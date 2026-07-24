@@ -1,0 +1,59 @@
+function(soda_core_test target source library)
+  add_executable(${target} ${source})
+  target_link_libraries(${target} PRIVATE ${library} doctest::doctest)
+  add_test(NAME ${target} COMMAND ${target})
+endfunction()
+
+soda_core_test(document_tests document/document_tests.cpp soda_document)
+soda_core_test(text_tests document/text_tests.cpp soda_document)
+soda_core_test(document_abi_tests document/c_api_tests.cpp soda_document)
+
+soda_core_test(lexer_tests lexer/lexer_tests.cpp soda_cpp_lexer)
+soda_core_test(relex_tests lexer/relex_tests.cpp soda_cpp_lexer)
+soda_core_test(token_buffer_tests lexer/token_buffer_tests.cpp soda_cpp_lexer)
+
+soda_core_test(green_tree_tests syntax/green_tree_tests.cpp soda_cpp_analysis)
+soda_core_test(parser_tests syntax/parser_tests.cpp soda_cpp_analysis)
+soda_core_test(reparse_tests syntax/reparse_tests.cpp soda_cpp_analysis)
+soda_core_test(structure_tests syntax/structure_tests.cpp soda_cpp_analysis)
+
+add_executable(syntax_concurrency_tests syntax/concurrency_tests.cpp)
+target_link_libraries(syntax_concurrency_tests
+  PRIVATE soda_cpp_analysis doctest::doctest Threads::Threads
+)
+add_test(NAME syntax_concurrency_tests COMMAND syntax_concurrency_tests)
+
+soda_core_test(clang_format_style_tests
+  formatting/clang_format_style_tests.cpp
+  soda_indentation
+)
+soda_core_test(indentation_tests indentation/indentation_tests.cpp soda_indentation)
+soda_core_test(native_core_tests native_core_tests.cpp soda_native_core)
+soda_core_test(runtime_tests runtime/runtime_tests.cpp soda_runtime)
+target_link_libraries(runtime_tests PRIVATE soda_document)
+
+find_program(CHEZ_SCHEME_EXECUTABLE NAMES scheme chezscheme)
+if(CHEZ_SCHEME_EXECUTABLE)
+  add_test(
+    NAME scheme_document_tests
+    CONFIGURATIONS Debug Release
+    COMMAND
+      ${CMAKE_COMMAND} -E env
+      SODA_DOCUMENT_LIBRARY=$<TARGET_FILE:soda_document>
+      ${CHEZ_SCHEME_EXECUTABLE}
+      --libdirs ${PROJECT_SOURCE_DIR}/scheme
+      --program ${CMAKE_CURRENT_SOURCE_DIR}/scheme/document_tests.ss
+  )
+
+  add_test(
+    NAME scheme_runtime_tests
+    CONFIGURATIONS Debug Release
+    COMMAND
+      ${CMAKE_COMMAND} -E env
+      SODA_RUNTIME_LIBRARY=$<TARGET_FILE:soda_runtime>
+      SODA_TEST_FILE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/ctor_sequence.yaml
+      ${CHEZ_SCHEME_EXECUTABLE}
+      --libdirs ${PROJECT_SOURCE_DIR}/scheme
+      --program ${CMAKE_CURRENT_SOURCE_DIR}/scheme/runtime_tests.ss
+  )
+endif()

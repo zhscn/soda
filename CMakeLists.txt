@@ -1,0 +1,30 @@
+cmake_minimum_required(VERSION 3.28)
+project(soda LANGUAGES C CXX)
+
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+add_compile_options(-Wall -Wextra -Wconversion -Wshadow)
+
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(Libuv REQUIRED IMPORTED_TARGET libuv)
+find_package(Threads REQUIRED)
+
+include(CTest)
+if(BUILD_TESTING)
+  include(FetchContent)
+  FetchContent_Declare(
+    doctest
+    URL https://github.com/doctest/doctest/archive/refs/tags/v2.4.12.tar.gz
+    URL_HASH SHA256=73381c7aa4dee704bd935609668cf41880ea7f19fa0504a200e13b74999c2d70
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+  )
+  FetchContent_MakeAvailable(doctest)
+endif()
+
+add_subdirectory(src)
+
+if(BUILD_TESTING)
+  add_subdirectory(tests)
+endif()
