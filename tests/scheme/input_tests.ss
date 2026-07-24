@@ -70,7 +70,12 @@
   (input-decoder-feed!
     decoder
     (bytes (bytevector-u8-ref utf8-bytes 1))))
-(unless (bytevector=? (key-event-text (car utf8-event)) utf8-bytes)
+(unless (and (eq? (key-event-key (car utf8-event)) 'character)
+             (= (key-event-codepoint (car utf8-event))
+                (char->integer #\λ))
+             (bytevector=?
+               (key-event-text (car utf8-event))
+               utf8-bytes))
   (error 'input-tests "split UTF-8 differs" utf8-event))
 
 (define legacy-ctrl-q
@@ -92,7 +97,30 @@
 (define invalid-utf8
   (input-decoder-feed! decoder (bytes #xff)))
 (unless (and (= (length invalid-utf8) 1)
+             (eq? (key-event-key (car invalid-utf8)) 'character)
+             (= (key-event-codepoint (car invalid-utf8)) #xfffd)
              (bytevector=?
                (key-event-text (car invalid-utf8))
                (string->utf8 (string (integer->char #xfffd)))))
   (error 'input-tests "invalid UTF-8 was not replaced" invalid-utf8))
+
+(unless
+  (null?
+    (input-decoder-feed!
+      decoder
+      (bytes #x1b #x5b #x32 #x30 #x30 #x7e
+             #x61 #x11 #x1b #x5b #x32)))
+  (error 'input-tests "incomplete bracketed paste produced an event"))
+(define paste-events
+  (input-decoder-feed!
+    decoder
+    (bytes #x30 #x31 #x7e #x71)))
+(unless (and (= (length paste-events) 2)
+             (text-input-event? (car paste-events))
+             (eq? (text-input-event-kind (car paste-events)) 'paste)
+             (bytevector=?
+               (text-input-event-text (car paste-events))
+               (bytes #x61 #x11))
+             (key-event? (cadr paste-events))
+             (= (key-event-codepoint (cadr paste-events)) 113))
+  (error 'input-tests "bracketed paste was not atomic" paste-events))

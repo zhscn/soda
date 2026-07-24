@@ -12,15 +12,27 @@
           key-event-modifiers
           key-event-type
           key-event-text
-          key-event-modifier?)
+          key-event-modifier?
+          text-input-event?
+          text-input-event-kind
+          text-input-event-text
+          input-event?)
   (import (rnrs)
           (soda editor event))
 
   (define-record-type (input-decoder %make-input-decoder input-decoder?)
-    (fields (mutable pending input-decoder-pending input-decoder-pending-set!)))
+    (fields
+      (mutable pending input-decoder-pending input-decoder-pending-set!)
+      (mutable paste? input-decoder-paste? input-decoder-paste?-set!)
+      (mutable paste-bytes
+               input-decoder-paste-bytes
+               input-decoder-paste-bytes-set!)))
 
   (define (make-input-decoder)
-    (%make-input-decoder (make-bytevector 0)))
+    (%make-input-decoder
+      (make-bytevector 0)
+      #f
+      (make-bytevector 0)))
 
   (define (input-decoder-pending? decoder)
     (unless (input-decoder? decoder)
@@ -47,6 +59,24 @@
     (let ([bytes (make-bytevector 1)])
       (bytevector-u8-set! bytes 0 value)
       bytes))
+
+  (define paste-end (string->utf8 "\x1b;[201~"))
+
+  (define (find-bytevector bytes pattern start)
+    (let ([limit
+            (- (bytevector-length bytes)
+               (bytevector-length pattern))])
+      (let search ([index start])
+        (cond
+          [(> index limit) #f]
+          [else
+           (let compare ([pattern-index 0])
+             (cond
+               [(= pattern-index (bytevector-length pattern)) index]
+               [(= (bytevector-u8-ref bytes (+ index pattern-index))
+                   (bytevector-u8-ref pattern pattern-index))
+                (compare (+ pattern-index 1))]
+               [else (search (+ index 1))]))]))))
 
   (define (split-string value delimiter)
     (let loop ([start 0] [index 0] [parts '()])
@@ -208,6 +238,12 @@
         [(char=? final #\~) (legacy-tilde parameters)]
         [else (legacy-functional final parameters)])))
 
+  (define (paste-start-csi? bytes start end)
+    (and (= (bytevector-u8-ref bytes end) (char->integer #\~))
+         (string=?
+           (utf8->string (bytevector-slice bytes start end))
+           "200")))
+
   (define (utf8-sequence-size first)
     (cond
       [(< first #x80) 1]
@@ -253,14 +289,14 @@
              (bytevector-u8-ref bytes (+ start 3))))]
         [else #f])))
 
-  (define (text-event bytes start end)
+  (define (character-event bytes start end)
     (let ([text
             (if (valid-utf8-sequence? bytes start end)
                 (bytevector-slice bytes start end)
                 (string->utf8 (string (integer->char #xfffd))))])
       (make-key-event
-        'text
-        #f
+        'character
+        (char->integer (string-ref (utf8->string text) 0))
         #f
         #f
         0
@@ -310,88 +346,158 @@
         'input-decoder-feed!
         "expected a bytevector"
         incoming))
-    (let* ([bytes
-             (append-bytevectors
-               (input-decoder-pending decoder)
-               incoming)]
-           [size (bytevector-length bytes)])
-      (let loop ([index 0] [events '()])
-        (cond
-          [(= index size)
-           (input-decoder-pending-set! decoder (make-bytevector 0))
-           (reverse events)]
-          [else
-           (let ([byte (bytevector-u8-ref bytes index)])
-             (cond
-               [(= byte 27)
-                (cond
-                  [(>= (+ index 1) size)
-                   (input-decoder-pending-set!
-                     decoder
-                     (bytevector-slice bytes index size))
-                   (reverse events)]
-                  [(= (bytevector-u8-ref bytes (+ index 1)) 91)
-                   (let ([end (find-csi-end bytes (+ index 2))])
-                     (if end
-                         (loop
-                           (+ end 1)
-                           (cons
-                             (parse-csi bytes (+ index 2) end)
-                             events))
-                         (begin
-                           (input-decoder-pending-set!
-                             decoder
-                             (bytevector-slice bytes index size))
-                           (reverse events))))]
-                  [(= (bytevector-u8-ref bytes (+ index 1)) 79)
-                   (if (>= (+ index 2) size)
-                       (begin
-                         (input-decoder-pending-set!
-                           decoder
-                           (bytevector-slice bytes index size))
-                         (reverse events))
-                       (loop
-                         (+ index 3)
-                         (cons
-                           (legacy-functional
-                             (integer->char
-                               (bytevector-u8-ref bytes (+ index 2)))
-                             "")
-                           events)))]
-                  [else
-                   (let ([next
-                           (bytevector-u8-ref bytes (+ index 1))])
-                     (if (and (>= next 32) (< next 127))
-                         (loop
-                           (+ index 2)
-                           (cons
-                             (make-key-event
-                               'character
-                               next
-                               #f
-                               #f
-                               2
-                               'press
-                               (single-byte next))
-                             events))
-                         (loop
-                           (+ index 1)
-                           (cons (escape-event) events))))])]
-               [(or (< byte 32) (= byte 127))
-                (loop (+ index 1) (cons (control-event byte) events))]
-               [else
-                (let ([character-size (utf8-sequence-size byte)])
-                  (if (> (+ index character-size) size)
-                      (begin
-                        (input-decoder-pending-set!
-                          decoder
-                          (bytevector-slice bytes index size))
-                        (reverse events))
-                      (loop
-                        (+ index character-size)
-                        (cons
-                          (text-event bytes index (+ index character-size))
-                          events))))]))]))))
+    (let ([initial
+            (append-bytevectors
+              (input-decoder-pending decoder)
+              incoming)])
+      (input-decoder-pending-set! decoder (make-bytevector 0))
+      (letrec
+        ([parse-paste
+           (lambda (bytes index events)
+             (let* ([combined
+                      (append-bytevectors
+                        (input-decoder-paste-bytes decoder)
+                        (bytevector-slice
+                          bytes
+                          index
+                          (bytevector-length bytes)))]
+                    [end (find-bytevector combined paste-end 0)])
+               (if end
+                   (let ([event
+                           (make-text-input-event
+                             'paste
+                             (string->utf8
+                               (utf8->string
+                                 (bytevector-slice
+                                   combined
+                                   0
+                                   end))))])
+                     (input-decoder-paste?-set! decoder #f)
+                     (input-decoder-paste-bytes-set!
+                       decoder
+                       (make-bytevector 0))
+                     (parse-normal
+                       combined
+                       (+ end (bytevector-length paste-end))
+                       (cons event events)))
+                   (begin
+                     (input-decoder-paste-bytes-set! decoder combined)
+                     (reverse events)))))]
+         [parse-normal
+           (lambda (bytes index events)
+             (let ([size (bytevector-length bytes)])
+               (cond
+                 [(= index size) (reverse events)]
+                 [else
+                  (let ([byte (bytevector-u8-ref bytes index)])
+                    (cond
+                      [(= byte 27)
+                       (cond
+                         [(>= (+ index 1) size)
+                          (input-decoder-pending-set!
+                            decoder
+                            (bytevector-slice bytes index size))
+                          (reverse events)]
+                         [(= (bytevector-u8-ref bytes (+ index 1)) 91)
+                          (let ([end
+                                  (find-csi-end bytes (+ index 2))])
+                            (if end
+                                (if (paste-start-csi?
+                                      bytes
+                                      (+ index 2)
+                                      end)
+                                    (begin
+                                      (input-decoder-paste?-set!
+                                        decoder
+                                        #t)
+                                      (input-decoder-paste-bytes-set!
+                                        decoder
+                                        (make-bytevector 0))
+                                      (parse-paste
+                                        bytes
+                                        (+ end 1)
+                                        events))
+                                    (parse-normal
+                                      bytes
+                                      (+ end 1)
+                                      (cons
+                                        (parse-csi
+                                          bytes
+                                          (+ index 2)
+                                          end)
+                                        events)))
+                                (begin
+                                  (input-decoder-pending-set!
+                                    decoder
+                                    (bytevector-slice bytes index size))
+                                  (reverse events))))]
+                         [(= (bytevector-u8-ref bytes (+ index 1)) 79)
+                          (if (>= (+ index 2) size)
+                              (begin
+                                (input-decoder-pending-set!
+                                  decoder
+                                  (bytevector-slice bytes index size))
+                                (reverse events))
+                              (parse-normal
+                                bytes
+                                (+ index 3)
+                                (cons
+                                  (legacy-functional
+                                    (integer->char
+                                      (bytevector-u8-ref
+                                        bytes
+                                        (+ index 2)))
+                                    "")
+                                  events)))]
+                         [else
+                          (let ([next
+                                  (bytevector-u8-ref
+                                    bytes
+                                    (+ index 1))])
+                            (if (and (>= next 32) (< next 127))
+                                (parse-normal
+                                  bytes
+                                  (+ index 2)
+                                  (cons
+                                    (make-key-event
+                                      'character
+                                      next
+                                      #f
+                                      #f
+                                      2
+                                      'press
+                                      (single-byte next))
+                                    events))
+                                (parse-normal
+                                  bytes
+                                  (+ index 1)
+                                  (cons (escape-event) events))))])]
+                      [(or (< byte 32) (= byte 127))
+                       (parse-normal
+                         bytes
+                         (+ index 1)
+                         (cons (control-event byte) events))]
+                      [else
+                       (let ([character-size
+                               (utf8-sequence-size byte)])
+                         (if (> (+ index character-size) size)
+                             (begin
+                               (input-decoder-pending-set!
+                                 decoder
+                                 (bytevector-slice bytes index size))
+                               (reverse events))
+                             (parse-normal
+                               bytes
+                               (+ index character-size)
+                               (cons
+                                 (character-event
+                                   bytes
+                                   index
+                                   (+ index character-size))
+                                 events))))]))])))])
+        (if (input-decoder-paste? decoder)
+            (parse-paste initial 0 '())
+            (parse-normal initial 0 '())))))
 
   (define (input-decoder-flush! decoder)
     (unless (input-decoder? decoder)

@@ -9,6 +9,14 @@
           key-event-type
           key-event-text
           key-event-modifier?
+          make-text-input-event
+          text-input-event?
+          text-input-event-kind
+          text-input-event-text
+          input-event?
+          make-input-message
+          input-message?
+          input-message-event
           make-key-message
           key-message?
           key-message-event
@@ -31,6 +39,14 @@
             type
             text))
 
+  (define-record-type
+    (text-input-event %make-text-input-event text-input-event?)
+    (fields kind text))
+
+  (define-record-type
+    (input-message %make-input-message input-message?)
+    (fields event))
+
   (define-record-type key-message
     (fields event))
 
@@ -49,6 +65,30 @@
       (meta . 32)
       (caps-lock . 64)
       (num-lock . 128)))
+
+  (define (make-text-input-event kind text)
+    (unless (memq kind '(text paste))
+      (assertion-violation
+        'make-text-input-event
+        "kind must be text or paste"
+        kind))
+    (unless (bytevector? text)
+      (assertion-violation
+        'make-text-input-event
+        "text must be a bytevector"
+        text))
+    (%make-text-input-event kind text))
+
+  (define (input-event? value)
+    (or (key-event? value) (text-input-event? value)))
+
+  (define (make-input-message event)
+    (unless (input-event? event)
+      (assertion-violation
+        'make-input-message
+        "expected an input event"
+        event))
+    (%make-input-message event))
 
   (define (key-event-modifier? event modifier)
     (unless (key-event? event)
