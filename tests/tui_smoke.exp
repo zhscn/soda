@@ -14,7 +14,7 @@ after 50
 send -- "Z"
 after 50
 send -- "\033\[113"
-after 50
+after 5
 send -- ";5u"
 
 expect {

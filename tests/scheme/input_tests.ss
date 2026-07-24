@@ -45,6 +45,21 @@
              (key-event-modifier? (car left) 'ctrl))
   (error 'input-tests "modified legacy arrow differs" left))
 
+(define ss3-f3
+  (input-decoder-feed! decoder (bytes #x1b #x4f #x52)))
+(unless (eq? (key-event-key (car ss3-f3)) 'f3)
+  (error 'input-tests "SS3 function key differs" ss3-f3))
+
+(define alt-x
+  (input-decoder-feed! decoder (bytes #x1b #x78)))
+(unless (and (eq? (key-event-key (car alt-x)) 'character)
+             (= (key-event-codepoint (car alt-x)) 120)
+             (key-event-modifier? (car alt-x) 'alt)
+             (bytevector=?
+               (key-event-text (car alt-x))
+               (ascii "x")))
+  (error 'input-tests "legacy Alt prefix differs" alt-x))
+
 (define utf8-bytes (string->utf8 "λ"))
 (unless (null?
           (input-decoder-feed!

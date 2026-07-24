@@ -43,6 +43,11 @@
       (bytevector-copy! bytes start output 0 (- end start))
       output))
 
+  (define (single-byte value)
+    (let ([bytes (make-bytevector 1)])
+      (bytevector-u8-set! bytes 0 value)
+      bytes))
+
   (define (split-string value delimiter)
     (let loop ([start 0] [index 0] [parts '()])
       (cond
@@ -144,6 +149,7 @@
         [(#\F) 'end]
         [(#\P) 'f1]
         [(#\Q) 'f2]
+        [(#\R) 'f3]
         [(#\S) 'f4]
         [(#\Z) 'tab]
         [else 'unknown])
@@ -337,10 +343,40 @@
                              decoder
                              (bytevector-slice bytes index size))
                            (reverse events))))]
+                  [(= (bytevector-u8-ref bytes (+ index 1)) 79)
+                   (if (>= (+ index 2) size)
+                       (begin
+                         (input-decoder-pending-set!
+                           decoder
+                           (bytevector-slice bytes index size))
+                         (reverse events))
+                       (loop
+                         (+ index 3)
+                         (cons
+                           (legacy-functional
+                             (integer->char
+                               (bytevector-u8-ref bytes (+ index 2)))
+                             "")
+                           events)))]
                   [else
-                   (loop
-                     (+ index 1)
-                     (cons (escape-event) events))])]
+                   (let ([next
+                           (bytevector-u8-ref bytes (+ index 1))])
+                     (if (and (>= next 32) (< next 127))
+                         (loop
+                           (+ index 2)
+                           (cons
+                             (make-key-event
+                               'character
+                               next
+                               #f
+                               #f
+                               2
+                               'press
+                               (single-byte next))
+                             events))
+                         (loop
+                           (+ index 1)
+                           (cons (escape-event) events))))])]
                [(or (< byte 32) (= byte 127))
                 (loop (+ index 1) (cons (control-event byte) events))]
                [else
