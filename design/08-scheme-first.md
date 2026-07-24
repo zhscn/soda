@@ -52,21 +52,26 @@ event-loop turn 之间推进；完成结果只在 document identity、revision �
 
 ## Command loop
 
-一次输入或完成事件按以下顺序处理：
+外部输入统一为 message。update 阶段处理 message、更新 Editor/View，并返回由外层
+runtime 执行的 effect 值；effect 完成后产生新的 message。render 阶段只读取状态：
 
 ```text
-native event
-  -> Scheme value
-  -> focused context
-  -> keymap / command or completion handler
-  -> Document transaction
-  -> language session sync
-  -> editor state update
-  -> render frame
+native event -> message -> update(Editor)
+                            │
+                ┌───────────┴───────────┐
+                ▼                       ▼
+          updated Editor             effects
+                │                       │
+                ▼                       ▼
+          render frame            runtime/libuv
+                                        │
+                                        └──> message
 ```
 
 command 收到显式 context，不从 native 全局变量推断当前 buffer 或 window。
-编辑命令以 transaction 为原子边界，并把 resulting selection/caret 作为返回值。
+编辑命令以 transaction 为原子边界，更新 View 的 caret/selection，并返回 effect
+列表。keymap 保存 command symbol；registry 中替换 procedure 后，已有绑定立即使用
+新实现。
 
 REPL 使用同一个 command loop、namespace 和事件队列。求值请求是编辑器事件；
 求值产生的状态变化走公开 Scheme API，因此不需要独立 nREPL 状态模型。

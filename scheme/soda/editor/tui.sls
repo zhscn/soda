@@ -1,8 +1,10 @@
 (library (soda editor tui)
-  (export run-tui-editor)
+  (export run-tui-editor render-editor-frame)
   (import (rnrs)
           (soda document)
           (soda editor buffer)
+          (soda editor command)
+          (soda editor core)
           (soda editor input)
           (soda runtime))
 
@@ -50,27 +52,61 @@
               (lambda () (text-close! text)))))
         (lambda () (snapshot-close! snapshot)))))
 
-  (define (render! terminal buffer caret name)
-    (let* ([document (buffer-document buffer)]
-           [size (terminal-size terminal)]
-           [rows (max 2 (car size))]
-           [columns (max 1 (cdr size))]
-           [position
-             (let ([snapshot (document-snapshot document)])
-               (dynamic-wind
-                 (lambda () #f)
-                 (lambda ()
-                   (let ([text (snapshot-text snapshot)])
-                     (dynamic-wind
-                       (lambda () #f)
-                       (lambda () (text-position text caret))
-                       (lambda () (text-close! text)))))
-                 (lambda () (snapshot-close! snapshot))))]
+  (define (caret-position document caret)
+    (let ([snapshot (document-snapshot document)])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (let ([text (snapshot-text snapshot)])
+            (dynamic-wind
+              (lambda () #f)
+              (lambda () (text-position text caret))
+              (lambda () (text-close! text)))))
+        (lambda () (snapshot-close! snapshot)))))
+
+  (define (modeline editor buffer caret-line caret-column columns)
+    (clip-line
+      (string-append
+        " "
+        (let ([resource (buffer-resource buffer)])
+          (if (string? resource) resource "*scratch*"))
+        "  "
+        (number->string (+ caret-line 1))
+        ":"
+        (number->string (+ caret-column 1))
+        (let ([message (editor-status-message editor)])
+          (if message
+              (string-append "  " message)
+              "  C-q quit ")))
+      columns))
+
+  (define (render-editor-frame editor rows columns)
+    (unless (editor? editor)
+      (assertion-violation
+        'render-editor-frame
+        "expected an editor"
+        editor))
+    (unless (and (integer? rows) (exact? rows) (>= rows 2))
+      (assertion-violation
+        'render-editor-frame
+        "rows must be an exact integer of at least two"
+        rows))
+    (unless (and (integer? columns) (exact? columns) (positive? columns))
+      (assertion-violation
+        'render-editor-frame
+        "columns must be a positive exact integer"
+        columns))
+    (let* ([view (editor-active-view editor)]
+           [buffer (view-buffer view)]
+           [document (buffer-document buffer)]
+           [position (caret-position document (view-caret view))]
            [caret-line (car position)]
            [caret-column (cdr position)]
            [content-rows (- rows 1)]
-           [first-line (max 0 (- caret-line (- content-rows 1)))]
-           [lines (list->vector (string-lines (snapshot-string document)))])
+           [first-line (view-first-line view)]
+           [lines
+             (list->vector
+               (string-lines (snapshot-string document)))])
       (call-with-values
         open-string-output-port
         (lambda (port extract)
@@ -92,15 +128,11 @@
               (number->string rows)
               ";1H"
               (ansi "[7m")
-              (clip-line
-                (string-append
-                  " "
-                  name
-                  "  "
-                  (number->string (+ caret-line 1))
-                  ":"
-                  (number->string (+ caret-column 1))
-                  "  C-q quit ")
+              (modeline
+                editor
+                buffer
+                caret-line
+                caret-column
                 columns)
               (ansi "[K")
               (ansi "[0m")
@@ -111,150 +143,39 @@
               "H"
               (ansi "[?25h"))
             port)
-          (terminal-write! terminal (extract))))))
+          (extract)))))
 
-  (define (previous-character-offset text caret)
-    (if (zero? caret)
-        0
-        (let loop ([offset (- caret 1)])
-          (if (or (zero? offset)
-                  (not (= (bitwise-and (text-byte-at text offset) #xc0) #x80)))
-              offset
-              (loop (- offset 1))))))
+  (define (render! terminal editor)
+    (let ([size (terminal-size terminal)])
+      (editor-update!
+        editor
+        (make-editor-message
+          'resize
+          (cons (max 2 (car size)) (max 1 (cdr size)))))
+      (terminal-write!
+        terminal
+        (render-editor-frame
+          editor
+          (max 2 (car size))
+          (max 1 (cdr size))))))
 
-  (define (next-character-offset text caret)
-    (let ([size (text-size text)])
-      (if (>= caret size)
-          size
-          (let loop ([offset (+ caret 1)])
-            (if (or (>= offset size)
-                    (not (= (bitwise-and (text-byte-at text offset) #xc0) #x80)))
-                offset
-                (loop (+ offset 1)))))))
+  (define (continue-after-effects? effects)
+    (not
+      (exists
+        (lambda (effect)
+          (eq? (command-effect-kind effect) 'quit))
+        effects)))
 
-  (define (with-document-text document procedure)
-    (let ([snapshot (document-snapshot document)])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda () (procedure text))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
-
-  (define (replace! buffer start end bytes)
-    (let ([change #f])
-      (call-with-values
-        (lambda ()
-          (call-with-buffer-transaction
-            buffer
-            (lambda (transaction)
-              (transaction-replace! transaction start end bytes))))
-        (lambda (result committed-change)
-          (set! change committed-change)))
-      (change-close! change)))
-
-  (define (move-vertical document caret delta)
-    (with-document-text
-      document
-      (lambda (text)
-        (let* ([position (text-position text caret)]
-               [line (car position)]
-               [column (cdr position)]
-               [target
-                 (max 0
-                      (min (+ line delta)
-                           (- (text-line-count text) 1)))]
-               [line-start (text-line-start text target)]
-               [line-end (text-line-content-end text target)])
-          (min (+ line-start column) line-end)))))
-
-  (define (handle-key-event buffer caret event)
-    (let ([document (buffer-document buffer)]
-          [key (key-event-key event)])
-      (cond
-        [(eq? (key-event-type event) 'release)
-         (values caret #t)]
-        [(and (eq? key 'character)
-              (= (key-event-codepoint event) 113)
-              (key-event-modifier? event 'ctrl))
-         (values caret #f)]
-        [(eq? key 'text)
-         (let ([text (key-event-text event)])
-           (replace! buffer caret caret text)
-           (values (+ caret (bytevector-length text)) #t))]
-        [(and (eq? key 'character)
-              (positive? (bytevector-length (key-event-text event))))
-         (let ([text (key-event-text event)])
-           (replace! buffer caret caret text)
-           (values (+ caret (bytevector-length text)) #t))]
-        [(eq? key 'backspace)
-         (let ([start
-                 (with-document-text
-                   document
-                   (lambda (text)
-                     (previous-character-offset text caret)))])
-           (when (< start caret)
-             (replace! buffer start caret (make-bytevector 0)))
-           (values start #t))]
-        [(eq? key 'delete)
-         (let ([end
-                 (with-document-text
-                   document
-                   (lambda (text)
-                     (next-character-offset text caret)))])
-           (when (> end caret)
-             (replace! buffer caret end (make-bytevector 0)))
-           (values caret #t))]
-        [(eq? key 'enter)
-         (replace! buffer caret caret (make-bytevector 1 10))
-         (values (+ caret 1) #t)]
-        [(eq? key 'up)
-         (values (move-vertical document caret -1) #t)]
-        [(eq? key 'down)
-         (values (move-vertical document caret 1) #t)]
-        [(eq? key 'right)
-         (values
-           (with-document-text
-             document
-             (lambda (text) (next-character-offset text caret)))
-           #t)]
-        [(eq? key 'left)
-         (values
-           (with-document-text
-             document
-             (lambda (text) (previous-character-offset text caret)))
-           #t)]
-        [(eq? key 'home)
-         (values
-           (with-document-text
-             document
-             (lambda (text)
-               (text-line-start text (car (text-position text caret)))))
-           #t)]
-        [(eq? key 'end)
-         (values
-           (with-document-text
-             document
-             (lambda (text)
-               (text-line-content-end
-                 text
-                 (car (text-position text caret)))))
-           #t)]
-        [else (values caret #t)])))
-
-  (define (handle-key-events buffer caret events)
-    (let loop ([caret caret] [events events])
+  (define (handle-key-events editor events)
+    (let loop ([events events])
       (if (null? events)
-          (values caret #t)
-          (call-with-values
-            (lambda () (handle-key-event buffer caret (car events)))
-            (lambda (next-caret running?)
-              (if running?
-                  (loop next-caret (cdr events))
-                  (values next-caret #f)))))))
+          #t
+          (let ([effects
+                  (editor-update!
+                    editor
+                    (make-editor-message 'key (car events)))])
+            (and (continue-after-effects? effects)
+                 (loop (cdr events)))))))
 
   (define (load-bytes runtime path)
     (if (not path)
@@ -276,7 +197,12 @@
            [terminal (make-terminal)]
            [document (make-document (load-bytes runtime path) 1)]
            [buffer
-             (make-buffer 1 document (or path "*scratch*") 'fundamental-mode)]
+             (make-buffer
+               1
+               document
+               (or path "*scratch*")
+               'fundamental-mode)]
+           [editor (make-editor buffer)]
            [input-source #f]
            [decoder (make-input-decoder)])
       (dynamic-wind
@@ -287,24 +213,21 @@
             (string-append (ansi "[?1049h") (ansi "[>1u")))
           (set! input-source (runtime-watch-fd! runtime 0 fd-readable)))
         (lambda ()
-          (let loop ([caret 0] [running? #t])
+          (let loop ([running? #t])
             (when running?
-              (render! terminal buffer caret (or path "*scratch*"))
+              (render! terminal editor)
               (let event-loop ([events (runtime-poll! runtime)])
                 (cond
-                  [(null? events) (loop caret running?)]
+                  [(null? events) (loop running?)]
                   [(and (= (event-source (car events)) input-source)
                         (eq? (event-kind (car events)) 'fd-ready))
                    (let ([input (terminal-read terminal)])
                      (if (zero? (bytevector-length input))
-                         (loop caret running?)
-                         (call-with-values
-                           (lambda ()
-                             (handle-key-events
-                               buffer
-                               caret
-                               (input-decoder-feed! decoder input)))
-                           loop)))]
+                         (loop running?)
+                         (loop
+                           (handle-key-events
+                             editor
+                             (input-decoder-feed! decoder input)))))]
                   [else (event-loop (cdr events))])))))
         (lambda ()
           (when input-source
@@ -320,7 +243,7 @@
           (guard (condition [else #f])
             (terminal-leave-raw! terminal))
           (guard (condition [else #f])
-            (buffer-close! buffer))
+            (editor-close! editor))
           (guard (condition [else #f])
             (terminal-close! terminal))
           (runtime-close! runtime))))))
