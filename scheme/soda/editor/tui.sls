@@ -7,6 +7,7 @@
           (soda editor effect)
           (soda editor event)
           (soda runtime)
+          (soda tui commands)
           (soda tui input)
           (soda tui presenter)
           (soda tui renderer))
@@ -108,6 +109,7 @@
               resource
               'fundamental-mode))
           (set! editor (make-editor buffer))
+          (install-tui-commands! editor)
           (procedure editor))
         (lambda ()
           (cond

@@ -8,8 +8,10 @@
         (soda editor event)
         (soda editor keymap)
         (soda editor language)
+        (soda tui commands)
         (soda tui frame)
         (soda tui input)
+        (soda tui inspect)
         (soda tui presenter)
         (soda tui renderer))
 
@@ -93,6 +95,7 @@
 (define document (make-document "" 71))
 (define buffer (make-buffer 17 document "*editor-test*" 'fundamental-mode))
 (define editor (make-editor buffer))
+(install-tui-commands! editor)
 (define decoder (make-input-decoder))
 
 (unless (and (editor? editor)
@@ -353,6 +356,37 @@
 (when (string-contains? clipped-frame "界")
   (error 'editor-tests "renderer split a wide character at the viewport edge"))
 (send! editor decoder (bytes #x1b #x5b #x43))
+(define tab-description
+  (describe-caret editor (render-editor-frame editor 2 10)))
+(unless (and (= (character-description-position tab-description) 2)
+             (char=? (character-description-character tab-description)
+                     #\tab)
+             (= (character-description-display-width tab-description) 7)
+             (= (character-description-screen-row tab-description) 0)
+             (= (character-description-screen-column tab-description) 1)
+             (eq? (car (character-description-faces tab-description))
+                  'default)
+             (eq? (cell-source-layer
+                    (car
+                      (character-description-sources
+                        tab-description)))
+                  'text))
+  (error 'editor-tests
+         "describe-caret did not report the rendered character"))
+(send! editor decoder (bytes 24 61))
+(unless (and (string? (editor-status-message editor))
+             (string-contains?
+               (editor-status-message editor)
+               "#\\tab U+0009")
+             (string-contains?
+               (editor-status-message editor)
+               "faces default")
+             (string-contains?
+               (editor-status-message editor)
+               "sources text/19"))
+  (error 'editor-tests
+         "help.describe-char did not expose cell inspection"
+         (editor-status-message editor)))
 (unless (string-contains?
           (frame->ansi (render-editor-frame editor 2 10))
           (string-append (string (integer->char 27)) "[1;2H"))

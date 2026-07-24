@@ -22,6 +22,7 @@
           editor-keymap
           editor-pending-keys
           editor-status-message
+          editor-set-status-message!
           editor-register-command!
           editor-bind-key!
           editor-execute-command!
