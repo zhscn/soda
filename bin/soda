@@ -1,0 +1,15 @@
+#!/bin/sh
+set -eu
+
+script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+project_dir=$(dirname -- "$script_dir")
+configuration=${SODA_BUILD_CONFIGURATION:-Debug}
+chez=${CHEZ_SCHEME:-scheme}
+
+export SODA_DOCUMENT_LIBRARY="${SODA_DOCUMENT_LIBRARY:-$project_dir/build/src/$configuration/libsoda_document.so}"
+export SODA_RUNTIME_LIBRARY="${SODA_RUNTIME_LIBRARY:-$project_dir/build/src/$configuration/libsoda_runtime.so}"
+
+exec "$chez" \
+  --libdirs "$project_dir/scheme" \
+  --program "$project_dir/scheme/soda/editor/main.ss" \
+  "$@"

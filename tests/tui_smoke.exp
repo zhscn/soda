@@ -1,0 +1,28 @@
+set editor [lindex $argv 0]
+set input_file [lindex $argv 1]
+set timeout 5
+log_user 0
+
+spawn -noecho $editor $input_file
+after 200
+send -- "abc"
+after 50
+send -- "\177"
+after 50
+send -- "\033\[D"
+after 50
+send -- "Z"
+after 50
+send -- "\021"
+
+expect {
+  eof {
+    set result [wait]
+    exit [lindex $result 3]
+  }
+  timeout {
+    close
+    wait
+    exit 1
+  }
+}

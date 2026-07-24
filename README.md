@@ -58,3 +58,18 @@ The editor does not create application worker threads or submit CPU work to the
 libuv thread pool. A libuv implementation may use internal threads to implement
 an asynchronous I/O operation; its completion is observed and applied on the
 editor thread.
+
+## TUI bootstrap
+
+Configure and build the Debug libraries, then start an empty buffer or open a
+UTF-8 file:
+
+```sh
+cmk build -c Debug
+./bin/soda
+./bin/soda path/to/file
+```
+
+Printable input inserts text. Backspace deletes the previous UTF-8 code point,
+the arrow keys move the caret, Enter inserts a newline, and `C-q` exits. The
+bootstrap edits an in-memory buffer; quitting leaves the file on disk unchanged.

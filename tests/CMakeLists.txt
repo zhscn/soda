@@ -35,6 +35,7 @@ soda_core_test(runtime_tests runtime/runtime_tests.cpp soda_runtime)
 target_link_libraries(runtime_tests PRIVATE soda_document)
 
 find_program(CHEZ_SCHEME_EXECUTABLE NAMES scheme chezscheme)
+find_program(EXPECT_EXECUTABLE NAMES expect)
 if(CHEZ_SCHEME_EXECUTABLE)
   add_test(
     NAME scheme_document_tests
@@ -94,4 +95,19 @@ if(CHEZ_SCHEME_EXECUTABLE)
       --libdirs ${PROJECT_SOURCE_DIR}/scheme
       --program ${CMAKE_CURRENT_SOURCE_DIR}/scheme/buffer_tests.ss
   )
+
+  if(EXPECT_EXECUTABLE)
+    add_test(
+      NAME tui_smoke_tests
+      CONFIGURATIONS Debug Release
+      COMMAND
+        ${CMAKE_COMMAND} -E env
+        SODA_BUILD_CONFIGURATION=$<CONFIG>
+        CHEZ_SCHEME=${CHEZ_SCHEME_EXECUTABLE}
+        ${EXPECT_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tui_smoke.exp
+        ${PROJECT_SOURCE_DIR}/bin/soda
+        ${CMAKE_CURRENT_SOURCE_DIR}/fixtures/ctor_sequence.yaml
+    )
+  endif()
 endif()
