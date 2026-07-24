@@ -96,6 +96,15 @@ if(CHEZ_SCHEME_EXECUTABLE)
       --program ${CMAKE_CURRENT_SOURCE_DIR}/scheme/buffer_tests.ss
   )
 
+  add_test(
+    NAME scheme_input_tests
+    CONFIGURATIONS Debug Release
+    COMMAND
+      ${CHEZ_SCHEME_EXECUTABLE}
+      --libdirs ${PROJECT_SOURCE_DIR}/scheme
+      --program ${CMAKE_CURRENT_SOURCE_DIR}/scheme/input_tests.ss
+  )
+
   if(EXPECT_EXECUTABLE)
     add_test(
       NAME tui_smoke_tests
