@@ -73,3 +73,7 @@ cmk build -c Debug
 Printable input inserts text. Backspace deletes the previous UTF-8 code point,
 the arrow keys move the caret, Enter inserts a newline, and `C-q` exits. The
 bootstrap edits an in-memory buffer; quitting leaves the file on disk unchanged.
+
+The TUI enables Kitty keyboard disambiguation while it owns the alternate
+screen and restores the terminal's previous keyboard mode on exit. Its
+incremental decoder accepts Kitty `CSI u` events and legacy terminal sequences.

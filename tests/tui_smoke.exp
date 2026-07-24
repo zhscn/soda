@@ -4,7 +4,7 @@ set timeout 5
 log_user 0
 
 spawn -noecho $editor $input_file
-after 200
+expect -exact "\033\[?1049h\033\[>1u"
 send -- "abc"
 after 50
 send -- "\177"
@@ -13,10 +13,13 @@ send -- "\033\[D"
 after 50
 send -- "Z"
 after 50
-send -- "\021"
+send -- "\033\[113"
+after 50
+send -- ";5u"
 
 expect {
-  eof {
+  -exact "\033\[<u" {
+    expect eof
     set result [wait]
     exit [lindex $result 3]
   }

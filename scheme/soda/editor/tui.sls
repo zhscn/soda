@@ -3,6 +3,7 @@
   (import (rnrs)
           (soda document)
           (soda editor buffer)
+          (soda editor input)
           (soda runtime))
 
   (define escape (string (integer->char 27)))
@@ -170,53 +171,90 @@
                [line-end (text-line-content-end text target)])
           (min (+ line-start column) line-end)))))
 
-  (define (handle-input buffer caret bytes)
+  (define (handle-key-event buffer caret event)
     (let ([document (buffer-document buffer)]
-          [running? #t])
-      (let loop ([index 0] [caret caret])
-        (if (>= index (bytevector-length bytes))
-            (values caret running?)
-            (let ([byte (bytevector-u8-ref bytes index)])
-              (cond
-                [(= byte 17) (values caret #f)]
-                [(or (= byte 8) (= byte 127))
-                 (let ([start
-                         (with-document-text
-                           document
-                           (lambda (text)
-                             (previous-character-offset text caret)))])
-                   (when (< start caret)
-                     (replace! buffer start caret (make-bytevector 0)))
-                   (loop (+ index 1) start))]
-                [(or (= byte 10) (= byte 13))
-                 (replace! buffer caret caret (make-bytevector 1 10))
-                 (loop (+ index 1) (+ caret 1))]
-                [(and (= byte 27)
-                      (< (+ index 2) (bytevector-length bytes))
-                      (= (bytevector-u8-ref bytes (+ index 1)) 91))
-                 (let ([code (bytevector-u8-ref bytes (+ index 2))])
-                   (case code
-                     [(65) (loop (+ index 3) (move-vertical document caret -1))]
-                     [(66) (loop (+ index 3) (move-vertical document caret 1))]
-                     [(67)
-                      (loop
-                        (+ index 3)
-                        (with-document-text
-                          document
-                          (lambda (text)
-                            (next-character-offset text caret))))]
-                     [(68)
-                      (loop
-                        (+ index 3)
-                        (with-document-text
-                          document
-                          (lambda (text)
-                            (previous-character-offset text caret))))]
-                     [else (loop (+ index 3) caret)]))]
-                [(>= byte 32)
-                 (replace! buffer caret caret (make-bytevector 1 byte))
-                 (loop (+ index 1) (+ caret 1))]
-                [else (loop (+ index 1) caret)]))))))
+          [key (key-event-key event)])
+      (cond
+        [(eq? (key-event-type event) 'release)
+         (values caret #t)]
+        [(and (eq? key 'character)
+              (= (key-event-codepoint event) 113)
+              (key-event-modifier? event 'ctrl))
+         (values caret #f)]
+        [(eq? key 'text)
+         (let ([text (key-event-text event)])
+           (replace! buffer caret caret text)
+           (values (+ caret (bytevector-length text)) #t))]
+        [(and (eq? key 'character)
+              (positive? (bytevector-length (key-event-text event))))
+         (let ([text (key-event-text event)])
+           (replace! buffer caret caret text)
+           (values (+ caret (bytevector-length text)) #t))]
+        [(eq? key 'backspace)
+         (let ([start
+                 (with-document-text
+                   document
+                   (lambda (text)
+                     (previous-character-offset text caret)))])
+           (when (< start caret)
+             (replace! buffer start caret (make-bytevector 0)))
+           (values start #t))]
+        [(eq? key 'delete)
+         (let ([end
+                 (with-document-text
+                   document
+                   (lambda (text)
+                     (next-character-offset text caret)))])
+           (when (> end caret)
+             (replace! buffer caret end (make-bytevector 0)))
+           (values caret #t))]
+        [(eq? key 'enter)
+         (replace! buffer caret caret (make-bytevector 1 10))
+         (values (+ caret 1) #t)]
+        [(eq? key 'up)
+         (values (move-vertical document caret -1) #t)]
+        [(eq? key 'down)
+         (values (move-vertical document caret 1) #t)]
+        [(eq? key 'right)
+         (values
+           (with-document-text
+             document
+             (lambda (text) (next-character-offset text caret)))
+           #t)]
+        [(eq? key 'left)
+         (values
+           (with-document-text
+             document
+             (lambda (text) (previous-character-offset text caret)))
+           #t)]
+        [(eq? key 'home)
+         (values
+           (with-document-text
+             document
+             (lambda (text)
+               (text-line-start text (car (text-position text caret)))))
+           #t)]
+        [(eq? key 'end)
+         (values
+           (with-document-text
+             document
+             (lambda (text)
+               (text-line-content-end
+                 text
+                 (car (text-position text caret)))))
+           #t)]
+        [else (values caret #t)])))
+
+  (define (handle-key-events buffer caret events)
+    (let loop ([caret caret] [events events])
+      (if (null? events)
+          (values caret #t)
+          (call-with-values
+            (lambda () (handle-key-event buffer caret (car events)))
+            (lambda (next-caret running?)
+              (if running?
+                  (loop next-caret (cdr events))
+                  (values next-caret #f)))))))
 
   (define (load-bytes runtime path)
     (if (not path)
@@ -239,11 +277,14 @@
            [document (make-document (load-bytes runtime path) 1)]
            [buffer
              (make-buffer 1 document (or path "*scratch*") 'fundamental-mode)]
-           [input-source #f])
+           [input-source #f]
+           [decoder (make-input-decoder)])
       (dynamic-wind
         (lambda ()
           (terminal-enter-raw! terminal)
-          (terminal-write! terminal (ansi "[?1049h"))
+          (terminal-write!
+            terminal
+            (string-append (ansi "[?1049h") (ansi "[>1u")))
           (set! input-source (runtime-watch-fd! runtime 0 fd-readable)))
         (lambda ()
           (let loop ([caret 0] [running? #t])
@@ -258,7 +299,11 @@
                      (if (zero? (bytevector-length input))
                          (loop caret running?)
                          (call-with-values
-                           (lambda () (handle-input buffer caret input))
+                           (lambda ()
+                             (handle-key-events
+                               buffer
+                               caret
+                               (input-decoder-feed! decoder input)))
                            loop)))]
                   [else (event-loop (cdr events))])))))
         (lambda ()
@@ -268,7 +313,10 @@
           (guard (condition [else #f])
             (terminal-write!
               terminal
-              (string-append (ansi "[?25h") (ansi "[?1049l"))))
+              (string-append
+                (ansi "[<u")
+                (ansi "[?25h")
+                (ansi "[?1049l"))))
           (guard (condition [else #f])
             (terminal-leave-raw! terminal))
           (guard (condition [else #f])
