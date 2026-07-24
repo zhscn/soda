@@ -9,9 +9,11 @@
         (soda editor keymap)
         (soda editor language)
         (soda tui commands)
+        (soda tui component)
         (soda tui frame)
         (soda tui input)
         (soda tui inspect)
+        (soda tui layout)
         (soda tui presenter)
         (soda tui renderer))
 
@@ -64,6 +66,24 @@
 
 (define lower-map (make-keymap))
 (define upper-map (make-keymap))
+(define split-rectangles
+  (layout-split
+    (make-rect 2 4 3 10)
+    'horizontal
+    (list
+      (make-fixed-extent 3)
+      (make-flex-extent 1)
+      (make-flex-extent 2))))
+(unless
+  (and (= (length split-rectangles) 3)
+       (= (rect-column (car split-rectangles)) 4)
+       (= (rect-columns (car split-rectangles)) 3)
+       (= (rect-column (cadr split-rectangles)) 7)
+       (= (rect-columns (cadr split-rectangles)) 3)
+       (= (rect-column (caddr split-rectangles)) 10)
+       (= (rect-columns (caddr split-rectangles)) 4))
+  (error 'editor-tests
+         "fixed and flex layout was not deterministic"))
 (define plain-q
   (make-key-stroke 'character (char->integer #\q) 0))
 (keymap-bind! lower-map (list plain-q) 'test.lower)
@@ -332,8 +352,16 @@
 (editor-set-active-view! editor (view-id display-view))
 (editor-update! editor (make-resize-message 2 10))
 (define structured-frame (render-editor-frame editor 2 10))
-(let ([text-cell (frame-cell-ref structured-frame 0 0)]
-      [modeline-cell (frame-cell-ref structured-frame 1 0)])
+(let* ([text-cell (frame-cell-ref structured-frame 0 0)]
+       [modeline-cell (frame-cell-ref structured-frame 1 0)]
+       [layout (frame-layout structured-frame)]
+       [text-node (component-node-find layout 'editor.text)]
+       [modeline-node
+         (component-node-find layout 'editor.modeline)]
+       [text-path
+         (component-node-path-at layout 0 0)]
+       [modeline-path
+         (component-node-path-at layout 1 0)])
   (unless (and (string=? (cell-text text-cell) "λ")
                (= (cell-width text-cell) 1)
                (eq? (cell-face text-cell) 'default)
@@ -341,12 +369,33 @@
                (eq? (cell-source-layer
                        (car (cell-sources text-cell)))
                      'text)
+               (exists
+                 (lambda (source)
+                   (and (eq? (cell-source-layer source) 'component)
+                        (eq? (cell-source-owner source)
+                             'editor.text)))
+                 (cell-sources text-cell))
                (eq? (cell-face modeline-cell) 'modeline)
                (memq 'reverse
                      (style-attributes
-                       (cell-style modeline-cell))))
+                       (cell-style modeline-cell)))
+               (component-node? layout)
+               (eq? (component-node-id layout) 'editor.root)
+               text-node
+               (= (rect-rows (component-node-rect text-node)) 1)
+               modeline-node
+               (= (rect-row
+                    (component-node-rect modeline-node))
+                  1)
+               (eq? (component-node-id
+                      (component-node-at layout 0 0))
+                    'editor.text)
+               (equal? (map component-node-id text-path)
+                       '(editor.root editor.text))
+               (equal? (map component-node-id modeline-path)
+                       '(editor.root editor.modeline)))
     (error 'editor-tests
-           "structured frame did not retain cell semantics")))
+           "structured frame did not retain component semantics")))
 (define wide-frame
   (frame->ansi structured-frame))
 (unless (string-contains? wide-frame "λ       界")
@@ -364,6 +413,9 @@
              (= (character-description-display-width tab-description) 7)
              (= (character-description-screen-row tab-description) 0)
              (= (character-description-screen-column tab-description) 1)
+             (equal?
+               (character-description-component-path tab-description)
+               '(editor.root editor.text))
              (eq? (car (character-description-faces tab-description))
                   'default)
              (eq? (cell-source-layer
@@ -381,6 +433,9 @@
              (string-contains?
                (editor-status-message editor)
                "faces default")
+             (string-contains?
+               (editor-status-message editor)
+               "components editor.root/editor.text")
              (string-contains?
                (editor-status-message editor)
                "sources text/19"))

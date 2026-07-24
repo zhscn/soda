@@ -4,7 +4,20 @@
           (soda document)
           (soda editor buffer)
           (soda editor core)
-          (soda tui frame))
+          (soda tui component)
+          (soda tui frame)
+          (soda tui layout))
+
+  (define-record-type editor-render-context
+    (fields editor
+            view
+            buffer
+            text
+            caret-line
+            caret-column
+            tab-width
+            first-line
+            line-count))
 
   (define modeline-style
     (make-style 'default 'default '(reverse)))
@@ -75,14 +88,25 @@
   (define (document-source buffer-id position detail)
     (make-cell-source 'text buffer-id (cons position detail)))
 
-  (define (document-cell text width buffer-id position detail)
+  (define (component-source component-id)
+    (make-cell-source 'component component-id #f))
+
+  (define (document-cell
+            text
+            width
+            buffer-id
+            position
+            detail
+            component-id)
     (make-cell
       text
       width
       '(default)
       default-style
       position
-      (list (document-source buffer-id position detail))))
+      (list
+        (document-source buffer-id position detail)
+        (component-source component-id))))
 
   (define (draw-document-line!
             frame
@@ -92,7 +116,8 @@
             line-start
             line-end
             tab-width
-            buffer-id)
+            buffer-id
+            component-id)
     (let ([value (decode-text bytes)]
           [limit (rect-columns rectangle)])
       (let loop ([index 0]
@@ -111,7 +136,8 @@
                     1
                     buffer-id
                     line-end
-                    'line-end)))
+                    'line-end
+                    component-id)))
               column)
             (let* ([character (string-ref value index)]
                    [byte-length (character-byte-length character)]
@@ -151,7 +177,8 @@
                        1
                        buffer-id
                        byte-position
-                       'tab)))
+                       'tab
+                       component-id)))
                  (loop
                    (+ index 1)
                    (+ byte-position byte-length)
@@ -167,7 +194,8 @@
                      width
                      buffer-id
                      byte-position
-                     character))
+                     character
+                     component-id))
                  (loop
                    (+ index 1)
                    (+ byte-position byte-length)
@@ -224,15 +252,71 @@
             (string-append "  " message)
             "  C-q quit "))))
 
-  (define (render-modeline!
-            frame
-            rectangle
-            editor
-            buffer
-            caret-line
-            caret-column)
+  (define (render-text-component! context frame rectangle)
+    (let* ([view (editor-render-context-view context)]
+           [buffer (editor-render-context-buffer context)]
+           [text (editor-render-context-text context)]
+           [component-id 'editor.text]
+           [background-source
+             (make-cell-source 'view (view-id view) 'background)]
+           [sources
+             (list
+               background-source
+               (component-source component-id))])
+      (frame-fill-rect!
+        frame
+        rectangle
+        (make-cell
+          " "
+          1
+          '(default)
+          default-style
+          #f
+          sources))
+      (do ([row-offset 0 (+ row-offset 1)])
+          ((= row-offset (rect-rows rectangle)))
+        (let ([line
+                (+ (editor-render-context-first-line context)
+                   row-offset)])
+          (when (< line (editor-render-context-line-count context))
+            (let ([line-start (text-line-start text line)]
+                  [line-end (text-line-content-end text line)])
+              (draw-document-line!
+                frame
+                rectangle
+                (+ (rect-row rectangle) row-offset)
+                (text-subbytevector
+                  text
+                  line-start
+                  line-end)
+                line-start
+                line-end
+                (editor-render-context-tab-width context)
+                (buffer-id buffer)
+                component-id)))))
+      (let ([cursor-row
+              (+ (rect-row rectangle)
+                 (- (editor-render-context-caret-line context)
+                    (editor-render-context-first-line context)))]
+            [cursor-column
+              (+ (rect-column rectangle)
+                 (editor-render-context-caret-column context))])
+        (if (and (rect-contains? rectangle cursor-row cursor-column)
+                 (< cursor-row (frame-rows frame))
+                 (< cursor-column (frame-columns frame)))
+            (frame-set-cursor!
+              frame
+              cursor-row
+              cursor-column
+              #t)
+            (frame-set-cursor! frame 0 0 #f)))))
+
+  (define (render-modeline-component! context frame rectangle)
     (let* ([source (make-cell-source 'chrome 'modeline #f)]
-           [sources (list source)]
+           [sources
+             (list
+               source
+               (component-source 'editor.modeline))]
            [fill
              (make-cell
                " "
@@ -242,15 +326,51 @@
                #f
                sources)])
       (frame-fill-rect! frame rectangle fill)
-      (draw-string!
-        frame
-        (rect-row rectangle)
-        (rect-column rectangle)
-        (rect-columns rectangle)
-        (modeline-text editor buffer caret-line caret-column)
-        '(modeline)
-        modeline-style
-        sources)))
+      (when (positive? (rect-rows rectangle))
+        (draw-string!
+          frame
+          (rect-row rectangle)
+          (rect-column rectangle)
+          (rect-columns rectangle)
+          (modeline-text
+            (editor-render-context-editor context)
+            (editor-render-context-buffer context)
+            (editor-render-context-caret-line context)
+            (editor-render-context-caret-column context))
+          '(modeline)
+          modeline-style
+          sources))))
+
+  (define editor-text-component
+    (make-component 'editor.text render-text-component!))
+
+  (define editor-modeline-component
+    (make-component 'editor.modeline render-modeline-component!))
+
+  (define (make-editor-component-tree rows columns)
+    (let* ([root-rectangle (make-rect 0 0 rows columns)]
+           [rectangles
+             (layout-split
+               root-rectangle
+               'vertical
+               (list
+                 (make-flex-extent 1)
+                 (make-fixed-extent 1)))])
+      (make-component-node
+        'editor.root
+        root-rectangle
+        #f
+        (list
+          (make-component-node
+            'editor.text
+            (car rectangles)
+            editor-text-component
+            '())
+          (make-component-node
+            'editor.modeline
+            (cadr rectangles)
+            editor-modeline-component
+            '())))))
 
   (define (render-editor-frame editor rows columns)
     (unless (editor? editor)
@@ -273,10 +393,8 @@
            [document (buffer-document buffer)]
            [snapshot (document-snapshot document)]
            [frame (make-frame rows columns)]
-           [content-rectangle (make-rect 0 0 (- rows 1) columns)]
-           [modeline-rectangle (make-rect (- rows 1) 0 1 columns)]
-           [background-source
-             (make-cell-source 'view (view-id view) 'background)])
+           [component-tree
+             (make-editor-component-tree rows columns)])
       (dynamic-wind
         (lambda () #f)
         (lambda ()
@@ -301,52 +419,20 @@
                            tab-width)]
                        [first-line (view-first-line view)]
                        [line-count (text-line-count text)])
-                  (frame-fill-rect!
-                    frame
-                    content-rectangle
-                    (make-cell
-                      " "
-                      1
-                      '(default)
-                      default-style
-                      #f
-                      (list background-source)))
-                  (do ([screen-row 0 (+ screen-row 1)])
-                      ((= screen-row (rect-rows content-rectangle)))
-                    (let ([line (+ first-line screen-row)])
-                      (when (< line line-count)
-                        (let ([line-start (text-line-start text line)]
-                              [line-end (text-line-content-end text line)])
-                          (draw-document-line!
-                            frame
-                            content-rectangle
-                            screen-row
-                            (text-subbytevector
-                              text
-                              line-start
-                              line-end)
-                            line-start
-                            line-end
-                            tab-width
-                            (buffer-id buffer))))))
-                  (render-modeline!
-                    frame
-                    modeline-rectangle
-                    editor
-                    buffer
-                    caret-line
-                    caret-column)
-                  (let ([cursor-row (- caret-line first-line)])
-                    (if (and (<= 0 cursor-row)
-                             (< cursor-row
-                                (rect-rows content-rectangle))
-                             (< caret-column columns))
-                        (frame-set-cursor!
-                          frame
-                          cursor-row
-                          caret-column
-                          #t)
-                        (frame-set-cursor! frame 0 0 #f)))
+                  (frame-set-layout! frame component-tree)
+                  (component-node-render!
+                    component-tree
+                    (make-editor-render-context
+                      editor
+                      view
+                      buffer
+                      text
+                      caret-line
+                      caret-column
+                      tab-width
+                      first-line
+                      line-count)
+                    frame)
                   frame))
               (lambda () (text-close! text)))))
         (lambda () (snapshot-close! snapshot))))))

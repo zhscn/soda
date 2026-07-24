@@ -10,6 +10,7 @@
           character-description-screen-row
           character-description-screen-column
           character-description-cell-text
+          character-description-component-path
           character-description-faces
           character-description-style
           character-description-sources
@@ -19,6 +20,7 @@
           (soda document)
           (soda editor buffer)
           (soda editor core)
+          (soda tui component)
           (soda tui frame)
           (soda tui renderer))
 
@@ -33,6 +35,7 @@
             screen-row
             screen-column
             cell-text
+            component-path
             faces
             style
             sources))
@@ -142,6 +145,18 @@
                          (and position-cell (car position-cell))]
                        [cell
                          (and position-cell (cdr position-cell))]
+                       [component-path
+                         (let ([layout (frame-layout frame)])
+                           (if (and visible-row
+                                    screen-column
+                                    (component-node? layout))
+                               (map
+                                 component-node-id
+                                 (component-node-path-at
+                                   layout
+                                   visible-row
+                                   screen-column))
+                               '()))]
                        [tab-width
                          (let ([setting
                                  (buffer-setting-ref
@@ -173,6 +188,7 @@
                     visible-row
                     screen-column
                     (and cell (cell-text cell))
+                    component-path
                     (if cell (cell-faces cell) '(default))
                     (if cell (cell-style cell) default-style)
                     (if cell (cell-sources cell) '()))))
@@ -271,6 +287,15 @@
           (map symbol->string
                (character-description-faces value))
           ",")
+        "; components "
+        (if (null?
+              (character-description-component-path value))
+            "none"
+            (join
+              (map
+                symbol->string
+                (character-description-component-path value))
+              "/"))
         "; style fg="
         (color->string (style-foreground style))
         " bg="
