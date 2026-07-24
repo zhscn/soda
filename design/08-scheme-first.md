@@ -3,7 +3,8 @@
 ## 组合根
 
 Chez Scheme 是编辑器的组合根。它持有 command loop、buffer registry、mode、
-keymap、window/workbench、导航、补全会话、用户配置和 REPL。native library
+language catalog、keymap catalog、window/workbench、导航、补全会话、用户配置和
+REPL。native library
 提供有界机制，不保存 Scheme 对象，也不反向调用 Scheme。
 
 ```text
@@ -72,6 +73,14 @@ command 收到显式 context，不从 native 全局变量推断当前 buffer 或
 编辑命令以 transaction 为原子边界，更新 View 的 caret/selection，并返回 effect
 列表。keymap 保存 command symbol；registry 中替换 procedure 后，已有绑定立即使用
 新实现。
+
+message 是按用途区分的记录值，包括 key、resize 和 command message。effect
+executor 按 kind 查找显式注册的 handler；handler 返回是否继续以及后续 message。
+没有 handler 的 effect 是程序错误，不会在 runtime adapter 中被忽略。
+
+Editor 用 id registry 管理 Buffer 与 View，active view 只保存 id。View 持有自己的
+caret、viewport、keymap layers 和 pending key sequence；切换 active view 同时切换
+命令的 buffer 与输入上下文。Editor 关闭时释放仍在 registry 中的 Buffer。
 
 REPL 使用同一个 command loop、namespace 和事件队列。求值请求是编辑器事件；
 求值产生的状态变化走公开 Scheme API，因此不需要独立 nREPL 状态模型。

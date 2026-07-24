@@ -3,7 +3,7 @@
 soda is a Scheme-first native editor. Chez Scheme owns the command loop and
 editor policy. Native libraries provide persistent text values, transactional
 documents, incremental C++ analysis, indentation mechanisms, asynchronous I/O,
-and terminal presentation.
+and terminal access.
 
 ## Native core
 
@@ -31,16 +31,19 @@ change sets directly to the analyzer without serializing text or syntax trees.
 
 ## Scheme editor core
 
-The Scheme editor layer owns `Editor`, `View`, command registries, keymaps, and
-the message update loop. Commands receive an explicit context, mutate buffers
-through document transactions, update view state, and return effect values for
-the outer runtime to execute.
+The Scheme editor layer owns dynamic Buffer and View registries, command
+registries, keymap and language catalogs, typed messages, and the update loop.
+Commands receive an explicit context, mutate buffers through buffer
+transactions, update view state, and return effect values for registered outer
+runtime handlers to execute.
 
 Keymaps bind key sequences to command symbols. Replacing a command procedure in
 the registry immediately affects existing bindings, which provides the
 indirection needed for interactive Scheme development. Terminal input and
 resize events enter the same update function; terminal frame rendering only
-reads the resulting editor state.
+reads the resulting editor state. The renderer reads visible document lines and
+uses terminal cells for tab expansion, wide-character clipping, and cursor
+placement.
 
 ## Language modes
 

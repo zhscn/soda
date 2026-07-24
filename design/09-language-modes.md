@@ -10,8 +10,8 @@ LanguageProfile  语言能力组合与 project policy
 SyntaxProvider   revision-scoped 语法机制
 ```
 
-Buffer 持有 major mode 和 language runtime；View 只借用某 revision 的 syntax view。
-Document 不知道语言类型。
+Editor 持有 language catalog，Buffer 引用该 catalog 并保存 major mode 名称与
+language runtime；View 只借用某 revision 的 syntax view。Document 不知道语言类型。
 
 ## Major mode
 
@@ -29,6 +29,11 @@ major mode 是 Scheme registry 中的描述值：
 mode parent 只表达 policy 继承，不表达 parser 继承。有效 keymap、settings、
 interaction class 和 language profile 沿 parent chain 合并。minor mode 叠加局部
 行为，但不替换 Buffer 的 language identity。
+
+language profile 与 major mode 注册到 Editor 所属 catalog。替换同名描述值后，
+Editor 刷新已注册 Buffer 的 runtime；Buffer 在查询 setting、profile 和 mode
+keymap 时按名称解析 catalog，因此不会持有过期 mode 描述值。默认 catalog 只作为
+独立使用 Buffer API 时的便利入口。
 
 文件名、shebang、modeline 或用户命令选择 major mode。切换 mode 是 Buffer
 transaction 之外的编辑器状态变化：关闭旧 language runtime，建立新 runtime，
@@ -77,9 +82,9 @@ syntax view 是 immutable、revision-scoped 的查询面：
 - fold、indent 与 injection range；
 - 可选 debug projection。
 
-Buffer 在 commit、undo 和 redo 后同步 session。若 provider 不能接受 change chain，
-则从目标 snapshot 重建。View 借用 syntax view 时必须显式 close；provider session
-关闭前释放全部 view。
+Buffer 在 commit、undo、redo 和显式接受 native change 后同步 session。若 provider
+不能接受 change chain，则从目标 snapshot 重建。View 借用 syntax view 时必须显式
+close；provider session 关闭前释放全部 view。
 
 ## Provider 层级
 

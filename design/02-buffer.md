@@ -101,7 +101,9 @@ Buffer {
   id,
   document,
   resource,
-  major_mode,
+  revision,
+  language_catalog,
+  major_mode_name,
   local_settings,
   language_runtime
 }
@@ -110,6 +112,17 @@ Buffer {
 `Document` 不知道 resource、dirty 状态、major mode 或 view。Buffer 比较已保存
 snapshot 与当前 snapshot 决定 dirty 状态，并负责在 commit、undo、redo 后同步
 language runtime。
+
+Buffer 的 `revision` 是已经被 Buffer 及其 language runtime 接受的 Document
+revision。Scheme 编辑命令通过 `call-with-buffer-transaction` 修改文本；该边界提交
+transaction、推进 Buffer revision，并同步派生语言状态。
+
+直接操作 Document 的 native 机制必须返回 normalized change。调用方随后用
+`buffer-adopt-change!` 把 change 交给所属 Buffer。change 的 old revision 必须等于
+Buffer revision，new revision 必须等于 Document 当前 revision；同一个 change
+只能接受一次。存在未接受的 Document change 时，Buffer 拒绝新的编辑、undo、
+redo 和 mode 切换。这一约束使 indentation 等 native 机制不需要依赖 Buffer，
+同时避免绕过 language runtime 同步。
 
 ## ABI 与线程归属
 

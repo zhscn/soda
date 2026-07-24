@@ -31,16 +31,23 @@ decoder 是增量状态机：一个 read 可能只包含 UTF-8 code point 或 es
 
 ```text
 KeyEvent {
-  key,                 // Unicode scalar 或具名功能键
+  key,                 // text、character 或具名功能键
+  codepoint,
+  shifted_codepoint,
+  base_layout_codepoint,
   modifiers,           // shift/control/alt/super/hyper/meta/caps/num
   type,                // press/repeat/release
-  text,                // 可插入文本；可为空
-  raw                   // 调试所需原始 bytes
+  text                  // 可插入 UTF-8 bytes；可为空
 }
 ```
 
 Kitty 修饰位和事件类型在 decoder 边界归一化。legacy Alt 前缀、控制字符与
 Backspace/Enter/Tab 也映射到同一结构。
+
+传统终端中的单独 Escape 与后续序列在 byte stream 上有歧义。decoder 暂存不完整
+序列，command loop 用 libuv 单次 timer 安排 flush；timer 到期时，单字节 Escape
+成为 `escape` event，其他不完整序列成为 `unknown` event。Kitty `CSI u` 事件不
+依赖该超时完成按键判定。
 
 ## Keymap
 
@@ -48,23 +55,17 @@ keymap 是一等、具名 trie。节点值可以是 command、子 keymap 或未�
 逐层查询，最高优先级中第一个认识该完整序列的层决定结果；稀疏高优先级 keymap
 不会遮蔽低层的其他续键。
 
-默认层次从高到低：
+基础 command loop 实现的层次从高到低：
 
 ```text
-override
-transient input state
-durable input state
-window
-view
-buffer
-minor modes
-major mode and parents
-editor
-application
+View keymap layers
+Major mode and parents
+Editor default
 ```
 
 解析结果是 `none | prefix | command`。同一个纯查询服务实际 dispatch、按键帮助和
-配置内省。命令解析后执行一次 remap pass，remap 不递归。
+配置内省。View 层可承载 transient、durable、window 和 buffer policy；这些层以
+具名 keymap 注册到 Editor 的 keymap catalog。
 
 ## Input state
 
@@ -141,7 +142,8 @@ View 持有 selection、viewport 和输入状态；Window 把 View 放入 layout
 
 完整重绘与 cell diff 是可替换的 presenter 策略，不改变 View、Window 或 Buffer
 模型。光标、modeline、minibuffer、popup 和工具区域都使用 terminal cells 表达，
-不会向 Document 写入控制序列或虚拟文本。
+不会向 Document 写入控制序列或虚拟文本。renderer 只读取 viewport 覆盖的行，
+按 terminal cell 展开 tab、裁剪宽字符并计算光标列，不 flatten 整个 Document。
 
 终端生命周期使用同一个清理作用域恢复 Kitty keyboard mode、alternate screen、
 cursor visibility 和 termios。
