@@ -105,6 +105,17 @@ if(CHEZ_SCHEME_EXECUTABLE)
       --program ${CMAKE_CURRENT_SOURCE_DIR}/scheme/input_tests.ss
   )
 
+  add_test(
+    NAME scheme_editor_tests
+    CONFIGURATIONS Debug Release
+    COMMAND
+      ${CMAKE_COMMAND} -E env
+      SODA_DOCUMENT_LIBRARY=$<TARGET_FILE:soda_document>
+      ${CHEZ_SCHEME_EXECUTABLE}
+      --libdirs ${PROJECT_SOURCE_DIR}/scheme
+      --program ${CMAKE_CURRENT_SOURCE_DIR}/scheme/editor_tests.ss
+  )
+
   if(EXPECT_EXECUTABLE)
     add_test(
       NAME tui_smoke_tests

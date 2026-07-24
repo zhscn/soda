@@ -29,6 +29,19 @@ editor buffers, views, command registries, Scheme objects, or frontend state.
 Chez libraries retain opaque native handles and pass document snapshots and
 change sets directly to the analyzer without serializing text or syntax trees.
 
+## Scheme editor core
+
+The Scheme editor layer owns `Editor`, `View`, command registries, keymaps, and
+the message update loop. Commands receive an explicit context, mutate buffers
+through document transactions, update view state, and return effect values for
+the outer runtime to execute.
+
+Keymaps bind key sequences to command symbols. Replacing a command procedure in
+the registry immediately affects existing bindings, which provides the
+indirection needed for interactive Scheme development. Terminal input and
+resize events enter the same update function; terminal frame rendering only
+reads the resulting editor state.
+
 ## Language modes
 
 Chez major modes compose replaceable syntax and indentation providers. Common
