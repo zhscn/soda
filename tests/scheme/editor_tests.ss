@@ -44,7 +44,7 @@
             effects
             (editor-update!
               editor
-              (make-key-message (car events))))))))
+              (make-input-message (car events))))))))
 
 (define (buffer-bytes buffer)
   (let ([snapshot (document-snapshot (buffer-document buffer))])
@@ -57,6 +57,36 @@
             (lambda () (text->bytevector text))
             (lambda () (text-close! text)))))
       (lambda () (snapshot-close! snapshot)))))
+
+(define lower-map (make-keymap))
+(define upper-map (make-keymap))
+(define plain-q
+  (make-key-stroke 'character (char->integer #\q) 0))
+(keymap-bind! lower-map (list plain-q) 'test.lower)
+(keymap-undefine! upper-map (list plain-q))
+(call-with-values
+  (lambda ()
+    (keymaps-resolve (list upper-map lower-map) (list plain-q)))
+  (lambda (status command)
+    (unless (and (eq? status 'undefined) (not command))
+      (error 'editor-tests "keymap tombstone did not shadow a lower layer"))))
+(let ([bindings (keymap-bindings upper-map)])
+  (unless (and (= (length bindings) 1)
+               (eq? (key-binding-status (car bindings)) 'undefined)
+               (key-stroke=?
+                 (car (key-binding-sequence (car bindings)))
+                 plain-q))
+    (error 'editor-tests "keymap bindings were not introspectable")))
+(unless (and (keymap-unbind! upper-map (list plain-q))
+             (null? (keymap-bindings upper-map)))
+  (error 'editor-tests "keymap unbind did not remove the local binding"))
+(call-with-values
+  (lambda ()
+    (keymaps-resolve (list upper-map lower-map) (list plain-q)))
+  (lambda (status command)
+    (unless (and (eq? status 'command)
+                 (eq? command 'test.lower))
+      (error 'editor-tests "keymap unbind did not reveal a lower layer"))))
 
 (define document (make-document "" 71))
 (define buffer (make-buffer 17 document "*editor-test*" 'fundamental-mode))
@@ -192,6 +222,59 @@
   (error 'editor-tests "view keymap layer did not override the default map"))
 (view-set-keymap-layers! (editor-active-view editor) '())
 
+(define transient-map (make-keymap))
+(keymap-bind!
+  transient-map
+  (list plain-q)
+  'test.count)
+(keymap-undefine!
+  transient-map
+  (list (make-key-stroke 'character 103 4)))
+(keymap-catalog-register!
+  (editor-keymap-catalog editor)
+  'test.transient
+  transient-map)
+(view-push-input-state!
+  (editor-active-view editor)
+  (make-input-state
+    'test-capture
+    '(test.transient)
+    'ignore))
+(define before-ignored-text (buffer-bytes buffer))
+(send! editor decoder (string->utf8 "z"))
+(unless (bytevector=? (buffer-bytes buffer) before-ignored-text)
+  (error 'editor-tests "ignore input state inserted unbound text"))
+(send! editor decoder (string->utf8 "q"))
+(unless (= invocation-count 31)
+  (error 'editor-tests "input state did not bind a printable character"))
+(send! editor decoder (bytes 7))
+(unless (and (= (length
+                  (view-input-states
+                    (editor-active-view editor)))
+                1)
+             (eq? (input-state-name
+                    (view-current-input-state
+                      (editor-active-view editor)))
+                  'editing)
+             (not (editor-status-message editor)))
+  (error 'editor-tests "keyboard.quit did not reset transient input"))
+
+(define revision-before-paste (buffer-revision buffer))
+(define paste-effects
+  (send!
+    editor
+    decoder
+    (bytes #x1b #x5b #x32 #x30 #x30 #x7e
+           #x58 #x11
+           #x1b #x5b #x32 #x30 #x31 #x7e)))
+(unless (and (null? paste-effects)
+             (= (buffer-revision buffer)
+                (+ revision-before-paste 1))
+             (bytevector=?
+               (buffer-bytes buffer)
+               (bytes #x61 #x62 #x58 #x11)))
+  (error 'editor-tests "paste did not use one text-input command"))
+
 (define mode-map (make-keymap))
 (keymap-bind!
   mode-map
@@ -217,7 +300,7 @@
   (error 'editor-tests "mode registration did not refresh buffers"))
 (buffer-set-major-mode! buffer 'test-editor-mode)
 (send! editor decoder (bytes 25))
-(unless (= invocation-count 31)
+(unless (= invocation-count 41)
   (error 'editor-tests "major mode keymap was not active"))
 (editor-register-major-mode!
   editor

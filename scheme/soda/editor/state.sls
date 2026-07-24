@@ -34,6 +34,11 @@
           view-viewport-rows
           view-viewport-columns
           view-keymap-layers
+          view-input-states
+          view-current-input-state
+          view-push-input-state!
+          view-pop-input-state!
+          view-reset-input-states!
           view-set-caret!
           view-set-vertical-caret!
           view-set-first-line!
@@ -44,6 +49,7 @@
           (soda document)
           (soda editor buffer)
           (soda editor command)
+          (soda editor input-state)
           (soda editor keymap)
           (soda editor language))
 
@@ -63,6 +69,7 @@
                view-viewport-columns
                view-viewport-columns-set!)
       (mutable keymap-layers view-keymap-layers view-keymap-layers-set!)
+      (mutable input-states view-input-states view-input-states-set!)
       (mutable pending-keys view-pending-keys view-pending-keys-set!)))
 
   (define-record-type (editor %make-editor editor?)
@@ -183,7 +190,22 @@
     (require-open-editor 'editor-open-view! value)
     (let* ([buffer (editor-buffer-ref value buffer-id)]
            [id (editor-next-view-id value)]
-           [view (%make-view id buffer 0 #f 0 1 1 '() '())])
+           [view
+             (%make-view
+               id
+               buffer
+               0
+               #f
+               0
+               1
+               1
+               '()
+               (list
+                 (make-input-state
+                   'editing
+                   '()
+                   'accept))
+               '())])
       (hashtable-set! (editor-view-table value) id view)
       (editor-view-ids-set!
         value
@@ -224,6 +246,7 @@
       (view-buffer-set! view buffer)
       (view-set-caret! view 0)
       (view-first-line-set! view 0)
+      (view-reset-input-states! view)
       (view-pending-keys-set! view '())))
 
   (define (editor-keymap value)
@@ -343,6 +366,61 @@
         layers))
     (view-keymap-layers-set! value layers))
 
+  (define (view-current-input-state value)
+    (unless (view? value)
+      (assertion-violation
+        'view-current-input-state
+        "expected a view"
+        value))
+    (car (view-input-states value)))
+
+  (define (view-push-input-state! value state)
+    (unless (view? value)
+      (assertion-violation
+        'view-push-input-state!
+        "expected a view"
+        value))
+    (unless (input-state? state)
+      (assertion-violation
+        'view-push-input-state!
+        "expected an input state"
+        state))
+    (view-input-states-set!
+      value
+      (cons state (view-input-states value)))
+    (view-pending-keys-set! value '())
+    state)
+
+  (define (view-pop-input-state! value)
+    (unless (view? value)
+      (assertion-violation
+        'view-pop-input-state!
+        "expected a view"
+        value))
+    (let ([states (view-input-states value)])
+      (if (null? (cdr states))
+          #f
+          (begin
+            (view-input-states-set! value (cdr states))
+            (view-pending-keys-set! value '())
+            (car states)))))
+
+  (define (last-input-state states)
+    (if (null? (cdr states))
+        (car states)
+        (last-input-state (cdr states))))
+
+  (define (view-reset-input-states! value)
+    (unless (view? value)
+      (assertion-violation
+        'view-reset-input-states!
+        "expected a view"
+        value))
+    (view-input-states-set!
+      value
+      (list (last-input-state (view-input-states value))))
+    (view-pending-keys-set! value '()))
+
   (define (with-document-text document procedure)
     (let ([snapshot (document-snapshot document)])
       (dynamic-wind
@@ -386,7 +464,22 @@
     (let* ([buffers (make-eqv-hashtable)]
            [views (make-eqv-hashtable)]
            [keymaps (make-keymap-catalog)]
-           [view (%make-view 1 buffer 0 #f 0 1 1 '() '())]
+           [view
+             (%make-view
+               1
+               buffer
+               0
+               #f
+               0
+               1
+               1
+               '()
+               (list
+                 (make-input-state
+                   'editing
+                   '()
+                   'accept))
+               '())]
            [value
              (%make-editor
                buffers
@@ -402,6 +495,7 @@
                #f)])
       (hashtable-set! buffers (buffer-id buffer) buffer)
       (hashtable-set! views 1 view)
+      (keymap-catalog-register! keymaps 'editor.override (make-keymap))
       (keymap-catalog-register! keymaps 'editor.default (make-keymap))
       value))
 

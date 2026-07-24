@@ -201,6 +201,14 @@
   (define (quit-command context)
     (list (make-command-effect 'quit #f)))
 
+  (define (keyboard-quit-command context)
+    (let ([editor (command-context-editor context)]
+          [view (command-context-view context)])
+      (view-reset-input-states! view)
+      (editor-set-pending-keys! editor '())
+      (editor-set-status-message! editor #f)
+      '()))
+
   (define editor-register-command!
     (case-lambda
       [(editor name procedure)
@@ -259,6 +267,10 @@
           (caddr entry)))
       (list
         (list 'editor.quit quit-command "Leave the editor.")
+        (list
+          'keyboard.quit
+          keyboard-quit-command
+          "Cancel the active input state and key sequence.")
         (list 'edit.self-insert self-insert-command "Insert event text.")
         (list
           'edit.backward-delete
@@ -306,4 +318,10 @@
         (cons (stroke 'up #f 0) 'move.previous-line)
         (cons (stroke 'down #f 0) 'move.next-line)
         (cons (stroke 'home #f 0) 'move.line-start)
-        (cons (stroke 'end #f 0) 'move.line-end)))))
+        (cons (stroke 'end #f 0) 'move.line-end)))
+    (keymap-bind!
+      (keymap-catalog-ref
+        (editor-keymap-catalog editor)
+        'editor.override)
+      (list (stroke 'character 103 4))
+      'keyboard.quit)))

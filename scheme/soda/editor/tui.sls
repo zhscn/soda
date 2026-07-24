@@ -42,7 +42,7 @@
                   (effect-result-messages result)
                   (cdr messages))))))))
 
-  (define (handle-key-events editor executor events)
+  (define (handle-input-events editor executor events)
     (let loop ([events events])
       (if (null? events)
           #t
@@ -50,7 +50,7 @@
             (handle-editor-message!
               editor
               executor
-              (make-key-message (car events)))
+              (make-input-message (car events)))
             (loop (cdr events))))))
 
   (define (load-bytes runtime path)
@@ -142,10 +142,10 @@
               #t
               (let ([events (input-decoder-feed! decoder input)])
                 (arm-flush-timer!)
-                (handle-key-events editor executor events)))))
+                (handle-input-events editor executor events)))))
       (define (handle-flush!)
         (set! flush-timer #f)
-        (handle-key-events
+        (handle-input-events
           editor
           executor
           (input-decoder-flush! decoder)))
@@ -161,7 +161,10 @@
           (set! screen? #t)
           (terminal-write!
             terminal
-            (string-append (ansi "[?1049h") (ansi "[>1u")))
+            (string-append
+              (ansi "[?1049h")
+              (ansi "[>1u")
+              (ansi "[?2004h")))
           (set! input-source
             (runtime-watch-fd! runtime 0 fd-readable))
           (let loop ([running? #t])
@@ -191,6 +194,7 @@
                 terminal
                 (string-append
                   (ansi "[<u")
+                  (ansi "[?2004l")
                   (ansi "[?25h")
                   (ansi "[?1049l")))))
           (when raw?

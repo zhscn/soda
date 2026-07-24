@@ -5,6 +5,7 @@
           (soda editor command)
           (soda editor commands basic)
           (soda editor event)
+          (soda editor input-state)
           (soda editor keymap)
           (soda editor language)
           (soda editor state))
@@ -46,6 +47,13 @@
            [buffer (view-buffer view)]
            [layers
              (append
+               (list 'editor.override)
+               (fold-right
+                 append
+                 '()
+                 (map
+                   input-state-keymap-layers
+                   (view-input-states view)))
                (view-keymap-layers view)
                (major-mode-keymaps
                  (editor-language-catalog editor)
@@ -53,7 +61,20 @@
                (list 'editor.default))])
       (map (lambda (layer) (catalog-keymap editor layer)) layers)))
 
-  (define (handle-key-message! editor event)
+  (define (dispatch-text! editor event text)
+    (let ([state
+            (view-current-input-state
+              (editor-active-view editor))])
+      (if (and (eq? (input-state-text-policy state) 'accept)
+               (positive? (bytevector-length text)))
+          (run-interactive-command
+            editor
+            (input-state-text-command state)
+            event
+            text)
+          '())))
+
+  (define (handle-key-event! editor event)
     (unless (key-event? event)
       (assertion-violation
         'editor-update!
@@ -75,22 +96,42 @@
                 [(command)
                  (editor-set-pending-keys! editor '())
                  (run-interactive-command editor command event #f)]
+                [(undefined)
+                 (editor-set-pending-keys! editor '())
+                 (editor-set-status-message!
+                   editor
+                   "Undefined key")
+                 '()]
                 [else
                  (editor-set-pending-keys! editor '())
                  (if (and (null? pending)
                           (positive?
                             (bytevector-length (key-event-text event))))
-                     (run-interactive-command
+                     (dispatch-text!
                        editor
-                       'edit.self-insert
                        event
-                       #f)
+                       (key-event-text event))
                      (begin
                        (when (pair? pending)
                          (editor-set-status-message!
                            editor
                            "Undefined key sequence"))
                        '()))]))))))
+
+  (define (handle-input-event! editor event)
+    (cond
+      [(key-event? event) (handle-key-event! editor event)]
+      [(text-input-event? event)
+       (editor-set-pending-keys! editor '())
+       (dispatch-text!
+         editor
+         event
+         (text-input-event-text event))]
+      [else
+       (assertion-violation
+         'editor-update!
+         "expected an input event"
+         event)]))
 
   (define (handle-resize-message! editor message)
     (let ([rows (resize-message-rows message)]
@@ -114,8 +155,10 @@
   (define (editor-update! editor message)
     (require-open-editor 'editor-update! editor)
     (cond
+      [(input-message? message)
+       (handle-input-event! editor (input-message-event message))]
       [(key-message? message)
-       (handle-key-message! editor (key-message-event message))]
+       (handle-key-event! editor (key-message-event message))]
       [(resize-message? message)
        (handle-resize-message! editor message)]
       [(command-message? message)

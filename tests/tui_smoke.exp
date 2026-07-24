@@ -5,7 +5,10 @@ log_user 0
 
 spawn -noecho $editor $input_file
 expect -exact "\033\[?1049h\033\[>1u"
+expect -exact "\033\[?2004h"
 send -- "abc"
+after 50
+send -- "\033\[200~p\021\033\[201~"
 after 50
 send -- "\177"
 after 50
@@ -19,6 +22,7 @@ send -- ";5u"
 
 expect {
   -exact "\033\[<u" {
+    expect -exact "\033\[?2004l"
     expect eof
     set result [wait]
     exit [lindex $result 3]

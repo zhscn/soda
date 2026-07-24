@@ -29,6 +29,14 @@
           make-key-message
           key-message?
           key-message-event
+          make-input-message
+          input-message?
+          input-message-event
+          make-text-input-event
+          text-input-event?
+          text-input-event-kind
+          text-input-event-text
+          input-event?
           make-resize-message
           resize-message?
           resize-message-rows
@@ -45,8 +53,19 @@
           view-viewport-rows
           view-viewport-columns
           view-keymap-layers
+          view-input-states
+          view-current-input-state
+          view-push-input-state!
+          view-pop-input-state!
+          view-reset-input-states!
           view-set-first-line!
           view-set-keymap-layers!
+          make-input-state
+          input-state?
+          input-state-name
+          input-state-keymap-layers
+          input-state-text-policy
+          input-state-text-command
           command-effect?
           command-effect-kind
           command-effect-payload)
@@ -55,6 +74,7 @@
           (soda editor command)
           (soda editor commands basic)
           (soda editor event)
+          (soda editor input-state)
           (soda editor state)
           (soda editor update))
 
