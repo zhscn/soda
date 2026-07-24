@@ -1,7 +1,9 @@
-(library (soda editor input)
+(library (soda tui input)
   (export make-input-decoder
           input-decoder?
+          input-decoder-pending?
           input-decoder-feed!
+          input-decoder-flush!
           key-event?
           key-event-key
           key-event-codepoint
@@ -11,43 +13,22 @@
           key-event-type
           key-event-text
           key-event-modifier?)
-  (import (rnrs))
+  (import (rnrs)
+          (soda editor event))
 
   (define-record-type (input-decoder %make-input-decoder input-decoder?)
     (fields (mutable pending input-decoder-pending input-decoder-pending-set!)))
 
-  (define-record-type key-event
-    (fields key
-            codepoint
-            shifted-codepoint
-            base-layout-codepoint
-            modifiers
-            type
-            text))
-
-  (define modifier-bits
-    '((shift . 1)
-      (alt . 2)
-      (ctrl . 4)
-      (super . 8)
-      (hyper . 16)
-      (meta . 32)
-      (caps-lock . 64)
-      (num-lock . 128)))
-
   (define (make-input-decoder)
     (%make-input-decoder (make-bytevector 0)))
 
-  (define (key-event-modifier? event modifier)
-    (unless (key-event? event)
-      (assertion-violation 'key-event-modifier? "expected a key event" event))
-    (let ([entry (assq modifier modifier-bits)])
-      (unless entry
-        (assertion-violation
-          'key-event-modifier?
-          "unknown modifier"
-          modifier))
-      (not (zero? (bitwise-and (key-event-modifiers event) (cdr entry))))))
+  (define (input-decoder-pending? decoder)
+    (unless (input-decoder? decoder)
+      (assertion-violation
+        'input-decoder-pending?
+        "expected an input decoder"
+        decoder))
+    (positive? (bytevector-length (input-decoder-pending decoder))))
 
   (define (append-bytevectors left right)
     (let* ([left-size (bytevector-length left)]
@@ -224,20 +205,71 @@
   (define (utf8-sequence-size first)
     (cond
       [(< first #x80) 1]
-      [(= (bitwise-and first #xe0) #xc0) 2]
-      [(= (bitwise-and first #xf0) #xe0) 3]
-      [(= (bitwise-and first #xf8) #xf0) 4]
+      [(<= #xc2 first #xdf) 2]
+      [(<= #xe0 first #xef) 3]
+      [(<= #xf0 first #xf4) 4]
       [else 1]))
 
+  (define (continuation-byte? byte)
+    (<= #x80 byte #xbf))
+
+  (define (valid-utf8-sequence? bytes start end)
+    (let* ([size (- end start)]
+           [first (bytevector-u8-ref bytes start)]
+           [second
+             (and (> size 1) (bytevector-u8-ref bytes (+ start 1)))])
+      (case size
+        [(1) (< first #x80)]
+        [(2)
+         (and (<= #xc2 first #xdf)
+              (continuation-byte? second))]
+        [(3)
+         (and
+           (cond
+             [(= first #xe0) (<= #xa0 second #xbf)]
+             [(= first #xed) (<= #x80 second #x9f)]
+             [else
+              (and (<= #xe1 first #xef)
+                   (continuation-byte? second))])
+           (continuation-byte?
+             (bytevector-u8-ref bytes (+ start 2))))]
+        [(4)
+         (and
+           (cond
+             [(= first #xf0) (<= #x90 second #xbf)]
+             [(= first #xf4) (<= #x80 second #x8f)]
+             [else
+              (and (<= #xf1 first #xf3)
+                   (continuation-byte? second))])
+           (continuation-byte?
+             (bytevector-u8-ref bytes (+ start 2)))
+           (continuation-byte?
+             (bytevector-u8-ref bytes (+ start 3))))]
+        [else #f])))
+
   (define (text-event bytes start end)
+    (let ([text
+            (if (valid-utf8-sequence? bytes start end)
+                (bytevector-slice bytes start end)
+                (string->utf8 (string (integer->char #xfffd))))])
+      (make-key-event
+        'text
+        #f
+        #f
+        #f
+        0
+        'press
+        text)))
+
+  (define (escape-event)
     (make-key-event
-      'text
-      #f
+      'escape
+      27
       #f
       #f
       0
       'press
-      (bytevector-slice bytes start end)))
+      (make-bytevector 0)))
 
   (define (control-event byte)
     (cond
@@ -308,16 +340,7 @@
                   [else
                    (loop
                      (+ index 1)
-                     (cons
-                       (make-key-event
-                         'escape
-                         27
-                         #f
-                         #f
-                         0
-                         'press
-                         (make-bytevector 0))
-                       events))])]
+                     (cons (escape-event) events))])]
                [(or (< byte 32) (= byte 127))
                 (loop (+ index 1) (cons (control-event byte) events))]
                [else
@@ -332,4 +355,28 @@
                         (+ index character-size)
                         (cons
                           (text-event bytes index (+ index character-size))
-                          events))))]))])))))
+                          events))))]))]))))
+
+  (define (input-decoder-flush! decoder)
+    (unless (input-decoder? decoder)
+      (assertion-violation
+        'input-decoder-flush!
+        "expected an input decoder"
+        decoder))
+    (let ([pending (input-decoder-pending decoder)])
+      (input-decoder-pending-set! decoder (make-bytevector 0))
+      (cond
+        [(zero? (bytevector-length pending)) '()]
+        [(and (= (bytevector-length pending) 1)
+              (= (bytevector-u8-ref pending 0) 27))
+         (list (escape-event))]
+        [else
+         (list
+           (make-key-event
+             'unknown
+             #f
+             #f
+             #f
+             0
+             'press
+             (make-bytevector 0)))]))))

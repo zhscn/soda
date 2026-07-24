@@ -9,9 +9,15 @@
           make-keymap
           keymap?
           keymap-bind!
-          keymap-resolve)
+          keymap-resolve
+          keymaps-resolve
+          make-keymap-catalog
+          keymap-catalog?
+          keymap-catalog-register!
+          keymap-catalog-find
+          keymap-catalog-ref)
   (import (rnrs)
-          (soda editor input))
+          (soda editor event))
 
   (define-record-type key-stroke
     (fields key codepoint modifiers))
@@ -23,6 +29,10 @@
 
   (define-record-type (keymap %make-keymap keymap?)
     (fields root))
+
+  (define-record-type
+    (keymap-catalog %make-keymap-catalog keymap-catalog?)
+    (fields entries))
 
   (define (key-stroke=? left right)
     (and (key-stroke? left)
@@ -47,6 +57,48 @@
 
   (define (make-keymap)
     (%make-keymap (%make-empty-node)))
+
+  (define (make-keymap-catalog)
+    (%make-keymap-catalog (make-eq-hashtable)))
+
+  (define (keymap-catalog-register! catalog name keymap)
+    (unless (keymap-catalog? catalog)
+      (assertion-violation
+        'keymap-catalog-register!
+        "expected a keymap catalog"
+        catalog))
+    (unless (symbol? name)
+      (assertion-violation
+        'keymap-catalog-register!
+        "keymap name must be a symbol"
+        name))
+    (unless (keymap? keymap)
+      (assertion-violation
+        'keymap-catalog-register!
+        "expected a keymap"
+        keymap))
+    (hashtable-set! (keymap-catalog-entries catalog) name keymap)
+    keymap)
+
+  (define (keymap-catalog-find catalog name)
+    (unless (keymap-catalog? catalog)
+      (assertion-violation
+        'keymap-catalog-find
+        "expected a keymap catalog"
+        catalog))
+    (unless (symbol? name)
+      (assertion-violation
+        'keymap-catalog-find
+        "keymap name must be a symbol"
+        name))
+    (hashtable-ref (keymap-catalog-entries catalog) name #f))
+
+  (define (keymap-catalog-ref catalog name)
+    (or (keymap-catalog-find catalog name)
+        (assertion-violation
+          'keymap-catalog-ref
+          "unknown keymap"
+          name)))
 
   (define (find-child node stroke)
     (let loop ([children (keymap-node-children node)])
@@ -115,5 +167,20 @@
           (let ([child (find-child node (car remaining))])
             (if child
                 (loop child (cdr remaining))
-                (values 'none #f)))))))
+                (values 'none #f))))))
 
+  (define (keymaps-resolve keymaps sequence)
+    (unless (and (list? keymaps) (for-all keymap? keymaps))
+      (assertion-violation
+        'keymaps-resolve
+        "expected a list of keymaps"
+        keymaps))
+    (let loop ([remaining keymaps])
+      (if (null? remaining)
+          (values 'none #f)
+          (call-with-values
+            (lambda () (keymap-resolve (car remaining) sequence))
+            (lambda (status command)
+              (if (eq? status 'none)
+                  (loop (cdr remaining))
+                  (values status command))))))))

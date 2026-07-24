@@ -5,8 +5,9 @@
           (soda editor buffer)
           (soda editor command)
           (soda editor core)
-          (soda editor input)
-          (soda runtime))
+          (soda editor event)
+          (soda runtime)
+          (soda tui input))
 
   (define escape (string (integer->char 27)))
 
@@ -149,9 +150,9 @@
     (let ([size (terminal-size terminal)])
       (editor-update!
         editor
-        (make-editor-message
-          'resize
-          (cons (max 2 (car size)) (max 1 (cdr size)))))
+        (make-resize-message
+          (max 2 (car size))
+          (max 1 (cdr size))))
       (terminal-write!
         terminal
         (render-editor-frame
@@ -173,7 +174,7 @@
           (let ([effects
                   (editor-update!
                     editor
-                    (make-editor-message 'key (car events)))])
+                    (make-key-message (car events)))])
             (and (continue-after-effects? effects)
                  (loop (cdr events)))))))
 

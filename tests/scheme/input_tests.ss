@@ -1,6 +1,7 @@
 #!r6rs
 (import (rnrs)
-        (soda editor input))
+        (soda editor event)
+        (soda tui input))
 
 (define (ascii value)
   (string->utf8 value))
@@ -62,3 +63,21 @@
 (unless (and (= (key-event-codepoint (car legacy-ctrl-q)) 113)
              (key-event-modifier? (car legacy-ctrl-q) 'ctrl))
   (error 'input-tests "legacy ctrl-q differs" legacy-ctrl-q))
+
+(unless (null? (input-decoder-feed! decoder (bytes 27)))
+  (error 'input-tests "pending escape produced an event"))
+(unless (input-decoder-pending? decoder)
+  (error 'input-tests "pending escape was not observable"))
+(define flushed-escape (input-decoder-flush! decoder))
+(unless (and (= (length flushed-escape) 1)
+             (eq? (key-event-key (car flushed-escape)) 'escape)
+             (not (input-decoder-pending? decoder)))
+  (error 'input-tests "standalone escape did not flush" flushed-escape))
+
+(define invalid-utf8
+  (input-decoder-feed! decoder (bytes #xff)))
+(unless (and (= (length invalid-utf8) 1)
+             (bytevector=?
+               (key-event-text (car invalid-utf8))
+               (string->utf8 (string (integer->char #xfffd)))))
+  (error 'input-tests "invalid UTF-8 was not replaced" invalid-utf8))

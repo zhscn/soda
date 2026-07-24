@@ -4,8 +4,9 @@
         (soda editor buffer)
         (soda editor command)
         (soda editor core)
-        (soda editor input)
-        (soda editor keymap))
+        (soda editor event)
+        (soda editor keymap)
+        (soda tui input))
 
 (define (decode decoder bytes)
   (input-decoder-feed! decoder bytes))
@@ -28,7 +29,7 @@
             effects
             (editor-update!
               editor
-              (make-editor-message 'key (car events))))))))
+              (make-key-message (car events))))))))
 
 (define (buffer-bytes buffer)
   (let ([snapshot (document-snapshot (buffer-document buffer))])
@@ -122,12 +123,44 @@
 (view-set-first-line! (editor-active-view editor) 4)
 (unless (= (view-first-line (editor-active-view editor)) 4)
   (error 'editor-tests "view did not retain viewport state"))
-(editor-update! editor (make-editor-message 'resize (cons 10 80)))
+(editor-update! editor (make-resize-message 10 80))
 (unless (and (= (view-viewport-rows (editor-active-view editor)) 9)
              (= (view-viewport-columns (editor-active-view editor)) 80)
              (= (view-first-line (editor-active-view editor)) 0))
   (error 'editor-tests "resize message did not update the viewport"))
 
+(define second-document (make-document "second" 72))
+(define second-buffer
+  (make-buffer 18 second-document "*second*" 'fundamental-mode))
+(editor-add-buffer! editor second-buffer)
+(define second-view (editor-open-view! editor (buffer-id second-buffer)))
+(editor-set-active-view! editor (view-id second-view))
+(unless (and (= (length (editor-buffers editor)) 2)
+             (= (length (editor-views editor)) 2)
+             (eq? (view-buffer (editor-active-view editor)) second-buffer))
+  (error 'editor-tests "editor did not switch to a registered view"))
+(send! editor decoder (string->utf8 "!"))
+(unless (bytevector=? (buffer-bytes second-buffer) (string->utf8 "!second"))
+  (error 'editor-tests "active view did not select its buffer"))
+(editor-set-active-view! editor 1)
+
+(define overlay (make-keymap))
+(keymap-bind!
+  overlay
+  (list (make-key-stroke 'character 120 4))
+  'test.count)
+(keymap-catalog-register!
+  (editor-keymap-catalog editor)
+  'test.overlay
+  overlay)
+(view-set-keymap-layers! (editor-active-view editor) '(test.overlay))
+(send! editor decoder (bytes 24))
+(unless (= invocation-count 21)
+  (error 'editor-tests "view keymap layer did not override the default map"))
+(view-set-keymap-layers! (editor-active-view editor) '())
+
 (editor-close! editor)
-(unless (and (editor-closed? editor) (buffer-closed? buffer))
+(unless (and (editor-closed? editor)
+             (buffer-closed? buffer)
+             (buffer-closed? second-buffer))
   (error 'editor-tests "closing the editor did not release its buffer"))
