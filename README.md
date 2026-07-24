@@ -34,8 +34,11 @@ change sets directly to the analyzer without serializing text or syntax trees.
 Chez major modes compose replaceable syntax and indentation providers. Common
 delimiter editing remains independent of any one parser, while the native C++
 analyzer and Tree-sitter sessions can provide progressively richer language
-capabilities. The provider contract and Smart Enter transaction model are
-defined in [design/10-language-modes.md](design/10-language-modes.md).
+capabilities. The mode, profile, and provider contracts are defined in
+[design/09-language-modes.md](design/09-language-modes.md).
+
+The complete architecture and subsystem specifications are indexed in
+[design/README.md](design/README.md).
 
 ## Runtime boundary
 
