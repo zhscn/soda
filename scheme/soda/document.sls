@@ -11,6 +11,7 @@
           text-byte-at
           text-line-start
           text-line-content-end
+          text-position
           text-offset
           text-utf16-offset
           text-offset-at-utf16
@@ -29,6 +30,8 @@
           document-undo-to!
           document-undo-position
           document-undo-node-count
+          document-undo-parent
+          document-undo-children
           document-create-anchor!
           document-remove-anchor!
           document-anchor-offset
@@ -62,7 +65,8 @@
           change-affected-new-range
           anchor-before-insertion
           anchor-after-insertion)
-  (import (chezscheme))
+  (import (chezscheme)
+          (soda document handles))
 
   (define shared-library
     (let ([path (or (getenv "SODA_DOCUMENT_LIBRARY") "libsoda_document.so")])
@@ -70,6 +74,7 @@
       path))
 
   (define text-npos #xffffffff)
+  (define undo-node-none #xffffffff)
   (define anchor-before-insertion 0)
   (define anchor-after-insertion 1)
 
@@ -106,6 +111,10 @@
     (foreign-procedure __atomic "soda_text_line_content_end"
                        (void* unsigned-32)
                        unsigned-32))
+  (define %text-position
+    (foreign-procedure __atomic "soda_text_position"
+                       (void* unsigned-32 void* void*)
+                       int))
   (define %text-offset
     (foreign-procedure __atomic "soda_text_offset"
                        (void* unsigned-32 unsigned-32)
@@ -153,6 +162,18 @@
     (foreign-procedure __atomic "soda_document_undo_position" (void*) unsigned-32))
   (define %document-undo-node-count
     (foreign-procedure __atomic "soda_document_undo_node_count" (void*) unsigned-32))
+  (define %document-undo-parent
+    (foreign-procedure __atomic "soda_document_undo_parent"
+                       (void* unsigned-32)
+                       unsigned-32))
+  (define %document-undo-child-count
+    (foreign-procedure __atomic "soda_document_undo_child_count"
+                       (void* unsigned-32)
+                       unsigned-32))
+  (define %document-undo-child
+    (foreign-procedure __atomic "soda_document_undo_child"
+                       (void* unsigned-32 unsigned-32)
+                       unsigned-32))
   (define %document-create-anchor
     (foreign-procedure __atomic "soda_document_create_anchor"
                        (void* unsigned-32 int)
@@ -251,17 +272,6 @@
   (define %change-affected-new-end
     (foreign-procedure __atomic "soda_change_affected_new_end" (void*) unsigned-32))
 
-  (define-record-type (text %make-text text?)
-    (fields (mutable pointer)))
-  (define-record-type (document %make-document document?)
-    (fields (mutable pointer)))
-  (define-record-type (snapshot %make-snapshot snapshot?)
-    (fields (mutable pointer)))
-  (define-record-type (transaction %make-transaction transaction?)
-    (fields (mutable pointer)))
-  (define-record-type (change %make-change change?)
-    (fields (mutable pointer)))
-
   (define (native-error who)
     (error who (%last-error)))
 
@@ -348,6 +358,22 @@
     (checked-text-offset
       'text-line-content-end
       (lambda () (%text-line-content-end (text-pointer value) line))))
+
+  (define (text-position value offset)
+    (require-open 'text-position text? text-pointer value)
+    (let ([line (foreign-alloc 4)]
+          [column (foreign-alloc 4)])
+      (dynamic-wind
+        (lambda () (void))
+        (lambda ()
+          (check-status
+            'text-position
+            (%text-position (text-pointer value) offset line column))
+          (cons (foreign-ref 'unsigned-32 line 0)
+                (foreign-ref 'unsigned-32 column 0)))
+        (lambda ()
+          (foreign-free line)
+          (foreign-free column)))))
 
   (define (text-offset value line byte-column)
     (require-open 'text-offset text? text-pointer value)
@@ -455,6 +481,31 @@
   (define (document-undo-node-count value)
     (require-open 'document-undo-node-count document? document-pointer value)
     (%document-undo-node-count (document-pointer value)))
+
+  (define (document-undo-parent value node)
+    (require-open 'document-undo-parent document? document-pointer value)
+    (let ([parent (%document-undo-parent (document-pointer value) node)])
+      (if (= parent undo-node-none)
+          (let ([message (%last-error)])
+            (if (string=? message "") #f (error 'document-undo-parent message)))
+          parent)))
+
+  (define (document-undo-children value node)
+    (require-open 'document-undo-children document? document-pointer value)
+    (let* ([count (%document-undo-child-count (document-pointer value) node)]
+           [message (%last-error)])
+      (unless (string=? message "")
+        (error 'document-undo-children message))
+      (do ([index 0 (+ index 1)]
+           [children '()
+                     (let ([child (%document-undo-child
+                                    (document-pointer value)
+                                    node
+                                    index)])
+                       (if (= child undo-node-none)
+                           (native-error 'document-undo-children)
+                           (cons child children)))])
+          ((= index count) (reverse children)))))
 
   (define (document-create-anchor! value offset affinity)
     (require-open 'document-create-anchor! document? document-pointer value)
