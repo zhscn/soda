@@ -37,13 +37,15 @@ Commands receive an explicit context, mutate buffers through buffer
 transactions, update view state, and return effect values for registered outer
 runtime handlers to execute.
 
-Keymaps bind key sequences to command symbols. Replacing a command procedure in
-the registry immediately affects existing bindings, which provides the
-indirection needed for interactive Scheme development. Terminal input and
-resize events enter the same update function; terminal frame rendering only
-reads the resulting editor state. The renderer reads visible document lines and
-uses terminal cells for tab expansion, wide-character clipping, and cursor
-placement.
+Keymaps bind key sequences to command symbols and support explicit tombstones
+that shadow lower-priority bindings. Each View owns a stack of input states
+whose keymap layers and text policy describe transient editing behavior.
+Replacing a command procedure in the registry immediately affects existing
+bindings, which provides the indirection needed for interactive Scheme
+development. Key, text, paste, and resize events enter the same update
+function; terminal frame rendering only reads the resulting editor state. The
+renderer reads visible document lines and uses terminal cells for tab
+expansion, wide-character clipping, and cursor placement.
 
 ## Language modes
 
@@ -93,6 +95,7 @@ Printable input inserts text. Backspace deletes the previous UTF-8 code point,
 the arrow keys move the caret, Enter inserts a newline, and `C-q` exits. The
 bootstrap edits an in-memory buffer; quitting leaves the file on disk unchanged.
 
-The TUI enables Kitty keyboard disambiguation while it owns the alternate
-screen and restores the terminal's previous keyboard mode on exit. Its
-incremental decoder accepts Kitty `CSI u` events and legacy terminal sequences.
+The TUI enables Kitty keyboard disambiguation and bracketed paste while it owns
+the alternate screen, then restores both terminal modes on exit. Its
+incremental decoder accepts Kitty `CSI u` events, legacy terminal sequences,
+UTF-8 characters, and paste payloads split across reads.

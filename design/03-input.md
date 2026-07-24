@@ -7,7 +7,7 @@
 ```text
 terminal bytes
   -> incremental decoder
-  -> KeyEvent
+  -> InputEvent
   -> focused View input state
   -> layered keymap
   -> command invocation
@@ -20,8 +20,9 @@ decoder 处理协议，不决定编辑语义；keymap 解析命令，不直接�
 ## 终端协议
 
 TUI 进入 raw mode 和 alternate screen 后启用 Kitty keyboard protocol 的
-disambiguate escape codes 标志，并在退出前恢复先前模式。decoder 同时接受 Kitty
-`CSI u`、传统 CSI/SS3 序列、控制字符和 UTF-8 文本。
+disambiguate escape codes 标志和 bracketed paste，并在退出前恢复先前模式。
+decoder 同时接受 Kitty `CSI u`、传统 CSI/SS3 序列、控制字符、UTF-8 文本和
+bracketed paste。
 
 decoder 是增量状态机：一个 read 可能只包含 UTF-8 code point 或 escape sequence
 的一部分，也可能包含多个事件。无法识别的序列以受控的 unknown event 呈现，
@@ -31,7 +32,7 @@ decoder 是增量状态机：一个 read 可能只包含 UTF-8 code point 或 es
 
 ```text
 KeyEvent {
-  key,                 // text、character 或具名功能键
+  key,                 // character 或具名功能键
   codepoint,
   shifted_codepoint,
   base_layout_codepoint,
@@ -42,7 +43,20 @@ KeyEvent {
 ```
 
 Kitty 修饰位和事件类型在 decoder 边界归一化。legacy Alt 前缀、控制字符与
-Backspace/Enter/Tab 也映射到同一结构。
+Backspace/Enter/Tab 也映射到同一结构。普通 UTF-8 字符产生 `character` key，
+同时携带 Unicode code point 和可插入的 UTF-8 bytes。
+
+独立文本输入使用另一种事件：
+
+```text
+TextInputEvent {
+  kind,                // text | paste
+  text                 // UTF-8 bytes
+}
+```
+
+bracketed paste 可以跨多个 read 增量收集，结束后产生一个 `paste` event。粘贴内容
+不解释为按键序列，其中的控制字节也不会触发 command。
 
 传统终端中的单独 Escape 与后续序列在 byte stream 上有歧义。decoder 暂存不完整
 序列，command loop 用 libuv 单次 timer 安排 flush；timer 到期时，单字节 Escape
@@ -51,21 +65,25 @@ Backspace/Enter/Tab 也映射到同一结构。
 
 ## Keymap
 
-keymap 是一等、具名 trie。节点值可以是 command、子 keymap 或未绑定。完整按键序列
-逐层查询，最高优先级中第一个认识该完整序列的层决定结果；稀疏高优先级 keymap
-不会遮蔽低层的其他续键。
+keymap 是一等、具名 trie。节点可以包含 command、显式 undefined tombstone 或
+续键子树。完整按键序列逐层查询，最高优先级中第一个认识该完整序列的层决定结果；
+稀疏高优先级 keymap 不会遮蔽低层的其他续键。
 
 基础 command loop 实现的层次从高到低：
 
 ```text
+Editor override
+InputState keymap layers, top state first
 View keymap layers
 Major mode and parents
 Editor default
 ```
 
-解析结果是 `none | prefix | command`。同一个纯查询服务实际 dispatch、按键帮助和
-配置内省。View 层可承载 transient、durable、window 和 buffer policy；这些层以
-具名 keymap 注册到 Editor 的 keymap catalog。
+解析结果是 `none | prefix | command | undefined`。显式 undefined 在当前层终止
+查找并屏蔽低层绑定；移除本地 binding 后，低层 binding 会重新可见。同一个纯查询
+服务实际 dispatch、按键帮助和配置内省。keymap 可以枚举全部 binding 或指定前缀
+下的 binding；Editor catalog 可以枚举已注册的 keymap 名称。View 层承载持久的
+window 和 buffer policy，InputState 层承载临时输入策略。
 
 ## Input state
 
@@ -73,26 +91,25 @@ input state 栈属于 View。栈底是 durable state，栈顶可以有 transient
 
 ```text
 InputState {
-  keymaps,
-  text_input: accept | ignore,
-  cursor_shape,
-  indicator,
-  handler,
-  on_enter,
-  on_exit
+  name,
+  keymap_layers,
+  text_policy: accept | ignore,
+  text_command
 }
 ```
 
 state 回答“这个 view 以什么姿态解释输入”；major mode 回答“buffer 的内容是什么”。
 因此同一 buffer 的两个 view 可以处于不同输入状态，但共享 language mode。
 
-transient state 表达 prefix、单键捕获、operator pending、incremental search 和
-picker 会话。`keyboard.quit` 清除 pending sequence、prefix 和 transient state，
-并保留 durable state。override 层确保取消命令始终可达。
+每个 View 始终有一个栈底 state。push 和 pop 操作管理 transient state；切换 View
+的 buffer 会恢复栈底 state。`keyboard.quit` 清除 pending sequence 和 transient
+state，并保留栈底 state。该命令位于 Editor override 层，因此普通 state keymap
+和 tombstone 都不能屏蔽它。
 
-带文本的 event 先尝试 keymap。事件未被消费且当前 state 接受文本时，`text`
-进入插入命令。TUI 的按键与文本位于同一事件中；支持 IME 的前端可以把组合文本
-作为独立 text-input event 接入同一规则。
+`KeyEvent` 先尝试 layered keymap。事件未被消费、携带文本且当前 state 接受文本时，
+文本交给 state 的 `text_command`。`TextInputEvent` 清除 pending sequence，并按
+当前 state 的 text policy 原子地交给同一 text command，不经过 keymap。支持 IME
+的前端可以用 `text` kind 提交组合文本。
 
 ## Selection、motion 与 verb
 
@@ -145,12 +162,12 @@ View 持有 selection、viewport 和输入状态；Window 把 View 放入 layout
 不会向 Document 写入控制序列或虚拟文本。renderer 只读取 viewport 覆盖的行，
 按 terminal cell 展开 tab、裁剪宽字符并计算光标列，不 flatten 整个 Document。
 
-终端生命周期使用同一个清理作用域恢复 Kitty keyboard mode、alternate screen、
-cursor visibility 和 termios。
+终端生命周期使用同一个清理作用域恢复 Kitty keyboard mode、bracketed paste、
+alternate screen、cursor visibility 和 termios。
 
 ## 设计依据
 
 分层 trie 保留 Emacs keymap 的组合能力，同时用单一解析规则避免多套翻译 map。
 per-view state 吸收 modal 编辑中的临时状态，而不会污染 buffer mode。Kitty
-协议在终端边界提供无歧义按键；其结果仍归一化为前端无关的 `KeyEvent`，command
+协议在终端边界提供无歧义按键；其结果归一化为前端无关的 `InputEvent`，command
 系统不依赖具体终端编码。
