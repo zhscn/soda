@@ -7,6 +7,7 @@
         (soda editor effect)
         (soda editor event)
         (soda editor keymap)
+        (soda editor language)
         (soda tui input))
 
 (define (decode decoder bytes)
@@ -177,6 +178,45 @@
 (unless (= invocation-count 21)
   (error 'editor-tests "view keymap layer did not override the default map"))
 (view-set-keymap-layers! (editor-active-view editor) '())
+
+(define mode-map (make-keymap))
+(keymap-bind!
+  mode-map
+  (list (make-key-stroke 'character 121 4))
+  'test.count)
+(keymap-catalog-register!
+  (editor-keymap-catalog editor)
+  'test.mode-map
+  mode-map)
+(define generation-before-registration
+  (buffer-mode-generation buffer))
+(editor-register-major-mode!
+  editor
+  (make-major-mode
+    'test-editor-mode
+    'fundamental-mode
+    #f
+    'editing
+    'test.mode-map
+    '((tab-width . 4))))
+(unless (> (buffer-mode-generation buffer)
+           generation-before-registration)
+  (error 'editor-tests "mode registration did not refresh buffers"))
+(buffer-set-major-mode! buffer 'test-editor-mode)
+(send! editor decoder (bytes 25))
+(unless (= invocation-count 31)
+  (error 'editor-tests "major mode keymap was not active"))
+(editor-register-major-mode!
+  editor
+  (make-major-mode
+    'test-editor-mode
+    'fundamental-mode
+    #f
+    'editing
+    'test.mode-map
+    '((tab-width . 6))))
+(unless (= (buffer-setting-ref buffer 'tab-width) 6)
+  (error 'editor-tests "re-registered mode was not visible to the buffer"))
 
 (editor-close! editor)
 (unless (and (editor-closed? editor)

@@ -16,6 +16,9 @@
           editor-set-view-buffer!
           editor-command-registry
           editor-keymap-catalog
+          editor-language-catalog
+          editor-register-language-profile!
+          editor-register-major-mode!
           editor-keymap
           editor-pending-keys
           editor-status-message

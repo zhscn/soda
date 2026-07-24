@@ -235,3 +235,55 @@
 
 (change-close! failing-change)
 (buffer-close! failing-buffer)
+
+(define external-document (make-document "a" 43))
+(define external-buffer
+  (make-buffer
+    9
+    external-document
+    "external.txt"
+    'fundamental-mode))
+(define external-transaction
+  (document-begin-transaction external-document))
+(transaction-insert! external-transaction 1 "b")
+(define external-change
+  (transaction-commit! external-transaction))
+(transaction-close! external-transaction)
+
+(define unadopted-change-rejected? #f)
+(guard (condition
+         [else (set! unadopted-change-rejected? #t)])
+  (call-with-buffer-transaction
+    external-buffer
+    (lambda (transaction) 'unexpected)))
+(unless unadopted-change-rejected?
+  (error 'buffer-tests "buffer accepted an unadopted document change"))
+
+(buffer-adopt-change! external-buffer external-change)
+(unless (= (buffer-revision external-buffer)
+           (document-revision external-document)
+           1)
+  (error 'buffer-tests "buffer did not adopt the document revision"))
+
+(define duplicate-adoption-rejected? #f)
+(guard (condition
+         [else (set! duplicate-adoption-rejected? #t)])
+  (buffer-adopt-change! external-buffer external-change))
+(unless duplicate-adoption-rejected?
+  (error 'buffer-tests "buffer adopted the same change twice"))
+
+(define following-change #f)
+(call-with-values
+  (lambda ()
+    (call-with-buffer-transaction
+      external-buffer
+      (lambda (transaction)
+        (transaction-insert! transaction 2 "c"))))
+  (lambda (result change)
+    (set! following-change change)))
+(unless (= (buffer-revision external-buffer) 2)
+  (error 'buffer-tests "buffer transaction did not advance its revision"))
+
+(change-close! following-change)
+(change-close! external-change)
+(buffer-close! external-buffer)

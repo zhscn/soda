@@ -17,6 +17,9 @@
           editor-set-view-buffer!
           editor-command-registry
           editor-keymap-catalog
+          editor-language-catalog
+          editor-register-language-profile!
+          editor-register-major-mode!
           editor-keymap
           editor-pending-keys
           editor-set-pending-keys!
@@ -41,7 +44,8 @@
           (soda document)
           (soda editor buffer)
           (soda editor command)
-          (soda editor keymap))
+          (soda editor keymap)
+          (soda editor language))
 
   (define-record-type (view %make-view view?)
     (fields
@@ -73,6 +77,7 @@
       (mutable next-view-id editor-next-view-id editor-next-view-id-set!)
       (immutable commands editor-command-registry)
       (immutable keymaps editor-keymap-catalog)
+      (immutable languages editor-language-catalog)
       (mutable status-message
                editor-status-message
                editor-status-message-set!)
@@ -120,6 +125,12 @@
       (assertion-violation
         'editor-add-buffer!
         "buffer is closed"
+        buffer))
+    (unless (eq? (buffer-language-catalog buffer)
+                 (editor-language-catalog value))
+      (assertion-violation
+        'editor-add-buffer!
+        "buffer belongs to another language catalog"
         buffer))
     (let ([id (buffer-id buffer)])
       (when (hashtable-contains? (editor-buffer-table value) id)
@@ -218,6 +229,31 @@
   (define (editor-keymap value)
     (require-open-editor 'editor-keymap value)
     (keymap-catalog-ref (editor-keymap-catalog value) 'editor.default))
+
+  (define (refresh-buffers! value)
+    (for-each
+      buffer-refresh-language!
+      (table-values
+        (editor-buffer-table value)
+        (editor-buffer-ids value))))
+
+  (define (editor-register-language-profile! value profile)
+    (require-open-editor 'editor-register-language-profile! value)
+    (let ([registered
+            (register-language-profile!
+              (editor-language-catalog value)
+              profile)])
+      (refresh-buffers! value)
+      registered))
+
+  (define (editor-register-major-mode! value mode)
+    (require-open-editor 'editor-register-major-mode! value)
+    (let ([registered
+            (register-major-mode!
+              (editor-language-catalog value)
+              mode)])
+      (refresh-buffers! value)
+      registered))
 
   (define (editor-pending-keys value)
     (view-pending-keys (editor-active-view value)))
@@ -361,6 +397,7 @@
                2
                (make-command-registry)
                keymaps
+               (buffer-language-catalog buffer)
                #f
                #f)])
       (hashtable-set! buffers (buffer-id buffer) buffer)

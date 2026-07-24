@@ -44,12 +44,12 @@
   (define (effective-keymaps editor)
     (let* ([view (editor-active-view editor)]
            [buffer (view-buffer view)]
-           [mode (major-mode-ref (buffer-major-mode-name buffer))]
-           [mode-layer (major-mode-keymap mode)]
            [layers
              (append
                (view-keymap-layers view)
-               (if mode-layer (list mode-layer) '())
+               (major-mode-keymaps
+                 (editor-language-catalog editor)
+                 (buffer-major-mode-name buffer))
                (list 'editor.default))])
       (map (lambda (layer) (catalog-keymap editor layer)) layers)))
 

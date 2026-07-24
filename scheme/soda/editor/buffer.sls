@@ -6,8 +6,11 @@
           buffer-resource
           buffer-closed?
           buffer-close!
+          buffer-language-catalog
+          buffer-revision
           buffer-major-mode-name
           buffer-set-major-mode!
+          buffer-refresh-language!
           buffer-mode-generation
           buffer-language-profile
           buffer-language-session
@@ -18,6 +21,7 @@
           buffer-clear-local-setting!
           call-with-buffer-syntax-view
           call-with-buffer-transaction
+          buffer-adopt-change!
           buffer-undo!
           buffer-redo!
           buffer-undo-to!)
@@ -39,7 +43,9 @@
       (immutable document buffer-document)
       (immutable resource buffer-resource)
       (immutable local-settings buffer-local-settings)
-      (mutable mode %buffer-major-mode %buffer-major-mode-set!)
+      (immutable language-catalog buffer-language-catalog)
+      (mutable revision buffer-revision buffer-revision-set!)
+      (mutable mode-name buffer-mode-name buffer-mode-name-set!)
       (mutable mode-generation buffer-mode-generation buffer-mode-generation-set!)
       (mutable language-runtime
                buffer-language-runtime
@@ -70,13 +76,22 @@
         (snapshot-revision snapshot)
         #f)))
 
-  (define (profile-for-mode mode)
-    (let ([language (resolve-major-mode-language (major-mode-name mode))])
-      (and language (language-profile-ref language))))
+  (define (profile-for-mode catalog mode-name)
+    (let ([language
+            (resolve-major-mode-language catalog mode-name)])
+      (and language (language-profile-ref catalog language))))
 
   (define (install-major-mode! value mode-name)
-    (let* ([mode (major-mode-ref mode-name)]
-           [profile (profile-for-mode mode)]
+    (unless (= (buffer-revision value)
+               (document-revision (buffer-document value)))
+      (assertion-violation
+        'buffer-set-major-mode!
+        "document has a change that the buffer has not adopted"
+        (buffer-revision value)
+        (document-revision (buffer-document value))))
+    (let* ([catalog (buffer-language-catalog value)]
+           [mode (major-mode-ref catalog mode-name)]
+           [profile (profile-for-mode catalog (major-mode-name mode))]
            [snapshot (document-snapshot (buffer-document value))]
            [new-runtime
              (dynamic-wind
@@ -84,31 +99,53 @@
                (lambda () (and profile (open-runtime profile snapshot)))
                (lambda () (snapshot-close! snapshot)))])
       (close-runtime! (buffer-language-runtime value))
-      (%buffer-major-mode-set! value mode)
+      (buffer-mode-name-set! value (major-mode-name mode))
       (buffer-language-runtime-set! value new-runtime)
       (buffer-mode-generation-set!
         value
         (+ (buffer-mode-generation value) 1))))
 
-  (define (make-buffer id document resource mode-name)
-    (unless (and (integer? id) (exact? id) (not (negative? id)))
-      (assertion-violation 'make-buffer "id must be a non-negative exact integer" id))
-    (unless (document? document)
-      (assertion-violation 'make-buffer "expected a document" document))
-    ;; A successfully constructed buffer owns the document handle and closes it
-    ;; with the language runtime.
-    (let ([value
-            (%make-buffer
-              id
-              document
-              resource
-              (make-eq-hashtable)
-              (major-mode-ref 'fundamental-mode)
-              0
-              #f
-              #f)])
-      (install-major-mode! value mode-name)
-      value))
+  (define make-buffer
+    (case-lambda
+      [(id document resource mode-name)
+       (make-buffer
+         id
+         document
+         resource
+         mode-name
+         default-language-catalog)]
+      [(id document resource mode-name catalog)
+       (unless (and (integer? id) (exact? id) (not (negative? id)))
+         (assertion-violation
+           'make-buffer
+           "id must be a non-negative exact integer"
+           id))
+       (unless (document? document)
+         (assertion-violation
+           'make-buffer
+           "expected a document"
+           document))
+       (unless (language-catalog? catalog)
+         (assertion-violation
+           'make-buffer
+           "expected a language catalog"
+           catalog))
+       ;; A successfully constructed buffer owns the document handle and closes
+       ;; it with the language runtime.
+       (let ([value
+               (%make-buffer
+                 id
+                 document
+                 resource
+                 (make-eq-hashtable)
+                 catalog
+                 (document-revision document)
+                 'fundamental-mode
+                 0
+                 #f
+                 #f)])
+         (install-major-mode! value mode-name)
+         value)]))
 
   (define (buffer-close! value)
     (when (and (buffer? value) (not (buffer-closed? value)))
@@ -119,11 +156,15 @@
 
   (define (buffer-major-mode-name value)
     (require-open-buffer 'buffer-major-mode-name value)
-    (major-mode-name (%buffer-major-mode value)))
+    (buffer-mode-name value))
 
   (define (buffer-set-major-mode! value mode-name)
     (require-open-buffer 'buffer-set-major-mode! value)
     (install-major-mode! value mode-name))
+
+  (define (buffer-refresh-language! value)
+    (require-open-buffer 'buffer-refresh-language! value)
+    (install-major-mode! value (buffer-mode-name value)))
 
   (define (buffer-language-profile value)
     (require-open-buffer 'buffer-language-profile value)
@@ -157,7 +198,8 @@
                  (hashtable-ref (buffer-local-settings value) key missing)])
            (if (eq? local missing)
                (major-mode-setting-ref
-                 (major-mode-name (%buffer-major-mode value))
+                 (buffer-language-catalog value)
+                 (buffer-mode-name value)
                  key
                  default)
                local)))]))
@@ -317,6 +359,13 @@
         'call-with-buffer-transaction
         "expected a procedure"
         procedure))
+    (unless (= (buffer-revision value)
+               (document-revision (buffer-document value)))
+      (assertion-violation
+        'call-with-buffer-transaction
+        "document has a change that the buffer has not adopted"
+        (buffer-revision value)
+        (document-revision (buffer-document value))))
     (let ([transaction
             (document-begin-transaction (buffer-document value))]
           [committed? #f])
@@ -326,6 +375,9 @@
           (let* ([result (procedure transaction)]
                  [change (transaction-commit! transaction)])
             (set! committed? #t)
+            (buffer-revision-set!
+              value
+              (change-new-revision change))
             (when (not (= (change-old-revision change)
                           (change-new-revision change)))
               (sync-change! value change))
@@ -336,27 +388,67 @@
               (transaction-abort! transaction)))
           (transaction-close! transaction)))))
 
+  (define (buffer-adopt-change! value change)
+    (require-open-buffer 'buffer-adopt-change! value)
+    (unless (change? change)
+      (assertion-violation
+        'buffer-adopt-change!
+        "expected a document change"
+        change))
+    (let ([old-revision (change-old-revision change)]
+          [new-revision (change-new-revision change)])
+      (unless (= old-revision (buffer-revision value))
+        (assertion-violation
+          'buffer-adopt-change!
+          "change does not begin at the buffer revision"
+          old-revision
+          (buffer-revision value)))
+      (unless (= new-revision
+                 (document-revision (buffer-document value)))
+        (assertion-violation
+          'buffer-adopt-change!
+          "change does not end at the document revision"
+          new-revision
+          (document-revision (buffer-document value))))
+      (buffer-revision-set! value new-revision)
+      (when (not (= old-revision new-revision))
+        (sync-change! value change))
+      change))
+
   (define (sync-optional-change! value change)
-    (when (and change
-               (not (= (change-old-revision change)
-                       (change-new-revision change))))
-      (sync-change! value change))
+    (when change
+      (buffer-adopt-change! value change))
     change)
 
   (define (buffer-undo! value)
     (require-open-buffer 'buffer-undo! value)
+    (unless (= (buffer-revision value)
+               (document-revision (buffer-document value)))
+      (assertion-violation
+        'buffer-undo!
+        "document has a change that the buffer has not adopted"))
     (sync-optional-change!
       value
       (document-undo! (buffer-document value))))
 
   (define (buffer-redo! value)
     (require-open-buffer 'buffer-redo! value)
+    (unless (= (buffer-revision value)
+               (document-revision (buffer-document value)))
+      (assertion-violation
+        'buffer-redo!
+        "document has a change that the buffer has not adopted"))
     (sync-optional-change!
       value
       (document-redo! (buffer-document value))))
 
   (define (buffer-undo-to! value node)
     (require-open-buffer 'buffer-undo-to! value)
+    (unless (= (buffer-revision value)
+               (document-revision (buffer-document value)))
+      (assertion-violation
+        'buffer-undo-to!
+        "document has a change that the buffer has not adopted"))
     (sync-optional-change!
       value
       (document-undo-to! (buffer-document value) node))))

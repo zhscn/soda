@@ -18,6 +18,9 @@
           language-profile-text-objects
           language-profile-electric
           language-profile-enter
+          make-language-catalog
+          language-catalog?
+          default-language-catalog
           register-language-profile!
           find-language-profile
           language-profile-ref
@@ -33,6 +36,7 @@
           find-major-mode
           major-mode-ref
           resolve-major-mode-language
+          major-mode-keymaps
           major-mode-setting-ref)
   (import (rnrs))
 
@@ -166,6 +170,27 @@
       (immutable keymap major-mode-keymap)
       (immutable default-settings major-mode-default-settings)))
 
+  (define-record-type
+    (language-catalog %make-language-catalog language-catalog?)
+    (fields profiles modes))
+
+  (define (make-language-catalog)
+    (let ([catalog
+            (%make-language-catalog
+              (make-eq-hashtable)
+              (make-eq-hashtable))])
+      (hashtable-set!
+        (language-catalog-modes catalog)
+        'fundamental-mode
+        (%make-major-mode
+          'fundamental-mode
+          #f
+          #f
+          'editing
+          #f
+          '()))
+      catalog))
+
   (define make-major-mode
     (case-lambda
       [(name parent language)
@@ -188,6 +213,11 @@
            'make-major-mode
            "interaction class must be editing or interface"
            interaction-class))
+       (unless (or (not keymap) (symbol? keymap))
+         (assertion-violation
+           'make-major-mode
+           "keymap must be a symbol or #f"
+           keymap))
        (unless (and (list? default-settings)
                     (for-all (lambda (entry)
                                (and (pair? entry) (symbol? (car entry))))
@@ -204,81 +234,176 @@
          keymap
          default-settings)]))
 
-  (define language-profiles (make-eq-hashtable))
-  (define major-modes (make-eq-hashtable))
+  (define default-language-catalog (make-language-catalog))
 
-  (define (register-language-profile! profile)
-    (unless (language-profile? profile)
-      (assertion-violation
-        'register-language-profile!
-        "expected a language profile"
-        profile))
-    (hashtable-set! language-profiles (language-profile-name profile) profile)
-    profile)
+  (define register-language-profile!
+    (case-lambda
+      [(profile)
+       (register-language-profile!
+         default-language-catalog
+         profile)]
+      [(catalog profile)
+       (unless (language-catalog? catalog)
+         (assertion-violation
+           'register-language-profile!
+           "expected a language catalog"
+           catalog))
+       (unless (language-profile? profile)
+         (assertion-violation
+           'register-language-profile!
+           "expected a language profile"
+           profile))
+       (hashtable-set!
+         (language-catalog-profiles catalog)
+         (language-profile-name profile)
+         profile)
+       profile]))
 
-  (define (find-language-profile name)
-    (unless (symbol? name)
-      (assertion-violation 'find-language-profile "name must be a symbol" name))
-    (hashtable-ref language-profiles name #f))
+  (define find-language-profile
+    (case-lambda
+      [(name)
+       (find-language-profile default-language-catalog name)]
+      [(catalog name)
+       (unless (language-catalog? catalog)
+         (assertion-violation
+           'find-language-profile
+           "expected a language catalog"
+           catalog))
+       (unless (symbol? name)
+         (assertion-violation
+           'find-language-profile
+           "name must be a symbol"
+           name))
+       (hashtable-ref (language-catalog-profiles catalog) name #f)]))
 
-  (define (language-profile-ref name)
-    (or (find-language-profile name)
-        (assertion-violation
-          'language-profile-ref
-          "unknown language profile"
-          name)))
+  (define language-profile-ref
+    (case-lambda
+      [(name)
+       (language-profile-ref default-language-catalog name)]
+      [(catalog name)
+       (or (find-language-profile catalog name)
+           (assertion-violation
+             'language-profile-ref
+             "unknown language profile"
+             name))]))
 
-  (define (register-major-mode! mode)
-    (unless (major-mode? mode)
-      (assertion-violation 'register-major-mode! "expected a major mode" mode))
-    (hashtable-set! major-modes (major-mode-name mode) mode)
-    mode)
+  (define register-major-mode!
+    (case-lambda
+      [(mode)
+       (register-major-mode! default-language-catalog mode)]
+      [(catalog mode)
+       (unless (language-catalog? catalog)
+         (assertion-violation
+           'register-major-mode!
+           "expected a language catalog"
+           catalog))
+       (unless (major-mode? mode)
+         (assertion-violation
+           'register-major-mode!
+           "expected a major mode"
+           mode))
+       (hashtable-set!
+         (language-catalog-modes catalog)
+         (major-mode-name mode)
+         mode)
+       mode]))
 
-  (define (find-major-mode name)
-    (unless (symbol? name)
-      (assertion-violation 'find-major-mode "name must be a symbol" name))
-    (hashtable-ref major-modes name #f))
+  (define find-major-mode
+    (case-lambda
+      [(name) (find-major-mode default-language-catalog name)]
+      [(catalog name)
+       (unless (language-catalog? catalog)
+         (assertion-violation
+           'find-major-mode
+           "expected a language catalog"
+           catalog))
+       (unless (symbol? name)
+         (assertion-violation
+           'find-major-mode
+           "name must be a symbol"
+           name))
+       (hashtable-ref (language-catalog-modes catalog) name #f)]))
 
-  (define (major-mode-ref name)
-    (or (find-major-mode name)
-        (assertion-violation 'major-mode-ref "unknown major mode" name)))
+  (define major-mode-ref
+    (case-lambda
+      [(name) (major-mode-ref default-language-catalog name)]
+      [(catalog name)
+       (or (find-major-mode catalog name)
+           (assertion-violation
+             'major-mode-ref
+             "unknown major mode"
+             name))]))
 
-  (define (mode-chain-fold who name visit seed)
+  (define (mode-chain-fold who catalog name visit seed)
     (let loop ([name name] [seen '()] [state seed])
       (when (memq name seen)
         (assertion-violation who "major mode parent cycle" name))
-      (let* ([mode (major-mode-ref name)]
+      (let* ([mode (major-mode-ref catalog name)]
              [next-state (visit mode state)]
              [parent (major-mode-parent mode)])
         (if parent
             (loop parent (cons name seen) next-state)
             next-state))))
 
-  (define (resolve-major-mode-language name)
-    (call/cc
-      (lambda (return)
-        (mode-chain-fold
-          'resolve-major-mode-language
-          name
-          (lambda (mode state)
-            (let ([language (major-mode-language mode)])
-              (if (eq? language 'inherit)
-                  state
-                  (return language))))
-          #f))))
+  (define resolve-major-mode-language
+    (case-lambda
+      [(name)
+       (resolve-major-mode-language default-language-catalog name)]
+      [(catalog name)
+       (call/cc
+         (lambda (return)
+           (mode-chain-fold
+             'resolve-major-mode-language
+             catalog
+             name
+             (lambda (mode state)
+               (let ([language (major-mode-language mode)])
+                 (if (eq? language 'inherit)
+                     state
+                     (return language))))
+             #f)))]))
 
-  (define (major-mode-setting-ref name key default)
-    (unless (symbol? key)
-      (assertion-violation 'major-mode-setting-ref "key must be a symbol" key))
-    (call/cc
-      (lambda (return)
-        (mode-chain-fold
-          'major-mode-setting-ref
-          name
-          (lambda (mode state)
-            (let ([entry (assq key (major-mode-default-settings mode))])
-              (if entry (return (cdr entry)) state)))
-          default))))
+  (define major-mode-keymaps
+    (case-lambda
+      [(name) (major-mode-keymaps default-language-catalog name)]
+      [(catalog name)
+       (reverse
+         (mode-chain-fold
+           'major-mode-keymaps
+           catalog
+           name
+           (lambda (mode keymaps)
+             (let ([keymap (major-mode-keymap mode)])
+               (if keymap (cons keymap keymaps) keymaps)))
+           '()))]))
+
+  (define major-mode-setting-ref
+    (case-lambda
+      [(name key default)
+       (major-mode-setting-ref
+         default-language-catalog
+         name
+         key
+         default)]
+      [(catalog name key default)
+       (unless (symbol? key)
+         (assertion-violation
+           'major-mode-setting-ref
+           "key must be a symbol"
+           key))
+       (call/cc
+         (lambda (return)
+           (mode-chain-fold
+             'major-mode-setting-ref
+             catalog
+             name
+             (lambda (mode state)
+               (let ([entry
+                       (assq key
+                         (major-mode-default-settings mode))])
+                 (if entry (return (cdr entry)) state)))
+             default)))]))
 
   (register-major-mode!
+    default-language-catalog
     (make-major-mode 'fundamental-mode #f #f 'editing #f '())))
