@@ -62,8 +62,9 @@ caret/transient feedback
 ```
 
 同一 layer 的稳定顺序由 namespace 与 annotation id 决定。合并只产生 frame run，
-不修改 Text。颜色和 terminal attribute 属于 theme/presenter；annotation 只表达
-语义 role。
+不修改 Text。frame compositor 把语义 face 栈解析为最终 style，同时把参与合并的
+layer、owner 和 annotation identity 保存在 cell sources 中。terminal presenter
+只消费最终 style；annotation 只表达语义 role。
 
 ## 虚拟文本与替换
 
@@ -78,7 +79,7 @@ ReplacementRun // 视觉替换一个真实 range，仍保留源映射
 inlay hint、completion ghost text 和 line-end diagnostic 使用 `VirtualRun`。
 隐藏标记、不可见字符替代和 fold placeholder 使用 `ReplacementRun`。hit test
 必须能从任一 cell 回到 document position；虚拟 cell 使用 before/after affinity
-决定 caret 落点。
+决定 caret 落点。字符检查、face 检查和渲染诊断读取同一 cell mapping 与 sources。
 
 ## Fold
 

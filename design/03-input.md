@@ -157,10 +157,47 @@ Prefix { count, register, extra }
 View 持有 selection、viewport 和输入状态；Window 把 View 放入 layout。frame
 从固定 revision 的 snapshot 与 editor state 组合，终端写入只是 frame 的呈现。
 
-完整重绘与 cell diff 是可替换的 presenter 策略，不改变 View、Window 或 Buffer
-模型。光标、modeline、minibuffer、popup 和工具区域都使用 terminal cells 表达，
-不会向 Document 写入控制序列或虚拟文本。renderer 只读取 viewport 覆盖的行，
-按 terminal cell 展开 tab、裁剪宽字符并计算光标列，不 flatten 整个 Document。
+结构化 frame 是 renderer 与 terminal presenter 之间的边界：
+
+```text
+Frame {
+  rows,
+  columns,
+  cells,
+  cursor
+}
+
+Cell {
+  text,
+  width,
+  continuation,
+  faces,
+  style,
+  document_position?,
+  sources
+}
+
+CellSource {
+  layer,
+  owner,
+  detail
+}
+```
+
+`faces` 保留语义 face 栈，`style` 是用于终端呈现的最终样式。`sources` 记录组成
+cell 的正文、chrome 和 decoration 来源；映射正文的 cell 同时保留 document byte
+position。tab 展开的每个空格和宽字符的 continuation cell 都保持该映射。
+
+renderer 只读取 viewport 覆盖的行，向 frame 写入 cell，并计算结构化 cursor。
+presenter 是唯一生成 ANSI 控制序列的组件。完整重绘与 cell diff 是可替换的
+presenter 策略，不改变 View、Window、Buffer 或 Frame 模型。光标、modeline、
+minibuffer、popup 和工具区域都使用 cells 表达，不会向 Document 写入控制序列
+或虚拟文本。
+
+`describe-caret` 从 snapshot 与最终 frame 生成结构化字符描述，包括 code point、
+document position、screen cell、显示宽度、faces、style 和 sources。
+`help.describe-char` 通过 `C-x =` 显示该描述。REPL、generated buffer 和调试
+overlay 可以消费同一个描述值，不需要解析 ANSI 输出。
 
 终端生命周期使用同一个清理作用域恢复 Kitty keyboard mode、bracketed paste、
 alternate screen、cursor visibility 和 termios。

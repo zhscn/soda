@@ -45,7 +45,9 @@ bindings, which provides the indirection needed for interactive Scheme
 development. Key, text, paste, and resize events enter the same update
 function; terminal frame rendering only reads the resulting editor state. The
 renderer reads visible document lines and uses terminal cells for tab
-expansion, wide-character clipping, and cursor placement.
+expansion, wide-character clipping, and cursor placement. Each cell retains
+its semantic faces, resolved style, document position, and render sources; the
+terminal presenter is the only layer that encodes the frame as ANSI.
 
 ## Language modes
 
@@ -92,8 +94,9 @@ cmk build -c Debug
 ```
 
 Printable input inserts text. Backspace deletes the previous UTF-8 code point,
-the arrow keys move the caret, Enter inserts a newline, and `C-q` exits. The
-bootstrap edits an in-memory buffer; quitting leaves the file on disk unchanged.
+the arrow keys move the caret, Enter inserts a newline, `C-x =` describes the
+character and rendered faces at point, and `C-q` exits. The bootstrap edits an
+in-memory buffer; quitting leaves the file on disk unchanged.
 
 The TUI enables Kitty keyboard disambiguation and bracketed paste while it owns
 the alternate screen, then restores both terminal modes on exit. Its
