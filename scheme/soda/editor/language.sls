@@ -5,6 +5,7 @@
           syntax-open
           syntax-sync!
           syntax-view
+          syntax-close-view!
           syntax-close!
           make-language-profile
           language-profile?
@@ -41,13 +42,16 @@
       (immutable open syntax-provider-open)
       (immutable sync syntax-provider-sync)
       (immutable view syntax-provider-view)
+      (immutable close-view syntax-provider-close-view)
       (immutable close syntax-provider-close)))
 
   (define make-syntax-provider
     (case-lambda
       [(capabilities open sync close)
-       (make-syntax-provider capabilities open sync #f close)]
+       (make-syntax-provider capabilities open sync #f #f close)]
       [(capabilities open sync view close)
+       (make-syntax-provider capabilities open sync view #f close)]
+      [(capabilities open sync view close-view close)
        (unless (and (list? capabilities) (for-all symbol? capabilities))
          (assertion-violation
            'make-syntax-provider
@@ -62,9 +66,14 @@
            'make-syntax-provider
            "view must be a procedure or #f"
            view))
+       (unless (or (not close-view) (procedure? close-view))
+         (assertion-violation
+           'make-syntax-provider
+           "close-view must be a procedure or #f"
+           close-view))
        (unless (procedure? close)
          (assertion-violation 'make-syntax-provider "close must be a procedure" close))
-       (%make-syntax-provider capabilities open sync view close)]))
+       (%make-syntax-provider capabilities open sync view close-view close)]))
 
   (define (require-syntax-provider who provider)
     (unless (syntax-provider? provider)
@@ -85,12 +94,13 @@
   (define (syntax-view provider session snapshot pending-edits)
     (require-syntax-provider 'syntax-view provider)
     (let ([view (syntax-provider-view provider)])
-      (unless view
-        (assertion-violation
-          'syntax-view
-          "syntax provider does not support speculative views"
-          provider))
-      (view session snapshot pending-edits)))
+      (and view (view session snapshot pending-edits))))
+
+  (define (syntax-close-view! provider view)
+    (require-syntax-provider 'syntax-close-view! provider)
+    (let ([close-view (syntax-provider-close-view provider)])
+      (when (and view close-view)
+        (close-view view))))
 
   (define (syntax-close! provider session)
     (require-syntax-provider 'syntax-close! provider)

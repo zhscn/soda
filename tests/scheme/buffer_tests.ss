@@ -22,6 +22,13 @@
       (record! (list 'sync
                      (change-old-revision change)
                      (change-new-revision change))))
+    (lambda (session snapshot pending-edits)
+      (record! (list 'view
+                     (snapshot-revision snapshot)
+                     (vector-length pending-edits)))
+      (vector (snapshot-revision snapshot) pending-edits))
+    (lambda (view)
+      (record! (list 'close-view (vector-ref view 0))))
     (lambda (session)
       (record! (list 'close (vector-ref session 0))))))
 
@@ -75,7 +82,22 @@
       buffer
       (lambda (transaction)
         (transaction-insert! transaction 3 "d")
-        'inserted)))
+        (call-with-buffer-syntax-view
+          buffer
+          transaction
+          (lambda (view)
+            (unless (= (vector-ref view 0) 1)
+              (error 'buffer-tests "speculative view revision differs"))
+            (let* ([pending-edits (vector-ref view 1)]
+                   [edit (vector-ref pending-edits 0)])
+              (unless (and (= (vector-length pending-edits) 1)
+                           (= (vector-ref edit 0) 3)
+                           (= (vector-ref edit 1) 3)
+                           (bytevector=?
+                             (vector-ref edit 2)
+                             (string->utf8 "d")))
+                (error 'buffer-tests "speculative pending edits differ")))
+            'inserted)))))
   (lambda (result committed-change)
     (set! command-result result)
     (set! change committed-change)))
@@ -146,6 +168,8 @@
 
 (unless (equal? (reverse events)
                 '((open 0)
+                  (view 1 1)
+                  (close-view 1)
                   (sync 0 1)
                   (sync 1 2)
                   (sync 2 3)

@@ -16,6 +16,7 @@
           buffer-setting-ref
           buffer-set-local-setting!
           buffer-clear-local-setting!
+          call-with-buffer-syntax-view
           call-with-buffer-transaction
           buffer-undo!
           buffer-redo!
@@ -242,6 +243,72 @@
                        (snapshot-revision snapshot))
                      (language-runtime-error-set! runtime #f))])))
             (lambda () (snapshot-close! snapshot)))))))
+
+  (define (transaction-pending-edits transaction)
+    (let* ([count (transaction-pending-edit-count transaction)]
+           [edits (make-vector count)])
+      (do ([index 0 (+ index 1)])
+          ((= index count) edits)
+        (let ([range (transaction-pending-edit-range transaction index)])
+          (vector-set!
+            edits
+            index
+            (vector
+              (car range)
+              (cdr range)
+              (transaction-pending-edit-text transaction index)))))))
+
+  (define (call-with-buffer-syntax-view value transaction procedure)
+    (require-open-buffer 'call-with-buffer-syntax-view value)
+    (unless (transaction? transaction)
+      (assertion-violation
+        'call-with-buffer-syntax-view
+        "expected a transaction"
+        transaction))
+    (unless (procedure? procedure)
+      (assertion-violation
+        'call-with-buffer-syntax-view
+        "expected a procedure"
+        procedure))
+    (let ([runtime (buffer-language-runtime value)])
+      (if (not runtime)
+          (procedure #f)
+          (let* ([profile (language-runtime-profile runtime)]
+                 [provider (language-profile-syntax profile)]
+                 [session (language-runtime-session runtime)])
+            (if (or (not provider) (not session))
+                (procedure #f)
+                (begin
+                  (unless (= (transaction-base-revision transaction)
+                             (language-runtime-revision runtime))
+                    (assertion-violation
+                      'call-with-buffer-syntax-view
+                      "transaction and syntax session revisions differ"
+                      (transaction-base-revision transaction)
+                      (language-runtime-revision runtime)))
+                  (let ([snapshot (transaction-snapshot transaction)]
+                        [view #f])
+                    (dynamic-wind
+                      (lambda () #f)
+                      (lambda ()
+                        (unless (= (snapshot-document-id snapshot)
+                                   (document-id (buffer-document value)))
+                          (assertion-violation
+                            'call-with-buffer-syntax-view
+                            "transaction belongs to another document"
+                            (snapshot-document-id snapshot)
+                            (document-id (buffer-document value))))
+                        (set! view
+                          (syntax-view
+                            provider
+                            session
+                            snapshot
+                            (transaction-pending-edits transaction)))
+                        (procedure view))
+                      (lambda ()
+                        (guard (condition [else #f])
+                          (syntax-close-view! provider view))
+                        (snapshot-close! snapshot))))))))))
 
   (define (call-with-buffer-transaction value procedure)
     (require-open-buffer 'call-with-buffer-transaction value)

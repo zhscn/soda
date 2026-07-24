@@ -92,6 +92,7 @@ DocumentId 绑定，缓存一个 committed revision：
 (syntax-open provider snapshot)                    -> session
 (syntax-sync! session change after-snapshot)       -> void
 (syntax-view session snapshot [pending-edits])     -> view
+(syntax-close-view! session view)                  -> void
 (syntax-close! session)                            -> void
 ```
 
@@ -229,7 +230,8 @@ transaction-pending-edit-text
 ```
 
 pending edit 使用 base-revision 坐标，与 committed `DocumentChange` 相同。provider
-不接触可变 transaction，只消费 snapshot 与 edit list。
+不接触可变 transaction，只消费 snapshot 与 edit list。Scheme provider 接收的 edit
+list 是 vector，每项为 `#(old-start old-end replacement-bytevector)`。
 
 ### Electric input
 
