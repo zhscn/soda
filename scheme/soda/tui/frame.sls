@@ -35,10 +35,12 @@
           frame-cursor-row
           frame-cursor-column
           frame-cursor-visible?
+          frame-layout
           frame-cell-ref
           frame-put-cell!
           frame-append-cell-text!
           frame-fill-rect!
+          frame-set-layout!
           frame-set-cursor!)
   (import (rnrs))
 
@@ -72,7 +74,8 @@
                      frame-cursor-column-set!)
             (mutable cursor-visible?
                      frame-cursor-visible?
-                     frame-cursor-visible?-set!)))
+                     frame-cursor-visible?-set!)
+            (mutable layout frame-layout frame-layout-set!)))
 
   (define valid-attributes
     '(bold dim italic underline blink reverse hidden strike))
@@ -228,6 +231,7 @@
       (make-vector (* rows columns) (blank-cell))
       0
       0
+      #f
       #f))
 
   (define (require-frame who value)
@@ -359,6 +363,11 @@
         (do ([column (rect-column rectangle) (+ column 1)])
             ((>= column column-end))
           (frame-cell-set! value row column new-cell)))))
+
+  (define (frame-set-layout! value layout)
+    (require-frame 'frame-set-layout! value)
+    (frame-layout-set! value layout)
+    value)
 
   (define (frame-set-cursor! value row column visible?)
     (require-frame 'frame-set-cursor! value)
