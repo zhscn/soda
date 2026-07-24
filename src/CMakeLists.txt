@@ -39,6 +39,7 @@ target_compile_definitions(soda_indentation PRIVATE SODA_INDENTATION_BUILD)
 add_library(soda_runtime SHARED
   runtime/c_api.cpp
   runtime/runtime.cpp
+  runtime/terminal_c_api.cpp
 )
 target_include_directories(soda_runtime PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_definitions(soda_runtime PRIVATE SODA_RUNTIME_BUILD)

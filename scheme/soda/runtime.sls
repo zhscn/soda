@@ -8,6 +8,14 @@
           runtime-watch-fd!
           runtime-read-file!
           runtime-cancel!
+          make-terminal
+          terminal?
+          terminal-close!
+          terminal-enter-raw!
+          terminal-leave-raw!
+          terminal-read
+          terminal-write!
+          terminal-size
           event?
           event-kind
           event-source
@@ -59,8 +67,33 @@
                        size_t))
   (define %last-error
     (foreign-procedure __atomic "soda_runtime_last_error" (void*) string))
+  (define %terminal-create
+    (foreign-procedure __atomic "soda_terminal_create" (int int) void*))
+  (define %terminal-destroy
+    (foreign-procedure __atomic "soda_terminal_destroy" (void*) void))
+  (define %terminal-enter-raw
+    (foreign-procedure __atomic "soda_terminal_enter_raw" (void*) int))
+  (define %terminal-leave-raw
+    (foreign-procedure __atomic "soda_terminal_leave_raw" (void*) int))
+  (define %terminal-read
+    (foreign-procedure __atomic "soda_terminal_read"
+                       (void* u8* size_t)
+                       integer-64))
+  (define %terminal-write
+    (foreign-procedure __atomic "soda_terminal_write"
+                       (void* u8* size_t)
+                       int))
+  (define %terminal-size
+    (foreign-procedure __atomic "soda_terminal_size"
+                       (void* void* void*)
+                       int))
+  (define %terminal-last-error
+    (foreign-procedure __atomic "soda_terminal_last_error" (void*) string))
 
   (define-record-type (runtime %make-runtime runtime?)
+    (fields (mutable pointer)))
+
+  (define-record-type (terminal %make-terminal terminal?)
     (fields (mutable pointer)))
 
   (define-record-type event
@@ -77,6 +110,15 @@
 
   (define (native-error who runtime)
     (error who (%last-error (runtime-pointer runtime))))
+
+  (define (require-terminal who value)
+    (unless (terminal? value)
+      (assertion-violation who "expected a terminal" value))
+    (unless (terminal-pointer value)
+      (assertion-violation who "terminal is closed" value)))
+
+  (define (terminal-error who terminal)
+    (error who (%terminal-last-error (terminal-pointer terminal))))
 
   (define (make-runtime)
     (let ([pointer (%runtime-create)])
@@ -116,6 +158,86 @@
       (if (negative? status)
           (native-error 'runtime-cancel! runtime)
           (not (zero? status)))))
+
+  (define make-terminal
+    (case-lambda
+      [() (make-terminal 0 1)]
+      [(input-fd output-fd)
+       (let ([pointer (%terminal-create input-fd output-fd)])
+         (unless pointer
+           (error 'make-terminal "cannot create terminal"))
+         (%make-terminal pointer))]))
+
+  (define (terminal-close! terminal)
+    (when (and (terminal? terminal) (terminal-pointer terminal))
+      (%terminal-destroy (terminal-pointer terminal))
+      (terminal-pointer-set! terminal #f)))
+
+  (define (terminal-enter-raw! terminal)
+    (require-terminal 'terminal-enter-raw! terminal)
+    (when (negative? (%terminal-enter-raw (terminal-pointer terminal)))
+      (terminal-error 'terminal-enter-raw! terminal)))
+
+  (define (terminal-leave-raw! terminal)
+    (require-terminal 'terminal-leave-raw! terminal)
+    (when (negative? (%terminal-leave-raw (terminal-pointer terminal)))
+      (terminal-error 'terminal-leave-raw! terminal)))
+
+  (define terminal-read
+    (case-lambda
+      [(terminal) (terminal-read terminal 4096)]
+      [(terminal capacity)
+       (require-terminal 'terminal-read terminal)
+       (let* ([buffer (make-bytevector capacity)]
+              [size
+                (%terminal-read
+                  (terminal-pointer terminal)
+                  buffer
+                  capacity)])
+         (when (negative? size)
+           (terminal-error 'terminal-read terminal))
+         (if (= size capacity)
+             buffer
+             (let ([output (make-bytevector size)])
+               (bytevector-copy! buffer 0 output 0 size)
+               output)))]))
+
+  (define (terminal-write! terminal data)
+    (require-terminal 'terminal-write! terminal)
+    (let ([bytes
+            (cond
+              [(bytevector? data) data]
+              [(string? data) (string->utf8 data)]
+              [else
+               (assertion-violation
+                 'terminal-write!
+                 "expected a bytevector or string"
+                 data)])])
+      (when (negative?
+              (%terminal-write
+                (terminal-pointer terminal)
+                bytes
+                (bytevector-length bytes)))
+        (terminal-error 'terminal-write! terminal))))
+
+  (define (terminal-size terminal)
+    (require-terminal 'terminal-size terminal)
+    (let ([rows (foreign-alloc 4)]
+          [columns (foreign-alloc 4)])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (when (negative?
+                  (%terminal-size
+                    (terminal-pointer terminal)
+                    rows
+                    columns))
+            (terminal-error 'terminal-size terminal))
+          (cons (foreign-ref 'unsigned-32 rows 0)
+                (foreign-ref 'unsigned-32 columns 0)))
+        (lambda ()
+          (foreign-free rows)
+          (foreign-free columns)))))
 
   (define (integer->event-kind value)
     (case value

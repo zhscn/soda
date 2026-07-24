@@ -9,11 +9,15 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <string>
 
 #if !defined(_WIN32)
+#include <fcntl.h>
+#include <sys/ioctl.h>
+#include <termios.h>
 #include <unistd.h>
 #endif
 
@@ -119,6 +123,66 @@ TEST_CASE("fd readiness does not transfer fd ownership") {
 
     CHECK(::close(pipe_fds[0]) == 0);
     CHECK(::close(pipe_fds[1]) == 0);
+}
+
+TEST_CASE("terminal ABI owns raw mode but not its descriptors") {
+    const int master = ::posix_openpt(O_RDWR | O_NOCTTY);
+    REQUIRE(master >= 0);
+    REQUIRE(::grantpt(master) == 0);
+    REQUIRE(::unlockpt(master) == 0);
+    const char* slave_name = ::ptsname(master);
+    REQUIRE(slave_name != nullptr);
+    const int slave = ::open(slave_name, O_RDWR | O_NOCTTY);
+    REQUIRE(slave >= 0);
+
+    termios original{};
+    REQUIRE(::tcgetattr(slave, &original) == 0);
+    winsize requested{};
+    requested.ws_row = 40;
+    requested.ws_col = 100;
+    REQUIRE(::ioctl(slave, TIOCSWINSZ, &requested) == 0);
+
+    soda_terminal* terminal = soda_terminal_create(slave, slave);
+    REQUIRE(terminal != nullptr);
+    REQUIRE(soda_terminal_enter_raw(terminal) == 0);
+
+    termios raw{};
+    REQUIRE(::tcgetattr(slave, &raw) == 0);
+    CHECK((raw.c_lflag & ICANON) == 0);
+    CHECK((raw.c_lflag & ECHO) == 0);
+
+    std::uint32_t rows = 0;
+    std::uint32_t columns = 0;
+    REQUIRE(soda_terminal_size(terminal, &rows, &columns) == 0);
+    CHECK(rows == 40);
+    CHECK(columns == 100);
+
+    Runtime runtime;
+    const SourceId watch = runtime.watch_fd(slave, FdEvent::Readable);
+    const std::uint8_t input = 'x';
+    REQUIRE(::write(master, &input, 1) == 1);
+    REQUIRE(runtime.poll(PollMode::Once) == 1);
+    REQUIRE(runtime.next_event().has_value());
+    std::uint8_t received = 0;
+    REQUIRE(soda_terminal_read(terminal, &received, 1) == 1);
+    CHECK(received == input);
+    CHECK(runtime.cancel(watch));
+    (void)runtime.poll(PollMode::NoWait);
+
+    const std::uint8_t output = 'y';
+    REQUIRE(soda_terminal_write(terminal, &output, 1) == 0);
+    std::uint8_t observed = 0;
+    REQUIRE(::read(master, &observed, 1) == 1);
+    CHECK(observed == output);
+
+    REQUIRE(soda_terminal_leave_raw(terminal) == 0);
+    termios restored{};
+    REQUIRE(::tcgetattr(slave, &restored) == 0);
+    CHECK(restored.c_lflag == original.c_lflag);
+    soda_terminal_destroy(terminal);
+
+    CHECK(::close(slave) == 0);
+    CHECK(::close(master) == 0);
 }
 #endif
 

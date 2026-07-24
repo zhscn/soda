@@ -18,6 +18,7 @@ extern "C" {
 #endif
 
 typedef struct soda_runtime soda_runtime;
+typedef struct soda_terminal soda_terminal;
 
 #define SODA_POLL_NOWAIT 0
 #define SODA_POLL_ONCE 1
@@ -60,6 +61,16 @@ SODA_RUNTIME_API size_t soda_runtime_copy_event_data(soda_runtime* runtime, uint
 // The returned message is owned by the runtime and remains valid until the
 // next C API operation on that runtime.
 SODA_RUNTIME_API const char* soda_runtime_last_error(soda_runtime* runtime);
+
+SODA_RUNTIME_API soda_terminal* soda_terminal_create(int input_fd, int output_fd);
+SODA_RUNTIME_API void soda_terminal_destroy(soda_terminal* terminal);
+SODA_RUNTIME_API int soda_terminal_enter_raw(soda_terminal* terminal);
+SODA_RUNTIME_API int soda_terminal_leave_raw(soda_terminal* terminal);
+SODA_RUNTIME_API int64_t soda_terminal_read(soda_terminal* terminal, uint8_t* destination,
+                                            size_t capacity);
+SODA_RUNTIME_API int soda_terminal_write(soda_terminal* terminal, const uint8_t* data, size_t size);
+SODA_RUNTIME_API int soda_terminal_size(soda_terminal* terminal, uint32_t* rows, uint32_t* columns);
+SODA_RUNTIME_API const char* soda_terminal_last_error(soda_terminal* terminal);
 
 #ifdef __cplusplus
 }
