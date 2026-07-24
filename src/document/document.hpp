@@ -48,6 +48,7 @@ public:
     void set_anchor_affinity(AnchorId id, AnchorAffinity affinity);
 
     const Text& current_text() const { return text_; }
+    RevisionId base_revision() const { return base_revision_; }
     // Snapshot of the pending state. Its revision is the revision commit()
     // would produce right now (base revision if no edits are pending).
     DocumentSnapshot speculative_snapshot() const;

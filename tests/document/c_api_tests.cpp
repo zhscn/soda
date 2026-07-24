@@ -91,6 +91,19 @@ TEST_CASE("document transaction exposes normalized changes and persistent snapsh
     REQUIRE(transaction != nullptr);
     const std::array<std::uint8_t, 1> replacement{'c'};
     REQUIRE(soda_transaction_replace(transaction.get(), 2, 3, replacement.data(), 1) == 0);
+    CHECK(soda_transaction_base_revision(transaction.get()) == 0);
+    CHECK(soda_transaction_pending_edit_count(transaction.get()) == 1);
+    std::uint32_t pending_start = SODA_TEXT_NPOS;
+    std::uint32_t pending_end = SODA_TEXT_NPOS;
+    REQUIRE(soda_transaction_pending_edit_range(transaction.get(), 0, &pending_start,
+                                                &pending_end) == 0);
+    CHECK(pending_start == 2);
+    CHECK(pending_end == 3);
+    CHECK(soda_transaction_pending_edit_text_size(transaction.get(), 0) == 1);
+    std::array<std::uint8_t, 1> pending_text{};
+    REQUIRE(soda_transaction_copy_pending_edit_text(transaction.get(), 0, pending_text.data(),
+                                                    pending_text.size()) == 0);
+    CHECK(pending_text[0] == 'c');
 
     SnapshotHandle speculative(soda_transaction_snapshot(transaction.get()));
     REQUIRE(speculative != nullptr);

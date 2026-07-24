@@ -51,6 +51,10 @@
           transaction-erase!
           transaction-anchor-offset
           transaction-set-anchor-affinity!
+          transaction-base-revision
+          transaction-pending-edit-count
+          transaction-pending-edit-range
+          transaction-pending-edit-text
           transaction-snapshot
           transaction-commit!
           transaction-abort!
@@ -74,6 +78,7 @@
       path))
 
   (define text-npos #xffffffff)
+  (define revision-none #xffffffffffffffff)
   (define undo-node-none #xffffffff)
   (define anchor-before-insertion 0)
   (define anchor-after-insertion 1)
@@ -84,7 +89,7 @@
     (foreign-procedure __atomic "soda_document_last_error" () string))
 
   (define abi-version-checked
-    (unless (= (%abi-version) 1)
+    (unless (= (%abi-version) 2)
       (error 'soda-document "unsupported native document ABI version")))
 
   (define %text-create
@@ -231,6 +236,26 @@
   (define %transaction-set-anchor-affinity
     (foreign-procedure __atomic "soda_transaction_set_anchor_affinity"
                        (void* unsigned-32 int)
+                       int))
+  (define %transaction-base-revision
+    (foreign-procedure __atomic "soda_transaction_base_revision"
+                       (void*)
+                       unsigned-64))
+  (define %transaction-pending-edit-count
+    (foreign-procedure __atomic "soda_transaction_pending_edit_count"
+                       (void*)
+                       unsigned-32))
+  (define %transaction-pending-edit-range
+    (foreign-procedure __atomic "soda_transaction_pending_edit_range"
+                       (void* unsigned-32 void* void*)
+                       int))
+  (define %transaction-pending-edit-text-size
+    (foreign-procedure __atomic "soda_transaction_pending_edit_text_size"
+                       (void* unsigned-32)
+                       unsigned-32))
+  (define %transaction-copy-pending-edit-text
+    (foreign-procedure __atomic "soda_transaction_copy_pending_edit_text"
+                       (void* unsigned-32 u8* size_t)
                        int))
   (define %transaction-snapshot
     (foreign-procedure __atomic "soda_transaction_snapshot" (void*) void*))
@@ -617,6 +642,75 @@
         (transaction-pointer value)
         anchor
         affinity)))
+
+  (define (transaction-base-revision value)
+    (require-open
+      'transaction-base-revision
+      transaction?
+      transaction-pointer
+      value)
+    (let ([revision (%transaction-base-revision (transaction-pointer value))])
+      (if (= revision revision-none)
+          (native-error 'transaction-base-revision)
+          revision)))
+
+  (define (transaction-pending-edit-count value)
+    (require-open
+      'transaction-pending-edit-count
+      transaction?
+      transaction-pointer
+      value)
+    (let ([count
+            (%transaction-pending-edit-count (transaction-pointer value))])
+      (if (= count text-npos)
+          (native-error 'transaction-pending-edit-count)
+          count)))
+
+  (define (transaction-pending-edit-range value index)
+    (require-open
+      'transaction-pending-edit-range
+      transaction?
+      transaction-pointer
+      value)
+    (let ([start (foreign-alloc 4)]
+          [end (foreign-alloc 4)])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (check-status
+            'transaction-pending-edit-range
+            (%transaction-pending-edit-range
+              (transaction-pointer value)
+              index
+              start
+              end))
+          (cons (foreign-ref 'unsigned-32 start 0)
+                (foreign-ref 'unsigned-32 end 0)))
+        (lambda ()
+          (foreign-free start)
+          (foreign-free end)))))
+
+  (define (transaction-pending-edit-text value index)
+    (require-open
+      'transaction-pending-edit-text
+      transaction?
+      transaction-pointer
+      value)
+    (let ([size
+            (%transaction-pending-edit-text-size
+              (transaction-pointer value)
+              index)])
+      (when (= size text-npos)
+        (native-error 'transaction-pending-edit-text))
+      (let ([output (make-bytevector size)])
+        (check-status
+          'transaction-pending-edit-text
+          (%transaction-copy-pending-edit-text
+            (transaction-pointer value)
+            index
+            output
+            size))
+        output)))
 
   (define (transaction-snapshot value)
     (require-open 'transaction-snapshot transaction? transaction-pointer value)

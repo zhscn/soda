@@ -181,6 +181,15 @@ const soda::TextEdit& change_edit(const soda_change* change, std::uint32_t edit_
     return handle.value.edits[edit_index];
 }
 
+const soda::TextEdit& transaction_edit(const soda_transaction* transaction,
+                                       std::uint32_t edit_index) {
+    const auto edits = transaction_value(transaction).pending_edits();
+    if (edit_index >= edits.size()) {
+        throw std::out_of_range("transaction edit index is out of range");
+    }
+    return edits[edit_index];
+}
+
 int copy_string(std::string_view value, std::uint8_t* destination, std::size_t capacity) {
     if (capacity < value.size()) {
         throw std::invalid_argument("destination is too small");
@@ -551,6 +560,42 @@ int soda_transaction_set_anchor_affinity(soda_transaction* transaction, uint32_t
     return guard(-1, [&] {
         transaction_value(transaction).set_anchor_affinity(anchor, anchor_affinity(affinity));
         return 0;
+    });
+}
+
+uint64_t soda_transaction_base_revision(const soda_transaction* transaction) {
+    return guard<std::uint64_t>(std::numeric_limits<std::uint64_t>::max(),
+                                [&] { return transaction_value(transaction).base_revision(); });
+}
+
+uint32_t soda_transaction_pending_edit_count(const soda_transaction* transaction) {
+    return guard<std::uint32_t>(SODA_TEXT_NPOS, [&] {
+        return static_cast<std::uint32_t>(transaction_value(transaction).pending_edits().size());
+    });
+}
+
+int soda_transaction_pending_edit_range(const soda_transaction* transaction, uint32_t edit_index,
+                                        uint32_t* start, uint32_t* end) {
+    return guard(-1, [&] {
+        write_range(transaction_edit(transaction, edit_index).old_range, start, end);
+        return 0;
+    });
+}
+
+uint32_t soda_transaction_pending_edit_text_size(const soda_transaction* transaction,
+                                                 uint32_t edit_index) {
+    return guard<std::uint32_t>(SODA_TEXT_NPOS, [&] {
+        return static_cast<std::uint32_t>(
+            transaction_edit(transaction, edit_index).new_text.size());
+    });
+}
+
+int soda_transaction_copy_pending_edit_text(const soda_transaction* transaction,
+                                            uint32_t edit_index, uint8_t* destination,
+                                            size_t capacity) {
+    return guard(-1, [&] {
+        return copy_string(transaction_edit(transaction, edit_index).new_text, destination,
+                           capacity);
     });
 }
 

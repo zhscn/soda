@@ -8,6 +8,17 @@
 
 (transaction-replace! transaction 2 3 "c")
 
+(unless (= (transaction-base-revision transaction) 0)
+  (error 'document-tests "transaction base revision differs"))
+(unless (= (transaction-pending-edit-count transaction) 1)
+  (error 'document-tests "transaction pending edit count differs"))
+(unless (equal? (transaction-pending-edit-range transaction 0) '(2 . 3))
+  (error 'document-tests "transaction pending edit range differs"))
+(unless (bytevector=?
+          (transaction-pending-edit-text transaction 0)
+          (string->utf8 "c"))
+  (error 'document-tests "transaction pending edit text differs"))
+
 (define speculative (transaction-snapshot transaction))
 (define speculative-text (snapshot-text speculative))
 

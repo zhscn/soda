@@ -23,7 +23,7 @@ typedef struct soda_snapshot soda_snapshot;
 typedef struct soda_transaction soda_transaction;
 typedef struct soda_change soda_change;
 
-#define SODA_DOCUMENT_ABI_VERSION 1U
+#define SODA_DOCUMENT_ABI_VERSION 2U
 #define SODA_TEXT_NPOS UINT32_MAX
 #define SODA_UNDO_NODE_NONE UINT32_MAX
 
@@ -110,6 +110,17 @@ SODA_DOCUMENT_API uint32_t soda_transaction_anchor_offset(const soda_transaction
                                                           uint32_t anchor);
 SODA_DOCUMENT_API int soda_transaction_set_anchor_affinity(soda_transaction* transaction,
                                                            uint32_t anchor, int affinity);
+SODA_DOCUMENT_API uint64_t soda_transaction_base_revision(const soda_transaction* transaction);
+SODA_DOCUMENT_API uint32_t soda_transaction_pending_edit_count(const soda_transaction* transaction);
+SODA_DOCUMENT_API int soda_transaction_pending_edit_range(const soda_transaction* transaction,
+                                                          uint32_t edit_index, uint32_t* start,
+                                                          uint32_t* end);
+SODA_DOCUMENT_API uint32_t
+soda_transaction_pending_edit_text_size(const soda_transaction* transaction, uint32_t edit_index);
+SODA_DOCUMENT_API int soda_transaction_copy_pending_edit_text(const soda_transaction* transaction,
+                                                              uint32_t edit_index,
+                                                              uint8_t* destination,
+                                                              size_t capacity);
 SODA_DOCUMENT_API soda_snapshot* soda_transaction_snapshot(const soda_transaction* transaction);
 SODA_DOCUMENT_API soda_change* soda_transaction_commit(soda_transaction* transaction);
 SODA_DOCUMENT_API int soda_transaction_abort(soda_transaction* transaction);
