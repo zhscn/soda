@@ -73,6 +73,7 @@
       (lambda (port extract)
         (display (ansi "[?25l") port)
         (display (ansi "[H") port)
+        (display (ansi "[0m") port)
         (let ([current-style default-style])
           (do ([row 0 (+ row 1)])
               ((= row (frame-rows value)))
