@@ -29,6 +29,14 @@ editor buffers, views, command registries, Scheme objects, or frontend state.
 Chez libraries retain opaque native handles and pass document snapshots and
 change sets directly to the analyzer without serializing text or syntax trees.
 
+## Language modes
+
+Chez major modes compose replaceable syntax and indentation providers. Common
+delimiter editing remains independent of any one parser, while the native C++
+analyzer and Tree-sitter sessions can provide progressively richer language
+capabilities. The provider contract and Smart Enter transaction model are
+defined in [design/10-language-modes.md](design/10-language-modes.md).
+
 ## Runtime boundary
 
 The editor has one state-owning thread. Chez Scheme runs the command loop on
