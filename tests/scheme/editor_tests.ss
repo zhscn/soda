@@ -8,7 +8,9 @@
         (soda editor event)
         (soda editor keymap)
         (soda editor language)
+        (soda tui frame)
         (soda tui input)
+        (soda tui presenter)
         (soda tui renderer))
 
 (define (decode decoder bytes)
@@ -325,15 +327,34 @@
 (define display-view
   (editor-open-view! editor (buffer-id display-buffer)))
 (editor-set-active-view! editor (view-id display-view))
-(define wide-frame (render-editor-frame editor 2 10))
+(editor-update! editor (make-resize-message 2 10))
+(define structured-frame (render-editor-frame editor 2 10))
+(let ([text-cell (frame-cell-ref structured-frame 0 0)]
+      [modeline-cell (frame-cell-ref structured-frame 1 0)])
+  (unless (and (string=? (cell-text text-cell) "λ")
+               (= (cell-width text-cell) 1)
+               (eq? (cell-face text-cell) 'default)
+               (= (cell-document-position text-cell) 0)
+               (eq? (cell-source-layer
+                       (car (cell-sources text-cell)))
+                     'text)
+               (eq? (cell-face modeline-cell) 'modeline)
+               (memq 'reverse
+                     (style-attributes
+                       (cell-style modeline-cell))))
+    (error 'editor-tests
+           "structured frame did not retain cell semantics")))
+(define wide-frame
+  (frame->ansi structured-frame))
 (unless (string-contains? wide-frame "λ       界")
   (error 'editor-tests "renderer did not expand tabs in display cells"))
-(define clipped-frame (render-editor-frame editor 2 9))
+(define clipped-frame
+  (frame->ansi (render-editor-frame editor 2 9)))
 (when (string-contains? clipped-frame "界")
   (error 'editor-tests "renderer split a wide character at the viewport edge"))
 (send! editor decoder (bytes #x1b #x5b #x43))
 (unless (string-contains?
-          (render-editor-frame editor 2 10)
+          (frame->ansi (render-editor-frame editor 2 10))
           (string-append (string (integer->char 27)) "[1;2H"))
   (error 'editor-tests "renderer cursor did not use display cells"))
 

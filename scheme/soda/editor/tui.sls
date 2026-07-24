@@ -8,6 +8,7 @@
           (soda editor event)
           (soda runtime)
           (soda tui input)
+          (soda tui presenter)
           (soda tui renderer))
 
   (define escape (string (integer->char 27)))
@@ -24,10 +25,11 @@
           (max 1 (cdr size))))
       (terminal-write!
         terminal
-        (render-editor-frame
-          editor
-          (max 2 (car size))
-          (max 1 (cdr size))))))
+        (frame->ansi
+          (render-editor-frame
+            editor
+            (max 2 (car size))
+            (max 1 (cdr size)))))))
 
   (define (handle-editor-message! editor executor message)
     (let loop ([messages (list message)])
