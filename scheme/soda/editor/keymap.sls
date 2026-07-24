@@ -9,13 +9,21 @@
           make-keymap
           keymap?
           keymap-bind!
+          keymap-undefine!
+          keymap-unbind!
           keymap-resolve
           keymaps-resolve
+          keymap-bindings
+          key-binding?
+          key-binding-sequence
+          key-binding-status
+          key-binding-command
           make-keymap-catalog
           keymap-catalog?
           keymap-catalog-register!
           keymap-catalog-find
-          keymap-catalog-ref)
+          keymap-catalog-ref
+          keymap-catalog-names)
   (import (rnrs)
           (soda editor event))
 
@@ -33,6 +41,11 @@
   (define-record-type
     (keymap-catalog %make-keymap-catalog keymap-catalog?)
     (fields entries))
+
+  (define-record-type key-binding
+    (fields sequence status command))
+
+  (define undefined-binding (list 'undefined-binding))
 
   (define (key-stroke=? left right)
     (and (key-stroke? left)
@@ -100,6 +113,15 @@
           "unknown keymap"
           name)))
 
+  (define (keymap-catalog-names catalog)
+    (unless (keymap-catalog? catalog)
+      (assertion-violation
+        'keymap-catalog-names
+        "expected a keymap catalog"
+        catalog))
+    (vector->list
+      (hashtable-keys (keymap-catalog-entries catalog))))
+
   (define (find-child node stroke)
     (let loop ([children (keymap-node-children node)])
       (cond
@@ -115,39 +137,87 @@
             (cons (cons stroke child) (keymap-node-children node)))
           child)))
 
-  (define (keymap-bind! keymap sequence command)
+  (define (remove-child! node stroke)
+    (keymap-node-children-set!
+      node
+      (filter
+        (lambda (entry)
+          (not (key-stroke=? stroke (car entry))))
+        (keymap-node-children node))))
+
+  (define (empty-node? node)
+    (and (not (keymap-node-command node))
+         (null? (keymap-node-children node))))
+
+  (define (require-sequence who keymap sequence)
     (unless (keymap? keymap)
-      (assertion-violation 'keymap-bind! "expected a keymap" keymap))
+      (assertion-violation who "expected a keymap" keymap))
     (unless (and (list? sequence)
                  (pair? sequence)
                  (for-all key-stroke? sequence))
       (assertion-violation
-        'keymap-bind!
+        who
         "key sequence must be a non-empty list of key strokes"
-        sequence))
-    (unless (symbol? command)
-      (assertion-violation
-        'keymap-bind!
-        "command name must be a symbol"
-        command))
+        sequence)))
+
+  (define (set-binding! who keymap sequence binding)
+    (require-sequence who keymap sequence)
     (let loop ([node (keymap-root keymap)] [remaining sequence])
       (let ([child (ensure-child! node (car remaining))])
         (if (null? (cdr remaining))
             (begin
               (unless (null? (keymap-node-children child))
                 (assertion-violation
-                  'keymap-bind!
-                  "cannot bind a command over an existing prefix"
+                  who
+                  "cannot bind over an existing prefix"
                   sequence))
-              (keymap-node-command-set! child command)
-              command)
+              (keymap-node-command-set! child binding)
+              binding)
             (begin
               (when (keymap-node-command child)
                 (assertion-violation
-                  'keymap-bind!
-                  "cannot extend a sequence that is already a command"
+                  who
+                  "cannot extend a sequence that already has a binding"
                   sequence))
               (loop child (cdr remaining)))))))
+
+  (define (keymap-bind! keymap sequence command)
+    (unless (symbol? command)
+      (assertion-violation
+        'keymap-bind!
+        "command name must be a symbol"
+        command))
+    (set-binding! 'keymap-bind! keymap sequence command)
+    command)
+
+  (define (keymap-undefine! keymap sequence)
+    (set-binding!
+      'keymap-undefine!
+      keymap
+      sequence
+      undefined-binding)
+    #t)
+
+  (define (remove-binding! node remaining)
+    (let ([stroke (car remaining)]
+          [child (find-child node (car remaining))])
+      (if (not child)
+          #f
+          (let ([removed?
+                  (if (null? (cdr remaining))
+                      (if (keymap-node-command child)
+                          (begin
+                            (keymap-node-command-set! child #f)
+                            #t)
+                          #f)
+                      (remove-binding! child (cdr remaining)))])
+            (when (and removed? (empty-node? child))
+              (remove-child! node stroke))
+            removed?))))
+
+  (define (keymap-unbind! keymap sequence)
+    (require-sequence 'keymap-unbind! keymap sequence)
+    (remove-binding! (keymap-root keymap) sequence))
 
   (define (keymap-resolve keymap sequence)
     (unless (keymap? keymap)
@@ -160,6 +230,8 @@
     (let loop ([node (keymap-root keymap)] [remaining sequence])
       (if (null? remaining)
           (cond
+            [(eq? (keymap-node-command node) undefined-binding)
+             (values 'undefined #f)]
             [(keymap-node-command node)
              (values 'command (keymap-node-command node))]
             [(pair? (keymap-node-children node)) (values 'prefix #f)]
@@ -183,4 +255,56 @@
             (lambda (status command)
               (if (eq? status 'none)
                   (loop (cdr remaining))
-                  (values status command))))))))
+                  (values status command)))))))
+
+  (define (binding-prefix-node node remaining)
+    (if (null? remaining)
+        node
+        (let ([child (find-child node (car remaining))])
+          (and child
+               (binding-prefix-node child (cdr remaining))))))
+
+  (define (collect-bindings node sequence bindings)
+    (let* ([binding (keymap-node-command node)]
+           [next
+             (cond
+               [(eq? binding undefined-binding)
+                (cons
+                  (make-key-binding sequence 'undefined #f)
+                  bindings)]
+               [binding
+                (cons
+                  (make-key-binding sequence 'command binding)
+                  bindings)]
+               [else bindings])])
+      (fold-left
+        (lambda (state entry)
+          (collect-bindings
+            (cdr entry)
+            (append sequence (list (car entry)))
+            state))
+        next
+        (keymap-node-children node))))
+
+  (define keymap-bindings
+    (case-lambda
+      [(keymap) (keymap-bindings keymap '())]
+      [(keymap prefix)
+       (unless (keymap? keymap)
+         (assertion-violation
+           'keymap-bindings
+           "expected a keymap"
+           keymap))
+       (unless (and (list? prefix) (for-all key-stroke? prefix))
+         (assertion-violation
+           'keymap-bindings
+           "prefix must be a list of key strokes"
+           prefix))
+       (let ([node
+               (binding-prefix-node
+                 (keymap-root keymap)
+                 prefix)])
+         (if node
+             (reverse
+               (collect-bindings node prefix '()))
+             '()))])))
