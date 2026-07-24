@@ -127,9 +127,14 @@
       (%make-runtime pointer)))
 
   (define (runtime-close! runtime)
-    (require-runtime 'runtime-close! runtime)
-    (%runtime-destroy (runtime-pointer runtime))
-    (runtime-pointer-set! runtime #f))
+    (unless (runtime? runtime)
+      (assertion-violation
+        'runtime-close!
+        "expected a runtime"
+        runtime))
+    (when (runtime-pointer runtime)
+      (%runtime-destroy (runtime-pointer runtime))
+      (runtime-pointer-set! runtime #f)))
 
   (define (runtime-start-timer! runtime timeout-ms repeat-ms)
     (require-runtime 'runtime-start-timer! runtime)

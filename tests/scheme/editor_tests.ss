@@ -4,6 +4,7 @@
         (soda editor buffer)
         (soda editor command)
         (soda editor core)
+        (soda editor effect)
         (soda editor event)
         (soda editor keymap)
         (soda tui input))
@@ -119,6 +120,24 @@
              (command-effect? (car quit-effects))
              (eq? (command-effect-kind (car quit-effects)) 'quit))
   (error 'editor-tests "quit command did not return a quit effect"))
+
+(define effect-executor (make-effect-executor))
+(register-effect-handler!
+  effect-executor
+  'quit
+  (lambda (payload) (make-effect-result #f '())))
+(unless (not
+          (effect-result-continue?
+            (execute-effects! effect-executor quit-effects)))
+  (error 'editor-tests "quit effect did not stop the effect executor"))
+(define unhandled-effect-rejected? #f)
+(guard (condition
+         [else (set! unhandled-effect-rejected? #t)])
+  (execute-effects!
+    effect-executor
+    (list (make-command-effect 'missing #f))))
+(unless unhandled-effect-rejected?
+  (error 'editor-tests "unhandled effect was silently ignored"))
 
 (view-set-first-line! (editor-active-view editor) 4)
 (unless (= (view-first-line (editor-active-view editor)) 4)

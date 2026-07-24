@@ -38,3 +38,4 @@
     (error 'runtime-tests "file read returned no data" event)))
 
 (runtime-close! runtime)
+(runtime-close! runtime)

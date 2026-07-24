@@ -3,8 +3,8 @@
   (import (rnrs)
           (soda document)
           (soda editor buffer)
-          (soda editor command)
           (soda editor core)
+          (soda editor effect)
           (soda editor event)
           (soda runtime)
           (soda tui input))
@@ -160,23 +160,29 @@
           (max 2 (car size))
           (max 1 (cdr size))))))
 
-  (define (continue-after-effects? effects)
-    (not
-      (exists
-        (lambda (effect)
-          (eq? (command-effect-kind effect) 'quit))
-        effects)))
+  (define (handle-editor-message! editor executor message)
+    (let loop ([messages (list message)])
+      (if (null? messages)
+          #t
+          (let* ([effects (editor-update! editor (car messages))]
+                 [result (execute-effects! executor effects)])
+            (and
+              (effect-result-continue? result)
+              (loop
+                (append
+                  (effect-result-messages result)
+                  (cdr messages))))))))
 
-  (define (handle-key-events editor events)
+  (define (handle-key-events editor executor events)
     (let loop ([events events])
       (if (null? events)
           #t
-          (let ([effects
-                  (editor-update!
-                    editor
-                    (make-key-message (car events)))])
-            (and (continue-after-effects? effects)
-                 (loop (cdr events)))))))
+          (and
+            (handle-editor-message!
+              editor
+              executor
+              (make-key-message (car events)))
+            (loop (cdr events))))))
 
   (define (load-bytes runtime path)
     (if (not path)
@@ -193,58 +199,146 @@
                      (event-data (car events)))]
                 [else (find (cdr events))]))))))
 
-  (define (run-tui-editor path)
-    (let* ([runtime (make-runtime)]
-           [terminal (make-terminal)]
-           [document (make-document (load-bytes runtime path) 1)]
-           [buffer
-             (make-buffer
-               1
-               document
-               (or path "*scratch*")
-               'fundamental-mode)]
-           [editor (make-editor buffer)]
-           [input-source #f]
-           [decoder (make-input-decoder)])
+  (define (call-with-runtime procedure)
+    (let ([runtime #f])
       (dynamic-wind
         (lambda ()
+          #f)
+        (lambda ()
+          (set! runtime (make-runtime))
+          (procedure runtime))
+        (lambda ()
+          (when runtime
+            (guard (condition [else #f])
+              (runtime-close! runtime)))))))
+
+  (define (call-with-terminal procedure)
+    (let ([terminal #f])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (set! terminal (make-terminal))
+          (procedure terminal))
+        (lambda ()
+          (when terminal
+            (guard (condition [else #f])
+              (terminal-close! terminal)))))))
+
+  (define (call-with-editor bytes resource procedure)
+    (let ([document #f] [buffer #f] [editor #f])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (set! document (make-document bytes 1))
+          (set! buffer
+            (make-buffer
+              1
+              document
+              resource
+              'fundamental-mode))
+          (set! editor (make-editor buffer))
+          (procedure editor))
+        (lambda ()
+          (cond
+            [editor
+             (guard (condition [else #f])
+               (editor-close! editor))]
+            [buffer
+             (guard (condition [else #f])
+               (buffer-close! buffer))]
+            [document
+             (guard (condition [else #f])
+               (document-close! document))])))))
+
+  (define (run-editor-session runtime terminal editor)
+    (let ([input-source #f]
+          [flush-timer #f]
+          [raw? #f]
+          [screen? #f]
+          [decoder (make-input-decoder)]
+          [executor (make-effect-executor)])
+      (define (cancel-flush-timer!)
+        (when flush-timer
+          (guard (condition [else #f])
+            (runtime-cancel! runtime flush-timer))
+          (set! flush-timer #f)))
+      (define (arm-flush-timer!)
+        (cancel-flush-timer!)
+        (when (input-decoder-pending? decoder)
+          (set! flush-timer
+            (runtime-start-timer! runtime 25 0))))
+      (define (handle-input!)
+        (let ([input (terminal-read terminal)])
+          (if (zero? (bytevector-length input))
+              #t
+              (let ([events (input-decoder-feed! decoder input)])
+                (arm-flush-timer!)
+                (handle-key-events editor executor events)))))
+      (define (handle-flush!)
+        (set! flush-timer #f)
+        (handle-key-events
+          editor
+          executor
+          (input-decoder-flush! decoder)))
+      (register-effect-handler!
+        executor
+        'quit
+        (lambda (payload) (make-effect-result #f '())))
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
           (terminal-enter-raw! terminal)
+          (set! raw? #t)
+          (set! screen? #t)
           (terminal-write!
             terminal
             (string-append (ansi "[?1049h") (ansi "[>1u")))
-          (set! input-source (runtime-watch-fd! runtime 0 fd-readable)))
-        (lambda ()
+          (set! input-source
+            (runtime-watch-fd! runtime 0 fd-readable))
           (let loop ([running? #t])
             (when running?
               (render! terminal editor)
-              (let event-loop ([events (runtime-poll! runtime)])
+              (let process
+                ([events (runtime-poll! runtime)] [continue? #t])
                 (cond
-                  [(null? events) (loop running?)]
+                  [(or (not continue?) (null? events))
+                   (loop continue?)]
                   [(and (= (event-source (car events)) input-source)
                         (eq? (event-kind (car events)) 'fd-ready))
-                   (let ([input (terminal-read terminal)])
-                     (if (zero? (bytevector-length input))
-                         (loop running?)
-                         (loop
-                           (handle-key-events
-                             editor
-                             (input-decoder-feed! decoder input)))))]
-                  [else (event-loop (cdr events))])))))
+                   (process (cdr events) (handle-input!))]
+                  [(and flush-timer
+                        (= (event-source (car events)) flush-timer)
+                        (eq? (event-kind (car events)) 'timer))
+                   (process (cdr events) (handle-flush!))]
+                  [else (process (cdr events) continue?)])))))
         (lambda ()
+          (cancel-flush-timer!)
           (when input-source
             (guard (condition [else #f])
               (runtime-cancel! runtime input-source)))
-          (guard (condition [else #f])
-            (terminal-write!
-              terminal
-              (string-append
-                (ansi "[<u")
-                (ansi "[?25h")
-                (ansi "[?1049l"))))
-          (guard (condition [else #f])
-            (terminal-leave-raw! terminal))
-          (guard (condition [else #f])
-            (editor-close! editor))
-          (guard (condition [else #f])
-            (terminal-close! terminal))
-          (runtime-close! runtime))))))
+          (when screen?
+            (guard (condition [else #f])
+              (terminal-write!
+                terminal
+                (string-append
+                  (ansi "[<u")
+                  (ansi "[?25h")
+                  (ansi "[?1049l")))))
+          (when raw?
+            (guard (condition [else #f])
+              (terminal-leave-raw! terminal)))))))
+
+  (define (run-tui-editor path)
+    (call-with-runtime
+      (lambda (runtime)
+        (let ([bytes (load-bytes runtime path)])
+          (call-with-editor
+            bytes
+            (or path "*scratch*")
+            (lambda (editor)
+              (call-with-terminal
+                (lambda (terminal)
+                  (run-editor-session
+                    runtime
+                    terminal
+                    editor))))))))))
