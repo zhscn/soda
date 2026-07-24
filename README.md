@@ -14,15 +14,20 @@ The native core is split by data ownership:
   layouts remain private to the native library.
 - `soda_cpp_lexer` derives a lossless token stream from a `Text` value.
 - `soda_cpp_analysis` derives and incrementally advances the C++ syntax tree
-  from snapshots and normalized change sets.
+  from snapshots and normalized change sets. Its C ABI owns the analysis cache
+  and exposes revision-scoped syntax nodes and structural editing queries.
 - `soda_indentation` computes indentation and implements atomic Enter and
-  typed-character editing mechanisms.
+  typed-character editing mechanisms. Its C ABI exposes configurable style
+  values, explainable indentation decisions, and commands that return the
+  resulting caret and normalized document change.
 - `soda_runtime` owns libuv handles and exposes pull-based timer, descriptor
   readiness, and filesystem completion events through a C ABI.
 - `soda_native_core` is the aggregate target for native consumers.
 
 The parser consumes document values and change sets. It has no dependency on
 editor buffers, views, command registries, Scheme objects, or frontend state.
+Chez libraries retain opaque native handles and pass document snapshots and
+change sets directly to the analyzer without serializing text or syntax trees.
 
 ## Runtime boundary
 

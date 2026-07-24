@@ -1,5 +1,7 @@
 #pragma once
 
+#include <cstdint>
+
 namespace soda {
 
 struct CppIndentStyle {
@@ -33,7 +35,7 @@ struct CppIndentStyle {
     // None: namespace bodies flush with the namespace keyword; Inner: only
     // bodies nested inside another namespace indent; All: every body indents
     // (clang-format NamespaceIndentation).
-    enum class NamespaceIndentation { None, Inner, All };
+    enum class NamespaceIndentation : std::uint8_t { None, Inner, All };
     NamespaceIndentation namespace_indentation = NamespaceIndentation::None;
     bool indent_type_body = true;
     bool indent_case_label = false;
@@ -50,7 +52,7 @@ struct CppIndentStyle {
     // — that is intra-line spacing, outside an indentation kernel's remit, so
     // for the leading column it behaves like None. The outermost include guard
     // (#ifndef/#define … trailing #endif) is transparent, matching clang-format.
-    enum class PPDirectiveIndent { None, AfterHash, BeforeHash };
+    enum class PPDirectiveIndent : std::uint8_t { None, AfterHash, BeforeHash };
     PPDirectiveIndent pp_directive_indent = PPDirectiveIndent::None;
     // Indent width per conditional level; -1 means "use indent_width"
     // (clang-format PPIndentWidth default).
@@ -59,7 +61,7 @@ struct CppIndentStyle {
     // Effective columns of one preprocessor nesting level.
     int pp_step() const { return pp_indent_width >= 0 ? pp_indent_width : indent_width; }
 
-    enum class ConstructorInitializerStyle {
+    enum class ConstructorInitializerStyle : std::uint8_t {
         NormalIndent,
         ContinuationIndent,
         AlignFirstInitializer,

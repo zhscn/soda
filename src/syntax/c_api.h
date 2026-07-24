@@ -53,9 +53,10 @@ typedef struct soda_cpp_analyzer soda_cpp_analyzer;
 #define SODA_SYNTAX_ERROR 26
 
 // An analyzer is mutable, belongs to its creating thread, and retains the
-// latest analyzed snapshot. Node ids are valid only until the next analyze or
-// apply operation on that analyzer and must originate from root, node_at,
-// node_parent, or node_child.
+// latest analyzed snapshot. Node ids are valid only until the next operation
+// that installs or advances analysis on that analyzer. This includes analyze,
+// apply, and higher-level ABI operations that accept a mutable analyzer. Node
+// ids must originate from root, node_at, node_parent, or node_child.
 SODA_CPP_ANALYSIS_API uint32_t soda_cpp_analysis_abi_version(void);
 SODA_CPP_ANALYSIS_API const char* soda_cpp_analysis_last_error(void);
 SODA_CPP_ANALYSIS_API const char* soda_syntax_kind_name(int kind);

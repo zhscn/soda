@@ -216,6 +216,17 @@ const DocumentChange& unwrap_change(const soda_change& change) noexcept {
     return change.value;
 }
 
+Document& unwrap_document(soda_document& document) {
+    require_owner(*document.state);
+    return document.state->value;
+}
+
+soda_change* wrap_change(DocumentChange change) {
+    auto output = std::make_unique<soda_change>();
+    output->value = std::move(change);
+    return output.release();
+}
+
 } // namespace soda::abi
 
 extern "C" {

@@ -16,6 +16,7 @@ soda_core_test(green_tree_tests syntax/green_tree_tests.cpp soda_cpp_analysis)
 soda_core_test(parser_tests syntax/parser_tests.cpp soda_cpp_analysis)
 soda_core_test(reparse_tests syntax/reparse_tests.cpp soda_cpp_analysis)
 soda_core_test(structure_tests syntax/structure_tests.cpp soda_cpp_analysis)
+soda_core_test(cpp_analysis_abi_tests syntax/c_api_tests.cpp soda_cpp_analysis)
 
 add_executable(syntax_concurrency_tests syntax/concurrency_tests.cpp)
 target_link_libraries(syntax_concurrency_tests
@@ -28,6 +29,7 @@ soda_core_test(clang_format_style_tests
   soda_indentation
 )
 soda_core_test(indentation_tests indentation/indentation_tests.cpp soda_indentation)
+soda_core_test(indentation_abi_tests indentation/c_api_tests.cpp soda_indentation)
 soda_core_test(native_core_tests native_core_tests.cpp soda_native_core)
 soda_core_test(runtime_tests runtime/runtime_tests.cpp soda_runtime)
 target_link_libraries(runtime_tests PRIVATE soda_document)
@@ -55,5 +57,30 @@ if(CHEZ_SCHEME_EXECUTABLE)
       ${CHEZ_SCHEME_EXECUTABLE}
       --libdirs ${PROJECT_SOURCE_DIR}/scheme
       --program ${CMAKE_CURRENT_SOURCE_DIR}/scheme/runtime_tests.ss
+  )
+
+  add_test(
+    NAME scheme_cpp_analysis_tests
+    CONFIGURATIONS Debug Release
+    COMMAND
+      ${CMAKE_COMMAND} -E env
+      SODA_DOCUMENT_LIBRARY=$<TARGET_FILE:soda_document>
+      SODA_CPP_ANALYSIS_LIBRARY=$<TARGET_FILE:soda_cpp_analysis>
+      ${CHEZ_SCHEME_EXECUTABLE}
+      --libdirs ${PROJECT_SOURCE_DIR}/scheme
+      --program ${CMAKE_CURRENT_SOURCE_DIR}/scheme/cpp_analysis_tests.ss
+  )
+
+  add_test(
+    NAME scheme_indentation_tests
+    CONFIGURATIONS Debug Release
+    COMMAND
+      ${CMAKE_COMMAND} -E env
+      SODA_DOCUMENT_LIBRARY=$<TARGET_FILE:soda_document>
+      SODA_CPP_ANALYSIS_LIBRARY=$<TARGET_FILE:soda_cpp_analysis>
+      SODA_INDENTATION_LIBRARY=$<TARGET_FILE:soda_indentation>
+      ${CHEZ_SCHEME_EXECUTABLE}
+      --libdirs ${PROJECT_SOURCE_DIR}/scheme
+      --program ${CMAKE_CURRENT_SOURCE_DIR}/scheme/indentation_tests.ss
   )
 endif()

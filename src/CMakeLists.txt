@@ -13,8 +13,10 @@ add_library(soda_cpp_lexer STATIC
   cpp_lexer/token_buffer.cpp
 )
 target_link_libraries(soda_cpp_lexer PUBLIC soda_document)
+set_target_properties(soda_cpp_lexer PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-add_library(soda_cpp_analysis STATIC
+add_library(soda_cpp_analysis SHARED
+  syntax/c_api.cpp
   syntax/analysis.cpp
   syntax/green_node.cpp
   syntax/parser.cpp
@@ -22,14 +24,17 @@ add_library(soda_cpp_analysis STATIC
   syntax/syntax_tree.cpp
 )
 target_link_libraries(soda_cpp_analysis PUBLIC soda_cpp_lexer)
+target_compile_definitions(soda_cpp_analysis PRIVATE SODA_CPP_ANALYSIS_BUILD)
 
-add_library(soda_indentation STATIC
+add_library(soda_indentation SHARED
   commands/editor_commands.cpp
   formatting/clang_format_style.cpp
+  indentation/c_api.cpp
   indentation/expression_continuation.cpp
   indentation/indentation_service.cpp
 )
 target_link_libraries(soda_indentation PUBLIC soda_cpp_analysis)
+target_compile_definitions(soda_indentation PRIVATE SODA_INDENTATION_BUILD)
 
 add_library(soda_runtime SHARED
   runtime/c_api.cpp
