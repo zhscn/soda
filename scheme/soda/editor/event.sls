@@ -60,4 +60,3 @@
           "unknown modifier"
           modifier))
       (not (zero? (bitwise-and (key-event-modifiers event) (cdr entry)))))))
-
