@@ -47,7 +47,9 @@ function; terminal frame rendering only reads the resulting editor state. The
 renderer reads visible document lines and uses terminal cells for tab
 expansion, wide-character clipping, and cursor placement. Each cell retains
 its semantic faces, resolved style, document position, and render sources; the
-terminal presenter is the only layer that encodes the frame as ANSI.
+frame retains the realized component tree and rectangles. Fixed and flexible
+layout extents place independent text and modeline components. The terminal
+presenter is the only layer that encodes the frame as ANSI.
 
 ## Language modes
 

@@ -164,6 +164,7 @@ Frame {
   rows,
   columns,
   cells,
+  layout,
   cursor
 }
 
@@ -188,6 +189,30 @@ CellSource {
 cell 的正文、chrome 和 decoration 来源；映射正文的 cell 同时保留 document byte
 position。tab 展开的每个空格和宽字符的 continuation cell 都保持该映射。
 
+frame 的 `layout` 保存实际使用的 component tree：
+
+```text
+Component {
+  id,
+  render(context, frame, rect)
+}
+
+ComponentNode {
+  id,
+  rect,
+  component?,
+  children
+}
+```
+
+component 不拥有 command loop，也不直接处理 terminal bytes。它读取 render
+context，只在分配的 Rect 中绘制。父节点先绘制，children 按顺序覆盖；坐标查询按
+相反顺序选择最上层的 component，并可返回从 root 到 leaf 的完整路径。
+
+layout 使用纯 Rect 运算。fixed extent 保留指定 cell 数，flex extent 按整数权重
+确定性分配剩余空间。正文和 modeline 是 root 下的两个独立 component；同一 split
+机制供后续 WindowLayout、minibuffer 保留行和工具区域复用。
+
 renderer 只读取 viewport 覆盖的行，向 frame 写入 cell，并计算结构化 cursor。
 presenter 是唯一生成 ANSI 控制序列的组件。完整重绘与 cell diff 是可替换的
 presenter 策略，不改变 View、Window、Buffer 或 Frame 模型。光标、modeline、
@@ -195,7 +220,7 @@ minibuffer、popup 和工具区域都使用 cells 表达，不会向 Document �
 或虚拟文本。
 
 `describe-caret` 从 snapshot 与最终 frame 生成结构化字符描述，包括 code point、
-document position、screen cell、显示宽度、faces、style 和 sources。
+document position、screen cell、component path、显示宽度、faces、style 和 sources。
 `help.describe-char` 通过 `C-x =` 显示该描述。REPL、generated buffer 和调试
 overlay 可以消费同一个描述值，不需要解析 ANSI 输出。
 
