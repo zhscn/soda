@@ -8,7 +8,8 @@
         (soda editor event)
         (soda editor keymap)
         (soda editor language)
-        (soda tui input))
+        (soda tui input)
+        (soda tui renderer))
 
 (define (decode decoder bytes)
   (input-decoder-feed! decoder bytes))
@@ -20,6 +21,18 @@
         (bytevector-u8-set! result index (car values))
         (loop (cdr values) (+ index 1))))
     result))
+
+(define (string-contains? value needle)
+  (let ([limit (- (string-length value) (string-length needle))])
+    (let loop ([index 0])
+      (and (<= index limit)
+           (or (string=?
+                 (substring
+                   value
+                   index
+                   (+ index (string-length needle)))
+                 needle)
+               (loop (+ index 1)))))))
 
 (define (send! editor decoder bytes)
   (let loop ([events (decode decoder bytes)] [effects '()])
@@ -218,8 +231,32 @@
 (unless (= (buffer-setting-ref buffer 'tab-width) 6)
   (error 'editor-tests "re-registered mode was not visible to the buffer"))
 
+(define display-document (make-document "λ\t界\nhidden" 73))
+(define display-buffer
+  (make-buffer
+    19
+    display-document
+    "*display*"
+    'fundamental-mode))
+(editor-add-buffer! editor display-buffer)
+(define display-view
+  (editor-open-view! editor (buffer-id display-buffer)))
+(editor-set-active-view! editor (view-id display-view))
+(define wide-frame (render-editor-frame editor 2 10))
+(unless (string-contains? wide-frame "λ       界")
+  (error 'editor-tests "renderer did not expand tabs in display cells"))
+(define clipped-frame (render-editor-frame editor 2 9))
+(when (string-contains? clipped-frame "界")
+  (error 'editor-tests "renderer split a wide character at the viewport edge"))
+(send! editor decoder (bytes #x1b #x5b #x43))
+(unless (string-contains?
+          (render-editor-frame editor 2 10)
+          (string-append (string (integer->char 27)) "[1;2H"))
+  (error 'editor-tests "renderer cursor did not use display cells"))
+
 (editor-close! editor)
 (unless (and (editor-closed? editor)
              (buffer-closed? buffer)
-             (buffer-closed? second-buffer))
+             (buffer-closed? second-buffer)
+             (buffer-closed? display-buffer))
   (error 'editor-tests "closing the editor did not release its buffer"))
