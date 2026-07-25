@@ -4,10 +4,13 @@
           (soda editor buffer)
           (soda editor command)
           (soda editor commands basic)
+          (soda editor completion)
+          (soda editor display)
           (soda editor event)
           (soda editor input-state)
           (soda editor keymap)
           (soda editor language)
+          (soda editor prompt)
           (soda editor state))
 
   (define (condition->string condition)
@@ -142,8 +145,7 @@
 
   (define (handle-resize-message! editor message)
     (let ([rows (resize-message-rows message)]
-          [columns (resize-message-columns message)]
-          [view (editor-active-view editor)])
+          [columns (resize-message-columns message)])
       (unless (and (integer? rows)
                    (exact? rows)
                    (>= rows 2)
@@ -155,8 +157,39 @@
           "resize dimensions are invalid"
           rows
           columns))
-      (view-set-viewport! view (- rows 1) columns)
-      (ensure-view-visible! view)
+      (let* ([session (editor-active-prompt editor)]
+             [completion (editor-active-prompt-completion editor)]
+             [completion-rows
+               (if completion
+                   (min
+                     6
+                     (length
+                       (completion-session-items completion))
+                     (max 0 (- rows 2)))
+                   0)]
+             [view (editor-base-view editor)]
+             [body-rows
+               (max
+                 1
+                 (- rows
+                    (if session (+ 2 completion-rows) 1)))])
+        (view-set-viewport! view body-rows columns)
+        (ensure-view-visible! view)
+        (when session
+          (let* ([prompt-view
+                   (editor-view-ref
+                     editor
+                     (prompt-session-view-id session))]
+                 [prompt-width
+                   (string-cell-width
+                     (prompt-request-prompt
+                       (prompt-session-request session))
+                     8)])
+            (view-set-viewport!
+              prompt-view
+              1
+              (max 1 (- columns prompt-width)))
+            (ensure-view-visible! prompt-view))))
       '()))
 
   (define (editor-update! editor message)
@@ -179,6 +212,9 @@
          editor
          (internal-command-message-name message)
          (internal-command-message-argument message))]
+      [(completion-response-message? message)
+       (editor-apply-completion-response! editor message)
+       '()]
       [else
        (assertion-violation
          'editor-update!

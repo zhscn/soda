@@ -4,13 +4,26 @@
           interaction-session-id
           interaction-session-kind
           interaction-session-name
+          interaction-session-transcript
           interaction-session-buffer-id
           interaction-session-evaluator
           interaction-session-prompt
           interaction-session-state
           interaction-session-generation
+          interaction-session-output-mark
           interaction-session-input-start
           interaction-session-history
+          interaction-session-history-index
+          interaction-session-history-draft
+          interaction-session-history-previous!
+          interaction-session-history-next!
+          interaction-session-reset-history-navigation!
+          interaction-session-prompt-start
+          interaction-session-prompt-end
+          interaction-session-last-input-start
+          interaction-session-last-input-end
+          interaction-session-last-output-start
+          interaction-session-last-output-end
           interaction-session-last-result
           interaction-session-begin!
           interaction-session-complete!
@@ -39,8 +52,12 @@
           evaluation-result-stdout
           evaluation-result-stderr
           evaluation-result-condition
-          evaluation-result-messages)
-  (import (rnrs))
+          evaluation-result-messages
+          interaction-transcript?
+          interaction-transcript-closed?)
+  (import (rnrs)
+          (soda editor interaction-history)
+          (soda editor interaction-transcript))
 
   (define-record-type
     (interaction-session %make-interaction-session interaction-session?)
@@ -48,21 +65,15 @@
       (immutable id interaction-session-id)
       (immutable kind interaction-session-kind)
       (immutable name interaction-session-name)
-      (immutable buffer-id interaction-session-buffer-id)
+      (immutable transcript interaction-session-transcript)
       (immutable evaluator interaction-session-evaluator)
-      (immutable prompt interaction-session-prompt)
       (mutable state
                interaction-session-state
                interaction-session-state-set!)
       (mutable generation
                interaction-session-generation
                interaction-session-generation-set!)
-      (mutable input-start
-               interaction-session-input-start
-               interaction-session-input-start-set!)
-      (mutable history
-               interaction-session-history
-               interaction-session-history-set!)
+      (immutable history interaction-session-history-state)
       (mutable last-result
                interaction-session-last-result
                interaction-session-last-result-set!)
@@ -80,6 +91,58 @@
   (define-record-type
     (evaluation-result %make-evaluation-result evaluation-result?)
     (fields request status values stdout stderr condition messages))
+
+  (define (interaction-session-buffer-id session)
+    (interaction-transcript-buffer-id
+      (interaction-session-transcript session)))
+
+  (define (interaction-session-prompt session)
+    (interaction-transcript-prompt
+      (interaction-session-transcript session)))
+
+  (define (interaction-session-input-start session)
+    (interaction-transcript-input-start
+      (interaction-session-transcript session)))
+
+  (define (interaction-session-output-mark session)
+    (interaction-transcript-output-mark
+      (interaction-session-transcript session)))
+
+  (define (interaction-session-prompt-start session)
+    (interaction-transcript-prompt-start
+      (interaction-session-transcript session)))
+
+  (define (interaction-session-prompt-end session)
+    (interaction-transcript-prompt-end
+      (interaction-session-transcript session)))
+
+  (define (interaction-session-last-input-start session)
+    (interaction-transcript-last-input-start
+      (interaction-session-transcript session)))
+
+  (define (interaction-session-last-input-end session)
+    (interaction-transcript-last-input-end
+      (interaction-session-transcript session)))
+
+  (define (interaction-session-last-output-start session)
+    (interaction-transcript-last-output-start
+      (interaction-session-transcript session)))
+
+  (define (interaction-session-last-output-end session)
+    (interaction-transcript-last-output-end
+      (interaction-session-transcript session)))
+
+  (define (interaction-session-history session)
+    (interaction-history-entries
+      (interaction-session-history-state session)))
+
+  (define (interaction-session-history-index session)
+    (interaction-history-index
+      (interaction-session-history-state session)))
+
+  (define (interaction-session-history-draft session)
+    (interaction-history-draft
+      (interaction-session-history-state session)))
 
   (define (exact-non-negative-integer? value)
     (and (integer? value) (exact? value) (not (negative? value))))
@@ -112,7 +175,7 @@
             id
             kind
             name
-            buffer-id
+            buffer
             evaluator
             prompt
             input-start)
@@ -131,11 +194,6 @@
         'make-interaction-session
         "name must be a string"
         name))
-    (unless (exact-non-negative-integer? buffer-id)
-      (assertion-violation
-        'make-interaction-session
-        "buffer id must be a non-negative exact integer"
-        buffer-id))
     (unless (string? prompt)
       (assertion-violation
         'make-interaction-session
@@ -150,13 +208,11 @@
       id
       kind
       name
-      buffer-id
+      (make-interaction-transcript buffer prompt input-start)
       evaluator
-      prompt
       'ready
       0
-      input-start
-      '()
+      (make-interaction-history 200)
       #f
       #f))
 
@@ -190,19 +246,46 @@
        (let ([generation (+ (interaction-session-generation session) 1)])
          (interaction-session-generation-set! session generation)
          (interaction-session-state-set! session 'evaluating)
-         (interaction-session-history-set!
-           session
-           (append (interaction-session-history session) (list source)))
+         (interaction-history-record!
+           (interaction-session-history-state session)
+           source)
          (make-evaluation-request
            (interaction-session-id session)
            generation
            source
            origin))]))
 
-  (define (interaction-session-complete!
+  (define (interaction-session-reset-history-navigation! session)
+    (require-open-session
+      'interaction-session-reset-history-navigation!
+      session)
+    (interaction-history-reset!
+      (interaction-session-history-state session))
+    session)
+
+  (define (interaction-session-history-previous!
             session
-            result
-            next-input-start)
+            current-input)
+    (require-open-session
+      'interaction-session-history-previous!
+      session)
+    (unless (string? current-input)
+      (assertion-violation
+        'interaction-session-history-previous!
+        "current input must be a string"
+        current-input))
+    (interaction-history-previous!
+      (interaction-session-history-state session)
+      current-input))
+
+  (define (interaction-session-history-next! session)
+    (require-open-session
+      'interaction-session-history-next!
+      session)
+    (interaction-history-next!
+      (interaction-session-history-state session)))
+
+  (define (interaction-session-complete! session result)
     (require-open-session 'interaction-session-complete! session)
     (unless (evaluation-result? result)
       (assertion-violation
@@ -220,12 +303,6 @@
           'interaction-session-complete!
           "evaluation result is stale"
           request)))
-    (unless (exact-non-negative-integer? next-input-start)
-      (assertion-violation
-        'interaction-session-complete!
-        "input start must be a non-negative exact integer"
-        next-input-start))
-    (interaction-session-input-start-set! session next-input-start)
     (interaction-session-last-result-set! session result)
     (interaction-session-state-set!
       session
@@ -249,6 +326,8 @@
   (define (interaction-session-close! session)
     (when (and (interaction-session? session)
                (not (interaction-session-closed? session)))
+      (interaction-transcript-close!
+        (interaction-session-transcript session))
       (interaction-session-state-set! session 'closed)
       (interaction-session-closed?-set! session #t)))
 

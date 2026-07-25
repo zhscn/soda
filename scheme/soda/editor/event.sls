@@ -31,7 +31,16 @@
           make-internal-command-message
           internal-command-message?
           internal-command-message-name
-          internal-command-message-argument)
+          internal-command-message-argument
+          make-completion-response-message
+          completion-response-message?
+          completion-response-message-session-id
+          completion-response-message-generation
+          completion-response-message-provider
+          completion-response-message-target-id
+          completion-response-message-target-revision
+          completion-response-message-items
+          completion-response-message-complete?)
   (import (rnrs))
 
   (define-record-type key-event
@@ -62,6 +71,56 @@
 
   (define-record-type internal-command-message
     (fields name argument))
+
+  (define-record-type
+    (completion-response-message
+      %make-completion-response-message
+      completion-response-message?)
+    (fields session-id
+            generation
+            provider
+            target-id
+            target-revision
+            items
+            complete?))
+
+  (define (exact-non-negative-integer? value)
+    (and (integer? value) (exact? value) (not (negative? value))))
+
+  (define (make-completion-response-message
+            session-id
+            generation
+            provider
+            target-id
+            target-revision
+            items
+            complete?)
+    (unless (and (exact-non-negative-integer? session-id)
+                 (exact-non-negative-integer? generation)
+                 (symbol? provider)
+                 (exact-non-negative-integer? target-id)
+                 (or (not target-revision)
+                     (exact-non-negative-integer? target-revision))
+                 (list? items)
+                 (boolean? complete?))
+      (assertion-violation
+        'make-completion-response-message
+        "completion response fields are invalid"
+        session-id
+        generation
+        provider
+        target-id
+        target-revision
+        items
+        complete?))
+    (%make-completion-response-message
+      session-id
+      generation
+      provider
+      target-id
+      target-revision
+      items
+      complete?))
 
   (define modifier-bits
     '((shift . 1)

@@ -8,6 +8,7 @@
         (soda editor event)
         (soda editor keymap)
         (soda editor language)
+        (soda editor scheme-semantics)
         (soda tui commands)
         (soda tui component)
         (soda tui frame)
@@ -563,3 +564,706 @@
              (buffer-closed? display-buffer)
              (buffer-closed? recreated-buffer))
   (error 'editor-tests "closing the editor did not release its buffer"))
+
+(define prompt-document (make-document "body" 91))
+(define prompt-buffer
+  (make-buffer
+    91
+    prompt-document
+    "*prompt-test*"
+    'fundamental-mode))
+(define prompt-editor (make-editor prompt-buffer))
+(define prompt-decoder (make-input-decoder))
+(define prompt-invocations 0)
+(define captured-prompt-result #f)
+(define selected-command #f)
+(editor-register-command!
+  prompt-editor
+  'test.prompt-target
+  (lambda (context)
+    (set! prompt-invocations (+ prompt-invocations 1))
+    '()))
+(editor-register-command!
+  prompt-editor
+  'test.capture-prompt
+  (lambda (context)
+    (set! captured-prompt-result (command-context-argument context))
+    '()))
+(editor-register-command!
+  prompt-editor
+  'test.choice-alpha
+  (lambda (context)
+    (set! selected-command 'alpha)
+    '()))
+(editor-register-command!
+  prompt-editor
+  'test.choice-beta
+  (lambda (context)
+    (set! selected-command 'beta)
+    '()))
+
+(editor-update! prompt-editor (make-resize-message 5 40))
+(send! prompt-editor prompt-decoder (bytes 27 120))
+(let ([session (editor-active-prompt prompt-editor)])
+  (unless (and session
+               (string=? (prompt-request-prompt
+                           (prompt-session-request session))
+                         "M-x ")
+               (= (length (editor-buffers prompt-editor)) 2)
+               (= (length (editor-views prompt-editor)) 2)
+               (eq? (view-buffer (editor-base-view prompt-editor))
+                    prompt-buffer)
+               (not (eq? (editor-active-view prompt-editor)
+                         (editor-base-view prompt-editor))))
+    (error 'editor-tests
+           "M-x did not open an isolated minibuffer session")))
+
+(send!
+  prompt-editor
+  prompt-decoder
+  (string->utf8 "test.prompt-target"))
+(unless (string=? (editor-active-prompt-input prompt-editor)
+                  "test.prompt-target")
+  (error 'editor-tests
+         "minibuffer text did not stay in its transient buffer"))
+(unless (bytevector=? (buffer-bytes prompt-buffer) (string->utf8 "body"))
+  (error 'editor-tests "minibuffer input changed the origin buffer"))
+
+(editor-update! prompt-editor (make-resize-message 5 40))
+(define prompt-frame (render-editor-frame prompt-editor 5 40))
+(let* ([layout (frame-layout prompt-frame)]
+       [node (component-node-find layout 'editor.minibuffer)]
+       [completion-node
+         (component-node-find layout 'editor.completions)])
+  (unless (and node
+               (= (rect-row (component-node-rect node)) 4)
+               (= (rect-rows (component-node-rect node)) 1)
+               completion-node
+               (= (rect-row
+                    (component-node-rect completion-node))
+                  3)
+               (string=? (cell-text (frame-cell-ref prompt-frame 3 0))
+                         "t")
+               (eq? (cell-face (frame-cell-ref prompt-frame 3 0))
+                    'completion-selected)
+               (string=? (cell-text (frame-cell-ref prompt-frame 4 0)) "M")
+               (string=? (cell-text (frame-cell-ref prompt-frame 4 4)) "t")
+               (eq? (cell-face (frame-cell-ref prompt-frame 4 0))
+                    'minibuffer-prompt)
+               (= (view-viewport-rows
+                    (editor-base-view prompt-editor))
+                  2)
+               (frame-cursor-visible? prompt-frame)
+               (= (frame-cursor-row prompt-frame) 4))
+    (error 'editor-tests
+           "minibuffer component did not preserve body layout and focus")))
+
+(define prompt-effects
+  (send! prompt-editor prompt-decoder (bytes 13)))
+(unless (and (= (length prompt-effects) 1)
+             (eq? (command-effect-kind (car prompt-effects))
+                  'prompt.reply)
+             (not (editor-active-prompt prompt-editor))
+             (= (length (editor-buffers prompt-editor)) 1)
+             (= (length (editor-views prompt-editor)) 1)
+             (eq? (view-buffer (editor-active-view prompt-editor))
+                  prompt-buffer))
+  (error 'editor-tests
+         "accepting the minibuffer did not restore the origin view"))
+
+(define prompt-executor (make-effect-executor))
+(install-prompt-effect-handler! prompt-executor)
+(define prompt-effect-result
+  (execute-effects! prompt-executor prompt-effects))
+(for-each
+  (lambda (message)
+    (editor-update! prompt-editor message))
+  (effect-result-messages prompt-effect-result))
+(unless (= prompt-invocations 1)
+  (error 'editor-tests
+         "prompt reply did not re-enter the command loop as a message"))
+(unless (equal? (editor-history-entries
+                  prompt-editor
+                  'extended-command)
+                '("test.prompt-target"))
+  (error 'editor-tests "accepted input was not recorded in history"))
+
+(send! prompt-editor prompt-decoder (bytes 27 120))
+(send! prompt-editor prompt-decoder (bytes #x1b #x5b #x41))
+(unless (string=? (editor-active-prompt-input prompt-editor)
+                  "test.prompt-target")
+  (error 'editor-tests "prompt history did not restore the newest entry"))
+(send! prompt-editor prompt-decoder (bytes 7))
+(unless (and (not (editor-active-prompt prompt-editor))
+             (null? (editor-prompts prompt-editor))
+             (equal? (editor-history-entries
+                       prompt-editor
+                       'extended-command)
+                     '("test.prompt-target")))
+  (error 'editor-tests
+         "keyboard quit did not abort without changing history"))
+
+(send! prompt-editor prompt-decoder (bytes 27 120))
+(send!
+  prompt-editor
+  prompt-decoder
+  (string->utf8 "test.choice-"))
+(let ([completion (editor-active-prompt-completion prompt-editor)])
+  (unless (and completion
+               (= (length (completion-session-items completion)) 2)
+               (string=?
+                 (completion-item-insert-text
+                   (completion-session-selected-item completion))
+                 "test.choice-alpha"))
+    (error 'editor-tests
+           "command choice source did not expose structured candidates")))
+(send! prompt-editor prompt-decoder (bytes 9))
+(let ([selected
+        (completion-session-selected-item
+          (editor-active-prompt-completion prompt-editor))])
+  (unless (and selected
+               (string=? (completion-item-insert-text selected)
+                         "test.choice-beta")
+               (eq? (completion-item-payload selected)
+                    'test.choice-beta))
+    (error 'editor-tests
+           "completion selection did not retain candidate identity")))
+(define selected-effects
+  (send! prompt-editor prompt-decoder (bytes 13)))
+(define selected-effect-result
+  (execute-effects! prompt-executor selected-effects))
+(for-each
+  (lambda (message)
+    (editor-update! prompt-editor message))
+  (effect-result-messages selected-effect-result))
+(unless (and (eq? selected-command 'beta)
+             (equal? (editor-history-entries
+                       prompt-editor
+                       'extended-command)
+                     '("test.choice-beta" "test.prompt-target")))
+  (error 'editor-tests
+         "accepting a selected completion did not use its insert value"))
+
+(editor-open-prompt!
+  prompt-editor
+  (make-prompt-request
+    "Default: "
+    ""
+    'default-test
+    "fallback"
+    'free
+    #f
+    'test.capture-prompt
+    #f))
+(define default-effects
+  (send! prompt-editor prompt-decoder (bytes 13)))
+(define default-effect-result
+  (execute-effects! prompt-executor default-effects))
+(for-each
+  (lambda (message)
+    (editor-update! prompt-editor message))
+  (effect-result-messages default-effect-result))
+(unless (and (prompt-result? captured-prompt-result)
+             (eq? (prompt-result-status captured-prompt-result)
+                  'accepted)
+             (string=? (prompt-result-value captured-prompt-result)
+                       "fallback")
+             (equal? (editor-history-entries
+                       prompt-editor
+                       'default-test)
+                     '("fallback")))
+  (error 'editor-tests
+         "prompt default and result contract differed"))
+
+(editor-open-prompt!
+  prompt-editor
+  (make-prompt-request
+    "Choice: "
+    "no"
+    #f
+    #f
+    'must-match
+    (lambda (value) (string=? value "yes"))
+    'test.capture-prompt
+    #f))
+(unless (null? (send! prompt-editor prompt-decoder (bytes 13)))
+  (error 'editor-tests "invalid must-match input produced a reply"))
+(unless (and (editor-active-prompt prompt-editor)
+             (string? (editor-status-message prompt-editor)))
+  (error 'editor-tests "invalid must-match input closed the minibuffer"))
+(send! prompt-editor prompt-decoder (bytes 127 127))
+(send! prompt-editor prompt-decoder (string->utf8 "yes"))
+(define matched-effects
+  (send! prompt-editor prompt-decoder (bytes 13)))
+(define matched-result
+  (execute-effects! prompt-executor matched-effects))
+(for-each
+  (lambda (message)
+    (editor-update! prompt-editor message))
+  (effect-result-messages matched-result))
+(unless (and (prompt-result? captured-prompt-result)
+             (string=? (prompt-result-value captured-prompt-result) "yes"))
+  (error 'editor-tests "valid must-match input was not accepted"))
+
+(define outer-prompt
+  (editor-open-prompt!
+    prompt-editor
+    (make-prompt-request "Outer: " 'test.capture-prompt)))
+(define inner-prompt
+  (editor-open-prompt!
+    prompt-editor
+    (make-prompt-request "Inner: " 'test.capture-prompt)))
+(unless (and (= (length (editor-prompts prompt-editor)) 2)
+             (= (prompt-session-origin-view-id inner-prompt)
+                (prompt-session-view-id outer-prompt))
+             (eq? (view-buffer (editor-base-view prompt-editor))
+                  prompt-buffer))
+  (error 'editor-tests "nested prompts did not retain their origin stack"))
+(editor-abort-prompt! prompt-editor)
+(unless (and (eq? (editor-active-prompt prompt-editor) outer-prompt)
+             (= (view-id (editor-active-view prompt-editor))
+                (prompt-session-view-id outer-prompt)))
+  (error 'editor-tests "closing a nested prompt did not restore its parent"))
+(editor-abort-prompt! prompt-editor)
+(unless (and (not (editor-active-prompt prompt-editor))
+             (eq? (view-buffer (editor-active-view prompt-editor))
+                  prompt-buffer)
+             (= (length (editor-buffers prompt-editor)) 1)
+             (= (length (editor-views prompt-editor)) 1))
+  (error 'editor-tests "closing the prompt stack leaked transient state"))
+
+(editor-close! prompt-editor)
+(unless (and (editor-closed? prompt-editor)
+             (buffer-closed? prompt-buffer))
+  (error 'editor-tests "prompt editor did not release its resources"))
+
+(define completion-document
+  (make-document (string->utf8 "alpha alpine beta al") 940))
+(define completion-buffer
+  (make-buffer 940 completion-document #f 'fundamental-mode))
+(define completion-editor (make-editor completion-buffer))
+(define completion-decoder (make-input-decoder))
+(define semantic-start-count 0)
+(define semantic-cancel-count 0)
+(define semantic-provider
+  (make-completion-provider
+    'semantic
+    (lambda (request)
+      (set! semantic-start-count (+ semantic-start-count 1))
+      (let* ([query (completion-request-query request)]
+             [label
+               (if (string=? query "alp")
+                   "alpine-extra"
+                   "algebra")]
+             [id (string->symbol label)])
+        (list
+          (make-completion-response-for-request
+            request
+            (list
+              (make-completion-item
+                id
+                'semantic
+                label
+                label
+                label
+                "semantic"
+                #f
+                id))
+            (string=? query "alp")))))
+    (lambda (request)
+      (set! semantic-cancel-count
+        (+ semantic-cancel-count 1)))))
+(editor-register-completion-provider!
+  completion-editor
+  semantic-provider)
+(buffer-set-local-setting!
+  completion-buffer
+  'completion-providers
+  '(semantic))
+(define completion-executor (make-effect-executor))
+(install-completion-effect-handlers!
+  completion-executor
+  (editor-completion-provider-catalog completion-editor))
+(editor-update! completion-editor (make-resize-message 6 30))
+(send! completion-editor completion-decoder (bytes #x1b #x5b #x46))
+(define completion-start-effects
+  (send! completion-editor completion-decoder (bytes 27 47)))
+(unless
+  (and
+    (= (length completion-start-effects) 1)
+    (eq? (command-effect-kind (car completion-start-effects))
+         'completion.request))
+  (error 'editor-tests
+         "starting completion did not emit provider request work"))
+(define completion-start-result
+  (execute-effects!
+    completion-executor
+    completion-start-effects))
+(for-each
+  (lambda (message)
+    (editor-update! completion-editor message))
+  (effect-result-messages completion-start-result))
+(let ([completion (editor-active-completion completion-editor)])
+  (unless
+    (and completion
+         (document-completion-target?
+           (completion-session-target completion))
+         (= (document-completion-target-start
+              (completion-session-target completion))
+            18)
+         (= (length (completion-session-items completion)) 3)
+         (string=?
+           (completion-item-insert-text
+             (completion-session-selected-item completion))
+           "alpha"))
+    (error 'editor-tests
+         "completion provider request did not populate the session")))
+
+(define completion-frame
+  (render-editor-frame completion-editor 6 30))
+(let* ([layout (frame-layout completion-frame)]
+       [node (component-node-find layout 'editor.completions)])
+  (unless
+    (and node
+         (= (rect-row (component-node-rect node)) 1)
+         (= (rect-rows (component-node-rect node)) 3)
+         (eq? (cell-face (frame-cell-ref completion-frame 2 20))
+              'completion-selected))
+    (error 'editor-tests
+           "document completion was not rendered beside the caret")))
+
+(let* ([completion (editor-active-completion completion-editor)]
+       [target (completion-session-target completion)]
+       [generation (completion-session-generation completion)]
+       [request
+         (completion-session-request completion 'semantic)])
+  (unless
+    (and
+      (= (completion-request-session-id request)
+         (completion-session-id completion))
+      (= (completion-request-generation request) generation)
+      (eq? (completion-request-target-kind request) 'document)
+      (= (completion-request-target-id request)
+         (document-completion-target-document-id target))
+      (= (completion-request-target-revision request)
+         (document-completion-target-revision target))
+      (= (completion-request-start request) 18)
+      (= (completion-request-end request) 20)
+      (string=? (completion-request-query request) "al"))
+    (error 'editor-tests
+           "completion request did not capture target metadata"))
+  (unless
+    (and
+      (= (length (completion-session-items completion)) 3)
+      (= (length
+           (completion-session-provider-results completion))
+         2)
+      (string=?
+        (completion-item-insert-text
+          (completion-session-selected-item completion))
+        "alpha")
+      (exists
+        (lambda (result)
+          (and
+            (eq? (completion-provider-result-provider result)
+                 'semantic)
+            (not
+              (completion-provider-result-complete? result))))
+        (completion-session-provider-results completion)))
+    (error 'editor-tests
+           "async provider response did not merge by provider"))
+  (editor-update!
+    completion-editor
+    (make-completion-response-message
+      (completion-session-id completion)
+      (- generation 1)
+      'semantic
+      (document-completion-target-document-id target)
+      (document-completion-target-revision target)
+      (list
+        (make-completion-item
+          'aardvark
+          'semantic
+          "aardvark"
+          "aardvark"
+          "aardvark"
+          #f
+          #f
+          'aardvark))
+      #t))
+  (unless (= (length (completion-session-items completion)) 3)
+    (error 'editor-tests
+           "stale completion generation changed visible items"))
+  (editor-update!
+    completion-editor
+    (make-completion-response-message
+      (completion-session-id completion)
+      generation
+      'semantic
+      (document-completion-target-document-id target)
+      (+ (document-completion-target-revision target) 1)
+      '()
+      #t))
+  (unless (= (length (completion-session-items completion)) 3)
+    (error 'editor-tests
+           "completion response for another revision was accepted"))
+  (editor-update!
+    completion-editor
+    (make-completion-response-message
+      (completion-session-id completion)
+      generation
+      'semantic
+      (document-completion-target-document-id target)
+      (document-completion-target-revision target)
+      (list
+        (make-completion-item
+          'altar
+          'semantic
+          "altar"
+          "altar"
+          "altar"
+          "semantic"
+          #f
+          'altar))
+      #t))
+  (unless
+    (and
+      (= (length (completion-session-items completion)) 3)
+      (not
+        (exists
+          (lambda (item)
+            (equal? (completion-item-id item) 'algebra))
+          (completion-session-items completion)))
+      (string=?
+        (completion-item-insert-text
+          (completion-session-selected-item completion))
+        "alpha"))
+    (error 'editor-tests
+           "provider replacement did not preserve selected identity")))
+
+(let* ([completion (editor-active-completion completion-editor)]
+       [target (completion-session-target completion)]
+       [generation (completion-session-generation completion)])
+  (unless (not (completion-session-pending? completion))
+    (error 'editor-tests
+           "final provider response did not retire its request"))
+  (editor-update!
+    completion-editor
+    (make-completion-response-message
+      (completion-session-id completion)
+      generation
+      'semantic
+      (document-completion-target-document-id target)
+      (document-completion-target-revision target)
+      (list
+        (make-completion-item
+          'after-final
+          'semantic
+          "after-final"
+          "after-final"
+          "after-final"
+          #f
+          #f
+          'after-final))
+      #t))
+  (when
+    (exists
+      (lambda (item)
+        (equal? (completion-item-id item) 'after-final))
+      (completion-session-items completion))
+    (error 'editor-tests
+           "response after provider final changed completion items")))
+
+(define completion-update-effects
+  (send! completion-editor completion-decoder (string->utf8 "p")))
+(let* ([completion (editor-active-completion completion-editor)]
+       [target (and completion (completion-session-target completion))])
+  (unless
+    (and completion
+         (string=? (completion-session-query completion) "alp")
+         (= (document-completion-target-end target) 21)
+         (= (document-completion-target-revision target)
+            (buffer-revision completion-buffer))
+         (= (length (completion-session-items completion)) 2))
+    (error 'editor-tests
+           "document completion did not follow command-loop edits")))
+
+(unless
+  (and
+    (= (length completion-update-effects) 1)
+    (eq? (command-effect-kind
+           (car completion-update-effects))
+         'completion.request))
+  (error 'editor-tests
+         "query change did not start replacement provider work"))
+(define completion-update-result
+  (execute-effects!
+    completion-executor
+    completion-update-effects))
+(for-each
+  (lambda (message)
+    (editor-update! completion-editor message))
+  (effect-result-messages completion-update-result))
+(let ([completion (editor-active-completion completion-editor)])
+  (unless (= (length (completion-session-items completion)) 3)
+    (error 'editor-tests
+           "current async response was not refiltered and merged")))
+
+(send! completion-editor completion-decoder (bytes 9))
+(define completion-accept-effects
+  (send! completion-editor completion-decoder (bytes 13)))
+(execute-effects!
+  completion-executor
+  completion-accept-effects)
+(unless
+  (and
+    (not (editor-active-completion completion-editor))
+    (= semantic-start-count 2)
+    (= semantic-cancel-count 0)
+    (bytevector=?
+      (buffer-bytes completion-buffer)
+      (string->utf8 "alpha alpine beta alpine")))
+  (error 'editor-tests
+         "accepting document completion did not apply one replacement"))
+(editor-close! completion-editor)
+
+(define scheme-completion-document
+  (make-document
+    (string->utf8
+      (string-append
+        "(define render-frame 1)\n"
+        "(define-syntax render-with (syntax-rules ()))\n"
+        "ren"))
+    942))
+(define scheme-completion-buffer
+  (make-buffer
+    942
+    scheme-completion-document
+    "self.sls"
+    'scheme-mode))
+(define scheme-completion-editor
+  (make-editor scheme-completion-buffer))
+(define scheme-completion-decoder (make-input-decoder))
+(define scheme-completion-executor (make-effect-executor))
+(install-completion-effect-handlers!
+  scheme-completion-executor
+  (editor-completion-provider-catalog
+    scheme-completion-editor))
+(send!
+  scheme-completion-editor
+  scheme-completion-decoder
+  (bytes
+    #x1b #x5b #x42
+    #x1b #x5b #x42
+    #x1b #x5b #x46))
+(define scheme-start-effects
+  (send!
+    scheme-completion-editor
+    scheme-completion-decoder
+    (bytes 27 47)))
+(unless
+  (and
+    (equal?
+      (buffer-setting-ref
+        scheme-completion-buffer
+        'completion-providers
+        '())
+      '(scheme-static))
+    (= (length scheme-start-effects) 1)
+    (eq? (completion-request-provider
+           (command-effect-payload (car scheme-start-effects)))
+         'scheme-static))
+  (error 'editor-tests
+         "scheme mode did not select its static completion provider"))
+(define scheme-start-result
+  (execute-effects!
+    scheme-completion-executor
+    scheme-start-effects))
+(for-each
+  (lambda (message)
+    (editor-update! scheme-completion-editor message))
+  (effect-result-messages scheme-start-result))
+(let* ([completion
+         (editor-active-completion scheme-completion-editor)]
+       [static-items
+         (filter
+           (lambda (item)
+             (eq? (completion-item-provider item) 'scheme-static))
+           (completion-session-items completion))]
+       [render-frame
+         (find
+           (lambda (item)
+             (string=? (completion-item-insert-text item)
+                       "render-frame"))
+           static-items)])
+  (unless
+    (and
+      completion
+      (= (length static-items) 2)
+      render-frame
+      (scheme-definition-id?
+        (completion-item-id render-frame))
+      (eq? (scheme-definition-kind
+             (completion-item-provider-data render-frame))
+           'variable))
+    (error 'editor-tests
+           "scheme static provider did not expose semantic definitions")))
+(send!
+  scheme-completion-editor
+  scheme-completion-decoder
+  (bytes 9))
+(define scheme-accept-effects
+  (send!
+    scheme-completion-editor
+    scheme-completion-decoder
+    (bytes 13)))
+(execute-effects!
+  scheme-completion-executor
+  scheme-accept-effects)
+(unless
+  (bytevector=?
+    (buffer-bytes scheme-completion-buffer)
+    (string->utf8
+      (string-append
+        "(define render-frame 1)\n"
+        "(define-syntax render-with (syntax-rules ()))\n"
+        "render-frame")))
+  (error 'editor-tests
+         "scheme semantic completion did not apply its definition"))
+(editor-close! scheme-completion-editor)
+
+(define stale-document
+  (make-document (string->utf8 "alpha al") 941))
+(define stale-buffer
+  (make-buffer 941 stale-document #f 'fundamental-mode))
+(define stale-editor (make-editor stale-buffer))
+(define stale-decoder (make-input-decoder))
+(send! stale-editor stale-decoder (bytes #x1b #x5b #x46))
+(send! stale-editor stale-decoder (bytes 27 47))
+(let ([change #f])
+  (dynamic-wind
+    (lambda () #f)
+    (lambda ()
+      (call-with-values
+        (lambda ()
+          (call-with-buffer-transaction
+            stale-buffer
+            (lambda (transaction)
+              (transaction-replace!
+                transaction
+                0
+                0
+                (string->utf8 "x")))))
+        (lambda (result committed-change)
+          (set! change committed-change))))
+    (lambda ()
+      (when change (change-close! change)))))
+(unless
+  (and
+    (not (editor-accept-completion! stale-editor))
+    (not (editor-active-completion stale-editor))
+    (string=? (editor-status-message stale-editor)
+              "Completion target changed"))
+  (error 'editor-tests
+         "completion accepted a candidate against a stale revision"))
+(editor-close! stale-editor)

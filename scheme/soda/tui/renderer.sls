@@ -24,6 +24,12 @@
   (define modeline-style
     (make-style 'default 'default '(reverse)))
 
+  (define minibuffer-prompt-style
+    (make-style 'default 'default '(bold)))
+
+  (define completion-selected-style
+    (make-style 'default 'default '(reverse)))
+
   (define (decode-text bytes)
     (utf8->string bytes))
 
@@ -308,36 +314,297 @@
           modeline-style
           sources))))
 
+  (define (render-minibuffer-component! context frame rectangle)
+    (let* ([editor (editor-render-context-editor context)]
+           [session (editor-active-prompt editor)]
+           [component-id 'editor.minibuffer]
+           [sources
+             (list
+               (make-cell-source 'chrome 'minibuffer #f)
+               (component-source component-id))])
+      (frame-fill-rect!
+        frame
+        rectangle
+        (make-cell
+          " "
+          1
+          '(default)
+          default-style
+          #f
+          sources))
+      (when (and session (positive? (rect-rows rectangle)))
+        (let* ([request (prompt-session-request session)]
+               [prompt (prompt-request-prompt request)]
+               [prompt-columns
+                 (min
+                   (rect-columns rectangle)
+                   (string-cell-width prompt 8))]
+               [input-columns
+                 (- (rect-columns rectangle) prompt-columns)]
+               [view
+                 (editor-view-ref
+                   editor
+                   (prompt-session-view-id session))]
+               [buffer (view-buffer view)]
+               [snapshot (document-snapshot (buffer-document buffer))])
+          (draw-string!
+            frame
+            (rect-row rectangle)
+            (rect-column rectangle)
+            prompt-columns
+            prompt
+            '(minibuffer-prompt)
+            minibuffer-prompt-style
+            sources)
+          (dynamic-wind
+            (lambda () #f)
+            (lambda ()
+              (let ([text (snapshot-text snapshot)])
+                (dynamic-wind
+                  (lambda () #f)
+                  (lambda ()
+                    (when (positive? input-columns)
+                      (let* ([line-count (text-line-count text)]
+                             [line
+                               (min
+                                 (view-first-line view)
+                                 (- line-count 1))]
+                             [line-start (text-line-start text line)]
+                             [line-end (text-line-content-end text line)]
+                             [input-rectangle
+                               (make-rect
+                                 (rect-row rectangle)
+                                 (+ (rect-column rectangle)
+                                    prompt-columns)
+                                 1
+                                 input-columns)]
+                             [position
+                               (text-position text (view-caret view))]
+                             [caret-line (car position)]
+                             [caret-column
+                               (text-cell-column
+                                 text
+                                 (view-caret view)
+                                 8)]
+                             [cursor-column
+                               (+ (rect-column input-rectangle)
+                                  (- caret-column
+                                     (view-first-column view)))])
+                        (draw-document-line!
+                          frame
+                          input-rectangle
+                          (rect-row input-rectangle)
+                          (text-subbytevector
+                            text
+                            line-start
+                            line-end)
+                          line-start
+                          line-end
+                          8
+                          (view-first-column view)
+                          (buffer-id buffer)
+                          component-id)
+                        (if (and (= caret-line line)
+                                 (rect-contains?
+                                   input-rectangle
+                                   (rect-row input-rectangle)
+                                   cursor-column))
+                            (frame-set-cursor!
+                              frame
+                              (rect-row input-rectangle)
+                              cursor-column
+                              #t)
+                            (frame-set-cursor! frame 0 0 #f)))))
+                  (lambda () (text-close! text)))))
+            (lambda () (snapshot-close! snapshot)))))))
+
+  (define (completion-row-text item)
+    (let ([annotation (completion-item-annotation item)])
+      (if annotation
+          (string-append
+            (completion-item-label item)
+            "  "
+            annotation)
+          (completion-item-label item))))
+
+  (define (render-completions-component! context frame rectangle)
+    (let* ([editor (editor-render-context-editor context)]
+           [completion (editor-active-completion editor)]
+           [component-id 'editor.completions]
+           [background-sources
+             (list
+               (make-cell-source 'chrome 'completions #f)
+               (component-source component-id))])
+      (frame-fill-rect!
+        frame
+        rectangle
+        (make-cell
+          " "
+          1
+          '(completion)
+          default-style
+          #f
+          background-sources))
+      (when completion
+        (let ([items (completion-session-items completion)]
+              [selected (completion-session-selected-index completion)])
+          (let ([start
+                  (if selected
+                      (max
+                        0
+                        (- selected (- (rect-rows rectangle) 1)))
+                      0)])
+          (do ([row 0 (+ row 1)])
+              ((or (= row (rect-rows rectangle))
+                   (= (+ start row) (length items))))
+            (let* ([item (list-ref items (+ start row))]
+                   [selected?
+                     (and selected (= selected (+ start row)))]
+                   [style
+                     (if selected?
+                         completion-selected-style
+                         default-style)]
+                   [faces
+                     (if selected?
+                         '(completion-selected)
+                         '(completion))]
+                   [sources
+                     (list
+                       (make-cell-source
+                         'completion
+                         (completion-item-id item)
+                         (completion-item-source item))
+                       (component-source component-id))])
+              (frame-fill-rect!
+                frame
+                (make-rect
+                  (+ (rect-row rectangle) row)
+                  (rect-column rectangle)
+                  1
+                  (rect-columns rectangle))
+                (make-cell " " 1 faces style #f sources))
+              (draw-string!
+                frame
+                (+ (rect-row rectangle) row)
+                (rect-column rectangle)
+                (rect-columns rectangle)
+                (completion-row-text item)
+                faces
+                style
+                sources))))))))
+
   (define editor-text-component
     (make-component 'editor.text render-text-component!))
 
   (define editor-modeline-component
     (make-component 'editor.modeline render-modeline-component!))
 
-  (define (make-editor-component-tree rows columns)
+  (define editor-minibuffer-component
+    (make-component 'editor.minibuffer render-minibuffer-component!))
+
+  (define editor-completions-component
+    (make-component 'editor.completions render-completions-component!))
+
+  (define (make-editor-component-tree
+            rows
+            columns
+            minibuffer?
+            prompt-completion-rows
+            document-completion-rectangle)
     (let* ([root-rectangle (make-rect 0 0 rows columns)]
            [rectangles
              (layout-split
                root-rectangle
                'vertical
-               (list
-                 (make-flex-extent 1)
-                 (make-fixed-extent 1)))])
+               (if minibuffer?
+                   (list
+                     (make-flex-extent 1)
+                     (make-fixed-extent 1)
+                     (make-fixed-extent prompt-completion-rows)
+                     (make-fixed-extent 1))
+                   (list
+                     (make-flex-extent 1)
+                     (make-fixed-extent 1))))])
       (make-component-node
         'editor.root
         root-rectangle
         #f
-        (list
-          (make-component-node
-            'editor.text
-            (car rectangles)
-            editor-text-component
-            '())
-          (make-component-node
-            'editor.modeline
-            (cadr rectangles)
-            editor-modeline-component
-            '())))))
+        (append
+          (list
+            (make-component-node
+              'editor.text
+              (car rectangles)
+              editor-text-component
+              '())
+            (make-component-node
+              'editor.modeline
+              (cadr rectangles)
+              editor-modeline-component
+              '()))
+          (if minibuffer?
+              (append
+                (if (positive? prompt-completion-rows)
+                    (list
+                      (make-component-node
+                        'editor.completions
+                        (caddr rectangles)
+                        editor-completions-component
+                        '()))
+                    '())
+                (list
+                  (make-component-node
+                    'editor.minibuffer
+                    (cadddr rectangles)
+                    editor-minibuffer-component
+                    '())))
+              '())
+          (if document-completion-rectangle
+              (list
+                (make-component-node
+                  'editor.completions
+                  document-completion-rectangle
+                  editor-completions-component
+                  '()))
+              '())))))
+
+  (define (document-completion-rectangle
+            completion
+            rows
+            columns
+            caret-row
+            caret-column)
+    (let* ([items (completion-session-items completion)]
+           [popup-rows (min 6 (length items) (max 0 (- rows 1)))])
+      (and
+        (positive? popup-rows)
+        (let* ([desired-width
+                 (fold-left
+                   (lambda (width item)
+                     (max
+                       width
+                       (+ 2
+                          (string-cell-width
+                            (completion-row-text item)
+                            8))))
+                   12
+                   items)]
+               [popup-columns (min columns desired-width)]
+               [text-rows (- rows 1)]
+               [screen-row (max 0 (min caret-row (- text-rows 1)))]
+               [below (- text-rows (+ screen-row 1))]
+               [popup-row
+                 (if (>= below popup-rows)
+                     (+ screen-row 1)
+                     (max 0 (- screen-row popup-rows)))]
+               [screen-column
+                 (max 0 (min caret-column (- columns 1)))]
+               [popup-column
+                 (min screen-column (- columns popup-columns))])
+          (make-rect
+            popup-row
+            popup-column
+            popup-rows
+            popup-columns)))))
 
   (define (render-editor-frame editor rows columns)
     (unless (editor? editor)
@@ -355,13 +622,21 @@
         'render-editor-frame
         "columns must be a positive exact integer"
         columns))
-    (let* ([view (editor-active-view editor)]
+    (let* ([prompt-completion
+             (editor-active-prompt-completion editor)]
+           [prompt-completion-rows
+             (if prompt-completion
+                 (min
+                   6
+                   (length
+                     (completion-session-items prompt-completion))
+                   (max 0 (- rows 2)))
+                 0)]
+           [view (editor-base-view editor)]
            [buffer (view-buffer view)]
            [document (buffer-document buffer)]
            [snapshot (document-snapshot document)]
-           [frame (make-frame rows columns)]
-           [component-tree
-             (make-editor-component-tree rows columns)])
+           [frame (make-frame rows columns)])
       (dynamic-wind
         (lambda () #f)
         (lambda ()
@@ -386,7 +661,27 @@
                            tab-width)]
                        [first-line (view-first-line view)]
                        [first-column (view-first-column view)]
-                       [line-count (text-line-count text)])
+                       [line-count (text-line-count text)]
+                       [document-completion
+                         (and
+                           (not (editor-active-prompt editor))
+                           (view-completion view))]
+                       [completion-rectangle
+                         (and
+                           document-completion
+                           (document-completion-rectangle
+                             document-completion
+                             rows
+                             columns
+                             (- caret-line first-line)
+                             (- caret-column first-column)))]
+                       [component-tree
+                         (make-editor-component-tree
+                           rows
+                           columns
+                           (and (editor-active-prompt editor) #t)
+                           prompt-completion-rows
+                           completion-rectangle)])
                   (frame-set-layout! frame component-tree)
                   (component-node-render!
                     component-tree

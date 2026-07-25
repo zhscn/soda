@@ -138,8 +138,13 @@
            'make-language-profile
            "syntax must be a syntax provider or #f"
            syntax))
-       (unless (list? pairs)
-         (assertion-violation 'make-language-profile "pairs must be a list" pairs))
+      (unless (list? pairs)
+        (assertion-violation 'make-language-profile "pairs must be a list" pairs))
+      (unless (or (not lexical) (procedure? lexical))
+        (assertion-violation
+          'make-language-profile
+          "lexical policy must be a procedure or #f"
+          lexical))
        (unless (and (list? electric) (for-all char? electric))
          (assertion-violation
            'make-language-profile
@@ -404,6 +409,76 @@
                  (if entry (return (cdr entry)) state)))
              default)))]))
 
+  (define (scheme-identifier-character? character)
+    (and
+      (not (char-whitespace? character))
+      (not
+        (memv
+          character
+          '(#\( #\) #\[ #\] #\{ #\}
+            #\" #\; #\' #\` #\, #\|)))))
+
+  (define (scheme-quoted-identifier-start input point)
+    (let loop ([index 0]
+               [quoted? #f]
+               [start #f]
+               [escaped? #f])
+      (if (= index point)
+          (and quoted? start)
+          (let ([character (string-ref input index)])
+            (cond
+              [escaped?
+               (loop (+ index 1) quoted? start #f)]
+              [(and quoted? (char=? character #\\))
+               (loop (+ index 1) quoted? start #t)]
+              [(char=? character #\|)
+               (if quoted?
+                   (loop (+ index 1) #f #f #f)
+                   (loop (+ index 1) #t index #f))]
+              [else
+               (loop (+ index 1) quoted? start #f)])))))
+
+  (define (scheme-completion-boundaries input point)
+    (let ([quoted-start
+            (scheme-quoted-identifier-start input point)])
+      (if quoted-start
+          (cons quoted-start point)
+          (let loop ([index point])
+            (if
+              (and
+                (positive? index)
+                (scheme-identifier-character?
+                  (string-ref input (- index 1))))
+              (loop (- index 1))
+              (cons index point))))))
+
   (register-major-mode!
     default-language-catalog
-    (make-major-mode 'fundamental-mode #f #f 'editing #f '())))
+    (make-major-mode 'fundamental-mode #f #f 'editing #f '()))
+
+  (register-language-profile!
+    default-language-catalog
+    (make-language-profile
+      'scheme
+      #f
+      #f
+      '()
+      scheme-identifier-character?
+      #f
+      #f
+      '()
+      #f))
+
+  (register-major-mode!
+    default-language-catalog
+    (make-major-mode
+      'scheme-mode
+      'fundamental-mode
+      'scheme
+      'editing
+      #f
+      (list
+        (cons 'completion-providers '(scheme-static))
+        (cons
+          'completion-boundaries
+          scheme-completion-boundaries)))))

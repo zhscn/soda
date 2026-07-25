@@ -1,6 +1,7 @@
 (library (soda editor evaluator)
   (export make-chez-evaluator
           chez-evaluator?
+          chez-evaluator-symbols
           chez-evaluator-evaluate
           evaluation-result-continuation
           evaluation-result->transcript)
@@ -14,6 +15,15 @@
   (define (make-chez-evaluator)
     (%make-chez-evaluator
       (copy-environment (scheme-environment))))
+
+  (define (chez-evaluator-symbols evaluator)
+    (unless (chez-evaluator? evaluator)
+      (assertion-violation
+        'chez-evaluator-symbols
+        "expected a Chez evaluator"
+        evaluator))
+    (environment-symbols
+      (chez-evaluator-environment evaluator)))
 
   (define (evaluate-source environment source)
     (let ([port (open-string-input-port source)])

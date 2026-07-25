@@ -16,6 +16,12 @@ send -- "\033\[D"
 after 50
 send -- "Z"
 after 50
+send -- "\033x"
+after 50
+send -- "f"
+after 50
+send -- "\007"
+after 50
 send -- "\033\[113"
 after 5
 send -- ";5u"

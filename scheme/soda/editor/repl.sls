@@ -7,6 +7,7 @@
           (soda editor buffer)
           (soda editor command)
           (soda editor commands basic)
+          (soda editor comint)
           (soda editor effect)
           (soda editor evaluator)
           (soda editor event)
@@ -30,42 +31,43 @@
               (lambda () (text-close! text)))))
         (lambda () (snapshot-close! snapshot)))))
 
-  (define (buffer-string-range buffer start end)
-    (let ([snapshot (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda ()
-                (utf8->string
-                  (text-subbytevector text start end)))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
+  (define (string-contains? value needle)
+    (let ([limit (- (string-length value)
+                    (string-length needle))])
+      (let loop ([index 0])
+        (and
+          (<= index limit)
+          (or
+            (string=?
+              (substring
+                value
+                index
+                (+ index (string-length needle)))
+              needle)
+            (loop (+ index 1)))))))
 
-  (define (append-buffer! buffer value)
-    (let* ([bytes
-             (if (bytevector? value)
-                 value
-                 (string->utf8 value))]
-           [offset (buffer-size buffer)]
-           [change #f])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (call-with-values
-            (lambda ()
-              (call-with-buffer-transaction
-                buffer
-                (lambda (transaction)
-                  (transaction-insert! transaction offset bytes))))
-            (lambda (result committed-change)
-              (set! change committed-change)
-              (+ offset (bytevector-length bytes)))))
-        (lambda ()
-          (when change
-            (change-close! change))))))
+  (define (incomplete-read-condition? condition)
+    (and
+      (irritants-condition? condition)
+      (exists
+        (lambda (value)
+          (and
+            (string? value)
+            (string-contains?
+              value
+              "unexpected end-of-file")))
+        (condition-irritants condition))))
+
+  (define (source-complete? source)
+    (guard (condition
+             [else
+              (not (incomplete-read-condition? condition))])
+      (let ([port (open-string-input-port source)])
+        (let loop ()
+          (let ([form (read port)])
+            (if (eof-object? form)
+                #t
+                (loop)))))))
 
   (define (repl-session editor)
     (find
@@ -74,23 +76,11 @@
              (not (interaction-session-closed? session))))
       (editor-interactions editor)))
 
-  (define (view-for-buffer editor target-buffer-id)
-    (find
-      (lambda (view)
-        (= (buffer-id (view-buffer view)) target-buffer-id))
-      (editor-views editor)))
-
   (define (activate-session-view! editor session)
-    (let* ([buffer-id (interaction-session-buffer-id session)]
-           [view
-             (or (view-for-buffer editor buffer-id)
-                 (editor-open-view! editor buffer-id))])
-      (view-set-keymap-layers! view '(scheme.repl))
-      (view-set-caret!
-        view
-        (interaction-session-input-start session))
-      (editor-set-active-view! editor (view-id view))
-      view))
+    (activate-interaction-view!
+      editor
+      session
+      '(scheme.repl)))
 
   (define (editor-open-repl! editor)
     (require-open-editor 'editor-open-repl! editor)
@@ -103,7 +93,7 @@
                    (editor-create-buffer!
                      editor
                      repl-resource
-                     'fundamental-mode
+                     'scheme-mode
                      repl-header)]
                  [input-start (buffer-size buffer)]
                  [session
@@ -119,6 +109,10 @@
               buffer
               'track-modified?
               #f)
+            (buffer-set-local-setting!
+              buffer
+              'completion-providers
+              '(scheme-repl))
             (document-set-editable-start!
               (buffer-document buffer)
               input-start)
@@ -126,9 +120,7 @@
             session))))
 
   (define (session-buffer editor session)
-    (editor-buffer-ref
-      editor
-      (interaction-session-buffer-id session)))
+    (comint-session-buffer editor session))
 
   (define (buffer-origin buffer start end)
     (make-evaluation-origin
@@ -144,17 +136,14 @@
         'scheme.repl-submit
         "REPL session is already evaluating"
         (interaction-session-id session)))
-    (let ([buffer (session-buffer editor session)])
-      (when echo?
-        (append-buffer! buffer source))
-      (let ([end (append-buffer! buffer "\n")])
-        (document-set-editable-start!
-          (buffer-document buffer)
-          end)
-        (list
-          (make-command-effect
-            'scheme.evaluate
-            (interaction-session-begin! session source origin))))))
+    (when echo?
+      (comint-stash-current-input! editor session)
+      (comint-replace-input! editor session source))
+    (comint-commit-input! editor session)
+    (list
+      (make-command-effect
+        'scheme.evaluate
+        (interaction-session-begin! session source origin))))
 
   (define (open-repl-command context)
     (let* ([editor (command-context-editor context)]
@@ -190,16 +179,19 @@
           'scheme.repl-submit
           "active buffer is not a REPL transcript"
           (buffer-id buffer)))
-      (session-submit-source!
-        editor
-        session
-        (let ([start (interaction-session-input-start session)]
-              [end (buffer-size buffer)])
-          (buffer-string-range buffer start end))
-        #f
-        (let ([start (interaction-session-input-start session)]
-              [end (buffer-size buffer)])
-          (buffer-origin buffer start end)))))
+      (let* ([start (interaction-session-input-start session)]
+             [end (buffer-size buffer)]
+             [source (comint-current-input editor session)])
+        (if (source-complete? source)
+            (session-submit-source!
+              editor
+              session
+              source
+              #f
+              (buffer-origin buffer start end))
+            (begin
+              (comint-insert-newline! view)
+              '())))))
 
   (define (eval-expression-command context)
     (let* ([argument (command-context-argument context)]
@@ -238,15 +230,6 @@
           request))
       session))
 
-  (define (move-session-views-to-end! editor session end)
-    (for-each
-      (lambda (view)
-        (when (= (buffer-id (view-buffer view))
-                 (interaction-session-buffer-id session))
-          (view-set-caret! view end)
-          (ensure-view-visible! view)))
-      (editor-views editor)))
-
   (define (apply-evaluation-result-command context)
     (let ([result (command-context-argument context)]
           [editor (command-context-editor context)])
@@ -255,18 +238,12 @@
           'scheme.apply-evaluation-result
           "expected an evaluation result"
           result))
-      (let* ([session (matching-result-session editor result)]
-             [buffer (session-buffer editor session)]
-             [transcript
-               (string-append
-                 (evaluation-result->transcript result)
-                 (interaction-session-prompt session))]
-             [end (append-buffer! buffer transcript)])
-        (document-set-editable-start!
-          (buffer-document buffer)
-          end)
-        (interaction-session-complete! session result end)
-        (move-session-views-to-end! editor session end)
+      (let ([session (matching-result-session editor result)])
+        (comint-append-output!
+          editor
+          session
+          (evaluation-result->transcript result))
+        (interaction-session-complete! session result)
         (editor-set-status-message!
           editor
           (if (eq? (evaluation-result-status result) 'condition)
@@ -290,7 +267,8 @@
         (assertion-violation
           'scheme.debug-retry
           "active interaction has no failed evaluation"))
-      (append-buffer! buffer ";; retry\n")
+      (comint-stash-current-input! editor session)
+      (comint-replace-input! editor session ";; retry")
       (session-submit-source!
         editor
         session
@@ -333,6 +311,18 @@
           repl-submit-command
           "Submit the editable input in the REPL transcript.")
         (list
+          'scheme.repl-history-previous
+          comint-history-previous-command
+          "Replace REPL input with the previous history entry.")
+        (list
+          'scheme.repl-history-next
+          comint-history-next-command
+          "Replace REPL input with the next history entry.")
+        (list
+          'scheme.repl-clear-input
+          comint-clear-input-command
+          "Clear the editable input in the REPL transcript.")
+        (list
           'scheme.eval-expression
           eval-expression-command
           "Evaluate a Scheme expression in the persistent REPL session.")
@@ -362,7 +352,35 @@
       (keymap-bind!
         keymap
         (list (make-key-stroke 'enter 13 0))
-        'scheme.repl-submit))
+        'scheme.repl-submit)
+      (keymap-bind!
+        keymap
+        (list
+          (make-key-stroke
+            'character
+            (char->integer #\p)
+            2))
+        'interaction.history-previous)
+      (keymap-bind!
+        keymap
+        (list
+          (make-key-stroke
+            'character
+            (char->integer #\n)
+            2))
+        'interaction.history-next)
+      (keymap-bind!
+        keymap
+        (list
+          (make-key-stroke
+            'character
+            (char->integer #\c)
+            4)
+          (make-key-stroke
+            'character
+            (char->integer #\u)
+            4))
+        'interaction.clear-input))
     (editor-bind-key!
       editor
       (list

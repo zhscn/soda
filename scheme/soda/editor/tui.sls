@@ -4,6 +4,7 @@
           (soda document)
           (soda editor buffer)
           (soda editor core)
+          (soda editor completion-runtime)
           (soda editor effect)
           (soda editor event)
           (soda editor file-runtime)
@@ -19,7 +20,7 @@
   (define (ansi suffix)
     (string-append escape suffix))
 
-  (define (render! terminal editor previous-frame)
+  (define (render! terminal editor previous-frame write!)
     (let ([size (terminal-size terminal)])
       (editor-update!
         editor
@@ -31,9 +32,7 @@
                 editor
                 (max 2 (car size))
                 (max 1 (cdr size)))])
-        (terminal-write!
-          terminal
-          (frame-diff->ansi previous-frame frame))
+        (write! (frame-diff->ansi previous-frame frame))
         frame)))
 
   (define (handle-editor-message! editor executor message)
@@ -87,6 +86,27 @@
         [(= (bytevector-u8-ref bytes index) 10) 'lf]
         [else (loop (+ index 1))])))
 
+  (define (string-suffix? suffix value)
+    (and
+      (<= (string-length suffix) (string-length value))
+      (string=?
+        suffix
+        (substring
+          value
+          (- (string-length value) (string-length suffix))
+          (string-length value)))))
+
+  (define (initial-major-mode path)
+    (let ([normalized (and path (string-foldcase path))])
+      (if (and
+            normalized
+            (exists
+              (lambda (suffix)
+                (string-suffix? suffix normalized))
+              '(".scm" ".ss" ".sls" ".sps")))
+          'scheme-mode
+          'fundamental-mode)))
+
   (define (call-with-runtime procedure)
     (let ([runtime #f])
       (dynamic-wind
@@ -123,7 +143,7 @@
               1
               document
               resource
-              'fundamental-mode))
+              (initial-major-mode file-path)))
           (buffer-set-local-setting!
             buffer
             'file-line-ending
@@ -151,6 +171,9 @@
           [raw? #f]
           [screen? #f]
           [previous-frame #f]
+          [pending-output #f]
+          [pending-output-offset 0]
+          [output-source #f]
           [decoder (make-input-decoder)]
           [executor (make-effect-executor)]
           [file-adapter #f])
@@ -159,6 +182,84 @@
           (guard (condition [else #f])
             (runtime-cancel! runtime flush-timer))
           (set! flush-timer #f)))
+      (define (cancel-output-source!)
+        (when output-source
+          (guard (condition [else #f])
+            (runtime-cancel! runtime output-source))
+          (set! output-source #f)))
+      (define (clear-pending-output!)
+        (set! pending-output #f)
+        (set! pending-output-offset 0)
+        (cancel-output-source!))
+      (define (arm-output-source!)
+        (unless output-source
+          (set! output-source
+            (runtime-watch-fd! runtime 1 fd-writable))))
+      (define (flush-output!)
+        (let loop ()
+          (when pending-output
+            (let ([written
+                    (terminal-write-some!
+                      terminal
+                      pending-output
+                      pending-output-offset)])
+              (cond
+                [(not written) (arm-output-source!)]
+                [(zero? written)
+                 (if (= pending-output-offset
+                        (bytevector-length pending-output))
+                     (clear-pending-output!)
+                     (arm-output-source!))]
+                [else
+                 (set! pending-output-offset
+                   (+ pending-output-offset written))
+                 (if (= pending-output-offset
+                        (bytevector-length pending-output))
+                     (clear-pending-output!)
+                     (loop))])))))
+      (define (append-output! data)
+        (let* ([bytes
+                 (if (bytevector? data)
+                     data
+                     (string->utf8 data))]
+               [remaining
+                 (if pending-output
+                     (- (bytevector-length pending-output)
+                        pending-output-offset)
+                     0)]
+               [combined
+                 (make-bytevector
+                   (+ remaining (bytevector-length bytes)))])
+          (when (positive? remaining)
+            (bytevector-copy!
+              pending-output
+              pending-output-offset
+              combined
+              0
+              remaining))
+          (bytevector-copy!
+            bytes
+            0
+            combined
+            remaining
+            (bytevector-length bytes))
+          (set! pending-output combined)
+          (set! pending-output-offset 0)
+          (flush-output!)))
+      (define (drain-output!)
+        (when pending-output
+          (let* ([remaining
+                   (- (bytevector-length pending-output)
+                      pending-output-offset)]
+                 [bytes (make-bytevector remaining)])
+            (bytevector-copy!
+              pending-output
+              pending-output-offset
+              bytes
+              0
+              remaining)
+            (terminal-write! terminal bytes))
+          (clear-pending-output!)))
       (define (arm-flush-timer!)
         (cancel-flush-timer!)
         (when (input-decoder-pending? decoder)
@@ -184,14 +285,17 @@
       (set! file-adapter
         (install-file-runtime! executor runtime))
       (install-interaction-effect-handler! executor editor)
+      (install-completion-effect-handlers!
+        executor
+        (editor-completion-provider-catalog editor))
+      (install-prompt-effect-handler! executor)
       (dynamic-wind
         (lambda () #f)
         (lambda ()
           (terminal-enter-raw! terminal)
           (set! raw? #t)
           (set! screen? #t)
-          (terminal-write!
-            terminal
+          (append-output!
             (string-append
               (ansi "[?1049h")
               (ansi "[>1u")
@@ -201,7 +305,11 @@
           (let loop ([running? #t])
             (when running?
               (set! previous-frame
-                (render! terminal editor previous-frame))
+                (render!
+                  terminal
+                  editor
+                  previous-frame
+                  append-output!))
               (let process
                 ([events (runtime-poll! runtime)] [continue? #t])
                 (cond
@@ -214,6 +322,11 @@
                         (= (event-source (car events)) flush-timer)
                         (eq? (event-kind (car events)) 'timer))
                    (process (cdr events) (handle-flush!))]
+                  [(and output-source
+                        (= (event-source (car events)) output-source)
+                        (eq? (event-kind (car events)) 'fd-ready))
+                   (flush-output!)
+                   (process (cdr events) continue?)]
                   [(eq? (event-kind (car events)) 'file-write)
                    (let ([message
                            (file-runtime-handle-event
@@ -235,6 +348,8 @@
           (when input-source
             (guard (condition [else #f])
               (runtime-cancel! runtime input-source)))
+          (guard (condition [else #f])
+            (drain-output!))
           (when screen?
             (guard (condition [else #f])
               (terminal-write!

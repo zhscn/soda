@@ -246,10 +246,22 @@
   (define (keyboard-quit-command context)
     (let ([editor (command-context-editor context)]
           [view (command-context-view context)])
-      (view-reset-input-states! view)
-      (editor-set-pending-keys! editor '())
-      (editor-set-status-message! editor #f)
-      '()))
+      (cond
+        [(editor-active-prompt editor)
+         (let ([reply (editor-abort-prompt! editor)])
+           (if reply
+               (list (make-command-effect 'prompt.reply reply))
+               '()))]
+        [(view-completion view)
+         (editor-cancel-completion! editor)
+         (editor-set-pending-keys! editor '())
+         (editor-set-status-message! editor #f)
+         '()]
+        [else
+         (view-reset-input-states! view)
+         (editor-set-pending-keys! editor '())
+         (editor-set-status-message! editor #f)
+         '()])))
 
   (define editor-register-command!
     (case-lambda
@@ -284,6 +296,7 @@
        (editor-execute-command! editor name #f #f)]
       [(editor name event argument)
        (require-open-editor 'editor-execute-command! editor)
+       (editor-refresh-completion! editor)
        (let ([effects
                (execute-command!
                  (editor-command-registry editor)
@@ -294,7 +307,10 @@
                    event
                    argument))])
          (ensure-view-visible! (editor-active-view editor))
-         effects)]))
+         (editor-refresh-completion-after-command! editor)
+         (append
+           effects
+           (editor-take-completion-effects! editor)))]))
 
   (define (stroke key codepoint modifiers)
     (make-key-stroke key codepoint modifiers))
