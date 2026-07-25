@@ -15,6 +15,7 @@
           terminal-enter-raw!
           terminal-leave-raw!
           terminal-read
+          terminal-write-some!
           terminal-write!
           terminal-size
           event?
@@ -36,7 +37,7 @@
     (foreign-procedure __atomic "soda_runtime_abi_version" () unsigned-32))
 
   (define abi-version-checked
-    (unless (= (%abi-version) 1)
+    (unless (= (%abi-version) 2)
       (error 'soda-runtime "unsupported native runtime ABI version")))
 
   (define %runtime-create
@@ -95,6 +96,10 @@
     (foreign-procedure __atomic "soda_terminal_write"
                        (void* u8* size_t)
                        int))
+  (define %terminal-write-some
+    (foreign-procedure __atomic "soda_terminal_write_some"
+                       (void* u8* size_t size_t)
+                       integer-64))
   (define %terminal-size
     (foreign-procedure __atomic "soda_terminal_size"
                        (void* void* void*)
@@ -258,6 +263,32 @@
                 bytes
                 (bytevector-length bytes)))
         (terminal-error 'terminal-write! terminal))))
+
+  (define (terminal-write-some! terminal data offset)
+    (require-terminal 'terminal-write-some! terminal)
+    (unless (bytevector? data)
+      (assertion-violation
+        'terminal-write-some!
+        "expected a bytevector"
+        data))
+    (unless (and (integer? offset)
+                 (exact? offset)
+                 (<= 0 offset (bytevector-length data)))
+      (assertion-violation
+        'terminal-write-some!
+        "offset is outside the bytevector"
+        offset))
+    (let ([result
+            (%terminal-write-some
+              (terminal-pointer terminal)
+              data
+              (bytevector-length data)
+              offset)])
+      (cond
+        [(= result -2) #f]
+        [(negative? result)
+         (terminal-error 'terminal-write-some! terminal)]
+        [else result])))
 
   (define (terminal-size terminal)
     (require-terminal 'terminal-size terminal)

@@ -16,6 +16,7 @@
 #include <iterator>
 #include <span>
 #include <string>
+#include <thread>
 #include <vector>
 
 #if !defined(_WIN32)
@@ -287,6 +288,56 @@ TEST_CASE("terminal ABI owns raw mode but not its descriptors") {
 
     CHECK(::close(slave) == 0);
     CHECK(::close(master) == 0);
+}
+
+TEST_CASE("terminal writes resume after a nonblocking descriptor would block") {
+    std::array<int, 2> pipe_fds{};
+    REQUIRE(::pipe(pipe_fds.data()) == 0);
+
+    const int original_flags = ::fcntl(pipe_fds[1], F_GETFL, 0);
+    REQUIRE(original_flags >= 0);
+    REQUIRE(::fcntl(pipe_fds[1], F_SETFL, original_flags | O_NONBLOCK) == 0);
+
+    std::array<std::uint8_t, 4096> filler{};
+    std::size_t filled = 0;
+    for (;;) {
+        const ssize_t result = ::write(pipe_fds[1], filler.data(), filler.size());
+        if (result > 0) {
+            filled += static_cast<std::size_t>(result);
+            continue;
+        }
+        REQUIRE(result < 0);
+        REQUIRE((errno == EAGAIN || errno == EWOULDBLOCK));
+        break;
+    }
+
+    soda_terminal* terminal = soda_terminal_create(pipe_fds[0], pipe_fds[1]);
+    REQUIRE(terminal != nullptr);
+    CHECK(soda_terminal_write_some(terminal, filler.data(), filler.size(), 0) ==
+          SODA_TERMINAL_WOULD_BLOCK);
+    const std::array<std::uint8_t, 15> payload{
+        't', 'e', 'r', 'm', 'i', 'n', 'a', 'l', '-', 'o', 'u', 't', 'p', 'u', 't',
+    };
+    int write_status = -2;
+    std::thread writer(
+        [&] { write_status = soda_terminal_write(terminal, payload.data(), payload.size()); });
+
+    std::vector<std::uint8_t> observed(filled + payload.size());
+    std::size_t offset = 0;
+    while (offset < observed.size()) {
+        const ssize_t result =
+            ::read(pipe_fds[0], observed.data() + offset, observed.size() - offset);
+        REQUIRE(result > 0);
+        offset += static_cast<std::size_t>(result);
+    }
+    writer.join();
+
+    CHECK(write_status == 0);
+    CHECK(std::ranges::equal(payload, std::span(observed).last(payload.size())));
+
+    soda_terminal_destroy(terminal);
+    CHECK(::close(pipe_fds[0]) == 0);
+    CHECK(::close(pipe_fds[1]) == 0);
 }
 #endif
 

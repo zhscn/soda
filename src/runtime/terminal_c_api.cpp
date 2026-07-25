@@ -11,6 +11,7 @@
 #include <string_view>
 
 #if !defined(_WIN32)
+#include <poll.h>
 #include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
@@ -57,6 +58,32 @@ void set_errno_error(soda_terminal& terminal, std::string_view operation) noexce
                         terminal.last_error.begin() + static_cast<std::ptrdiff_t>(offset));
     terminal.last_error[offset + suffix] = '\0';
 }
+
+#if !defined(_WIN32)
+bool wait_for_output(soda_terminal& terminal) noexcept {
+    pollfd descriptor{
+        .fd = terminal.output_fd,
+        .events = POLLOUT,
+        .revents = 0,
+    };
+    for (;;) {
+        const int result = ::poll(&descriptor, 1, -1);
+        if (result > 0) {
+            if ((descriptor.revents & POLLOUT) != 0) {
+                return true;
+            }
+            errno = (descriptor.revents & POLLNVAL) != 0 ? EBADF : EIO;
+            set_errno_error(terminal, "cannot wait for terminal output");
+            return false;
+        }
+        if (result < 0 && errno == EINTR) {
+            continue;
+        }
+        set_errno_error(terminal, "cannot wait for terminal output");
+        return false;
+    }
+}
+#endif
 
 } // namespace
 
@@ -158,6 +185,36 @@ int64_t soda_terminal_read(soda_terminal* terminal, uint8_t* destination, size_t
 #endif
 }
 
+int64_t soda_terminal_write_some(soda_terminal* terminal, const uint8_t* data, size_t size,
+                                 size_t offset) {
+    if (terminal == nullptr || offset > size || (size != 0 && data == nullptr)) {
+        return -1;
+    }
+    clear_error(*terminal);
+#if defined(_WIN32)
+    set_error(*terminal, "terminal writes are unavailable on this platform");
+    return -1;
+#else
+    if (offset == size) {
+        return 0;
+    }
+    for (;;) {
+        const ssize_t result = ::write(terminal->output_fd, data + offset, size - offset);
+        if (result >= 0) {
+            return result;
+        }
+        if (errno == EINTR) {
+            continue;
+        }
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            return SODA_TERMINAL_WOULD_BLOCK;
+        }
+        set_errno_error(*terminal, "cannot write terminal output");
+        return -1;
+    }
+#endif
+}
+
 int soda_terminal_write(soda_terminal* terminal, const uint8_t* data, size_t size) {
     if (terminal == nullptr || (size != 0 && data == nullptr)) {
         return -1;
@@ -174,6 +231,13 @@ int soda_terminal_write(soda_terminal* terminal, const uint8_t* data, size_t siz
             offset += static_cast<std::size_t>(result);
         } else if (result < 0 && errno == EINTR) {
             continue;
+        } else if (result < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            if (!wait_for_output(*terminal)) {
+                return -1;
+            }
+        } else if (result == 0) {
+            set_error(*terminal, "cannot write terminal output: write returned zero");
+            return -1;
         } else {
             set_errno_error(*terminal, "cannot write terminal output");
             return -1;

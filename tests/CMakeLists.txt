@@ -32,7 +32,7 @@ soda_core_test(indentation_tests indentation/indentation_tests.cpp soda_indentat
 soda_core_test(indentation_abi_tests indentation/c_api_tests.cpp soda_indentation)
 soda_core_test(native_core_tests native_core_tests.cpp soda_native_core)
 soda_core_test(runtime_tests runtime/runtime_tests.cpp soda_runtime)
-target_link_libraries(runtime_tests PRIVATE soda_document)
+target_link_libraries(runtime_tests PRIVATE soda_document Threads::Threads)
 
 find_program(CHEZ_SCHEME_EXECUTABLE NAMES scheme chezscheme)
 find_program(EXPECT_EXECUTABLE NAMES expect)

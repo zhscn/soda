@@ -28,10 +28,11 @@ typedef struct soda_terminal soda_terminal;
 #define SODA_EVENT_FILE_READ 3U
 #define SODA_EVENT_FILE_WRITE 4U
 
-#define SODA_RUNTIME_ABI_VERSION 1U
+#define SODA_RUNTIME_ABI_VERSION 2U
 
 #define SODA_FD_READABLE (1U << 0U)
 #define SODA_FD_WRITABLE (1U << 1U)
+#define SODA_TERMINAL_WOULD_BLOCK (-2)
 
 SODA_RUNTIME_API soda_runtime* soda_runtime_create(void);
 SODA_RUNTIME_API void soda_runtime_destroy(soda_runtime* runtime);
@@ -74,6 +75,8 @@ SODA_RUNTIME_API int soda_terminal_enter_raw(soda_terminal* terminal);
 SODA_RUNTIME_API int soda_terminal_leave_raw(soda_terminal* terminal);
 SODA_RUNTIME_API int64_t soda_terminal_read(soda_terminal* terminal, uint8_t* destination,
                                             size_t capacity);
+SODA_RUNTIME_API int64_t soda_terminal_write_some(soda_terminal* terminal, const uint8_t* data,
+                                                  size_t size, size_t offset);
 SODA_RUNTIME_API int soda_terminal_write(soda_terminal* terminal, const uint8_t* data, size_t size);
 SODA_RUNTIME_API int soda_terminal_size(soda_terminal* terminal, uint32_t* rows, uint32_t* columns);
 SODA_RUNTIME_API const char* soda_terminal_last_error(soda_terminal* terminal);
