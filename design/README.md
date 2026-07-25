@@ -17,21 +17,22 @@
 | 07 | [07-decoration.md](07-decoration.md) | 文本区间元数据、诊断、虚拟文本与 fold |
 | 08 | [08-scheme-first.md](08-scheme-first.md) | Chez Scheme、native core、libuv 与 TUI 的所有权边界 |
 | 09 | [09-language-modes.md](09-language-modes.md) | major mode、language profile 与 syntax provider |
+| 10 | [10-interaction.md](10-interaction.md) | 进程内 REPL、求值 request、来源与 debugger 状态 |
 
 依赖关系：
 
 ```text
-                 08 Scheme-first composition root
-                  │
-          ┌───────┼─────────┐
-          ▼       ▼         ▼
-      03 input  04 workbench 09 language modes
-                    │          │
-              ┌─────┴───┐      ▼
-              ▼         ▼   01 C++ language core
-           05 jump  06 completion
-              │         │
-              └────┬────┘
+                   08 Scheme-first composition root
+                    │
+          ┌─────────┼──────────┬──────────┐
+          ▼         ▼          ▼          ▼
+      03 input  04 workbench 09 modes  10 interaction
+                    │          │          │
+              ┌─────┴───┐      ▼          │
+              ▼         ▼   01 C++ core   │
+           05 jump  06 completion         │
+              │         │                 │
+              └────┬────┴─────────────────┘
                    ▼
               07 decoration
                    │

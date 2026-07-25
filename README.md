@@ -51,6 +51,12 @@ frame retains the realized component tree and rectangles. Fixed and flexible
 layout extents place independent text and modeline components. The terminal
 presenter is the only layer that encodes the frame as ANSI.
 
+An editor-owned Chez interaction session provides the persistent Scheme
+environment used by the REPL and source evaluation. Its transcript is an
+ordinary protected-prefix Buffer. Evaluation requests retain their source
+Buffer, resource, revision, and optional byte range; returned values, output,
+conditions, and queued editor commands re-enter through the command loop.
+
 ## Language modes
 
 Chez major modes compose replaceable syntax and indentation providers. Common
@@ -97,8 +103,10 @@ cmk build -c Debug
 
 Printable input inserts text. Backspace deletes the previous UTF-8 code point,
 the arrow keys move the caret, Enter inserts a newline, `C-x =` describes the
-character and rendered faces at point, and `C-q` exits. The bootstrap edits an
-in-memory buffer; quitting leaves the file on disk unchanged.
+character and rendered faces at point, `C-c C-z` toggles the Chez REPL, and
+`C-q` exits. Enter submits the editable input while the REPL transcript is
+active. The bootstrap edits an in-memory buffer; quitting leaves the file on
+disk unchanged.
 
 The TUI enables Kitty keyboard disambiguation and bracketed paste while it owns
 the alternate screen, then restores both terminal modes on exit. Its

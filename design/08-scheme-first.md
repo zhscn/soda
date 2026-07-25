@@ -84,8 +84,10 @@ caret、viewport、持久 keymap layers、InputState 栈和 pending key sequence
 切换 active view 同时切换命令的 buffer 与输入上下文。Editor 关闭时释放仍在
 registry 中的 Buffer。
 
-REPL 使用同一个 command loop、namespace 和事件队列。求值请求是编辑器事件；
-求值产生的状态变化走公开 Scheme API，因此不需要独立 nREPL 状态模型。
+进程内 REPL 使用同一个 command loop 和事件队列。持久求值 namespace 由
+InteractionSession 持有，transcript 是普通 Buffer；求值产生的编辑器修改排成
+后续 command message。request identity、来源 revision、I/O 重定向和失败状态见
+[10-interaction.md](10-interaction.md)。
 
 ## Runtime ABI
 
