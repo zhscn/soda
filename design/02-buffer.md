@@ -104,7 +104,9 @@ Buffer {
   revision,
   file_path?,
   saved_revision,
+  saved_undo_node,
   pending_save_revision?,
+  pending_save_undo_node?,
   language_catalog,
   major_mode_name,
   local_settings,
@@ -114,8 +116,17 @@ Buffer {
 
 `Document` 不知道 resource、dirty 状态、major mode 或 view。`resource` 是显示与
 project identity，`file_path` 是可写入的本地路径；generated Buffer 可以有
-resource 而没有 file path。Buffer 比较 `saved_revision` 与当前 revision 决定
-modified 状态，并负责在 commit、undo、redo 后同步 language runtime。
+resource 而没有 file path。Buffer 比较保存时的 undo node 与当前 undo position
+决定 modified 状态，因此 undo 回保存点会恢复 clean，沿其他分支继续编辑则保持
+modified。`saved_revision` 用于标识实际写入的 snapshot；Buffer 负责在 commit、
+undo、redo 后同步 language runtime。
+
+持久用户 Buffer 默认跟踪 modified。transcript 等可再生成 Buffer 通过
+`track-modified?` 设置退出保存策略，不把求值输出当作待保存的用户修改。
+
+文件加载边界在 Document 规范化换行前记录 `file-line-ending`。Document 和编辑
+命令统一使用 LF；保存 request 按该设置重新编码为 LF、CRLF 或 CR，使整文件写入
+保持资源原有的换行约定。
 
 Buffer 的 `revision` 是已经被 Buffer 及其 language runtime 接受的 Document
 revision。Scheme 编辑命令通过 `call-with-buffer-transaction` 修改文本；该边界提交
@@ -142,15 +153,18 @@ SaveRequest {
 }
 ```
 
-Buffer 同时只有一个 pending save。runtime effect 异步写入 request 中的 bytes；
-完成事件再进入 command loop。成功完成只把 `saved_revision` 推进到 request
-revision，因此写入期间发生的新编辑仍保持 modified。失败清除 pending 状态但不
-改变 `saved_revision`。
+Buffer 同时只有一个 pending save，并保存 request 对应的 undo node。runtime
+effect 在目标目录创建临时文件，写入全部 bytes，执行 `fsync`，保留已有目标的
+权限，再以 rename 原子替换目标。失败时移除临时文件，原目标内容保持不变；完成
+事件再进入 command loop。
 
-基础 file runtime 对已有 `file_path` 执行整文件 open、truncate、write、close。
-同一 request 协议支持由 minibuffer/resource policy 选择目标 path 的另存为流程。
-需要临时文件、权限保留、备份或原子 rename 的环境可以替换 file effect handler，
-不改变 Buffer revision 语义。
+成功完成把 `saved_revision` 和 saved undo node 推进到 request 对应的 snapshot。
+写入期间发生的新编辑位于另一个 undo node，仍保持 modified。失败清除 pending
+状态但不改变保存点。退出命令在 save pending 时等待完成；存在 modified Buffer
+时要求显式的第二次退出命令确认丢弃。
+
+同一 request 协议支持由 minibuffer/resource policy 选择目标 path 的另存为流程，
+也允许替换 file effect handler 而不改变 Buffer revision 与 undo node 语义。
 
 ## ABI 与线程归属
 

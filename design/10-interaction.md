@@ -60,10 +60,10 @@ evaluator 在 session environment 中提供：
 - `*interaction-session*`：发起求值的 session；
 - `editor-command!`：按 command symbol 和可选参数创建后续 command message。
 
-求值期间调用 `editor-command!` 只记录消息。求值结果先应用到 session 和
-transcript，随后 command loop 依次处理这些消息。该顺序避免从 evaluator 栈中
-递归调用 `editor-update!`，并让普通 command registry 继续作为编辑器 mutation
-的序列化入口。
+求值期间调用 `editor-command!` 只记录 internal command message。求值结果先应用
+到 session 和 transcript，随后 command loop 依次处理这些消息。该顺序避免从
+evaluator 栈中递归调用 `editor-update!`，并让普通 command registry 继续作为
+编辑器 mutation 的序列化入口。
 
 `current-output-port` 与 `current-error-port` 在每次求值中重定向到结果对象。
 `current-input-port` 是该 request 私有的 EOF port，不能读取终端输入。需要用户

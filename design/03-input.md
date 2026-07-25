@@ -156,6 +156,10 @@ Prefix { count, register, extra }
 
 View 持有 selection、viewport 和输入状态；Window 把 View 放入 layout。frame
 从固定 revision 的 snapshot 与 editor state 组合，终端写入只是 frame 的呈现。
+caret 与 selection endpoint 使用 Document anchor，多个 View 显示同一 Buffer
+时会随提交、undo 和 redo 结算，不会保留失效的裸 byte offset。viewport 同时保存
+首行和首个 display column；纵向 motion 按 tab 与宽字符展开后的 display column
+维持目标列。
 
 结构化 frame 是 renderer 与 terminal presenter 之间的边界：
 
@@ -214,10 +218,10 @@ layout 使用纯 Rect 运算。fixed extent 保留指定 cell 数，flex extent 
 机制供后续 WindowLayout、minibuffer 保留行和工具区域复用。
 
 renderer 只读取 viewport 覆盖的行，向 frame 写入 cell，并计算结构化 cursor。
-presenter 是唯一生成 ANSI 控制序列的组件。完整重绘与 cell diff 是可替换的
-presenter 策略，不改变 View、Window、Buffer 或 Frame 模型。光标、modeline、
-minibuffer、popup 和工具区域都使用 cells 表达，不会向 Document 写入控制序列
-或虚拟文本。
+presenter 是唯一生成 ANSI 控制序列的组件。首帧与尺寸变化使用完整重绘，后续帧
+比较 cell 的 text、width、continuation 与 style，只写入发生显示变化的 cell。
+光标、modeline、minibuffer、popup 和工具区域都使用 cells 表达，不会向 Document
+写入控制序列或虚拟文本。
 
 `describe-caret` 从 snapshot 与最终 frame 生成结构化字符描述，包括 code point、
 document position、screen cell、component path、显示宽度、faces、style 和 sources。

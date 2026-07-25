@@ -74,13 +74,17 @@ command 收到显式 context，不从 native 全局变量推断当前 buffer 或
 列表。keymap 保存 command symbol；registry 中替换 procedure 后，已有绑定立即使用
 新实现。
 
-message 是按用途区分的记录值，包括 input、resize 和 command message。input
-message 携带归一化的 `KeyEvent` 或 `TextInputEvent`。effect executor 按 kind
-查找显式注册的 handler；handler 返回是否继续以及后续 message。没有 handler 的
-effect 是程序错误，不会在 runtime adapter 中被忽略。
+message 是按用途区分的记录值，包括 input、resize、interactive command 和
+internal command message。input message 携带归一化的 `KeyEvent` 或
+`TextInputEvent`。交互命令抛出的 condition 转成 status message；effect completion
+与 evaluator 排入的 internal command 保留 condition，使过期结果、identity
+错配等程序错误不能被交互错误边界隐藏。effect executor 按 kind 查找显式注册的
+handler；handler 返回是否继续以及后续 message。没有 handler 的 effect 是程序
+错误，不会在 runtime adapter 中被忽略。
 
-Editor 用 id registry 管理 Buffer 与 View，active view 只保存 id。View 持有自己的
-caret、viewport、持久 keymap layers、InputState 栈和 pending key sequence；
+Editor 用 id registry 管理 Buffer 与 View，并为创建的 Buffer 单调分配且不复用
+Document identity；active view 只保存 id。View 持有自己的 caret anchor、
+viewport、持久 keymap layers、InputState 栈和 pending key sequence；
 切换 active view 同时切换命令的 buffer 与输入上下文。Editor 关闭时释放仍在
 registry 中的 Buffer。
 
@@ -93,12 +97,16 @@ InteractionSession 持有，transcript 是普通 Buffer；求值产生的编辑�
 
 runtime ABI 遵循 pull-based 约束：
 
+- 固定版本函数在 Scheme wrapper 装载时验证 ABI 兼容性；
 - 创建 handle 后由 Scheme 注册 interest；
 - poll 只驱动 libuv 并返回可读取事件数量；
 - Scheme drain timer、fd、file-read、file-write 等结果；
 - close 是显式、幂等的生命周期动作；
 - callback data 不保存 Scheme pointer；
 - error code 与消息作为值跨 ABI 返回。
+
+文件写入在 libuv worker pool 中执行完整的临时文件写入与原子替换。worker 不访问
+Scheme 对象；完成 callback 只把状态加入 native event queue。
 
 终端 raw mode 和 alternate screen 的获取与释放使用动态清理边界。初始化中途失败、
 command 抛错和正常退出都执行相同的恢复路径。
