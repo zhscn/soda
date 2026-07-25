@@ -7,6 +7,7 @@
           editor-buffers
           editor-buffer-ref
           editor-add-buffer!
+          editor-create-buffer!
           editor-remove-buffer!
           editor-views
           editor-view-ref
@@ -15,6 +16,10 @@
           editor-active-view
           editor-set-active-view!
           editor-set-view-buffer!
+          editor-interactions
+          editor-interaction-ref
+          editor-interaction-for-buffer
+          editor-register-interaction!
           editor-command-registry
           editor-keymap-catalog
           editor-language-catalog
@@ -50,6 +55,7 @@
           (soda editor buffer)
           (soda editor command)
           (soda editor input-state)
+          (soda editor interaction)
           (soda editor keymap)
           (soda editor language))
 
@@ -76,12 +82,22 @@
     (fields
       (immutable buffer-table editor-buffer-table)
       (mutable buffer-ids editor-buffer-ids editor-buffer-ids-set!)
+      (mutable next-buffer-id
+               editor-next-buffer-id
+               editor-next-buffer-id-set!)
       (immutable view-table editor-view-table)
       (mutable view-ids editor-view-ids editor-view-ids-set!)
       (mutable active-view-id
                editor-active-view-id
                editor-active-view-id-set!)
       (mutable next-view-id editor-next-view-id editor-next-view-id-set!)
+      (immutable interaction-table editor-interaction-table)
+      (mutable interaction-ids
+               editor-interaction-ids
+               editor-interaction-ids-set!)
+      (mutable next-interaction-id
+               editor-next-interaction-id
+               editor-next-interaction-id-set!)
       (immutable commands editor-command-registry)
       (immutable keymaps editor-keymap-catalog)
       (immutable languages editor-language-catalog)
@@ -149,11 +165,61 @@
       (editor-buffer-ids-set!
         value
         (append (editor-buffer-ids value) (list id)))
+      (when (>= id (editor-next-buffer-id value))
+        (editor-next-buffer-id-set! value (+ id 1)))
       buffer))
+
+  (define (editor-create-buffer! value resource mode-name bytes)
+    (require-open-editor 'editor-create-buffer! value)
+    (unless (or (not resource) (string? resource))
+      (assertion-violation
+        'editor-create-buffer!
+        "resource must be a string or #f"
+        resource))
+    (unless (symbol? mode-name)
+      (assertion-violation
+        'editor-create-buffer!
+        "mode name must be a symbol"
+        mode-name))
+    (unless (or (string? bytes) (bytevector? bytes))
+      (assertion-violation
+        'editor-create-buffer!
+        "initial text must be a string or bytevector"
+        bytes))
+    (let* ([id (editor-next-buffer-id value)]
+           [new-document-id
+             (+ 1
+                (fold-left
+                  (lambda (maximum buffer)
+                    (max
+                      maximum
+                      (document-id (buffer-document buffer))))
+                  0
+                  (editor-buffers value)))]
+           [document (make-document bytes new-document-id)]
+           [buffer
+             (make-buffer
+               id
+               document
+               resource
+               mode-name
+               (editor-language-catalog value))])
+      (editor-add-buffer! value buffer)))
 
   (define (editor-remove-buffer! value id)
     (require-open-editor 'editor-remove-buffer! value)
     (let ([buffer (editor-buffer-ref value id)])
+      (when
+        (exists
+          (lambda (session)
+            (= (interaction-session-buffer-id session) id))
+          (table-values
+            (editor-interaction-table value)
+            (editor-interaction-ids value)))
+        (assertion-violation
+          'editor-remove-buffer!
+          "buffer belongs to an interaction session"
+          id))
       (when
         (exists
           (lambda (view) (eq? (view-buffer view) buffer))
@@ -171,6 +237,73 @@
           (lambda (registered-id) (not (= registered-id id)))
           (editor-buffer-ids value)))
       (buffer-close! buffer)))
+
+  (define (editor-interactions value)
+    (require-open-editor 'editor-interactions value)
+    (table-values
+      (editor-interaction-table value)
+      (editor-interaction-ids value)))
+
+  (define (editor-interaction-ref value id)
+    (require-open-editor 'editor-interaction-ref value)
+    (unless (exact-non-negative-integer? id)
+      (assertion-violation
+        'editor-interaction-ref
+        "interaction id must be a non-negative exact integer"
+        id))
+    (or
+      (hashtable-ref (editor-interaction-table value) id #f)
+      (assertion-violation
+        'editor-interaction-ref
+        "unknown interaction id"
+        id)))
+
+  (define (editor-interaction-for-buffer value buffer-id)
+    (require-open-editor 'editor-interaction-for-buffer value)
+    (unless (exact-non-negative-integer? buffer-id)
+      (assertion-violation
+        'editor-interaction-for-buffer
+        "buffer id must be a non-negative exact integer"
+        buffer-id))
+    (find
+      (lambda (session)
+        (= (interaction-session-buffer-id session) buffer-id))
+      (editor-interactions value)))
+
+  (define (editor-register-interaction!
+            value
+            kind
+            name
+            buffer-id
+            evaluator
+            prompt
+            input-start)
+    (require-open-editor 'editor-register-interaction! value)
+    (editor-buffer-ref value buffer-id)
+    (when (editor-interaction-for-buffer value buffer-id)
+      (assertion-violation
+        'editor-register-interaction!
+        "buffer already belongs to an interaction session"
+        buffer-id))
+    (let* ([id (editor-next-interaction-id value)]
+           [session
+             (make-interaction-session
+               id
+               kind
+               name
+               buffer-id
+               evaluator
+               prompt
+               input-start)])
+      (hashtable-set!
+        (editor-interaction-table value)
+        id
+        session)
+      (editor-interaction-ids-set!
+        value
+        (append (editor-interaction-ids value) (list id)))
+      (editor-next-interaction-id-set! value (+ id 1))
+      session))
 
   (define (editor-views value)
     (require-open-editor 'editor-views value)
@@ -463,6 +596,7 @@
       (assertion-violation 'make-editor-state "buffer is closed" buffer))
     (let* ([buffers (make-eqv-hashtable)]
            [views (make-eqv-hashtable)]
+           [interactions (make-eqv-hashtable)]
            [keymaps (make-keymap-catalog)]
            [view
              (%make-view
@@ -484,10 +618,14 @@
              (%make-editor
                buffers
                (list (buffer-id buffer))
+               (+ (buffer-id buffer) 1)
                views
                '(1)
                1
                2
+               interactions
+               '()
+               1
                (make-command-registry)
                keymaps
                (buffer-language-catalog buffer)
@@ -501,6 +639,11 @@
 
   (define (editor-close! value)
     (when (and (editor? value) (not (editor-closed? value)))
+      (for-each
+        interaction-session-close!
+        (table-values
+          (editor-interaction-table value)
+          (editor-interaction-ids value)))
       (for-each
         (lambda (buffer)
           (unless (buffer-closed? buffer)
