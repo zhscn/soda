@@ -177,6 +177,28 @@
 (unless (= invocation-count 11)
   (error 'editor-tests "command replacement did not affect an existing binding"))
 
+(editor-register-command!
+  editor
+  'test.fail
+  (lambda (context)
+    (error 'test.fail "expected failure")))
+(editor-bind-key!
+  editor
+  (list (make-key-stroke 'character 116 4))
+  'test.fail)
+(send! editor decoder (bytes 20))
+(unless (string? (editor-status-message editor))
+  (error 'editor-tests
+         "interactive command failure did not become a status message"))
+(define internal-failure-propagated? #f)
+(guard (condition
+         [else (set! internal-failure-propagated? #t)])
+  (editor-update!
+    editor
+    (make-internal-command-message 'test.fail #f)))
+(unless internal-failure-propagated?
+  (error 'editor-tests "internal command failure was hidden"))
+
 (send! editor decoder (bytes 24))
 (send! editor decoder (string->utf8 "z"))
 (unless (string=? (editor-status-message editor) "Undefined key sequence")
@@ -184,6 +206,14 @@
 (unless (bytevector=? (buffer-bytes buffer) (string->utf8 "ab"))
   (error 'editor-tests "undefined prefix inserted its final key"))
 
+(define first-quit-effects (send! editor decoder (bytes 17)))
+(unless
+  (and (null? first-quit-effects)
+       (string-contains?
+         (editor-status-message editor)
+         "Modified buffers"))
+  (error 'editor-tests
+         "first quit did not protect modified buffers"))
 (define quit-effects (send! editor decoder (bytes 17)))
 (unless (and (= (length quit-effects) 1)
              (command-effect? (car quit-effects))
@@ -216,6 +246,47 @@
              (= (view-viewport-columns (editor-active-view editor)) 80)
              (= (view-first-line (editor-active-view editor)) 0))
   (error 'editor-tests "resize message did not update the viewport"))
+
+(define anchor-document (make-document "abc" 73))
+(define anchor-buffer
+  (make-buffer 19 anchor-document "*anchor*" 'fundamental-mode))
+(define anchor-editor (make-editor anchor-buffer))
+(define anchor-decoder (make-input-decoder))
+(define anchor-second-view
+  (editor-open-view! anchor-editor (buffer-id anchor-buffer)))
+(editor-set-active-view! anchor-editor (view-id anchor-second-view))
+(editor-execute-command! anchor-editor 'move.line-end)
+(editor-set-active-view! anchor-editor 1)
+(editor-execute-command! anchor-editor 'move.line-end)
+(send! anchor-editor anchor-decoder (bytes 127 127 127))
+(unless (= (view-caret anchor-second-view) 0)
+  (error 'editor-tests
+         "document edits left another view caret out of range"))
+(editor-close! anchor-editor)
+
+(define unicode-document (make-document "a\néx\n" 74))
+(define unicode-buffer
+  (make-buffer 20 unicode-document "*unicode*" 'fundamental-mode))
+(define unicode-editor (make-editor unicode-buffer))
+(define unicode-decoder (make-input-decoder))
+(editor-execute-command! unicode-editor 'move.line-end)
+(send! unicode-editor unicode-decoder (bytes #x1b #x5b #x42))
+(unless (= (view-caret (editor-active-view unicode-editor)) 4)
+  (error 'editor-tests
+         "vertical movement did not preserve the Unicode display column"))
+(editor-update! unicode-editor (make-resize-message 3 2))
+(editor-execute-command! unicode-editor 'move.forward-character)
+(unless (= (view-first-column (editor-active-view unicode-editor)) 1)
+  (error 'editor-tests
+         "caret visibility did not update the horizontal viewport"))
+(define unicode-frame (render-editor-frame unicode-editor 3 2))
+(unless
+  (and (string=? (cell-text (frame-cell-ref unicode-frame 0 0)) "x")
+       (frame-cursor-visible? unicode-frame)
+       (= (frame-cursor-column unicode-frame) 1))
+  (error 'editor-tests
+         "renderer did not apply the horizontal viewport"))
+(editor-close! unicode-editor)
 
 (define second-document (make-document "second" 72))
 (define second-buffer
@@ -447,9 +518,48 @@
           (string-append (string (integer->char 27)) "[1;2H"))
   (error 'editor-tests "renderer cursor did not use display cells"))
 
+(define previous-diff-frame (make-frame 1 3))
+(define current-diff-frame (make-frame 1 3))
+(frame-put-cell!
+  current-diff-frame
+  0
+  1
+  (make-cell "x" 1 '(default) default-style #f '()))
+(define diff-output
+  (frame-diff->ansi previous-diff-frame current-diff-frame))
+(unless
+  (and (string-contains?
+         diff-output
+         (string-append (string (integer->char 27)) "[1;2Hx"))
+       (not
+         (string-contains?
+           diff-output
+           (string-append (string (integer->char 27)) "[H"))))
+  (error 'editor-tests "frame diff did not limit output to changed cells"))
+
+(define created-buffer
+  (editor-create-buffer!
+    editor
+    "*created-one*"
+    'fundamental-mode
+    ""))
+(define created-document-id
+  (document-id (buffer-document created-buffer)))
+(editor-remove-buffer! editor (buffer-id created-buffer))
+(define recreated-buffer
+  (editor-create-buffer!
+    editor
+    "*created-two*"
+    'fundamental-mode
+    ""))
+(unless (> (document-id (buffer-document recreated-buffer))
+           created-document-id)
+  (error 'editor-tests "editor reused a removed document id"))
+
 (editor-close! editor)
 (unless (and (editor-closed? editor)
              (buffer-closed? buffer)
              (buffer-closed? second-buffer)
-             (buffer-closed? display-buffer))
+             (buffer-closed? display-buffer)
+             (buffer-closed? recreated-buffer))
   (error 'editor-tests "closing the editor did not release its buffer"))

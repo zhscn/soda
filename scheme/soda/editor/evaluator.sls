@@ -70,7 +70,7 @@
                        name))
                    (set! messages
                      (cons
-                       (make-command-message name argument)
+                       (make-internal-command-message name argument)
                        messages))
                    (void)]))
               (set-top-level-value! '*editor* editor environment)

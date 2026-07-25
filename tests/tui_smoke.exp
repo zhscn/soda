@@ -19,6 +19,10 @@ after 50
 send -- "\033\[113"
 after 5
 send -- ";5u"
+after 50
+send -- "\033\[113"
+after 5
+send -- ";5u"
 
 expect {
   -exact "\033\[<u" {

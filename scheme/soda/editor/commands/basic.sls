@@ -7,6 +7,7 @@
           (soda document)
           (soda editor buffer)
           (soda editor command)
+          (soda editor display)
           (soda editor event)
           (soda editor keymap)
           (soda editor state))
@@ -75,16 +76,37 @@
       (lambda (text)
         (let* ([position (text-position text (view-caret view))]
                [line (car position)]
-               [column (or (view-preferred-column view) (cdr position))]
+               [tab-width
+                 (let ([setting
+                         (buffer-setting-ref
+                           (view-buffer view)
+                           'tab-width
+                           8)])
+                   (if (and (integer? setting)
+                            (exact? setting)
+                            (positive? setting))
+                       setting
+                       8))]
+               [column
+                 (or
+                   (view-preferred-column view)
+                   (text-cell-column
+                     text
+                     (view-caret view)
+                     tab-width))]
                [target
                  (max 0
                       (min (+ line delta)
                            (- (text-line-count text) 1)))]
-               [line-start (text-line-start text target)]
-               [line-end (text-line-content-end text target)])
+               [target-offset
+                 (text-offset-at-cell-column
+                   text
+                   target
+                   column
+                   tab-width)])
           (view-set-vertical-caret!
             view
-            (min (+ line-start column) line-end)
+            target-offset
             column)))))
 
   (define (self-insert-command context)
@@ -199,7 +221,27 @@
     '())
 
   (define (quit-command context)
-    (list (make-command-effect 'quit #f)))
+    (let* ([editor (command-context-editor context)]
+           [buffers (editor-buffers editor)]
+           [pending?
+             (exists buffer-save-pending? buffers)]
+           [modified?
+             (exists buffer-modified? buffers)])
+      (cond
+        [pending?
+         (editor-disarm-quit! editor)
+         (editor-set-status-message!
+           editor
+           "Save in progress; wait before quitting")
+         '()]
+        [(and modified? (not (editor-quit-armed? editor)))
+         (editor-arm-quit! editor)
+         (editor-set-status-message!
+           editor
+           "Modified buffers; press C-q again to discard changes")
+         '()]
+        [else
+         (list (make-command-effect 'quit #f))])))
 
   (define (keyboard-quit-command context)
     (let ([editor (command-context-editor context)]

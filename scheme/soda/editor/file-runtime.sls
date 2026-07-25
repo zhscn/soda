@@ -46,7 +46,7 @@
                     (make-effect-result
                       #t
                       (list
-                        (make-command-message
+                        (make-internal-command-message
                           'file.apply-save-result
                           (make-save-result
                             request
@@ -91,7 +91,7 @@
               #f
               (begin
                 (hashtable-delete! pending (event-source event))
-                (make-command-message
+                (make-internal-command-message
                   'file.apply-save-result
                   (make-save-result
                     (vector-ref target 0)

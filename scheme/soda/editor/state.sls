@@ -30,12 +30,16 @@
           editor-set-pending-keys!
           editor-status-message
           editor-set-status-message!
+          editor-quit-armed?
+          editor-arm-quit!
+          editor-disarm-quit!
           view?
           view-id
           view-buffer
           view-caret
           view-preferred-column
           view-first-line
+          view-first-column
           view-viewport-rows
           view-viewport-columns
           view-keymap-layers
@@ -47,6 +51,7 @@
           view-set-caret!
           view-set-vertical-caret!
           view-set-first-line!
+          view-set-first-column!
           view-set-viewport!
           view-set-keymap-layers!
           ensure-view-visible!)
@@ -54,6 +59,7 @@
           (soda document)
           (soda editor buffer)
           (soda editor command)
+          (soda editor display)
           (soda editor input-state)
           (soda editor interaction)
           (soda editor keymap)
@@ -63,11 +69,12 @@
     (fields
       (immutable id view-id)
       (mutable buffer view-buffer view-buffer-set!)
-      (mutable caret view-caret view-caret-set!)
+      (mutable caret-anchor view-caret-anchor view-caret-anchor-set!)
       (mutable preferred-column
                view-preferred-column
                view-preferred-column-set!)
       (mutable first-line view-first-line view-first-line-set!)
+      (mutable first-column view-first-column view-first-column-set!)
       (mutable viewport-rows
                view-viewport-rows
                view-viewport-rows-set!)
@@ -85,6 +92,9 @@
       (mutable next-buffer-id
                editor-next-buffer-id
                editor-next-buffer-id-set!)
+      (mutable next-document-id
+               editor-next-document-id
+               editor-next-document-id-set!)
       (immutable view-table editor-view-table)
       (mutable view-ids editor-view-ids editor-view-ids-set!)
       (mutable active-view-id
@@ -104,6 +114,9 @@
       (mutable status-message
                editor-status-message
                editor-status-message-set!)
+      (mutable quit-armed?
+               editor-quit-armed?
+               editor-quit-armed?-set!)
       (mutable closed? editor-closed? editor-closed?-set!)))
 
   (define (require-open-editor who value)
@@ -167,6 +180,9 @@
         (append (editor-buffer-ids value) (list id)))
       (when (>= id (editor-next-buffer-id value))
         (editor-next-buffer-id-set! value (+ id 1)))
+      (let ([document-id (document-id (buffer-document buffer))])
+        (when (>= document-id (editor-next-document-id value))
+          (editor-next-document-id-set! value (+ document-id 1))))
       buffer))
 
   (define (editor-create-buffer! value resource mode-name bytes)
@@ -187,15 +203,7 @@
         "initial text must be a string or bytevector"
         bytes))
     (let* ([id (editor-next-buffer-id value)]
-           [new-document-id
-             (+ 1
-                (fold-left
-                  (lambda (maximum buffer)
-                    (max
-                      maximum
-                      (document-id (buffer-document buffer))))
-                  0
-                  (editor-buffers value)))]
+           [new-document-id (editor-next-document-id value)]
            [document (make-document bytes new-document-id)]
            [buffer
              (make-buffer
@@ -327,8 +335,12 @@
              (%make-view
                id
                buffer
-               0
+               (document-create-anchor!
+                 (buffer-document buffer)
+                 0
+                 anchor-after-insertion)
                #f
+               0
                0
                1
                1
@@ -348,12 +360,15 @@
 
   (define (editor-close-view! value id)
     (require-open-editor 'editor-close-view! value)
-    (editor-view-ref value id)
-    (when (= (length (editor-view-ids value)) 1)
-      (assertion-violation
-        'editor-close-view!
-        "an open editor requires at least one view"
-        id))
+    (let ([view (editor-view-ref value id)])
+      (when (= (length (editor-view-ids value)) 1)
+        (assertion-violation
+          'editor-close-view!
+          "an open editor requires at least one view"
+          id))
+      (document-remove-anchor!
+        (buffer-document (view-buffer view))
+        (view-caret-anchor view)))
     (hashtable-delete! (editor-view-table value) id)
     (let ([remaining
             (filter
@@ -376,9 +391,18 @@
     (require-open-editor 'editor-set-view-buffer! value)
     (let ([view (editor-view-ref value view-id)]
           [buffer (editor-buffer-ref value buffer-id)])
-      (view-buffer-set! view buffer)
-      (view-set-caret! view 0)
+      (let ([anchor
+              (document-create-anchor!
+                (buffer-document buffer)
+                0
+                anchor-after-insertion)])
+        (document-remove-anchor!
+          (buffer-document (view-buffer view))
+          (view-caret-anchor view))
+        (view-buffer-set! view buffer)
+        (view-caret-anchor-set! view anchor))
       (view-first-line-set! view 0)
+      (view-first-column-set! view 0)
       (view-reset-input-states! view)
       (view-pending-keys-set! view '())))
 
@@ -427,6 +451,32 @@
         message))
     (editor-status-message-set! value message))
 
+  (define (editor-arm-quit! value)
+    (require-open-editor 'editor-arm-quit! value)
+    (editor-quit-armed?-set! value #t))
+
+  (define (editor-disarm-quit! value)
+    (require-open-editor 'editor-disarm-quit! value)
+    (editor-quit-armed?-set! value #f))
+
+  (define (view-caret value)
+    (unless (view? value)
+      (assertion-violation 'view-caret "expected a view" value))
+    (document-anchor-offset
+      (buffer-document (view-buffer value))
+      (view-caret-anchor value)))
+
+  (define (replace-view-caret-anchor! value offset)
+    (let* ([document (buffer-document (view-buffer value))]
+           [anchor
+             (document-create-anchor!
+               document
+               offset
+               anchor-after-insertion)]
+           [previous (view-caret-anchor value)])
+      (document-remove-anchor! document previous)
+      (view-caret-anchor-set! value anchor)))
+
   (define (view-set-caret! value offset)
     (unless (view? value)
       (assertion-violation 'view-set-caret! "expected a view" value))
@@ -435,7 +485,7 @@
         'view-set-caret!
         "offset must be a non-negative exact integer"
         offset))
-    (view-caret-set! value offset)
+    (replace-view-caret-anchor! value offset)
     (view-preferred-column-set! value #f))
 
   (define (view-set-vertical-caret! value offset column)
@@ -451,7 +501,7 @@
         "offset and column must be non-negative exact integers"
         offset
         column))
-    (view-caret-set! value offset)
+    (replace-view-caret-anchor! value offset)
     (view-preferred-column-set! value column))
 
   (define (view-set-first-line! value line)
@@ -466,6 +516,19 @@
         "line must be a non-negative exact integer"
         line))
     (view-first-line-set! value line))
+
+  (define (view-set-first-column! value column)
+    (unless (view? value)
+      (assertion-violation
+        'view-set-first-column!
+        "expected a view"
+        value))
+    (unless (exact-non-negative-integer? column)
+      (assertion-violation
+        'view-set-first-column!
+        "column must be a non-negative exact integer"
+        column))
+    (view-first-column-set! value column))
 
   (define (view-set-viewport! value rows columns)
     (unless (view? value)
@@ -572,19 +635,43 @@
         'ensure-view-visible!
         "expected a view"
         view))
-    (let* ([document (buffer-document (view-buffer view))]
-           [caret-line
+    (let* ([buffer (view-buffer view)]
+           [document (buffer-document buffer)]
+           [tab-width
+             (let ([setting (buffer-setting-ref buffer 'tab-width 8)])
+               (if (and (integer? setting)
+                        (exact? setting)
+                        (positive? setting))
+                   setting
+                   8))]
+           [caret-position
              (with-document-text
                document
                (lambda (text)
-                 (car (text-position text (view-caret view)))))]
+                 (cons
+                   (car (text-position text (view-caret view)))
+                   (text-cell-column
+                     text
+                     (view-caret view)
+                     tab-width))))]
+           [caret-line (car caret-position)]
+           [caret-column (cdr caret-position)]
            [first-line (view-first-line view)]
-           [rows (max 1 (view-viewport-rows view))])
+           [rows (max 1 (view-viewport-rows view))]
+           [first-column (view-first-column view)]
+           [columns (max 1 (view-viewport-columns view))])
       (cond
         [(< caret-line first-line)
          (view-first-line-set! view caret-line)]
         [(>= caret-line (+ first-line rows))
-         (view-first-line-set! view (- caret-line (- rows 1)))])))
+         (view-first-line-set! view (- caret-line (- rows 1)))])
+      (cond
+        [(< caret-column first-column)
+         (view-first-column-set! view caret-column)]
+        [(>= caret-column (+ first-column columns))
+         (view-first-column-set!
+           view
+           (- caret-column (- columns 1)))])))
 
   (define (make-editor-state buffer)
     (unless (buffer? buffer)
@@ -602,8 +689,12 @@
              (%make-view
                1
                buffer
-               0
+               (document-create-anchor!
+                 (buffer-document buffer)
+                 0
+                 anchor-after-insertion)
                #f
+               0
                0
                1
                1
@@ -619,6 +710,7 @@
                buffers
                (list (buffer-id buffer))
                (+ (buffer-id buffer) 1)
+               (+ (document-id (buffer-document buffer)) 1)
                views
                '(1)
                1
@@ -629,6 +721,7 @@
                (make-command-registry)
                keymaps
                (buffer-language-catalog buffer)
+               #f
                #f
                #f)])
       (hashtable-set! buffers (buffer-id buffer) buffer)
@@ -645,13 +738,17 @@
           (editor-interaction-table value)
           (editor-interaction-ids value)))
       (for-each
+        (lambda (view)
+          (view-pending-keys-set! view '())
+          (document-remove-anchor!
+            (buffer-document (view-buffer view))
+            (view-caret-anchor view)))
+        (table-values (editor-view-table value) (editor-view-ids value)))
+      (for-each
         (lambda (buffer)
           (unless (buffer-closed? buffer)
             (buffer-close! buffer)))
         (table-values
           (editor-buffer-table value)
           (editor-buffer-ids value)))
-      (for-each
-        (lambda (view) (view-pending-keys-set! view '()))
-        (table-values (editor-view-table value) (editor-view-ids value)))
       (editor-closed?-set! value #t))))

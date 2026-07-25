@@ -27,7 +27,11 @@
           make-command-message
           command-message?
           command-message-name
-          command-message-argument)
+          command-message-argument
+          make-internal-command-message
+          internal-command-message?
+          internal-command-message-name
+          internal-command-message-argument)
   (import (rnrs))
 
   (define-record-type key-event
@@ -54,6 +58,9 @@
     (fields rows columns))
 
   (define-record-type command-message
+    (fields name argument))
+
+  (define-record-type internal-command-message
     (fields name argument))
 
   (define modifier-bits

@@ -115,6 +115,36 @@
          status
          detail)]))
 
+  (define (encode-file-data data line-ending)
+    (case line-ending
+      [(lf) data]
+      [(crlf cr)
+       (call-with-values
+         open-bytevector-output-port
+         (lambda (port extract)
+           (do ([index 0 (+ index 1)])
+               ((= index (bytevector-length data))
+                (extract))
+             (let* ([byte (bytevector-u8-ref data index)]
+                    [preceded-by-cr?
+                      (and (positive? index)
+                           (= (bytevector-u8-ref data (- index 1))
+                              13))])
+               (cond
+                 [(not (= byte 10))
+                  (put-u8 port byte)]
+                 [(eq? line-ending 'crlf)
+                  (unless preceded-by-cr?
+                    (put-u8 port 13))
+                  (put-u8 port 10)]
+                 [(not preceded-by-cr?)
+                  (put-u8 port 13)])))))]
+      [else
+       (assertion-violation
+         'file.save
+         "file-line-ending must be lf, crlf, or cr"
+         line-ending)]))
+
   (define (snapshot-save-request buffer path)
     (let* ([document (buffer-document buffer)]
            [snapshot (document-snapshot document)])
@@ -130,7 +160,12 @@
                   (snapshot-document-id snapshot)
                   (snapshot-revision snapshot)
                   path
-                  (text->bytevector text)))
+                  (encode-file-data
+                    (text->bytevector text)
+                    (buffer-setting-ref
+                      buffer
+                      'file-line-ending
+                      'lf))))
               (lambda () (text-close! text)))))
         (lambda () (snapshot-close! snapshot)))))
 

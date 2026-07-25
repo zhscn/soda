@@ -56,9 +56,15 @@
       (mutable saved-revision
                buffer-saved-revision
                buffer-saved-revision-set!)
+      (mutable saved-undo-node
+               buffer-saved-undo-node
+               buffer-saved-undo-node-set!)
       (mutable pending-save-revision
                buffer-pending-save-revision
                buffer-pending-save-revision-set!)
+      (mutable pending-save-undo-node
+               buffer-pending-save-undo-node
+               buffer-pending-save-undo-node-set!)
       (mutable mode-name buffer-mode-name buffer-mode-name-set!)
       (mutable mode-generation buffer-mode-generation buffer-mode-generation-set!)
       (mutable language-runtime
@@ -93,7 +99,7 @@
   (define (profile-for-mode catalog mode-name)
     (let ([language
             (resolve-major-mode-language catalog mode-name)])
-      (and language (language-profile-ref catalog language))))
+    (and language (language-profile-ref catalog language))))
 
   (define (install-major-mode! value mode-name)
     (unless (= (buffer-revision value)
@@ -156,6 +162,8 @@
                  (document-revision document)
                  #f
                  (document-revision document)
+                 (document-undo-position document)
+                 #f
                  #f
                  'fundamental-mode
                  0
@@ -177,8 +185,10 @@
 
   (define (buffer-modified? value)
     (require-open-buffer 'buffer-modified? value)
-    (not (= (buffer-revision value)
-            (buffer-saved-revision value))))
+    (and
+      (buffer-setting-ref value 'track-modified? #t)
+      (not (= (document-undo-position (buffer-document value))
+              (buffer-saved-undo-node value)))))
 
   (define (buffer-save-pending? value)
     (require-open-buffer 'buffer-save-pending? value)
@@ -202,6 +212,9 @@
         (buffer-id value)
         (buffer-pending-save-revision value)))
     (buffer-pending-save-revision-set! value revision)
+    (buffer-pending-save-undo-node-set!
+      value
+      (document-undo-position (buffer-document value)))
     revision)
 
   (define (buffer-finish-save! value revision saved?)
@@ -227,7 +240,11 @@
         (buffer-pending-save-revision value)))
     (buffer-pending-save-revision-set! value #f)
     (when saved?
-      (buffer-saved-revision-set! value revision))
+      (buffer-saved-revision-set! value revision)
+      (buffer-saved-undo-node-set!
+        value
+        (buffer-pending-save-undo-node value)))
+    (buffer-pending-save-undo-node-set! value #f)
     value)
 
   (define (buffer-close! value)

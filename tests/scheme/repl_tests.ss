@@ -73,6 +73,7 @@
        (= (interaction-session-input-start session)
           (document-editable-start
             (buffer-document repl-buffer)))
+       (not (buffer-modified? repl-buffer))
        (string=? (buffer-string repl-buffer)
                  "Soda Chez Scheme REPL\n> "))
   (error 'repl-tests

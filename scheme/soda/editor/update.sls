@@ -18,6 +18,8 @@
         (extract))))
 
   (define (run-interactive-command editor name event argument)
+    (unless (eq? name 'editor.quit)
+      (editor-disarm-quit! editor))
     (guard (condition
              [else
               (editor-set-status-message!
@@ -26,6 +28,11 @@
               '()])
       (editor-set-status-message! editor #f)
       (editor-execute-command! editor name event argument)))
+
+  (define (run-internal-command editor name argument)
+    (unless (eq? name 'editor.quit)
+      (editor-disarm-quit! editor))
+    (editor-execute-command! editor name #f argument))
 
   (define (catalog-keymap editor layer)
     (cond
@@ -167,6 +174,11 @@
          (command-message-name message)
          #f
          (command-message-argument message))]
+      [(internal-command-message? message)
+       (run-internal-command
+         editor
+         (internal-command-message-name message)
+         (internal-command-message-argument message))]
       [else
        (assertion-violation
          'editor-update!

@@ -4,6 +4,7 @@
           (soda document)
           (soda editor buffer)
           (soda editor core)
+          (soda editor display)
           (soda tui component)
           (soda tui frame)
           (soda tui layout))
@@ -17,64 +18,14 @@
             caret-column
             tab-width
             first-line
+            first-column
             line-count))
 
   (define modeline-style
     (make-style 'default 'default '(reverse)))
 
-  (define (wide-codepoint? value)
-    (or (<= #x1100 value #x115f)
-        (= value #x2329)
-        (= value #x232a)
-        (and (<= #x2e80 value #xa4cf) (not (= value #x303f)))
-        (<= #xac00 value #xd7a3)
-        (<= #xf900 value #xfaff)
-        (<= #xfe10 value #xfe19)
-        (<= #xfe30 value #xfe6f)
-        (<= #xff00 value #xff60)
-        (<= #xffe0 value #xffe6)
-        (<= #x1f300 value #x1faff)
-        (<= #x20000 value #x3fffd)))
-
-  (define (character-cell-width character)
-    (unless (char? character)
-      (assertion-violation
-        'character-cell-width
-        "expected a character"
-        character))
-    (let ([category (char-general-category character)]
-          [value (char->integer character)])
-      (cond
-        [(memq category '(Mn Me Cf)) 0]
-        [(or (eq? category 'Cc) (eq? category 'Cs)) 1]
-        [(wide-codepoint? value) 2]
-        [else 1])))
-
-  (define (next-tab-stop column tab-width)
-    (+ column (- tab-width (mod column tab-width))))
-
-  (define (string-cell-width value tab-width)
-    (let loop ([index 0] [column 0])
-      (if (= index (string-length value))
-          column
-          (let ([character (string-ref value index)])
-            (loop
-              (+ index 1)
-              (if (char=? character #\tab)
-                  (next-tab-stop column tab-width)
-                  (+ column (character-cell-width character))))))))
-
   (define (decode-text bytes)
     (utf8->string bytes))
-
-  (define (caret-cell-column text caret tab-width)
-    (let* ([position (text-position text caret)]
-           [line (car position)]
-           [line-start (text-line-start text line)]
-           [prefix
-             (decode-text
-               (text-subbytevector text line-start caret))])
-      (string-cell-width prefix tab-width)))
 
   (define (display-character character)
     (if (memq (char-general-category character) '(Cc Cs))
@@ -116,21 +67,23 @@
             line-start
             line-end
             tab-width
+            first-column
             buffer-id
             component-id)
     (let ([value (decode-text bytes)]
-          [limit (rect-columns rectangle)])
+          [limit (+ first-column (rect-columns rectangle))])
       (let loop ([index 0]
                  [byte-position line-start]
                  [column 0]
                  [previous-column #f])
         (if (= index (string-length value))
             (begin
-              (when (< column limit)
+              (when (and (<= first-column column) (< column limit))
                 (frame-put-cell!
                   frame
                   screen-row
-                  (+ (rect-column rectangle) column)
+                  (+ (rect-column rectangle)
+                     (- column first-column))
                   (document-cell
                     " "
                     1
@@ -148,11 +101,14 @@
                          (character-cell-width character))])
               (cond
                 [(zero? width)
-                 (when previous-column
+                 (when (and previous-column
+                            (<= first-column previous-column)
+                            (< previous-column limit))
                    (frame-append-cell-text!
                      frame
                      screen-row
-                     (+ (rect-column rectangle) previous-column)
+                     (+ (rect-column rectangle)
+                        (- previous-column first-column))
                      (string character)
                      (document-source
                        buffer-id
@@ -163,39 +119,46 @@
                    (+ byte-position byte-length)
                    column
                    previous-column)]
-                [(> (+ column width) limit)
+                [(>= column limit)
                  column]
                 [tab?
                  (do ([offset 0 (+ offset 1)])
                      ((= offset width))
-                   (frame-put-cell!
-                     frame
-                     screen-row
-                     (+ (rect-column rectangle) column offset)
-                     (document-cell
-                       " "
-                       1
-                       buffer-id
-                       byte-position
-                       'tab
-                       component-id)))
+                   (let ([cell-column (+ column offset)])
+                     (when (and (<= first-column cell-column)
+                                (< cell-column limit))
+                       (frame-put-cell!
+                         frame
+                         screen-row
+                         (+ (rect-column rectangle)
+                            (- cell-column first-column))
+                         (document-cell
+                           " "
+                           1
+                           buffer-id
+                           byte-position
+                           'tab
+                           component-id)))))
                  (loop
                    (+ index 1)
                    (+ byte-position byte-length)
                    (+ column width)
                    (+ column (- width 1)))]
                 [else
-                 (frame-put-cell!
-                   frame
-                   screen-row
-                   (+ (rect-column rectangle) column)
-                   (document-cell
-                     (string (display-character character))
-                     width
-                     buffer-id
-                     byte-position
-                     character
-                     component-id))
+                 (when (and (<= first-column column)
+                            (<= (+ column width) limit))
+                   (frame-put-cell!
+                     frame
+                     screen-row
+                     (+ (rect-column rectangle)
+                        (- column first-column))
+                     (document-cell
+                       (string (display-character character))
+                       width
+                       buffer-id
+                       byte-position
+                       character
+                       component-id)))
                  (loop
                    (+ index 1)
                    (+ byte-position byte-length)
@@ -294,6 +257,7 @@
                 line-start
                 line-end
                 (editor-render-context-tab-width context)
+                (editor-render-context-first-column context)
                 (buffer-id buffer)
                 component-id)))))
       (let ([cursor-row
@@ -302,7 +266,8 @@
                     (editor-render-context-first-line context)))]
             [cursor-column
               (+ (rect-column rectangle)
-                 (editor-render-context-caret-column context))])
+                 (- (editor-render-context-caret-column context)
+                    (editor-render-context-first-column context)))])
         (if (and (rect-contains? rectangle cursor-row cursor-column)
                  (< cursor-row (frame-rows frame))
                  (< cursor-column (frame-columns frame)))
@@ -415,11 +380,12 @@
                                setting
                                8))]
                        [caret-column
-                         (caret-cell-column
+                         (text-cell-column
                            text
                            (view-caret view)
                            tab-width)]
                        [first-line (view-first-line view)]
+                       [first-column (view-first-column view)]
                        [line-count (text-line-count text)])
                   (frame-set-layout! frame component-tree)
                   (component-node-render!
@@ -433,6 +399,7 @@
                       caret-column
                       tab-width
                       first-line
+                      first-column
                       line-count)
                     frame)
                   frame))

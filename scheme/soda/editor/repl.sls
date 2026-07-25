@@ -115,6 +115,10 @@
                      (make-chez-evaluator)
                      repl-prompt
                      input-start)])
+            (buffer-set-local-setting!
+              buffer
+              'track-modified?
+              #f)
             (document-set-editable-start!
               (buffer-document buffer)
               input-start)
@@ -390,7 +394,7 @@
           (make-effect-result
             #t
             (cons
-              (make-command-message
+              (make-internal-command-message
                 'scheme.apply-evaluation-result
                 result)
               (evaluation-result-messages result))))))

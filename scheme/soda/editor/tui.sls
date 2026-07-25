@@ -19,20 +19,22 @@
   (define (ansi suffix)
     (string-append escape suffix))
 
-  (define (render! terminal editor)
+  (define (render! terminal editor previous-frame)
     (let ([size (terminal-size terminal)])
       (editor-update!
         editor
         (make-resize-message
           (max 2 (car size))
           (max 1 (cdr size))))
-      (terminal-write!
-        terminal
-        (frame->ansi
-          (render-editor-frame
-            editor
-            (max 2 (car size))
-            (max 1 (cdr size)))))))
+      (let ([frame
+              (render-editor-frame
+                editor
+                (max 2 (car size))
+                (max 1 (cdr size)))])
+        (terminal-write!
+          terminal
+          (frame-diff->ansi previous-frame frame))
+        frame)))
 
   (define (handle-editor-message! editor executor message)
     (let loop ([messages (list message)])
@@ -73,6 +75,18 @@
                      (event-data (car events)))]
                 [else (find (cdr events))]))))))
 
+  (define (detect-file-line-ending bytes)
+    (let loop ([index 0])
+      (cond
+        [(= index (bytevector-length bytes)) 'lf]
+        [(= (bytevector-u8-ref bytes index) 13)
+         (if (and (< (+ index 1) (bytevector-length bytes))
+                  (= (bytevector-u8-ref bytes (+ index 1)) 10))
+             'crlf
+             'cr)]
+        [(= (bytevector-u8-ref bytes index) 10) 'lf]
+        [else (loop (+ index 1))])))
+
   (define (call-with-runtime procedure)
     (let ([runtime #f])
       (dynamic-wind
@@ -110,6 +124,10 @@
               document
               resource
               'fundamental-mode))
+          (buffer-set-local-setting!
+            buffer
+            'file-line-ending
+            (detect-file-line-ending bytes))
           (when file-path
             (buffer-set-file-path! buffer file-path))
           (set! editor (make-editor buffer))
@@ -132,6 +150,7 @@
           [flush-timer #f]
           [raw? #f]
           [screen? #f]
+          [previous-frame #f]
           [decoder (make-input-decoder)]
           [executor (make-effect-executor)]
           [file-adapter #f])
@@ -181,7 +200,8 @@
             (runtime-watch-fd! runtime 0 fd-readable))
           (let loop ([running? #t])
             (when running?
-              (render! terminal editor)
+              (set! previous-frame
+                (render! terminal editor previous-frame))
               (let process
                 ([events (runtime-poll! runtime)] [continue? #t])
                 (cond

@@ -50,11 +50,16 @@
           command-message?
           command-message-name
           command-message-argument
+          make-internal-command-message
+          internal-command-message?
+          internal-command-message-name
+          internal-command-message-argument
           view?
           view-id
           view-buffer
           view-caret
           view-first-line
+          view-first-column
           view-viewport-rows
           view-viewport-columns
           view-keymap-layers

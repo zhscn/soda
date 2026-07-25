@@ -110,6 +110,8 @@
   (error 'buffer-tests "language revision did not advance"))
 (unless (not (buffer-language-error buffer))
   (error 'buffer-tests "language runtime reported an error"))
+(unless (buffer-modified? buffer)
+  (error 'buffer-tests "edit did not mark the buffer modified"))
 
 (define after (document-snapshot (buffer-document buffer)))
 (define after-text (snapshot-text after))
@@ -121,12 +123,17 @@
   (error 'buffer-tests "buffer undo returned no change"))
 (unless (= (buffer-language-revision buffer) 2)
   (error 'buffer-tests "undo did not synchronize language runtime"))
+(unless (not (buffer-modified? buffer))
+  (error 'buffer-tests
+         "undo to the saved history node left the buffer modified"))
 
 (define redone (buffer-redo! buffer))
 (unless redone
   (error 'buffer-tests "buffer redo returned no change"))
 (unless (= (buffer-language-revision buffer) 3)
   (error 'buffer-tests "redo did not synchronize language runtime"))
+(unless (buffer-modified? buffer)
+  (error 'buffer-tests "redo away from the saved history node was clean"))
 
 (buffer-set-major-mode! buffer 'fundamental-mode)
 (unless (not (buffer-language-profile buffer))

@@ -185,6 +185,17 @@
                   "Buffer has no file path")
   (error 'file-tests "pathless buffer did not report save-as requirement"))
 
+(buffer-set-file-path! buffer save-path)
+(buffer-set-local-setting! buffer 'file-line-ending 'crlf)
+(insert! 18 "\nlast")
+(dispatch! (make-command-message 'file.save #f))
+(finish-file-write!)
+(unless
+  (bytevector=?
+    (read-saved-bytes)
+    (string->utf8 "base one two newer\r\nlast"))
+  (error 'file-tests "save did not preserve the CRLF file convention"))
+
 (editor-close! editor)
 (runtime-close! runtime)
 (when (file-exists? save-path)
