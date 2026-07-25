@@ -104,3 +104,7 @@ debugger command 从进程内对象构造工具 Buffer 或 overlay，因此不�
 stack frame、局部变量、restart 与 continuation 操作属于同一个 debugger 数据
 模型。呈现层通过 generated Buffer、selection 和 describe 组件访问这些对象，
 不接管 terminal stdin，也不进入递归 command loop。
+
+成功求值产生的顶层 binding 进入 session runtime catalog。该 catalog 与静态
+Scheme semantic index 的合并规则见
+[11-scheme-semantics.md](11-scheme-semantics.md)。

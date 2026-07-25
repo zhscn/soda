@@ -60,6 +60,10 @@ LanguageProfile {
 project settings 可覆盖 style、provider 配置和 query 搜索路径。profile 是普通
 Scheme 值，major mode 只引用其名字；同一 provider 可以被多个 mode 复用。
 
+Scheme profile 组合 revision-scoped syntax view、静态 binding analyzer 和运行时
+session catalog。scope graph、library index、completion 与 xref 的契约见
+[11-scheme-semantics.md](11-scheme-semantics.md)。
+
 ## Syntax provider
 
 provider contract：

@@ -18,26 +18,29 @@
 | 08 | [08-scheme-first.md](08-scheme-first.md) | Chez Scheme、native core、libuv 与 TUI 的所有权边界 |
 | 09 | [09-language-modes.md](09-language-modes.md) | major mode、language profile 与 syntax provider |
 | 10 | [10-interaction.md](10-interaction.md) | 进程内 REPL、求值 request、来源与 debugger 状态 |
+| 11 | [11-scheme-semantics.md](11-scheme-semantics.md) | Scheme scope graph、语义索引、补全与 xref |
 
 依赖关系：
 
 ```text
-                   08 Scheme-first composition root
-                    │
-          ┌─────────┼──────────┬──────────┐
-          ▼         ▼          ▼          ▼
-      03 input  04 workbench 09 modes  10 interaction
-                    │          │          │
-              ┌─────┴───┐      ▼          │
-              ▼         ▼   01 C++ core   │
-           05 jump  06 completion         │
-              │         │                 │
-              └────┬────┴─────────────────┘
-                   ▼
-              07 decoration
-                   │
-                   ▼
-              02 Text / Document
+                    08 Scheme-first composition root
+                     │
+          ┌──────────┼──────────┬───────────┐
+          ▼          ▼          ▼           ▼
+      03 input   04 workbench 09 modes  10 interaction
+                     │          │           │
+              ┌──────┴───┐      ├────┬──────┘
+              ▼          ▼      ▼    ▼
+           05 jump  06 completion  11 Scheme semantics
+              │          │      │
+              └──────┬───┴──────┘
+                     ▼
+                07 decoration
+                     │
+                     ▼
+                02 Text / Document
+
+      09 modes ───────────────> 01 C++ language core
 ```
 
 上层模块持有策略与可组合状态；native 模块提供具有明确生命周期、revision

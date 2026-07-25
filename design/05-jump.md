@@ -67,6 +67,10 @@ grep、references、implementations、diagnostics、build errors 和外部语义
 不同 producer。创建列表不打开文件；坐标保持 producer 的原始编码，直到资源被
 解析到具体 snapshot 后再换算。
 
+Scheme definition 与 references 由
+[11-scheme-semantics.md](11-scheme-semantics.md) 的 DefinitionId 和 workspace
+倒排索引产生。provider 返回 LocationList，不直接打开 Buffer 或选择 Window。
+
 excerpt 同时用于显示和内容校验。item 在首次跳转或对应 buffer 打开时提升为
 AnchorRange。未提升 item 的落点顺序为：
 

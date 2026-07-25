@@ -17,8 +17,10 @@ resolve(item id) -> resolved fields
 cancel(request)
 ```
 
-provider 可以是 LSP session、path、buffer words、snippet 或 Scheme procedure。
-每个结果携带 provider identity、request generation、document identity 与 revision。
+provider 可以是 LSP session、path、buffer words、snippet、Scheme 静态语义索引
+或 InteractionSession runtime catalog。每个结果携带 provider identity、request
+generation、document identity 与 revision。Scheme provider 的 DefinitionId 和
+静态/运行时合并规则见 [11-scheme-semantics.md](11-scheme-semantics.md)。
 
 请求向全部有效 provider 扇出。首个结果即可显示；迟到结果按 provider 整组替换，
 不会冻结或重建其他 provider 的条目。新输入推进 generation，旧 response 和旧
