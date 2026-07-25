@@ -19,6 +19,7 @@
 | 09 | [09-language-modes.md](09-language-modes.md) | major mode、language profile 与 syntax provider |
 | 10 | [10-interaction.md](10-interaction.md) | 进程内 REPL、求值 request、来源与 debugger 状态 |
 | 11 | [11-scheme-semantics.md](11-scheme-semantics.md) | Scheme scope graph、语义索引、补全与 xref |
+| 12 | [12-minibuffer.md](12-minibuffer.md) | minibuffer session、读取协议、history 与补全目标 |
 
 依赖关系：
 
@@ -41,6 +42,8 @@
                 02 Text / Document
 
       09 modes ───────────────> 01 C++ language core
+
+      03 input ──> 12 minibuffer <── 06 completion
 ```
 
 上层模块持有策略与可组合状态；native 模块提供具有明确生命周期、revision

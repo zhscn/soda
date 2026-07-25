@@ -64,6 +64,16 @@ Scheme profile 组合 revision-scoped syntax view、静态 binding analyzer 和�
 session catalog。scope graph、library index、completion 与 xref 的契约见
 [11-scheme-semantics.md](11-scheme-semantics.md)。
 
+内建 `scheme-mode` 覆盖 `.scm`、`.ss`、`.sls` 与 `.sps` 资源，并通过 mode
+setting 选择 `scheme-static` completion provider。Scheme identifier policy 把
+reader delimiter 之外的字符视为 symbol 组成部分，因此 `-`、`?`、`!` 等标点参与
+补全 query 和 replacement range。completion boundary policy 识别竖线引用的
+identifier，使空白和转义字符保留在同一个 query range 中。
+
+Scheme REPL Buffer 复用 `scheme-mode` 的 reader boundary policy，但以 buffer-local
+setting 选择 `scheme-repl` provider。该 provider 查询 InteractionSession 持有的
+Chez environment；静态 provider 只分析源码 Document，不解析 transcript。
+
 ## Syntax provider
 
 provider contract：

@@ -14,11 +14,11 @@ Scheme syntax view ──> binding analysis ──> semantic snapshot
                                                 ├── definition provider
                                                 └── reference provider
 
-InteractionSession ──> runtime symbol catalog ──┘
+InteractionSession ──> Chez environment symbol view ──┘
 ```
 
 静态索引负责 lexical scope、library import/export、定义位置和源码引用。运行时
-catalog 负责 REPL 中已经求值的定义、过程元数据和没有对应源码文件的值。两者通过
+symbol view 负责 REPL 中已经求值的定义和没有对应源码文件的值。两者通过
 [06-completion.md](06-completion.md) 的 provider 管线和
 [05-jump.md](05-jump.md) 的位置模型汇合，不共享可变 namespace，也不互相替代。
 
@@ -35,7 +35,7 @@ Scheme semantic provider 是进程内 Scheme library，不建立平行的 VFS、
 - Buffer language runtime 持有当前 Document revision 的 syntax 与 semantic
   snapshot；
 - Workbench 持有 library graph、跨文档 definition/use 索引和 dirty queue；
-- InteractionSession 持有 runtime symbol catalog；
+- InteractionSession 的 evaluator 持有 Chez environment；
 - completion session、LocationList 和 jump graph 只借用 provider 产生的公共值；
 - LSP 是可选的外部 provider/adapter，不是内部语义索引的表示格式。
 
@@ -214,10 +214,11 @@ library identity 或源码定义。
 
 ## Completion
 
-Scheme completion provider 的请求包含 document、revision、position、query range
-和 active InteractionSession。provider 在对应 semantic snapshot 中找到最内层
-scope，收集可见 definition，按当前位置的拼写应用 lexical shadowing，然后转换为
-通用 `CompletionItem`：
+Scheme completion provider 的请求包含 document、revision、position 和 query
+range。静态 provider 在对应 semantic snapshot 中找到最内层 scope，收集可见
+definition，按当前位置的拼写应用 lexical shadowing，然后转换为通用
+`CompletionItem`。REPL provider 通过 target Document 在 Editor registry 中找到
+所属 InteractionSession，并查询其 evaluator environment：
 
 ```text
 provider_data: {
@@ -228,7 +229,8 @@ provider_data: {
 ```
 
 静态候选提供 name、kind、library、signature 和 definition location。runtime
-provider 从 session catalog 提供已经求值的顶层 binding。合并规则为：
+provider 从 session environment 提供已经求值的顶层 binding。language mode 或
+buffer-local policy 选择 provider 组合；组合时遵循：
 
 - lexical definition 优先于同名 runtime binding；
 - 当前 REPL session 的动态定义优先于其他 interaction session；
@@ -238,6 +240,23 @@ provider 从 session catalog 提供已经求值的顶层 binding。合并规则�
 
 completion item 的 text edit、generation、resolve 和 apply 继续遵循通用补全
 管线；Scheme provider 不直接修改 Buffer。
+
+## 自举静态 Provider
+
+`scheme-mode` 通过 `completion-providers` setting 启用 `scheme-static`。provider
+从请求绑定的 Document revision 建立轻量 semantic snapshot，并把本文件定义与
+R6RS/Chez primitive metadata 转换为通用 CompletionItem。
+
+自举 scanner 直接读取 UTF-8 snapshot，识别 Scheme identifier 中的标点，并容错
+跳过字符串、行注释、嵌套 block comment、datum comment 以及 quoted datum。它提取
+`define`、procedure definition、`define-syntax` 和 `define-record-type`；record
+名称、constructor 与 predicate 分别形成稳定定义。未闭合的外围 form 不妨碍已经
+出现的定义进入 snapshot。
+
+文档定义的 DefinitionId 由 document id、revision、声明 byte offset 和 name
+组成；primitive DefinitionId 使用静态 metadata identity。文档定义按名字遮蔽
+primitive。scope graph 可在同一 snapshot 和 DefinitionId 接口之后增加，provider
+catalog、completion session 和 TUI 不依赖 scanner 的内部 token 表示。
 
 ## Definition、references 与 rename
 
@@ -280,10 +299,11 @@ RuntimeBinding {
 }
 ```
 
-catalog 是 InteractionSession 的派生状态，不从 transcript 文本反向解析。顶层
-`define`、`define-syntax` 和 library load 可以携带 EvaluationOrigin；当 origin
-对应的 static definition 仍匹配时，runtime binding 关联其 DefinitionId。重新
-定义同名 binding 产生新的 generation，并替换该 session 中的可见版本。
+runtime symbol view 从 InteractionSession 的 Chez environment 投影，不从
+transcript 文本反向解析。顶层 `define`、`define-syntax` 和 library load 可以携带
+EvaluationOrigin；当 origin 对应的 static definition 仍匹配时，runtime binding
+关联其 DefinitionId。重新定义同名 binding 后，environment 中的可见版本用于后续
+查询。
 
 任意 Scheme 值保留在 Chez environment 内。completion、hover 和 debugger 读取
 经过限制的 metadata，不把值序列化进 semantic workspace，也不让静态 analyzer

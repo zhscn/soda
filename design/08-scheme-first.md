@@ -108,6 +108,11 @@ runtime ABI 遵循 pull-based 约束：
 文件写入在 libuv worker pool 中执行完整的临时文件写入与原子替换。worker 不访问
 Scheme 对象；完成 callback 只把状态加入 native event queue。
 
+终端输出使用 partial-write ABI。`write-some` 返回已写 byte 数或 would-block；
+Scheme 保留未写 suffix，并在 libuv 报告 output fd writable 后继续 flush。短写、
+`EINTR` 和 `EAGAIN` 都不会丢弃 frame 数据，也不会被解释成终端故障。同步完整写入
+只用于退出清理等必须排空输出的边界。
+
 终端 raw mode 和 alternate screen 的获取与释放使用动态清理边界。初始化中途失败、
 command 抛错和正常退出都执行相同的恢复路径。
 

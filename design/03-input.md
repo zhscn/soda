@@ -16,6 +16,8 @@ terminal bytes
 
 decoder 处理协议，不决定编辑语义；keymap 解析命令，不直接修改 Document；command
 通过显式 context 访问当前 view、buffer、selection 和 prefix argument。
+文件 I/O、补全 provider 和其他异步设施把结果包装成 command-loop message，并在
+同一更新入口完成 identity、generation 与 revision 校验。
 
 ## 终端协议
 
@@ -214,14 +216,18 @@ context，只在分配的 Rect 中绘制。父节点先绘制，children 按顺�
 相反顺序选择最上层的 component，并可返回从 root 到 leaf 的完整路径。
 
 layout 使用纯 Rect 运算。fixed extent 保留指定 cell 数，flex extent 按整数权重
-确定性分配剩余空间。正文和 modeline 是 root 下的两个独立 component；同一 split
-机制供后续 WindowLayout、minibuffer 保留行和工具区域复用。
+确定性分配剩余空间。正文、modeline 和活动 minibuffer 是 root 下的独立
+component；同一 split 机制供 WindowLayout、保留行和工具区域复用。
 
 renderer 只读取 viewport 覆盖的行，向 frame 写入 cell，并计算结构化 cursor。
 presenter 是唯一生成 ANSI 控制序列的组件。首帧与尺寸变化使用完整重绘，后续帧
 比较 cell 的 text、width、continuation 与 style，只写入发生显示变化的 cell。
 光标、modeline、minibuffer、popup 和工具区域都使用 cells 表达，不会向 Document
 写入控制序列或虚拟文本。
+
+presenter 输出进入有序 byte queue。terminal ABI 尝试 partial write；would-block
+时由 runtime 注册 output fd writable interest，后续事件继续发送未写 suffix。
+frame 的逻辑提交顺序与 byte queue 顺序一致，短写不会导致 ANSI 序列截断。
 
 `describe-caret` 从 snapshot 与最终 frame 生成结构化字符描述，包括 code point、
 document position、screen cell、component path、显示宽度、faces、style 和 sources。
