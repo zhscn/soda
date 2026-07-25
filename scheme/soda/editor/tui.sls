@@ -6,6 +6,7 @@
           (soda editor core)
           (soda editor effect)
           (soda editor event)
+          (soda editor repl)
           (soda runtime)
           (soda tui commands)
           (soda tui input)
@@ -157,6 +158,7 @@
         executor
         'quit
         (lambda (payload) (make-effect-result #f '())))
+      (install-interaction-effect-handler! executor editor)
       (dynamic-wind
         (lambda () #f)
         (lambda ()

@@ -6,6 +6,7 @@
           editor-buffers
           editor-buffer-ref
           editor-add-buffer!
+          editor-create-buffer!
           editor-remove-buffer!
           editor-views
           editor-view-ref
@@ -14,6 +15,9 @@
           editor-active-view
           editor-set-active-view!
           editor-set-view-buffer!
+          editor-interactions
+          editor-interaction-ref
+          editor-interaction-for-buffer
           editor-command-registry
           editor-keymap-catalog
           editor-language-catalog
@@ -67,6 +71,15 @@
           input-state-keymap-layers
           input-state-text-policy
           input-state-text-command
+          interaction-session?
+          interaction-session-id
+          interaction-session-kind
+          interaction-session-name
+          interaction-session-buffer-id
+          interaction-session-state
+          interaction-session-history
+          interaction-session-last-result
+          interaction-session-debug-actions
           command-effect?
           command-effect-kind
           command-effect-payload)
@@ -76,10 +89,13 @@
           (soda editor commands basic)
           (soda editor event)
           (soda editor input-state)
+          (soda editor interaction)
+          (soda editor repl)
           (soda editor state)
           (soda editor update))
 
   (define (make-editor buffer)
     (let ([editor (make-editor-state buffer)])
       (install-basic-commands! editor)
+      (install-interaction-commands! editor)
       editor)))
