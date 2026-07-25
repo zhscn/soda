@@ -37,5 +37,34 @@
   (unless (positive? (bytevector-length (event-data event)))
     (error 'runtime-tests "file read returned no data" event)))
 
+(define save-file (getenv "SODA_SAVE_TEST_FILE"))
+(when (file-exists? save-file)
+  (delete-file save-file))
+(define expected-save-data (string->utf8 "saved λ"))
+(define file-write
+  (runtime-write-file! runtime save-file expected-save-data))
+(define write-events (runtime-poll! runtime))
+
+(unless (= (length write-events) 1)
+  (error 'runtime-tests "expected one file write event" write-events))
+
+(let ([event (car write-events)])
+  (unless (eq? (event-kind event) 'file-write)
+    (error 'runtime-tests "expected file-write event" event))
+  (unless (= (event-source event) file-write)
+    (error 'runtime-tests "file write source differs" event))
+  (unless (zero? (event-status event))
+    (error 'runtime-tests "file write failed" event))
+  (unless (zero? (bytevector-length (event-data event)))
+    (error 'runtime-tests "file write returned unexpected data" event)))
+
+(define saved-read (runtime-read-file! runtime save-file))
+(let ([events (runtime-poll! runtime)])
+  (unless (and (= (length events) 1)
+               (= (event-source (car events)) saved-read)
+               (bytevector=? (event-data (car events)) expected-save-data))
+    (error 'runtime-tests "saved file bytes differ" events)))
+(delete-file save-file)
+
 (runtime-close! runtime)
 (runtime-close! runtime)

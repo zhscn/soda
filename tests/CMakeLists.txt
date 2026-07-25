@@ -55,6 +55,7 @@ if(CHEZ_SCHEME_EXECUTABLE)
       ${CMAKE_COMMAND} -E env
       SODA_RUNTIME_LIBRARY=$<TARGET_FILE:soda_runtime>
       SODA_TEST_FILE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/ctor_sequence.yaml
+      SODA_SAVE_TEST_FILE=${CMAKE_CURRENT_BINARY_DIR}/scheme_runtime_save_test.txt
       ${CHEZ_SCHEME_EXECUTABLE}
       --libdirs ${PROJECT_SOURCE_DIR}/scheme
       --program ${CMAKE_CURRENT_SOURCE_DIR}/scheme/runtime_tests.ss
@@ -125,6 +126,19 @@ if(CHEZ_SCHEME_EXECUTABLE)
       ${CHEZ_SCHEME_EXECUTABLE}
       --libdirs ${PROJECT_SOURCE_DIR}/scheme
       --program ${CMAKE_CURRENT_SOURCE_DIR}/scheme/repl_tests.ss
+  )
+
+  add_test(
+    NAME scheme_file_tests
+    CONFIGURATIONS Debug Release
+    COMMAND
+      ${CMAKE_COMMAND} -E env
+      SODA_DOCUMENT_LIBRARY=$<TARGET_FILE:soda_document>
+      SODA_RUNTIME_LIBRARY=$<TARGET_FILE:soda_runtime>
+      SODA_EDITOR_SAVE_TEST_FILE=${CMAKE_CURRENT_BINARY_DIR}/scheme_editor_save_test.txt
+      ${CHEZ_SCHEME_EXECUTABLE}
+      --libdirs ${PROJECT_SOURCE_DIR}/scheme
+      --program ${CMAKE_CURRENT_SOURCE_DIR}/scheme/file_tests.ss
   )
 
   if(EXPECT_EXECUTABLE)

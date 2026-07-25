@@ -7,6 +7,7 @@
           runtime-start-timer!
           runtime-watch-fd!
           runtime-read-file!
+          runtime-write-file!
           runtime-cancel!
           make-terminal
           terminal?
@@ -45,6 +46,10 @@
                        unsigned-64))
   (define %read-file
     (foreign-procedure __atomic "soda_runtime_read_file" (void* string) unsigned-64))
+  (define %write-file
+    (foreign-procedure __atomic "soda_runtime_write_file"
+                       (void* string u8* size_t)
+                       unsigned-64))
   (define %cancel
     (foreign-procedure __atomic "soda_runtime_cancel" (void* unsigned-64) int))
   (define %poll
@@ -157,6 +162,28 @@
           (native-error 'runtime-read-file! runtime)
           source)))
 
+  (define (runtime-write-file! runtime path data)
+    (require-runtime 'runtime-write-file! runtime)
+    (unless (string? path)
+      (assertion-violation
+        'runtime-write-file!
+        "path must be a string"
+        path))
+    (unless (bytevector? data)
+      (assertion-violation
+        'runtime-write-file!
+        "data must be a bytevector"
+        data))
+    (let ([source
+            (%write-file
+              (runtime-pointer runtime)
+              path
+              data
+              (bytevector-length data))])
+      (if (zero? source)
+          (native-error 'runtime-write-file! runtime)
+          source)))
+
   (define (runtime-cancel! runtime source)
     (require-runtime 'runtime-cancel! runtime)
     (let ([status (%cancel (runtime-pointer runtime) source)])
@@ -249,6 +276,7 @@
       [(1) 'timer]
       [(2) 'fd-ready]
       [(3) 'file-read]
+      [(4) 'file-write]
       [else (error 'runtime-poll! "unknown native event kind" value)]))
 
   (define (copy-current-data pointer)

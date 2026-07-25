@@ -2,12 +2,14 @@
 
 #include <uv.h>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
 #include <exception>
 #include <fcntl.h>
+#include <limits>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -75,6 +77,24 @@ struct Runtime::Impl {
         Phase phase = Phase::Open;
     };
 
+    struct FileWrite {
+        enum class Phase : std::uint8_t {
+            Open,
+            Write,
+            Close,
+        };
+
+        Impl* owner = nullptr;
+        SourceId id;
+        uv_fs_t request{};
+        std::string path;
+        std::vector<std::byte> data;
+        uv_file file = -1;
+        std::size_t offset = 0;
+        int final_status = 0;
+        Phase phase = Phase::Open;
+    };
+
     Impl() : owner_thread(std::this_thread::get_id()) {
         const int status = uv_loop_init(&loop);
         if (status < 0) {
@@ -99,6 +119,10 @@ struct Runtime::Impl {
         for (auto& [id, read] : file_reads) {
             (void)id;
             (void)uv_cancel(reinterpret_cast<uv_req_t*>(&read->request));
+        }
+        for (auto& [id, write] : file_writes) {
+            (void)id;
+            (void)uv_cancel(reinterpret_cast<uv_req_t*>(&write->request));
         }
 
         while (uv_loop_alive(&loop) != 0) {
@@ -224,6 +248,32 @@ struct Runtime::Impl {
         return id;
     }
 
+    SourceId write_file(std::string path, std::vector<std::byte> data) {
+        require_owner_thread();
+        if (path.empty()) {
+            throw std::invalid_argument("file write has no path");
+        }
+
+        auto write = std::make_unique<FileWrite>();
+        write->owner = this;
+        write->id = allocate_id();
+        write->path = std::move(path);
+        write->data = std::move(data);
+        write->request.data = write.get();
+        const SourceId id = write->id;
+        file_writes.emplace(id.value, std::move(write));
+
+        FileWrite& operation = *file_writes.at(id.value);
+        const int status = uv_fs_open(&loop, &operation.request, operation.path.c_str(),
+                                      O_WRONLY | O_CREAT | O_TRUNC, 0666, on_file_write);
+        if (status < 0) {
+            uv_fs_req_cleanup(&operation.request);
+            queue_file_write_result(operation, status);
+            file_writes.erase(id.value);
+        }
+        return id;
+    }
+
     bool cancel(SourceId source) {
         require_owner_thread();
         if (!source.valid()) {
@@ -245,6 +295,9 @@ struct Runtime::Impl {
         }
         if (const auto read = file_reads.find(source.value); read != file_reads.end()) {
             return uv_cancel(reinterpret_cast<uv_req_t*>(&read->second->request)) == 0;
+        }
+        if (const auto write = file_writes.find(source.value); write != file_writes.end()) {
+            return uv_cancel(reinterpret_cast<uv_req_t*>(&write->second->request)) == 0;
         }
         return false;
     }
@@ -340,6 +393,64 @@ struct Runtime::Impl {
             event.data = std::move(operation.data);
         }
         events.push_back(std::move(event));
+    }
+
+    void submit_file_write(FileWrite& operation) {
+        operation.phase = FileWrite::Phase::Write;
+        if (operation.offset == operation.data.size()) {
+            submit_file_write_close(operation, 0);
+            return;
+        }
+        constexpr std::size_t max_chunk = std::numeric_limits<unsigned int>::max();
+        const std::size_t remaining = operation.data.size() - operation.offset;
+        const auto chunk_size = static_cast<unsigned int>(std::min(remaining, max_chunk));
+        const uv_buf_t buffer = uv_buf_init(
+            reinterpret_cast<char*>(operation.data.data() + operation.offset), chunk_size);
+        const int status = uv_fs_write(&loop, &operation.request, operation.file, &buffer, 1,
+                                       static_cast<std::int64_t>(operation.offset), on_file_write);
+        if (status < 0) {
+            uv_fs_req_cleanup(&operation.request);
+            submit_file_write_close(operation, status);
+        }
+    }
+
+    void submit_file_write_close(FileWrite& operation, int final_status) {
+        operation.phase = FileWrite::Phase::Close;
+        operation.final_status = final_status;
+        if (operation.file < 0) {
+            finish_file_write(operation);
+            return;
+        }
+        const int status = uv_fs_close(&loop, &operation.request, operation.file, on_file_write);
+        if (status < 0) {
+            uv_fs_req_cleanup(&operation.request);
+            uv_fs_t close_request{};
+            const int close_status = uv_fs_close(&loop, &close_request, operation.file, nullptr);
+            uv_fs_req_cleanup(&close_request);
+            operation.file = -1;
+            if (operation.final_status == 0) {
+                operation.final_status = close_status < 0 ? close_status : status;
+            }
+            finish_file_write(operation);
+        }
+    }
+
+    void finish_file_write(FileWrite& operation) {
+        const std::uint64_t id = operation.id.value;
+        if (!shutting_down) {
+            queue_file_write_result(operation, operation.final_status);
+        }
+        file_writes.erase(id);
+    }
+
+    void queue_file_write_result(FileWrite& operation, int status) {
+        events.push_back({
+            .kind = EventKind::FileWrite,
+            .source = operation.id,
+            .status = status,
+            .flags = 0,
+            .data = {},
+        });
     }
 
     template <typename Operation> static void guard_callback(Operation&& operation) noexcept {
@@ -449,6 +560,61 @@ struct Runtime::Impl {
         });
     }
 
+    static void on_file_write(uv_fs_t* request) noexcept {
+        guard_callback([&] {
+            auto& operation = *static_cast<FileWrite*>(request->data);
+            Impl& owner = *operation.owner;
+            const auto result = request->result;
+            uv_fs_req_cleanup(request);
+
+            switch (operation.phase) {
+            case FileWrite::Phase::Open:
+                if (result < 0) {
+                    operation.final_status = static_cast<int>(result);
+                    owner.finish_file_write(operation);
+                    return;
+                }
+                operation.file = static_cast<uv_file>(result);
+                if (owner.shutting_down) {
+                    owner.submit_file_write_close(operation, UV_ECANCELED);
+                    return;
+                }
+                owner.submit_file_write(operation);
+                return;
+
+            case FileWrite::Phase::Write:
+                if (result < 0) {
+                    owner.submit_file_write_close(operation, static_cast<int>(result));
+                    return;
+                }
+                if (result == 0) {
+                    owner.submit_file_write_close(operation, UV_EIO);
+                    return;
+                }
+                operation.offset += static_cast<std::size_t>(result);
+                if (owner.shutting_down) {
+                    owner.submit_file_write_close(operation, UV_ECANCELED);
+                    return;
+                }
+                owner.submit_file_write(operation);
+                return;
+
+            case FileWrite::Phase::Close:
+                if (result < 0 && operation.file >= 0) {
+                    uv_fs_t close_request{};
+                    (void)uv_fs_close(&owner.loop, &close_request, operation.file, nullptr);
+                    uv_fs_req_cleanup(&close_request);
+                }
+                operation.file = -1;
+                if (result < 0 && operation.final_status == 0) {
+                    operation.final_status = static_cast<int>(result);
+                }
+                owner.finish_file_write(operation);
+                return;
+            }
+        });
+    }
+
     uv_loop_t loop{};
     const std::thread::id owner_thread;
     std::uint64_t next_id = 1;
@@ -458,6 +624,7 @@ struct Runtime::Impl {
     std::unordered_map<std::uint64_t, std::unique_ptr<FdWatch>> fd_watches;
     std::unordered_map<int, SourceId> watched_fds;
     std::unordered_map<std::uint64_t, std::unique_ptr<FileRead>> file_reads;
+    std::unordered_map<std::uint64_t, std::unique_ptr<FileWrite>> file_writes;
 };
 
 Runtime::Runtime() : impl_(std::make_unique<Impl>()) {}
@@ -473,6 +640,10 @@ SourceId Runtime::watch_fd(int fd, FdEvent events) {
 
 SourceId Runtime::read_file(std::string path) {
     return impl_->read_file(std::move(path));
+}
+
+SourceId Runtime::write_file(std::string path, std::vector<std::byte> data) {
+    return impl_->write_file(std::move(path), std::move(data));
 }
 
 bool Runtime::cancel(SourceId source) {

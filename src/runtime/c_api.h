@@ -26,6 +26,7 @@ typedef struct soda_terminal soda_terminal;
 #define SODA_EVENT_TIMER 1U
 #define SODA_EVENT_FD_READY 2U
 #define SODA_EVENT_FILE_READ 3U
+#define SODA_EVENT_FILE_WRITE 4U
 
 #define SODA_FD_READABLE (1U << 0U)
 #define SODA_FD_WRITABLE (1U << 1U)
@@ -37,6 +38,8 @@ SODA_RUNTIME_API uint64_t soda_runtime_start_timer(soda_runtime* runtime, uint64
                                                    uint64_t repeat_ms);
 SODA_RUNTIME_API uint64_t soda_runtime_watch_fd(soda_runtime* runtime, int fd, uint32_t events);
 SODA_RUNTIME_API uint64_t soda_runtime_read_file(soda_runtime* runtime, const char* path);
+SODA_RUNTIME_API uint64_t soda_runtime_write_file(soda_runtime* runtime, const char* path,
+                                                  const uint8_t* data, size_t size);
 SODA_RUNTIME_API int soda_runtime_cancel(soda_runtime* runtime, uint64_t source);
 
 SODA_RUNTIME_API int soda_runtime_poll(soda_runtime* runtime, int mode);

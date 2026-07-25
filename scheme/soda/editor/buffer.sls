@@ -8,6 +8,13 @@
           buffer-close!
           buffer-language-catalog
           buffer-revision
+          buffer-file-path
+          buffer-set-file-path!
+          buffer-saved-revision
+          buffer-modified?
+          buffer-save-pending?
+          buffer-begin-save!
+          buffer-finish-save!
           buffer-major-mode-name
           buffer-set-major-mode!
           buffer-refresh-language!
@@ -45,6 +52,13 @@
       (immutable local-settings buffer-local-settings)
       (immutable language-catalog buffer-language-catalog)
       (mutable revision buffer-revision buffer-revision-set!)
+      (mutable file-path buffer-file-path buffer-file-path-set!)
+      (mutable saved-revision
+               buffer-saved-revision
+               buffer-saved-revision-set!)
+      (mutable pending-save-revision
+               buffer-pending-save-revision
+               buffer-pending-save-revision-set!)
       (mutable mode-name buffer-mode-name buffer-mode-name-set!)
       (mutable mode-generation buffer-mode-generation buffer-mode-generation-set!)
       (mutable language-runtime
@@ -140,12 +154,81 @@
                  (make-eq-hashtable)
                  catalog
                  (document-revision document)
+                 #f
+                 (document-revision document)
+                 #f
                  'fundamental-mode
                  0
                  #f
                  #f)])
          (install-major-mode! value mode-name)
          value)]))
+
+  (define (buffer-set-file-path! value path)
+    (require-open-buffer 'buffer-set-file-path! value)
+    (unless (or (not path)
+                (and (string? path) (positive? (string-length path))))
+      (assertion-violation
+        'buffer-set-file-path!
+        "file path must be a non-empty string or #f"
+        path))
+    (buffer-file-path-set! value path)
+    path)
+
+  (define (buffer-modified? value)
+    (require-open-buffer 'buffer-modified? value)
+    (not (= (buffer-revision value)
+            (buffer-saved-revision value))))
+
+  (define (buffer-save-pending? value)
+    (require-open-buffer 'buffer-save-pending? value)
+    (and (buffer-pending-save-revision value) #t))
+
+  (define (buffer-begin-save! value revision)
+    (require-open-buffer 'buffer-begin-save! value)
+    (unless (and (integer? revision)
+                 (exact? revision)
+                 (not (negative? revision))
+                 (= revision (buffer-revision value)))
+      (assertion-violation
+        'buffer-begin-save!
+        "save revision must match the current buffer revision"
+        revision
+        (buffer-revision value)))
+    (when (buffer-save-pending? value)
+      (assertion-violation
+        'buffer-begin-save!
+        "buffer already has a pending save"
+        (buffer-id value)
+        (buffer-pending-save-revision value)))
+    (buffer-pending-save-revision-set! value revision)
+    revision)
+
+  (define (buffer-finish-save! value revision saved?)
+    (require-open-buffer 'buffer-finish-save! value)
+    (unless (and (integer? revision)
+                 (exact? revision)
+                 (not (negative? revision)))
+      (assertion-violation
+        'buffer-finish-save!
+        "save revision must be a non-negative exact integer"
+        revision))
+    (unless (boolean? saved?)
+      (assertion-violation
+        'buffer-finish-save!
+        "saved status must be a boolean"
+        saved?))
+    (unless (and (buffer-pending-save-revision value)
+                 (= revision (buffer-pending-save-revision value)))
+      (assertion-violation
+        'buffer-finish-save!
+        "save completion does not match the pending revision"
+        revision
+        (buffer-pending-save-revision value)))
+    (buffer-pending-save-revision-set! value #f)
+    (when saved?
+      (buffer-saved-revision-set! value revision))
+    value)
 
   (define (buffer-close! value)
     (when (and (buffer? value) (not (buffer-closed? value)))

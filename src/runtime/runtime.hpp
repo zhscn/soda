@@ -7,6 +7,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace soda::runtime {
 
@@ -28,6 +29,7 @@ public:
     [[nodiscard]] SourceId start_timer(std::uint64_t timeout_ms, std::uint64_t repeat_ms = 0);
     [[nodiscard]] SourceId watch_fd(int fd, FdEvent events);
     [[nodiscard]] SourceId read_file(std::string path);
+    [[nodiscard]] SourceId write_file(std::string path, std::vector<std::byte> data);
     bool cancel(SourceId source);
 
     std::size_t poll(PollMode mode);

@@ -6,6 +6,7 @@
           (soda editor core)
           (soda editor effect)
           (soda editor event)
+          (soda editor file-runtime)
           (soda editor repl)
           (soda runtime)
           (soda tui commands)
@@ -97,7 +98,7 @@
             (guard (condition [else #f])
               (terminal-close! terminal)))))))
 
-  (define (call-with-editor bytes resource procedure)
+  (define (call-with-editor bytes resource file-path procedure)
     (let ([document #f] [buffer #f] [editor #f])
       (dynamic-wind
         (lambda () #f)
@@ -109,6 +110,8 @@
               document
               resource
               'fundamental-mode))
+          (when file-path
+            (buffer-set-file-path! buffer file-path))
           (set! editor (make-editor buffer))
           (install-tui-commands! editor)
           (procedure editor))
@@ -130,7 +133,8 @@
           [raw? #f]
           [screen? #f]
           [decoder (make-input-decoder)]
-          [executor (make-effect-executor)])
+          [executor (make-effect-executor)]
+          [file-adapter #f])
       (define (cancel-flush-timer!)
         (when flush-timer
           (guard (condition [else #f])
@@ -158,6 +162,8 @@
         executor
         'quit
         (lambda (payload) (make-effect-result #f '())))
+      (set! file-adapter
+        (install-file-runtime! executor runtime))
       (install-interaction-effect-handler! executor editor)
       (dynamic-wind
         (lambda () #f)
@@ -188,6 +194,21 @@
                         (= (event-source (car events)) flush-timer)
                         (eq? (event-kind (car events)) 'timer))
                    (process (cdr events) (handle-flush!))]
+                  [(eq? (event-kind (car events)) 'file-write)
+                   (let ([message
+                           (file-runtime-handle-event
+                             file-adapter
+                             (car events))])
+                     (process
+                       (cdr events)
+                       (and
+                         continue?
+                         (or
+                           (not message)
+                           (handle-editor-message!
+                             editor
+                             executor
+                             message)))))]
                   [else (process (cdr events) continue?)])))))
         (lambda ()
           (cancel-flush-timer!)
@@ -214,6 +235,7 @@
           (call-with-editor
             bytes
             (or path "*scratch*")
+            path
             (lambda (editor)
               (call-with-terminal
                 (lambda (terminal)

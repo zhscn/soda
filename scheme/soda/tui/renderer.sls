@@ -241,8 +241,10 @@
   (define (modeline-text editor buffer caret-line caret-column)
     (string-append
       " "
+      (if (buffer-modified? buffer) "*" "-")
       (let ([resource (buffer-resource buffer)])
         (if (string? resource) resource "*scratch*"))
+      (if (buffer-save-pending? buffer) " [saving]" "")
       "  "
       (number->string (+ caret-line 1))
       ":"

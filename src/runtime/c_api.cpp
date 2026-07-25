@@ -11,6 +11,7 @@
 #include <stdexcept>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 struct soda_runtime {
     soda::runtime::Runtime runtime;
@@ -83,6 +84,24 @@ uint64_t soda_runtime_read_file(soda_runtime* runtime, const char* path) {
             throw std::invalid_argument("file read path is null");
         }
         return runtime->runtime.read_file(path).value;
+    });
+}
+
+uint64_t soda_runtime_write_file(soda_runtime* runtime, const char* path, const uint8_t* data,
+                                 size_t size) {
+    return guard(runtime, uint64_t{0}, [&] {
+        if (path == nullptr) {
+            throw std::invalid_argument("file write path is null");
+        }
+        if (data == nullptr && size != 0) {
+            throw std::invalid_argument("file write data is null");
+        }
+        std::vector<std::byte> owned_data(size);
+        if (size != 0) {
+            std::ranges::copy_n(reinterpret_cast<const std::byte*>(data),
+                                static_cast<std::ptrdiff_t>(size), owned_data.begin());
+        }
+        return runtime->runtime.write_file(path, std::move(owned_data)).value;
     });
 }
 
