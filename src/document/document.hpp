@@ -37,7 +37,7 @@ public:
     EditTransaction& operator=(const EditTransaction&) = delete;
     EditTransaction(EditTransaction&& other) noexcept;
     EditTransaction& operator=(EditTransaction&&) = delete;
-    ~EditTransaction();
+    ~EditTransaction() noexcept;
 
     void replace(TextRange range, std::string_view replacement);
     void insert(TextOffset position, std::string_view text);
@@ -73,7 +73,7 @@ private:
 
     void require_active() const;
     void apply(std::uint32_t start, std::uint32_t end, std::string_view replacement);
-    void finish();
+    void finish() noexcept;
 
     Document* document_ = nullptr;
     RevisionId base_revision_ = 0;

@@ -248,9 +248,9 @@ EditTransaction::EditTransaction(EditTransaction&& other) noexcept
     other.document_ = nullptr;
 }
 
-EditTransaction::~EditTransaction() {
+EditTransaction::~EditTransaction() noexcept {
     if (document_ != nullptr) {
-        abort();
+        finish();
     }
 }
 
@@ -343,6 +343,11 @@ void EditTransaction::apply(std::uint32_t cs, std::uint32_t ce, std::string_view
         edits_.insert(edits_.begin() + static_cast<std::ptrdiff_t>(insert_pos),
                       TextEdit{make_range(old_start, old_end), std::string(replacement)});
     } else {
+        if (!last) {
+            throw std::logic_error("EditTransaction: incomplete overlapping edit range");
+        }
+        const std::size_t first_index = *first;
+        const std::size_t last_index = *last;
         const std::uint32_t mcs = std::min(cs, first_cur_start);
         const std::uint32_t mce = std::max(ce, last_cur_end);
         std::string merged;
@@ -353,14 +358,14 @@ void EditTransaction::apply(std::uint32_t cs, std::uint32_t ce, std::string_view
         const std::uint32_t old_start =
             mcs < first_cur_start
                 ? static_cast<std::uint32_t>(static_cast<std::int64_t>(mcs) - delta_before_first)
-                : edits_[*first].old_range.start.value;
+                : edits_[first_index].old_range.start.value;
         const std::uint32_t old_end =
             mce > last_cur_end
                 ? static_cast<std::uint32_t>(static_cast<std::int64_t>(mce) - delta_after_last)
-                : edits_[*last].old_range.end.value;
-        edits_.erase(edits_.begin() + static_cast<std::ptrdiff_t>(*first),
-                     edits_.begin() + static_cast<std::ptrdiff_t>(*last) + 1);
-        edits_.insert(edits_.begin() + static_cast<std::ptrdiff_t>(*first),
+                : edits_[last_index].old_range.end.value;
+        edits_.erase(edits_.begin() + static_cast<std::ptrdiff_t>(first_index),
+                     edits_.begin() + static_cast<std::ptrdiff_t>(last_index) + 1);
+        edits_.insert(edits_.begin() + static_cast<std::ptrdiff_t>(first_index),
                       TextEdit{make_range(old_start, old_end), std::move(merged)});
     }
 
@@ -453,7 +458,7 @@ void EditTransaction::abort() {
     finish();
 }
 
-void EditTransaction::finish() {
+void EditTransaction::finish() noexcept {
     document_->transaction_active_ = false;
     document_ = nullptr;
 }
