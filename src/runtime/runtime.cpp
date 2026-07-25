@@ -78,21 +78,13 @@ struct Runtime::Impl {
     };
 
     struct FileWrite {
-        enum class Phase : std::uint8_t {
-            Open,
-            Write,
-            Close,
-        };
-
         Impl* owner = nullptr;
         SourceId id;
-        uv_fs_t request{};
+        uv_work_t request{};
         std::string path;
+        std::string temporary_path;
         std::vector<std::byte> data;
-        uv_file file = -1;
-        std::size_t offset = 0;
-        int final_status = 0;
-        Phase phase = Phase::Open;
+        int status = 0;
     };
 
     Impl() : owner_thread(std::this_thread::get_id()) {
@@ -264,10 +256,9 @@ struct Runtime::Impl {
         file_writes.emplace(id.value, std::move(write));
 
         FileWrite& operation = *file_writes.at(id.value);
-        const int status = uv_fs_open(&loop, &operation.request, operation.path.c_str(),
-                                      O_WRONLY | O_CREAT | O_TRUNC, 0666, on_file_write);
+        const int status =
+            uv_queue_work(&loop, &operation.request, perform_file_write, on_file_write);
         if (status < 0) {
-            uv_fs_req_cleanup(&operation.request);
             queue_file_write_result(operation, status);
             file_writes.erase(id.value);
         }
@@ -395,54 +386,6 @@ struct Runtime::Impl {
         events.push_back(std::move(event));
     }
 
-    void submit_file_write(FileWrite& operation) {
-        operation.phase = FileWrite::Phase::Write;
-        if (operation.offset == operation.data.size()) {
-            submit_file_write_close(operation, 0);
-            return;
-        }
-        constexpr std::size_t max_chunk = std::numeric_limits<unsigned int>::max();
-        const std::size_t remaining = operation.data.size() - operation.offset;
-        const auto chunk_size = static_cast<unsigned int>(std::min(remaining, max_chunk));
-        const uv_buf_t buffer = uv_buf_init(
-            reinterpret_cast<char*>(operation.data.data() + operation.offset), chunk_size);
-        const int status = uv_fs_write(&loop, &operation.request, operation.file, &buffer, 1,
-                                       static_cast<std::int64_t>(operation.offset), on_file_write);
-        if (status < 0) {
-            uv_fs_req_cleanup(&operation.request);
-            submit_file_write_close(operation, status);
-        }
-    }
-
-    void submit_file_write_close(FileWrite& operation, int final_status) {
-        operation.phase = FileWrite::Phase::Close;
-        operation.final_status = final_status;
-        if (operation.file < 0) {
-            finish_file_write(operation);
-            return;
-        }
-        const int status = uv_fs_close(&loop, &operation.request, operation.file, on_file_write);
-        if (status < 0) {
-            uv_fs_req_cleanup(&operation.request);
-            uv_fs_t close_request{};
-            const int close_status = uv_fs_close(&loop, &close_request, operation.file, nullptr);
-            uv_fs_req_cleanup(&close_request);
-            operation.file = -1;
-            if (operation.final_status == 0) {
-                operation.final_status = close_status < 0 ? close_status : status;
-            }
-            finish_file_write(operation);
-        }
-    }
-
-    void finish_file_write(FileWrite& operation) {
-        const std::uint64_t id = operation.id.value;
-        if (!shutting_down) {
-            queue_file_write_result(operation, operation.final_status);
-        }
-        file_writes.erase(id);
-    }
-
     void queue_file_write_result(FileWrite& operation, int status) {
         events.push_back({
             .kind = EventKind::FileWrite,
@@ -560,58 +503,158 @@ struct Runtime::Impl {
         });
     }
 
-    static void on_file_write(uv_fs_t* request) noexcept {
+    static int synchronous_close(uv_file file) noexcept {
+        uv_fs_t request{};
+        const int status = uv_fs_close(nullptr, &request, file, nullptr);
+        uv_fs_req_cleanup(&request);
+        return status;
+    }
+
+    static void remove_temporary_file(FileWrite& operation) noexcept {
+        if (operation.temporary_path.empty()) {
+            return;
+        }
+        uv_fs_t request{};
+        (void)uv_fs_unlink(nullptr, &request, operation.temporary_path.c_str(), nullptr);
+        uv_fs_req_cleanup(&request);
+    }
+
+    static int open_temporary_file(FileWrite& operation) {
+        constexpr unsigned int maximum_attempts = 100;
+        for (unsigned int attempt = 0; attempt < maximum_attempts; ++attempt) {
+            operation.temporary_path = operation.path + ".soda-save-" +
+                                       std::to_string(operation.id.value) + "-" +
+                                       std::to_string(attempt);
+            uv_fs_t request{};
+            const int result = uv_fs_open(nullptr, &request, operation.temporary_path.c_str(),
+                                          O_WRONLY | O_CREAT | O_EXCL, 0666, nullptr);
+            uv_fs_req_cleanup(&request);
+            if (result >= 0) {
+                return result;
+            }
+            if (result != UV_EEXIST) {
+                return result;
+            }
+        }
+        return UV_EEXIST;
+    }
+
+    static int write_temporary_file(FileWrite& operation, uv_file file) noexcept {
+        std::size_t offset = 0;
+        while (offset < operation.data.size()) {
+            constexpr std::size_t max_chunk = std::numeric_limits<unsigned int>::max();
+            const std::size_t remaining = operation.data.size() - offset;
+            const auto chunk_size = static_cast<unsigned int>(std::min(remaining, max_chunk));
+            const uv_buf_t buffer =
+                uv_buf_init(reinterpret_cast<char*>(operation.data.data() + offset), chunk_size);
+            uv_fs_t request{};
+            const int result = uv_fs_write(nullptr, &request, file, &buffer, 1,
+                                           static_cast<std::int64_t>(offset), nullptr);
+            uv_fs_req_cleanup(&request);
+            if (result < 0) {
+                return result;
+            }
+            if (result == 0) {
+                return UV_EIO;
+            }
+            offset += static_cast<std::size_t>(result);
+        }
+        return 0;
+    }
+
+    static int synchronize_file(uv_file file) noexcept {
+        uv_fs_t request{};
+        const int status = uv_fs_fsync(nullptr, &request, file, nullptr);
+        uv_fs_req_cleanup(&request);
+        return status;
+    }
+
+    static int preserve_target_mode(const FileWrite& operation) noexcept {
+        uv_fs_t stat_request{};
+        const int stat_status = uv_fs_stat(nullptr, &stat_request, operation.path.c_str(), nullptr);
+        if (stat_status == UV_ENOENT) {
+            uv_fs_req_cleanup(&stat_request);
+            return 0;
+        }
+        if (stat_status < 0) {
+            uv_fs_req_cleanup(&stat_request);
+            return stat_status;
+        }
+        const int mode = static_cast<int>(stat_request.statbuf.st_mode & 07777U);
+        uv_fs_req_cleanup(&stat_request);
+
+        uv_fs_t chmod_request{};
+        const int chmod_status =
+            uv_fs_chmod(nullptr, &chmod_request, operation.temporary_path.c_str(), mode, nullptr);
+        uv_fs_req_cleanup(&chmod_request);
+        return chmod_status;
+    }
+
+    static int replace_target(FileWrite& operation) noexcept {
+        uv_fs_t request{};
+        const int status = uv_fs_rename(nullptr, &request, operation.temporary_path.c_str(),
+                                        operation.path.c_str(), nullptr);
+        uv_fs_req_cleanup(&request);
+        if (status == 0) {
+            operation.temporary_path.clear();
+        }
+        return status;
+    }
+
+    static void perform_file_write(uv_work_t* request) noexcept {
+        auto& operation = *static_cast<FileWrite*>(request->data);
+        uv_file file = -1;
+        try {
+            file = open_temporary_file(operation);
+            if (file < 0) {
+                operation.status = file;
+                remove_temporary_file(operation);
+                return;
+            }
+
+            int status = preserve_target_mode(operation);
+            if (status == 0) {
+                status = write_temporary_file(operation, file);
+            }
+            if (status == 0) {
+                status = synchronize_file(file);
+            }
+            const int close_status = synchronous_close(file);
+            file = -1;
+            if (status == 0) {
+                status = close_status;
+            }
+            if (status == 0) {
+                status = replace_target(operation);
+            }
+            operation.status = status;
+            if (status != 0) {
+                remove_temporary_file(operation);
+            }
+        } catch (const std::bad_alloc&) {
+            if (file >= 0) {
+                (void)synchronous_close(file);
+            }
+            operation.status = UV_ENOMEM;
+            remove_temporary_file(operation);
+        } catch (...) {
+            if (file >= 0) {
+                (void)synchronous_close(file);
+            }
+            operation.status = UV_EIO;
+            remove_temporary_file(operation);
+        }
+    }
+
+    static void on_file_write(uv_work_t* request, int status) noexcept {
         guard_callback([&] {
             auto& operation = *static_cast<FileWrite*>(request->data);
             Impl& owner = *operation.owner;
-            const auto result = request->result;
-            uv_fs_req_cleanup(request);
-
-            switch (operation.phase) {
-            case FileWrite::Phase::Open:
-                if (result < 0) {
-                    operation.final_status = static_cast<int>(result);
-                    owner.finish_file_write(operation);
-                    return;
-                }
-                operation.file = static_cast<uv_file>(result);
-                if (owner.shutting_down) {
-                    owner.submit_file_write_close(operation, UV_ECANCELED);
-                    return;
-                }
-                owner.submit_file_write(operation);
-                return;
-
-            case FileWrite::Phase::Write:
-                if (result < 0) {
-                    owner.submit_file_write_close(operation, static_cast<int>(result));
-                    return;
-                }
-                if (result == 0) {
-                    owner.submit_file_write_close(operation, UV_EIO);
-                    return;
-                }
-                operation.offset += static_cast<std::size_t>(result);
-                if (owner.shutting_down) {
-                    owner.submit_file_write_close(operation, UV_ECANCELED);
-                    return;
-                }
-                owner.submit_file_write(operation);
-                return;
-
-            case FileWrite::Phase::Close:
-                if (result < 0 && operation.file >= 0) {
-                    uv_fs_t close_request{};
-                    (void)uv_fs_close(&owner.loop, &close_request, operation.file, nullptr);
-                    uv_fs_req_cleanup(&close_request);
-                }
-                operation.file = -1;
-                if (result < 0 && operation.final_status == 0) {
-                    operation.final_status = static_cast<int>(result);
-                }
-                owner.finish_file_write(operation);
-                return;
+            if (!owner.shutting_down) {
+                owner.queue_file_write_result(operation,
+                                              status == UV_ECANCELED ? status : operation.status);
             }
+            owner.file_writes.erase(operation.id.value);
         });
     }
 

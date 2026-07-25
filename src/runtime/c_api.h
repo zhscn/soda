@@ -28,11 +28,14 @@ typedef struct soda_terminal soda_terminal;
 #define SODA_EVENT_FILE_READ 3U
 #define SODA_EVENT_FILE_WRITE 4U
 
+#define SODA_RUNTIME_ABI_VERSION 1U
+
 #define SODA_FD_READABLE (1U << 0U)
 #define SODA_FD_WRITABLE (1U << 1U)
 
 SODA_RUNTIME_API soda_runtime* soda_runtime_create(void);
 SODA_RUNTIME_API void soda_runtime_destroy(soda_runtime* runtime);
+SODA_RUNTIME_API uint32_t soda_runtime_abi_version(void);
 
 SODA_RUNTIME_API uint64_t soda_runtime_start_timer(soda_runtime* runtime, uint64_t timeout_ms,
                                                    uint64_t repeat_ms);

@@ -55,6 +55,10 @@ const soda::runtime::Event* current_event(soda_runtime* runtime) noexcept {
 
 extern "C" {
 
+uint32_t soda_runtime_abi_version(void) {
+    return SODA_RUNTIME_ABI_VERSION;
+}
+
 soda_runtime* soda_runtime_create(void) {
     try {
         return new soda_runtime();

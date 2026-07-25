@@ -32,6 +32,13 @@
       (load-shared-object path)
       path))
 
+  (define %abi-version
+    (foreign-procedure __atomic "soda_runtime_abi_version" () unsigned-32))
+
+  (define abi-version-checked
+    (unless (= (%abi-version) 1)
+      (error 'soda-runtime "unsupported native runtime ABI version")))
+
   (define %runtime-create
     (foreign-procedure __atomic "soda_runtime_create" () void*))
   (define %runtime-destroy

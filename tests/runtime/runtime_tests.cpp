@@ -163,6 +163,38 @@ TEST_CASE("file write failures are completion events") {
     CHECK(event->data.empty());
 }
 
+TEST_CASE("failed file replacement leaves the target intact and removes temporary files") {
+    namespace fs = std::filesystem;
+    const fs::path parent =
+        fs::temp_directory_path() /
+        ("soda-runtime-replace-failure-" +
+         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    const fs::path target = parent / "target";
+    fs::create_directories(target);
+    {
+        std::ofstream marker(target / "marker", std::ios::binary);
+        marker << "original";
+    }
+
+    Runtime runtime;
+    const SourceId write = runtime.write_file(target.string(), {std::byte{'x'}});
+    while (runtime.pending_events() == 0) {
+        (void)runtime.poll(PollMode::Once);
+    }
+    const auto event = runtime.next_event();
+    REQUIRE(event.has_value());
+    CHECK(event->kind == EventKind::FileWrite);
+    CHECK(event->source == write);
+    CHECK(event->status < 0);
+    CHECK(fs::is_directory(target));
+    CHECK(fs::exists(target / "marker"));
+    CHECK(
+        std::ranges::none_of(fs::directory_iterator(parent), [&](const fs::directory_entry& item) {
+            return item.path().filename().string().starts_with("target.soda-save-");
+        }));
+    fs::remove_all(parent);
+}
+
 TEST_CASE("runtime destruction drains an active file request") {
     Runtime runtime;
     CHECK(runtime.read_file("/soda/path/that/does/not/exist").valid());
@@ -259,6 +291,7 @@ TEST_CASE("terminal ABI owns raw mode but not its descriptors") {
 #endif
 
 TEST_CASE("C ABI exposes an event without native callbacks into its caller") {
+    CHECK(soda_runtime_abi_version() == SODA_RUNTIME_ABI_VERSION);
     soda_runtime* runtime = soda_runtime_create();
     REQUIRE(runtime != nullptr);
     const std::uint64_t timer = soda_runtime_start_timer(runtime, 1, 0);
