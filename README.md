@@ -106,9 +106,10 @@ cmk build -c Debug
 Printable input inserts text. Backspace deletes the previous UTF-8 code point,
 the arrow keys move the caret, Enter inserts a newline, `C-x =` describes the
 character and rendered faces at point, `C-c C-z` toggles the Chez REPL, and
-`C-q` exits. Enter submits the editable input while the REPL transcript is
-active. The bootstrap edits an in-memory buffer; quitting leaves the file on
-disk unchanged.
+`C-x C-s` saves a buffer that has a file path, and `C-q` exits. Enter submits
+the editable input while the REPL transcript is active. File saves capture a
+document revision and complete asynchronously; edits made while a save is in
+flight remain marked as modified.
 
 The TUI enables Kitty keyboard disambiguation and bracketed paste while it owns
 the alternate screen, then restores both terminal modes on exit. Its

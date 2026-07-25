@@ -102,6 +102,9 @@ Buffer {
   document,
   resource,
   revision,
+  file_path?,
+  saved_revision,
+  pending_save_revision?,
   language_catalog,
   major_mode_name,
   local_settings,
@@ -109,9 +112,10 @@ Buffer {
 }
 ```
 
-`Document` 不知道 resource、dirty 状态、major mode 或 view。Buffer 比较已保存
-snapshot 与当前 snapshot 决定 dirty 状态，并负责在 commit、undo、redo 后同步
-language runtime。
+`Document` 不知道 resource、dirty 状态、major mode 或 view。`resource` 是显示与
+project identity，`file_path` 是可写入的本地路径；generated Buffer 可以有
+resource 而没有 file path。Buffer 比较 `saved_revision` 与当前 revision 决定
+modified 状态，并负责在 commit、undo、redo 后同步 language runtime。
 
 Buffer 的 `revision` 是已经被 Buffer 及其 language runtime 接受的 Document
 revision。Scheme 编辑命令通过 `call-with-buffer-transaction` 修改文本；该边界提交
@@ -123,6 +127,30 @@ Buffer revision，new revision 必须等于 Document 当前 revision；同一个
 只能接受一次。存在未接受的 Document change 时，Buffer 拒绝新的编辑、undo、
 redo 和 mode 切换。这一约束使 indentation 等 native 机制不需要依赖 Buffer，
 同时避免绕过 language runtime 同步。
+
+## 保存
+
+`file.save` 在 update turn 中从当前 snapshot 构造不可变 request：
+
+```text
+SaveRequest {
+  buffer_id,
+  document_id,
+  revision,
+  path,
+  bytes
+}
+```
+
+Buffer 同时只有一个 pending save。runtime effect 异步写入 request 中的 bytes；
+完成事件再进入 command loop。成功完成只把 `saved_revision` 推进到 request
+revision，因此写入期间发生的新编辑仍保持 modified。失败清除 pending 状态但不
+改变 `saved_revision`。
+
+基础 file runtime 对已有 `file_path` 执行整文件 open、truncate、write、close。
+同一 request 协议支持由 minibuffer/resource policy 选择目标 path 的另存为流程。
+需要临时文件、权限保留、备份或原子 rename 的环境可以替换 file effect handler，
+不改变 Buffer revision 语义。
 
 ## ABI 与线程归属
 

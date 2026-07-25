@@ -95,7 +95,7 @@ runtime ABI 遵循 pull-based 约束：
 
 - 创建 handle 后由 Scheme 注册 interest；
 - poll 只驱动 libuv 并返回可读取事件数量；
-- Scheme drain timer、fd、file-read 等结果；
+- Scheme drain timer、fd、file-read、file-write 等结果；
 - close 是显式、幂等的生命周期动作；
 - callback data 不保存 Scheme pointer；
 - error code 与消息作为值跨 ABI 返回。
