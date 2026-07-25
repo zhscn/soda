@@ -139,6 +139,21 @@ Buffer revision，new revision 必须等于 Document 当前 revision；同一个
 redo 和 mode 切换。这一约束使 indentation 等 native 机制不需要依赖 Buffer，
 同时避免绕过 language runtime 同步。
 
+## 打开与切换
+
+`file.find` 通过 minibuffer 读取路径，并把读取工作提交为 `file.read` effect。
+请求携带发起操作的 view identity；runtime adapter 只负责把 native source 与请求
+关联，文件内容和完成状态以 internal command 返回 editor。成功结果创建带
+`file_path` 的 Buffer，根据路径选择初始 major mode，并记录原始换行约定。
+
+同一路径已有 Buffer 时复用其 identity，不重复读取或创建 Document。异步读取完成
+时，结果显示到发起请求的 view；该 view 已关闭时，Buffer 仍加入全局 Buffer 集合，
+供后续显示策略选择。
+
+`buffer.switch` 从命令发起时存在的 Buffer 集合构造 must-match completion source。
+候选携带 Buffer identity，显示名只用于筛选和呈现。minibuffer 自身的临时 Buffer
+因此不会进入候选集合，重名 Buffer 使用 identity 后缀区分。
+
 ## 保存
 
 `file.save` 在 update turn 中从当前 snapshot 构造不可变 request：

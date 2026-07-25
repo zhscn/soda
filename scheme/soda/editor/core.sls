@@ -250,6 +250,7 @@
           (soda editor buffer)
           (soda editor command)
           (soda editor commands basic)
+          (soda editor commands buffer)
           (soda editor comint)
           (soda editor completion)
           (soda editor completion-commands)
@@ -271,6 +272,7 @@
   (define (make-editor buffer)
     (let ([editor (make-editor-state buffer)])
       (install-basic-commands! editor)
+      (install-buffer-commands! editor)
       (install-comint-commands! editor)
       (install-completion-commands! editor)
       (editor-register-completion-provider!

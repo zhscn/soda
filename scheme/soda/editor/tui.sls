@@ -7,6 +7,7 @@
           (soda editor completion-runtime)
           (soda editor effect)
           (soda editor event)
+          (soda editor file)
           (soda editor file-runtime)
           (soda editor repl)
           (soda runtime)
@@ -74,39 +75,6 @@
                      (event-data (car events)))]
                 [else (find (cdr events))]))))))
 
-  (define (detect-file-line-ending bytes)
-    (let loop ([index 0])
-      (cond
-        [(= index (bytevector-length bytes)) 'lf]
-        [(= (bytevector-u8-ref bytes index) 13)
-         (if (and (< (+ index 1) (bytevector-length bytes))
-                  (= (bytevector-u8-ref bytes (+ index 1)) 10))
-             'crlf
-             'cr)]
-        [(= (bytevector-u8-ref bytes index) 10) 'lf]
-        [else (loop (+ index 1))])))
-
-  (define (string-suffix? suffix value)
-    (and
-      (<= (string-length suffix) (string-length value))
-      (string=?
-        suffix
-        (substring
-          value
-          (- (string-length value) (string-length suffix))
-          (string-length value)))))
-
-  (define (initial-major-mode path)
-    (let ([normalized (and path (string-foldcase path))])
-      (if (and
-            normalized
-            (exists
-              (lambda (suffix)
-                (string-suffix? suffix normalized))
-              '(".scm" ".ss" ".sls" ".sps")))
-          'scheme-mode
-          'fundamental-mode)))
-
   (define (call-with-runtime procedure)
     (let ([runtime #f])
       (dynamic-wind
@@ -143,7 +111,7 @@
               1
               document
               resource
-              (initial-major-mode file-path)))
+              (file-major-mode-for-path file-path)))
           (buffer-set-local-setting!
             buffer
             'file-line-ending
@@ -327,7 +295,9 @@
                         (eq? (event-kind (car events)) 'fd-ready))
                    (flush-output!)
                    (process (cdr events) continue?)]
-                  [(eq? (event-kind (car events)) 'file-write)
+                  [(memq
+                     (event-kind (car events))
+                     '(file-read file-write))
                    (let ([message
                            (file-runtime-handle-event
                              file-adapter

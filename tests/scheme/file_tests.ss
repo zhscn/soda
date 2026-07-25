@@ -8,6 +8,7 @@
         (soda editor event)
         (soda editor file-runtime)
         (soda editor keymap)
+        (soda editor prompt)
         (soda runtime))
 
 (define (string-contains? value needle)
@@ -24,6 +25,7 @@
              (loop (+ index 1)))))))
 
 (define save-path (getenv "SODA_EDITOR_SAVE_TEST_FILE"))
+(define open-path (getenv "SODA_EDITOR_OPEN_TEST_FILE"))
 (when (file-exists? save-path)
   (delete-file save-path))
 
@@ -47,6 +49,33 @@
     (unless (and (eq? status 'command)
                  (eq? command 'file.save))
       (error 'file-tests "C-x C-s was not bound to file.save"))))
+
+(define (assert-key-binding strokes expected)
+  (call-with-values
+    (lambda ()
+      (keymaps-resolve
+        (list (editor-keymap editor))
+        strokes))
+    (lambda (status command)
+      (unless (and (eq? status 'command)
+                   (eq? command expected))
+        (error
+          'file-tests
+          "key sequence did not resolve to the expected command"
+          expected
+          status
+          command)))))
+
+(assert-key-binding
+  (list
+    (make-key-stroke 'character (char->integer #\x) 4)
+    (make-key-stroke 'character (char->integer #\f) 4))
+  'file.find)
+(assert-key-binding
+  (list
+    (make-key-stroke 'character (char->integer #\x) 4)
+    (make-key-stroke 'character (char->integer #\b) 0))
+  'buffer.switch)
 
 (define (dispatch! message)
   (let loop ([messages (list message)])
@@ -73,6 +102,22 @@
            (when message
              (dispatch! message))
            (if (eq? (event-kind (car events)) 'file-write)
+               (car events)
+               (find (cdr events))))]))))
+
+(define (finish-file-read!)
+  (let loop ()
+    (let find ([events (runtime-poll! runtime)])
+      (cond
+        [(null? events) (loop)]
+        [else
+         (let ([message
+                 (file-runtime-handle-event
+                   adapter
+                   (car events))])
+           (when message
+             (dispatch! message))
+           (if (eq? (event-kind (car events)) 'file-read)
                (car events)
                (find (cdr events))))]))))
 
@@ -195,6 +240,98 @@
     (read-saved-bytes)
     (string->utf8 "base one two newer\r\nlast"))
   (error 'file-tests "save did not preserve the CRLF file convention"))
+
+(define origin-view-id (view-id (editor-active-view editor)))
+(dispatch!
+  (make-command-message
+    'file.open-path
+    (make-prompt-result
+      100
+      'accepted
+      open-path
+      origin-view-id
+      #f)))
+(define opened-event (finish-file-read!))
+(define opened-buffer (view-buffer (editor-active-view editor)))
+(unless
+  (and
+    (zero? (event-status opened-event))
+    (= (length (editor-buffers editor)) 2)
+    (string=? (buffer-file-path opened-buffer) open-path)
+    (eq? (buffer-major-mode-name opened-buffer) 'scheme-mode)
+    (positive? (bytevector-length (event-data opened-event)))
+    (not (buffer-modified? opened-buffer))
+    (string-contains? (editor-status-message editor) "Opened"))
+  (error 'file-tests "asynchronous open did not create a file buffer"))
+
+(dispatch!
+  (make-command-message
+    'file.open-path
+    (make-prompt-result
+      101
+      'accepted
+      open-path
+      origin-view-id
+      #f)))
+(unless
+  (and
+    (= (length (editor-buffers editor)) 2)
+    (eq? (view-buffer (editor-active-view editor)) opened-buffer)
+    (string-contains?
+      (editor-status-message editor)
+      "Switched"))
+  (error 'file-tests "opening an existing path duplicated its buffer"))
+
+(dispatch! (make-command-message 'buffer.switch #f))
+(define switch-session (editor-active-prompt editor))
+(define switch-source
+  (prompt-request-completion-source
+    (prompt-session-request switch-session)))
+(define switch-candidate
+  (find
+    (lambda (item)
+      (= (completion-item-payload item) (buffer-id buffer)))
+    (choice-source-candidates switch-source "")))
+(unless switch-candidate
+  (error 'file-tests "buffer prompt omitted an editor buffer"))
+(dispatch! (make-command-message 'prompt.abort #f))
+(dispatch!
+  (make-command-message
+    'buffer.apply-switch
+    (make-prompt-result
+      102
+      'accepted
+      (completion-item-insert-text switch-candidate)
+      origin-view-id
+      switch-candidate)))
+(unless
+  (and
+    (eq? (view-buffer (editor-active-view editor)) buffer)
+    (string-contains?
+      (editor-status-message editor)
+      "Switched"))
+  (error 'file-tests "buffer selection did not change the active view"))
+
+(define buffers-before-failed-open (length (editor-buffers editor)))
+(dispatch!
+  (make-command-message
+    'file.open-path
+    (make-prompt-result
+      103
+      'accepted
+      "/soda/path/that/does/not/exist/open"
+      origin-view-id
+      #f)))
+(define open-failure (finish-file-read!))
+(unless
+  (and
+    (negative? (event-status open-failure))
+    (= (length (editor-buffers editor))
+       buffers-before-failed-open)
+    (string-contains?
+      (editor-status-message editor)
+      "Open failed"))
+  (error 'file-tests "failed open created or switched a buffer"))
 
 (editor-close! editor)
 (runtime-close! runtime)

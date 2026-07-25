@@ -34,6 +34,39 @@
               (make-eqv-hashtable))])
       (register-effect-handler!
         executor
+        'file.read
+        (lambda (request)
+          (unless (open-request? request)
+            (assertion-violation
+              'file.read
+              "expected an open request"
+              request))
+          (guard (condition
+                   [else
+                    (make-effect-result
+                      #t
+                      (list
+                        (make-internal-command-message
+                          'file.apply-open-result
+                          (make-open-result
+                            request
+                            -1
+                            (make-bytevector 0)
+                            (condition->string condition)))))])
+            (let ([source
+                    (runtime-read-file!
+                      runtime
+                      (open-request-path request))])
+              (hashtable-set!
+                (file-runtime-pending adapter)
+                source
+                (vector
+                  'read
+                  (open-request-view-id request)
+                  (open-request-path request)))
+              (make-effect-result #t '())))))
+      (register-effect-handler!
+        executor
         'file.write
         (lambda (request)
           (unless (save-request? request)
@@ -61,6 +94,7 @@
                 (file-runtime-pending adapter)
                 source
                 (vector
+                  'write
                   (save-request-buffer-id request)
                   (save-request-document-id request)
                   (save-request-revision request)
@@ -79,7 +113,7 @@
         'file-runtime-handle-event
         "expected a runtime event"
         event))
-    (if (not (eq? (event-kind event) 'file-write))
+    (if (not (memq (event-kind event) '(file-read file-write)))
         #f
         (let* ([pending (file-runtime-pending adapter)]
                [target
@@ -91,12 +125,28 @@
               #f
               (begin
                 (hashtable-delete! pending (event-source event))
-                (make-internal-command-message
-                  'file.apply-save-result
-                  (make-save-result
-                    (vector-ref target 0)
-                    (vector-ref target 1)
-                    (vector-ref target 2)
-                    (vector-ref target 3)
-                    (event-status event)
-                    #f))))))))
+                (case (vector-ref target 0)
+                  [(read)
+                   (make-internal-command-message
+                     'file.apply-open-result
+                     (make-open-result
+                       (vector-ref target 1)
+                       (vector-ref target 2)
+                       (event-status event)
+                       (event-data event)
+                       #f))]
+                  [(write)
+                   (make-internal-command-message
+                     'file.apply-save-result
+                     (make-save-result
+                       (vector-ref target 1)
+                       (vector-ref target 2)
+                       (vector-ref target 3)
+                       (vector-ref target 4)
+                       (event-status event)
+                       #f))]
+                  [else
+                   (assertion-violation
+                     'file-runtime-handle-event
+                     "unknown pending file operation"
+                     target)])))))))
