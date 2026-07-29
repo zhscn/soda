@@ -174,14 +174,20 @@ runtime 把 libuv status 转换成稳定的错误名和消息。`ENOENT` 结果�
 Buffer 集合，供后续显示策略选择。启动参数、find-file 与 save-as 使用相同的绝对化
 和词法归一化规则；stat 默认跟随符号链接，因此符号链接目录进入目录分支。
 
+`file.insert`（`C-x i`）通过同一个 file completion source 读取路径，再以
+`file.insert` effect 异步 stat/read。request 固定目标 Buffer、Document、revision
+和 point；成功结果规范化换行并以一次 Buffer transaction 插入内容。读取期间发生
+编辑会使结果失效，避免把文件内容写入过期坐标。目录结果继续以该目录为初值读取
+路径，读取错误保持 Buffer 不变。
+
 `buffer.switch` 从命令发起时存在的 Buffer 集合构造 must-match completion source。
 候选携带 Buffer identity，显示名只用于筛选和呈现。minibuffer 自身的临时 Buffer
 因此不会进入候选集合，重名 Buffer 使用 identity 后缀区分。
 
 `buffer.kill` 使用同一候选模型选择目标。关闭前，所有显示目标的 View 切换到替代
 Buffer；关闭最后一个用户 Buffer 时创建 `*scratch*`，维持 editor 至少拥有一个
-View 和一个 Buffer 的不变量。pending save 和 interaction session 拥有的 Buffer
-保持存活。modified Buffer 要求先保存，或通过显式的
+View 和一个 Buffer 的不变量。pending save、reload、file insertion 和 interaction
+session 拥有的 Buffer 保持存活。modified Buffer 要求先保存，或通过显式的
 `buffer.force-kill-current` 放弃修改。
 
 ## 保存

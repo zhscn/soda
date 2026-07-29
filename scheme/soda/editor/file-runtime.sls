@@ -30,6 +30,12 @@
             (mutable phase)
             (mutable stat)))
 
+  (define-record-type
+    (insert-file-operation
+      %make-insert-file-operation
+      insert-file-operation?)
+    (fields request (mutable phase)))
+
   (define (condition->string condition)
     (call-with-string-output-port
       (lambda (port)
@@ -111,6 +117,21 @@
         data
         detail
         stat)))
+
+  (define (insert-file-result-message
+            operation
+            status
+            data
+            detail
+            kind)
+    (make-internal-command-message
+      'file.apply-insert-result
+      (make-insert-file-result
+        (insert-file-operation-request operation)
+        status
+        data
+        detail
+        kind)))
 
   (define (start-open! adapter request)
     (let* ([path (open-request-path request)]
@@ -225,6 +246,29 @@
           operation)
         (make-effect-result #t '()))))
 
+  (define (start-insert-file! adapter request)
+    (guard (condition
+             [else
+              (make-effect-result
+                #t
+                (list
+                  (make-internal-command-message
+                    'file.apply-insert-result
+                    (make-insert-file-result
+                      request
+                      -1
+                      (make-bytevector 0)
+                      (condition->string condition)))))])
+      (let ([operation
+              (%make-insert-file-operation request 'stat)])
+        (register-pending!
+          adapter
+          (runtime-stat-path!
+            (file-runtime-runtime adapter)
+            (insert-file-request-path request))
+          operation)
+        (make-effect-result #t '()))))
+
   (define (install-file-runtime! executor runtime)
     (unless (effect-executor? executor)
       (assertion-violation
@@ -271,6 +315,16 @@
               "expected a reload request"
               request))
           (start-reload! adapter request)))
+      (register-effect-handler!
+        executor
+        'file.insert
+        (lambda (request)
+          (unless (insert-file-request? request)
+            (assertion-violation
+              'file.insert
+              "expected an insert-file request"
+              request))
+          (start-insert-file! adapter request)))
       adapter))
 
   (define (finish-open! adapter operation)
@@ -462,6 +516,52 @@
         (zero? (event-status event))
         (reload-operation-stat operation))))
 
+  (define (handle-insert-file-stat!
+            adapter
+            operation
+            event)
+    (cond
+      [(negative? (event-status event))
+       (insert-file-result-message
+         operation
+         (event-status event)
+         (make-bytevector 0)
+         (event-error-message event)
+         #f)]
+      [(= (event-flags event) 2)
+       (insert-file-result-message
+         operation
+         -1
+         (make-bytevector 0)
+         #f
+         'directory)]
+      [else
+       (guard (condition
+                [else
+                 (insert-file-result-message
+                   operation
+                   -1
+                   (make-bytevector 0)
+                   (condition->string condition)
+                   #f)])
+         (insert-file-operation-phase-set! operation 'read)
+         (register-pending!
+           adapter
+           (runtime-read-file!
+             (file-runtime-runtime adapter)
+             (insert-file-request-path
+               (insert-file-operation-request operation)))
+           operation)
+         #f)]))
+
+  (define (handle-insert-file-read! operation event)
+    (insert-file-result-message
+      operation
+      (event-status event)
+      (event-data event)
+      (event-error-message event)
+      #f))
+
   (define (file-runtime-handle-event adapter event)
     (unless (file-runtime? adapter)
       (assertion-violation
@@ -532,6 +632,22 @@
                     'file-runtime-handle-event
                     "unknown reload operation phase"
                     (reload-operation-phase operation))])]
+              [(insert-file-operation? operation)
+               (case (insert-file-operation-phase operation)
+                 [(stat)
+                  (handle-insert-file-stat!
+                    adapter
+                    operation
+                    event)]
+                 [(read)
+                  (handle-insert-file-read!
+                    operation
+                    event)]
+                 [else
+                  (assertion-violation
+                    'file-runtime-handle-event
+                    "unknown insert-file operation phase"
+                    (insert-file-operation-phase operation))])]
               [else
                (assertion-violation
                  'file-runtime-handle-event

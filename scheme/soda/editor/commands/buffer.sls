@@ -171,6 +171,10 @@
        (editor-set-status-message!
          editor
          "Cannot kill a buffer while reloading")]
+      [(buffer-setting-ref target 'file-insert-pending? #f)
+       (editor-set-status-message!
+         editor
+         "Cannot kill a buffer while inserting a file")]
       [(editor-interaction-for-buffer editor (buffer-id target))
        (editor-set-status-message!
          editor

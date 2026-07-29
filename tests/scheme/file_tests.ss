@@ -45,6 +45,7 @@
 (define open-path (getenv "SODA_EDITOR_OPEN_TEST_FILE"))
 (define new-path (string-append save-as-path ".new"))
 (define external-path (string-append save-as-path ".external.sls"))
+(define insert-path (string-append save-as-path ".insert"))
 (when (file-exists? save-path)
   (delete-file save-path))
 (when (file-exists? save-as-path)
@@ -53,6 +54,8 @@
   (delete-file new-path))
 (when (file-exists? external-path)
   (delete-file external-path))
+(when (file-exists? insert-path)
+  (delete-file insert-path))
 
 (define document (make-document "base" 801))
 (define buffer
@@ -110,6 +113,11 @@
     (make-key-stroke 'character (char->integer #\x) 4)
     (make-key-stroke 'character (char->integer #\w) 4))
   'file.save-as)
+(assert-key-binding
+  (list
+    (make-key-stroke 'character (char->integer #\x) 4)
+    (make-key-stroke 'character (char->integer #\i) 0))
+  'file.insert)
 
 (define (dispatch! message)
   (let loop ([messages (list message)])
@@ -334,11 +342,146 @@
     (string->utf8 "base one two newer\r\nlast"))
   (error 'file-tests "save did not preserve the CRLF file convention"))
 
+(write-file-bytes
+  insert-path
+  (string->utf8 "inserted\r\ntext\r"))
+(dispatch! (make-command-message 'file.insert #f))
+(let ([session (editor-active-prompt editor)])
+  (unless
+    (and
+      session
+      (string=?
+        (prompt-request-prompt
+          (prompt-session-request session))
+        "Read file: ")
+      (eq?
+        (choice-source-category
+          (prompt-request-completion-source
+            (prompt-session-request session)))
+        'file))
+    (error 'file-tests
+           "insert-file did not open a file completion prompt")))
+(dispatch! (make-command-message 'prompt.abort #f))
+(dispatch! (make-command-message 'move.buffer-end #f))
+(define insert-origin-view-id
+  (view-id (editor-active-view editor)))
+(dispatch!
+  (make-command-message
+    'file.insert-path
+    (make-prompt-result
+      104
+      'accepted
+      insert-path
+      insert-origin-view-id
+      #f)))
+(unless
+  (buffer-setting-ref
+    buffer
+    'file-insert-pending?
+    #f)
+  (error 'file-tests
+         "insert-file did not expose its pending state"))
+(finish-file-read!)
+(unless
+  (and
+    (not
+      (buffer-setting-ref
+        buffer
+        'file-insert-pending?
+        #f))
+    (bytevector=?
+      (buffer-bytes buffer)
+      (string->utf8
+        "base one two newer\nlastinserted\ntext\n"))
+    (string-contains?
+      (editor-status-message editor)
+      "Inserted"))
+  (error 'file-tests
+         "insert-file did not normalize and insert file contents"))
+(dispatch! (make-command-message 'edit.undo #f))
+
+(dispatch! (make-command-message 'move.buffer-end #f))
+(dispatch!
+  (make-command-message
+    'file.insert-path
+    (make-prompt-result
+      105
+      'accepted
+      insert-path
+      insert-origin-view-id
+      #f)))
+(insert! 0 "local ")
+(finish-file-read!)
+(unless
+  (and
+    (bytevector=?
+      (buffer-bytes buffer)
+      (string->utf8
+        "local base one two newer\nlast"))
+    (not
+      (buffer-setting-ref
+        buffer
+        'file-insert-pending?
+        #f))
+    (string-contains?
+      (editor-status-message editor)
+      "buffer changed"))
+  (error 'file-tests
+         "stale insert-file result changed a newer revision"))
+(dispatch! (make-command-message 'edit.undo #f))
+
+(dispatch!
+  (make-command-message
+    'file.insert-path
+    (make-prompt-result
+      106
+      'accepted
+      (string-append insert-path ".missing")
+      insert-origin-view-id
+      #f)))
+(finish-file-read!)
+(unless
+  (and
+    (bytevector=?
+      (buffer-bytes buffer)
+      (string->utf8 "base one two newer\nlast"))
+    (string-contains?
+      (editor-status-message editor)
+      "Read file failed"))
+  (error 'file-tests
+         "failed insert-file changed the buffer"))
+
 (define save-directory
   (string-append
     (path-parent save-path)
     (string (directory-separator))))
 (define save-name (path-last save-path))
+(dispatch!
+  (make-command-message
+    'file.insert-path
+    (make-prompt-result
+      107
+      'accepted
+      save-directory
+      insert-origin-view-id
+      #f)))
+(finish-file-read!)
+(let ([session (editor-active-prompt editor)])
+  (unless
+    (and
+      session
+      (string=?
+        (prompt-request-prompt
+          (prompt-session-request session))
+        "Read file: ")
+      (string=?
+        (prompt-request-initial
+          (prompt-session-request session))
+        save-directory))
+    (error 'file-tests
+           "insert-file directory did not continue path selection")))
+(dispatch! (make-command-message 'prompt.abort #f))
+
 (dispatch! (make-command-message 'file.find #f))
 (finish-directory-scan!)
 (let* ([session (editor-active-prompt editor)]
@@ -829,3 +972,5 @@
   (delete-file new-path))
 (when (file-exists? external-path)
   (delete-file external-path))
+(when (file-exists? insert-path)
+  (delete-file insert-path))

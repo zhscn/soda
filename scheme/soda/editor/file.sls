@@ -35,6 +35,26 @@
           reload-result-data
           reload-result-detail
           reload-result-stat
+          make-insert-file-request
+          insert-file-request?
+          insert-file-request-view-id
+          insert-file-request-buffer-id
+          insert-file-request-document-id
+          insert-file-request-revision
+          insert-file-request-offset
+          insert-file-request-path
+          make-insert-file-result
+          insert-file-result?
+          insert-file-result-view-id
+          insert-file-result-buffer-id
+          insert-file-result-document-id
+          insert-file-result-revision
+          insert-file-result-offset
+          insert-file-result-path
+          insert-file-result-status
+          insert-file-result-data
+          insert-file-result-detail
+          insert-file-result-kind
           make-save-request
           save-request?
           save-request-buffer-id
@@ -92,6 +112,32 @@
             data
             detail
             stat))
+
+  (define-record-type
+    (insert-file-request
+      %make-insert-file-request
+      insert-file-request?)
+    (fields view-id
+            buffer-id
+            document-id
+            revision
+            offset
+            path))
+
+  (define-record-type
+    (insert-file-result
+      %make-insert-file-result
+      insert-file-result?)
+    (fields view-id
+            buffer-id
+            document-id
+            revision
+            offset
+            path
+            status
+            data
+            detail
+            kind))
 
   (define (open-result-view-id result)
     (car (open-result-view-ids result)))
@@ -204,6 +250,84 @@
       data
       detail
       stat))
+
+  (define (make-insert-file-request
+            view-id
+            buffer-id
+            document-id
+            revision
+            offset
+            path)
+    (unless
+      (and
+        (exact-non-negative-integer? view-id)
+        (exact-non-negative-integer? buffer-id)
+        (exact-non-negative-integer? document-id)
+        (exact-non-negative-integer? revision)
+        (exact-non-negative-integer? offset))
+      (assertion-violation
+        'make-insert-file-request
+        "identities, revision, and offset must be non-negative exact integers"
+        view-id
+        buffer-id
+        document-id
+        revision
+        offset))
+    (unless (non-empty-string? path)
+      (assertion-violation
+        'make-insert-file-request
+        "path must be a non-empty string"
+        path))
+    (%make-insert-file-request
+      view-id
+      buffer-id
+      document-id
+      revision
+      offset
+      path))
+
+  (define make-insert-file-result
+    (case-lambda
+      [(request status data detail)
+       (make-insert-file-result
+         request status data detail #f)]
+      [(request status data detail kind)
+       (unless (insert-file-request? request)
+         (assertion-violation
+           'make-insert-file-result
+           "expected an insert-file request"
+           request))
+       (unless (and (integer? status) (exact? status))
+         (assertion-violation
+           'make-insert-file-result
+           "status must be an exact integer"
+           status))
+       (unless (bytevector? data)
+         (assertion-violation
+           'make-insert-file-result
+           "data must be a bytevector"
+           data))
+       (unless (or (not detail) (string? detail))
+         (assertion-violation
+           'make-insert-file-result
+           "detail must be a string or #f"
+           detail))
+       (unless (or (not kind) (symbol? kind))
+         (assertion-violation
+           'make-insert-file-result
+           "kind must be a symbol or #f"
+           kind))
+       (%make-insert-file-result
+         (insert-file-request-view-id request)
+         (insert-file-request-buffer-id request)
+         (insert-file-request-document-id request)
+         (insert-file-request-revision request)
+         (insert-file-request-offset request)
+         (insert-file-request-path request)
+         status
+         data
+         detail
+         kind)]))
 
   (define make-open-result
     (case-lambda
@@ -650,12 +774,189 @@
           'file.open-path
           #f))))
 
+  (define (open-insert-file-prompt! editor view initial)
+    (let* ([base-directory
+             (buffer-default-directory (view-buffer view))]
+           [initial-path
+             (or initial base-directory)])
+      (editor-open-prompt!
+        editor
+        (make-completing-prompt-request
+          "Read file: "
+          initial-path
+          'file-name
+          #f
+          'free
+          (make-file-choice-source base-directory)
+          'file.insert-path
+          #f))))
+
   (define (find-file-command context)
     (open-find-file-prompt!
       (command-context-editor context)
       (command-context-view context)
       #f)
     '())
+
+  (define (insert-file-command context)
+    (let* ([editor (command-context-editor context)]
+           [view (command-context-view context)]
+           [buffer (view-buffer view)])
+      (if
+        (buffer-setting-ref
+          buffer
+          'file-insert-pending?
+          #f)
+        (editor-set-status-message!
+          editor
+          "File insertion already in progress")
+        (open-insert-file-prompt! editor view #f))
+      '()))
+
+  (define (insert-file-path-command context)
+    (let* ([editor (command-context-editor context)]
+           [result (command-context-argument context)]
+           [input
+             (and
+               (prompt-result? result)
+               (eq? (prompt-result-status result) 'accepted)
+               (prompt-result-value result))]
+           [view
+             (and
+               (prompt-result? result)
+               (find-view-by-id
+                 editor
+                 (prompt-result-origin-view-id result)))]
+           [buffer (and view (view-buffer view))]
+           [path
+             (and
+               buffer
+               input
+               (positive? (string-length input))
+               (vfs-resolve-path
+                 (buffer-default-directory buffer)
+                 input))])
+      (cond
+        [(not buffer)
+         (editor-set-status-message!
+           editor
+           "Read-file origin is no longer available")
+         '()]
+        [(or (not path) (zero? (string-length path)))
+         (editor-set-status-message! editor "No file name")
+         '()]
+        [(buffer-setting-ref
+           buffer
+           'file-insert-pending?
+           #f)
+         (editor-set-status-message!
+           editor
+           "File insertion already in progress")
+         '()]
+        [else
+         (let* ([document (buffer-document buffer)]
+                [request
+                  (make-insert-file-request
+                    (view-id view)
+                    (buffer-id buffer)
+                    (document-id document)
+                    (buffer-revision buffer)
+                    (view-caret view)
+                    path)])
+           (buffer-set-local-setting!
+             buffer
+             'file-insert-pending?
+             #t)
+           (editor-set-status-message!
+             editor
+             (string-append "Reading " path))
+           (list
+             (make-command-effect
+               'file.insert
+               request)))])))
+
+  (define (apply-insert-file-result-command context)
+    (let* ([editor (command-context-editor context)]
+           [result (command-context-argument context)])
+      (unless (insert-file-result? result)
+        (assertion-violation
+          'file.apply-insert-result
+          "expected an insert-file result"
+          result))
+      (let* ([buffer
+               (editor-buffer-ref
+                 editor
+                 (insert-file-result-buffer-id result))]
+             [document (buffer-document buffer)]
+             [view
+               (find-view-by-id
+                 editor
+                 (insert-file-result-view-id result))])
+        (buffer-clear-local-setting!
+          buffer
+          'file-insert-pending?)
+        (cond
+          [(not
+             (= (document-id document)
+                (insert-file-result-document-id result)))
+           (assertion-violation
+             'file.apply-insert-result
+             "insert-file result belongs to another document"
+             (insert-file-result-document-id result)
+             (document-id document))]
+          [(eq? (insert-file-result-kind result) 'directory)
+           (if
+             (and view (eq? (view-buffer view) buffer))
+             (open-insert-file-prompt!
+               editor
+               view
+               (vfs-directory-path
+                 (insert-file-result-path result)))
+             (editor-set-status-message!
+               editor
+               "Read-file origin view is no longer available"))
+           '()]
+          [(not
+             (= (buffer-revision buffer)
+                (insert-file-result-revision result)))
+           (editor-set-status-message!
+             editor
+             "File insertion cancelled because the buffer changed")
+           '()]
+          [(not (zero? (insert-file-result-status result)))
+           (editor-set-status-message!
+             editor
+             (string-append
+               "Read file failed: "
+               (insert-file-result-path result)
+               (let ([detail (insert-file-result-detail result)])
+                 (if detail
+                     (string-append " (" detail ")")
+                     (string-append
+                       " (status "
+                       (number->string
+                         (insert-file-result-status result))
+                       ")")))))
+           '()]
+          [else
+           (let ([data
+                   (normalize-file-data
+                     (insert-file-result-data result))]
+                 [offset
+                   (insert-file-result-offset result)])
+             (buffer-replace-range!
+               buffer offset offset data)
+             (when
+               (and view (eq? (view-buffer view) buffer))
+               (view-set-caret!
+                 view
+                 (+ offset (bytevector-length data)))))
+           (editor-set-status-message!
+             editor
+             (string-append
+               "Inserted "
+               (insert-file-result-path result)))
+           '()]))))
 
   (define (open-path-command context)
     (let* ([editor (command-context-editor context)]
@@ -1145,6 +1446,21 @@
       "Start an asynchronous file open requested by the minibuffer.")
     (editor-register-command!
       editor
+      'file.insert
+      insert-file-command
+      "Read a file path and insert its contents at point.")
+    (editor-register-command!
+      editor
+      'file.insert-path
+      insert-file-path-command
+      "Start an asynchronous file insertion requested by the minibuffer.")
+    (editor-register-command!
+      editor
+      'file.apply-insert-result
+      apply-insert-file-result-command
+      "Apply an asynchronous file insertion result.")
+    (editor-register-command!
+      editor
       'file.apply-open-result
       apply-open-result-command
       "Apply an asynchronous file open result.")
@@ -1189,6 +1505,12 @@
         (make-key-stroke 'character (char->integer #\x) 4)
         (make-key-stroke 'character (char->integer #\f) 4))
       'file.find)
+    (editor-bind-key!
+      editor
+      (list
+        (make-key-stroke 'character (char->integer #\x) 4)
+        (make-key-stroke 'character (char->integer #\i) 0))
+      'file.insert)
     (editor-bind-key!
       editor
       (list
