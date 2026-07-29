@@ -45,6 +45,16 @@
              (key-event-modifier? (car left) 'ctrl))
   (error 'input-tests "modified legacy arrow differs" left))
 
+(define legacy-backtab
+  (input-decoder-feed! decoder (bytes #x1b #x5b #x5a)))
+(unless
+  (and
+    (= (length legacy-backtab) 1)
+    (eq? (key-event-key (car legacy-backtab)) 'tab)
+    (= (key-event-codepoint (car legacy-backtab)) 9)
+    (key-event-modifier? (car legacy-backtab) 'shift))
+  (error 'input-tests "legacy backtab differs" legacy-backtab))
+
 (define ss3-f3
   (input-decoder-feed! decoder (bytes #x1b #x4f #x52)))
 (unless (eq? (key-event-key (car ss3-f3)) 'f3)

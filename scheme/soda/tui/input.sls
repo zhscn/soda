@@ -183,10 +183,13 @@
         [(#\S) 'f4]
         [(#\Z) 'tab]
         [else 'unknown])
+      (if (char=? final #\Z) 9 #f)
       #f
       #f
-      #f
-      (legacy-modifiers parameters)
+      (let ([modifiers (legacy-modifiers parameters)])
+        (if (char=? final #\Z)
+            (bitwise-ior modifiers 1)
+            modifiers))
       'press
       (make-bytevector 0)))
 

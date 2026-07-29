@@ -147,9 +147,11 @@ IndentDecision {
 
 基础编辑命令提供不依赖 parser 的缩进层。Buffer 的 `auto-indent?` 设置使
 `edit.newline` 复制当前行的 leading whitespace，`M-i` 切换该 buffer-local
-设置。`M-}` 与 `M-{` 按 `indent-width` 增减活动 region 涉及的每一行；整个 region
-变换在一次 Buffer transaction 中提交。major-mode keymap 可以用语言专用命令覆盖
-这些基础行为。
+设置。没有活动 region 时，TAB 根据 `use-tabs?` 插入 tab，或按 `tab-width`
+前进到下一个显示列 tab stop；有活动 region 时，TAB 按 `indent-width` 增加其涉及
+的每一行。Shift-TAB 按 `indent-width` 反缩进活动 region 或当前行。`M-}` 与 `M-{`
+也提供 region 缩进命令。整组多行变换在一次 Buffer transaction 中提交。
+major-mode keymap 可以用语言专用命令覆盖这些基础行为。
 
 `cpp.indent-line` 通过 profile 的 indentation provider 查询 native
 IndentDecision，再用普通 Buffer transaction 写回 leading whitespace。`cpp-mode`

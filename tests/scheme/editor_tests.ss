@@ -1094,6 +1094,71 @@
          "M-] did not find the opening delimiter"))
 (editor-close! structure-editor)
 
+(define tab-document
+  (make-document "界x\na\n b\n" 977))
+(define tab-buffer
+  (make-buffer
+    977
+    tab-document
+    "*tab-editing*"
+    'fundamental-mode))
+(buffer-set-local-setting! tab-buffer 'indent-width 2)
+(buffer-set-local-setting! tab-buffer 'tab-width 4)
+(define tab-editor (make-editor tab-buffer))
+(define tab-view (editor-active-view tab-editor))
+(define tab-decoder (make-input-decoder))
+
+(view-set-caret! tab-view 4)
+(send! tab-editor tab-decoder (bytes 9))
+(unless
+  (and
+    (= (view-caret tab-view) 5)
+    (bytevector=?
+      (buffer-bytes tab-buffer)
+      (string->utf8 "界x \na\n b\n")))
+  (error 'editor-tests
+         "TAB did not advance to the next display tab stop"))
+
+(view-set-mark! tab-view 6)
+(view-set-caret! tab-view 10)
+(send! tab-editor tab-decoder (bytes 9))
+(unless
+  (bytevector=?
+    (buffer-bytes tab-buffer)
+    (string->utf8 "界x \n  a\n   b\n"))
+  (error 'editor-tests
+         "TAB did not indent all lines touched by the region"))
+(send! tab-editor tab-decoder (bytes 27 91 90))
+(unless
+  (bytevector=?
+    (buffer-bytes tab-buffer)
+    (string->utf8 "界x \na\n b\n"))
+  (error 'editor-tests
+         "backtab did not unindent all lines touched by the region"))
+
+(view-clear-mark! tab-view)
+(view-set-caret! tab-view 9)
+(send! tab-editor tab-decoder (bytes 27 91 90))
+(unless
+  (and
+    (= (view-caret tab-view) 8)
+    (bytevector=?
+      (buffer-bytes tab-buffer)
+      (string->utf8 "界x \na\nb\n")))
+  (error 'editor-tests
+         "backtab did not unindent the current line"))
+
+(buffer-set-local-setting! tab-buffer 'use-tabs? #t)
+(view-set-caret! tab-view 0)
+(send! tab-editor tab-decoder (bytes 9))
+(unless
+  (and
+    (= (view-caret tab-view) 1)
+    (= (bytevector-u8-ref (buffer-bytes tab-buffer) 0) 9))
+  (error 'editor-tests
+         "TAB did not honor the buffer use-tabs setting"))
+(editor-close! tab-editor)
+
 (define prefix-document
   (make-document "one two\nthree\nlast" 975))
 (define prefix-buffer

@@ -322,6 +322,16 @@
         value
         8)))
 
+  (define (tab-width buffer)
+    (let ([value (buffer-setting-ref buffer 'tab-width 8)])
+      (if
+        (and
+          (integer? value)
+          (exact? value)
+          (positive? value))
+        value
+        8)))
+
   (define (spaces count)
     (make-bytevector count 32))
 
@@ -365,6 +375,7 @@
             first-line
             last-line
             width
+            unit-width
             unindent?)
     (let loop ([line last-line] [result '()])
       (if (< line first-line)
@@ -373,12 +384,17 @@
             (if unindent?
                 (let* ([end (line-whitespace-end text line)]
                        [remove-end
-                         (cond
-                           [(= start end) start]
-                           [(= (text-byte-at text start) 9)
-                            (+ start 1)]
-                           [else
-                            (min end (+ start width))])])
+                         (let consume ([offset start] [remaining width])
+                           (if
+                             (or (= offset end) (not (positive? remaining)))
+                             offset
+                             (consume
+                               (+ offset 1)
+                               (-
+                                 remaining
+                                 (if (= (text-byte-at text offset) 9)
+                                     unit-width
+                                     1)))))])
                   (loop
                     (- line 1)
                     (if (= start remove-end)
@@ -394,6 +410,10 @@
                   (cons
                     (list start start (spaces width))
                     result)))))))
+
+  (define (non-empty-region view)
+    (let ([region (view-region view)])
+      (and region (< (car region) (cdr region)) region)))
 
   (define (shift-region-command context unindent?)
     (let* ([editor (command-context-editor context)]
@@ -425,6 +445,7 @@
                       (car lines)
                       (cdr lines)
                       width
+                      (indent-width buffer)
                       unindent?)))))))
       '()))
 
@@ -433,6 +454,77 @@
 
   (define (unindent-region-command context)
     (shift-region-command context #t))
+
+  (define (tab-command context)
+    (let* ([view (context-view context)]
+           [buffer (context-buffer context)]
+           [region (non-empty-region view)]
+           [count
+             (require-non-negative-count
+               'edit.indent-or-insert-tab
+               context)])
+      (cond
+        [region
+         (shift-region-command context #f)]
+        [(positive? count)
+         (let* ([caret (view-caret view)]
+                [width (tab-width buffer)]
+                [replacement
+                  (if (buffer-setting-ref buffer 'use-tabs? #f)
+                      (repeat-bytes (make-bytevector 1 9) count)
+                      (with-document-text
+                        (buffer-document buffer)
+                        (lambda (text)
+                          (let ([column
+                                  (text-cell-column text caret width)])
+                            (spaces
+                              (+
+                                (- (next-tab-stop column width) column)
+                                (* (- count 1) width)))))))])
+           (buffer-replace-range! buffer caret caret replacement)
+           (view-set-caret!
+             view
+             (+ caret (bytevector-length replacement)))
+           (when (view-region view)
+             (view-clear-mark! view))
+           '())]
+        [else '()])))
+
+  (define (backtab-command context)
+    (let* ([view (context-view context)]
+           [buffer (context-buffer context)]
+           [region (non-empty-region view)]
+           [count
+             (require-non-negative-count
+               'edit.unindent
+               context)])
+      (if region
+          (shift-region-command context #t)
+          (when (positive? count)
+            (with-document-text
+              (buffer-document buffer)
+              (lambda (text)
+                (let* ([caret (view-caret view)]
+                       [line (car (text-position text caret))]
+                       [start (text-line-start text line)]
+                       [replacement
+                         (region-indent-replacements
+                           text
+                           line
+                           line
+                           (* (indent-width buffer) count)
+                           (indent-width buffer)
+                           #t)])
+                  (unless (null? replacement)
+                    (let* ([end (cadar replacement)]
+                           [removed (- end start)])
+                      (apply-replacements! buffer replacement)
+                      (view-set-caret!
+                        view
+                        (if (<= caret end)
+                            start
+                            (- caret removed))))))))))
+      '()))
 
   (define default-delimiter-pairs
     '((#\( . #\))
@@ -1254,6 +1346,14 @@
           unindent-region-command
           "Remove one indentation level from the active region.")
         (list
+          'edit.indent-or-insert-tab
+          tab-command
+          "Indent the active region or insert whitespace to the next tab stop.")
+        (list
+          'edit.unindent
+          backtab-command
+          "Unindent the active region or current line.")
+        (list
           'edit.delete-horizontal-space
           delete-horizontal-space-command
           "Delete spaces and tabs around point.")
@@ -1392,6 +1492,8 @@
         (cons (stroke 'backspace 127 0) 'edit.backward-delete)
         (cons (stroke 'delete #f 0) 'edit.forward-delete)
         (cons (stroke 'enter 13 0) 'edit.newline)
+        (cons (stroke 'tab 9 0) 'edit.indent-or-insert-tab)
+        (cons (stroke 'tab 9 1) 'edit.unindent)
         (cons
           (stroke 'character (char->integer #\i) 2)
           'edit.toggle-auto-indent)
