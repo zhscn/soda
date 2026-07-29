@@ -54,9 +54,12 @@
           editor-set-status-message!
           editor-kill-ring
           editor-push-kill!
+          editor-record-kill!
           editor-current-kill
+          editor-last-command-class
           editor-register-command!
           editor-bind-key!
+          editor-execute-interactive-command!
           editor-execute-command!
           editor-update!
           make-key-message

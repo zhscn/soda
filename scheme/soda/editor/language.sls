@@ -14,6 +14,7 @@
           language-profile-indent
           language-profile-pairs
           language-profile-lexical
+          language-profile-word-motion
           language-profile-highlights
           language-profile-text-objects
           language-profile-electric
@@ -38,7 +39,8 @@
           resolve-major-mode-language
           major-mode-keymaps
           major-mode-setting-ref)
-  (import (rnrs))
+  (import (rnrs)
+          (soda editor motion))
 
   (define-record-type (syntax-provider %make-syntax-provider syntax-provider?)
     (fields
@@ -118,6 +120,7 @@
       (immutable indent language-profile-indent)
       (immutable pairs language-profile-pairs)
       (immutable lexical language-profile-lexical)
+      (immutable word-motion language-profile-word-motion)
       (immutable highlights language-profile-highlights)
       (immutable text-objects language-profile-text-objects)
       (immutable electric language-profile-electric)
@@ -126,8 +129,11 @@
   (define make-language-profile
     (case-lambda
       [(name syntax)
-       (make-language-profile name syntax #f '() #f #f #f '() #f)]
+       (make-language-profile name syntax #f '() #f #f #f #f '() #f)]
       [(name syntax indent pairs lexical highlights text-objects electric enter)
+       (make-language-profile
+         name syntax indent pairs lexical #f highlights text-objects electric enter)]
+      [(name syntax indent pairs lexical word-motion highlights text-objects electric enter)
        (unless (symbol? name)
          (assertion-violation
            'make-language-profile
@@ -145,6 +151,11 @@
           'make-language-profile
           "lexical policy must be a procedure or #f"
           lexical))
+       (unless (or (not word-motion) (word-motion? word-motion))
+         (assertion-violation
+           'make-language-profile
+           "word motion must be a word-motion or #f"
+           word-motion))
        (unless (and (list? electric) (for-all char? electric))
          (assertion-violation
            'make-language-profile
@@ -161,6 +172,7 @@
          indent
          pairs
          lexical
+         word-motion
          highlights
          text-objects
          electric

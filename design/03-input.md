@@ -130,9 +130,11 @@ mark 与 caret 都使用 Document anchor，因此 region 可跨普通编辑、un
 和 yank 把 active region 作为替换范围。切换 View 的 Buffer 或关闭 View 会释放
 mark anchor。
 
-Editor 拥有有界 kill ring。copy-region 和 kill-region 把 UTF-8 bytes 复制到 ring，
-yank 插入最新条目。ring 不属于 Document，不进入 undo tree；由 yank 产生的文本
-修改仍是普通 Buffer transaction。
+Editor 拥有有界 kill ring。copy-region 和 kill command 把 UTF-8 bytes 复制到
+ring，yank 插入最新条目。连续的 kill class command 共享最新条目：向前 kill
+追加，向后 kill 前置。每次删除仍是独立的 Buffer transaction，因此 kill ring
+合并与 undo 粒度彼此独立。copy command 可以承接前一次 kill，但自身不属于 kill
+class。ring 不属于 Document，不进入 undo tree。
 
 多 range selection 可以把 primary region 泛化为：
 
@@ -157,6 +159,12 @@ motion 是纯函数：
 selection 并返回 transaction 与 resulting selection。这组原语能组合 Emacs
 式命令、Vim operator、Helix 多选区和结构化 selection，而不把某一种 modal
 模型固化进 Document。
+
+word motion 是 motion policy 的一个可替换实例。命令按 Buffer local setting、
+language profile、Unicode 默认实现的顺序解析 policy。默认实现把 Unicode 字母、
+数字、组合字符、connector punctuation 和下划线视为 word constituent。major
+mode 可以替换 policy，实现语言 identifier、subword 或自然语言分词，而
+move-word、kill-word 等消费者保持不变。
 
 prefix argument 是下一次 command invocation 的显式字段：
 

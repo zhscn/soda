@@ -58,7 +58,10 @@
           editor-set-status-message!
           editor-kill-ring
           editor-push-kill!
+          editor-record-kill!
           editor-current-kill
+          editor-last-command-class
+          editor-set-last-command-class!
           editor-quit-armed?
           editor-arm-quit!
           editor-disarm-quit!
@@ -172,6 +175,9 @@
                editor-status-message
                editor-status-message-set!)
       (mutable kill-ring editor-kill-ring editor-kill-ring-set!)
+      (mutable last-command-class
+               editor-last-command-class
+               editor-last-command-class-set!)
       (mutable quit-armed?
                editor-quit-armed?
                editor-quit-armed?-set!)
@@ -1541,6 +1547,48 @@
             entries)))
     bytes)
 
+  (define (append-bytevectors first second)
+    (let* ([first-size (bytevector-length first)]
+           [second-size (bytevector-length second)]
+           [result (make-bytevector (+ first-size second-size))])
+      (bytevector-copy! first 0 result 0 first-size)
+      (bytevector-copy! second 0 result first-size second-size)
+      result))
+
+  (define (editor-record-kill! value bytes direction)
+    (require-open-editor 'editor-record-kill! value)
+    (unless (bytevector? bytes)
+      (assertion-violation
+        'editor-record-kill!
+        "kill text must be a bytevector"
+        bytes))
+    (unless (memq direction '(forward backward))
+      (assertion-violation
+        'editor-record-kill!
+        "direction must be forward or backward"
+        direction))
+    (if (and (eq? (editor-last-command-class value) 'kill)
+             (pair? (editor-kill-ring value)))
+        (let* ([current (car (editor-kill-ring value))]
+               [combined
+                 (if (eq? direction 'backward)
+                     (append-bytevectors bytes current)
+                     (append-bytevectors current bytes))])
+          (editor-kill-ring-set!
+            value
+            (cons combined (cdr (editor-kill-ring value))))
+          bytes)
+        (editor-push-kill! value bytes)))
+
+  (define (editor-set-last-command-class! value class)
+    (require-open-editor 'editor-set-last-command-class! value)
+    (unless (or (not class) (symbol? class))
+      (assertion-violation
+        'editor-set-last-command-class!
+        "command class must be a symbol or #f"
+        class))
+    (editor-last-command-class-set! value class))
+
   (define (editor-current-kill value)
     (require-open-editor 'editor-current-kill value)
     (and
@@ -1816,6 +1864,7 @@
                '()
                #f
                '()
+               #f
                #f
                #f)])
       (hashtable-set! buffers (buffer-id buffer) buffer)

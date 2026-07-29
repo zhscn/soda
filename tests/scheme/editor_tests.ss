@@ -8,6 +8,7 @@
         (soda editor event)
         (soda editor keymap)
         (soda editor language)
+        (soda editor motion)
         (soda editor prompt)
         (soda editor scheme-semantics)
         (soda tui commands)
@@ -178,7 +179,16 @@
              (not
                (command-documentation
                  (editor-command-registry editor)
-                 'test.count)))
+                 'test.count))
+             (not
+               (command-class
+                 (editor-command-registry editor)
+                 'test.count))
+             (eq?
+               (command-class
+                 (editor-command-registry editor)
+                 'edit.kill-word)
+               'kill))
   (error 'editor-tests "registered command was not introspectable"))
 (editor-bind-key!
   editor
@@ -788,6 +798,88 @@
     (string->utf8 "alpha beta"))
   (error 'editor-tests "kill followed by yank did not restore text"))
 (editor-close! region-editor)
+
+(define word-document (make-document "one two" 971))
+(define word-buffer
+  (make-buffer
+    971
+    word-document
+    "*word*"
+    'fundamental-mode))
+(define word-editor (make-editor word-buffer))
+(define word-view (editor-active-view word-editor))
+(define word-decoder (make-input-decoder))
+(editor-update! word-editor (make-resize-message 3 20))
+
+(send! word-editor word-decoder (bytes 27 102))
+(unless (= (view-caret word-view) 3)
+  (error 'editor-tests "forward-word did not find the word boundary"))
+(send! word-editor word-decoder (bytes 27 98))
+(unless (= (view-caret word-view) 0)
+  (error 'editor-tests "backward-word did not find the word boundary"))
+
+(send! word-editor word-decoder (bytes 27 100))
+(send! word-editor word-decoder (bytes 27 100))
+(unless
+  (and
+    (bytevector=?
+      (buffer-bytes word-buffer)
+      (string->utf8 ""))
+    (bytevector=?
+      (editor-current-kill word-editor)
+      (string->utf8 "one two"))
+    (eq? (editor-last-command-class word-editor) 'kill))
+  (error 'editor-tests "consecutive forward word kills did not append"))
+
+(editor-update!
+  word-editor
+  (make-command-message 'edit.undo #f))
+(editor-update!
+  word-editor
+  (make-command-message 'edit.undo #f))
+(unless
+  (bytevector=?
+    (buffer-bytes word-buffer)
+    (string->utf8 "one two"))
+  (error 'editor-tests "word kills did not remain separate undo changes"))
+
+(editor-update!
+  word-editor
+  (make-command-message 'move.line-end #f))
+(send! word-editor word-decoder (bytes 27 127))
+(send! word-editor word-decoder (bytes 27 127))
+(unless
+  (and
+    (bytevector=?
+      (buffer-bytes word-buffer)
+      (string->utf8 ""))
+    (bytevector=?
+      (editor-current-kill word-editor)
+      (string->utf8 "one two")))
+  (error 'editor-tests "consecutive backward word kills did not prepend"))
+(editor-close! word-editor)
+
+(define custom-word-document (make-document "alpha beta" 972))
+(define custom-word-buffer
+  (make-buffer
+    972
+    custom-word-document
+    "*custom-word*"
+    'fundamental-mode))
+(buffer-set-local-setting!
+  custom-word-buffer
+  'word-motion
+  (make-word-motion
+    (lambda (text offset count)
+      (if (negative? count) 0 (text-size text)))))
+(define custom-word-editor (make-editor custom-word-buffer))
+(editor-update!
+  custom-word-editor
+  (make-command-message 'move.forward-word #f))
+(unless
+  (= (view-caret (editor-active-view custom-word-editor)) 10)
+  (error 'editor-tests "buffer word-motion policy was not used"))
+(editor-close! custom-word-editor)
 
 (define prompt-document (make-document "body" 91))
 (define prompt-buffer

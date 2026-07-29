@@ -23,14 +23,16 @@
   (define (run-interactive-command editor name event argument)
     (unless (eq? name 'editor.quit)
       (editor-disarm-quit! editor))
-    (guard (condition
+      (guard (condition
              [else
+              (editor-set-last-command-class! editor #f)
               (editor-set-status-message!
                 editor
                 (condition->string condition))
               '()])
       (editor-set-status-message! editor #f)
-      (editor-execute-command! editor name event argument)))
+      (editor-execute-interactive-command!
+        editor name event argument)))
 
   (define (run-internal-command editor name argument)
     (unless (eq? name 'editor.quit)
@@ -108,6 +110,7 @@
                  (run-interactive-command editor command event #f)]
                 [(undefined)
                  (editor-set-pending-keys! editor '())
+                 (editor-set-last-command-class! editor #f)
                  (editor-set-status-message!
                    editor
                    "Undefined key")
@@ -121,7 +124,8 @@
                        editor
                        event
                        (key-event-text event))
-                     (begin
+                       (begin
+                       (editor-set-last-command-class! editor #f)
                        (when (pair? pending)
                          (editor-set-status-message!
                            editor

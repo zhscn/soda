@@ -2,6 +2,7 @@
   (export install-basic-commands!
           editor-register-command!
           editor-bind-key!
+          editor-execute-interactive-command!
           editor-execute-command!)
   (import (rnrs)
           (soda document)
@@ -9,7 +10,10 @@
           (soda editor command)
           (soda editor display)
           (soda editor event)
+          (soda editor kill)
           (soda editor keymap)
+          (soda editor language)
+          (soda editor motion)
           (soda editor state))
 
   (define (with-document-text document procedure)
@@ -41,18 +45,6 @@
         (lambda ()
           (when change
             (change-close! change))))))
-
-  (define (buffer-range-bytes buffer start end)
-    (let ([snapshot (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda () (text-subbytevector text start end))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
 
   (define (previous-character-offset text caret)
     (if (zero? caret)
@@ -223,6 +215,46 @@
             (next-character-offset text (view-caret view))))))
     '())
 
+  (define (buffer-word-motion buffer)
+    (let ([setting (buffer-setting-ref buffer 'word-motion #f)])
+      (cond
+        [(word-motion? setting) setting]
+        [setting
+         (assertion-violation
+           'buffer-word-motion
+           "word-motion setting must be a word motion"
+           setting)]
+        [else
+         (let ([profile (buffer-language-profile buffer)])
+           (or (and profile (language-profile-word-motion profile))
+               default-word-motion))])))
+
+  (define (word-target buffer offset count)
+    (with-document-text
+      (buffer-document buffer)
+      (lambda (text)
+        (word-motion-target
+          (buffer-word-motion buffer)
+          text
+          offset
+          count))))
+
+  (define (move-word! context count)
+    (let* ([view (context-view context)]
+           [target
+             (word-target
+               (context-buffer context)
+               (view-caret view)
+               count)])
+      (view-set-caret! view target)
+      '()))
+
+  (define (forward-word-command context)
+    (move-word! context 1))
+
+  (define (backward-word-command context)
+    (move-word! context -1))
+
   (define (previous-line-command context)
     (move-vertical! (context-view context) -1)
     '())
@@ -284,15 +316,29 @@
       (if (or (not region) (= (car region) (cdr region)))
           (editor-set-status-message! editor "Region is empty")
           (begin
-            (editor-push-kill!
+            (editor-copy-buffer-range!
               editor
-              (buffer-range-bytes
-                (context-buffer context)
-                (car region)
-                (cdr region)))
+              (context-buffer context)
+              (view-mark view)
+              (view-caret view))
             (view-deactivate-mark! view)
             (editor-set-status-message! editor "Region copied")))
       '()))
+
+  (define (kill-range! context first second)
+    (let* ([editor (command-context-editor context)]
+           [view (context-view context)]
+           [start (min first second)]
+           [end (max first second)])
+      (when (< start end)
+        (editor-kill-buffer-range!
+          editor
+          (context-buffer context)
+          first
+          second)
+        (view-set-caret! view start)
+        (view-clear-mark! view))
+      (< start end)))
 
   (define (kill-region-command context)
     (let* ([editor (command-context-editor context)]
@@ -300,21 +346,26 @@
            [region (view-region view)])
       (if (or (not region) (= (car region) (cdr region)))
           (editor-set-status-message! editor "Region is empty")
-          (let ([start (car region)] [end (cdr region)])
-            (editor-push-kill!
-              editor
-              (buffer-range-bytes
-                (context-buffer context)
-                start
-                end))
-            (replace!
-              (context-buffer context)
-              start
-              end
-              (make-bytevector 0))
-            (view-set-caret! view start)
-            (view-clear-mark! view)
+          (begin
+            (kill-range!
+              context
+              (view-mark view)
+              (view-caret view))
             (editor-set-status-message! editor "Region killed")))
+      '()))
+
+  (define (kill-word-command context)
+    (let* ([view (context-view context)]
+           [start (view-caret view)]
+           [end (word-target (context-buffer context) start 1)])
+      (kill-range! context start end)
+      '()))
+
+  (define (backward-kill-word-command context)
+    (let* ([view (context-view context)]
+           [start (view-caret view)]
+           [end (word-target (context-buffer context) start -1)])
+      (kill-range! context start end)
       '()))
 
   (define (yank-command context)
@@ -419,12 +470,16 @@
          name
          procedure)]
       [(editor name procedure documentation)
+       (editor-register-command!
+         editor name procedure documentation #f)]
+      [(editor name procedure documentation class)
        (require-open-editor 'editor-register-command! editor)
        (register-command!
          (editor-command-registry editor)
          name
          procedure
-         documentation)]))
+         documentation
+         class)]))
 
   (define (editor-bind-key! editor sequence command)
     (require-open-editor 'editor-bind-key! editor)
@@ -459,6 +514,18 @@
            effects
            (editor-take-completion-effects! editor)))]))
 
+  (define editor-execute-interactive-command!
+    (case-lambda
+      [(editor name)
+       (editor-execute-interactive-command! editor name #f #f)]
+      [(editor name event argument)
+       (let ([effects
+               (editor-execute-command! editor name event argument)])
+         (editor-set-last-command-class!
+           editor
+           (command-class (editor-command-registry editor) name))
+         effects)]))
+
   (define (stroke key codepoint modifiers)
     (make-key-stroke key codepoint modifiers))
 
@@ -469,7 +536,8 @@
           editor
           (car entry)
           (cadr entry)
-          (caddr entry)))
+          (caddr entry)
+          (if (pair? (cdddr entry)) (cadddr entry) #f)))
       (list
         (list 'editor.quit quit-command "Leave the editor.")
         (list
@@ -494,6 +562,14 @@
           'move.forward-character
           forward-character-command
           "Move forward by one character.")
+        (list
+          'move.backward-word
+          backward-word-command
+          "Move backward by one word.")
+        (list
+          'move.forward-word
+          forward-word-command
+          "Move forward by one word.")
         (list
           'move.previous-line
           previous-line-command
@@ -524,7 +600,18 @@
         (list
           'edit.kill-region
           kill-region-command
-          "Kill the active region.")
+          "Kill the active region."
+          'kill)
+        (list
+          'edit.kill-word
+          kill-word-command
+          "Kill through the end of the next word."
+          'kill)
+        (list
+          'edit.backward-kill-word
+          backward-kill-word-command
+          "Kill backward through the start of the previous word."
+          'kill)
         (list
           'edit.yank
           yank-command
@@ -539,6 +626,8 @@
         (cons (stroke 'enter 13 0) 'edit.newline)
         (cons (stroke 'left #f 0) 'move.backward-character)
         (cons (stroke 'right #f 0) 'move.forward-character)
+        (cons (stroke 'character (char->integer #\b) 2) 'move.backward-word)
+        (cons (stroke 'character (char->integer #\f) 2) 'move.forward-word)
         (cons (stroke 'up #f 0) 'move.previous-line)
         (cons (stroke 'down #f 0) 'move.next-line)
         (cons (stroke 'home #f 0) 'move.line-start)
@@ -549,6 +638,10 @@
         (cons (stroke 'character (char->integer #\space) 4) 'mark.set)
         (cons (stroke 'character (char->integer #\w) 2) 'edit.copy-region)
         (cons (stroke 'character (char->integer #\w) 4) 'edit.kill-region)
+        (cons (stroke 'character (char->integer #\d) 2) 'edit.kill-word)
+        (cons (stroke 'backspace 127 2) 'edit.backward-kill-word)
+        (cons (stroke 'backspace 127 4) 'edit.backward-kill-word)
+        (cons (stroke 'delete #f 4) 'edit.kill-word)
         (cons (stroke 'character (char->integer #\y) 4) 'edit.yank)))
     (editor-bind-key!
       editor

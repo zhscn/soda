@@ -118,7 +118,8 @@
            (if (command-registered?
                  (editor-command-registry editor)
                  name)
-               (editor-execute-command! editor name #f #f)
+               (editor-execute-interactive-command!
+                 editor name #f #f)
                (begin
                  (editor-set-status-message!
                    editor

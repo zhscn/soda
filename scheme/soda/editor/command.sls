@@ -6,6 +6,7 @@
           command-names
           command-procedure
           command-documentation
+          command-class
           execute-command!
           make-command-context
           command-context?
@@ -28,6 +29,9 @@
   (define-record-type command-effect
     (fields kind payload))
 
+  (define-record-type registered-command
+    (fields procedure documentation class))
+
   (define (make-command-registry)
     (%make-command-registry (make-eq-hashtable)))
 
@@ -40,6 +44,13 @@
       [(registry name procedure)
        (register-command! registry name procedure #f)]
       [(registry name procedure documentation)
+       (register-command!
+         registry
+         name
+         procedure
+         documentation
+         #f)]
+      [(registry name procedure documentation class)
        (require-registry 'register-command! registry)
        (unless (symbol? name)
          (assertion-violation
@@ -56,10 +67,15 @@
            'register-command!
            "command documentation must be a string or #f"
            documentation))
+       (unless (or (not class) (symbol? class))
+         (assertion-violation
+           'register-command!
+           "command class must be a symbol or #f"
+           class))
        (hashtable-set!
          (command-registry-entries registry)
          name
-         (cons procedure documentation))
+         (make-registered-command procedure documentation class))
        name]))
 
   (define (command-registered? registry name)
@@ -75,10 +91,16 @@
         (assertion-violation who "unknown command" name)))
 
   (define (command-procedure registry name)
-    (car (command-entry 'command-procedure registry name)))
+    (registered-command-procedure
+      (command-entry 'command-procedure registry name)))
 
   (define (command-documentation registry name)
-    (cdr (command-entry 'command-documentation registry name)))
+    (registered-command-documentation
+      (command-entry 'command-documentation registry name)))
+
+  (define (command-class registry name)
+    (registered-command-class
+      (command-entry 'command-class registry name)))
 
   (define (command-names registry)
     (require-registry 'command-names registry)

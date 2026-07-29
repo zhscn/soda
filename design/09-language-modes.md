@@ -50,6 +50,7 @@ LanguageProfile {
   comment_syntax,
   delimiter_pairs,
   identifier_policy,
+  word_motion,
   completion_providers,
   trigger_policy,
   query_sets,
