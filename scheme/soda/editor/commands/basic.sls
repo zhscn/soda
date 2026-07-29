@@ -172,6 +172,22 @@
         (view-clear-mark! view))
       '()))
 
+  (define (open-line-command context)
+    (let* ([view (context-view context)]
+           [caret (view-caret view)]
+           [region (view-region view)]
+           [start (if region (car region) caret)]
+           [end (if region (cdr region) caret)])
+      (buffer-replace-range!
+        (context-buffer context)
+        start
+        end
+        (make-bytevector 1 10))
+      (view-set-caret! view start)
+      (when region
+        (view-clear-mark! view))
+      '()))
+
   (define (backward-character-command context)
     (let ([view (context-view context)])
       (view-set-caret!
@@ -239,6 +255,51 @@
               text
               (car (text-position text (view-caret view))))))))
     '())
+
+  (define (buffer-start-command context)
+    (view-set-caret! (context-view context) 0)
+    '())
+
+  (define (buffer-end-command context)
+    (let ([view (context-view context)])
+      (view-set-caret!
+        view
+        (with-document-text
+          (context-document context)
+          text-size)))
+    '())
+
+  (define (horizontal-space-byte? byte)
+    (or (= byte 9) (= byte 32)))
+
+  (define (delete-horizontal-space-command context)
+    (let* ([view (context-view context)]
+           [caret (view-caret view)])
+      (call-with-values
+        (lambda ()
+          (with-document-text
+            (context-document context)
+            (lambda (text)
+              (let find-start ([offset caret])
+                (if (and (positive? offset)
+                         (horizontal-space-byte?
+                           (text-byte-at text (- offset 1))))
+                    (find-start (- offset 1))
+                    (let find-end ([end caret])
+                      (if (and (< end (text-size text))
+                               (horizontal-space-byte?
+                                 (text-byte-at text end)))
+                          (find-end (+ end 1))
+                          (values offset end))))))))
+        (lambda (start end)
+          (when (< start end)
+            (buffer-delete-range!
+              (context-buffer context)
+              start
+              end)
+            (view-set-caret! view start)
+            (view-deactivate-mark! view))))
+      '()))
 
   (define (set-mark-command context)
     (let* ([editor (command-context-editor context)]
@@ -326,6 +387,26 @@
                (context-buffer context)
                start
                -1)])
+      (kill-range! context start end)
+      '()))
+
+  (define (kill-line-command context)
+    (let* ([view (context-view context)]
+           [start (view-caret view)]
+           [end
+             (with-document-text
+               (context-document context)
+               (lambda (text)
+                 (let* ([size (text-size text)]
+                        [line
+                          (car
+                            (text-position text start))]
+                        [content-end
+                          (text-line-content-end text line)])
+                   (cond
+                     [(< start content-end) content-end]
+                     [(< start size) (+ start 1)]
+                     [else start]))))])
       (kill-range! context start end)
       '()))
 
@@ -455,6 +536,14 @@
           "Delete the next character.")
         (list 'edit.newline newline-command "Insert a newline.")
         (list
+          'edit.open-line
+          open-line-command
+          "Insert a newline after point and leave point before it.")
+        (list
+          'edit.delete-horizontal-space
+          delete-horizontal-space-command
+          "Delete spaces and tabs around point.")
+        (list
           'move.backward-character
           backward-character-command
           "Move backward by one character.")
@@ -486,6 +575,14 @@
           'move.line-end
           line-end-command
           "Move to the end of the line.")
+        (list
+          'move.buffer-start
+          buffer-start-command
+          "Move to the start of the buffer.")
+        (list
+          'move.buffer-end
+          buffer-end-command
+          "Move to the end of the buffer.")
         (list 'edit.undo undo-command "Undo the previous buffer change.")
         (list 'edit.redo redo-command "Redo the next buffer change.")
         (list 'mark.set set-mark-command "Set the mark at point.")
@@ -513,6 +610,11 @@
           "Kill backward through the start of the previous word."
           'kill)
         (list
+          'edit.kill-line
+          kill-line-command
+          "Kill through the end of the line."
+          'kill)
+        (list
           'edit.yank
           yank-command
           "Insert the newest kill-ring entry.")))
@@ -524,6 +626,7 @@
         (cons (stroke 'backspace 127 0) 'edit.backward-delete)
         (cons (stroke 'delete #f 0) 'edit.forward-delete)
         (cons (stroke 'enter 13 0) 'edit.newline)
+        (cons (stroke 'character (char->integer #\o) 4) 'edit.open-line)
         (cons (stroke 'left #f 0) 'move.backward-character)
         (cons (stroke 'right #f 0) 'move.forward-character)
         (cons (stroke 'character (char->integer #\b) 2) 'move.backward-word)
@@ -532,6 +635,8 @@
         (cons (stroke 'down #f 0) 'move.next-line)
         (cons (stroke 'home #f 0) 'move.line-start)
         (cons (stroke 'end #f 0) 'move.line-end)
+        (cons (stroke 'character (char->integer #\<) 2) 'move.buffer-start)
+        (cons (stroke 'character (char->integer #\>) 2) 'move.buffer-end)
         (cons (stroke 'character (char->integer #\z) 4) 'edit.undo)
         (cons (stroke 'character (char->integer #\/) 4) 'edit.undo)
         (cons (stroke 'character (char->integer #\z) 5) 'edit.redo)
@@ -539,6 +644,10 @@
         (cons (stroke 'character (char->integer #\w) 2) 'edit.copy-region)
         (cons (stroke 'character (char->integer #\w) 4) 'edit.kill-region)
         (cons (stroke 'character (char->integer #\d) 2) 'edit.kill-word)
+        (cons (stroke 'character (char->integer #\k) 4) 'edit.kill-line)
+        (cons
+          (stroke 'character (char->integer #\\) 2)
+          'edit.delete-horizontal-space)
         (cons (stroke 'backspace 127 2) 'edit.backward-kill-word)
         (cons (stroke 'backspace 127 4) 'edit.backward-kill-word)
         (cons (stroke 'delete #f 4) 'edit.kill-word)

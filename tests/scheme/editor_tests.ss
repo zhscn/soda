@@ -907,6 +907,91 @@
     "failed word kill changed editor state"))
 (editor-close! protected-editor)
 
+(define line-document
+  (make-document "one two\n  three  \nlast" 974))
+(define line-buffer
+  (make-buffer
+    974
+    line-document
+    "*line-editing*"
+    'fundamental-mode))
+(define line-editor (make-editor line-buffer))
+(define line-view (editor-active-view line-editor))
+(define line-decoder (make-input-decoder))
+(editor-update! line-editor (make-resize-message 5 30))
+
+(send! line-editor line-decoder (bytes 27 62))
+(unless (= (view-caret line-view) 22)
+  (error 'editor-tests "M-> did not move to the buffer end"))
+(send! line-editor line-decoder (bytes 27 60))
+(unless (= (view-caret line-view) 0)
+  (error 'editor-tests "M-< did not move to the buffer start"))
+
+(send! line-editor line-decoder (bytes 27 102))
+(send! line-editor line-decoder (bytes 15))
+(unless
+  (and
+    (= (view-caret line-view) 3)
+    (bytevector=?
+      (buffer-bytes line-buffer)
+      (string->utf8 "one\n two\n  three  \nlast")))
+  (error 'editor-tests "open-line did not leave point before the newline"))
+(editor-update!
+  line-editor
+  (make-command-message 'edit.undo #f))
+
+(send! line-editor line-decoder (bytes 11))
+(send! line-editor line-decoder (bytes 11))
+(unless
+  (and
+    (= (view-caret line-view) 3)
+    (bytevector=?
+      (buffer-bytes line-buffer)
+      (string->utf8 "one  three  \nlast"))
+    (bytevector=?
+      (editor-current-kill line-editor)
+      (string->utf8 " two\n")))
+  (error 'editor-tests "consecutive kill-line commands did not compose"))
+(editor-update!
+  line-editor
+  (make-command-message 'edit.undo #f))
+(editor-update!
+  line-editor
+  (make-command-message 'edit.undo #f))
+(unless
+  (bytevector=?
+    (buffer-bytes line-buffer)
+    (string->utf8 "one two\n  three  \nlast"))
+  (error 'editor-tests "kill-line changes did not undo independently"))
+
+(send! line-editor line-decoder (bytes 27 60))
+(editor-update!
+  line-editor
+  (make-command-message 'move.next-line #f))
+(send! line-editor line-decoder (bytes 27 92))
+(unless
+  (and
+    (= (view-caret line-view) 8)
+    (bytevector=?
+      (buffer-bytes line-buffer)
+      (string->utf8 "one two\nthree  \nlast")))
+  (error 'editor-tests "M-\\ did not delete following horizontal space"))
+(editor-update!
+  line-editor
+  (make-command-message 'edit.undo #f))
+(editor-update!
+  line-editor
+  (make-command-message 'move.line-end #f))
+(send! line-editor line-decoder (bytes 27 92))
+(unless
+  (and
+    (= (view-caret line-view) 15)
+    (bytevector=?
+      (buffer-bytes line-buffer)
+      (string->utf8 "one two\n  three\nlast")))
+  (error 'editor-tests "M-\\ did not delete preceding horizontal space"))
+(editor-close! line-editor)
+
 (define prompt-document (make-document "body" 91))
 (define prompt-buffer
   (make-buffer

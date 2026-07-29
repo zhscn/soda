@@ -136,6 +136,12 @@ ring，yank 插入最新条目。连续的 kill class command 共享最新条目
 合并与 undo 粒度彼此独立。copy command 可以承接前一次 kill，但自身不属于 kill
 class。ring 不属于 Document，不进入 undo tree。
 
+范围修改通过共享的 Buffer edit mechanism 提交。普通 replace/delete、open-line、
+horizontal-space 删除和 kill range 使用相同的 transaction 生命周期；kill 在
+transaction 成功后才更新 ring。`kill-line` 只计算当前 point 到行内容末尾或换行符
+之后的有向 range，因此连续调用沿用普通 kill command 的 append 规则，同时保留
+独立 undo 单元。
+
 多 range selection 可以把 primary region 泛化为：
 
 ```text
