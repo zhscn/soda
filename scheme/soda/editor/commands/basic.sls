@@ -220,6 +220,34 @@
               (car (text-position text (view-caret view))))))))
     '())
 
+  (define (apply-history-command context operation empty-message success-message)
+    (let* ([editor (command-context-editor context)]
+           [view (context-view context)]
+           [change (operation (context-buffer context))])
+      (if (not change)
+          (editor-set-status-message! editor empty-message)
+          (dynamic-wind
+            (lambda () #f)
+            (lambda ()
+              (view-set-caret! view (view-caret view))
+              (editor-set-status-message! editor success-message))
+            (lambda () (change-close! change))))
+      '()))
+
+  (define (undo-command context)
+    (apply-history-command
+      context
+      buffer-undo!
+      "No undo information"
+      "Undo"))
+
+  (define (redo-command context)
+    (apply-history-command
+      context
+      buffer-redo!
+      "No redo information"
+      "Redo"))
+
   (define (quit-command context)
     (let* ([editor (command-context-editor context)]
            [buffers (editor-buffers editor)]
@@ -362,7 +390,9 @@
         (list
           'move.line-end
           line-end-command
-          "Move to the end of the line.")))
+          "Move to the end of the line.")
+        (list 'edit.undo undo-command "Undo the previous buffer change.")
+        (list 'edit.redo redo-command "Redo the next buffer change.")))
     (for-each
       (lambda (entry)
         (editor-bind-key! editor (list (car entry)) (cdr entry)))
@@ -376,7 +406,16 @@
         (cons (stroke 'up #f 0) 'move.previous-line)
         (cons (stroke 'down #f 0) 'move.next-line)
         (cons (stroke 'home #f 0) 'move.line-start)
-        (cons (stroke 'end #f 0) 'move.line-end)))
+        (cons (stroke 'end #f 0) 'move.line-end)
+        (cons (stroke 'character (char->integer #\z) 4) 'edit.undo)
+        (cons (stroke 'character (char->integer #\/) 4) 'edit.undo)
+        (cons (stroke 'character (char->integer #\z) 5) 'edit.redo)))
+    (editor-bind-key!
+      editor
+      (list
+        (stroke 'character (char->integer #\x) 4)
+        (stroke 'character (char->integer #\u) 0))
+      'edit.undo)
     (keymap-bind!
       (keymap-catalog-ref
         (editor-keymap-catalog editor)

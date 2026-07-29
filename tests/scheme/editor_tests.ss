@@ -136,6 +136,36 @@
 (unless (= (view-caret (editor-active-view editor)) 2)
   (error 'editor-tests "backspace command did not move the caret"))
 
+(send! editor decoder (bytes 26))
+(unless
+  (and
+    (bytevector=? (buffer-bytes buffer) (string->utf8 "abc"))
+    (= (view-caret (editor-active-view editor)) 3)
+    (string=? (editor-status-message editor) "Undo"))
+  (error 'editor-tests "undo did not restore text and caret"))
+
+(editor-update! editor (make-command-message 'edit.redo #f))
+(unless
+  (and
+    (bytevector=? (buffer-bytes buffer) (string->utf8 "ab"))
+    (= (view-caret (editor-active-view editor)) 2)
+    (string=? (editor-status-message editor) "Redo"))
+  (error 'editor-tests "redo did not restore text and caret"))
+
+(call-with-values
+  (lambda ()
+    (keymaps-resolve
+      (list (editor-keymap editor))
+      (list
+        (make-key-stroke
+          'character
+          (char->integer #\z)
+          5))))
+  (lambda (status command)
+    (unless (and (eq? status 'command)
+                 (eq? command 'edit.redo))
+      (error 'editor-tests "C-S-z was not bound to redo"))))
+
 (define invocation-count 0)
 (define (count-once context)
   (set! invocation-count (+ invocation-count 1))
