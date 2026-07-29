@@ -157,14 +157,23 @@
         "path must be a string or #f"
         path))
     (let ([normalized (and path (string-foldcase path))])
-      (if (and
-            normalized
-            (exists
-              (lambda (suffix)
-                (string-suffix? suffix normalized))
-              '(".scm" ".ss" ".sls" ".sps")))
-          'scheme-mode
-          'fundamental-mode)))
+      (cond
+        [(and
+           normalized
+           (exists
+             (lambda (suffix)
+               (string-suffix? suffix normalized))
+             '(".scm" ".ss" ".sls" ".sps")))
+         'scheme-mode]
+        [(and
+           normalized
+           (exists
+             (lambda (suffix)
+               (string-suffix? suffix normalized))
+             '(".c" ".cc" ".cpp" ".cxx"
+               ".h" ".hh" ".hpp" ".hxx")))
+         'cpp-mode]
+        [else 'fundamental-mode])))
 
   (define make-save-request
     (case-lambda

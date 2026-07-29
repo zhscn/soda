@@ -112,6 +112,8 @@ if(CHEZ_SCHEME_EXECUTABLE)
     COMMAND
       ${CMAKE_COMMAND} -E env
       SODA_DOCUMENT_LIBRARY=$<TARGET_FILE:soda_document>
+      SODA_CPP_ANALYSIS_LIBRARY=$<TARGET_FILE:soda_cpp_analysis>
+      SODA_INDENTATION_LIBRARY=$<TARGET_FILE:soda_indentation>
       ${CHEZ_SCHEME_EXECUTABLE}
       --libdirs ${PROJECT_SOURCE_DIR}/scheme
       --program ${CMAKE_CURRENT_SOURCE_DIR}/scheme/editor_tests.ss
@@ -123,6 +125,8 @@ if(CHEZ_SCHEME_EXECUTABLE)
     COMMAND
       ${CMAKE_COMMAND} -E env
       SODA_DOCUMENT_LIBRARY=$<TARGET_FILE:soda_document>
+      SODA_CPP_ANALYSIS_LIBRARY=$<TARGET_FILE:soda_cpp_analysis>
+      SODA_INDENTATION_LIBRARY=$<TARGET_FILE:soda_indentation>
       ${CHEZ_SCHEME_EXECUTABLE}
       --libdirs ${PROJECT_SOURCE_DIR}/scheme
       --program ${CMAKE_CURRENT_SOURCE_DIR}/scheme/repl_tests.ss
@@ -143,6 +147,8 @@ if(CHEZ_SCHEME_EXECUTABLE)
     COMMAND
       ${CMAKE_COMMAND} -E env
       SODA_DOCUMENT_LIBRARY=$<TARGET_FILE:soda_document>
+      SODA_CPP_ANALYSIS_LIBRARY=$<TARGET_FILE:soda_cpp_analysis>
+      SODA_INDENTATION_LIBRARY=$<TARGET_FILE:soda_indentation>
       SODA_RUNTIME_LIBRARY=$<TARGET_FILE:soda_runtime>
       SODA_EDITOR_OPEN_TEST_FILE=${CMAKE_CURRENT_SOURCE_DIR}/scheme/file_tests.ss
       SODA_EDITOR_SAVE_AS_TEST_FILE=${CMAKE_CURRENT_BINARY_DIR}/scheme_editor_save_as_test.txt

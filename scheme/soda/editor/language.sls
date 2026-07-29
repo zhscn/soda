@@ -145,6 +145,11 @@
            'make-language-profile
            "syntax must be a syntax provider or #f"
            syntax))
+       (unless (or (not indent) (procedure? indent))
+         (assertion-violation
+           'make-language-profile
+           "indent must be a procedure or #f"
+           indent))
       (unless (list? pairs)
         (assertion-violation 'make-language-profile "pairs must be a list" pairs))
       (unless (or (not lexical) (procedure? lexical))

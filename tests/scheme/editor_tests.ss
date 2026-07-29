@@ -1,9 +1,11 @@
 #!r6rs
 (import (rnrs)
+        (soda cpp-analysis)
         (soda document)
         (soda editor buffer)
         (soda editor command)
         (soda editor core)
+        (soda editor cpp-language)
         (soda editor effect)
         (soda editor event)
         (soda editor keymap)
@@ -1838,6 +1840,172 @@
 (unless (annotation-set-closed? editor-owned-diagnostic-set)
   (error 'editor-tests
          "closing the editor did not release annotation anchors"))
+
+(define cpp-enter-document
+  (make-document "int main() {}\n" 984))
+(define cpp-enter-buffer
+  (make-buffer
+    984
+    cpp-enter-document
+    "main.cpp"
+    'cpp-mode))
+(define cpp-enter-session
+  (buffer-language-session cpp-enter-buffer))
+(unless
+  (and
+    (eq? (resolve-major-mode-language 'cpp-mode) 'cpp)
+    (cpp-language-session? cpp-enter-session)
+    (= (cpp-analyzer-revision
+         (cpp-language-session-analyzer
+           cpp-enter-session))
+       0)
+    (eq?
+      (cpp-analyzer-node-kind
+        (cpp-language-session-analyzer
+          cpp-enter-session)
+        (cpp-analyzer-root
+          (cpp-language-session-analyzer
+            cpp-enter-session)))
+      'translation-unit))
+  (error 'editor-tests
+         "cpp-mode did not open its native analysis session"))
+(define cpp-enter-editor
+  (make-editor cpp-enter-buffer))
+(editor-update!
+  cpp-enter-editor
+  (make-resize-message 6 60))
+(editor-update!
+  cpp-enter-editor
+  (make-command-message
+    'move.forward-character
+    #f
+    (prefix-argument-digit
+      (prefix-argument-digit #f 1)
+      2)))
+(editor-update!
+  cpp-enter-editor
+  (make-command-message 'cpp.newline-and-indent #f))
+(unless
+  (and
+    (bytevector=?
+      (buffer-bytes cpp-enter-buffer)
+      (string->utf8
+        "int main() {\n    \n}\n"))
+    (= (view-caret
+         (editor-active-view cpp-enter-editor))
+       17)
+    (= (buffer-revision cpp-enter-buffer) 1)
+    (= (cpp-analyzer-revision
+         (cpp-language-session-analyzer
+           cpp-enter-session))
+       1))
+  (error 'editor-tests
+         "C++ Enter did not adopt native text and analyzer revisions"))
+(editor-update!
+  cpp-enter-editor
+  (make-command-message 'edit.undo #f))
+(unless
+  (and
+    (bytevector=?
+      (buffer-bytes cpp-enter-buffer)
+      (string->utf8 "int main() {}\n"))
+    (= (cpp-analyzer-revision
+         (cpp-language-session-analyzer
+           cpp-enter-session))
+       (buffer-revision cpp-enter-buffer)))
+  (error 'editor-tests
+         "C++ analyzer did not follow editor undo"))
+(define cpp-speculative-kind #f)
+(define cpp-speculative-owned? #f)
+(let ([change #f])
+  (dynamic-wind
+    (lambda () #f)
+    (lambda ()
+      (call-with-values
+        (lambda ()
+          (call-with-buffer-transaction
+            cpp-enter-buffer
+            (lambda (transaction)
+              (transaction-insert!
+                transaction
+                12
+                "return 0;")
+              (call-with-buffer-syntax-view
+                cpp-enter-buffer
+                transaction
+                (lambda (syntax-view)
+                  (set! cpp-speculative-owned?
+                    (not
+                      (eq?
+                        (cpp-syntax-view-analyzer
+                          syntax-view)
+                        (cpp-language-session-analyzer
+                          cpp-enter-session))))
+                  (set! cpp-speculative-kind
+                    (cpp-analyzer-node-kind
+                      (cpp-syntax-view-analyzer
+                        syntax-view)
+                      (cpp-analyzer-root
+                        (cpp-syntax-view-analyzer
+                          syntax-view)))))))))
+        (lambda (result committed-change)
+          (set! change committed-change))))
+    (lambda ()
+      (when change (change-close! change)))))
+(unless
+  (and
+    cpp-speculative-owned?
+    (eq? cpp-speculative-kind 'translation-unit)
+    (= (cpp-analyzer-revision
+         (cpp-language-session-analyzer
+           cpp-enter-session))
+       (buffer-revision cpp-enter-buffer)))
+  (error 'editor-tests
+         "C++ speculative syntax view leaked or desynchronized"))
+(editor-close! cpp-enter-editor)
+
+(define cpp-indent-document
+  (make-document
+    "int main() {\nreturn 0;\n}\n"
+    985))
+(define cpp-indent-buffer
+  (make-buffer
+    985
+    cpp-indent-document
+    "indent.cc"
+    'cpp-mode))
+(define cpp-indent-editor
+  (make-editor cpp-indent-buffer))
+(define cpp-indent-decoder (make-input-decoder))
+(editor-update!
+  cpp-indent-editor
+  (make-resize-message 6 60))
+(editor-update!
+  cpp-indent-editor
+  (make-command-message
+    'move.forward-character
+    #f
+    (prefix-argument-digit
+      (prefix-argument-digit #f 1)
+      3)))
+(send! cpp-indent-editor cpp-indent-decoder (bytes 9))
+(unless
+  (and
+    (bytevector=?
+      (buffer-bytes cpp-indent-buffer)
+      (string->utf8
+        "int main() {\n    return 0;\n}\n"))
+    (= (view-caret
+         (editor-active-view cpp-indent-editor))
+       17)
+    (= (cpp-analyzer-revision
+         (cpp-language-session-analyzer
+           (buffer-language-session
+             cpp-indent-buffer)))
+       (buffer-revision cpp-indent-buffer)))
+  (error 'editor-tests
+         "cpp-mode TAB did not use native line indentation"))
+(editor-close! cpp-indent-editor)
 
 (define prompt-document (make-document "body" 91))
 (define prompt-buffer

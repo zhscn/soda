@@ -7,6 +7,8 @@ configuration=${SODA_BUILD_CONFIGURATION:-Debug}
 chez=${CHEZ_SCHEME:-scheme}
 
 export SODA_DOCUMENT_LIBRARY="${SODA_DOCUMENT_LIBRARY:-$project_dir/build/src/$configuration/libsoda_document.so}"
+export SODA_CPP_ANALYSIS_LIBRARY="${SODA_CPP_ANALYSIS_LIBRARY:-$project_dir/build/src/$configuration/libsoda_cpp_analysis.so}"
+export SODA_INDENTATION_LIBRARY="${SODA_INDENTATION_LIBRARY:-$project_dir/build/src/$configuration/libsoda_indentation.so}"
 export SODA_RUNTIME_LIBRARY="${SODA_RUNTIME_LIBRARY:-$project_dir/build/src/$configuration/libsoda_runtime.so}"
 
 exec "$chez" \

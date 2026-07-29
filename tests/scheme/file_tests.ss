@@ -6,10 +6,19 @@
         (soda editor core)
         (soda editor effect)
         (soda editor event)
+        (soda editor file)
         (soda editor file-runtime)
         (soda editor keymap)
         (soda editor prompt)
         (soda runtime))
+
+(unless
+  (and
+    (eq? (file-major-mode-for-path "main.cpp") 'cpp-mode)
+    (eq? (file-major-mode-for-path "HEADER.HPP") 'cpp-mode)
+    (eq? (file-major-mode-for-path "module.sls") 'scheme-mode)
+    (eq? (file-major-mode-for-path "README") 'fundamental-mode))
+  (error 'file-tests "file suffix major-mode selection differs"))
 
 (define (string-contains? value needle)
   (let ([limit (- (string-length value) (string-length needle))])

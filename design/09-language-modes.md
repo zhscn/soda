@@ -81,6 +81,13 @@ Scheme REPL Buffer 复用 `scheme-mode` 的 reader boundary policy，但以 buff
 setting 选择 `scheme-repl` provider。该 provider 查询 InteractionSession 持有的
 Chez environment；静态 provider 只分析源码 Document，不解析 transcript。
 
+内建 `cpp-mode` 覆盖 `.c`、`.cc`、`.cpp`、`.cxx`、`.h`、`.hh`、`.hpp` 与
+`.hxx` 资源，并继承 `prog-mode`。每个 C++ Buffer 打开一个 native analyzer
+session；普通 commit、undo 和 redo 使用 change 增量同步。native 编辑命令已经把
+同一 analyzer 推进到目标 revision 时，Buffer sync 识别目标 revision 并跳过重复
+apply。临时 transaction 的 syntax view 使用独立 analyzer 分析 speculative
+snapshot，关闭 view 时立即释放。
+
 ## Syntax provider
 
 provider contract：
@@ -137,6 +144,12 @@ IndentDecision {
 可以由 query capture 提供语言规则；specialized provider 可使用更深语法结构。
 把空白写回 Document 是 command 的责任，因此缩进查询保持纯函数，多个前端和
 批量命令可以复用。
+
+`cpp.indent-line` 通过 profile 的 indentation provider 查询 native
+IndentDecision，再用普通 Buffer transaction 写回 leading whitespace。`cpp-mode`
+的 TAB 绑定到该命令。Enter 绑定到 `cpp.newline-and-indent`；native engine 对
+between-braces 等结构执行单次原子编辑并返回 Document change，Buffer 接受 change
+后统一更新 revision、undo history、View caret 与 language runtime。
 
 ## Tree-sitter runtime
 
