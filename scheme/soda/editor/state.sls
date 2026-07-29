@@ -65,6 +65,8 @@
           editor-set-pending-keys!
           editor-status-message
           editor-set-status-message!
+          editor-theme-catalog
+          editor-register-theme!
           editor-theme
           editor-set-theme!
           editor-render-generation
@@ -134,6 +136,7 @@
           (soda editor prefix)
           (soda editor prompt)
           (soda editor theme)
+          (soda editor themes catppuccin)
           (soda editor window))
 
   (define-record-type (view %make-view view?)
@@ -225,6 +228,7 @@
       (mutable last-command-class
                editor-last-command-class
                editor-last-command-class-set!)
+      (immutable theme-catalog editor-theme-catalog)
       (mutable theme editor-theme editor-theme-set!)
       (mutable render-generation
                editor-render-generation
@@ -2218,6 +2222,10 @@
       (editor-invalidate! value 'theme))
     theme)
 
+  (define (editor-register-theme! value theme)
+    (require-open-editor 'editor-register-theme! value)
+    (theme-catalog-register! (editor-theme-catalog value) theme))
+
   (define (view-caret value)
     (unless (view? value)
       (assertion-violation 'view-caret "expected a view" value))
@@ -2597,6 +2605,7 @@
                '()
                #f
                #f
+               (make-default-theme-catalog)
                default-theme
                0
                '(initial)

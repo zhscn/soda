@@ -510,9 +510,11 @@
                              'editor.text)))
                  (cell-sources text-cell))
                (eq? (cell-face modeline-cell) 'modeline)
-               (memq 'reverse
-                     (style-attributes
-                       (cell-style modeline-cell)))
+               (equal?
+                 (style-background (cell-style modeline-cell))
+                 (vector #x31 #x32 #x44))
+               (memq 'bold
+                     (style-attributes (cell-style modeline-cell)))
                (component-node? layout)
                (eq? (component-node-id layout) 'editor.root)
                text-node
@@ -885,9 +887,9 @@
     (eq? (cell-face (frame-cell-ref region-frame 0 0))
          'selection)
     (equal?
-      (style-attributes
+      (style-background
         (cell-style (frame-cell-ref region-frame 0 0)))
-      '(reverse))
+      (vector #x58 #x5b #x70))
     (eq? (cell-face (frame-cell-ref region-frame 0 5))
          'default))
   (error 'editor-tests "active region was not rendered as selection"))
@@ -1928,9 +1930,9 @@
     (and
       (equal? (cell-faces selected-keyword)
               '(default syntax-keyword selection))
-      (memq 'reverse
-            (style-attributes
-              (cell-style selected-keyword))))
+      (equal?
+        (style-background (cell-style selected-keyword))
+        (vector #x58 #x5b #x70)))
     (error 'editor-tests
            "selection did not compose above syntax highlighting"
            (cell-faces selected-keyword)
@@ -2112,6 +2114,62 @@
     (not (editor-current-location-list highlight-editor)))
   (error 'editor-tests
          "diagnostic namespace was not cleared"))
+
+(unless
+  (and
+    (eq? (editor-theme highlight-editor) catppuccin-mocha)
+    (equal?
+      (theme-catalog-names (editor-theme-catalog highlight-editor))
+      '(catppuccin-latte
+        catppuccin-frappe
+        catppuccin-macchiato
+        catppuccin-mocha))
+    (equal?
+      (face-spec-foreground
+        (theme-face-spec catppuccin-mocha 'default))
+      (vector #xcd #xd6 #xf4))
+    (eq? (theme-appearance catppuccin-latte) 'light)
+    (command-registered?
+      (editor-command-registry highlight-editor)
+      'theme.select))
+  (error 'editor-tests
+         "Catppuccin themes were not installed with Mocha as the default"))
+(editor-update!
+  highlight-editor
+  (make-command-message 'theme.select #f))
+(unless
+  (and
+    (editor-active-prompt highlight-editor)
+    (string=?
+      (prompt-request-default
+        (prompt-session-request
+          (editor-active-prompt highlight-editor)))
+      "catppuccin-mocha")
+    (= (length
+         (completion-session-items
+           (editor-active-prompt-completion highlight-editor)))
+       4))
+  (error 'editor-tests
+         "theme selection did not expose the installed theme catalog"))
+(editor-update!
+  highlight-editor
+  (make-command-message 'prompt.abort #f))
+(editor-update!
+  highlight-editor
+  (make-command-message
+    'theme.apply
+    (make-prompt-result
+      0
+      'accepted
+      "catppuccin-latte"
+      (view-id (editor-active-view highlight-editor))
+      #f)))
+(unless
+  (and
+    (eq? (editor-theme highlight-editor) catppuccin-latte)
+    (string=? (editor-status-message highlight-editor)
+              "Theme: catppuccin-latte"))
+  (error 'editor-tests "theme selection did not apply the chosen theme"))
 
 (define custom-theme
   (make-theme

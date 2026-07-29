@@ -138,6 +138,12 @@ chrome component 通过 role 请求 face。syntax provider、annotation producer
 View decoration 也只发布 face identity。默认 theme 为每个内建 role 和通用 syntax
 face 定义 terminal style。
 
+Editor 持有按 name 索引的 `ThemeCatalog`。Scheme 配置可以向 catalog 注册 theme；
+`theme.select` 使用 minibuffer completion 读取 catalog 中的名字并切换 active
+theme。内建 catalog 提供 Catppuccin Latte、Frappé、Macchiato 和 Mocha，
+默认使用 Mocha；每个 flavor 使用对应的 light/dark appearance 和官方 RGB
+palette。
+
 theme resolver 维护：
 
 ```text

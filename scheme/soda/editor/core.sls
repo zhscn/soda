@@ -73,6 +73,8 @@
           editor-pending-prefix
           editor-status-message
           editor-set-status-message!
+          editor-theme-catalog
+          editor-register-theme!
           editor-theme
           editor-set-theme!
           editor-render-generation
@@ -92,6 +94,17 @@
           theme-generation
           theme-face-spec
           theme-resolve-faces
+          make-theme-catalog
+          theme-catalog?
+          theme-catalog-register!
+          theme-catalog-ref
+          theme-catalog-names
+          theme-catalog-themes
+          catppuccin-latte
+          catppuccin-frappe
+          catppuccin-macchiato
+          catppuccin-mocha
+          catppuccin-themes
           default-theme
           editor-kill-ring
           editor-push-kill!
@@ -442,6 +455,7 @@
           (soda editor command-runtime)
           (soda editor commands basic)
           (soda editor commands buffer)
+          (soda editor commands theme)
           (soda editor commands transform)
           (soda editor comint)
           (soda editor completion)
@@ -473,6 +487,7 @@
           (soda editor search)
           (soda editor state)
           (soda editor theme)
+          (soda editor themes catppuccin)
           (soda editor update)
           (soda editor window)
           (soda editor window-runtime))
@@ -484,6 +499,7 @@
       (install-transform-commands! editor)
       (install-navigation-commands! editor)
       (install-buffer-commands! editor)
+      (install-theme-commands! editor)
       (install-comint-commands! editor)
       (install-completion-commands! editor)
       (editor-register-completion-provider!

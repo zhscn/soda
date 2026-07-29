@@ -12,7 +12,12 @@
           theme-generation
           theme-face-spec
           theme-resolve-faces
-          default-theme)
+          make-theme-catalog
+          theme-catalog?
+          theme-catalog-register!
+          theme-catalog-ref
+          theme-catalog-names
+          theme-catalog-themes)
   (import (rnrs))
 
   (define-record-type
@@ -22,6 +27,12 @@
   (define-record-type
     (theme %make-theme theme?)
     (fields name appearance generation faces resolved-cache))
+
+  (define-record-type
+    (theme-catalog %make-theme-catalog theme-catalog?)
+    (fields
+      (immutable table theme-catalog-table)
+      (mutable names theme-catalog-names theme-catalog-names-set!)))
 
   (define valid-attributes
     '(bold dim italic underline blink reverse hidden strike))
@@ -199,32 +210,62 @@
           resolved)
         resolved)))
 
-  (define (face foreground background attributes)
-    (make-face-spec foreground background attributes '()))
+  (define make-theme-catalog
+    (case-lambda
+      [()
+       (%make-theme-catalog (make-eq-hashtable) '())]
+      [(themes)
+       (unless (and (list? themes) (for-all theme? themes))
+         (assertion-violation
+           'make-theme-catalog
+           "expected a list of themes"
+           themes))
+       (let ([catalog (make-theme-catalog)])
+         (for-each
+           (lambda (theme)
+             (theme-catalog-register! catalog theme))
+           themes)
+         catalog)]))
 
-  (define default-theme
-    (make-theme
-      'soda-default
-      'dark
-      0
-      (list
-        (cons 'default (face 'default 'default '()))
-        (cons 'modeline (face 'default 'default '(reverse)))
-        (cons 'minibuffer-prompt (face 'default 'default '(bold)))
-        (cons 'completion-selected (face 'default 'default '(reverse)))
-        (cons 'selection (face 'default 'default '(reverse)))
-        (cons 'line-number (face 244 'default '()))
-        (cons 'syntax-comment (face 244 'default '(italic)))
-        (cons 'syntax-string (face 114 'default '()))
-        (cons 'syntax-constant (face 173 'default '()))
-        (cons 'syntax-number (face 173 'default '()))
-        (cons 'syntax-keyword (face 141 'default '(bold)))
-        (cons 'syntax-builtin (face 75 'default '()))
-        (cons 'syntax-definition (face 81 'default '(bold)))
-        (cons 'syntax-type (face 80 'default '()))
-        (cons 'syntax-delimiter (face 246 'default '()))
-        (cons 'diagnostic-error (face 203 'inherit '(underline)))
-        (cons 'diagnostic-warning (face 214 'inherit '(underline)))
-        (cons 'diagnostic-info (face 75 'inherit '(underline)))
-        (cons 'diagnostic-hint (face 244 'inherit '(underline)))
-        (cons 'completion-match (face 75 'inherit '(bold)))))))
+  (define (theme-catalog-register! catalog value)
+    (unless (theme-catalog? catalog)
+      (assertion-violation
+        'theme-catalog-register!
+        "expected a theme catalog"
+        catalog))
+    (unless (theme? value)
+      (assertion-violation
+        'theme-catalog-register!
+        "expected a theme"
+        value))
+    (let ([name (theme-name value)])
+      (unless (hashtable-contains? (theme-catalog-table catalog) name)
+        (theme-catalog-names-set!
+          catalog
+          (append (theme-catalog-names catalog) (list name))))
+      (hashtable-set! (theme-catalog-table catalog) name value))
+    value)
+
+  (define (theme-catalog-ref catalog name)
+    (unless (theme-catalog? catalog)
+      (assertion-violation
+        'theme-catalog-ref
+        "expected a theme catalog"
+        catalog))
+    (unless (symbol? name)
+      (assertion-violation
+        'theme-catalog-ref
+        "theme name must be a symbol"
+        name))
+    (hashtable-ref (theme-catalog-table catalog) name #f))
+
+  (define (theme-catalog-themes catalog)
+    (unless (theme-catalog? catalog)
+      (assertion-violation
+        'theme-catalog-themes
+        "expected a theme catalog"
+        catalog))
+    (map
+      (lambda (name)
+        (theme-catalog-ref catalog name))
+      (theme-catalog-names catalog))))
