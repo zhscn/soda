@@ -8,6 +8,7 @@
           (soda editor display)
           (soda editor edit)
           (soda editor event)
+          (soda editor input-state)
           (soda editor kill)
           (soda editor keymap)
           (soda editor language)
@@ -54,6 +55,12 @@
 
   (define (context-document context)
     (buffer-document (context-buffer context)))
+
+  (define (exact-non-negative-integer? value)
+    (and
+      (integer? value)
+      (exact? value)
+      (not (negative? value))))
 
   (define (require-non-negative-count who context)
     (let ([count (command-context-count context)])
@@ -987,28 +994,182 @@
       "No redo information"
       "Redo"))
 
+  (define (buffer-by-id editor id)
+    (find
+      (lambda (buffer) (= (buffer-id buffer) id))
+      (editor-buffers editor)))
+
+  (define (quit-buffer-label buffer)
+    (or
+      (buffer-resource buffer)
+      (buffer-file-path buffer)
+      (string-append
+        "*buffer-"
+        (number->string (buffer-id buffer))
+        "*")))
+
+  (define (open-quit-confirmation! editor buffer queue)
+    (let* ([view (editor-active-view editor)]
+           [session
+             (begin
+               (unless (eq? (view-buffer view) buffer)
+                 (editor-set-view-buffer!
+                   editor
+                   (view-id view)
+                   (buffer-id buffer)))
+               (editor-open-prompt!
+                 editor
+                 (make-prompt-request
+                   (string-append
+                     "Save modified buffer "
+                     (quit-buffer-label buffer)
+                     "? (y)es, (n)o, (c)ancel: ")
+                   ""
+                   #f
+                   #f
+                   'free
+                   #f
+                   'editor.quit-choice-cancel
+                   #f
+                   queue)))])
+      (view-push-input-state!
+        (editor-view-ref
+          editor
+          (prompt-session-view-id session))
+        (make-input-state
+          'quit-confirmation
+          '(editor.quit-confirm)
+          'ignore))
+      '()))
+
+  (define (continue-quit! editor queue)
+    (let loop ([queue queue])
+      (if (null? queue)
+          (list (make-command-effect 'quit #f))
+          (let ([buffer (buffer-by-id editor (car queue))])
+            (cond
+              [(not buffer) (loop (cdr queue))]
+              [(buffer-save-pending? buffer)
+               (editor-set-status-message!
+                 editor
+                 "Save in progress; wait before quitting")
+               '()]
+              [(buffer-modified? buffer)
+               (open-quit-confirmation!
+                 editor
+                 buffer
+                 queue)]
+              [else (loop (cdr queue))])))))
+
   (define (quit-command context)
     (let* ([editor (command-context-editor context)]
-           [buffers (editor-buffers editor)]
-           [pending?
-             (exists buffer-save-pending? buffers)]
-           [modified?
-             (exists buffer-modified? buffers)])
+           [buffers (editor-buffers editor)])
       (cond
-        [pending?
-         (editor-disarm-quit! editor)
+        [(editor-active-prompt editor)
+         (editor-set-status-message!
+           editor
+           "Finish or cancel the active minibuffer before quitting")
+         '()]
+        [(exists buffer-save-pending? buffers)
          (editor-set-status-message!
            editor
            "Save in progress; wait before quitting")
          '()]
-        [(and modified? (not (editor-quit-armed? editor)))
-         (editor-arm-quit! editor)
+        [else
+         (continue-quit!
+           editor
+           (map buffer-id buffers))])))
+
+  (define (active-quit-queue editor)
+    (let ([session (editor-active-prompt editor)])
+      (and
+        session
+        (let ([queue
+                (prompt-request-data
+                  (prompt-session-request session))])
+          (and
+            (list? queue)
+            (for-all exact-non-negative-integer? queue)
+            queue)))))
+
+  (define (close-quit-prompt! editor)
+    (editor-abort-prompt! editor)
+    (editor-set-status-message! editor #f))
+
+  (define (quit-choice-save-command context)
+    (let* ([editor (command-context-editor context)]
+           [queue (active-quit-queue editor)])
+      (if (not (pair? queue))
+          (begin
+            (editor-set-status-message!
+              editor
+              "No active quit confirmation")
+            '())
+          (begin
+            (close-quit-prompt! editor)
+            (list
+              (make-command-effect
+                'command.invoke
+                (make-command-message
+                  'file.save-for-quit
+                  queue)))))))
+
+  (define (quit-choice-discard-command context)
+    (let* ([editor (command-context-editor context)]
+           [queue (active-quit-queue editor)])
+      (if (not (pair? queue))
+          (begin
+            (editor-set-status-message!
+              editor
+              "No active quit confirmation")
+            '())
+          (begin
+            (close-quit-prompt! editor)
+            (continue-quit! editor (cdr queue))))))
+
+  (define (quit-choice-cancel-command context)
+    (let* ([editor (command-context-editor context)]
+           [active-queue (active-quit-queue editor)]
+           [argument (command-context-argument context)]
+           [finished-queue
+             (and
+               (prompt-result? argument)
+               (let ([data (prompt-result-data argument)])
+                 (and
+                   (list? data)
+                   (for-all
+                     exact-non-negative-integer?
+                     data)
+                   data)))])
+      (cond
+        [active-queue
+         (close-quit-prompt! editor)
          (editor-set-status-message!
            editor
-           "Modified buffers; press C-q again to discard changes")
-         '()]
+           "Quit cancelled")]
+        [finished-queue
+         (editor-set-status-message!
+           editor
+           "Quit cancelled")]
         [else
-         (list (make-command-effect 'quit #f))])))
+         (editor-set-status-message!
+           editor
+           "No active quit confirmation")])
+      '()))
+
+  (define (continue-quit-command context)
+    (let ([queue (command-context-argument context)])
+      (unless
+        (and
+          (list? queue)
+          (for-all exact-non-negative-integer? queue))
+        (assertion-violation
+          'editor.continue-quit
+          "expected a list of buffer identities"
+          queue))
+      (continue-quit!
+        (command-context-editor context)
+        queue)))
 
   (define (keyboard-quit-command context)
     (let ([editor (command-context-editor context)]
@@ -1046,6 +1207,22 @@
           (if (pair? (cdddr entry)) (cadddr entry) #f)))
       (list
         (list 'editor.quit quit-command "Leave the editor.")
+        (list
+          'editor.quit-choice-save
+          quit-choice-save-command
+          "Save the current modified buffer and continue quitting.")
+        (list
+          'editor.quit-choice-discard
+          quit-choice-discard-command
+          "Discard the current buffer changes and continue quitting.")
+        (list
+          'editor.quit-choice-cancel
+          quit-choice-cancel-command
+          "Cancel the active quit workflow.")
+        (list
+          'editor.continue-quit
+          continue-quit-command
+          "Continue checking buffers in an active quit workflow.")
         (list
           'keyboard.quit
           keyboard-quit-command
@@ -1185,6 +1362,28 @@
           yank-pop-command
           "Replace the previous yank with another kill-ring entry."
           'yank)))
+    (let ([keymap (make-keymap)])
+      (for-each
+        (lambda (entry)
+          (keymap-bind!
+            keymap
+            (list
+              (stroke
+                'character
+                (char->integer (car entry))
+                0))
+            (cdr entry)))
+        (list
+          (cons #\y 'editor.quit-choice-save)
+          (cons #\Y 'editor.quit-choice-save)
+          (cons #\n 'editor.quit-choice-discard)
+          (cons #\N 'editor.quit-choice-discard)
+          (cons #\c 'editor.quit-choice-cancel)
+          (cons #\C 'editor.quit-choice-cancel)))
+      (keymap-catalog-register!
+        (editor-keymap-catalog editor)
+        'editor.quit-confirm
+        keymap))
     (for-each
       (lambda (entry)
         (editor-bind-key! editor (list (car entry)) (cdr entry)))

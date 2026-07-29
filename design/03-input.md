@@ -109,6 +109,11 @@ state 回答“这个 view 以什么姿态解释输入”；major mode 回答“
 state，并保留栈底 state。该命令位于 Editor override 层，因此普通 state keymap
 和 tombstone 都不能屏蔽它。
 
+modified-buffer 退出确认在 minibuffer View 上叠加 `quit-confirmation` state。该
+state 忽略普通文本，只接受 `y`、`n`、`c` 的专用 keymap；全局 `C-g` 仍可取消
+整个退出工作流。选择保存后 state 随 prompt 关闭，异步保存结果再决定继续下一个
+Buffer 或停止退出。
+
 `KeyEvent` 先尝试 layered keymap。事件未被消费、携带文本且当前 state 接受文本时，
 文本交给 state 的 `text_command`。`TextInputEvent` 清除 pending sequence，并按
 当前 state 的 text policy 原子地交给同一 text command，不经过 keymap。支持 IME

@@ -116,8 +116,9 @@ and merge consecutive kills in textual order. `C-k` kills through the end of
 the line, `C-o` opens a line without advancing point, `M-\` deletes horizontal
 space, and `M-<`/`M->` move to the buffer boundaries. `C-c C-z` toggles the
 Chez REPL, and `C-x C-s` saves the active buffer. `C-q` exits clean state,
-waits for an active save, and requires a second press before discarding
-modified buffers. Enter submits the editable input while the REPL transcript
+waits for an active save, and visits each modified buffer with `y` save,
+`n` discard, and `c`/`C-g` cancel choices. A pathless buffer enters the normal
+Save as workflow. Enter submits the editable input while the REPL transcript
 is active.
 File saves capture a document revision and undo node, atomically replace the
 target, and complete asynchronously; edits made while a save is in flight

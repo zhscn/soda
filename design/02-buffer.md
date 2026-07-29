@@ -219,8 +219,10 @@ runtime effect 在目标目录创建临时文件，写入全部 bytes，执行 `
 
 成功完成把 `saved_revision` 和 saved undo node 推进到 request 对应的 snapshot。
 写入期间发生的新编辑位于另一个 undo node，仍保持 modified。失败清除 pending
-状态但不改变保存点。退出命令在 save pending 时等待完成；存在 modified Buffer
-时要求显式的第二次退出命令确认丢弃。
+状态但不改变保存点。退出命令在 save pending 时等待完成，并依次对每个 modified
+Buffer 读取 save、discard 或 cancel 选择。save 复用异步写入协议；成功后继续检查
+队列，失败时停止退出。写入期间产生的新修改会使同一 Buffer 再次进入确认。没有
+`file_path` 的 Buffer 通过 Save as minibuffer 选择目标。
 
 同一 request 协议支持由 minibuffer/resource policy 选择目标 path 的另存为流程，
 也允许替换 file effect handler 而不改变 Buffer revision 与 undo node 语义。

@@ -256,17 +256,31 @@
 
 (define first-quit-effects (send! editor decoder (bytes 17)))
 (unless
-  (and (null? first-quit-effects)
-       (string-contains?
-         (editor-status-message editor)
-         "Modified buffers"))
+  (and
+    (null? first-quit-effects)
+    (editor-active-prompt editor)
+    (string-contains?
+      (prompt-request-prompt
+        (prompt-session-request
+          (editor-active-prompt editor)))
+      "Save modified buffer"))
   (error 'editor-tests
          "first quit did not protect modified buffers"))
-(define quit-effects (send! editor decoder (bytes 17)))
+(send! editor decoder (bytes 99))
+(unless
+  (and
+    (not (editor-active-prompt editor))
+    (string=? (editor-status-message editor) "Quit cancelled"))
+  (error 'editor-tests
+         "quit confirmation did not support cancellation"))
+
+(send! editor decoder (bytes 17))
+(define quit-effects (send! editor decoder (bytes 110)))
 (unless (and (= (length quit-effects) 1)
              (command-effect? (car quit-effects))
              (eq? (command-effect-kind (car quit-effects)) 'quit))
-  (error 'editor-tests "quit command did not return a quit effect"))
+  (error 'editor-tests
+         "discarding a modified buffer did not finish quitting"))
 
 (define effect-executor (make-effect-executor))
 (register-effect-handler!

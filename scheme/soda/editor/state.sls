@@ -81,9 +81,6 @@
           editor-take-pending-prefix!
           editor-last-command-class
           editor-set-last-command-class!
-          editor-quit-armed?
-          editor-arm-quit!
-          editor-disarm-quit!
           view?
           view-id
           view-buffer
@@ -221,9 +218,6 @@
       (mutable last-command-class
                editor-last-command-class
                editor-last-command-class-set!)
-      (mutable quit-armed?
-               editor-quit-armed?
-               editor-quit-armed?-set!)
       (mutable closed? editor-closed? editor-closed?-set!)))
 
   (define (require-open-editor who value)
@@ -2173,14 +2167,6 @@
         message))
     (editor-status-message-set! value message))
 
-  (define (editor-arm-quit! value)
-    (require-open-editor 'editor-arm-quit! value)
-    (editor-quit-armed?-set! value #t))
-
-  (define (editor-disarm-quit! value)
-    (require-open-editor 'editor-disarm-quit! value)
-    (editor-quit-armed?-set! value #f))
-
   (define (view-caret value)
     (unless (view? value)
       (assertion-violation 'view-caret "expected a view" value))
@@ -2558,7 +2544,6 @@
                #f
                #f
                '()
-               #f
                #f
                #f
                #f)])

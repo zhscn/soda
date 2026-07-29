@@ -1264,32 +1264,58 @@
                (reload-result-path result)))
            '()]))))
 
-  (define (open-save-as-prompt! editor buffer)
-    (editor-open-prompt!
-      editor
-      (make-prompt-request
-        "Save as: "
-        (or (buffer-file-path buffer) "")
-        'file-name
-        #f
-        'free
-        #f
-        'file.save-to-path
-        #f)))
+  (define open-save-as-prompt!
+    (case-lambda
+      [(editor buffer)
+       (open-save-as-prompt! editor buffer #f)]
+      [(editor buffer data)
+       (editor-open-prompt!
+         editor
+         (make-prompt-request
+           "Save as: "
+           (or (buffer-file-path buffer) "")
+           'file-name
+           #f
+           'free
+           #f
+           'file.save-to-path
+           #f
+           data))]))
 
-  (define (begin-save! editor buffer path adopt-path?)
-    (let ([request
-            (snapshot-save-request
-              buffer
-              path
-              adopt-path?)])
-      (buffer-begin-save!
-        buffer
-        (save-request-revision request))
-      (editor-set-status-message!
-        editor
-        (string-append "Saving " path))
-      (list (make-command-effect 'file.write request))))
+  (define begin-save!
+    (case-lambda
+      [(editor buffer path adopt-path?)
+       (begin-save!
+         editor buffer path adopt-path? #f)]
+      [(editor buffer path adopt-path? continuation)
+       (unless
+         (or
+           (not continuation)
+           (command-message? continuation))
+         (assertion-violation
+           'begin-save!
+           "continuation must be a command message or #f"
+           continuation))
+       (let ([request
+               (snapshot-save-request
+                 buffer
+                 path
+                 adopt-path?)])
+         (buffer-begin-save!
+           buffer
+           (save-request-revision request))
+         (if continuation
+             (buffer-set-local-setting!
+               buffer
+               'file-save-continuation
+               continuation)
+             (buffer-clear-local-setting!
+               buffer
+               'file-save-continuation))
+         (editor-set-status-message!
+           editor
+           (string-append "Saving " path))
+         (list (make-command-effect 'file.write request)))]))
 
   (define (save-buffer-command context)
     (let* ([editor (command-context-editor context)]
@@ -1322,6 +1348,53 @@
           (open-save-as-prompt! editor buffer))
       '()))
 
+  (define (quit-save-queue? value)
+    (and
+      (pair? value)
+      (for-all exact-non-negative-integer? value)))
+
+  (define (save-for-quit-command context)
+    (let* ([editor (command-context-editor context)]
+           [buffer (view-buffer (command-context-view context))]
+           [queue (command-context-argument context)]
+           [path (buffer-file-path buffer)])
+      (unless (quit-save-queue? queue)
+        (assertion-violation
+          'file.save-for-quit
+          "expected a non-empty list of buffer identities"
+          queue))
+      (unless (= (buffer-id buffer) (car queue))
+        (assertion-violation
+          'file.save-for-quit
+          "active buffer does not match the quit queue"
+          (buffer-id buffer)
+          (car queue)))
+      (cond
+        [(buffer-save-pending? buffer)
+         (editor-set-status-message!
+           editor
+           "Save already in progress")
+         '()]
+        [(not (buffer-modified? buffer))
+         (list
+           (make-command-effect
+             'command.invoke
+             (make-command-message
+               'editor.continue-quit
+               queue)))]
+        [(not path)
+         (open-save-as-prompt! editor buffer queue)
+         '()]
+        [else
+         (begin-save!
+           editor
+           buffer
+           path
+           #f
+           (make-command-message
+             'editor.continue-quit
+             queue))])))
+
   (define (save-to-path-command context)
     (let* ([editor (command-context-editor context)]
            [result (command-context-argument context)]
@@ -1336,7 +1409,12 @@
                (find-view-by-id
                  editor
                  (prompt-result-origin-view-id result)))]
-           [buffer (and view (view-buffer view))])
+           [buffer (and view (view-buffer view))]
+           [quit-queue
+             (and
+               (prompt-result? result)
+               (let ([data (prompt-result-data result)])
+                 (and (quit-save-queue? data) data)))])
       (let ([path
               (and
                 input
@@ -1367,7 +1445,16 @@
            (string-append "Path already visited: " path))
          '()]
         [else
-         (begin-save! editor buffer path #t)]))))
+         (begin-save!
+           editor
+           buffer
+           path
+           #t
+           (and
+             quit-queue
+             (make-command-message
+               'editor.continue-quit
+               quit-queue)))]))))
 
   (define (apply-save-result-command context)
     (let ([editor (command-context-editor context)]
@@ -1382,7 +1469,15 @@
                  editor
                  (save-result-buffer-id result))]
              [document (buffer-document buffer)]
-             [success? (zero? (save-result-status result))])
+             [success? (zero? (save-result-status result))]
+             [continuation
+               (buffer-setting-ref
+                 buffer
+                 'file-save-continuation
+                 #f)])
+        (buffer-clear-local-setting!
+          buffer
+          'file-save-continuation)
         (unless (= (document-id document)
                    (save-result-document-id result))
           (assertion-violation
@@ -1431,7 +1526,13 @@
              (string-append
                "Saved "
                (save-result-path result))]))
-        '())))
+        (if
+          (and success? continuation)
+          (list
+            (make-command-effect
+              'command.invoke
+              continuation))
+          '()))))
 
   (define (install-file-commands! editor)
     (editor-register-command!
@@ -1484,6 +1585,11 @@
       'file.save
       save-buffer-command
       "Save the active buffer to its file path.")
+    (editor-register-command!
+      editor
+      'file.save-for-quit
+      save-for-quit-command
+      "Save the active buffer and continue an editor quit workflow.")
     (editor-register-command!
       editor
       'file.save-as

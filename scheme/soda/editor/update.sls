@@ -22,8 +22,6 @@
         (extract))))
 
   (define (run-interactive-command editor name event argument message-prefix)
-    (unless (eq? name 'editor.quit)
-      (editor-disarm-quit! editor))
     (guard (condition
              [else
               (editor-clear-pending-prefix! editor)
@@ -47,8 +45,6 @@
               (or message-prefix pending-prefix))))))
 
   (define (run-internal-command editor name argument)
-    (unless (eq? name 'editor.quit)
-      (editor-disarm-quit! editor))
     (editor-execute-command! editor name #f argument))
 
   (define (catalog-keymap editor layer)

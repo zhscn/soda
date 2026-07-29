@@ -64,6 +64,7 @@
 (define editor (make-editor buffer))
 (define runtime (make-runtime))
 (define executor (make-effect-executor))
+(install-command-effect-handler! executor)
 (define adapter (install-file-runtime! executor runtime))
 (define vfs-adapter (install-vfs-runtime! editor runtime))
 (install-completion-effect-handlers!
@@ -450,6 +451,46 @@
       "Read file failed"))
   (error 'file-tests
          "failed insert-file changed the buffer"))
+
+(define pathless-buffer
+  (editor-create-buffer!
+    editor
+    #f
+    'fundamental-mode
+    "draft"))
+(insert-into! pathless-buffer 5 " changes")
+(define pathless-view (editor-active-view editor))
+(editor-set-view-buffer!
+  editor
+  (view-id pathless-view)
+  (buffer-id pathless-buffer))
+(dispatch! (make-command-message 'editor.quit #f))
+(dispatch!
+  (make-command-message
+    'editor.quit-choice-save
+    #f))
+(let ([session (editor-active-prompt editor)])
+  (unless
+    (and
+      session
+      (string=?
+        (prompt-request-prompt
+          (prompt-session-request session))
+        "Save as: ")
+      (equal?
+        (prompt-request-data
+          (prompt-session-request session))
+        (list (buffer-id pathless-buffer))))
+    (error 'file-tests
+           "pathless quit save did not continue through save-as")))
+(dispatch! (make-command-message 'prompt.abort #f))
+(editor-set-view-buffer!
+  editor
+  (view-id pathless-view)
+  (buffer-id buffer))
+(editor-remove-buffer!
+  editor
+  (buffer-id pathless-buffer))
 
 (define save-directory
   (string-append
@@ -856,6 +897,64 @@
       "buffer changed"))
   (error 'file-tests
          "stale reload result replaced a newer buffer revision"))
+
+(insert! 0 "quit ")
+(dispatch! (make-command-message 'editor.quit #f))
+(unless
+  (let ([session (editor-active-prompt editor)])
+    (and
+      session
+      (equal?
+        (car
+          (prompt-request-data
+            (prompt-session-request session)))
+        (buffer-id buffer))))
+  (error 'file-tests
+         "quit workflow did not start with the first modified buffer"))
+(dispatch!
+  (make-command-message
+    'editor.quit-choice-save
+    #f))
+(unless
+  (and
+    (buffer-save-pending? buffer)
+    (not (editor-active-prompt editor)))
+  (error 'file-tests
+         "quit save choice did not start an asynchronous save"))
+(finish-file-write!)
+(unless
+  (let* ([session (editor-active-prompt editor)]
+         [queue
+           (and
+             session
+             (prompt-request-data
+               (prompt-session-request session)))])
+    (and
+      (not (buffer-modified? buffer))
+      (pair? queue)
+      (= (car queue) (buffer-id opened-buffer))))
+  (error 'file-tests
+         "successful quit save did not continue to the next buffer"))
+(dispatch!
+  (make-command-message
+    'editor.quit-choice-cancel
+    #f))
+
+(dispatch! (make-command-message 'editor.quit #f))
+(dispatch!
+  (make-command-message
+    'editor.quit-choice-save
+    #f))
+(finish-file-write!)
+(unless
+  (and
+    (buffer-modified? opened-buffer)
+    (not (editor-active-prompt editor))
+    (string-contains?
+      (editor-status-message editor)
+      "Save failed"))
+  (error 'file-tests
+         "failed quit save did not stop the quit workflow"))
 
 (dispatch! (make-command-message 'buffer.switch #f))
 (define switch-session (editor-active-prompt editor))
