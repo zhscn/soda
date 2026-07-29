@@ -203,6 +203,18 @@
 (define (insert! offset text)
   (insert-into! buffer offset text))
 
+(define (buffer-bytes target)
+  (let ([snapshot (document-snapshot (buffer-document target))])
+    (dynamic-wind
+      (lambda () #f)
+      (lambda ()
+        (let ([text (snapshot-text snapshot)])
+          (dynamic-wind
+            (lambda () #f)
+            (lambda () (text->bytevector text))
+            (lambda () (text-close! text)))))
+      (lambda () (snapshot-close! snapshot)))))
+
 (define (read-file-bytes path)
   (let ([source (runtime-read-file! runtime path)])
     (let loop ()
@@ -609,6 +621,98 @@
       "changed on disk"))
   (error 'file-tests
          "save overwrote an externally modified file"))
+
+(dispatch! (make-command-message 'file.reload #f))
+(unless
+  (and
+    (buffer-modified? opened-buffer)
+    (not
+      (buffer-setting-ref
+        opened-buffer
+        'file-reload-pending?
+        #f))
+    (string-contains?
+      (editor-status-message editor)
+      "file.force-reload"))
+  (error 'file-tests
+         "ordinary reload did not protect local modifications"))
+
+(dispatch! (make-command-message 'file.force-reload #f))
+(unless
+  (and
+    (buffer-setting-ref
+      opened-buffer
+      'file-reload-pending?
+      #f)
+    (string-contains?
+      (editor-status-message editor)
+      "Reloading"))
+  (error 'file-tests "forced reload did not start asynchronously"))
+(finish-file-read!)
+(unless
+  (and
+    (not (buffer-modified? opened-buffer))
+    (not
+      (buffer-setting-ref
+        opened-buffer
+        'file-reload-pending?
+        #f))
+    (bytevector=?
+      (buffer-bytes opened-buffer)
+      (string->utf8 "externally replaced\n"))
+    (vfs-stat?
+      (buffer-setting-ref
+        opened-buffer
+        'file-observed-state
+        #f))
+    (string-contains?
+      (editor-status-message editor)
+      "Reloaded"))
+  (error 'file-tests "forced reload did not replace the buffer"))
+
+(write-file-bytes
+  external-path
+  (string->utf8 "new\r\ndisk\r\n"))
+(dispatch! (make-command-message 'file.reload #f))
+(finish-file-read!)
+(unless
+  (and
+    (not (buffer-modified? opened-buffer))
+    (bytevector=?
+      (buffer-bytes opened-buffer)
+      (string->utf8 "new\ndisk\n"))
+    (eq?
+      (buffer-setting-ref
+        opened-buffer
+        'file-line-ending
+        #f)
+      'crlf))
+  (error 'file-tests
+         "ordinary reload did not normalize file contents"))
+
+(write-file-bytes
+  external-path
+  (string->utf8 "latest disk contents\n"))
+(dispatch! (make-command-message 'file.reload #f))
+(insert-into! opened-buffer 0 "edit during reload\n")
+(finish-file-read!)
+(unless
+  (and
+    (buffer-modified? opened-buffer)
+    (bytevector=?
+      (buffer-bytes opened-buffer)
+      (string->utf8
+        "edit during reload\nnew\ndisk\n"))
+    (not
+      (buffer-setting-ref
+        opened-buffer
+        'file-reload-pending?
+        #f))
+    (string-contains?
+      (editor-status-message editor)
+      "buffer changed"))
+  (error 'file-tests
+         "stale reload result replaced a newer buffer revision"))
 
 (dispatch! (make-command-message 'buffer.switch #f))
 (define switch-session (editor-active-prompt editor))

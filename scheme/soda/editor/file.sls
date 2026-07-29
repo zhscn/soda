@@ -17,6 +17,24 @@
           open-result-detail
           open-result-kind
           open-result-stat
+          make-reload-request
+          reload-request?
+          reload-request-view-id
+          reload-request-buffer-id
+          reload-request-document-id
+          reload-request-revision
+          reload-request-path
+          make-reload-result
+          reload-result?
+          reload-result-view-id
+          reload-result-buffer-id
+          reload-result-document-id
+          reload-result-revision
+          reload-result-path
+          reload-result-status
+          reload-result-data
+          reload-result-detail
+          reload-result-stat
           make-save-request
           save-request?
           save-request-buffer-id
@@ -44,6 +62,7 @@
           (soda editor command)
           (soda editor command-runtime)
           (soda editor completion)
+          (soda editor edit)
           (soda editor event)
           (soda editor keymap)
           (soda editor prompt)
@@ -57,6 +76,22 @@
   (define-record-type
     (open-result %make-open-result open-result?)
     (fields view-ids path status data error-name detail kind stat))
+
+  (define-record-type
+    (reload-request %make-reload-request reload-request?)
+    (fields view-id buffer-id document-id revision path))
+
+  (define-record-type
+    (reload-result %make-reload-result reload-result?)
+    (fields view-id
+            buffer-id
+            document-id
+            revision
+            path
+            status
+            data
+            detail
+            stat))
 
   (define (open-result-view-id result)
     (car (open-result-view-ids result)))
@@ -100,6 +135,75 @@
         "path must be a non-empty string"
         path))
     (%make-open-request view-id path))
+
+  (define (make-reload-request
+            view-id
+            buffer-id
+            document-id
+            revision
+            path)
+    (unless
+      (and
+        (exact-non-negative-integer? view-id)
+        (exact-non-negative-integer? buffer-id)
+        (exact-non-negative-integer? document-id)
+        (exact-non-negative-integer? revision))
+      (assertion-violation
+        'make-reload-request
+        "identities and revision must be non-negative exact integers"
+        view-id
+        buffer-id
+        document-id
+        revision))
+    (unless (non-empty-string? path)
+      (assertion-violation
+        'make-reload-request
+        "path must be a non-empty string"
+        path))
+    (%make-reload-request
+      view-id buffer-id document-id revision path))
+
+  (define (make-reload-result
+            request
+            status
+            data
+            detail
+            stat)
+    (unless (reload-request? request)
+      (assertion-violation
+        'make-reload-result
+        "expected a reload request"
+        request))
+    (unless (and (integer? status) (exact? status))
+      (assertion-violation
+        'make-reload-result
+        "status must be an exact integer"
+        status))
+    (unless (bytevector? data)
+      (assertion-violation
+        'make-reload-result
+        "data must be a bytevector"
+        data))
+    (unless (or (not detail) (string? detail))
+      (assertion-violation
+        'make-reload-result
+        "detail must be a string or #f"
+        detail))
+    (unless (or (not stat) (vfs-stat? stat))
+      (assertion-violation
+        'make-reload-result
+        "stat must be a VFS stat value or #f"
+        stat))
+    (%make-reload-result
+      (reload-request-view-id request)
+      (reload-request-buffer-id request)
+      (reload-request-document-id request)
+      (reload-request-revision request)
+      (reload-request-path request)
+      status
+      data
+      detail
+      stat))
 
   (define make-open-result
     (case-lambda
@@ -186,6 +290,30 @@
              'cr)]
         [(= (bytevector-u8-ref bytes index) 10) 'lf]
         [else (loop (+ index 1))])))
+
+  (define (normalize-file-data bytes)
+    (call-with-bytevector-output-port
+      (lambda (port)
+        (let loop ([index 0])
+          (when (< index (bytevector-length bytes))
+            (let ([byte (bytevector-u8-ref bytes index)])
+              (if (= byte 13)
+                  (begin
+                    (put-u8 port 10)
+                    (loop
+                      (if
+                        (and
+                          (< (+ index 1)
+                             (bytevector-length bytes))
+                          (= (bytevector-u8-ref
+                               bytes
+                               (+ index 1))
+                             10))
+                        (+ index 2)
+                        (+ index 1))))
+                  (begin
+                    (put-u8 port byte)
+                    (loop (+ index 1))))))))))
 
   (define (string-suffix? suffix value)
     (and
@@ -692,6 +820,149 @@
          (create-open-result-buffer! editor result #f)
          '()])))
 
+  (define (buffer-byte-length buffer)
+    (let ([snapshot (document-snapshot (buffer-document buffer))])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (let ([text (snapshot-text snapshot)])
+            (dynamic-wind
+              (lambda () #f)
+              (lambda () (text-size text))
+              (lambda () (text-close! text)))))
+        (lambda () (snapshot-close! snapshot)))))
+
+  (define (begin-reload! editor view buffer force?)
+    (let ([path (buffer-file-path buffer)])
+      (cond
+        [(not path)
+         (editor-set-status-message!
+           editor
+           "Buffer does not visit a file")
+         '()]
+        [(buffer-save-pending? buffer)
+         (editor-set-status-message!
+           editor
+           "Cannot reload while saving")
+         '()]
+        [(buffer-setting-ref buffer 'file-reload-pending? #f)
+         (editor-set-status-message!
+           editor
+           "Reload already in progress")
+         '()]
+        [(and (buffer-modified? buffer) (not force?))
+         (editor-set-status-message!
+           editor
+           "Buffer is modified; use file.force-reload to discard changes")
+         '()]
+        [else
+         (let* ([document (buffer-document buffer)]
+                [request
+                  (make-reload-request
+                    (view-id view)
+                    (buffer-id buffer)
+                    (document-id document)
+                    (buffer-revision buffer)
+                    path)])
+           (buffer-set-local-setting!
+             buffer
+             'file-reload-pending?
+             #t)
+           (editor-set-status-message!
+             editor
+             (string-append "Reloading " path))
+           (list (make-command-effect 'file.reload request)))])))
+
+  (define (reload-buffer-command context)
+    (begin-reload!
+      (command-context-editor context)
+      (command-context-view context)
+      (view-buffer (command-context-view context))
+      #f))
+
+  (define (force-reload-buffer-command context)
+    (begin-reload!
+      (command-context-editor context)
+      (command-context-view context)
+      (view-buffer (command-context-view context))
+      #t))
+
+  (define (apply-reload-result-command context)
+    (let* ([editor (command-context-editor context)]
+           [result (command-context-argument context)])
+      (unless (reload-result? result)
+        (assertion-violation
+          'file.apply-reload-result
+          "expected a reload result"
+          result))
+      (let* ([buffer
+               (editor-buffer-ref
+                 editor
+                 (reload-result-buffer-id result))]
+             [document (buffer-document buffer)])
+        (buffer-clear-local-setting!
+          buffer
+          'file-reload-pending?)
+        (cond
+          [(not
+             (= (document-id document)
+                (reload-result-document-id result)))
+           (assertion-violation
+             'file.apply-reload-result
+             "reload result belongs to another document"
+             (reload-result-document-id result)
+             (document-id document))]
+          [(not
+             (= (buffer-revision buffer)
+                (reload-result-revision result)))
+           (editor-set-status-message!
+             editor
+             "Reload cancelled because the buffer changed")
+           '()]
+          [(not (zero? (reload-result-status result)))
+           (editor-set-status-message!
+             editor
+             (string-append
+               "Reload failed: "
+               (reload-result-path result)
+               (let ([detail (reload-result-detail result)])
+                 (if detail
+                     (string-append " (" detail ")")
+                     (string-append
+                       " (status "
+                       (number->string
+                         (reload-result-status result))
+                       ")")))))
+           '()]
+          [else
+           (let ([normalized
+                   (normalize-file-data
+                     (reload-result-data result))])
+             (buffer-replace-range!
+               buffer
+               0
+               (buffer-byte-length buffer)
+               normalized))
+           (buffer-mark-saved! buffer)
+           (buffer-clear-local-setting!
+             buffer
+             'file-needs-save?)
+           (buffer-set-local-setting!
+             buffer
+             'file-line-ending
+             (detect-file-line-ending
+               (reload-result-data result)))
+           (buffer-set-local-setting!
+             buffer
+             'file-observed-state
+             (reload-result-stat result))
+           (editor-set-status-message!
+             editor
+             (string-append
+               "Reloaded "
+               (reload-result-path result)))
+           '()]))))
+
   (define (open-save-as-prompt! editor buffer)
     (editor-open-prompt!
       editor
@@ -877,6 +1148,21 @@
       'file.apply-open-result
       apply-open-result-command
       "Apply an asynchronous file open result.")
+    (editor-register-command!
+      editor
+      'file.reload
+      reload-buffer-command
+      "Replace an unmodified buffer with the current file contents.")
+    (editor-register-command!
+      editor
+      'file.force-reload
+      force-reload-buffer-command
+      "Replace a buffer with the current file contents, discarding edits.")
+    (editor-register-command!
+      editor
+      'file.apply-reload-result
+      apply-reload-result-command
+      "Apply an asynchronous file reload result.")
     (editor-register-command!
       editor
       'file.save

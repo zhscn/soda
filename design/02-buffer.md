@@ -222,6 +222,18 @@ runtime effect 在目标目录创建临时文件，写入全部 bytes，执行 `
 带 `adopt_path` 的 request 仅在写入成功后更新 Buffer 的 `resource` 与 `file_path`；
 失败保留原关联。目标 path 已由另一个 Buffer 访问时，editor 不启动写入。
 
+## 重新读取
+
+`file.reload` 对访问本地路径且未修改的 Buffer 发起异步 stat/read。modified Buffer
+要求使用 `file.force-reload` 明确放弃本地修改。reload request 固定 Buffer、
+Document 和 revision identity；读取完成前发生的新编辑会使结果失效，磁盘内容不会
+覆盖新的 Buffer revision。
+
+读取成功以一次普通 Buffer transaction 替换全文并同步 language runtime，更新
+换行约定和文件状态，再把新 undo node 标为保存点。替换仍保留在 undo tree 中，
+因此用户可以撤销重新读取并恢复原文本；此时 Buffer 相对新保存点处于 modified。
+pending reload 期间不能启动另一次 reload，也不能关闭对应 Buffer。
+
 ## ABI 与线程归属
 
 native ABI 使用 opaque handles 和显式 retain/close。返回的 byte span 只有在其

@@ -167,6 +167,10 @@
        (editor-set-status-message!
          editor
          "Cannot kill a buffer while saving")]
+      [(buffer-setting-ref target 'file-reload-pending? #f)
+       (editor-set-status-message!
+         editor
+         "Cannot kill a buffer while reloading")]
       [(editor-interaction-for-buffer editor (buffer-id target))
        (editor-set-status-message!
          editor

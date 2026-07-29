@@ -16,6 +16,7 @@
           buffer-save-pending?
           buffer-begin-save!
           buffer-finish-save!
+          buffer-mark-saved!
           buffer-major-mode-name
           buffer-set-major-mode!
           buffer-refresh-language!
@@ -258,6 +259,19 @@
         value
         (buffer-pending-save-undo-node value)))
     (buffer-pending-save-undo-node-set! value #f)
+    value)
+
+  (define (buffer-mark-saved! value)
+    (require-open-buffer 'buffer-mark-saved! value)
+    (when (buffer-save-pending? value)
+      (assertion-violation
+        'buffer-mark-saved!
+        "buffer has a pending save"
+        (buffer-id value)))
+    (buffer-saved-revision-set! value (buffer-revision value))
+    (buffer-saved-undo-node-set!
+      value
+      (document-undo-position (buffer-document value)))
     value)
 
   (define (buffer-close! value)

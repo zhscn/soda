@@ -24,6 +24,12 @@
     (save-operation %make-save-operation save-operation?)
     (fields request (mutable phase)))
 
+  (define-record-type
+    (reload-operation %make-reload-operation reload-operation?)
+    (fields request
+            (mutable phase)
+            (mutable stat)))
+
   (define (condition->string condition)
     (call-with-string-output-port
       (lambda (port)
@@ -90,6 +96,21 @@
           detail
           (save-request-adopt-path? request)
           observed-state))))
+
+  (define (reload-result-message
+            operation
+            status
+            data
+            detail
+            stat)
+    (make-internal-command-message
+      'file.apply-reload-result
+      (make-reload-result
+        (reload-operation-request operation)
+        status
+        data
+        detail
+        stat)))
 
   (define (start-open! adapter request)
     (let* ([path (open-request-path request)]
@@ -177,6 +198,33 @@
             (start-save-write! adapter operation))
         (make-effect-result #t '()))))
 
+  (define (start-reload! adapter request)
+    (guard (condition
+             [else
+              (make-effect-result
+                #t
+                (list
+                  (make-internal-command-message
+                    'file.apply-reload-result
+                    (make-reload-result
+                      request
+                      -1
+                      (make-bytevector 0)
+                      (condition->string condition)
+                      #f))))])
+      (let ([operation
+              (%make-reload-operation
+                request
+                'stat
+                #f)])
+        (register-pending!
+          adapter
+          (runtime-stat-path!
+            (file-runtime-runtime adapter)
+            (reload-request-path request))
+          operation)
+        (make-effect-result #t '()))))
+
   (define (install-file-runtime! executor runtime)
     (unless (effect-executor? executor)
       (assertion-violation
@@ -213,6 +261,16 @@
               "expected a save request"
               request))
           (start-save! adapter request)))
+      (register-effect-handler!
+        executor
+        'file.reload
+        (lambda (request)
+          (unless (reload-request? request)
+            (assertion-violation
+              'file.reload
+              "expected a reload request"
+              request))
+          (start-reload! adapter request)))
       adapter))
 
   (define (finish-open! adapter operation)
@@ -356,6 +414,54 @@
                 "invalid stat result"))
             #f))))
 
+  (define (handle-reload-stat! adapter operation event)
+    (cond
+      [(negative? (event-status event))
+       (reload-result-message
+         operation
+         (event-status event)
+         (make-bytevector 0)
+         (event-error-message event)
+         #f)]
+      [(= (event-flags event) 2)
+       (reload-result-message
+         operation
+         -1
+         (make-bytevector 0)
+         "resource is a directory"
+         #f)]
+      [else
+       (guard (condition
+                [else
+                 (reload-result-message
+                   operation
+                   -1
+                   (make-bytevector 0)
+                   (condition->string condition)
+                   #f)])
+         (reload-operation-stat-set!
+           operation
+           (event-stat event))
+         (reload-operation-phase-set! operation 'read)
+         (register-pending!
+           adapter
+           (runtime-read-file!
+             (file-runtime-runtime adapter)
+             (reload-request-path
+               (reload-operation-request operation)))
+           operation)
+         #f)]))
+
+  (define (handle-reload-read! operation event)
+    (reload-result-message
+      operation
+      (event-status event)
+      (event-data event)
+      (event-error-message event)
+      (and
+        (zero? (event-status event))
+        (reload-operation-stat operation))))
+
   (define (file-runtime-handle-event adapter event)
     (unless (file-runtime? adapter)
       (assertion-violation
@@ -412,6 +518,20 @@
                     'file-runtime-handle-event
                     "unknown save operation phase"
                     (save-operation-phase operation))])]
+              [(reload-operation? operation)
+               (case (reload-operation-phase operation)
+                 [(stat)
+                  (handle-reload-stat!
+                    adapter
+                    operation
+                    event)]
+                 [(read)
+                  (handle-reload-read! operation event)]
+                 [else
+                  (assertion-violation
+                    'file-runtime-handle-event
+                    "unknown reload operation phase"
+                    (reload-operation-phase operation))])]
               [else
                (assertion-violation
                  'file-runtime-handle-event
