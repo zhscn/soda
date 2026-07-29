@@ -610,7 +610,8 @@
 (unless
   (and (string-contains?
          diff-output
-         (string-append (string (integer->char 27)) "[1;2Hx"))
+         (string-append (string (integer->char 27)) "[1;2H"))
+       (string-contains? diff-output "x")
        (string-contains?
          diff-output
          (string-append (string (integer->char 27)) "[?7l"))
@@ -645,7 +646,9 @@
         output
         (string-append
           (string (integer->char 27))
-          "[1;1Hxy"))
+          "[1;1H"
+          (string (integer->char 27))
+          "[0mxy"))
       (not
         (string-contains?
           output
@@ -654,6 +657,44 @@
             "[1;2H"))))
     (error 'editor-tests
            "presenter did not merge adjacent cells into a row span")))
+
+(define styled-span-previous-frame (make-frame 2 2))
+(define styled-span-current-frame (make-frame 2 2))
+(define styled-span-style
+  (make-style
+    (vector #xcd #xd6 #xf4)
+    (vector #x1e #x1e #x2e)
+    '()))
+(frame-put-cell!
+  styled-span-current-frame
+  0
+  0
+  (make-cell "x" 1 '(default) styled-span-style #f '()))
+(frame-put-cell!
+  styled-span-current-frame
+  1
+  0
+  (make-cell "y" 1 '(default) styled-span-style #f '()))
+(let* ([escape (string (integer->char 27))]
+       [style
+         (string-append
+           escape
+           "[0;38;2;205;214;244;48;2;30;30;46m")]
+       [output
+         (frame-diff->ansi
+           styled-span-previous-frame
+           styled-span-current-frame)])
+  (unless
+    (and
+      (string-contains?
+        output
+        (string-append escape "[1;1H" style "x"))
+      (string-contains?
+        output
+        (string-append escape "[2;1H" style "y")))
+    (error 'editor-tests
+           "presenter did not establish style for each positioned span")))
+
 (unless
   (string=?
     (frame-diff->ansi span-current-frame span-current-frame)

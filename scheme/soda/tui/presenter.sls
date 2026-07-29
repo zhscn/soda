@@ -183,17 +183,20 @@
             value
             row
             start
-            end
-            current-style)
+            end)
     (display (cursor-sequence row start) port)
-    (let loop ([column start] [current-style current-style])
+    (let loop ([column start] [current-style #f])
       (if (= column end)
           current-style
           (let ([cell (frame-cell-ref value row column)])
             (if (cell-continuation? cell)
                 (loop (+ column 1) current-style)
                 (begin
-                  (unless (style=? current-style (cell-style cell))
+                  (when
+                    (or
+                      (not current-style)
+                      (not
+                        (style=? current-style (cell-style cell))))
                     (display
                       (style-sequence (cell-style cell))
                       port))
@@ -240,28 +243,24 @@
                   (unless display-same?
                     (display (ansi "[?25l") port)
                     (display (ansi "[?7l") port)
-                    (let ([current-style default-style])
-                      (do ([row 0 (+ row 1)])
-                          ((= row (frame-rows value)))
-                        (let span-loop ([column 0])
-                          (let ([start
-                                  (row-first-change
-                                    previous value row column)])
-                            (when start
-                              (let ([end
-                                      (row-change-end
-                                        previous value row start)])
-                                (set! current-style
-                                  (write-row-span!
-                                    port
-                                    value
-                                    row
-                                    start
-                                    end
-                                    current-style))
-                                (span-loop end)))))
-                      (unless (style=? current-style default-style)
-                        (display (ansi "[0m") port))))
+                    (do ([row 0 (+ row 1)])
+                        ((= row (frame-rows value)))
+                      (let span-loop ([column 0])
+                        (let ([start
+                                (row-first-change
+                                  previous value row column)])
+                          (when start
+                            (let ([end
+                                    (row-change-end
+                                      previous value row start)])
+                              (write-row-span!
+                                port
+                                value
+                                row
+                                start
+                                end)
+                              (span-loop end))))))
+                    (display (ansi "[0m") port)
                     (display (ansi "[?7h") port))
                   (write-final-cursor! port value)
                   (extract))))))))
