@@ -1229,6 +1229,144 @@
   (buffer-id navigation-buffer-b))
 (editor-close! navigation-editor)
 
+(define search-document
+  (make-document "alpha beta alpha" 980))
+(define search-buffer
+  (make-buffer
+    980
+    search-document
+    "*search*"
+    'fundamental-mode))
+(define search-editor (make-editor search-buffer))
+(define search-view (editor-active-view search-editor))
+(define search-decoder (make-input-decoder))
+(define search-executor (make-effect-executor))
+(install-prompt-effect-handler! search-executor)
+(install-command-effect-handler! search-executor)
+(define (dispatch-search-effects! effects)
+  (unless (null? effects)
+    (let ([result (execute-effects! search-executor effects)])
+      (for-each
+        (lambda (message)
+          (dispatch-search-effects!
+            (editor-update! search-editor message)))
+        (effect-result-messages result)))))
+(define (search-send! input)
+  (for-each
+    (lambda (event)
+      (dispatch-search-effects!
+        (editor-update!
+          search-editor
+          (make-input-message event))))
+    (decode search-decoder input)))
+
+(search-send! (bytes 19))
+(search-send! (string->utf8 "alpha"))
+(unless
+  (and
+    (editor-active-prompt search-editor)
+    (= (view-caret search-view) 5)
+    (equal? (view-region search-view) (cons 0 5)))
+  (error 'editor-tests "incremental search did not update on prompt edits"))
+(search-send! (bytes 19))
+(unless
+  (and
+    (= (view-caret search-view) 16)
+    (equal? (view-region search-view) (cons 11 16)))
+  (error 'editor-tests "repeated C-s did not advance the search"))
+(search-send! (bytes 19))
+(unless
+  (and
+    (= (view-caret search-view) 5)
+    (string=? (editor-status-message search-editor) "Search wrapped"))
+  (error 'editor-tests "incremental search did not wrap"))
+(search-send! (bytes 13))
+(unless
+  (and
+    (not (editor-active-prompt search-editor))
+    (= (view-caret search-view) 5)
+    (not (view-mark-active? search-view))
+    (editor-jump-back! search-editor)
+    (= (view-caret search-view) 0))
+  (error 'editor-tests "accepted search did not enter location history"))
+
+(search-send! (bytes 19))
+(search-send! (string->utf8 "missing"))
+(unless
+  (and
+    (= (view-caret search-view) 0)
+    (string-contains?
+      (editor-status-message search-editor)
+      "Failing search"))
+  (error 'editor-tests "failing incremental search moved point"))
+(search-send! (bytes 7))
+(unless
+  (and
+    (not (editor-active-prompt search-editor))
+    (= (view-caret search-view) 0)
+    (not (view-mark-active? search-view)))
+  (error 'editor-tests "aborted search did not restore its origin"))
+
+(editor-update!
+  search-editor
+  (make-command-message 'move.buffer-end #f))
+(search-send! (bytes 18))
+(search-send! (string->utf8 "alpha"))
+(unless (= (view-caret search-view) 11)
+  (error 'editor-tests "backward incremental search chose the wrong match"))
+(search-send! (bytes 7))
+(unless (= (view-caret search-view) 16)
+  (error 'editor-tests "aborted backward search did not restore point"))
+
+(editor-update!
+  search-editor
+  (make-command-message 'move.buffer-start #f))
+(search-send! (bytes 27 37))
+(search-send! (string->utf8 "alpha"))
+(search-send! (bytes 13))
+(search-send! (string->utf8 "A"))
+(search-send! (bytes 13))
+(unless
+  (and
+    (editor-active-prompt search-editor)
+    (equal? (view-region search-view) (cons 0 5)))
+  (error 'editor-tests "query-replace did not select its first match"))
+(search-send! (string->utf8 "n"))
+(unless (equal? (view-region search-view) (cons 11 16))
+  (error 'editor-tests "query-replace skip did not advance"))
+(search-send! (string->utf8 "y"))
+(unless
+  (and
+    (not (editor-active-prompt search-editor))
+    (bytevector=?
+      (buffer-bytes search-buffer)
+      (string->utf8 "alpha beta A"))
+    (string-contains?
+      (editor-status-message search-editor)
+      "Replaced 1"))
+  (error 'editor-tests "query-replace did not finish after the last match"))
+
+(editor-update!
+  search-editor
+  (make-command-message 'move.buffer-start #f))
+(search-send! (bytes 27 37))
+(search-send! (string->utf8 "a"))
+(search-send! (bytes 13))
+(search-send! (string->utf8 "x"))
+(search-send! (bytes 13))
+(search-send! (string->utf8 "!"))
+(unless
+  (and
+    (not (editor-active-prompt search-editor))
+    (bytevector=?
+      (buffer-bytes search-buffer)
+      (string->utf8 "xlphx betx A"))
+    (string-contains?
+      (editor-status-message search-editor)
+      "Replaced 3"))
+  (error 'editor-tests "query-replace all did not replace remaining matches"))
+(editor-close! search-editor)
+
 (define prompt-document (make-document "body" 91))
 (define prompt-buffer
   (make-buffer

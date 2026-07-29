@@ -189,6 +189,7 @@
           prompt-request-abort-command
           prompt-request-completion-source
           prompt-request-data
+          prompt-request-change-command
           prompt-session?
           prompt-session-id
           prompt-session-request
@@ -316,6 +317,7 @@
           (soda editor repl)
           (soda editor scheme-completion)
           (soda editor scheme-repl-completion)
+          (soda editor search)
           (soda editor state)
           (soda editor update))
 
@@ -337,4 +339,5 @@
       (install-file-commands! editor)
       (install-interaction-commands! editor)
       (install-prompt-commands! editor)
+      (install-search-commands! editor)
       editor)))

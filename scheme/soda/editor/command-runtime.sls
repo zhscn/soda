@@ -5,11 +5,39 @@
           editor-execute-interactive-command!
           install-command-effect-handler!)
   (import (rnrs)
+          (soda editor buffer)
           (soda editor command)
           (soda editor effect)
           (soda editor event)
           (soda editor keymap)
+          (soda editor prompt)
           (soda editor state))
+
+  (define (prompt-change-effects editor session revision)
+    (let ([active (editor-active-prompt editor)])
+      (if (and session
+               active
+               (= (prompt-session-id active)
+                  (prompt-session-id session))
+               (not
+                 (=
+                   revision
+                   (buffer-revision
+                     (editor-buffer-ref
+                       editor
+                       (prompt-session-buffer-id active))))))
+          (let ([command
+                  (prompt-request-change-command
+                    (prompt-session-request active))])
+            (if command
+                (list
+                  (make-command-effect
+                    'command.invoke
+                    (make-command-message
+                      command
+                      (prompt-session-id active))))
+                '()))
+          '())))
 
   (define editor-register-command!
     (case-lambda
@@ -51,7 +79,15 @@
       [(editor name event argument prefix)
        (require-open-editor 'editor-execute-command! editor)
        (editor-refresh-completion! editor)
-       (let ([effects
+       (let* ([prompt (editor-active-prompt editor)]
+              [prompt-revision
+                (and
+                  prompt
+                  (buffer-revision
+                    (editor-buffer-ref
+                      editor
+                      (prompt-session-buffer-id prompt))))]
+              [effects
                (execute-command!
                  (editor-command-registry editor)
                  name
@@ -60,11 +96,17 @@
                    (editor-active-view editor)
                    event
                    argument
-                   prefix))])
+                   prefix))]
+              [change-effects
+                (if prompt
+                    (prompt-change-effects
+                      editor prompt prompt-revision)
+                    '())])
          (ensure-view-visible! (editor-active-view editor))
          (editor-refresh-completion-after-command! editor)
          (append
            effects
+           change-effects
            (editor-take-completion-effects! editor)))]))
 
   (define editor-execute-interactive-command!

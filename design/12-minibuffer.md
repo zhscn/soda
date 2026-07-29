@@ -46,7 +46,8 @@ PromptRequest {
   completion-source?,
   accept-command,
   abort-command?,
-  data?
+  data?,
+  change-command?
 }
 ```
 
@@ -57,6 +58,9 @@ PromptRequest {
 - `accept-policy` 为 `free` 或 `must-match`；`must-match` 使用 validator 检查最终值。
 - `completion-source` 为读取附加结构化 choice completion。
 - `data` 是 responder 的不透明 continuation data，在接受和取消时原样进入结果。
+- `change-command` 在 transient input Buffer revision 改变后产生
+  `command.invoke` effect；payload 是 prompt session id。同一个 revision 内的
+  caret motion、completion selection 和 responder command 不触发 change。
 - responder 使用 command symbol，不保存调用栈或暂停中的递归编辑。
 
 `PromptSession` 保存 session id、request、transient buffer/view id、origin view id、

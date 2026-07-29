@@ -212,6 +212,32 @@ snapshot 计算 UTF-8 byte range，再通过普通 Buffer replace transaction �
 大小写转换使用 Unicode string case mapping，替换后按转换结果的实际 byte 长度
 安置 point。
 
+## Incremental search 与 query replace
+
+incremental search 使用 PromptSession 读取 query，并把 SearchSession 作为 request
+data。PromptRequest 的 change continuation 在每次输入 revision 改变后重新匹配；
+搜索逻辑不依赖 completion candidate。session 保存 origin View、live
+EditorLocation、方向、query、当前 match 和 wrap 状态。
+
+`C-s` 和 `C-r` 分别启动前向和后向搜索；搜索 prompt 活动时再次调用会从当前
+match 后或前继续。query 改变时从 origin 重新匹配。成功 match 临时使用 origin
+View 的 active region 呈现，失败保留最后位置并报告 failing 状态，越过 Buffer
+边界后回绕。接受搜索先恢复 origin，再通过 navigation jump 落到 match，因此写入
+View 的 location walk；取消清除临时 region 并恢复 live origin。
+
+query replace 由 query、replacement 和 decision 三个非递归阶段组成。前两个阶段
+使用普通 minibuffer；decision 阶段压入忽略文本输入的 transient InputState，只
+解释：
+
+- `y` 或 Space：替换当前 match；
+- `n` 或 Delete：跳过当前 match；
+- `!`：替换全部剩余 match；
+- `q`：保留已经完成的替换并结束。
+
+每次替换使用 Buffer range transaction，并从 replacement 末尾继续扫描，从而不会
+重复匹配刚插入的 replacement。`C-g` 在读取阶段恢复 origin；在 decision 阶段停止
+遍历并保留已经提交的 transaction。
+
 ## TUI view 与渲染
 
 View 持有 selection、viewport 和输入状态；Window 把 View 放入 layout。frame

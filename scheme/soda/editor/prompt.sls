@@ -12,6 +12,7 @@
           prompt-request-abort-command
           prompt-request-completion-source
           prompt-request-data
+          prompt-request-change-command
           make-prompt-session
           prompt-session?
           prompt-session-id
@@ -57,7 +58,8 @@
             accept-command
             abort-command
             completion-source
-            data))
+            data
+            change-command))
 
   (define-record-type prompt-session
     (fields id
@@ -92,6 +94,7 @@
          #f
          accept-command
          #f
+         #f
          #f)]
       [(prompt
          initial
@@ -120,6 +123,27 @@
          accept-command
          abort-command
          data)
+       (make-prompt-request
+         prompt
+         initial
+         history-id
+         default
+         accept-policy
+         validator
+         accept-command
+         abort-command
+         data
+         #f)]
+      [(prompt
+         initial
+         history-id
+         default
+         accept-policy
+         validator
+         accept-command
+         abort-command
+         data
+         change-command)
        (unless (string? prompt)
          (assertion-violation
            'make-prompt-request
@@ -164,6 +188,11 @@
            'make-prompt-request
            "abort command must be a symbol or #f"
            abort-command))
+       (unless (or (not change-command) (symbol? change-command))
+         (assertion-violation
+           'make-prompt-request
+           "change command must be a symbol or #f"
+           change-command))
        (%make-prompt-request
          prompt
          initial
@@ -174,7 +203,8 @@
          accept-command
          abort-command
          #f
-         data)]))
+         data
+         change-command)]))
 
   (define make-completing-prompt-request
     (case-lambda
@@ -185,6 +215,11 @@
          accept-command abort-command #f)]
       [(prompt initial history-id default accept-policy source
                accept-command abort-command data)
+       (make-completing-prompt-request
+         prompt initial history-id default accept-policy source
+         accept-command abort-command data #f)]
+      [(prompt initial history-id default accept-policy source
+               accept-command abort-command data change-command)
        (unless (choice-source? source)
          (assertion-violation
            'make-completing-prompt-request
@@ -203,7 +238,8 @@
                      (choice-source-valid? source value)))
                  accept-command
                  abort-command
-                 data)])
+                 data
+                 change-command)])
          (%make-prompt-request
            (prompt-request-prompt request)
            (prompt-request-initial request)
@@ -214,7 +250,8 @@
            (prompt-request-accept-command request)
            (prompt-request-abort-command request)
            source
-           (prompt-request-data request)))]))
+           (prompt-request-data request)
+           (prompt-request-change-command request)))]))
 
   (define make-prompt-result
     (case-lambda
