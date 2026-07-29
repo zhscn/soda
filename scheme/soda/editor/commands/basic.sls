@@ -472,26 +472,20 @@
 
   (define (yank-command context)
     (let* ([editor (command-context-editor context)]
-           [view (context-view context)]
-           [bytes (editor-current-kill editor)]
-           [region (view-region view)]
-           [caret (view-caret view)]
-           [start (if region (car region) caret)]
-           [end (if region (cdr region) caret)])
-      (if (not bytes)
+           [view (context-view context)])
+      (if (not (editor-yank! editor view))
           (editor-set-status-message! editor "Kill ring is empty")
           (begin
-            (buffer-replace-range!
-              (context-buffer context)
-              start
-              end
-              bytes)
-            (view-set-caret!
-              view
-              (+ start (bytevector-length bytes)))
-            (when region
-              (view-clear-mark! view))
             (editor-set-status-message! editor "Yanked")))
+      '()))
+
+  (define (yank-pop-command context)
+    (let ([editor (command-context-editor context)])
+      (editor-yank-pop!
+        editor
+        (context-view context)
+        (command-context-count context))
+      (editor-set-status-message! editor "Yank rotated")
       '()))
 
   (define (apply-history-command context operation empty-message success-message)
@@ -677,7 +671,13 @@
         (list
           'edit.yank
           yank-command
-          "Insert the newest kill-ring entry.")))
+          "Insert the newest kill-ring entry."
+          'yank)
+        (list
+          'edit.yank-pop
+          yank-pop-command
+          "Replace the previous yank with another kill-ring entry."
+          'yank)))
     (for-each
       (lambda (entry)
         (editor-bind-key! editor (list (car entry)) (cdr entry)))
@@ -711,7 +711,8 @@
         (cons (stroke 'backspace 127 2) 'edit.backward-kill-word)
         (cons (stroke 'backspace 127 4) 'edit.backward-kill-word)
         (cons (stroke 'delete #f 4) 'edit.kill-word)
-        (cons (stroke 'character (char->integer #\y) 4) 'edit.yank)))
+        (cons (stroke 'character (char->integer #\y) 4) 'edit.yank)
+        (cons (stroke 'character (char->integer #\y) 2) 'edit.yank-pop)))
     (editor-bind-key!
       editor
       (list

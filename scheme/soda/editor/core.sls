@@ -59,6 +59,8 @@
           editor-current-kill
           editor-copy-buffer-range!
           editor-kill-buffer-range!
+          editor-yank!
+          editor-yank-pop!
           buffer-replace-range!
           buffer-delete-range!
           editor-last-command-class
@@ -281,6 +283,7 @@
           (soda editor command-runtime)
           (soda editor commands basic)
           (soda editor commands buffer)
+          (soda editor commands transform)
           (soda editor comint)
           (soda editor completion)
           (soda editor completion-commands)
@@ -307,6 +310,7 @@
     (let ([editor (make-editor-state buffer)])
       (install-prefix-commands! editor)
       (install-basic-commands! editor)
+      (install-transform-commands! editor)
       (install-buffer-commands! editor)
       (install-comint-commands! editor)
       (install-completion-commands! editor)

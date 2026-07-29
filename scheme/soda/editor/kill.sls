@@ -3,12 +3,17 @@
           editor-record-kill!
           editor-current-kill
           editor-copy-buffer-range!
-          editor-kill-buffer-range!)
+          editor-kill-buffer-range!
+          editor-yank!
+          editor-yank-pop!)
   (import (rnrs)
           (soda document)
           (soda editor buffer)
           (soda editor edit)
           (soda editor state))
+
+  (define-record-type yank-state
+    (fields view-id buffer-id revision start end index))
 
   (define (copy-bytevector value)
     (let ([result (make-bytevector (bytevector-length value))])
@@ -84,6 +89,87 @@
     (and
       (pair? (editor-kill-ring editor))
       (copy-bytevector (car (editor-kill-ring editor)))))
+
+  (define (ring-entry ring index)
+    (copy-bytevector (list-ref ring index)))
+
+  (define (editor-yank! editor view)
+    (require-open-editor 'editor-yank! editor)
+    (unless (view? view)
+      (assertion-violation 'editor-yank! "expected a view" view))
+    (let ([ring (editor-kill-ring editor)])
+      (if (null? ring)
+          #f
+          (let* ([buffer (view-buffer view)]
+                 [region (view-region view)]
+                 [caret (view-caret view)]
+                 [start (if region (car region) caret)]
+                 [end (if region (cdr region) caret)]
+                 [bytes (ring-entry ring 0)]
+                 [new-end (+ start (bytevector-length bytes))])
+            (buffer-replace-range! buffer start end bytes)
+            (view-set-caret! view new-end)
+            (when region
+              (view-clear-mark! view))
+            (editor-set-last-yank!
+              editor
+              (make-yank-state
+                (view-id view)
+                (buffer-id buffer)
+                (buffer-revision buffer)
+                start
+                new-end
+                0))
+            bytes))))
+
+  (define (editor-yank-pop! editor view count)
+    (require-open-editor 'editor-yank-pop! editor)
+    (unless (view? view)
+      (assertion-violation 'editor-yank-pop! "expected a view" view))
+    (unless (and (integer? count) (exact? count))
+      (assertion-violation
+        'editor-yank-pop!
+        "count must be an exact integer"
+        count))
+    (let ([state (editor-last-yank editor)]
+          [ring (editor-kill-ring editor)]
+          [buffer (view-buffer view)])
+      (unless (and (eq? (editor-last-command-class editor) 'yank)
+                   (yank-state? state)
+                   (= (yank-state-view-id state) (view-id view))
+                   (= (yank-state-buffer-id state) (buffer-id buffer))
+                   (= (yank-state-revision state)
+                      (buffer-revision buffer)))
+        (assertion-violation
+          'editor-yank-pop!
+          "previous command was not a yank in this view"))
+      (when (null? ring)
+        (assertion-violation
+          'editor-yank-pop!
+          "kill ring is empty"))
+      (let* ([index
+               (mod
+                 (+ (yank-state-index state) count)
+                 (length ring))]
+             [bytes (ring-entry ring index)]
+             [start (yank-state-start state)]
+             [new-end (+ start (bytevector-length bytes))])
+        (buffer-replace-range!
+          buffer
+          start
+          (yank-state-end state)
+          bytes)
+        (view-set-caret! view new-end)
+        (editor-set-last-yank!
+          editor
+          (make-yank-state
+            (view-id view)
+            (buffer-id buffer)
+            (buffer-revision buffer)
+            start
+            new-end
+            index))
+        bytes)))
 
   (define (validate-offsets who first second)
     (unless (and (integer? first)

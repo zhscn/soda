@@ -137,6 +137,11 @@ ring，yank 插入最新条目。连续的 kill class command 共享最新条目
 合并与 undo 粒度彼此独立。copy command 可以承接前一次 kill，但自身不属于 kill
 class。ring 不属于 Document，不进入 undo tree。
 
+yank 保存 view、buffer、revision、替换范围和 ring index 组成的 transient state。
+紧随其后的 yank-pop 用下一条 ring entry 替换同一范围；正负 count 分别向两个方向
+旋转并按 ring 长度回绕。yank 和 yank-pop 属于同一 command class。其他交互命令、
+view/buffer 不匹配或 revision 改变都会使该范围失效。
+
 范围修改通过共享的 Buffer edit mechanism 提交。普通 replace/delete、open-line、
 horizontal-space 删除和 kill range 使用相同的 transaction 生命周期；kill 在
 transaction 成功后才更新 ring。不带参数的 `kill-line` 计算当前 point 到行内容
@@ -201,6 +206,11 @@ pending 值而不成为普通 command class；下一条普通命令把值移入
 字符、word 和纵向 motion 接受正负 count；self-insert、newline 和 open-line
 接受非负 count；kill-line 使用 prefix 是否显式存在来区分默认行为与显式数值
 行为。取消、未定义按键和命令错误清除 pending prefix。
+
+transpose-character、transpose-word 和 word case command 先从 motion 与当前
+snapshot 计算 UTF-8 byte range，再通过普通 Buffer replace transaction 提交。
+大小写转换使用 Unicode string case mapping，替换后按转换结果的实际 byte 长度
+安置 point。
 
 ## TUI view 与渲染
 

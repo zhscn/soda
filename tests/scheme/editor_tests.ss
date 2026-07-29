@@ -1065,6 +1065,97 @@
   (error 'editor-tests "keyboard quit did not clear a pending prefix"))
 (editor-close! prefix-editor)
 
+(define transform-document
+  (make-document "ab one TWO three" 976))
+(define transform-buffer
+  (make-buffer
+    976
+    transform-document
+    "*transform*"
+    'fundamental-mode))
+(define transform-editor (make-editor transform-buffer))
+(define transform-view (editor-active-view transform-editor))
+(define transform-decoder (make-input-decoder))
+(editor-update!
+  transform-editor
+  (make-command-message
+    'move.forward-character
+    #f
+    (prefix-argument-digit #f 1)))
+(send! transform-editor transform-decoder (bytes 20))
+(unless
+  (bytevector=?
+    (buffer-bytes transform-buffer)
+    (string->utf8 "ba one TWO three"))
+  (error
+    'editor-tests
+    "transpose-characters did not swap adjacent text"
+    (utf8->string (buffer-bytes transform-buffer))
+    (view-caret transform-view)
+    (editor-status-message transform-editor)))
+
+(send! transform-editor transform-decoder (bytes 27 99))
+(send! transform-editor transform-decoder (bytes 27 108))
+(send! transform-editor transform-decoder (bytes 27 117))
+(unless
+  (bytevector=?
+    (buffer-bytes transform-buffer)
+    (string->utf8 "ba One two THREE"))
+  (error 'editor-tests "word case commands did not compose"))
+
+(editor-update!
+  transform-editor
+  (make-command-message 'move.buffer-start #f))
+(send! transform-editor transform-decoder (bytes 27 116))
+(unless
+  (and
+    (= (view-caret transform-view) 6)
+    (bytevector=?
+      (buffer-bytes transform-buffer)
+      (string->utf8 "One ba two THREE")))
+  (error 'editor-tests "transpose-words did not preserve separators"))
+(editor-close! transform-editor)
+
+(define yank-pop-document (make-document "" 977))
+(define yank-pop-buffer
+  (make-buffer
+    977
+    yank-pop-document
+    "*yank-pop*"
+    'fundamental-mode))
+(define yank-pop-editor (make-editor yank-pop-buffer))
+(define yank-pop-decoder (make-input-decoder))
+(editor-push-kill! yank-pop-editor (string->utf8 "first"))
+(editor-push-kill! yank-pop-editor (string->utf8 "second"))
+(send! yank-pop-editor yank-pop-decoder (bytes 25))
+(send! yank-pop-editor yank-pop-decoder (bytes 27 121))
+(unless
+  (and
+    (eq? (editor-last-command-class yank-pop-editor) 'yank)
+    (bytevector=?
+      (buffer-bytes yank-pop-buffer)
+      (string->utf8 "first")))
+  (error 'editor-tests "yank-pop did not rotate the kill ring"))
+(send! yank-pop-editor yank-pop-decoder (bytes 27 121))
+(unless
+  (bytevector=?
+    (buffer-bytes yank-pop-buffer)
+    (string->utf8 "second"))
+  (error 'editor-tests "yank-pop did not wrap around the kill ring"))
+(editor-update!
+  yank-pop-editor
+  (make-command-message 'move.buffer-start #f))
+(send! yank-pop-editor yank-pop-decoder (bytes 27 121))
+(unless
+  (and
+    (bytevector=?
+      (buffer-bytes yank-pop-buffer)
+      (string->utf8 "second"))
+    (not (editor-last-command-class yank-pop-editor))
+    (string? (editor-status-message yank-pop-editor)))
+  (error 'editor-tests "yank-pop accepted a stale yank range"))
+(editor-close! yank-pop-editor)
+
 (define prompt-document (make-document "body" 91))
 (define prompt-buffer
   (make-buffer

@@ -58,6 +58,8 @@
           editor-set-status-message!
           editor-kill-ring
           editor-set-kill-ring!
+          editor-last-yank
+          editor-set-last-yank!
           editor-pending-prefix
           editor-set-pending-prefix!
           editor-clear-pending-prefix!
@@ -178,6 +180,7 @@
                editor-status-message
                editor-status-message-set!)
       (mutable kill-ring editor-kill-ring editor-kill-ring-set!)
+      (mutable last-yank editor-last-yank editor-last-yank-set!)
       (mutable pending-prefix
                editor-pending-prefix
                editor-pending-prefix-set!)
@@ -206,6 +209,10 @@
         "expected a prefix argument or #f"
         prefix))
     (editor-pending-prefix-set! editor prefix))
+
+  (define (editor-set-last-yank! editor state)
+    (require-open-editor 'editor-set-last-yank! editor)
+    (editor-last-yank-set! editor state))
 
   (define (editor-clear-pending-prefix! editor)
     (require-open-editor 'editor-clear-pending-prefix! editor)
@@ -1826,6 +1833,7 @@
                '()
                #f
                '()
+               #f
                #f
                #f
                #f
