@@ -485,7 +485,9 @@
       'scheme
       #f
       #f
-      '()
+      '((#\( . #\))
+        (#\[ . #\])
+        (#\{ . #\}))
       scheme-identifier-character?
       scheme-highlight-runs
       #f

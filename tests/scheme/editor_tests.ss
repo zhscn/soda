@@ -13,6 +13,10 @@
         (soda editor motion)
         (soda editor prompt)
         (soda editor scheme-semantics)
+        (only (soda editor state)
+              view-clear-mark!
+              view-set-caret!
+              view-set-mark!)
         (soda tui commands)
         (soda tui component)
         (soda tui frame)
@@ -1000,6 +1004,81 @@
       (string->utf8 "one two\n  three\nlast")))
   (error 'editor-tests "M-\\ did not delete preceding horizontal space"))
 (editor-close! line-editor)
+
+(define structure-document
+  (make-document
+    "  alpha\n    beta\n(gamma [delta])\n"
+    976))
+(define structure-buffer
+  (make-buffer
+    976
+    structure-document
+    "*structure-editing*"
+    'fundamental-mode))
+(buffer-set-local-setting! structure-buffer 'indent-width 2)
+(define structure-editor (make-editor structure-buffer))
+(define structure-view (editor-active-view structure-editor))
+(define structure-decoder (make-input-decoder))
+
+(view-set-caret! structure-view 7)
+(send! structure-editor structure-decoder (bytes 27 105))
+(send! structure-editor structure-decoder (bytes 13))
+(unless
+  (and
+    (= (view-caret structure-view) 10)
+    (bytevector=?
+      (buffer-bytes structure-buffer)
+      (string->utf8
+        "  alpha\n  \n    beta\n(gamma [delta])\n")))
+  (error 'editor-tests
+         "auto indent did not copy leading whitespace"))
+(editor-update!
+  structure-editor
+  (make-command-message 'edit.undo #f))
+
+(view-set-mark! structure-view 0)
+(view-set-caret! structure-view 17)
+(send! structure-editor structure-decoder (bytes 27 125))
+(unless
+  (bytevector=?
+    (buffer-bytes structure-buffer)
+    (string->utf8
+      "    alpha\n      beta\n(gamma [delta])\n"))
+  (error 'editor-tests
+         "M-} did not indent all region lines"))
+(send! structure-editor structure-decoder (bytes 27 123))
+(unless
+  (bytevector=?
+    (buffer-bytes structure-buffer)
+    (string->utf8
+      "  alpha\n    beta\n(gamma [delta])\n"))
+  (error 'editor-tests
+         "M-{ did not unindent all region lines"))
+(editor-update!
+  structure-editor
+  (make-command-message 'edit.undo #f))
+(unless
+  (bytevector=?
+    (buffer-bytes structure-buffer)
+    (string->utf8
+      "    alpha\n      beta\n(gamma [delta])\n"))
+  (error 'editor-tests
+         "region unindent was not one undo transaction"))
+(editor-update!
+  structure-editor
+  (make-command-message 'edit.undo #f))
+
+(view-clear-mark! structure-view)
+(view-set-caret! structure-view 17)
+(send! structure-editor structure-decoder (bytes 27 93))
+(unless (= (view-caret structure-view) 31)
+  (error 'editor-tests
+         "M-] did not find the closing delimiter"))
+(send! structure-editor structure-decoder (bytes 27 93))
+(unless (= (view-caret structure-view) 17)
+  (error 'editor-tests
+         "M-] did not find the opening delimiter"))
+(editor-close! structure-editor)
 
 (define prefix-document
   (make-document "one two\nthree\nlast" 975))

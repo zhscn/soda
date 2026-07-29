@@ -145,11 +145,21 @@ IndentDecision {
 把空白写回 Document 是 command 的责任，因此缩进查询保持纯函数，多个前端和
 批量命令可以复用。
 
+基础编辑命令提供不依赖 parser 的缩进层。Buffer 的 `auto-indent?` 设置使
+`edit.newline` 复制当前行的 leading whitespace，`M-i` 切换该 buffer-local
+设置。`M-}` 与 `M-{` 按 `indent-width` 增减活动 region 涉及的每一行；整个 region
+变换在一次 Buffer transaction 中提交。major-mode keymap 可以用语言专用命令覆盖
+这些基础行为。
+
 `cpp.indent-line` 通过 profile 的 indentation provider 查询 native
 IndentDecision，再用普通 Buffer transaction 写回 leading whitespace。`cpp-mode`
 的 TAB 绑定到该命令。Enter 绑定到 `cpp.newline-and-indent`；native engine 对
 between-braces 等结构执行单次原子编辑并返回 Document change，Buffer 接受 change
 后统一更新 revision、undo history、View caret 与 language runtime。
+
+language profile 的 delimiter pairs 同时驱动通用 `move.matching-delimiter`
+命令。`M-]` 接受 point 上或 point 前的 delimiter，以同类嵌套深度扫描并移动到
+配对位置；没有声明 pairs 的 mode 使用圆括号、方括号和花括号。
 
 ## Tree-sitter runtime
 

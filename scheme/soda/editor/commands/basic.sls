@@ -10,6 +10,7 @@
           (soda editor event)
           (soda editor kill)
           (soda editor keymap)
+          (soda editor language)
           (soda editor motion-runtime)
           (soda editor prompt)
           (soda editor state))
@@ -77,6 +78,56 @@
 
   (define (newline-bytes count)
     (make-bytevector count 10))
+
+  (define (append-bytevectors first second)
+    (let* ([first-length (bytevector-length first)]
+           [second-length (bytevector-length second)]
+           [result
+             (make-bytevector
+               (+ first-length second-length))])
+      (bytevector-copy!
+        first 0 result 0 first-length)
+      (bytevector-copy!
+        second
+        0
+        result
+        first-length
+        second-length)
+      result))
+
+  (define (line-whitespace-end text line)
+    (let ([end (text-line-content-end text line)])
+      (let loop ([offset (text-line-start text line)])
+        (if
+          (and
+            (< offset end)
+            (memv (text-byte-at text offset) '(9 32)))
+          (loop (+ offset 1))
+          offset))))
+
+  (define (newline-replacement buffer offset count)
+    (let ([newlines (newline-bytes count)])
+      (if
+        (not
+          (buffer-setting-ref
+            buffer
+            'auto-indent?
+            #f))
+        newlines
+        (with-document-text
+          (buffer-document buffer)
+          (lambda (text)
+            (let* ([line (car (text-position text offset))]
+                   [line-start (text-line-start text line)]
+                   [whitespace-end
+                     (line-whitespace-end text line)]
+                   [prefix-end (min offset whitespace-end)])
+              (append-bytevectors
+                newlines
+                (text-subbytevector
+                  text
+                  line-start
+                  prefix-end))))))))
 
   (define (move-vertical! view delta)
     (with-document-text
@@ -193,14 +244,21 @@
            [region (view-region view)]
            [start (if region (car region) caret)]
            [end (if region (cdr region) caret)]
-           [count (require-non-negative-count 'newline-command context)])
+           [count (require-non-negative-count 'newline-command context)]
+           [replacement
+             (newline-replacement
+               (context-buffer context)
+               start
+               count)])
       (unless (zero? count)
         (buffer-replace-range!
           (context-buffer context)
           start
           end
-          (newline-bytes count))
-        (view-set-caret! view (+ start count))
+          replacement)
+        (view-set-caret!
+          view
+          (+ start (bytevector-length replacement)))
         (when region
           (view-clear-mark! view)))
       '()))
@@ -221,6 +279,258 @@
         (view-set-caret! view start)
         (when region
           (view-clear-mark! view)))
+      '()))
+
+  (define (toggle-auto-indent-command context)
+    (let* ([editor (command-context-editor context)]
+           [buffer (context-buffer context)]
+           [enabled?
+             (not
+               (buffer-setting-ref
+                 buffer
+                 'auto-indent?
+                 #f))])
+      (buffer-set-local-setting!
+        buffer
+        'auto-indent?
+        enabled?)
+      (editor-set-status-message!
+        editor
+        (if enabled?
+            "Auto indent enabled"
+            "Auto indent disabled"))
+      '()))
+
+  (define (indent-width buffer)
+    (let ([value
+            (buffer-setting-ref
+              buffer
+              'indent-width
+              (buffer-setting-ref buffer 'tab-width 8))])
+      (if
+        (and
+          (integer? value)
+          (exact? value)
+          (positive? value))
+        value
+        8)))
+
+  (define (spaces count)
+    (make-bytevector count 32))
+
+  (define (apply-replacements! buffer replacements)
+    (unless (null? replacements)
+      (let ([change #f])
+        (dynamic-wind
+          (lambda () #f)
+          (lambda ()
+            (call-with-values
+              (lambda ()
+                (call-with-buffer-transaction
+                  buffer
+                  (lambda (transaction)
+                    (for-each
+                      (lambda (replacement)
+                        (transaction-replace!
+                          transaction
+                          (car replacement)
+                          (cadr replacement)
+                          (caddr replacement)))
+                      replacements))))
+              (lambda (result committed-change)
+                (set! change committed-change)
+                result)))
+          (lambda ()
+            (when change
+              (change-close! change)))))))
+
+  (define (region-line-range text region)
+    (let* ([start (car region)]
+           [end (cdr region)]
+           [start-line (car (text-position text start))]
+           [last-offset
+             (if (> end start) (- end 1) end)]
+           [end-line (car (text-position text last-offset))])
+      (cons start-line end-line)))
+
+  (define (region-indent-replacements
+            text
+            first-line
+            last-line
+            width
+            unindent?)
+    (let loop ([line last-line] [result '()])
+      (if (< line first-line)
+          (reverse result)
+          (let ([start (text-line-start text line)])
+            (if unindent?
+                (let* ([end (line-whitespace-end text line)]
+                       [remove-end
+                         (cond
+                           [(= start end) start]
+                           [(= (text-byte-at text start) 9)
+                            (+ start 1)]
+                           [else
+                            (min end (+ start width))])])
+                  (loop
+                    (- line 1)
+                    (if (= start remove-end)
+                        result
+                        (cons
+                          (list
+                            start
+                            remove-end
+                            (make-bytevector 0))
+                          result))))
+                (loop
+                  (- line 1)
+                  (cons
+                    (list start start (spaces width))
+                    result)))))))
+
+  (define (shift-region-command context unindent?)
+    (let* ([editor (command-context-editor context)]
+           [view (context-view context)]
+           [buffer (context-buffer context)]
+           [region (view-region view)])
+      (if (not region)
+          (editor-set-status-message!
+            editor
+            "No active region")
+          (with-document-text
+            (buffer-document buffer)
+            (lambda (text)
+              (let* ([lines
+                       (region-line-range text region)]
+                     [width
+                       (*
+                         (indent-width buffer)
+                         (require-non-negative-count
+                           (if unindent?
+                               'edit.unindent-region
+                               'edit.indent-region)
+                           context))])
+                (when (positive? width)
+                  (apply-replacements!
+                    buffer
+                    (region-indent-replacements
+                      text
+                      (car lines)
+                      (cdr lines)
+                      width
+                      unindent?)))))))
+      '()))
+
+  (define (indent-region-command context)
+    (shift-region-command context #f))
+
+  (define (unindent-region-command context)
+    (shift-region-command context #t))
+
+  (define default-delimiter-pairs
+    '((#\( . #\))
+      (#\[ . #\])
+      (#\{ . #\})))
+
+  (define (buffer-delimiter-pairs buffer)
+    (let ([profile (buffer-language-profile buffer)])
+      (if
+        (and
+          profile
+          (pair? (language-profile-pairs profile)))
+        (language-profile-pairs profile)
+        default-delimiter-pairs)))
+
+  (define (delimiter-at text offset)
+    (and
+      (<= 0 offset)
+      (< offset (text-size text))
+      (let ([byte (text-byte-at text offset)])
+        (and (< byte 128) (integer->char byte)))))
+
+  (define (delimiter-spec pairs character)
+    (or
+      (let ([entry (assv character pairs)])
+        (and entry
+             (list 'forward character (cdr entry))))
+      (let ([entry
+              (find
+                (lambda (entry)
+                  (char=? character (cdr entry)))
+                pairs)])
+        (and entry
+             (list 'backward (car entry) character)))))
+
+  (define (scan-matching-delimiter
+            text
+            offset
+            direction
+            open
+            close)
+    (let ([step (if (eq? direction 'forward) 1 -1)])
+      (let loop ([cursor (+ offset step)] [depth 1])
+        (if
+          (or
+            (negative? cursor)
+            (>= cursor (text-size text)))
+          #f
+          (let ([character (delimiter-at text cursor)])
+            (cond
+              [(and character (char=? character open))
+               (if (eq? direction 'forward)
+                   (loop (+ cursor step) (+ depth 1))
+                   (let ([next (- depth 1)])
+                     (if (zero? next)
+                         cursor
+                         (loop (+ cursor step) next))))]
+              [(and character (char=? character close))
+               (if (eq? direction 'forward)
+                   (let ([next (- depth 1)])
+                     (if (zero? next)
+                         cursor
+                         (loop (+ cursor step) next)))
+                   (loop (+ cursor step) (+ depth 1)))]
+              [else
+               (loop (+ cursor step) depth)]))))))
+
+  (define (matching-delimiter-command context)
+    (let* ([editor (command-context-editor context)]
+           [view (context-view context)]
+           [buffer (context-buffer context)])
+      (with-document-text
+        (buffer-document buffer)
+        (lambda (text)
+          (let* ([caret (view-caret view)]
+                 [pairs (buffer-delimiter-pairs buffer)]
+                 [at-caret (delimiter-at text caret)]
+                 [before
+                   (and
+                     (positive? caret)
+                     (delimiter-at text (- caret 1)))]
+                 [spec-at (and at-caret
+                               (delimiter-spec pairs at-caret))]
+                 [spec-before
+                   (and
+                     before
+                     (delimiter-spec pairs before))]
+                 [offset (if spec-at caret (- caret 1))]
+                 [spec (or spec-at spec-before)])
+            (if (not spec)
+                (editor-set-status-message!
+                  editor
+                  "Point is not on a delimiter")
+                (let ([target
+                        (scan-matching-delimiter
+                          text
+                          offset
+                          (car spec)
+                          (cadr spec)
+                          (caddr spec))])
+                  (if target
+                      (view-set-caret! view target)
+                      (editor-set-status-message!
+                        editor
+                        "No matching delimiter")))))))
       '()))
 
   (define (move-character! context count)
@@ -751,9 +1061,21 @@
           "Delete the next character.")
         (list 'edit.newline newline-command "Insert a newline.")
         (list
+          'edit.toggle-auto-indent
+          toggle-auto-indent-command
+          "Toggle copying line indentation after a newline.")
+        (list
           'edit.open-line
           open-line-command
           "Insert a newline after point and leave point before it.")
+        (list
+          'edit.indent-region
+          indent-region-command
+          "Indent every line touched by the active region.")
+        (list
+          'edit.unindent-region
+          unindent-region-command
+          "Remove one indentation level from the active region.")
         (list
           'edit.delete-horizontal-space
           delete-horizontal-space-command
@@ -818,6 +1140,10 @@
           'move.buffer-end
           buffer-end-command
           "Move to the end of the buffer.")
+        (list
+          'move.matching-delimiter
+          matching-delimiter-command
+          "Move between matching parentheses, brackets, or braces.")
         (list 'edit.undo undo-command "Undo the previous buffer change.")
         (list 'edit.redo redo-command "Redo the next buffer change.")
         (list 'mark.set set-mark-command "Set the mark at point.")
@@ -867,7 +1193,16 @@
         (cons (stroke 'backspace 127 0) 'edit.backward-delete)
         (cons (stroke 'delete #f 0) 'edit.forward-delete)
         (cons (stroke 'enter 13 0) 'edit.newline)
+        (cons
+          (stroke 'character (char->integer #\i) 2)
+          'edit.toggle-auto-indent)
         (cons (stroke 'character (char->integer #\o) 4) 'edit.open-line)
+        (cons
+          (stroke 'character (char->integer #\}) 2)
+          'edit.indent-region)
+        (cons
+          (stroke 'character (char->integer #\{) 2)
+          'edit.unindent-region)
         (cons (stroke 'left #f 0) 'move.backward-character)
         (cons (stroke 'right #f 0) 'move.forward-character)
         (cons (stroke 'character (char->integer #\b) 2) 'move.backward-word)
@@ -885,6 +1220,9 @@
         (cons (stroke 'end #f 0) 'move.line-end)
         (cons (stroke 'character (char->integer #\<) 2) 'move.buffer-start)
         (cons (stroke 'character (char->integer #\>) 2) 'move.buffer-end)
+        (cons
+          (stroke 'character (char->integer #\]) 2)
+          'move.matching-delimiter)
         (cons (stroke 'character (char->integer #\z) 4) 'edit.undo)
         (cons (stroke 'character (char->integer #\/) 4) 'edit.undo)
         (cons (stroke 'character (char->integer #\z) 5) 'edit.redo)
