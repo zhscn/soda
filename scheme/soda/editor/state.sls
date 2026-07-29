@@ -57,9 +57,7 @@
           editor-status-message
           editor-set-status-message!
           editor-kill-ring
-          editor-push-kill!
-          editor-record-kill!
-          editor-current-kill
+          editor-set-kill-ring!
           editor-last-command-class
           editor-set-last-command-class!
           editor-quit-armed?
@@ -1512,74 +1510,6 @@
            (let ([caret (view-caret value)])
              (cons (min mark caret) (max mark caret))))))
 
-  (define (copy-bytevector value)
-    (let ([result (make-bytevector (bytevector-length value))])
-      (bytevector-copy!
-        value
-        0
-        result
-        0
-        (bytevector-length value))
-      result))
-
-  (define (take-prefix values count)
-    (if (or (zero? count) (null? values))
-        '()
-        (cons
-          (car values)
-          (take-prefix (cdr values) (- count 1)))))
-
-  (define (editor-push-kill! value bytes)
-    (require-open-editor 'editor-push-kill! value)
-    (unless (bytevector? bytes)
-      (assertion-violation
-        'editor-push-kill!
-        "kill text must be a bytevector"
-        bytes))
-    (editor-kill-ring-set!
-      value
-      (let ([entries
-              (cons
-                (copy-bytevector bytes)
-                (editor-kill-ring value))])
-        (if (> (length entries) 60)
-            (take-prefix entries 60)
-            entries)))
-    bytes)
-
-  (define (append-bytevectors first second)
-    (let* ([first-size (bytevector-length first)]
-           [second-size (bytevector-length second)]
-           [result (make-bytevector (+ first-size second-size))])
-      (bytevector-copy! first 0 result 0 first-size)
-      (bytevector-copy! second 0 result first-size second-size)
-      result))
-
-  (define (editor-record-kill! value bytes direction)
-    (require-open-editor 'editor-record-kill! value)
-    (unless (bytevector? bytes)
-      (assertion-violation
-        'editor-record-kill!
-        "kill text must be a bytevector"
-        bytes))
-    (unless (memq direction '(forward backward))
-      (assertion-violation
-        'editor-record-kill!
-        "direction must be forward or backward"
-        direction))
-    (if (and (eq? (editor-last-command-class value) 'kill)
-             (pair? (editor-kill-ring value)))
-        (let* ([current (car (editor-kill-ring value))]
-               [combined
-                 (if (eq? direction 'backward)
-                     (append-bytevectors bytes current)
-                     (append-bytevectors current bytes))])
-          (editor-kill-ring-set!
-            value
-            (cons combined (cdr (editor-kill-ring value))))
-          bytes)
-        (editor-push-kill! value bytes)))
-
   (define (editor-set-last-command-class! value class)
     (require-open-editor 'editor-set-last-command-class! value)
     (unless (or (not class) (symbol? class))
@@ -1589,11 +1519,14 @@
         class))
     (editor-last-command-class-set! value class))
 
-  (define (editor-current-kill value)
-    (require-open-editor 'editor-current-kill value)
-    (and
-      (pair? (editor-kill-ring value))
-      (copy-bytevector (car (editor-kill-ring value)))))
+  (define (editor-set-kill-ring! value entries)
+    (require-open-editor 'editor-set-kill-ring! value)
+    (unless (and (list? entries) (for-all bytevector? entries))
+      (assertion-violation
+        'editor-set-kill-ring!
+        "kill ring must be a list of bytevectors"
+        entries))
+    (editor-kill-ring-set! value entries))
 
   (define (replace-view-caret-anchor! value offset)
     (let* ([document (buffer-document (view-buffer value))]

@@ -881,6 +881,32 @@
   (error 'editor-tests "buffer word-motion policy was not used"))
 (editor-close! custom-word-editor)
 
+(define protected-document
+  (make-document "locked editable" 973))
+(document-set-editable-start! protected-document 7)
+(define protected-buffer
+  (make-buffer
+    973
+    protected-document
+    "*protected-word*"
+    'fundamental-mode))
+(define protected-editor (make-editor protected-buffer))
+(editor-update!
+  protected-editor
+  (make-command-message 'edit.kill-word #f))
+(unless
+  (and
+    (bytevector=?
+      (buffer-bytes protected-buffer)
+      (string->utf8 "locked editable"))
+    (not (editor-current-kill protected-editor))
+    (not (editor-last-command-class protected-editor))
+    (string? (editor-status-message protected-editor)))
+  (error
+    'editor-tests
+    "failed word kill changed editor state"))
+(editor-close! protected-editor)
+
 (define prompt-document (make-document "body" 91))
 (define prompt-buffer
   (make-buffer

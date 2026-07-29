@@ -56,6 +56,8 @@
           editor-push-kill!
           editor-record-kill!
           editor-current-kill
+          editor-copy-buffer-range!
+          editor-kill-buffer-range!
           editor-last-command-class
           editor-register-command!
           editor-bind-key!
@@ -272,6 +274,7 @@
           (soda editor file)
           (soda editor input-state)
           (soda editor interaction)
+          (soda editor kill)
           (soda editor prompt)
           (soda editor prompt-commands)
           (soda editor prompt-runtime)
