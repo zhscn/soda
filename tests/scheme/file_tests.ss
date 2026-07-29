@@ -16,7 +16,8 @@
         (soda editor vfs-runtime)
         (soda editor keymap)
         (soda editor prompt)
-        (soda runtime))
+        (soda runtime)
+        (soda vfs))
 
 (unless
   (and
@@ -43,12 +44,15 @@
 (define save-as-path (getenv "SODA_EDITOR_SAVE_AS_TEST_FILE"))
 (define open-path (getenv "SODA_EDITOR_OPEN_TEST_FILE"))
 (define new-path (string-append save-as-path ".new"))
+(define external-path (string-append save-as-path ".external.sls"))
 (when (file-exists? save-path)
   (delete-file save-path))
 (when (file-exists? save-as-path)
   (delete-file save-as-path))
 (when (file-exists? new-path)
   (delete-file new-path))
+(when (file-exists? external-path)
+  (delete-file external-path))
 
 (define document (make-document "base" 801))
 (define buffer
@@ -131,7 +135,7 @@
                    (car events))])
            (when message
              (dispatch! message))
-           (if (eq? (event-kind (car events)) 'file-write)
+           (if message
                (car events)
                (find (cdr events))))]))))
 
@@ -175,7 +179,7 @@
                (find (cdr events))))]
         [else (find (cdr events))]))))
 
-(define (insert! offset text)
+(define (insert-into! target offset text)
   (let ([change #f])
     (dynamic-wind
       (lambda () #f)
@@ -183,7 +187,7 @@
         (call-with-values
           (lambda ()
             (call-with-buffer-transaction
-              buffer
+              target
               (lambda (transaction)
                 (transaction-insert!
                   transaction
@@ -196,6 +200,9 @@
         (when change
           (change-close! change))))))
 
+(define (insert! offset text)
+  (insert-into! buffer offset text))
+
 (define (read-file-bytes path)
   (let ([source (runtime-read-file! runtime path)])
     (let loop ()
@@ -205,6 +212,19 @@
           [(and (= (event-source (car events)) source)
                 (eq? (event-kind (car events)) 'file-read))
            (event-data (car events))]
+          [else (find (cdr events))])))))
+
+(define (write-file-bytes path data)
+  (let ([source (runtime-write-file! runtime path data)])
+    (let loop ()
+      (let find ([events (runtime-poll! runtime)])
+        (cond
+          [(null? events) (loop)]
+          [(and (= (event-source (car events)) source)
+                (eq? (event-kind (car events)) 'file-write))
+           (unless (zero? (event-status (car events)))
+             (error 'file-tests "cannot prepare test file" path))
+           (car events)]
           [else (find (cdr events))])))))
 
 (dispatch! (make-command-message 'file.save #f))
@@ -515,13 +535,14 @@
 
 (define coalesced-view
   (editor-open-view! editor (buffer-id buffer)))
+(write-file-bytes external-path (read-file-bytes open-path))
 (dispatch!
   (make-command-message
     'file.open-path
     (make-prompt-result
       100
       'accepted
-      open-path
+      external-path
       origin-view-id
       #f)))
 (dispatch!
@@ -530,7 +551,7 @@
     (make-prompt-result
       100
       'accepted
-      open-path
+      external-path
       (view-id coalesced-view)
       #f)))
 (define opened-event (finish-file-read!))
@@ -539,9 +560,14 @@
   (and
     (zero? (event-status opened-event))
     (= (length (editor-buffers editor)) 2)
-    (string=? (buffer-file-path opened-buffer) open-path)
+    (string=? (buffer-file-path opened-buffer) external-path)
     (eq? (view-buffer coalesced-view) opened-buffer)
     (eq? (buffer-major-mode-name opened-buffer) 'scheme-mode)
+    (vfs-stat?
+      (buffer-setting-ref
+        opened-buffer
+        'file-observed-state
+        #f))
     (positive? (bytevector-length (event-data opened-event)))
     (not (buffer-modified? opened-buffer))
     (string-contains? (editor-status-message editor) "Opened"))
@@ -553,7 +579,7 @@
     (make-prompt-result
       101
       'accepted
-      open-path
+      external-path
       origin-view-id
       #f)))
 (unless
@@ -564,6 +590,25 @@
       (editor-status-message editor)
       "Switched"))
   (error 'file-tests "opening an existing path duplicated its buffer"))
+
+(insert-into! opened-buffer 0 "local edit\n")
+(write-file-bytes
+  external-path
+  (string->utf8 "externally replaced\n"))
+(dispatch! (make-command-message 'file.save #f))
+(finish-file-write!)
+(unless
+  (and
+    (buffer-modified? opened-buffer)
+    (not (buffer-save-pending? opened-buffer))
+    (bytevector=?
+      (read-file-bytes external-path)
+      (string->utf8 "externally replaced\n"))
+    (string-contains?
+      (editor-status-message editor)
+      "changed on disk"))
+  (error 'file-tests
+         "save overwrote an externally modified file"))
 
 (dispatch! (make-command-message 'buffer.switch #f))
 (define switch-session (editor-active-prompt editor))
@@ -640,6 +685,23 @@
   (error 'file-tests
          "missing file did not create a visiting buffer"))
 
+(write-file-bytes new-path (string->utf8 "raced creation\n"))
+(dispatch! (make-command-message 'file.save #f))
+(finish-file-write!)
+(unless
+  (and
+    (buffer-modified? new-file-buffer)
+    (not (buffer-save-pending? new-file-buffer))
+    (bytevector=?
+      (read-file-bytes new-path)
+      (string->utf8 "raced creation\n"))
+    (string-contains?
+      (editor-status-message editor)
+      "changed on disk"))
+  (error 'file-tests
+         "first save overwrote a path created after opening"))
+
+(delete-file new-path)
 (dispatch! (make-command-message 'file.save #f))
 (finish-file-write!)
 (unless
@@ -661,3 +723,5 @@
   (delete-file save-as-path))
 (when (file-exists? new-path)
   (delete-file new-path))
+(when (file-exists? external-path)
+  (delete-file external-path))

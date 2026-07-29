@@ -18,6 +18,7 @@
           vfs-stat-mtime-nanoseconds
           vfs-stat-device
           vfs-stat-inode
+          vfs-stat-same-version?
           decode-vfs-stat)
   (import (rnrs)
           (only (chezscheme)
@@ -267,4 +268,21 @@
       (unsigned-u64->signed
         (bytevector-u64-little-endian data 16))
       (bytevector-u64-little-endian data 24)
-      (bytevector-u64-little-endian data 32))))
+      (bytevector-u64-little-endian data 32)))
+
+  (define (vfs-stat-same-version? left right)
+    (unless (and (vfs-stat? left) (vfs-stat? right))
+      (assertion-violation
+        'vfs-stat-same-version?
+        "expected two VFS stat values"
+        left
+        right))
+    (and
+      (eq? (vfs-stat-kind left) (vfs-stat-kind right))
+      (= (vfs-stat-size left) (vfs-stat-size right))
+      (= (vfs-stat-mtime-seconds left)
+         (vfs-stat-mtime-seconds right))
+      (= (vfs-stat-mtime-nanoseconds left)
+         (vfs-stat-mtime-nanoseconds right))
+      (= (vfs-stat-device left) (vfs-stat-device right))
+      (= (vfs-stat-inode left) (vfs-stat-inode right)))))

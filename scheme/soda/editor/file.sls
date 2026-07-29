@@ -16,6 +16,7 @@
           open-result-error-name
           open-result-detail
           open-result-kind
+          open-result-stat
           make-save-request
           save-request?
           save-request-buffer-id
@@ -24,6 +25,7 @@
           save-request-path
           save-request-data
           save-request-adopt-path?
+          save-request-expected-state
           make-save-result
           save-result?
           save-result-buffer-id
@@ -32,7 +34,8 @@
           save-result-path
           save-result-status
           save-result-detail
-          save-result-adopt-path?)
+          save-result-adopt-path?
+          save-result-observed-state)
   (import (rnrs)
           (only (chezscheme)
                 current-directory)
@@ -53,14 +56,20 @@
 
   (define-record-type
     (open-result %make-open-result open-result?)
-    (fields view-ids path status data error-name detail kind))
+    (fields view-ids path status data error-name detail kind stat))
 
   (define (open-result-view-id result)
     (car (open-result-view-ids result)))
 
   (define-record-type
     (save-request %make-save-request save-request?)
-    (fields buffer-id document-id revision path data adopt-path?))
+    (fields buffer-id
+            document-id
+            revision
+            path
+            data
+            adopt-path?
+            expected-state))
 
   (define-record-type
     (save-result %make-save-result save-result?)
@@ -70,7 +79,8 @@
             path
             status
             detail
-            adopt-path?))
+            adopt-path?
+            observed-state))
 
   (define (exact-non-negative-integer? value)
     (and (integer? value) (exact? value) (not (negative? value))))
@@ -109,8 +119,11 @@
            first second third fourth #f fifth))]
       [(view-id path status data error-name detail)
        (make-open-result
-         view-id path status data error-name detail #f)]
+         view-id path status data error-name detail #f #f)]
       [(views path status data error-name detail kind)
+       (make-open-result
+         views path status data error-name detail kind #f)]
+      [(views path status data error-name detail kind stat)
        (let ([view-ids (if (list? views) views (list views))])
        (unless
          (and (pair? view-ids)
@@ -149,8 +162,13 @@
            'make-open-result
            "kind must be a symbol or #f"
            kind))
+       (unless (or (not stat) (vfs-stat? stat))
+         (assertion-violation
+           'make-open-result
+           "stat must be a VFS stat value or #f"
+           stat))
        (%make-open-result
-         view-ids path status data error-name detail kind))]))
+         view-ids path status data error-name detail kind stat))]))
 
   (define (detect-file-line-ending bytes)
     (unless (bytevector? bytes)
@@ -236,6 +254,21 @@
          data
          #f)]
       [(buffer-id document-id revision path data adopt-path?)
+       (make-save-request
+         buffer-id
+         document-id
+         revision
+         path
+         data
+         adopt-path?
+         #f)]
+      [(buffer-id
+         document-id
+         revision
+         path
+         data
+         adopt-path?
+         expected-state)
        (unless (and (exact-non-negative-integer? buffer-id)
                     (exact-non-negative-integer? document-id)
                     (exact-non-negative-integer? revision))
@@ -260,13 +293,23 @@
            'make-save-request
            "adopt-path flag must be a boolean"
            adopt-path?))
+       (unless
+         (or
+           (not expected-state)
+           (eq? expected-state 'missing)
+           (vfs-stat? expected-state))
+         (assertion-violation
+           'make-save-request
+           "expected state must be a VFS stat value, missing, or #f"
+           expected-state))
        (%make-save-request
          buffer-id
          document-id
          revision
          path
          data
-         adopt-path?)]))
+         adopt-path?
+         expected-state)]))
 
   (define make-save-result
     (case-lambda
@@ -283,7 +326,8 @@
          (save-request-path request)
          status
          detail
-         (save-request-adopt-path? request))]
+         (save-request-adopt-path? request)
+         #f)]
       [(buffer-id document-id revision path status detail)
        (make-save-result
          buffer-id
@@ -292,6 +336,7 @@
          path
          status
          detail
+         #f
          #f)]
       [(buffer-id
          document-id
@@ -300,6 +345,23 @@
          status
          detail
          adopt-path?)
+       (make-save-result
+         buffer-id
+         document-id
+         revision
+         path
+         status
+         detail
+         adopt-path?
+         #f)]
+      [(buffer-id
+         document-id
+         revision
+         path
+         status
+         detail
+         adopt-path?
+         observed-state)
        (unless (and (exact-non-negative-integer? buffer-id)
                     (exact-non-negative-integer? document-id)
                     (exact-non-negative-integer? revision))
@@ -329,6 +391,15 @@
            'make-save-result
            "adopt-path flag must be a boolean"
            adopt-path?))
+       (unless
+         (or
+           (not observed-state)
+           (eq? observed-state 'missing)
+           (vfs-stat? observed-state))
+         (assertion-violation
+           'make-save-result
+           "observed state must be a VFS stat value, missing, or #f"
+           observed-state))
        (%make-save-result
          buffer-id
          document-id
@@ -336,7 +407,8 @@
          path
          status
          detail
-         adopt-path?)]))
+         adopt-path?
+         observed-state)]))
 
   (define (encode-file-data data line-ending)
     (case line-ending
@@ -389,7 +461,19 @@
                       buffer
                       'file-line-ending
                       'lf))
-                  adopt-path?))
+                  adopt-path?
+                  (if
+                    (and
+                      adopt-path?
+                      (let ([current (buffer-file-path buffer)])
+                        (or
+                          (not current)
+                          (not (string=? current path)))))
+                    #f
+                    (buffer-setting-ref
+                      buffer
+                      'file-observed-state
+                      #f))))
               (lambda () (text-close! text)))))
         (lambda () (snapshot-close! snapshot)))))
 
@@ -518,6 +602,13 @@
           buffer
           'file-needs-save?
           #t))
+      (buffer-set-local-setting!
+        buffer
+        'file-observed-state
+        (if
+          new-file?
+          'missing
+          (open-result-stat result)))
       (if
         (fold-left
           (lambda (activated? view-id)
@@ -740,7 +831,11 @@
         (when success?
           (buffer-clear-local-setting!
             buffer
-            'file-needs-save?))
+            'file-needs-save?)
+          (buffer-set-local-setting!
+            buffer
+            'file-observed-state
+            (save-result-observed-state result)))
         (editor-set-status-message!
           editor
           (cond

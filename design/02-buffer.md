@@ -107,6 +107,7 @@ Buffer {
   saved_undo_node,
   pending_save_revision?,
   pending_save_undo_node?,
+  file_observed_state?,
   language_catalog,
   major_mode_name,
   local_settings,
@@ -128,7 +129,8 @@ undo、redo 后同步 language runtime。
 
 文件加载边界在 Document 规范化换行前记录 `file-line-ending`。Document 和编辑
 命令统一使用 LF；保存 request 按该设置重新编码为 LF、CRLF 或 CR，使整文件写入
-保持资源原有的换行约定。
+保持资源原有的换行约定。访问本地文件的 Buffer 还记录最近一次成功读取或保存后的
+文件状态；新文件记录 `missing`。
 
 Buffer 的 `revision` 是已经被 Buffer 及其 language runtime 接受的 Document
 revision。Scheme 编辑命令通过 `call-with-buffer-transaction` 修改文本；该边界提交
@@ -159,6 +161,7 @@ runtime adapter 先异步 stat 路径，再按结果进入目录、读取或新�
 打开以该目录为初值的 find-file，普通文件启动异步 read，`ENOENT` 直接进入新文件
 分支。文件内容和完成状态以 internal command 返回 editor。成功结果创建带
 `file_path` 的 Buffer，根据路径选择初始 major mode，并记录原始换行约定。
+成功 stat 的文件状态随读取结果进入 Buffer，作为后续保存的版本前提。
 
 runtime 把 libuv status 转换成稳定的错误名和消息。`ENOENT` 结果创建一个访问该
 路径的空 Buffer，并设置首次保存要求；该 Buffer 即使尚无文本编辑也处于 modified
@@ -192,14 +195,21 @@ SaveRequest {
   revision,
   path,
   bytes,
-  adopt_path
+  adopt_path,
+  expected_state
 }
 ```
 
 Buffer 同时只有一个 pending save，并保存 request 对应的 undo node。runtime
-effect 在目标目录创建临时文件，写入全部 bytes，执行 `fsync`，保留已有目标的
+在写入前异步 stat 目标，并将文件类型、大小、修改时间、设备号和 inode 与
+`expected_state` 比较。访问既有文件的 request 要求状态一致；以 `missing` 打开的
+新文件要求目标仍不存在。状态不一致时拒绝写入，Buffer 保持 modified，供用户重新
+读取或另存为。另存到不同路径不继承原资源的状态前提。
+
+runtime effect 在目标目录创建临时文件，写入全部 bytes，执行 `fsync`，保留已有目标的
 权限，再以 rename 原子替换目标。失败时移除临时文件，原目标内容保持不变；完成
-事件再进入 command loop。
+事件再进入 command loop。写入后再次异步 stat 目标，成功结果携带新的文件状态；
+只有状态刷新成功才推进 Buffer 保存点。
 
 成功完成把 `saved_revision` 和 saved undo node 推进到 request 对应的 snapshot。
 写入期间发生的新编辑位于另一个 undo node，仍保持 modified。失败清除 pending

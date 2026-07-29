@@ -66,7 +66,7 @@
 
   (define (load-bytes runtime path)
     (if (not path)
-        (values (make-bytevector 0) #f)
+        (values (make-bytevector 0) #f #f)
         (let ([stat-source (runtime-stat-path! runtime path)])
           (let loop ()
             (let find ([events (runtime-poll! runtime)])
@@ -84,7 +84,11 @@
                         "startup resource is a directory"
                         path)]
                      [(zero? status)
-                      (let ([read-source
+                      (let ([stat
+                              (decode-vfs-stat
+                                (event-flags (car events))
+                                (event-data (car events)))]
+                            [read-source
                               (runtime-read-file! runtime path)])
                         (let read-loop ()
                           (let read-find
@@ -102,7 +106,8 @@
                                    (event-status (car read-events)))
                                  (values
                                    (event-data (car read-events))
-                                   #f)
+                                   #f
+                                   stat)
                                  (error
                                    'run-tui-editor
                                    "cannot read file"
@@ -116,7 +121,7 @@
                      [(string=?
                         (runtime-status-name status)
                         "ENOENT")
-                      (values (make-bytevector 0) #t)]
+                      (values (make-bytevector 0) #t 'missing)]
                      [else
                       (error
                         'run-tui-editor
@@ -423,13 +428,18 @@
                     path))])
           (call-with-values
           (lambda () (load-bytes runtime resource))
-          (lambda (bytes new-file?)
+          (lambda (bytes new-file? observed-state)
             (call-with-editor
               bytes
               (or resource "*scratch*")
               resource
               new-file?
               (lambda (editor)
+                (when observed-state
+                  (buffer-set-local-setting!
+                    (view-buffer (editor-active-view editor))
+                    'file-observed-state
+                    observed-state))
                 (call-with-terminal
                   (lambda (terminal)
                     (run-editor-session
