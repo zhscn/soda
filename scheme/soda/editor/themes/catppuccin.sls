@@ -53,14 +53,22 @@
         (cons 'selection (pface 'inherit 'surface2 '()))
         (cons 'line-number (pface 'overlay0 'base '()))
         (cons 'syntax-comment (pface 'overlay1 'inherit '(italic)))
+        (cons 'syntax-doc-comment (pface 'overlay1 'inherit '(italic bold)))
         (cons 'syntax-string (pface 'green 'inherit '()))
         (cons 'syntax-constant (pface 'peach 'inherit '()))
         (cons 'syntax-number (pface 'peach 'inherit '()))
         (cons 'syntax-keyword (pface 'mauve 'inherit '(bold)))
         (cons 'syntax-builtin (pface 'blue 'inherit '()))
         (cons 'syntax-definition (pface 'blue 'inherit '(bold)))
+        (cons 'syntax-function (pface 'blue 'inherit '(bold)))
+        (cons 'syntax-function-call (pface 'blue 'inherit '()))
+        (cons 'syntax-variable (pface 'rosewater 'inherit '()))
+        (cons 'syntax-property (pface 'teal 'inherit '()))
+        (cons 'syntax-label (pface 'peach 'inherit '(bold)))
         (cons 'syntax-type (pface 'yellow 'inherit '()))
         (cons 'syntax-delimiter (pface 'overlay2 'inherit '()))
+        (cons 'syntax-bracket (pface 'overlay2 'inherit '()))
+        (cons 'syntax-operator (pface 'sapphire 'inherit '()))
         (cons 'syntax-preprocessor (pface 'mauve 'inherit '()))
         (cons 'syntax-invalid (pface 'red 'inherit '(underline)))
         (cons 'diagnostic-error (pface 'red 'inherit '(underline)))
@@ -71,6 +79,7 @@
 
   (define latte-palette
     (list
+      (cons 'rosewater (rgb #xdc #x8a #x78))
       (cons 'red (rgb #xd2 #x0f #x39))
       (cons 'peach (rgb #xfe #x64 #x0b))
       (cons 'yellow (rgb #xdf #x8e #x1d))
@@ -90,6 +99,7 @@
 
   (define frappe-palette
     (list
+      (cons 'rosewater (rgb #xf2 #xd5 #xcf))
       (cons 'red (rgb #xe7 #x82 #x84))
       (cons 'peach (rgb #xef #x9f #x76))
       (cons 'yellow (rgb #xe5 #xc8 #x90))
@@ -109,6 +119,7 @@
 
   (define macchiato-palette
     (list
+      (cons 'rosewater (rgb #xf4 #xdb #xd6))
       (cons 'red (rgb #xed #x87 #x96))
       (cons 'peach (rgb #xf5 #xa9 #x7f))
       (cons 'yellow (rgb #xee #xd4 #x9f))
@@ -128,6 +139,7 @@
 
   (define mocha-palette
     (list
+      (cons 'rosewater (rgb #xf5 #xe0 #xdc))
       (cons 'red (rgb #xf3 #x8b #xa8))
       (cons 'peach (rgb #xfa #xb3 #x87))
       (cons 'yellow (rgb #xf9 #xe2 #xaf))

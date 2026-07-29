@@ -78,7 +78,15 @@
        type
        delimiter
        preprocessor
-       invalid))
+       invalid
+       doc-comment
+       function-name
+       function-call
+       variable-name
+       property-name
+       label
+       operator
+       bracket))
 
   (define-record-type cpp-highlight
     (fields category start end))
@@ -89,7 +97,7 @@
     (foreign-procedure __atomic "soda_cpp_analysis_last_error" () string))
 
   (define abi-version-checked
-    (unless (= (%abi-version) 2)
+    (unless (= (%abi-version) 3)
       (error 'soda-cpp-analysis "unsupported native C++ analysis ABI version")))
 
   (define %analyzer-create

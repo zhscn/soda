@@ -3,6 +3,7 @@
 #include "document/c_api_internal.hpp"
 #include "syntax/analysis.hpp"
 #include "syntax/c_api_internal.hpp"
+#include "syntax/highlighting.hpp"
 #include "syntax/structure.hpp"
 #include "syntax/syntax_kind.hpp"
 
@@ -19,15 +20,19 @@
 #include <thread>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 static_assert(static_cast<int>(soda::SyntaxKind::TranslationUnit) == SODA_SYNTAX_TRANSLATION_UNIT);
 static_assert(static_cast<int>(soda::SyntaxKind::Error) == SODA_SYNTAX_ERROR);
+static_assert(static_cast<int>(soda::HighlightKind::None) == SODA_CPP_HIGHLIGHT_NONE);
+static_assert(static_cast<int>(soda::HighlightKind::Bracket) == SODA_CPP_HIGHLIGHT_BRACKET);
 
 struct soda_cpp_analyzer {
     soda::Analyzer value;
     const soda::Analysis* current = nullptr;
     std::optional<soda::DocumentId> document_id;
     std::unordered_set<soda::SyntaxNodeId> known_nodes;
+    mutable std::vector<soda::HighlightKind> highlights;
     const std::thread::id owner = std::this_thread::get_id();
 };
 
@@ -138,93 +143,11 @@ void write_range(soda::TextRange range, std::uint32_t* start, std::uint32_t* end
     *end = range.end.value;
 }
 
-int identifier_highlight(const soda::Analysis& analysis, soda::Token token) {
-    static const std::unordered_set<std::string_view> constants{
-        "false",
-        "nullptr",
-        "true",
-    };
-    static const std::unordered_set<std::string_view> types{
-        "auto",  "bool", "char", "char8_t", "char16_t", "char32_t", "decltype", "double",
-        "float", "int",  "long", "short",   "signed",   "unsigned", "void",     "wchar_t",
-    };
-    static const std::unordered_set<std::string_view> keywords{
-        "alignas",     "alignof",       "and",           "and_eq",
-        "asm",         "atomic_cancel", "atomic_commit", "atomic_noexcept",
-        "bitand",      "bitor",         "break",         "catch",
-        "co_await",    "co_return",     "co_yield",      "compl",
-        "concept",     "const",         "const_cast",    "consteval",
-        "constexpr",   "constinit",     "continue",      "contract_assert",
-        "delete",      "dynamic_cast",  "explicit",      "export",
-        "extern",      "friend",        "goto",          "import",
-        "inline",      "module",        "mutable",       "new",
-        "noexcept",    "not",           "not_eq",        "or",
-        "or_eq",       "reflexpr",      "register",      "reinterpret_cast",
-        "requires",    "sizeof",        "static",        "static_assert",
-        "static_cast", "synchronized",  "this",          "thread_local",
-        "throw",       "try",           "typedef",       "typeid",
-        "typename",    "using",         "virtual",       "volatile",
-        "xor",         "xor_eq",
-    };
-    const std::string identifier = analysis.text.substring(token.range);
-    const std::string_view name(identifier);
-    if (constants.contains(name)) {
-        return SODA_CPP_HIGHLIGHT_CONSTANT;
+const std::vector<soda::HighlightKind>& current_highlights(const soda_cpp_analyzer& analyzer) {
+    if (analyzer.highlights.empty()) {
+        analyzer.highlights = soda::classify_highlights(current_analysis(analyzer));
     }
-    if (types.contains(name)) {
-        return SODA_CPP_HIGHLIGHT_TYPE;
-    }
-    if (keywords.contains(name)) {
-        return SODA_CPP_HIGHLIGHT_KEYWORD;
-    }
-    return SODA_CPP_HIGHLIGHT_NONE;
-}
-
-int token_highlight(const soda::Analysis& analysis, soda::Token token) {
-    using soda::LexicalFlags;
-    using soda::TokenKind;
-
-    switch (token.kind) {
-    case TokenKind::LineComment:
-    case TokenKind::BlockComment:
-        return SODA_CPP_HIGHLIGHT_COMMENT;
-    case TokenKind::StringLiteral:
-    case TokenKind::RawStringLiteral:
-        return SODA_CPP_HIGHLIGHT_STRING;
-    case TokenKind::CharacterLiteral:
-        return SODA_CPP_HIGHLIGHT_CONSTANT;
-    case TokenKind::Number:
-        return SODA_CPP_HIGHLIGHT_NUMBER;
-    case TokenKind::Invalid:
-        return SODA_CPP_HIGHLIGHT_INVALID;
-    default:
-        break;
-    }
-
-    if (soda::has_flag(token.flags, LexicalFlags::PreprocessorLine)) {
-        return token.kind == TokenKind::Whitespace || token.kind == TokenKind::Newline
-                   ? SODA_CPP_HIGHLIGHT_NONE
-                   : SODA_CPP_HIGHLIGHT_PREPROCESSOR;
-    }
-
-    if (token.kind >= TokenKind::NamespaceKw && token.kind <= TokenKind::OperatorKw) {
-        return SODA_CPP_HIGHLIGHT_KEYWORD;
-    }
-    switch (token.kind) {
-    case TokenKind::Identifier:
-        return identifier_highlight(analysis, token);
-    case TokenKind::LBrace:
-    case TokenKind::RBrace:
-    case TokenKind::LParen:
-    case TokenKind::RParen:
-    case TokenKind::LBracket:
-    case TokenKind::RBracket:
-    case TokenKind::Comma:
-    case TokenKind::Semicolon:
-        return SODA_CPP_HIGHLIGHT_DELIMITER;
-    default:
-        return SODA_CPP_HIGHLIGHT_NONE;
-    }
+    return analyzer.highlights;
 }
 
 template <typename Query>
@@ -262,6 +185,7 @@ const Analysis& resync_analyzer(soda_cpp_analyzer& analyzer, const DocumentSnaps
     require_owner(analyzer);
     analyzer.current = &analyzer.value.analyze(snapshot);
     analyzer.document_id = snapshot.document_id();
+    analyzer.highlights.clear();
     reset_nodes(analyzer);
     return *analyzer.current;
 }
@@ -432,7 +356,7 @@ int soda_cpp_analyzer_node_incomplete(soda_cpp_analyzer* analyzer, uint32_t node
 
 uint32_t soda_cpp_analyzer_highlight_count(const soda_cpp_analyzer* analyzer) {
     return guard<std::uint32_t>(SODA_SYNTAX_NODE_NONE, [&] {
-        const std::size_t count = current_analysis(analyzer_handle(analyzer)).tree.tokens().size();
+        const std::size_t count = current_highlights(analyzer_handle(analyzer)).size();
         if (count > std::numeric_limits<std::uint32_t>::max()) {
             throw std::overflow_error("highlight token count exceeds the ABI range");
         }
@@ -446,12 +370,13 @@ int soda_cpp_analyzer_highlight_at(soda_cpp_analyzer* analyzer, uint32_t token_i
         auto& handle = analyzer_handle(analyzer);
         const auto& analysis = current_analysis(handle);
         const auto& tokens = analysis.tree.tokens();
-        if (token_index >= tokens.size()) {
+        const auto& highlights = current_highlights(handle);
+        if (token_index >= highlights.size()) {
             throw std::out_of_range("highlight token index is out of range");
         }
         const soda::Token token = tokens[token_index];
         write_range(token.range, start, end);
-        return token_highlight(analysis, token);
+        return static_cast<int>(highlights[token_index]);
     });
 }
 

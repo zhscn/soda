@@ -36,6 +36,14 @@
       [(delimiter) 'syntax-delimiter]
       [(preprocessor) 'syntax-preprocessor]
       [(invalid) 'syntax-invalid]
+      [(doc-comment) 'syntax-doc-comment]
+      [(function-name) 'syntax-function]
+      [(function-call) 'syntax-function-call]
+      [(variable-name) 'syntax-variable]
+      [(property-name) 'syntax-property]
+      [(label) 'syntax-label]
+      [(operator) 'syntax-operator]
+      [(bracket) 'syntax-bracket]
       [else #f]))
 
   (define (cpp-highlight-index analyzer)

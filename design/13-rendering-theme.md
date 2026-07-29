@@ -72,6 +72,17 @@ FaceSpec {
 }
 ```
 
+base syntax 使用稳定的语义 face 词汇，包括 comment、doc-comment、string、
+constant、number、keyword、builtin、type、function、function-call、variable、
+property、label、operator、bracket、delimiter、preprocessor 与 invalid。producer
+选择能够可靠判断的最具体 face；无法区分声明和引用的 identifier 保持 default，
+由 semantic refinement layer 在具备 symbol 信息时继续细化。
+
+C++ provider 先从增量 token snapshot 生成词法分类，再用同 revision 的 syntax tree
+识别类型声明、函数与变量 declarator、class property、枚举常量、goto label 和宏
+参数。分类结果按 buffer revision 缓存为 DecorationIndex，viewport 查询不重新运行
+语言分析。
+
 face name 使用从一般到具体的层级名称：
 
 ```text

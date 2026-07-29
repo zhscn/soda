@@ -20,7 +20,7 @@ extern "C" {
 
 typedef struct soda_cpp_analyzer soda_cpp_analyzer;
 
-#define SODA_CPP_ANALYSIS_ABI_VERSION 2U
+#define SODA_CPP_ANALYSIS_ABI_VERSION 3U
 #define SODA_SYNTAX_NODE_NONE UINT32_MAX
 #define SODA_CPP_ANALYSIS_REVISION_NONE UINT64_MAX
 
@@ -62,6 +62,14 @@ typedef struct soda_cpp_analyzer soda_cpp_analyzer;
 #define SODA_CPP_HIGHLIGHT_DELIMITER 7
 #define SODA_CPP_HIGHLIGHT_PREPROCESSOR 8
 #define SODA_CPP_HIGHLIGHT_INVALID 9
+#define SODA_CPP_HIGHLIGHT_DOC_COMMENT 10
+#define SODA_CPP_HIGHLIGHT_FUNCTION_NAME 11
+#define SODA_CPP_HIGHLIGHT_FUNCTION_CALL 12
+#define SODA_CPP_HIGHLIGHT_VARIABLE_NAME 13
+#define SODA_CPP_HIGHLIGHT_PROPERTY_NAME 14
+#define SODA_CPP_HIGHLIGHT_LABEL 15
+#define SODA_CPP_HIGHLIGHT_OPERATOR 16
+#define SODA_CPP_HIGHLIGHT_BRACKET 17
 
 // An analyzer is mutable, belongs to its creating thread, and retains the
 // latest analyzed snapshot. Node ids are valid only until the next operation

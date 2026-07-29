@@ -152,6 +152,81 @@ TEST_CASE("analysis ABI classifies revisioned lexical highlights") {
     CHECK(std::strlen(soda_cpp_analysis_last_error()) != 0);
 }
 
+TEST_CASE("analysis ABI applies C++ declaration faces") {
+    constexpr std::string_view source = R"cpp(/** docs */
+#define SCALE(x) ((x) * 2)
+enum class Color { Red, Blue };
+struct Widget {
+    int field;
+    int method(int value);
+};
+int Widget::method(int value) {
+label:
+    field = helper(value) + SCALE(value);
+    left + right;
+    goto label;
+}
+)cpp";
+    DocumentHandle document = make_document(source);
+    SnapshotHandle snapshot(soda_document_snapshot(document.get()));
+    AnalyzerHandle analyzer(soda_cpp_analyzer_create());
+    REQUIRE(soda_cpp_analyzer_analyze(analyzer.get(), snapshot.get()) == 0);
+
+    bool doc_comment = false;
+    bool macro_function = false;
+    bool macro_parameter = false;
+    bool declared_type = false;
+    bool enum_constant = false;
+    bool property = false;
+    bool function_name = false;
+    bool parameter = false;
+    bool function_call = false;
+    bool label = false;
+    bool op = false;
+    bool bracket = false;
+    bool plain_expression_identifiers = true;
+    int plain_expression_identifier_count = 0;
+    const std::uint32_t count = soda_cpp_analyzer_highlight_count(analyzer.get());
+    REQUIRE(count != SODA_SYNTAX_NODE_NONE);
+    for (std::uint32_t index = 0; index < count; ++index) {
+        std::uint32_t start = 0;
+        std::uint32_t end = 0;
+        const int category = soda_cpp_analyzer_highlight_at(analyzer.get(), index, &start, &end);
+        REQUIRE(category >= SODA_CPP_HIGHLIGHT_NONE);
+        const std::string_view spelling = source.substr(start, end - start);
+        doc_comment |= category == SODA_CPP_HIGHLIGHT_DOC_COMMENT && spelling == "/** docs */";
+        macro_function |= category == SODA_CPP_HIGHLIGHT_FUNCTION_NAME && spelling == "SCALE";
+        macro_parameter |= category == SODA_CPP_HIGHLIGHT_VARIABLE_NAME && spelling == "x";
+        declared_type |= category == SODA_CPP_HIGHLIGHT_TYPE && spelling == "Widget";
+        enum_constant |= category == SODA_CPP_HIGHLIGHT_CONSTANT && spelling == "Red";
+        property |= category == SODA_CPP_HIGHLIGHT_PROPERTY_NAME && spelling == "field";
+        function_name |= category == SODA_CPP_HIGHLIGHT_FUNCTION_NAME && spelling == "method";
+        parameter |= category == SODA_CPP_HIGHLIGHT_VARIABLE_NAME && spelling == "value";
+        function_call |= category == SODA_CPP_HIGHLIGHT_FUNCTION_CALL && spelling == "helper";
+        label |= category == SODA_CPP_HIGHLIGHT_LABEL && spelling == "label";
+        op |= category == SODA_CPP_HIGHLIGHT_OPERATOR && spelling == "+";
+        bracket |= category == SODA_CPP_HIGHLIGHT_BRACKET && spelling == "{";
+        if (spelling == "left" || spelling == "right") {
+            plain_expression_identifiers &= category == SODA_CPP_HIGHLIGHT_NONE;
+            ++plain_expression_identifier_count;
+        }
+    }
+    CHECK(doc_comment);
+    CHECK(macro_function);
+    CHECK(macro_parameter);
+    CHECK(declared_type);
+    CHECK(enum_constant);
+    CHECK(property);
+    CHECK(function_name);
+    CHECK(parameter);
+    CHECK(function_call);
+    CHECK(label);
+    CHECK(op);
+    CHECK(bracket);
+    CHECK(plain_expression_identifiers);
+    CHECK(plain_expression_identifier_count == 2);
+}
+
 TEST_CASE("analysis ABI rejects stale and fabricated node ids") {
     DocumentHandle document = make_document("int value;\n");
     SnapshotHandle snapshot(soda_document_snapshot(document.get()));

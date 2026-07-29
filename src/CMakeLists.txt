@@ -19,6 +19,7 @@ add_library(soda_cpp_analysis SHARED
   syntax/c_api.cpp
   syntax/analysis.cpp
   syntax/green_node.cpp
+  syntax/highlighting.cpp
   syntax/parser.cpp
   syntax/structure.cpp
   syntax/syntax_tree.cpp

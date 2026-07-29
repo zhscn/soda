@@ -2472,6 +2472,46 @@
            "C++ highlights did not follow the buffer revision")))
 (editor-close! cpp-highlight-editor)
 
+(define cpp-declaration-highlight-document
+  (make-document
+    "struct Widget { int field; };\nint run(int value) { return value + helper(value); }\n"
+    987))
+(define cpp-declaration-highlight-buffer
+  (make-buffer
+    987
+    cpp-declaration-highlight-document
+    "faces.cpp"
+    'cpp-mode))
+(define cpp-declaration-highlight-editor
+  (make-editor cpp-declaration-highlight-buffer))
+(editor-update!
+  cpp-declaration-highlight-editor
+  (make-resize-message 5 90))
+(let ([frame
+        (render-editor-frame
+          cpp-declaration-highlight-editor
+          5
+          90)])
+  (unless
+    (and
+      (memq 'syntax-type
+            (cell-faces (frame-cell-ref frame 0 7)))
+      (memq 'syntax-property
+            (cell-faces (frame-cell-ref frame 0 20)))
+      (memq 'syntax-function
+            (cell-faces (frame-cell-ref frame 1 4)))
+      (memq 'syntax-variable
+            (cell-faces (frame-cell-ref frame 1 12)))
+      (memq 'syntax-operator
+            (cell-faces (frame-cell-ref frame 1 34)))
+      (memq 'syntax-function-call
+            (cell-faces (frame-cell-ref frame 1 36)))
+      (memq 'syntax-bracket
+            (cell-faces (frame-cell-ref frame 1 7))))
+    (error 'editor-tests
+           "C++ declaration faces did not reach the rendered frame")))
+(editor-close! cpp-declaration-highlight-editor)
+
 (define cpp-indent-document
   (make-document
     "int main() {\nreturn 0;\n}\n"
