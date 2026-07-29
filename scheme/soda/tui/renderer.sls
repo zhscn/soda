@@ -54,6 +54,7 @@
       [(diagnostic-warning) (make-style 214 'default '(underline))]
       [(diagnostic-info) (make-style 75 'default '(underline))]
       [(diagnostic-hint) (make-style 244 'default '(underline))]
+      [(completion-match) (make-style 75 'default '(bold))]
       [(selection) selection-style]
       [else default-style]))
 
@@ -590,6 +591,73 @@
             annotation)
           (completion-item-label item))))
 
+  (define (completion-index-matched? match index)
+    (and
+      match
+      (exists
+        (lambda (range)
+          (and (<= (car range) index) (< index (cdr range))))
+        (completion-match-ranges match))))
+
+  (define (draw-completion-item!
+            frame
+            row
+            column
+            columns
+            item
+            match
+            selected?
+            base-faces
+            base-style
+            sources
+            annotation-column)
+    (let* ([label (completion-item-label item)]
+           [highlight?
+             (string=?
+               label
+               (completion-item-filter-text item))])
+      (let loop ([index 0] [cell-column 0])
+        (unless (= index (string-length label))
+          (let* ([character (string-ref label index)]
+                 [width (character-cell-width character)]
+                 [matched?
+                   (and
+                     highlight?
+                     (completion-index-matched? match index))]
+                 [faces
+                   (if matched?
+                       (append base-faces '(completion-match))
+                       base-faces)]
+                 [style
+                   (if matched?
+                       (merge-style
+                         base-style
+                         (face-style 'completion-match))
+                       base-style)])
+            (when (<= (+ cell-column width) columns)
+              (draw-string!
+                frame
+                row
+                (+ column cell-column)
+                (- columns cell-column)
+                (string character)
+                faces
+                style
+                sources))
+            (loop (+ index 1) (+ cell-column width)))))
+      (let ([annotation (completion-item-annotation item)])
+        (when
+          (and annotation (< annotation-column columns))
+          (draw-string!
+            frame
+            row
+            (+ column annotation-column)
+            (- columns annotation-column)
+            annotation
+            base-faces
+            base-style
+            sources)))))
+
   (define (render-completions-component! context frame rectangle)
     (let* ([editor (editor-render-context-editor context)]
            [completion (editor-active-completion editor)]
@@ -611,50 +679,110 @@
       (when completion
         (let ([items (completion-session-items completion)]
               [selected (completion-session-selected-index completion)])
-          (let ([start
-                  (if selected
-                      (max
-                        0
-                        (- selected (- (rect-rows rectangle) 1)))
-                      0)])
-          (do ([row 0 (+ row 1)])
-              ((or (= row (rect-rows rectangle))
-                   (= (+ start row) (length items))))
-            (let* ([item (list-ref items (+ start row))]
-                   [selected?
-                     (and selected (= selected (+ start row)))]
-                   [style
-                     (if selected?
-                         completion-selected-style
-                         default-style)]
-                   [faces
-                     (if selected?
-                         '(completion-selected)
-                         '(completion))]
-                   [sources
-                     (list
-                       (make-cell-source
-                         'completion
-                         (completion-item-id item)
-                         (completion-item-source item))
-                       (component-source component-id))])
-              (frame-fill-rect!
-                frame
-                (make-rect
-                  (+ (rect-row rectangle) row)
-                  (rect-column rectangle)
-                  1
-                  (rect-columns rectangle))
-                (make-cell " " 1 faces style #f sources))
+          (if (null? items)
+            (draw-string!
+              frame
+              (rect-row rectangle)
+              (rect-column rectangle)
+              (rect-columns rectangle)
+              (if
+                (completion-session-pending? completion)
+                "[Pending completions]"
+                "[No match]")
+              '(completion)
+              default-style
+              background-sources)
+            (let* ([start
+                     (if selected
+                         (max
+                           0
+                           (- selected (- (rect-rows rectangle) 1)))
+                         0)]
+                   [visible
+                     (let loop ([remaining (list-tail items start)]
+                                [count (rect-rows rectangle)]
+                                [result '()])
+                       (if (or (zero? count) (null? remaining))
+                           (reverse result)
+                           (loop
+                             (cdr remaining)
+                             (- count 1)
+                             (cons (car remaining) result))))]
+                   [annotation-column
+                     (+
+                       2
+                       (fold-left
+                         (lambda (width item)
+                           (max
+                             width
+                             (string-cell-width
+                               (completion-item-label item)
+                               8)))
+                         0
+                         visible))]
+                   [indicator
+                     (if selected
+                         (string-append
+                           (number->string (+ selected 1))
+                           "/"
+                           (number->string (length items)))
+                         (number->string (length items)))]
+                   [indicator-column
+                     (max
+                       0
+                       (-
+                         (rect-columns rectangle)
+                         (string-cell-width indicator 8)))])
+              (do ([row 0 (+ row 1)])
+                  ((= row (length visible)))
+                (let* ([item (list-ref visible row)]
+                       [item-index (+ start row)]
+                       [selected?
+                         (and selected (= selected item-index))]
+                       [style
+                         (if selected?
+                             completion-selected-style
+                             default-style)]
+                       [faces
+                         (if selected?
+                             '(completion-selected)
+                             '(completion))]
+                       [sources
+                         (list
+                           (make-cell-source
+                             'completion
+                             (completion-item-id item)
+                             (completion-item-source item))
+                           (component-source component-id))])
+                  (frame-fill-rect!
+                    frame
+                    (make-rect
+                      (+ (rect-row rectangle) row)
+                      (rect-column rectangle)
+                      1
+                      (rect-columns rectangle))
+                    (make-cell " " 1 faces style #f sources))
+                  (draw-completion-item!
+                    frame
+                    (+ (rect-row rectangle) row)
+                    (rect-column rectangle)
+                    (rect-columns rectangle)
+                      item
+                    (completion-session-item-match completion item)
+                    selected?
+                    faces
+                    style
+                    sources
+                    annotation-column)))
               (draw-string!
                 frame
-                (+ (rect-row rectangle) row)
-                (rect-column rectangle)
-                (rect-columns rectangle)
-                (completion-row-text item)
-                faces
-                style
-                sources))))))))
+                (rect-row rectangle)
+                (+ (rect-column rectangle) indicator-column)
+                (- (rect-columns rectangle) indicator-column)
+                indicator
+                '(completion)
+                default-style
+                background-sources)))))))
 
   (define editor-text-component
     (make-component 'editor.text render-text-component!))
@@ -791,8 +919,10 @@
              (if prompt-completion
                  (min
                    6
-                   (length
-                     (completion-session-items prompt-completion))
+                   (max
+                     1
+                     (length
+                       (completion-session-items prompt-completion)))
                    (max 0 (- rows 2)))
                  0)]
            [view (editor-base-view editor)]
@@ -1008,8 +1138,10 @@
              (if prompt-completion
                  (min
                    6
-                   (length
-                     (completion-session-items prompt-completion))
+                   (max
+                     1
+                     (length
+                       (completion-session-items prompt-completion)))
                    (max 0 (- rows 2)))
                  0)]
            [root-rectangle (make-rect 0 0 rows columns)]

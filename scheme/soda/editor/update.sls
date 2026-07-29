@@ -185,8 +185,10 @@
                (if completion
                    (min
                      6
-                     (length
-                       (completion-session-items completion))
+                     (max
+                       1
+                       (length
+                         (completion-session-items completion)))
                      (max 0 (- rows 2)))
                    0)]
              [view (editor-base-view editor)]

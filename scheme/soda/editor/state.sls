@@ -26,6 +26,8 @@
           editor-active-prompt
           editor-open-prompt!
           editor-accept-prompt!
+          editor-accept-prompt-input!
+          editor-insert-prompt-completion!
           editor-abort-prompt!
           editor-active-prompt-input
           editor-active-prompt-completion
@@ -983,6 +985,9 @@
         (choice-source-cancel!
           (completion-session-source completion)
           (completion-session-generation completion))
+        (let ([target (completion-session-target completion)])
+          (when (document-completion-target? target)
+            (document-completion-target-close! target)))
         (view-completion-set! view #f)
         (pop-completion-input-state! view))
       completion))
@@ -1000,7 +1005,15 @@
             completion
             allow-revision-change?)
     (let* ([target (completion-session-target completion)]
-           [view (editor-active-view value)])
+           [view (editor-active-view value)]
+           [start
+             (and
+               (document-completion-target? target)
+               (document-completion-target-start target))]
+           [replacement-end
+             (and
+               (document-completion-target? target)
+               (document-completion-target-replacement-end target))])
       (if (or
             (not (document-completion-target? target))
             (not (= (view-id view)
@@ -1016,12 +1029,10 @@
                 (=
                   (buffer-revision (view-buffer view))
                   (document-completion-target-revision target))))
-            (< (view-caret view)
-               (document-completion-target-start target)))
+            (< (view-caret view) start)
+            (> (view-caret view) replacement-end))
           #f
           (let* ([buffer (view-buffer view)]
-                 [start
-                   (document-completion-target-start target)]
                  [end (view-caret view)]
                  [snapshot
                    (document-snapshot (buffer-document buffer))])
@@ -1037,13 +1048,7 @@
                         (cons
                           (utf8->string
                             (text-subbytevector text start end))
-                          (make-document-completion-target
-                            (view-id view)
-                            (buffer-id buffer)
-                            (document-id (buffer-document buffer))
-                            (buffer-revision buffer)
-                            start
-                            end))))
+                          target)))
                     (lambda () (text-close! text)))))
               (lambda () (snapshot-close! snapshot)))))))
 
@@ -1061,9 +1066,10 @@
           (if query+target
               (let ([generation
                       (completion-session-generation completion)])
-                (completion-session-target-set!
-                  completion
-                  (cdr query+target))
+                (document-completion-target-refresh!
+                  (cdr query+target)
+                  (buffer-revision (view-buffer view))
+                  (view-caret view))
                 (completion-session-refresh!
                   completion
                   (car query+target))
@@ -1098,8 +1104,17 @@
          source
          start
          end
+         end
          '())]
       [(value source start end provider-names)
+       (editor-start-document-completion!
+         value
+         source
+         start
+         end
+         end
+         provider-names)]
+      [(value source start end replacement-end provider-names)
        (require-open-editor
          'editor-start-document-completion!
          value)
@@ -1139,13 +1154,16 @@
               [caret (view-caret view)])
          (unless (and (exact-non-negative-integer? start)
                       (exact-non-negative-integer? end)
+                      (exact-non-negative-integer? replacement-end)
                       (<= start end)
+                      (<= end replacement-end)
                       (= end caret))
            (assertion-violation
              'editor-start-document-completion!
              "completion range must end at the active caret"
              start
              end
+             replacement-end
              caret))
          (cancel-view-completion! value view)
          (let* ([id (editor-next-completion-id value)]
@@ -1153,10 +1171,11 @@
                   (make-document-completion-target
                     (view-id view)
                     (buffer-id buffer)
-                    (document-id document)
+                    document
                     (buffer-revision buffer)
                     start
-                    end)]
+                    end
+                    replacement-end)]
                 [completion
                   (make-completion-session
                     id
@@ -1174,8 +1193,137 @@
            (editor-refresh-document-completion! value #f)
            completion))]))
 
-  (define (replace-buffer-range! buffer start end bytes)
-    (let ([change #f])
+  (define (completion-primary-edit item target mode)
+    (let ([edit (completion-item-edit item)])
+      (if edit
+          (case mode
+            [(insert) (completion-edit-insert edit)]
+            [(replace) (completion-edit-replace edit)]
+            [else
+             (assertion-violation
+               'editor-accept-completion!
+               "unknown completion insertion mode"
+               mode)])
+          (make-completion-text-edit
+            (document-completion-target-start target)
+            (case mode
+              [(insert) (document-completion-target-end target)]
+              [(replace)
+               (document-completion-target-replacement-end target)]
+              [else
+               (assertion-violation
+                 'editor-accept-completion!
+                 "unknown completion insertion mode"
+                 mode)])
+            (completion-item-insert-text item)))))
+
+  (define (completion-additional-edits item)
+    (let ([edit (completion-item-edit item)])
+      (if edit (completion-edit-additional-edits edit) '())))
+
+  (define (validate-completion-item-edit! item target)
+    (let ([edit (completion-item-edit item)])
+      (when edit
+        (let ([insert (completion-edit-insert edit)]
+              [replace (completion-edit-replace edit)]
+              [caret (document-completion-target-end target)])
+          (unless
+            (and
+              (<= (completion-text-edit-start insert) caret)
+              (<= caret (completion-text-edit-end insert))
+              (<= (completion-text-edit-start replace)
+                  (completion-text-edit-start insert))
+              (<= (completion-text-edit-end insert)
+                  (completion-text-edit-end replace)))
+            (assertion-violation
+              'editor-accept-completion!
+              "completion insert and replace ranges are incompatible"
+              insert
+              replace
+              caret))))))
+
+  (define (text-edit-size edit)
+    (bytevector-length
+      (string->utf8 (completion-text-edit-new-text edit))))
+
+  (define (validate-completion-edits! document primary additional)
+    (let ([size
+            (let ([snapshot (document-snapshot document)])
+              (dynamic-wind
+                (lambda () #f)
+                (lambda ()
+                  (let ([text (snapshot-text snapshot)])
+                    (dynamic-wind
+                      (lambda () #f)
+                      (lambda () (text-size text))
+                      (lambda () (text-close! text)))))
+                (lambda () (snapshot-close! snapshot))))]
+          [edits (cons primary additional)])
+      (for-each
+        (lambda (edit)
+          (unless (and
+                    (<= (completion-text-edit-start edit)
+                        (completion-text-edit-end edit))
+                    (<= (completion-text-edit-end edit) size))
+            (assertion-violation
+              'editor-accept-completion!
+              "completion edit is outside the current document"
+              edit
+              size)))
+        edits)
+      (let ([ordered
+              (list-sort
+                (lambda (left right)
+                  (< (completion-text-edit-start left)
+                     (completion-text-edit-start right)))
+                edits)])
+        (let loop ([remaining ordered])
+          (unless (or (null? remaining) (null? (cdr remaining)))
+            (let ([left (car remaining)]
+                  [right (cadr remaining)])
+              (when
+                (or
+                  (> (completion-text-edit-end left)
+                     (completion-text-edit-start right))
+                  (= (completion-text-edit-start left)
+                     (completion-text-edit-start right)))
+                (assertion-violation
+                  'editor-accept-completion!
+                  "completion edits overlap"
+                  left
+                  right))
+              (loop (cdr remaining))))))))
+
+  (define (apply-completion-edits! buffer primary additional)
+    (let* ([document (buffer-document buffer)]
+           [edits (cons primary additional)]
+           [ordered
+             (list-sort
+               (lambda (left right)
+                 (> (completion-text-edit-start left)
+                    (completion-text-edit-start right)))
+               edits)]
+           [caret
+             (+
+               (completion-text-edit-start primary)
+               (text-edit-size primary)
+               (fold-left
+                 (lambda (offset edit)
+                   (if
+                     (<= (completion-text-edit-end edit)
+                         (completion-text-edit-start primary))
+                     (+
+                       offset
+                       (-
+                         (text-edit-size edit)
+                         (-
+                           (completion-text-edit-end edit)
+                           (completion-text-edit-start edit))))
+                     offset))
+                 0
+                 additional))]
+           [change #f])
+      (validate-completion-edits! document primary additional)
       (dynamic-wind
         (lambda () #f)
         (lambda ()
@@ -1184,68 +1332,78 @@
               (call-with-buffer-transaction
                 buffer
                 (lambda (transaction)
-                  (transaction-replace!
-                    transaction
-                    start
-                    end
-                    bytes))))
+                  (for-each
+                    (lambda (edit)
+                      (transaction-replace!
+                        transaction
+                        (completion-text-edit-start edit)
+                        (completion-text-edit-end edit)
+                        (string->utf8
+                          (completion-text-edit-new-text edit))))
+                    ordered))))
             (lambda (result committed-change)
               (set! change committed-change)
-              result)))
+              caret)))
         (lambda ()
           (when change
             (change-close! change))))))
 
-  (define (editor-accept-completion! value)
-    (require-open-editor 'editor-accept-completion! value)
-    (when (editor-active-prompt value)
-      (assertion-violation
-        'editor-accept-completion!
-        "prompt completion is accepted through its prompt"))
-    (let* ([view (editor-active-view value)]
-           [completion (view-completion view)]
-           [item
-             (and completion
-                  (completion-session-selected-item completion))])
-      (cond
-        [(not completion) #f]
-        [(not item)
-         (editor-set-status-message! value "No completion candidate")
-         #f]
-        [else
-         (let* ([target (completion-session-target completion)]
-                [buffer (view-buffer view)]
-                [document (buffer-document buffer)])
-           (if (or
-                 (not (document-completion-target? target))
-                 (not (= (view-id view)
-                         (document-completion-target-view-id target)))
-                 (not (= (buffer-id buffer)
-                         (document-completion-target-buffer-id target)))
-                 (not (= (document-id document)
-                         (document-completion-target-document-id target)))
-                 (not (= (buffer-revision buffer)
-                         (document-completion-target-revision target)))
-                 (not (= (view-caret view)
-                         (document-completion-target-end target))))
-               (begin
-                 (cancel-view-completion! value view)
-                 (editor-set-status-message!
-                   value
-                   "Completion target changed")
-                 #f)
-               (let* ([start
-                        (document-completion-target-start target)]
-                      [end (document-completion-target-end target)]
-                      [bytes
-                        (string->utf8
-                          (completion-item-insert-text item))])
-                 (replace-buffer-range! buffer start end bytes)
-                 (view-set-caret!
-                   view
-                   (+ start (bytevector-length bytes)))
-                 (cancel-view-completion! value view)
-                 item)))])))
+  (define editor-accept-completion!
+    (case-lambda
+      [(value) (editor-accept-completion! value 'insert)]
+      [(value mode)
+       (require-open-editor 'editor-accept-completion! value)
+       (unless (memq mode '(insert replace))
+         (assertion-violation
+           'editor-accept-completion!
+           "completion mode must be insert or replace"
+           mode))
+       (when (editor-active-prompt value)
+         (assertion-violation
+           'editor-accept-completion!
+           "prompt completion is accepted through its prompt"))
+       (let* ([view (editor-active-view value)]
+              [completion (view-completion view)]
+              [item
+                (and completion
+                     (completion-session-selected-item completion))])
+         (cond
+           [(not completion) #f]
+           [(not item)
+            (editor-set-status-message! value "No completion candidate")
+            #f]
+           [else
+            (let* ([target (completion-session-target completion)]
+                   [buffer (view-buffer view)]
+                   [document (buffer-document buffer)])
+              (if (or
+                    (not (document-completion-target? target))
+                    (not (= (view-id view)
+                            (document-completion-target-view-id target)))
+                    (not (= (buffer-id buffer)
+                            (document-completion-target-buffer-id target)))
+                    (not (= (document-id document)
+                            (document-completion-target-document-id target)))
+                    (not (= (buffer-revision buffer)
+                            (document-completion-target-revision target)))
+                    (not (= (view-caret view)
+                            (document-completion-target-end target))))
+                  (begin
+                    (cancel-view-completion! value view)
+                    (editor-set-status-message!
+                      value
+                      "Completion target changed")
+                    #f)
+                  (let ([caret
+                          (begin
+                            (validate-completion-item-edit! item target)
+                            (apply-completion-edits!
+                              buffer
+                              (completion-primary-edit item target mode)
+                              (completion-additional-edits item)))])
+                    (view-set-caret! view caret)
+                    (cancel-view-completion! value view)
+                    item)))]))]))
 
   (define (editor-completion-next! value)
     (require-open-editor 'editor-completion-next! value)
@@ -1337,24 +1495,88 @@
         (editor-set-status-message! value "No completions"))
       accepted?))
 
+  (define (prompt-completion-context value completion)
+    (let* ([session
+             (active-prompt-session
+               'editor-refresh-prompt-completion!
+               value)]
+           [view
+             (editor-view-ref
+               value
+               (prompt-session-view-id session))]
+           [buffer (view-buffer view)]
+           [caret (view-caret view)]
+           [source (completion-session-source completion)]
+           [snapshot
+             (document-snapshot (buffer-document buffer))])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (let ([text (snapshot-text snapshot)])
+            (dynamic-wind
+              (lambda () #f)
+              (lambda ()
+                (let* ([size (text-size text)]
+                       [input
+                         (utf8->string
+                           (text-subbytevector text 0 size))]
+                       [prefix
+                         (utf8->string
+                           (text-subbytevector text 0 caret))]
+                       [point (string-length prefix)]
+                       [range
+                         (or
+                           (choice-source-boundaries
+                             source input point)
+                           (cons 0 (string-length input)))])
+                  (unless
+                    (and
+                      (pair? range)
+                      (exact-non-negative-integer? (car range))
+                      (exact-non-negative-integer? (cdr range))
+                      (<= (car range) point)
+                      (<= point (cdr range))
+                      (<= (cdr range) (string-length input)))
+                    (assertion-violation
+                      'editor-refresh-prompt-completion!
+                      "completion boundaries must contain point"
+                      range
+                      point
+                      input))
+                  (let ([start
+                          (bytevector-length
+                            (string->utf8
+                              (substring input 0 (car range))))]
+                        [replacement-end
+                          (bytevector-length
+                            (string->utf8
+                              (substring input 0 (cdr range))))])
+                    (values
+                      (substring input (car range) point)
+                      (make-prompt-completion-target
+                        (prompt-session-id session)
+                        start
+                        caret
+                        replacement-end)))))
+              (lambda () (text-close! text)))))
+        (lambda () (snapshot-close! snapshot)))))
+
   (define (editor-refresh-prompt-completion! value)
     (require-open-editor 'editor-refresh-prompt-completion! value)
     (let ([completion (editor-active-prompt-completion value)])
       (when completion
-        (let ([input (editor-active-prompt-input value)]
-              [generation
-                (completion-session-generation completion)])
-          (completion-session-target-set!
-            completion
-            (make-prompt-completion-target
-              (prompt-session-id (editor-active-prompt value))
-              0
-              (bytevector-length (string->utf8 input))))
-          (completion-session-refresh! completion input)
-          (unless
-            (= generation
-               (completion-session-generation completion))
-            (queue-completion-generation! value completion))))
+        (call-with-values
+          (lambda ()
+            (prompt-completion-context value completion))
+          (lambda (query target)
+            (let ([generation
+                    (completion-session-generation completion)])
+              (completion-session-target-set! completion target)
+              (completion-session-refresh! completion query)
+              (unless
+                (= generation
+                   (completion-session-generation completion))
+                (queue-completion-generation! value completion))))))
       completion))
 
   (define (editor-prompt-completion-next! value)
@@ -1362,6 +1584,18 @@
 
   (define (editor-prompt-completion-previous! value)
     (editor-completion-previous! value))
+
+  (define (prompt-completion-preselect? source)
+    (let ([entry (assq 'preselect (choice-source-metadata source))])
+      (if entry
+          (begin
+            (unless (boolean? (cdr entry))
+              (assertion-violation
+                'editor-open-prompt!
+                "completion preselect metadata must be a boolean"
+                (cdr entry)))
+            (cdr entry))
+          #f)))
 
   (define (editor-open-prompt! value request)
     (require-open-editor 'editor-open-prompt! value)
@@ -1407,12 +1641,11 @@
                (make-completion-session
                  completion-id
                  (make-prompt-completion-target
-                   id
-                   0
-                   (bytevector-length
-                     (string->utf8
-                       (prompt-request-initial request))))
-                 (prompt-request-completion-source request)))]
+                   id 0 0 0)
+                 (prompt-request-completion-source request)
+                 '()
+                 (prompt-completion-preselect?
+                   (prompt-request-completion-source request))))]
            [session
              (make-prompt-session
                id
@@ -1534,42 +1767,81 @@
       (editor-set-status-message! value #f)
       (and command (make-prompt-reply command result))))
 
-  (define (editor-accept-prompt! value)
-    (require-open-editor 'editor-accept-prompt! value)
+  (define (replace-prompt-completion-field!
+            value
+            completion
+            candidate)
     (let* ([session
              (active-prompt-session
-               'editor-accept-prompt!
+               'replace-prompt-completion-field!
                value)]
-           [request (prompt-session-request session)]
-           [input (editor-active-prompt-input value)]
-           [input-or-default
-             (if (and (zero? (string-length input))
-                      (prompt-request-default request))
-                 (prompt-request-default request)
-                 input)]
-           [completion (prompt-session-completion session)]
-           [exact-candidate
-             (and
-               completion
-               (find
-                 (lambda (item)
-                   (string=?
-                     (completion-item-insert-text item)
-                     input-or-default))
-                 (completion-session-items completion)))]
-           [candidate
-             (and
-               completion
-               (or
-                 exact-candidate
-                 (completion-session-selected-item completion)))]
+           [target (completion-session-target completion)]
+           [view
+             (editor-view-ref
+               value
+               (prompt-session-view-id session))]
+           [buffer (view-buffer view)]
+           [bytes
+             (string->utf8
+               (completion-item-insert-text candidate))]
+           [change #f])
+      (unless
+        (and
+          (prompt-completion-target? target)
+          (=
+            (prompt-session-id session)
+            (prompt-completion-target-prompt-id target)))
+        (assertion-violation
+          'replace-prompt-completion-field!
+          "completion target does not belong to the active prompt"
+          target))
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (call-with-values
+            (lambda ()
+              (call-with-buffer-transaction
+                buffer
+                (lambda (transaction)
+                  (transaction-replace!
+                    transaction
+                    (prompt-completion-target-start target)
+                    (prompt-completion-target-replacement-end target)
+                    bytes))))
+            (lambda (result committed-change)
+              (set! change committed-change)
+              (view-set-caret!
+                view
+                (+
+                  (prompt-completion-target-start target)
+                  (bytevector-length bytes))))))
+        (lambda ()
+          (when change (change-close! change))))
+      (ensure-view-visible! view)
+      (editor-refresh-prompt-completion! value)
+      candidate))
+
+  (define (prompt-completion-introduced-field? completion)
+    (let ([target (completion-session-target completion)])
+      (and
+        (prompt-completion-target? target)
+        (=
+          (prompt-completion-target-start target)
+          (prompt-completion-target-end target)))))
+
+  (define (finish-accepted-prompt!
+            value
+            session
+            input
+            candidate)
+    (let* ([request (prompt-session-request session)]
            [resolved
-             (if (and
-                   candidate
-                   (eq? (prompt-request-accept-policy request)
-                        'must-match))
-                 (completion-item-insert-text candidate)
-                 input-or-default)]
+             (if
+               (and
+                 (zero? (string-length input))
+                 (prompt-request-default request))
+               (prompt-request-default request)
+               input)]
            [valid?
              (or
                (eq? (prompt-request-accept-policy request) 'free)
@@ -1588,6 +1860,68 @@
               resolved
               candidate
               (prompt-request-accept-command request))))))
+
+  (define (editor-insert-prompt-completion! value)
+    (require-open-editor
+      'editor-insert-prompt-completion!
+      value)
+    (let* ([session
+             (active-prompt-session
+               'editor-insert-prompt-completion!
+               value)]
+           [completion (prompt-session-completion session)]
+           [candidate
+             (and
+               completion
+               (or
+                 (completion-session-selected-item completion)
+                 (begin
+                   (completion-session-select-next! completion)
+                   (completion-session-selected-item completion))))])
+      (if candidate
+          (replace-prompt-completion-field!
+            value completion candidate)
+          (begin
+            (editor-set-status-message!
+              value
+              "No completion candidate selected")
+            #f))))
+
+  (define (editor-accept-prompt-input! value)
+    (require-open-editor 'editor-accept-prompt-input! value)
+    (let ([session
+            (active-prompt-session
+              'editor-accept-prompt-input!
+              value)])
+      (finish-accepted-prompt!
+        value
+        session
+        (editor-active-prompt-input value)
+        #f)))
+
+  (define (editor-accept-prompt! value)
+    (require-open-editor 'editor-accept-prompt! value)
+    (let* ([session
+             (active-prompt-session
+               'editor-accept-prompt!
+               value)]
+           [completion (prompt-session-completion session)]
+           [candidate
+             (and
+               completion
+               (completion-session-selected-item completion))])
+      (if (not candidate)
+          (editor-accept-prompt-input! value)
+          (begin
+            (replace-prompt-completion-field!
+              value completion candidate)
+            (if (prompt-completion-introduced-field? completion)
+                #f
+                (finish-accepted-prompt!
+                  value
+                  session
+                  (editor-active-prompt-input value)
+                  candidate))))))
 
   (define (editor-abort-prompt! value)
     (require-open-editor 'editor-abort-prompt! value)

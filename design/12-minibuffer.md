@@ -95,11 +95,15 @@ TUI root 在 session 活动时按正文、modeline、可选 completion list 和 
 
 `prompt.input` transient keymap 定义：
 
-- `RET`、`C-j`：接受；
+- `RET`、`C-j`：接受显式选中的候选；没有选择时接受原始输入；
+- `M-RET`、`M-j`：忽略候选并接受原始输入；
 - `ESC`、`C-g`：取消；
-- `Up`、`C-p`：上一条 history；
-- `Down`、`C-n`：下一条 history。
-- `TAB`、`S-TAB`：选择下一个或上一个 completion candidate。
+- `Up`、`C-p`：选择上一个候选；
+- `Down`、`C-n`：选择下一个候选；
+- `M-p`、`M-Up`：上一条 history；
+- `M-n`、`M-Down`：下一条 history；
+- `TAB`：插入候选并保持 minibuffer 活动；
+- `S-TAB`：选择上一个候选。
 
 history 由 Editor 按 symbol 标识并保存，条目以最新值优先。首次向后浏览前保存当前
 draft；向前越过最新条目时恢复 draft。只有通过验证的非空接受值进入 history，
@@ -113,7 +117,7 @@ draft；向前越过最新条目时恢复 draft。只有通过验证的非空接
 ```text
 CompletionTarget =
     DocumentTarget(document-id, revision, range)
-  | PromptTarget(prompt-session-id, generation, range)
+  | PromptTarget(prompt-session-id, field-start, point, replacement-end)
 ```
 
 两类目标共享 `CompletionItem`、generation、候选身份、过滤排序、选择状态和 TUI
@@ -124,7 +128,32 @@ choice source 显式提供 metadata、boundaries、candidates、validate 和 can
 候选分别保存 insert text、label、annotation、group、source 和 payload，显示文本
 不承担返回值或对象身份。
 
+`boundaries(input, point)` 使用字符索引返回当前 field 的 `[start, end)`。completion
+query 是 `[start, point)`；应用候选时原子替换 `[start, end)`，因此光标位于 field
+中间时不会留下旧后缀。路径、复合命令和其他分段 reader 可以在插入候选后返回一个
+新的空 field，例如 `root/usr/|`。`RET` 遇到这种边界会提交当前 field 并继续读取，
+直到候选没有引入后续 field 才结束 prompt。`TAB` 始终只提交当前 field。
+
+choice source metadata 为匹配和选择声明策略：
+
+```text
+category:    command | file | buffer | ...
+styles:      (prefix substring flex)
+ignore-case: boolean
+preselect:   boolean
+```
+
+styles 按顺序尝试，每个匹配结果包含 score、匹配区间和 exact 标记。presenter 使用
+匹配区间高亮 label，并对可见候选统一对齐 annotation。默认不预选候选；键入会使
+选择保持为空，避免 `RET` 意外接受列表首项。需要传统首项选择行为的 source 可以
+设置 `preselect`。
+
+completion component 始终显式表示 pending、无匹配、候选数量和当前选择位置。选择
+按 `(provider, item-id)` 保持身份；refilter 或异步结果到达后，只要候选仍然存在，
+选择不会因排序位置变化而漂移。
+
 `M-x` 使用 command registry choice source 和 `extended-command` history 读取
-command symbol。发起 `M-x` 的 prefix argument 作为 request data 跨 prompt
+command symbol。它使用大小写不敏感的 prefix/flex 匹配，并保持无预选状态。发起
+`M-x` 的 prefix argument 作为 request data 跨 prompt
 生命周期保存，`prompt.execute-command` 把它放入 interactive command message，
 因此最终命令收到与直接按键调用相同的 `CommandContext`。

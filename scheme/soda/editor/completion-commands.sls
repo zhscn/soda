@@ -55,6 +55,16 @@
           [else
            (loop (+ index 1) #f words)]))))
 
+  (define (identifier-end value start identifier-character?)
+    (let ([length (string-length value)])
+      (let loop ([index start])
+        (if
+          (and
+            (< index length)
+            (identifier-character? (string-ref value index)))
+          (loop (+ index 1))
+          index))))
+
   (define (snapshot-completion-text buffer caret)
     (let* ([document (buffer-document buffer)]
            [editable-start
@@ -165,12 +175,25 @@
                                      before
                                      0
                                      (car range)))))]
+                           [replacement-end
+                             (+
+                               editable-start
+                               (bytevector-length
+                                 (string->utf8
+                                   (substring
+                                     text
+                                     0
+                                     (identifier-end
+                                       text
+                                       (string-length before)
+                                       identifier-character?)))))]
                            [completion
                              (editor-start-document-completion!
                                editor
                                source
                                start
                                caret
+                               replacement-end
                                (buffer-setting-ref
                                  buffer
                                  'completion-providers
@@ -190,6 +213,12 @@
   (define (accept-completion-command context)
     (editor-accept-completion!
       (command-context-editor context))
+    '())
+
+  (define (accept-replacing-completion-command context)
+    (editor-accept-completion!
+      (command-context-editor context)
+      'replace)
     '())
 
   (define (cancel-completion-command context)
@@ -232,6 +261,10 @@
           accept-completion-command
           "Apply the selected completion candidate.")
         (list
+          'completion.accept-replace
+          accept-replacing-completion-command
+          "Apply the selected completion candidate and replace its suffix.")
+        (list
           'completion.cancel
           cancel-completion-command
           "Cancel completion.")
@@ -250,6 +283,7 @@
         (list
           (cons (stroke 'enter 13 0) 'completion.accept)
           (cons (stroke 'character 106 4) 'completion.accept)
+          (cons (stroke 'enter 13 2) 'completion.accept-replace)
           (cons (stroke 'escape 27 0) 'completion.cancel)
           (cons (stroke 'tab 9 0) 'completion.next)
           (cons (stroke 'tab 9 1) 'completion.previous)

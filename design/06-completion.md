@@ -80,11 +80,7 @@ CompletionItem {
   insert_text,
   kind,
   detail,
-  edit: {
-    insert_range,
-    replace_range,
-    new_text
-  }?,
+  edit: CompletionEdit?,
   sort_text,
   annotation?,
   group?,
@@ -93,14 +89,55 @@ CompletionItem {
   documentation?,
   provider_data
 }
+
+CompletionEdit {
+  insert: {
+    insert_range,
+    new_text
+  },
+  replace: {
+    replace_range,
+    new_text
+  },
+  additional_edits
+}
 ```
 
 `id` 在一个 generation 内稳定，UI、resolve 和 apply 都按 id 寻址，不用 label
 反查。菜单需要的轻字段随初始响应归一化；documentation 和其他重字段只对选中项
 及可视范围懒 resolve。
 
-范围绑定请求 snapshot。provider 未指定 edit 时使用通用 query range；LSP 的
-insert/replace 双范围原样保留到 apply policy。
+范围绑定请求 snapshot。provider 未指定 edit 时使用 session 的通用 insert/replace
+范围；LSP 的 insert/replace 双范围原样保留到 apply policy。additional edit 与主
+edit 不得重叠。
+
+## Composition session
+
+Document completion 是 editor 拥有的 text rewrite session。正文、caret、selection
+和 anchor 始终由 editor command loop 管理；provider 只读取带 revision 的 snapshot
+并返回候选。用户在菜单存续期间输入的文本已经属于正文，不是临时 preedit。
+
+session 跟踪三个逻辑边界：
+
+```text
+query range:    [query_start, caret)
+insert range:   [query_start, caret)
+replace range:  [query_start, replacement_end)
+```
+
+`query_start` 和 `replacement_end` 是 Document anchor。起点使用
+before-insertion affinity，替换终点使用 after-insertion affinity。普通事务、
+undo 和 redo 自动映射这两个边界，session 不保存易失的绝对起点。
+
+caret 可以在 `[query_start, replacement_end]` 内移动。向左移动缩短 query；向右
+移动把已有正文纳入 query。移动越过任一边界、切换 View/Buffer、产生不兼容
+selection，或者使 anchor 无法解释的编辑会关闭 session。
+
+completion controller 观察命令执行后的 Document transaction 和 selection
+状态。普通字符、Backspace、Left、Right 继续执行标准 editor command；controller
+根据提交后的正文和 caret 刷新 query。候选导航、接受和取消才是 completion
+专用命令。由此，宏、undo、kill 命令和语言命令不需要在 key handling 层分别适配
+completion。
 
 ## Refilter 与排序
 
@@ -110,9 +147,15 @@ insert/replace 双范围原样保留到 apply policy。
 - incomplete provider 重新请求并替换自己的 item set；
 - query 退回触发点之前时关闭会话。
 
-匹配文本优先使用 `filter_text`，否则使用 `label`。所有 provider 进入同一个排序：
-词首层级、exact、fuzzy score、`sort_text`、kind、label。provider priority 只作为
-明确的 tie-break policy，不用短路方式隐藏较晚来源。
+匹配文本优先使用 `filter_text`，否则使用 `label`。choice source metadata 选择按
+顺序尝试的 `prefix`、`substring`、`flex` style 和大小写策略。匹配产出
+`CompletionMatch(score, ranges, exact)`，其中 ranges 使用 `filter_text` 字符索引，
+供 presenter 高亮命中片段。
+
+所有 provider 进入同一个排序：style 层级、exact、匹配紧凑度、起始位置、
+`sort_text` 和 label。provider priority 只作为明确的 tie-break policy，不用短路
+方式隐藏较晚来源。异步合并和 refilter 通过 `(provider, item-id)` 恢复选择，不把
+旧的列表索引解释成候选身份。
 
 语义重复可按最终 `new_text`、range 和 kind 去重；原 item identity 仍保留在
 provider side table 中供 resolve。
@@ -132,17 +175,35 @@ revision 校验是固定机制，不能由 debounce 代替。
 
 ## 应用
 
-接受 item 时重新验证 document identity、revision 和 edit range。主 text edit、
-`additionalTextEdits` 和 snippet 初始展开合并为一个 `DocumentTransaction`；
-跨资源 additional edits 使用 [05-jump.md](05-jump.md) 的 workspace edit。
+接受 item 有 `insert` 与 `replace` 两种 mode。没有显式 CompletionEdit 时，
+`insert` 替换 query range，`replace` 替换到 `replacement_end`。显式
+CompletionEdit 为两个 mode 分别提供 snapshot range 与 replacement text。
+
+接受 item 时重新验证 document identity、revision 和 edit range。当前正文保持
+不变，直到候选被解析成完整 commit。主 text edit、`additionalTextEdits` 和
+snippet 初始展开合并为一个 `DocumentTransaction`；跨资源 additional edits 使用
+[05-jump.md](05-jump.md) 的 workspace edit。
+
+```text
+resolve candidate if required
+        │
+        ▼
+CompletionCommit
+        │  map ranges and validate revision/context
+        ▼
+one DocumentTransaction
+        │
+        ▼
+caret/selection result
+```
 
 command loop 在执行命令前验证活动 Document target。命令通过该 loop 修改 query
 range 后，session 才把 target 推进到新 revision；来自其他 view 或后台提交的
 revision 变化会关闭旧 session，不能由一次普通 refresh 追认。
 
 需要 resolve 才能获得完整 additional edits 的 item，在 resolve 成功且 generation
-仍有效后再提交。应用结果只产生一个 undo 单元，不通过“先插入、再删除、再修正”
-模拟。
+仍有效后再提交。provider 不获得可变 Buffer，也不在 commit 前删除 query。应用
+结果只产生一个 undo 单元，不通过“先插入、再删除、再修正”模拟。
 
 ## UI 与输入
 
@@ -154,26 +215,35 @@ overlay。
 的文本输入继续走 buffer 插入，然后推进补全 query。UI 关闭只释放会话视图，不取消
 可复用的 provider cache。
 
+presenter 对可见候选统一计算 annotation 列，使用 match ranges 高亮 label，并显示
+候选总数和当前选择位置。空结果区分 provider 尚未完成与已完成但没有匹配。
+Document completion 默认预选首项；minibuffer completion 的选择策略由 choice
+source metadata 声明。
+
 合并时选中项按 `(provider, item-id)` 保持身份。某个 provider 的迟到响应只替换
 该 provider 的结果；其他 provider 的候选、完成状态和选中项保持不变。
 
 补全应用目标显式区分普通 Document range 与 minibuffer Prompt range。两者共享
 候选、generation、过滤排序和 presenter；Document target 校验 document revision
-与 edit range，Prompt target 校验 prompt session id 与 query generation。命令、
-Buffer、路径和其他离散集合通过 choice source 进入同一管线，读取生命周期见
+与 edit range，Prompt target 校验 prompt session id，并保存当前 field 的 start、
+point 和 replacement end。Prompt query 只覆盖 `[start, point)`，选择候选原子替换
+整个 `[start, replacement-end)` field。命令、Buffer、路径和其他离散集合通过
+choice source 进入同一管线，读取生命周期见
 [12-minibuffer.md](12-minibuffer.md)。
 
 `completion.at-point` 是 Document completion 的统一手动入口。choice source 的
 boundary procedure 根据 caret 上下文返回 query range；language mode 可以通过
-buffer setting 提供 reader-aware boundary policy。没有语言 policy 时使用字母、
-数字和下划线。
+buffer setting 提供 reader-aware boundary policy。相同 lexical policy 从 caret
+向右计算默认 `replacement_end`。没有语言 policy 时使用字母、数字和下划线。
 
 Document 的 editable start 是补全可读取和替换的下界。普通源码 Buffer 的下界为
 零；comint transcript 把它推进到当前 prompt 之后。因此通用 completion 只处理
 当前可编辑输入，不需要知道 InteractionSession、prompt 或 transcript 格式。
 buffer-word source 从该区域收集去重词项，再与 mode 选择的异步 provider 进入同一
-session。默认 `M-/` 启动该命令；菜单的 Enter、Tab、Shift-Tab、方向键和 Escape
-分别负责接受、遍历与取消。
+session。默认 `M-/` 启动该命令；菜单提供 insert accept、replace accept、遍历和
+取消命令。Enter 或 `C-j` 执行 insert accept，`M-Enter` 执行 replace accept，
+Tab、Shift-Tab 和 Up/Down 遍历候选。Left、Right 与 Backspace 保持普通编辑语义
+并动态改变 query。
 
 ## 设计依据
 

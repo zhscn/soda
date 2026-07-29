@@ -18,6 +18,20 @@
           completion-item-documentation
           completion-item-provider-data
           completion-item-payload
+          make-completion-text-edit
+          completion-text-edit?
+          completion-text-edit-start
+          completion-text-edit-end
+          completion-text-edit-new-text
+          make-completion-edit
+          completion-edit?
+          completion-edit-insert
+          completion-edit-replace
+          completion-edit-additional-edits
+          completion-match?
+          completion-match-score
+          completion-match-ranges
+          completion-match-exact?
           make-choice-source
           choice-source?
           choice-source-category
@@ -31,6 +45,7 @@
           prompt-completion-target-prompt-id
           prompt-completion-target-start
           prompt-completion-target-end
+          prompt-completion-target-replacement-end
           make-document-completion-target
           document-completion-target?
           document-completion-target-view-id
@@ -39,6 +54,9 @@
           document-completion-target-revision
           document-completion-target-start
           document-completion-target-end
+          document-completion-target-replacement-end
+          document-completion-target-refresh!
+          document-completion-target-close!
           completion-target?
           make-completion-session
           completion-session?
@@ -51,6 +69,7 @@
           completion-session-generation
           completion-session-query
           completion-session-items
+          completion-session-item-match
           completion-session-pending?
           completion-session-provider-results
           completion-provider-result?
@@ -76,7 +95,8 @@
           completion-session-apply-response!
           completion-session-select-next!
           completion-session-select-previous!)
-  (import (rnrs))
+  (import (rnrs)
+          (soda document))
 
   (define-record-type
     (completion-item %make-completion-item completion-item?)
@@ -97,6 +117,17 @@
             provider-data))
 
   (define-record-type
+    (completion-text-edit %make-completion-text-edit completion-text-edit?)
+    (fields start end new-text))
+
+  (define-record-type
+    (completion-edit %make-completion-edit completion-edit?)
+    (fields insert replace additional-edits))
+
+  (define-record-type completion-match
+    (fields score ranges exact?))
+
+  (define-record-type
     (choice-source %make-choice-source choice-source?)
     (fields
       (immutable category choice-source-category)
@@ -114,13 +145,21 @@
     (prompt-completion-target
       %make-prompt-completion-target
       prompt-completion-target?)
-    (fields prompt-id start end))
+    (fields prompt-id start end replacement-end))
 
   (define-record-type
     (document-completion-target
       %make-document-completion-target
       document-completion-target?)
-    (fields view-id buffer-id document-id revision start end))
+    (fields view-id
+            buffer-id
+            document-id
+            document
+            start-anchor
+            replacement-end-anchor
+            (mutable revision)
+            (mutable query-end)
+            (mutable closed?)))
 
   (define-record-type
     (completion-session %make-completion-session completion-session?)
@@ -133,6 +172,8 @@
             (mutable provider-results)
             (mutable active-requests)
             (mutable items)
+            (mutable matches)
+            preselect?
             (mutable selected-index)))
 
   (define-record-type completion-provider-result
@@ -157,45 +198,173 @@
          (exact-non-negative-integer? end)
          (<= start end)))
 
-  (define (make-prompt-completion-target prompt-id start end)
-    (unless (and (exact-non-negative-integer? prompt-id)
-                 (valid-range? start end))
+  (define make-prompt-completion-target
+    (case-lambda
+      [(prompt-id start end)
+       (make-prompt-completion-target prompt-id start end end)]
+      [(prompt-id start end replacement-end)
+       (unless (and (exact-non-negative-integer? prompt-id)
+                    (valid-range? start end)
+                    (exact-non-negative-integer? replacement-end)
+                    (<= end replacement-end))
+         (assertion-violation
+           'make-prompt-completion-target
+           "prompt target fields are invalid"
+           prompt-id
+           start
+           end
+           replacement-end))
+       (%make-prompt-completion-target
+         prompt-id start end replacement-end)]))
+
+  (define (make-completion-text-edit start end new-text)
+    (unless (and (valid-range? start end) (string? new-text))
       (assertion-violation
-        'make-prompt-completion-target
-        "prompt target fields are invalid"
-        prompt-id
+        'make-completion-text-edit
+        "completion text edit is invalid"
         start
-        end))
-    (%make-prompt-completion-target prompt-id start end))
+        end
+        new-text))
+    (%make-completion-text-edit start end new-text))
+
+  (define (make-completion-edit insert replace additional-edits)
+    (unless (and (completion-text-edit? insert)
+                 (completion-text-edit? replace)
+                 (list? additional-edits)
+                 (for-all completion-text-edit? additional-edits))
+      (assertion-violation
+        'make-completion-edit
+        "completion edit is invalid"
+        insert
+        replace
+        additional-edits))
+    (%make-completion-edit insert replace additional-edits))
 
   (define (make-document-completion-target
             view-id
             buffer-id
-            document-id
+            document
             revision
             start
-            end)
+            end
+            replacement-end)
     (unless (and (exact-non-negative-integer? view-id)
                  (exact-non-negative-integer? buffer-id)
-                 (exact-non-negative-integer? document-id)
+                 (document? document)
                  (exact-non-negative-integer? revision)
-                 (valid-range? start end))
+                 (= revision (document-revision document))
+                 (valid-range? start end)
+                 (<= end replacement-end))
       (assertion-violation
         'make-document-completion-target
         "document target fields are invalid"
         view-id
         buffer-id
-        document-id
+        document
         revision
         start
+        end
+        replacement-end))
+    (let ([start-anchor #f]
+          [replacement-end-anchor #f]
+          [complete? #f])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (set! start-anchor
+            (document-create-anchor!
+              document start anchor-before-insertion))
+          (set! replacement-end-anchor
+            (document-create-anchor!
+              document replacement-end anchor-after-insertion))
+          (let ([target
+                  (%make-document-completion-target
+                    view-id
+                    buffer-id
+                    (document-id document)
+                    document
+                    start-anchor
+                    replacement-end-anchor
+                    revision
+                    end
+                    #f)])
+            (set! complete? #t)
+            target))
+        (lambda ()
+          (unless complete?
+            (when start-anchor
+              (document-remove-anchor! document start-anchor))
+            (when replacement-end-anchor
+              (document-remove-anchor!
+                document replacement-end-anchor)))))))
+
+  (define (require-open-document-target who target)
+    (unless (document-completion-target? target)
+      (assertion-violation
+        who
+        "expected a document completion target"
+        target))
+    (when (document-completion-target-closed? target)
+      (assertion-violation
+        who
+        "document completion target is closed"
+        target)))
+
+  (define (document-completion-target-start target)
+    (require-open-document-target
+      'document-completion-target-start target)
+    (document-anchor-offset
+      (document-completion-target-document target)
+      (document-completion-target-start-anchor target)))
+
+  (define (document-completion-target-end target)
+    (require-open-document-target
+      'document-completion-target-end target)
+    (document-completion-target-query-end target))
+
+  (define (document-completion-target-replacement-end target)
+    (require-open-document-target
+      'document-completion-target-replacement-end target)
+    (document-anchor-offset
+      (document-completion-target-document target)
+      (document-completion-target-replacement-end-anchor target)))
+
+  (define (document-completion-target-refresh! target revision end)
+    (require-open-document-target
+      'document-completion-target-refresh! target)
+    (unless (and (exact-non-negative-integer? revision)
+                 (= revision
+                    (document-revision
+                      (document-completion-target-document target)))
+                 (exact-non-negative-integer? end)
+                 (<= (document-completion-target-start target) end)
+                 (<= end
+                     (document-completion-target-replacement-end target)))
+      (assertion-violation
+        'document-completion-target-refresh!
+        "document completion target refresh is invalid"
+        revision
         end))
-    (%make-document-completion-target
-      view-id
-      buffer-id
-      document-id
-      revision
-      start
-      end))
+    (document-completion-target-revision-set! target revision)
+    (document-completion-target-query-end-set! target end)
+    target)
+
+  (define (document-completion-target-close! target)
+    (unless (document-completion-target? target)
+      (assertion-violation
+        'document-completion-target-close!
+        "expected a document completion target"
+        target))
+    (unless (document-completion-target-closed? target)
+      (let ([document (document-completion-target-document target)])
+        (document-remove-anchor!
+          document
+          (document-completion-target-start-anchor target))
+        (document-remove-anchor!
+          document
+          (document-completion-target-replacement-end-anchor target))
+        (document-completion-target-closed?-set! target #t)))
+    target)
 
   (define (completion-target? value)
     (or (prompt-completion-target? value)
@@ -268,6 +437,11 @@
            'make-completion-item
            "detail must be a string or #f"
            detail))
+       (unless (or (not edit) (completion-edit? edit))
+         (assertion-violation
+           'make-completion-item
+           "edit must be a completion edit or #f"
+           edit))
        (unless (or (not annotation) (string? annotation))
          (assertion-violation
            'make-completion-item
@@ -362,6 +536,13 @@
   (define (choice-source-cancel! source generation)
     ((choice-source-cancel-procedure source) generation))
 
+  (define (choice-source-option source key fallback)
+    (let ([entry (assq key (choice-source-metadata source))])
+      (if entry (cdr entry) fallback)))
+
+  (define (normalize-string value ignore-case?)
+    (if ignore-case? (string-downcase value) value))
+
   (define (string-prefix? prefix value)
     (and
       (<= (string-length prefix) (string-length value))
@@ -369,20 +550,167 @@
         prefix
         (substring value 0 (string-length prefix)))))
 
-  (define (filter-items items query)
+  (define (substring-index needle value)
+    (let ([needle-length (string-length needle)]
+          [value-length (string-length value)])
+      (let loop ([index 0])
+        (cond
+          [(> (+ index needle-length) value-length) #f]
+          [(string=?
+             needle
+             (substring value index (+ index needle-length)))
+           index]
+          [else (loop (+ index 1))]))))
+
+  (define (prefix-match query value)
+    (and
+      (string-prefix? query value)
+      (make-completion-match
+        (+ 3000
+           (if (string=? query value) 10000 0)
+           (- (string-length value)))
+        (if (zero? (string-length query))
+            '()
+            (list (cons 0 (string-length query))))
+        (string=? query value))))
+
+  (define (substring-match query value)
+    (let ([index (substring-index query value)])
+      (and
+        index
+        (make-completion-match
+          (+ 2000
+             (if (zero? index) 100 0)
+             (if (string=? query value) 10000 0)
+             (- index)
+             (- (string-length value)))
+          (if (zero? (string-length query))
+              '()
+              (list
+                (cons index (+ index (string-length query)))))
+          (string=? query value)))))
+
+  (define (adjoin-match-index index ranges)
+    (cond
+      [(null? ranges) (list (cons index (+ index 1)))]
+      [(= index (cdar ranges))
+       (cons
+         (cons (caar ranges) (+ index 1))
+         (cdr ranges))]
+      [else (cons (cons index (+ index 1)) ranges)]))
+
+  (define (flex-match query value)
+    (let ([query-length (string-length query)]
+          [value-length (string-length value)])
+      (let loop ([query-index 0]
+                 [value-index 0]
+                 [ranges '()]
+                 [first #f]
+                 [last #f])
+        (cond
+          [(= query-index query-length)
+           (let ([gap
+                   (if first
+                       (- (+ (- last first) 1) query-length)
+                       0)])
+             (make-completion-match
+               (+ 1000
+                  (if (string=? query value) 10000 0)
+                  (- gap)
+                  (- (or first 0))
+                  (- value-length))
+               (reverse ranges)
+               (string=? query value)))]
+          [(= value-index value-length) #f]
+          [(char=?
+             (string-ref query query-index)
+             (string-ref value value-index))
+           (loop
+             (+ query-index 1)
+             (+ value-index 1)
+             (adjoin-match-index value-index ranges)
+             (or first value-index)
+             value-index)]
+          [else
+           (loop
+             query-index
+             (+ value-index 1)
+             ranges
+             first
+             last)]))))
+
+  (define (match-with-style style query value)
+    (case style
+      [(prefix) (prefix-match query value)]
+      [(substring) (substring-match query value)]
+      [(flex) (flex-match query value)]
+      [else
+       (assertion-violation
+         'completion-session-refresh!
+         "unknown completion style"
+         style)]))
+
+  (define (match-item source query item)
+    (let* ([ignore-case?
+             (choice-source-option source 'ignore-case #f)]
+           [styles
+             (choice-source-option source 'styles '(prefix))]
+           [normalized-query
+             (normalize-string query ignore-case?)]
+           [normalized-value
+             (normalize-string
+               (completion-item-filter-text item)
+               ignore-case?)])
+      (unless (and (list? styles) (for-all symbol? styles))
+        (assertion-violation
+          'completion-session-refresh!
+          "completion styles must be a list of symbols"
+          styles))
+      (let loop ([remaining styles])
+        (and
+          (pair? remaining)
+          (or
+            (match-with-style
+              (car remaining)
+              normalized-query
+              normalized-value)
+            (loop (cdr remaining)))))))
+
+  (define (matched-item<? left right)
+    (let* ([left-item (car left)]
+           [right-item (car right)]
+           [left-match (cdr left)]
+           [right-match (cdr right)]
+           [left-score (completion-match-score left-match)]
+           [right-score (completion-match-score right-match)])
+      (cond
+        [(not (= left-score right-score))
+         (> left-score right-score)]
+        [(not
+           (string=?
+             (completion-item-sort-text left-item)
+             (completion-item-sort-text right-item)))
+         (string<?
+           (completion-item-sort-text left-item)
+           (completion-item-sort-text right-item))]
+        [else
+         (string<?
+           (completion-item-label left-item)
+           (completion-item-label right-item))])))
+
+  (define (match-items source items query)
     (list-sort
-      (lambda (left right)
-        (let ([left-key (completion-item-sort-text left)]
-              [right-key (completion-item-sort-text right)])
-          (if (string=? left-key right-key)
-              (string<?
-                (completion-item-label left)
-                (completion-item-label right))
-              (string<? left-key right-key))))
-      (filter
-        (lambda (item)
-          (string-prefix? query (completion-item-filter-text item)))
-        items)))
+      matched-item<?
+      (let loop ([remaining items] [matched '()])
+        (if (null? remaining)
+            (reverse matched)
+            (let ([match
+                    (match-item source query (car remaining))])
+              (loop
+                (cdr remaining)
+                (if match
+                    (cons (cons (car remaining) match) matched)
+                    matched)))))))
 
   (define (completion-item-identity=? left right)
     (and
@@ -483,8 +811,9 @@
 
   (define (rebuild-session-items! session selected-item)
     (let* ([query (or (completion-session-query session) "")]
-           [items
-             (filter-items
+           [matched
+             (match-items
+               (completion-session-source session)
                (fold-right
                  append
                  '()
@@ -492,17 +821,28 @@
                    completion-provider-result-items
                    (completion-session-provider-results session)))
                query)]
+           [items (map car matched)]
+           [matches (map cdr matched)]
            [selected-index (find-item-index selected-item items)])
       (completion-session-items-set! session items)
+      (completion-session-matches-set! session matches)
       (completion-session-selected-index-set!
         session
-        (or selected-index (and (pair? items) 0)))))
+        (or
+          selected-index
+          (and
+            (completion-session-preselect? session)
+            (pair? items)
+            0)))))
 
   (define make-completion-session
     (case-lambda
       [(id target source)
-       (make-completion-session id target source '())]
+       (make-completion-session id target source '() #t)]
       [(id target source provider-names)
+       (make-completion-session
+         id target source provider-names #t)]
+      [(id target source provider-names preselect?)
        (unless (exact-non-negative-integer? id)
          (assertion-violation
            'make-completion-session
@@ -518,6 +858,11 @@
            'make-completion-session
            "expected a choice source"
            source))
+       (unless (boolean? preselect?)
+         (assertion-violation
+           'make-completion-session
+           "preselect flag must be a boolean"
+           preselect?))
        (unless (and
                  (list? provider-names)
                  (for-all symbol? provider-names))
@@ -543,6 +888,8 @@
          '()
          '()
          '()
+         '()
+         preselect?
          #f)]))
 
   (define (completion-session-prompt-id session)
@@ -565,6 +912,17 @@
     (let ([index (completion-session-selected-index session)]
           [items (completion-session-items session)])
       (and index (< index (length items)) (list-ref items index))))
+
+  (define (completion-session-item-match session item)
+    (unless (completion-session? session)
+      (assertion-violation
+        'completion-session-item-match
+        "expected a completion session"
+        session))
+    (let ([index (find-item-index item (completion-session-items session))])
+      (and
+        index
+        (list-ref (completion-session-matches session) index))))
 
   (define (completion-session-pending? session)
     (unless (completion-session? session)

@@ -19,6 +19,16 @@
       (editor-accept-prompt!
         (command-context-editor context))))
 
+  (define (accept-input-command context)
+    (reply-effects
+      (editor-accept-prompt-input!
+        (command-context-editor context))))
+
+  (define (insert-completion-command context)
+    (editor-insert-prompt-completion!
+      (command-context-editor context))
+    '())
+
   (define (abort-command context)
     (reply-effects
       (editor-abort-prompt!
@@ -47,7 +57,9 @@
   (define (command-choice-source editor)
     (make-choice-source
       'command
-      '((category . command))
+      '((category . command)
+        (styles . (prefix flex))
+        (ignore-case . #t))
       (lambda (input point)
         (cons 0 (string-length input)))
       (lambda (query)
@@ -148,7 +160,15 @@
         (list
           'prompt.accept
           accept-command
-          "Accept the active minibuffer input.")
+          "Accept the selected completion or minibuffer input.")
+        (list
+          'prompt.accept-input
+          accept-input-command
+          "Accept the minibuffer text without choosing a candidate.")
+        (list
+          'prompt.insert-completion
+          insert-completion-command
+          "Insert the selected completion and keep the minibuffer active.")
         (list
           'prompt.abort
           abort-command
@@ -184,12 +204,18 @@
         (list
           (cons (stroke 'enter 13 0) 'prompt.accept)
           (cons (stroke 'character 106 4) 'prompt.accept)
+          (cons (stroke 'enter 13 2) 'prompt.accept-input)
+          (cons (stroke 'character 106 2) 'prompt.accept-input)
           (cons (stroke 'escape 27 0) 'prompt.abort)
-          (cons (stroke 'up #f 0) 'prompt.history-previous)
-          (cons (stroke 'down #f 0) 'prompt.history-next)
-          (cons (stroke 'character 112 4) 'prompt.history-previous)
-          (cons (stroke 'character 110 4) 'prompt.history-next)
-          (cons (stroke 'tab 9 0) 'prompt.completion-next)
+          (cons (stroke 'up #f 0) 'prompt.completion-previous)
+          (cons (stroke 'down #f 0) 'prompt.completion-next)
+          (cons (stroke 'character 112 4) 'prompt.completion-previous)
+          (cons (stroke 'character 110 4) 'prompt.completion-next)
+          (cons (stroke 'character 112 2) 'prompt.history-previous)
+          (cons (stroke 'character 110 2) 'prompt.history-next)
+          (cons (stroke 'up #f 2) 'prompt.history-previous)
+          (cons (stroke 'down #f 2) 'prompt.history-next)
+          (cons (stroke 'tab 9 0) 'prompt.insert-completion)
           (cons (stroke 'tab 9 1) 'prompt.completion-previous)))
       (keymap-catalog-register!
         (editor-keymap-catalog editor)

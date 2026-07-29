@@ -36,6 +36,8 @@
           editor-active-prompt
           editor-open-prompt!
           editor-accept-prompt!
+          editor-accept-prompt-input!
+          editor-insert-prompt-completion!
           editor-abort-prompt!
           editor-active-prompt-input
           editor-active-prompt-completion
@@ -317,6 +319,20 @@
           completion-item-documentation
           completion-item-provider-data
           completion-item-payload
+          make-completion-text-edit
+          completion-text-edit?
+          completion-text-edit-start
+          completion-text-edit-end
+          completion-text-edit-new-text
+          make-completion-edit
+          completion-edit?
+          completion-edit-insert
+          completion-edit-replace
+          completion-edit-additional-edits
+          completion-match?
+          completion-match-score
+          completion-match-ranges
+          completion-match-exact?
           make-choice-source
           choice-source?
           choice-source-category
@@ -330,6 +346,7 @@
           prompt-completion-target-prompt-id
           prompt-completion-target-start
           prompt-completion-target-end
+          prompt-completion-target-replacement-end
           make-document-completion-target
           document-completion-target?
           document-completion-target-view-id
@@ -338,6 +355,7 @@
           document-completion-target-revision
           document-completion-target-start
           document-completion-target-end
+          document-completion-target-replacement-end
           completion-target?
           completion-session?
           completion-session-id
@@ -348,6 +366,7 @@
           completion-session-generation
           completion-session-query
           completion-session-items
+          completion-session-item-match
           completion-session-pending?
           completion-session-provider-results
           completion-provider-result?
