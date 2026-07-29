@@ -63,7 +63,7 @@
 
   (define (load-bytes runtime path)
     (if (not path)
-        (make-bytevector 0)
+        (values (make-bytevector 0) #f)
         (let ([source (runtime-read-file! runtime path)])
           (let loop ()
             (let find ([events (runtime-poll! runtime)])
@@ -71,9 +71,20 @@
                 [(null? events) (loop)]
                 [(and (= (event-source (car events)) source)
                       (eq? (event-kind (car events)) 'file-read))
-                 (if (negative? (event-status (car events)))
-                     (error 'run-tui-editor "cannot read file" path)
-                     (event-data (car events)))]
+                 (let ([status (event-status (car events))])
+                   (cond
+                     [(zero? status)
+                      (values (event-data (car events)) #f)]
+                     [(string=?
+                        (runtime-status-name status)
+                        "ENOENT")
+                      (values (make-bytevector 0) #t)]
+                     [else
+                      (error
+                        'run-tui-editor
+                        "cannot read file"
+                        path
+                        (runtime-status-message status))]))]
                 [else (find (cdr events))]))))))
 
   (define (call-with-runtime procedure)
@@ -101,7 +112,12 @@
             (guard (condition [else #f])
               (terminal-close! terminal)))))))
 
-  (define (call-with-editor bytes resource file-path procedure)
+  (define (call-with-editor
+            bytes
+            resource
+            file-path
+            new-file?
+            procedure)
     (let ([document #f] [buffer #f] [editor #f])
       (dynamic-wind
         (lambda () #f)
@@ -119,6 +135,11 @@
             (detect-file-line-ending bytes))
           (when file-path
             (buffer-set-file-path! buffer file-path))
+          (when new-file?
+            (buffer-set-local-setting!
+              buffer
+              'file-needs-save?
+              #t))
           (set! editor (make-editor buffer))
           (install-tui-commands! editor)
           (procedure editor))
@@ -338,15 +359,18 @@
   (define (run-tui-editor path)
     (call-with-runtime
       (lambda (runtime)
-        (let ([bytes (load-bytes runtime path)])
-          (call-with-editor
-            bytes
-            (or path "*scratch*")
-            path
-            (lambda (editor)
-              (call-with-terminal
-                (lambda (terminal)
-                  (run-editor-session
-                    runtime
-                    terminal
-                    editor))))))))))
+        (call-with-values
+          (lambda () (load-bytes runtime path))
+          (lambda (bytes new-file?)
+            (call-with-editor
+              bytes
+              (or path "*scratch*")
+              path
+              new-file?
+              (lambda (editor)
+                (call-with-terminal
+                  (lambda (terminal)
+                    (run-editor-session
+                      runtime
+                      terminal
+                      editor)))))))))))

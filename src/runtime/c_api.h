@@ -28,7 +28,7 @@ typedef struct soda_terminal soda_terminal;
 #define SODA_EVENT_FILE_READ 3U
 #define SODA_EVENT_FILE_WRITE 4U
 
-#define SODA_RUNTIME_ABI_VERSION 2U
+#define SODA_RUNTIME_ABI_VERSION 3U
 
 #define SODA_FD_READABLE (1U << 0U)
 #define SODA_FD_WRITABLE (1U << 1U)
@@ -64,6 +64,10 @@ SODA_RUNTIME_API size_t soda_runtime_event_data_size(soda_runtime* runtime);
 SODA_RUNTIME_API const uint8_t* soda_runtime_event_data(soda_runtime* runtime);
 SODA_RUNTIME_API size_t soda_runtime_copy_event_data(soda_runtime* runtime, uint8_t* destination,
                                                      size_t capacity);
+// Returns libuv's stable symbolic error name and human-readable message for a
+// status. The returned strings have static lifetime.
+SODA_RUNTIME_API const char* soda_runtime_status_name(int status);
+SODA_RUNTIME_API const char* soda_runtime_status_message(int status);
 
 // The returned message is owned by the runtime and remains valid until the
 // next C API operation on that runtime.

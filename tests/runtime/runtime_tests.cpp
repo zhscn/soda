@@ -360,6 +360,22 @@ TEST_CASE("C ABI exposes an event without native callbacks into its caller") {
     soda_runtime_destroy(runtime);
 }
 
+TEST_CASE("C ABI classifies asynchronous filesystem failures") {
+    soda_runtime* runtime = soda_runtime_create();
+    REQUIRE(runtime != nullptr);
+    REQUIRE(soda_runtime_read_file(runtime, "/soda/path/that/does/not/exist") != 0);
+
+    REQUIRE(soda_runtime_poll(runtime, SODA_POLL_ONCE) == 0);
+    REQUIRE(soda_runtime_next_event(runtime) == 1);
+    REQUIRE(soda_runtime_event_kind(runtime) == SODA_EVENT_FILE_READ);
+    const int status = soda_runtime_event_status(runtime);
+    REQUIRE(status < 0);
+    CHECK(std::string(soda_runtime_status_name(status)) == "ENOENT");
+    CHECK_FALSE(std::string(soda_runtime_status_message(status)).empty());
+
+    soda_runtime_destroy(runtime);
+}
+
 TEST_CASE("file event data constructs native Text without a Scheme copy") {
     namespace fs = std::filesystem;
     const fs::path path =

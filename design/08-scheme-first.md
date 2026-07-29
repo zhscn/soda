@@ -105,7 +105,7 @@ runtime ABI 遵循 pull-based 约束：
 - Scheme drain timer、fd、file-read、file-write 等结果；
 - close 是显式、幂等的生命周期动作；
 - callback data 不保存 Scheme pointer；
-- error code 与消息作为值跨 ABI 返回。
+- status、libuv 稳定错误名与人类可读消息作为值跨 ABI 返回。
 
 文件写入在 libuv worker pool 中执行完整的临时文件写入与原子替换。worker 不访问
 Scheme 对象；完成 callback 只把状态加入 native event queue。

@@ -135,7 +135,14 @@
                        (vector-ref target 2)
                        (event-status event)
                        (event-data event)
-                       #f))]
+                       (and
+                         (negative? (event-status event))
+                         (runtime-status-name
+                           (event-status event)))
+                       (and
+                         (negative? (event-status event))
+                         (runtime-status-message
+                           (event-status event)))))]
                   [(write)
                    (make-internal-command-message
                      'file.apply-save-result
@@ -145,7 +152,10 @@
                        (vector-ref target 3)
                        (vector-ref target 4)
                        (event-status event)
-                       #f
+                       (and
+                         (negative? (event-status event))
+                         (runtime-status-message
+                           (event-status event)))
                        (vector-ref target 5)))]
                   [else
                    (assertion-violation

@@ -66,5 +66,24 @@
     (error 'runtime-tests "saved file bytes differ" events)))
 (delete-file save-file)
 
+(define missing-file (string-append save-file ".missing"))
+(when (file-exists? missing-file)
+  (delete-file missing-file))
+(define missing-read (runtime-read-file! runtime missing-file))
+(let* ([events (runtime-poll! runtime)]
+       [event (and (= (length events) 1) (car events))])
+  (unless
+    (and
+      event
+      (= (event-source event) missing-read)
+      (negative? (event-status event))
+      (string=? (runtime-status-name (event-status event)) "ENOENT")
+      (positive?
+        (string-length
+          (runtime-status-message (event-status event)))))
+    (error 'runtime-tests
+           "runtime did not classify a missing file"
+           events)))
+
 (runtime-close! runtime)
 (runtime-close! runtime)

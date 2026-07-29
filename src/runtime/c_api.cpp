@@ -2,6 +2,8 @@
 
 #include "runtime/runtime.hpp"
 
+#include <uv.h>
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -191,6 +193,14 @@ size_t soda_runtime_copy_event_data(soda_runtime* runtime, uint8_t* destination,
         std::ranges::copy(event->data, reinterpret_cast<std::byte*>(destination));
         return event->data.size();
     });
+}
+
+const char* soda_runtime_status_name(int status) {
+    return uv_err_name(status);
+}
+
+const char* soda_runtime_status_message(int status) {
+    return uv_strerror(status);
 }
 
 const char* soda_runtime_last_error(soda_runtime* runtime) {

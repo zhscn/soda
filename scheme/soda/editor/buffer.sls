@@ -198,8 +198,10 @@
     (require-open-buffer 'buffer-modified? value)
     (and
       (buffer-setting-ref value 'track-modified? #t)
-      (not (= (document-undo-position (buffer-document value))
-              (buffer-saved-undo-node value)))))
+      (or
+        (buffer-setting-ref value 'file-needs-save? #f)
+        (not (= (document-undo-position (buffer-document value))
+                (buffer-saved-undo-node value))))))
 
   (define (buffer-save-pending? value)
     (require-open-buffer 'buffer-save-pending? value)

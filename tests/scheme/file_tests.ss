@@ -40,10 +40,13 @@
 (define save-path (getenv "SODA_EDITOR_SAVE_TEST_FILE"))
 (define save-as-path (getenv "SODA_EDITOR_SAVE_AS_TEST_FILE"))
 (define open-path (getenv "SODA_EDITOR_OPEN_TEST_FILE"))
+(define new-path (string-append save-as-path ".new"))
 (when (file-exists? save-path)
   (delete-file save-path))
 (when (file-exists? save-as-path)
   (delete-file save-as-path))
+(when (file-exists? new-path)
+  (delete-file new-path))
 
 (define document (make-document "base" 801))
 (define buffer
@@ -528,23 +531,60 @@
 (define buffers-before-failed-open (length (editor-buffers editor)))
 (dispatch!
   (make-command-message
-    'file.open-path
-    (make-prompt-result
-      103
-      'accepted
-      "/soda/path/that/does/not/exist/open"
+    'file.apply-open-result
+    (make-open-result
       origin-view-id
-      #f)))
-(define open-failure (finish-file-read!))
+      "/soda/path/that/is/not/readable"
+      -1
+      (make-bytevector 0)
+      "EACCES"
+      "permission denied")))
 (unless
   (and
-    (negative? (event-status open-failure))
     (= (length (editor-buffers editor))
        buffers-before-failed-open)
     (string-contains?
       (editor-status-message editor)
       "Open failed"))
-  (error 'file-tests "failed open created or switched a buffer"))
+  (error 'file-tests
+         "non-ENOENT open failure created a file buffer"))
+
+(dispatch!
+  (make-command-message
+    'file.open-path
+    (make-prompt-result
+      103
+      'accepted
+      new-path
+      origin-view-id
+      #f)))
+(define new-file-event (finish-file-read!))
+(define new-file-buffer (view-buffer (editor-active-view editor)))
+(unless
+  (and
+    (negative? (event-status new-file-event))
+    (= (length (editor-buffers editor))
+       (+ buffers-before-failed-open 1))
+    (string=? (buffer-file-path new-file-buffer) new-path)
+    (buffer-modified? new-file-buffer)
+    (string-contains?
+      (editor-status-message editor)
+      "New file"))
+  (error 'file-tests
+         "missing file did not create a visiting buffer"))
+
+(dispatch! (make-command-message 'file.save #f))
+(finish-file-write!)
+(unless
+  (and
+    (file-exists? new-path)
+    (zero? (bytevector-length (read-file-bytes new-path)))
+    (not (buffer-modified? new-file-buffer))
+    (string-contains?
+      (editor-status-message editor)
+      "Saved"))
+  (error 'file-tests
+         "new empty file did not complete its first save"))
 
 (editor-close! editor)
 (runtime-close! runtime)
@@ -552,3 +592,5 @@
   (delete-file save-path))
 (when (file-exists? save-as-path)
   (delete-file save-as-path))
+(when (file-exists? new-path)
+  (delete-file new-path))

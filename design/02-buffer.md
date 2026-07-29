@@ -156,6 +156,11 @@ runtime adapter 只负责把 native source 与请求关联，文件内容和完�
 command 返回 editor。成功结果创建带 `file_path` 的 Buffer，根据路径选择初始
 major mode，并记录原始换行约定。
 
+runtime 把 libuv status 转换成稳定的错误名和消息。`ENOENT` 结果创建一个访问该
+路径的空 Buffer，并设置首次保存要求；该 Buffer 即使尚无文本编辑也处于 modified
+状态，首次 `file.save` 会创建文件并清除要求。权限、I/O 和其他读取错误只报告失败，
+不创建 Buffer。
+
 同一路径已有 Buffer 时复用其 identity，不重复读取或创建 Document。异步读取完成
 时，结果显示到发起请求的 view；该 view 已关闭时，Buffer 仍加入全局 Buffer 集合，
 供后续显示策略选择。

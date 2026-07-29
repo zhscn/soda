@@ -12,6 +12,7 @@
           open-result-path
           open-result-status
           open-result-data
+          open-result-error-name
           open-result-detail
           make-save-request
           save-request?
@@ -56,7 +57,7 @@
 
   (define-record-type
     (open-result %make-open-result open-result?)
-    (fields view-id path status data detail))
+    (fields view-id path status data error-name detail))
 
   (define-record-type
     (save-request %make-save-request save-request?)
@@ -94,18 +95,20 @@
   (define make-open-result
     (case-lambda
       [(request status data detail)
-       (unless (open-request? request)
-         (assertion-violation
-           'make-open-result
-           "expected an open request"
-           request))
-       (make-open-result
-         (open-request-view-id request)
-         (open-request-path request)
-         status
-         data
-         detail)]
-      [(view-id path status data detail)
+       (make-open-result request status data #f detail)]
+      [(first second third fourth fifth)
+       (if
+         (open-request? first)
+         (make-open-result
+           (open-request-view-id first)
+           (open-request-path first)
+           second
+           third
+           fourth
+           fifth)
+         (make-open-result
+           first second third fourth #f fifth))]
+      [(view-id path status data error-name detail)
        (unless (exact-non-negative-integer? view-id)
          (assertion-violation
            'make-open-result
@@ -126,12 +129,18 @@
            'make-open-result
            "data must be a bytevector"
            data))
+       (unless (or (not error-name) (string? error-name))
+         (assertion-violation
+           'make-open-result
+           "error name must be a string or #f"
+           error-name))
        (unless (or (not detail) (string? detail))
          (assertion-violation
            'make-open-result
            "detail must be a string or #f"
            detail))
-       (%make-open-result view-id path status data detail)]))
+       (%make-open-result
+         view-id path status data error-name detail)]))
 
   (define (detect-file-line-ending bytes)
     (unless (bytevector? bytes)
@@ -657,15 +666,79 @@
                (prompt-result-origin-view-id result)
                path)))])))
 
+  (define (open-result-not-found? result)
+    (and
+      (not (zero? (open-result-status result)))
+      (string? (open-result-error-name result))
+      (string=? (open-result-error-name result) "ENOENT")))
+
+  (define (create-open-result-buffer! editor result new-file?)
+    (let ([buffer
+            (editor-create-buffer!
+              editor
+              (open-result-path result)
+              (file-major-mode-for-path
+                (open-result-path result))
+              (if
+                new-file?
+                (make-bytevector 0)
+                (open-result-data result)))])
+      (buffer-set-file-path! buffer (open-result-path result))
+      (buffer-set-local-setting!
+        buffer
+        'file-line-ending
+        (if
+          new-file?
+          'lf
+          (detect-file-line-ending
+            (open-result-data result))))
+      (when new-file?
+        (buffer-set-local-setting!
+          buffer
+          'file-needs-save?
+          #t))
+      (if
+        (activate-buffer!
+          editor
+          (open-result-view-id result)
+          buffer)
+        (editor-set-status-message!
+          editor
+          (string-append
+            (if new-file? "New file " "Opened ")
+            (open-result-path result)))
+        (editor-set-status-message!
+          editor
+          (string-append
+            (if new-file? "New file " "Opened ")
+            (open-result-path result)
+            " in a background buffer")))
+      buffer))
+
   (define (apply-open-result-command context)
-    (let ([editor (command-context-editor context)]
-          [result (command-context-argument context)])
+    (let* ([editor (command-context-editor context)]
+           [result (command-context-argument context)])
       (unless (open-result? result)
         (assertion-violation
           'file.apply-open-result
           "expected an open result"
           result))
       (cond
+        [(find-buffer-by-path editor (open-result-path result)) =>
+         (lambda (buffer)
+           (activate-buffer!
+             editor
+             (open-result-view-id result)
+             buffer)
+           (editor-set-status-message!
+             editor
+             (string-append
+               "Switched to "
+               (open-result-path result)))
+           '())]
+        [(open-result-not-found? result)
+         (create-open-result-buffer! editor result #t)
+         '()]
         [(not (zero? (open-result-status result)))
          (editor-set-status-message!
            editor
@@ -680,51 +753,9 @@
                      (number->string (open-result-status result))
                      ")")))))
          '()]
-        [(find-buffer-by-path editor (open-result-path result)) =>
-         (lambda (buffer)
-           (activate-buffer!
-             editor
-             (open-result-view-id result)
-             buffer)
-           (editor-set-status-message!
-             editor
-             (string-append
-               "Switched to "
-               (open-result-path result)))
-           '())]
         [else
-         (let ([buffer
-                 (editor-create-buffer!
-                   editor
-                   (open-result-path result)
-                   (file-major-mode-for-path
-                     (open-result-path result))
-                   (open-result-data result))])
-           (buffer-set-file-path!
-             buffer
-             (open-result-path result))
-           (buffer-set-local-setting!
-             buffer
-             'file-line-ending
-             (detect-file-line-ending
-               (open-result-data result)))
-           (if
-             (activate-buffer!
-               editor
-               (open-result-view-id result)
-               buffer)
-             (editor-set-status-message!
-               editor
-               (string-append
-                 "Opened "
-                 (open-result-path result)))
-             (editor-set-status-message!
-               editor
-               (string-append
-                 "Opened "
-                 (open-result-path result)
-                 " in a background buffer")))
-           '())])))
+         (create-open-result-buffer! editor result #f)
+         '()])))
 
   (define (open-save-as-prompt! editor buffer)
     (editor-open-prompt!
@@ -850,6 +881,10 @@
         (when (and success? (save-result-adopt-path? result))
           (buffer-set-file-path! buffer (save-result-path result))
           (buffer-set-resource! buffer (save-result-path result)))
+        (when success?
+          (buffer-clear-local-setting!
+            buffer
+            'file-needs-save?))
         (editor-set-status-message!
           editor
           (cond

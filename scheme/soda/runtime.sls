@@ -9,6 +9,8 @@
           runtime-read-file!
           runtime-write-file!
           runtime-cancel!
+          runtime-status-name
+          runtime-status-message
           make-terminal
           terminal?
           terminal-close!
@@ -37,7 +39,7 @@
     (foreign-procedure __atomic "soda_runtime_abi_version" () unsigned-32))
 
   (define abi-version-checked
-    (unless (= (%abi-version) 2)
+    (unless (= (%abi-version) 3)
       (error 'soda-runtime "unsupported native runtime ABI version")))
 
   (define %runtime-create
@@ -78,6 +80,10 @@
     (foreign-procedure __atomic "soda_runtime_copy_event_data"
                        (void* u8* size_t)
                        size_t))
+  (define %status-name
+    (foreign-procedure __atomic "soda_runtime_status_name" (int) string))
+  (define %status-message
+    (foreign-procedure __atomic "soda_runtime_status_message" (int) string))
   (define %last-error
     (foreign-procedure __atomic "soda_runtime_last_error" (void*) string))
   (define %terminal-create
@@ -202,6 +208,22 @@
       (if (negative? status)
           (native-error 'runtime-cancel! runtime)
           (not (zero? status)))))
+
+  (define (runtime-status-name status)
+    (unless (and (integer? status) (exact? status))
+      (assertion-violation
+        'runtime-status-name
+        "status must be an exact integer"
+        status))
+    (%status-name status))
+
+  (define (runtime-status-message status)
+    (unless (and (integer? status) (exact? status))
+      (assertion-violation
+        'runtime-status-message
+        "status must be an exact integer"
+        status))
+    (%status-message status))
 
   (define make-terminal
     (case-lambda

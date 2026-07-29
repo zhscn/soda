@@ -103,6 +103,9 @@ cmk build -c Debug
 ./bin/soda path/to/file
 ```
 
+When the path does not exist, Soda starts an empty visiting buffer whose first
+save creates the file. Other startup read failures remain fatal.
+
 Printable input inserts text. Backspace deletes the previous UTF-8 code point,
 the arrow keys move the caret, Enter inserts a newline, `C-x =` describes the
 character and rendered faces at point, `C-Space` sets the mark, `M-w` copies
