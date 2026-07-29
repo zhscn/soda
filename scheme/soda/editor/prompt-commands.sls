@@ -90,7 +90,8 @@
           'must-match
           (command-choice-source editor)
           'prompt.execute-command
-          #f)))
+          #f
+          (command-context-prefix context))))
     '())
 
   (define (execute-prompt-command context)
@@ -122,7 +123,10 @@
                (list
                  (make-command-effect
                    'command.invoke
-                   (make-command-message name #f)))
+                   (make-command-message
+                     name
+                     #f
+                     (prompt-result-data result))))
                (begin
                  (editor-set-status-message!
                    editor

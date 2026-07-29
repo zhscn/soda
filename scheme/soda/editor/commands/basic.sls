@@ -53,6 +53,30 @@
   (define (context-document context)
     (buffer-document (context-buffer context)))
 
+  (define (require-non-negative-count who context)
+    (let ([count (command-context-count context)])
+      (when (negative? count)
+        (assertion-violation
+          who
+          "command requires a non-negative prefix argument"
+          count))
+      count))
+
+  (define (repeat-bytes bytes count)
+    (let* ([length (bytevector-length bytes)]
+           [result (make-bytevector (* length count))])
+      (do ([index 0 (+ index 1)])
+          [(= index count) result]
+        (bytevector-copy!
+          bytes
+          0
+          result
+          (* index length)
+          length))))
+
+  (define (newline-bytes count)
+    (make-bytevector count 10))
+
   (define (move-vertical! view delta)
     (with-document-text
       (buffer-document (view-buffer view))
@@ -100,14 +124,20 @@
                [(bytevector? argument) argument]
                [(and event (key-event? event)) (key-event-text event)]
                [else (make-bytevector 0)])]
+           [inserted
+             (repeat-bytes
+               bytes
+               (require-non-negative-count
+                 'self-insert-command
+                 context))]
            [view (context-view context)]
            [caret (view-caret view)]
            [region (view-region view)]
            [start (if region (car region) caret)]
            [end (if region (cdr region) caret)])
-      (unless (zero? (bytevector-length bytes))
-        (buffer-replace-range! (context-buffer context) start end bytes)
-        (view-set-caret! view (+ start (bytevector-length bytes)))
+      (unless (zero? (bytevector-length inserted))
+        (buffer-replace-range! (context-buffer context) start end inserted)
+        (view-set-caret! view (+ start (bytevector-length inserted)))
         (when region
           (view-clear-mark! view)))
       '()))
@@ -161,15 +191,17 @@
            [caret (view-caret view)]
            [region (view-region view)]
            [start (if region (car region) caret)]
-           [end (if region (cdr region) caret)])
-      (buffer-replace-range!
-        (context-buffer context)
-        start
-        end
-        (make-bytevector 1 10))
-      (view-set-caret! view (+ start 1))
-      (when region
-        (view-clear-mark! view))
+           [end (if region (cdr region) caret)]
+           [count (require-non-negative-count 'newline-command context)])
+      (unless (zero? count)
+        (buffer-replace-range!
+          (context-buffer context)
+          start
+          end
+          (newline-bytes count))
+        (view-set-caret! view (+ start count))
+        (when region
+          (view-clear-mark! view)))
       '()))
 
   (define (open-line-command context)
@@ -177,36 +209,45 @@
            [caret (view-caret view)]
            [region (view-region view)]
            [start (if region (car region) caret)]
-           [end (if region (cdr region) caret)])
-      (buffer-replace-range!
-        (context-buffer context)
-        start
-        end
-        (make-bytevector 1 10))
-      (view-set-caret! view start)
-      (when region
-        (view-clear-mark! view))
+           [end (if region (cdr region) caret)]
+           [count (require-non-negative-count 'open-line-command context)])
+      (unless (zero? count)
+        (buffer-replace-range!
+          (context-buffer context)
+          start
+          end
+          (newline-bytes count))
+        (view-set-caret! view start)
+        (when region
+          (view-clear-mark! view)))
+      '()))
+
+  (define (move-character! context count)
+    (let ([view (context-view context)])
+      (view-set-caret!
+        view
+        (with-document-text
+          (context-document context)
+          (lambda (text)
+            (let loop ([remaining count]
+                       [offset (view-caret view)])
+              (cond
+                [(zero? remaining) offset]
+                [(positive? remaining)
+                 (loop
+                   (- remaining 1)
+                   (next-character-offset text offset))]
+                [else
+                 (loop
+                   (+ remaining 1)
+                   (previous-character-offset text offset))])))))
       '()))
 
   (define (backward-character-command context)
-    (let ([view (context-view context)])
-      (view-set-caret!
-        view
-        (with-document-text
-          (context-document context)
-          (lambda (text)
-            (previous-character-offset text (view-caret view))))))
-    '())
+    (move-character! context (- (command-context-count context))))
 
   (define (forward-character-command context)
-    (let ([view (context-view context)])
-      (view-set-caret!
-        view
-        (with-document-text
-          (context-document context)
-          (lambda (text)
-            (next-character-offset text (view-caret view))))))
-    '())
+    (move-character! context (command-context-count context)))
 
   (define (move-word! context count)
     (let* ([view (context-view context)]
@@ -219,17 +260,21 @@
       '()))
 
   (define (forward-word-command context)
-    (move-word! context 1))
+    (move-word! context (command-context-count context)))
 
   (define (backward-word-command context)
-    (move-word! context -1))
+    (move-word! context (- (command-context-count context))))
 
   (define (previous-line-command context)
-    (move-vertical! (context-view context) -1)
+    (move-vertical!
+      (context-view context)
+      (- (command-context-count context)))
     '())
 
   (define (next-line-command context)
-    (move-vertical! (context-view context) 1)
+    (move-vertical!
+      (context-view context)
+      (command-context-count context))
     '())
 
   (define (line-start-command context)
@@ -375,7 +420,7 @@
              (buffer-word-motion-target
                (context-buffer context)
                start
-               1)])
+               (command-context-count context))])
       (kill-range! context start end)
       '()))
 
@@ -386,7 +431,7 @@
              (buffer-word-motion-target
                (context-buffer context)
                start
-               -1)])
+               (- (command-context-count context)))])
       (kill-range! context start end)
       '()))
 
@@ -403,10 +448,25 @@
                             (text-position text start))]
                         [content-end
                           (text-line-content-end text line)])
-                   (cond
-                     [(< start content-end) content-end]
-                     [(< start size) (+ start 1)]
-                     [else start]))))])
+                   (if (not (command-context-prefix context))
+                       (cond
+                         [(< start content-end) content-end]
+                         [(< start size) (+ start 1)]
+                         [else start])
+                       (let ([count (command-context-count context)])
+                         (cond
+                           [(zero? count) start]
+                           [(positive? count)
+                            (if (>= (+ line count)
+                                    (text-line-count text))
+                                size
+                                (text-line-start
+                                  text
+                                  (+ line count)))]
+                           [else
+                            (text-line-start
+                              text
+                              (max 0 (+ line count 1)))]))))))])
       (kill-range! context start end)
       '()))
 

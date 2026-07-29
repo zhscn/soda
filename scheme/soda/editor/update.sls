@@ -20,19 +20,30 @@
         (write condition port)
         (extract))))
 
-  (define (run-interactive-command editor name event argument)
+  (define (run-interactive-command editor name event argument message-prefix)
     (unless (eq? name 'editor.quit)
       (editor-disarm-quit! editor))
     (guard (condition
              [else
+              (editor-clear-pending-prefix! editor)
               (editor-set-last-command-class! editor #f)
               (editor-set-status-message!
                 editor
                 (condition->string condition))
               '()])
       (editor-set-status-message! editor #f)
-      (editor-execute-interactive-command!
-        editor name event argument)))
+      (if (eq?
+            (command-class (editor-command-registry editor) name)
+            'prefix)
+          (editor-execute-command! editor name event argument #f)
+          (let ([pending-prefix
+                  (editor-take-pending-prefix! editor)])
+            (editor-execute-interactive-command!
+              editor
+              name
+              event
+              argument
+              (or message-prefix pending-prefix))))))
 
   (define (run-internal-command editor name argument)
     (unless (eq? name 'editor.quit)
@@ -60,6 +71,9 @@
            [layers
              (append
                (list 'editor.override)
+               (if (editor-pending-prefix editor)
+                   (list 'editor.prefix)
+                   '())
                (fold-right
                  append
                  '()
@@ -83,7 +97,8 @@
             editor
             (input-state-text-command state)
             event
-            text)
+            text
+            #f)
           '())))
 
   (define (handle-key-event! editor event)
@@ -107,9 +122,10 @@
                  '()]
                 [(command)
                  (editor-set-pending-keys! editor '())
-                 (run-interactive-command editor command event #f)]
+                 (run-interactive-command editor command event #f #f)]
                 [(undefined)
                  (editor-set-pending-keys! editor '())
+                 (editor-clear-pending-prefix! editor)
                  (editor-set-last-command-class! editor #f)
                  (editor-set-status-message!
                    editor
@@ -126,6 +142,7 @@
                        (key-event-text event))
                      (begin
                        (editor-set-last-command-class! editor #f)
+                       (editor-clear-pending-prefix! editor)
                        (when (pair? pending)
                          (editor-set-status-message!
                            editor
@@ -210,7 +227,8 @@
          editor
          (command-message-name message)
          #f
-         (command-message-argument message))]
+         (command-message-argument message)
+         (command-message-prefix message))]
       [(internal-command-message? message)
        (run-internal-command
          editor

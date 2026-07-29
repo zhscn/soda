@@ -45,7 +45,8 @@ PromptRequest {
   validator?,
   completion-source?,
   accept-command,
-  abort-command?
+  abort-command?,
+  data?
 }
 ```
 
@@ -55,6 +56,7 @@ PromptRequest {
 - `history-id` 选择 Editor 持有的 history collection。
 - `accept-policy` 为 `free` 或 `must-match`；`must-match` 使用 validator 检查最终值。
 - `completion-source` 为读取附加结构化 choice completion。
+- `data` 是 responder 的不透明 continuation data，在接受和取消时原样进入结果。
 - responder 使用 command symbol，不保存调用栈或暂停中的递归编辑。
 
 `PromptSession` 保存 session id、request、transient buffer/view id、origin view id、
@@ -62,9 +64,9 @@ PromptRequest {
 结果校验使用。
 
 `PromptResult` 包含 session id、`accepted` 或 `aborted` 状态、最终值、选中的
-completion candidate 和 origin view id。接受结果先关闭 session 并恢复 origin
-view，再投递给 responder。取消值和 candidate 为 `#f`；没有 abort responder 时
-只完成清理。
+completion candidate、origin view id 和 request data。接受结果先关闭 session
+并恢复 origin view，再投递给 responder。取消值和 candidate 为 `#f`；没有 abort
+responder 时只完成清理。
 
 ## Buffer、View 与焦点
 
@@ -119,4 +121,6 @@ choice source 显式提供 metadata、boundaries、candidates、validate 和 can
 不承担返回值或对象身份。
 
 `M-x` 使用 command registry choice source 和 `extended-command` history 读取
-command symbol，结果通过 `prompt.execute-command` 回到 command registry。
+command symbol。发起 `M-x` 的 prefix argument 作为 request data 跨 prompt
+生命周期保存，`prompt.execute-command` 把它放入 interactive command message，
+因此最终命令收到与直接按键调用相同的 `CommandContext`。

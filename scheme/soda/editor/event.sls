@@ -28,6 +28,7 @@
           command-message?
           command-message-name
           command-message-argument
+          command-message-prefix
           make-internal-command-message
           internal-command-message?
           internal-command-message-name
@@ -41,7 +42,8 @@
           completion-response-message-target-revision
           completion-response-message-items
           completion-response-message-complete?)
-  (import (rnrs))
+  (import (rnrs)
+          (soda editor prefix))
 
   (define-record-type key-event
     (fields key
@@ -66,8 +68,26 @@
   (define-record-type resize-message
     (fields rows columns))
 
-  (define-record-type command-message
-    (fields name argument))
+  (define-record-type
+    (command-message %make-command-message command-message?)
+    (fields name argument prefix))
+
+  (define make-command-message
+    (case-lambda
+      [(name argument)
+       (make-command-message name argument #f)]
+      [(name argument prefix)
+       (unless (symbol? name)
+         (assertion-violation
+           'make-command-message
+           "command name must be a symbol"
+           name))
+       (unless (or (not prefix) (prefix-argument? prefix))
+         (assertion-violation
+           'make-command-message
+           "prefix must be a prefix argument or #f"
+           prefix))
+       (%make-command-message name argument prefix)]))
 
   (define-record-type internal-command-message
     (fields name argument))

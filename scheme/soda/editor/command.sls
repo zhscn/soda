@@ -14,17 +14,42 @@
           command-context-view
           command-context-event
           command-context-argument
+          command-context-prefix
+          command-context-count
           make-command-effect
           command-effect?
           command-effect-kind
           command-effect-payload)
-  (import (rnrs))
+  (import (rnrs)
+          (soda editor prefix))
 
   (define-record-type (command-registry %make-command-registry command-registry?)
     (fields entries))
 
-  (define-record-type command-context
-    (fields editor view event argument))
+  (define-record-type
+    (command-context %make-command-context command-context?)
+    (fields editor view event argument prefix))
+
+  (define make-command-context
+    (case-lambda
+      [(editor view event argument)
+       (%make-command-context editor view event argument #f)]
+      [(editor view event argument prefix)
+       (unless (or (not prefix) (prefix-argument? prefix))
+         (assertion-violation
+           'make-command-context
+           "prefix must be a prefix argument or #f"
+           prefix))
+       (%make-command-context editor view event argument prefix)]))
+
+  (define (command-context-count context)
+    (unless (command-context? context)
+      (assertion-violation
+        'command-context-count
+        "expected a command context"
+        context))
+    (let ([prefix (command-context-prefix context)])
+      (if prefix (prefix-argument-value prefix) 1)))
 
   (define-record-type command-effect
     (fields kind payload))

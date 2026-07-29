@@ -11,6 +11,7 @@
           prompt-request-accept-command
           prompt-request-abort-command
           prompt-request-completion-source
+          prompt-request-data
           make-prompt-session
           prompt-session?
           prompt-session-id
@@ -37,6 +38,7 @@
           prompt-result-value
           prompt-result-origin-view-id
           prompt-result-candidate
+          prompt-result-data
           make-prompt-reply
           prompt-reply?
           prompt-reply-command
@@ -54,7 +56,8 @@
             validator
             accept-command
             abort-command
-            completion-source))
+            completion-source
+            data))
 
   (define-record-type prompt-session
     (fields id
@@ -70,8 +73,9 @@
   (define-record-type prompt-history
     (fields id (mutable entries)))
 
-  (define-record-type prompt-result
-    (fields session-id status value origin-view-id candidate))
+  (define-record-type
+    (prompt-result %make-prompt-result prompt-result?)
+    (fields session-id status value origin-view-id candidate data))
 
   (define-record-type prompt-reply
     (fields command result))
@@ -87,6 +91,7 @@
          'free
          #f
          accept-command
+         #f
          #f)]
       [(prompt
          initial
@@ -96,6 +101,25 @@
          validator
          accept-command
          abort-command)
+       (make-prompt-request
+         prompt
+         initial
+         history-id
+         default
+         accept-policy
+         validator
+         accept-command
+         abort-command
+         #f)]
+      [(prompt
+         initial
+         history-id
+         default
+         accept-policy
+         validator
+         accept-command
+         abort-command
+         data)
        (unless (string? prompt)
          (assertion-violation
            'make-prompt-request
@@ -149,42 +173,54 @@
          validator
          accept-command
          abort-command
-         #f)]))
+         #f
+         data)]))
 
-  (define (make-completing-prompt-request
-            prompt
-            initial
-            history-id
-            default
-            accept-policy
-            source
-            accept-command
-            abort-command)
-    (unless (choice-source? source)
-      (assertion-violation
-        'make-completing-prompt-request
-        "expected a choice source"
-        source))
-    (let ([request
-            (make-prompt-request
-              prompt
-              initial
-              history-id
-              default
-              accept-policy
-              (and
-                (eq? accept-policy 'must-match)
-                (lambda (value)
-                  (choice-source-valid? source value)))
-              accept-command
-              abort-command)])
-      (%make-prompt-request
-        (prompt-request-prompt request)
-        (prompt-request-initial request)
-        (prompt-request-history-id request)
-        (prompt-request-default request)
-        (prompt-request-accept-policy request)
-        (prompt-request-validator request)
-        (prompt-request-accept-command request)
-        (prompt-request-abort-command request)
-        source))))
+  (define make-completing-prompt-request
+    (case-lambda
+      [(prompt initial history-id default accept-policy source
+               accept-command abort-command)
+       (make-completing-prompt-request
+         prompt initial history-id default accept-policy source
+         accept-command abort-command #f)]
+      [(prompt initial history-id default accept-policy source
+               accept-command abort-command data)
+       (unless (choice-source? source)
+         (assertion-violation
+           'make-completing-prompt-request
+           "expected a choice source"
+           source))
+       (let ([request
+               (make-prompt-request
+                 prompt
+                 initial
+                 history-id
+                 default
+                 accept-policy
+                 (and
+                   (eq? accept-policy 'must-match)
+                   (lambda (value)
+                     (choice-source-valid? source value)))
+                 accept-command
+                 abort-command
+                 data)])
+         (%make-prompt-request
+           (prompt-request-prompt request)
+           (prompt-request-initial request)
+           (prompt-request-history-id request)
+           (prompt-request-default request)
+           (prompt-request-accept-policy request)
+           (prompt-request-validator request)
+           (prompt-request-accept-command request)
+           (prompt-request-abort-command request)
+           source
+           (prompt-request-data request)))]))
+
+  (define make-prompt-result
+    (case-lambda
+      [(session-id status value origin-view-id candidate)
+       (%make-prompt-result
+         session-id status value origin-view-id candidate #f)]
+      [(session-id status value origin-view-id candidate data)
+       (%make-prompt-result
+         session-id status value origin-view-id candidate data)])))

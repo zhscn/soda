@@ -992,6 +992,79 @@
   (error 'editor-tests "M-\\ did not delete preceding horizontal space"))
 (editor-close! line-editor)
 
+(define prefix-document
+  (make-document "one two\nthree\nlast" 975))
+(define prefix-buffer
+  (make-buffer
+    975
+    prefix-document
+    "*prefix*"
+    'fundamental-mode))
+(define prefix-editor (make-editor prefix-buffer))
+(define prefix-view (editor-active-view prefix-editor))
+(define prefix-decoder (make-input-decoder))
+(editor-update! prefix-editor (make-resize-message 5 30))
+
+(send! prefix-editor prefix-decoder (bytes 21))
+(unless
+  (and (= (prefix-argument-value
+            (editor-pending-prefix prefix-editor))
+          4)
+       (string=? (editor-status-message prefix-editor) "Prefix: 4"))
+  (error 'editor-tests "C-u did not establish a universal argument"))
+(send! prefix-editor prefix-decoder (bytes #x1b #x5b #x43))
+(unless
+  (and (= (view-caret prefix-view) 4)
+       (not (editor-pending-prefix prefix-editor)))
+  (error 'editor-tests "character motion did not consume its prefix"))
+
+(send! prefix-editor prefix-decoder (bytes 27 50 27 102))
+(unless (= (view-caret prefix-view) 13)
+  (error
+    'editor-tests
+    "M-2 did not repeat forward-word"
+    (view-caret prefix-view)
+    (editor-status-message prefix-editor)))
+(send! prefix-editor prefix-decoder (bytes 27 45 49 27 102))
+(unless (= (view-caret prefix-view) 8)
+  (error 'editor-tests "negative argument did not reverse word motion"))
+
+(send! prefix-editor prefix-decoder (bytes 21 51 120))
+(unless
+  (and (= (view-caret prefix-view) 11)
+       (bytevector=?
+         (buffer-bytes prefix-buffer)
+         (string->utf8 "one two\nxxxthree\nlast")))
+  (error 'editor-tests "plain prefix digits did not repeat self-insert"))
+
+(editor-update!
+  prefix-editor
+  (make-command-message
+    'move.buffer-start
+    #f))
+(editor-update!
+  prefix-editor
+  (make-command-message
+    'edit.kill-line
+    #f
+    (prefix-argument-digit #f 2)))
+(unless
+  (and
+    (= (view-caret prefix-view) 0)
+    (bytevector=?
+      (buffer-bytes prefix-buffer)
+      (string->utf8 "last"))
+    (bytevector=?
+      (editor-current-kill prefix-editor)
+      (string->utf8 "one two\nxxxthree\n")))
+  (error 'editor-tests "explicit kill-line count did not kill whole lines"))
+
+(send! prefix-editor prefix-decoder (bytes 21 7))
+(unless (and (not (editor-pending-prefix prefix-editor))
+             (not (editor-status-message prefix-editor)))
+  (error 'editor-tests "keyboard quit did not clear a pending prefix"))
+(editor-close! prefix-editor)
+
 (define prompt-document (make-document "body" 91))
 (define prompt-buffer
   (make-buffer
@@ -1002,6 +1075,7 @@
 (define prompt-editor (make-editor prompt-buffer))
 (define prompt-decoder (make-input-decoder))
 (define prompt-invocations 0)
+(define prompt-prefix-count 0)
 (define captured-prompt-result #f)
 (define selected-command #f)
 (editor-register-command!
@@ -1009,6 +1083,7 @@
   'test.prompt-target
   (lambda (context)
     (set! prompt-invocations (+ prompt-invocations 1))
+    (set! prompt-prefix-count (command-context-count context))
     '()))
 (editor-register-command!
   prompt-editor
@@ -1118,11 +1193,26 @@
 (unless (= prompt-invocations 1)
   (error 'editor-tests
          "prompt reply did not re-enter the command loop as a message"))
+(unless (= prompt-prefix-count 1)
+  (error 'editor-tests "ordinary M-x invocation acquired a prefix"))
 (unless (equal? (editor-history-entries
                   prompt-editor
                   'extended-command)
                 '("test.prompt-target"))
   (error 'editor-tests "accepted input was not recorded in history"))
+
+(send! prompt-editor prompt-decoder (bytes 21 27 120))
+(send!
+  prompt-editor
+  prompt-decoder
+  (string->utf8 "test.prompt-target"))
+(define prefixed-prompt-effects
+  (send! prompt-editor prompt-decoder (bytes 13)))
+(dispatch-prompt-effects! prefixed-prompt-effects)
+(unless (and (= prompt-invocations 2)
+             (= prompt-prefix-count 4)
+             (not (editor-pending-prefix prompt-editor)))
+  (error 'editor-tests "M-x did not preserve its prefix across the prompt"))
 
 (send! prompt-editor prompt-decoder (bytes 27 120))
 (send! prompt-editor prompt-decoder (bytes #x1b #x5b #x41))

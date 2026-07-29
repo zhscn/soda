@@ -47,6 +47,8 @@
       [(editor name)
        (editor-execute-command! editor name #f #f)]
       [(editor name event argument)
+       (editor-execute-command! editor name event argument #f)]
+      [(editor name event argument prefix)
        (require-open-editor 'editor-execute-command! editor)
        (editor-refresh-completion! editor)
        (let ([effects
@@ -57,7 +59,8 @@
                    editor
                    (editor-active-view editor)
                    event
-                   argument))])
+                   argument
+                   prefix))])
          (ensure-view-visible! (editor-active-view editor))
          (editor-refresh-completion-after-command! editor)
          (append
@@ -69,8 +72,12 @@
       [(editor name)
        (editor-execute-interactive-command! editor name #f #f)]
       [(editor name event argument)
+       (editor-execute-interactive-command!
+         editor name event argument #f)]
+      [(editor name event argument prefix)
        (let ([effects
-               (editor-execute-command! editor name event argument)])
+               (editor-execute-command!
+                 editor name event argument prefix)])
          (editor-set-last-command-class!
            editor
            (command-class (editor-command-registry editor) name))

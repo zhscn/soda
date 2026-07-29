@@ -58,6 +58,10 @@
           editor-set-status-message!
           editor-kill-ring
           editor-set-kill-ring!
+          editor-pending-prefix
+          editor-set-pending-prefix!
+          editor-clear-pending-prefix!
+          editor-take-pending-prefix!
           editor-last-command-class
           editor-set-last-command-class!
           editor-quit-armed?
@@ -104,6 +108,7 @@
           (soda editor interaction)
           (soda editor keymap)
           (soda editor language)
+          (soda editor prefix)
           (soda editor prompt))
 
   (define-record-type (view %make-view view?)
@@ -173,6 +178,9 @@
                editor-status-message
                editor-status-message-set!)
       (mutable kill-ring editor-kill-ring editor-kill-ring-set!)
+      (mutable pending-prefix
+               editor-pending-prefix
+               editor-pending-prefix-set!)
       (mutable last-command-class
                editor-last-command-class
                editor-last-command-class-set!)
@@ -189,6 +197,25 @@
 
   (define (exact-non-negative-integer? value)
     (and (integer? value) (exact? value) (not (negative? value))))
+
+  (define (editor-set-pending-prefix! editor prefix)
+    (require-open-editor 'editor-set-pending-prefix! editor)
+    (unless (or (not prefix) (prefix-argument? prefix))
+      (assertion-violation
+        'editor-set-pending-prefix!
+        "expected a prefix argument or #f"
+        prefix))
+    (editor-pending-prefix-set! editor prefix))
+
+  (define (editor-clear-pending-prefix! editor)
+    (require-open-editor 'editor-clear-pending-prefix! editor)
+    (editor-pending-prefix-set! editor #f))
+
+  (define (editor-take-pending-prefix! editor)
+    (require-open-editor 'editor-take-pending-prefix! editor)
+    (let ([prefix (editor-pending-prefix editor)])
+      (editor-pending-prefix-set! editor #f)
+      prefix))
 
   (define (table-values table ids)
     (map (lambda (id) (hashtable-ref table id #f)) ids))
@@ -1234,7 +1261,9 @@
                status
                input
                origin-view-id
-               candidate)])
+               candidate
+               (prompt-request-data
+                 (prompt-session-request session)))])
       (when (prompt-session-completion session)
         (queue-completion-cancellation!
           value
@@ -1797,6 +1826,7 @@
                '()
                #f
                '()
+               #f
                #f
                #f
                #f)])

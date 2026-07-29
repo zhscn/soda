@@ -50,6 +50,7 @@
           editor-register-major-mode!
           editor-keymap
           editor-pending-keys
+          editor-pending-prefix
           editor-status-message
           editor-set-status-message!
           editor-kill-ring
@@ -61,6 +62,14 @@
           buffer-replace-range!
           buffer-delete-range!
           editor-last-command-class
+          prefix-argument?
+          prefix-argument-value
+          prefix-argument-universal
+          prefix-argument-digit
+          prefix-argument-negative
+          prefix-argument->string
+          command-context-prefix
+          command-context-count
           editor-register-command!
           editor-bind-key!
           editor-execute-interactive-command!
@@ -86,6 +95,7 @@
           command-message?
           command-message-name
           command-message-argument
+          command-message-prefix
           make-internal-command-message
           internal-command-message?
           internal-command-message-name
@@ -165,6 +175,7 @@
           prompt-request-accept-command
           prompt-request-abort-command
           prompt-request-completion-source
+          prompt-request-data
           prompt-session?
           prompt-session-id
           prompt-session-request
@@ -178,6 +189,7 @@
           prompt-result-value
           prompt-result-origin-view-id
           prompt-result-candidate
+          prompt-result-data
           make-completion-item
           completion-item?
           completion-item-id
@@ -283,6 +295,8 @@
           (soda editor prompt)
           (soda editor prompt-commands)
           (soda editor prompt-runtime)
+          (soda editor prefix)
+          (soda editor prefix-commands)
           (soda editor repl)
           (soda editor scheme-completion)
           (soda editor scheme-repl-completion)
@@ -291,6 +305,7 @@
 
   (define (make-editor buffer)
     (let ([editor (make-editor-state buffer)])
+      (install-prefix-commands! editor)
       (install-basic-commands! editor)
       (install-buffer-commands! editor)
       (install-comint-commands! editor)

@@ -75,6 +75,7 @@ keymap 是一等、具名 trie。节点可以包含 command、显式 undefined t
 
 ```text
 Editor override
+Pending prefix argument
 InputState keymap layers, top state first
 View keymap layers
 Major mode and parents
@@ -138,9 +139,10 @@ class。ring 不属于 Document，不进入 undo tree。
 
 范围修改通过共享的 Buffer edit mechanism 提交。普通 replace/delete、open-line、
 horizontal-space 删除和 kill range 使用相同的 transaction 生命周期；kill 在
-transaction 成功后才更新 ring。`kill-line` 只计算当前 point 到行内容末尾或换行符
-之后的有向 range，因此连续调用沿用普通 kill command 的 append 规则，同时保留
-独立 undo 单元。
+transaction 成功后才更新 ring。不带参数的 `kill-line` 计算当前 point 到行内容
+末尾；point 已在内容末尾时删除换行符。显式正参数按整行向前计算边界，负参数向后
+计算边界，零参数不修改 Buffer。连续调用沿用普通 kill command 的
+append/prepend 规则，同时保留独立 undo 单元。
 
 多 range selection 可以把 primary region 泛化为：
 
@@ -175,10 +177,30 @@ move-word、kill-word 等消费者保持不变。
 prefix argument 是下一次 command invocation 的显式字段：
 
 ```text
-Prefix { count, register, extra }
+PrefixArgument {
+  sign,
+  magnitude,
+  kind: universal | digits | negative
+}
+
+CommandContext {
+  editor,
+  view,
+  event?,
+  argument?,
+  prefix?
+}
 ```
 
-普通命令消费它；取消、解析失败和 view 切换按 input policy 清理它。
+`C-u` 建立数值 4，连续 `C-u` 乘以 4；`M-0` 至 `M-9` 输入数字，`M--`
+切换符号。prefix 存在时临时 keymap 也接受普通数字和减号。prefix command 更新
+pending 值而不成为普通 command class；下一条普通命令把值移入
+`CommandContext` 并清除 pending 状态。command 通过 `command-context-count`
+取得默认值为 1 的有符号重复次数。
+
+字符、word 和纵向 motion 接受正负 count；self-insert、newline 和 open-line
+接受非负 count；kill-line 使用 prefix 是否显式存在来区分默认行为与显式数值
+行为。取消、未定义按键和命令错误清除 pending prefix。
 
 ## TUI view 与渲染
 
