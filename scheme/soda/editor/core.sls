@@ -58,6 +58,8 @@
           editor-current-kill
           editor-copy-buffer-range!
           editor-kill-buffer-range!
+          buffer-replace-range!
+          buffer-delete-range!
           editor-last-command-class
           editor-register-command!
           editor-bind-key!
@@ -272,6 +274,7 @@
           (soda editor completion-commands)
           (soda editor completion-provider)
           (soda editor completion-runtime)
+          (soda editor edit)
           (soda editor event)
           (soda editor file)
           (soda editor input-state)

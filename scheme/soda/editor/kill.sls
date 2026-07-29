@@ -7,6 +7,7 @@
   (import (rnrs)
           (soda document)
           (soda editor buffer)
+          (soda editor edit)
           (soda editor state))
 
   (define (copy-bytevector value)
@@ -128,28 +129,6 @@
               (lambda () (text-close! text)))))
         (lambda () (snapshot-close! snapshot)))))
 
-  (define (delete-range! buffer start end)
-    (let ([change #f])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (call-with-values
-            (lambda ()
-              (call-with-buffer-transaction
-                buffer
-                (lambda (transaction)
-                  (transaction-replace!
-                    transaction
-                    start
-                    end
-                    (make-bytevector 0)))))
-            (lambda (result committed-change)
-              (set! change committed-change)
-              result)))
-        (lambda ()
-          (when change
-            (change-close! change))))))
-
   (define (editor-copy-buffer-range! editor buffer first second)
     (require-open-editor 'editor-copy-buffer-range! editor)
     (call-with-values
@@ -182,6 +161,6 @@
         (and
           bytes
           (begin
-            (delete-range! buffer start end)
+            (buffer-delete-range! buffer start end)
             (editor-record-kill! editor bytes direction)
             bytes))))))

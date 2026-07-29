@@ -6,6 +6,7 @@
           (soda editor command)
           (soda editor command-runtime)
           (soda editor display)
+          (soda editor edit)
           (soda editor event)
           (soda editor kill)
           (soda editor keymap)
@@ -23,24 +24,6 @@
               (lambda () (procedure text))
               (lambda () (text-close! text)))))
         (lambda () (snapshot-close! snapshot)))))
-
-  (define (replace! buffer start end bytes)
-    (let ([change #f])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (call-with-values
-            (lambda ()
-              (call-with-buffer-transaction
-                buffer
-                (lambda (transaction)
-                  (transaction-replace! transaction start end bytes))))
-            (lambda (result committed-change)
-              (set! change committed-change)
-              result)))
-        (lambda ()
-          (when change
-            (change-close! change))))))
 
   (define (previous-character-offset text caret)
     (if (zero? caret)
@@ -123,7 +106,7 @@
            [start (if region (car region) caret)]
            [end (if region (cdr region) caret)])
       (unless (zero? (bytevector-length bytes))
-        (replace! (context-buffer context) start end bytes)
+        (buffer-replace-range! (context-buffer context) start end bytes)
         (view-set-caret! view (+ start (bytevector-length bytes)))
         (when region
           (view-clear-mark! view)))
@@ -142,11 +125,10 @@
                      (previous-character-offset text caret))))]
            [end (if region (cdr region) caret)])
       (when (< start end)
-        (replace!
+        (buffer-delete-range!
           (context-buffer context)
           start
-          end
-          (make-bytevector 0)))
+          end))
       (view-set-caret! view start)
       (when region
         (view-clear-mark! view))
@@ -165,11 +147,10 @@
                    (lambda (text)
                      (next-character-offset text caret))))])
       (when (> end start)
-        (replace!
+        (buffer-delete-range!
           (context-buffer context)
           start
-          end
-          (make-bytevector 0)))
+          end))
       (when region
         (view-set-caret! view start)
         (view-clear-mark! view))
@@ -181,7 +162,7 @@
            [region (view-region view)]
            [start (if region (car region) caret)]
            [end (if region (cdr region) caret)])
-      (replace!
+      (buffer-replace-range!
         (context-buffer context)
         start
         end
@@ -359,7 +340,11 @@
       (if (not bytes)
           (editor-set-status-message! editor "Kill ring is empty")
           (begin
-            (replace! (context-buffer context) start end bytes)
+            (buffer-replace-range!
+              (context-buffer context)
+              start
+              end
+              bytes)
             (view-set-caret!
               view
               (+ start (bytevector-length bytes)))
