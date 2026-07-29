@@ -50,7 +50,24 @@ stale policy 由 annotation channel 定义。diagnostic 使用 strict-source pol
 
 ## 合并管线
 
-renderer 对一个可见行收集各通道的 run，按显式 layer 和 priority 合并：
+每个通道为指定 snapshot 和 byte range 建立有序 `DecorationCursor`。cursor 按
+`(start, end, layer, priority, owner, id)` 的稳定顺序推进，只枚举与查询范围相交
+的 run：
+
+```text
+DecorationCursor {
+  current() -> DecorationRun?
+  advance()
+}
+```
+
+syntax cursor 来自 revision-scoped syntax view；外部事实来自按 range 索引的
+AnnotationSet；selection、search 和瞬时反馈由 View 建立。合并器同时推进所有
+cursor，并以最近的 run start 或 end 作为下一处边界。在两个边界之间，face stack
+与 provenance 保持不变，因此合并器直接产生连续 `StyledChunk`，不会为每个字符
+重新过滤 decoration 列表。
+
+各通道按显式 layer 和 priority 合并：
 
 ```text
 base syntax
@@ -62,19 +79,25 @@ caret/transient feedback
 ```
 
 同一 layer 的稳定顺序由 namespace 与 annotation id 决定。合并只产生 frame run，
-不修改 Text。frame compositor 把语义 face 栈解析为最终 style，同时把参与合并的
-layer、owner 和 annotation identity 保存在 cell sources 中。terminal presenter
-只消费最终 style；annotation 只表达语义 role。
+不修改 Text。合并结果保留语义 face 栈，并把参与合并的 layer、owner 和 annotation
+identity 保存为 source。theme resolver 在生成 frame cell 时解析最终 style；
+terminal presenter 只消费最终 style。完整管线见
+[13-rendering-theme.md](13-rendering-theme.md)。
 
 `DecorationRun { start, end, face, layer, priority, owner, detail }` 是派生通道的
 公共区间值。range 使用 Document byte offset，并且只属于生成它的 revision。
-Scheme highlight provider 从共享 lexical token stream 生成 comment、string、
-delimiter、definition、keyword、builtin、type 与 literal face。selection 作为更高
-layer 追加到同一个 face 栈，因此高亮信息仍可由 `describe-char` 检查。
+syntax provider 从共享 lexical token stream、Tree-sitter capture 或 specialized
+syntax view 生成 comment、string、delimiter、definition、keyword、builtin、type
+与 literal face。selection 作为更高 layer 追加到同一个 face 栈，因此高亮信息仍
+可由 `describe-char` 检查。
 
-## 虚拟文本与替换
+AnnotationSet 为 annotations 维护 range index。发布 generation 时一次构建索引；
+viewport 查询只访问相交区间。索引和 cursor 是查询机制，不改变 AnnotationSet 的
+namespace、revision 和 anchor 所有权。
 
-frame run 支持三种来源：
+## 显示文本与替换
+
+display mapping 支持三种 run：
 
 ```text
 TextRun        // 映射真实 document bytes
@@ -85,7 +108,8 @@ ReplacementRun // 视觉替换一个真实 range，仍保留源映射
 inlay hint、completion ghost text 和 line-end diagnostic 使用 `VirtualRun`。
 隐藏标记、不可见字符替代和 fold placeholder 使用 `ReplacementRun`。hit test
 必须能从任一 cell 回到 document position；虚拟 cell 使用 before/after affinity
-决定 caret 落点。字符检查、face 检查和渲染诊断读取同一 cell mapping 与 sources。
+决定 caret 落点。字符检查、face 检查和渲染诊断读取同一 display mapping 与
+sources。
 
 ## Fold
 
@@ -98,6 +122,10 @@ Fold { anchor_range, placeholder, kind, collapsed }
 语法 provider、outline 工具或用户命令产生 fold range，View 决定 collapsed 状态。
 fold 不删除 Text，也不进入 Document undo。编辑触及 fold 时，policy 可以展开
 对应 range；anchor 负责其余编辑下的位置结算。
+
+fold、virtual run、replacement run、tab 展开与 soft wrap 按固定顺序组成
+DisplayMap。尚未启用非恒等 transform 的 View 使用 identity DisplayMap，renderer
+不需要为各类 display feature 增加特殊分支。
 
 ## Generated buffer
 

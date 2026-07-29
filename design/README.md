@@ -20,6 +20,7 @@
 | 10 | [10-interaction.md](10-interaction.md) | 进程内 REPL、求值 request、来源与 debugger 状态 |
 | 11 | [11-scheme-semantics.md](11-scheme-semantics.md) | Scheme scope graph、语义索引、补全与 xref |
 | 12 | [12-minibuffer.md](12-minibuffer.md) | minibuffer session、读取协议、history 与补全目标 |
+| 13 | [13-rendering-theme.md](13-rendering-theme.md) | 增量高亮、display mapping、theme 与终端渲染管线 |
 
 依赖关系：
 
@@ -38,12 +39,17 @@
                      ▼
                 07 decoration
                      │
-                     ▼
-                02 Text / Document
+             ┌───────┴───────┐
+             ▼               ▼
+        02 Text / Document  13 rendering/theme
+                              ▲
+                              │
+                          09 modes
 
       09 modes ───────────────> 01 C++ language core
 
       03 input ──> 12 minibuffer <── 06 completion
+      03 input <──────────────── 13 rendering/theme
 ```
 
 上层模块持有策略与可组合状态；native 模块提供具有明确生命周期、revision

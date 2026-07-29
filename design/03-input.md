@@ -340,7 +340,10 @@ layout 使用纯 Rect 运算。fixed extent 保留指定 cell 数，flex extent 
 确定性分配剩余空间。正文、modeline 和活动 minibuffer 是 root 下的独立
 component；同一 split 机制供 WindowLayout、保留行和工具区域复用。
 
-renderer 只读取 viewport 覆盖的行，向 frame 写入 cell，并计算结构化 cursor。
+renderer 只消费 viewport 对应的 display chunks，向 frame 写入 cell，并计算结构化
+cursor。syntax、annotation、selection、虚拟文本与 fold 在进入 renderer 前由
+[13-rendering-theme.md](13-rendering-theme.md) 定义的高亮和 display mapping 管线
+合成为 display chunks。
 presenter 是唯一生成 ANSI 控制序列的组件。首帧与尺寸变化使用完整重绘，后续帧
 比较 cell 的 text、width、continuation 与 style，只写入发生显示变化的 cell。
 光标、modeline、minibuffer、popup 和工具区域都使用 cells 表达，不会向 Document

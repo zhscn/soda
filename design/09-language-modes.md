@@ -65,11 +65,12 @@ Scheme profile 组合 revision-scoped syntax view、静态 binding analyzer 和�
 session catalog。scope graph、library index、completion 与 xref 的契约见
 [11-scheme-semantics.md](11-scheme-semantics.md)。
 
-profile 的 highlight provider 接收
-`(document-id, revision, snapshot-bytes, visible-start, visible-end)`，返回只属于该
-revision 的 DecorationRun 列表。provider 只产生语义 face、layer、priority 与
-provenance，不选择终端颜色。renderer 在每个可见 View 上查询 provider，并按
-[07-decoration.md](07-decoration.md) 的合并顺序生成 frame cell。
+syntax view 为指定 byte range 建立有序 highlight cursor。cursor 只属于 syntax
+view 的 revision，产生语义 face、layer、priority 与 provenance，不选择终端颜色。
+Tree-sitter provider 从 highlight query capture 生成 cursor；specialized provider
+从自身 token/CST 查询面生成 cursor；delimiter provider 可以提供基础 lexical
+cursor。renderer 不调用 parser 或 lexer，只消费
+[13-rendering-theme.md](13-rendering-theme.md) 定义的 `StyledChunk`。
 
 内建 `scheme-mode` 覆盖 `.scm`、`.ss`、`.sls` 与 `.sps` 资源，并通过 mode
 setting 选择 `scheme-static` completion provider。Scheme identifier policy 把
@@ -97,6 +98,7 @@ capabilities(provider) -> set
 open(snapshot, config) -> session
 sync(session, snapshot, normalized changes) -> session
 view(session, revision) -> syntax-view
+highlights(syntax-view, start, end) -> highlight-cursor
 close-view(syntax-view)
 close(session)
 ```
@@ -104,6 +106,7 @@ close(session)
 syntax view 是 immutable、revision-scoped 的查询面：
 
 - token/semantic class at offset；
+- 指定 range 的有序 highlight cursor；
 - matching delimiter；
 - enclosing node/range；
 - capture query；
@@ -183,9 +186,44 @@ query set 按用途分开：highlight、indent、fold、text object、locals、i
 query 文件合并和覆盖由 language profile 决定，provider 负责校验 node type 与
 capture name。
 
-injection query 返回宿主 range、目标 language 和 content ranges。每个 injection
-建立子 session，并把宿主 byte range 映射到子文档坐标。宿主 edit 后先更新 range，
-再同步或重建受影响子 session；嵌套深度和总 session 数由 profile 限制。
+一个 Tree-sitter session 持有 layered syntax map：
+
+```text
+TreeSitterSession {
+  document_id,
+  parsed_revision,
+  interpolated_revision,
+  root_layer,
+  injection_layers,
+  query_set,
+  damage_ranges
+}
+
+SyntaxLayer {
+  language,
+  depth,
+  host_ranges,
+  tree
+}
+```
+
+root 和 injection layer 都使用宿主 Document 的 byte 坐标。一次 edit 先用
+`TSInputEdit` 调整所有相交 tree 的结构位置并推进 `interpolated_revision`，然后以旧
+tree 增量 parse。成功发布的全部 layer 属于同一个 `parsed_revision`；changed ranges
+合并为 syntax damage，供高亮缓存和 View invalidation 使用。
+
+injection query 返回宿主 ranges、目标 language 和 query configuration。provider
+创建、复用或释放对应 layer，并在宿主 edit 后只重新查询受影响的父 layer。嵌套深度、
+总 layer 数、单次 query 字节数和 capture 数由 profile 限制。
+
+highlight query 的 capture index 在 grammar/query set 加载时映射到稳定的语义
+`FaceId`。theme resolver 对 `FaceId` 使用层级 fallback；theme generation 改变时
+只重建 face 解析缓存，不改变 capture mapping，也不重新 parse tree。viewport 查询
+只执行与请求范围相交的 query，并返回按 host byte range 排序的 capture cursor。
+
+初次 parse 与增量 parse 都在 editor thread 执行。provider 为 parse、injection 和
+query 工作设置交互预算；超出一次 command-loop turn 的工作保留 revision-tagged
+pending state，并在后续 turn 继续。新 edit 使旧 revision 的 pending 结果失效。
 
 ## 生命周期不变量
 
