@@ -395,6 +395,7 @@
                 (string-append
                   (ansi "[<u")
                   (ansi "[?2004l")
+                  (ansi "[?7h")
                   (ansi "[?25h")
                   (ansi "[?1049l")))))
           (when raw?

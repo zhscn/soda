@@ -72,11 +72,15 @@
       open-string-output-port
       (lambda (port extract)
         (display (ansi "[?25l") port)
+        (display (ansi "[?7l") port)
+        (display (ansi "[2J") port)
         (display (ansi "[H") port)
         (display (ansi "[0m") port)
         (let ([current-style default-style])
           (do ([row 0 (+ row 1)])
               ((= row (frame-rows value)))
+            (unless (zero? row)
+              (display (cursor-sequence row 0) port))
             (do ([column 0 (+ column 1)])
                 ((= column (frame-columns value)))
               (let ([cell (frame-cell-ref value row column)])
@@ -84,11 +88,10 @@
                   (unless (style=? current-style (cell-style cell))
                     (display (style-sequence (cell-style cell)) port)
                     (set! current-style (cell-style cell)))
-                  (display (cell-text cell) port))))
-            (unless (= row (- (frame-rows value) 1))
-              (display "\r\n" port)))
+                  (display (cell-text cell) port)))))
           (unless (style=? current-style default-style)
             (display (ansi "[0m") port)))
+        (display (ansi "[?7h") port)
         (when (frame-cursor-visible? value)
           (display
             (ansi
@@ -221,9 +224,10 @@
         'frame-diff->ansi
         "previous frame must be a frame or #f"
         previous))
-    (if (or (not previous)
-            (not (= (frame-rows previous) (frame-rows value)))
-            (not (= (frame-columns previous) (frame-columns value))))
+    (if (or
+          (not previous)
+          (not (= (frame-rows previous) (frame-rows value)))
+          (not (= (frame-columns previous) (frame-columns value))))
         (frame->ansi value)
         (let ([display-same? (frames-display=? previous value)]
               [cursor-same?
@@ -235,6 +239,7 @@
                 (lambda (port extract)
                   (unless display-same?
                     (display (ansi "[?25l") port)
+                    (display (ansi "[?7l") port)
                     (let ([current-style default-style])
                       (do ([row 0 (+ row 1)])
                           ((= row (frame-rows value)))
@@ -257,5 +262,6 @@
                                 (span-loop end)))))
                       (unless (style=? current-style default-style)
                         (display (ansi "[0m") port))))
+                    (display (ansi "[?7h") port))
                   (write-final-cursor! port value)
-                  (extract)))))))))
+                  (extract))))))))

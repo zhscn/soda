@@ -534,7 +534,22 @@
            "structured frame did not retain component semantics")))
 (define wide-frame
   (frame->ansi structured-frame))
-(unless (string-contains? wide-frame "λ       界")
+(unless
+  (and
+    (string-contains? wide-frame "λ       界")
+    (string-contains?
+      wide-frame
+      (string-append (string (integer->char 27)) "[?7l"))
+    (string-contains?
+      wide-frame
+      (string-append (string (integer->char 27)) "[2J"))
+    (string-contains?
+      wide-frame
+      (string-append (string (integer->char 27)) "[2;1H"))
+    (string-contains?
+      wide-frame
+      (string-append (string (integer->char 27)) "[?7h"))
+    (not (string-contains? wide-frame "\r\n")))
   (error 'editor-tests "renderer did not expand tabs in display cells"))
 (define clipped-frame
   (frame->ansi (render-editor-frame editor 2 9)))
@@ -596,6 +611,12 @@
   (and (string-contains?
          diff-output
          (string-append (string (integer->char 27)) "[1;2Hx"))
+       (string-contains?
+         diff-output
+         (string-append (string (integer->char 27)) "[?7l"))
+       (string-contains?
+         diff-output
+         (string-append (string (integer->char 27)) "[?7h"))
        (not
          (string-contains?
            diff-output
