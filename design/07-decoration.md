@@ -66,6 +66,12 @@ caret/transient feedback
 layer、owner 和 annotation identity 保存在 cell sources 中。terminal presenter
 只消费最终 style；annotation 只表达语义 role。
 
+`DecorationRun { start, end, face, layer, priority, owner, detail }` 是派生通道的
+公共区间值。range 使用 Document byte offset，并且只属于生成它的 revision。
+Scheme highlight provider 从共享 lexical token stream 生成 comment、string、
+delimiter、definition、keyword、builtin、type 与 literal face。selection 作为更高
+layer 追加到同一个 face 栈，因此高亮信息仍可由 `describe-char` 检查。
+
 ## 虚拟文本与替换
 
 frame run 支持三种来源：

@@ -42,6 +42,8 @@
   (scheme-semantic-snapshot-definitions snapshot))
 (define uses
   (scheme-semantic-snapshot-uses snapshot))
+(define lexical-tokens
+  (scheme-lexical-tokenize (string->utf8 source)))
 
 (define (exact-non-negative-integer? value)
   (and (integer? value) (exact? value) (not (negative? value))))
@@ -51,6 +53,23 @@
     (lambda (definition)
       (string=? name (scheme-definition-name definition)))
     definitions))
+
+(unless
+  (and
+    (exists
+      (lambda (token)
+        (eq? (scheme-lexical-token-kind token) 'comment))
+      lexical-tokens)
+    (exists
+      (lambda (token)
+        (eq? (scheme-lexical-token-kind token) 'string))
+      lexical-tokens)
+    (exists
+      (lambda (token)
+        (eq? (scheme-lexical-token-kind token) 'datum-comment))
+      lexical-tokens))
+  (error 'scheme-semantics-tests
+         "lexical token stream omitted highlightable source ranges"))
 
 (unless
   (and

@@ -1571,6 +1571,82 @@
          (editor-status-message xref-editor)))
 (editor-close! xref-editor)
 
+(define highlight-document
+  (make-document
+    "(define answer \"yes\") ; note\n"
+    983))
+(define highlight-buffer
+  (make-buffer
+    983
+    highlight-document
+    "*highlight*"
+    'scheme-mode))
+(define highlight-editor (make-editor highlight-buffer))
+(editor-update!
+  highlight-editor
+  (make-resize-message 4 50))
+(define highlight-frame
+  (render-editor-frame highlight-editor 4 50))
+(define keyword-cell (frame-cell-ref highlight-frame 0 1))
+(define definition-cell (frame-cell-ref highlight-frame 0 8))
+(define string-cell (frame-cell-ref highlight-frame 0 15))
+(define comment-cell (frame-cell-ref highlight-frame 0 22))
+(unless
+  (and
+    (memq 'syntax-keyword (cell-faces keyword-cell))
+    (memq 'syntax-definition (cell-faces definition-cell))
+    (memq 'syntax-string (cell-faces string-cell))
+    (memq 'syntax-comment (cell-faces comment-cell))
+    (exists
+      (lambda (source)
+        (and
+          (eq? (cell-source-layer source) 'base-syntax)
+          (eq? (cell-source-owner source) 'scheme)))
+      (cell-sources keyword-cell)))
+  (error 'editor-tests
+         "Scheme highlighting did not reach frame faces and sources"))
+(editor-update!
+  highlight-editor
+  (make-command-message 'move.forward-character #f))
+(let ([description
+        (describe-caret
+          highlight-editor
+          (render-editor-frame highlight-editor 4 50))])
+  (unless
+    (and
+      (memq 'syntax-keyword
+            (character-description-faces description))
+      (exists
+        (lambda (source)
+          (eq? (cell-source-layer source) 'base-syntax))
+        (character-description-sources description)))
+    (error 'editor-tests
+           "describe-char omitted syntax decoration provenance")))
+(editor-update!
+  highlight-editor
+  (make-command-message 'mark.set #f))
+(editor-update!
+  highlight-editor
+  (make-command-message 'move.forward-character #f))
+(let ([selected-keyword
+        (frame-cell-ref
+          (render-editor-frame highlight-editor 4 50)
+          0
+          1)])
+  (unless
+    (and
+      (equal? (cell-faces selected-keyword)
+              '(default syntax-keyword selection))
+      (memq 'reverse
+            (style-attributes
+              (cell-style selected-keyword))))
+    (error 'editor-tests
+           "selection did not compose above syntax highlighting"
+           (cell-faces selected-keyword)
+           (style-attributes
+             (cell-style selected-keyword)))))
+(editor-close! highlight-editor)
+
 (define prompt-document (make-document "body" 91))
 (define prompt-buffer
   (make-buffer

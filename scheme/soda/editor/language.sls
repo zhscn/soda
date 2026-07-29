@@ -40,7 +40,8 @@
           major-mode-keymaps
           major-mode-setting-ref)
   (import (rnrs)
-          (soda editor motion-protocol))
+          (soda editor motion-protocol)
+          (soda editor scheme-highlighting))
 
   (define-record-type (syntax-provider %make-syntax-provider syntax-provider?)
     (fields
@@ -151,6 +152,11 @@
           'make-language-profile
           "lexical policy must be a procedure or #f"
           lexical))
+       (unless (or (not highlights) (procedure? highlights))
+         (assertion-violation
+           'make-language-profile
+           "highlights must be a procedure or #f"
+           highlights))
        (unless (or (not word-motion) (word-motion? word-motion))
          (assertion-violation
            'make-language-profile
@@ -476,7 +482,7 @@
       #f
       '()
       scheme-identifier-character?
-      #f
+      scheme-highlight-runs
       #f
       '()
       #f))

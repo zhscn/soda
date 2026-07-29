@@ -109,6 +109,18 @@
           location-list-current
           editor-current-location-list
           editor-set-current-location-list!
+          make-decoration-run
+          decoration-run?
+          decoration-run-start
+          decoration-run-end
+          decoration-run-face
+          decoration-run-layer
+          decoration-run-priority
+          decoration-run-owner
+          decoration-run-detail
+          decoration-run-covers?
+          decoration-runs-in-range
+          decoration-runs-at
           prefix-argument?
           prefix-argument-value
           prefix-argument-universal
@@ -335,6 +347,7 @@
           (soda editor completion-commands)
           (soda editor completion-provider)
           (soda editor completion-runtime)
+          (soda editor decoration)
           (soda editor edit)
           (soda editor event)
           (soda editor file)

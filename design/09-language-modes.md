@@ -65,6 +65,12 @@ Scheme profile 组合 revision-scoped syntax view、静态 binding analyzer 和�
 session catalog。scope graph、library index、completion 与 xref 的契约见
 [11-scheme-semantics.md](11-scheme-semantics.md)。
 
+profile 的 highlight provider 接收
+`(document-id, revision, snapshot-bytes, visible-start, visible-end)`，返回只属于该
+revision 的 DecorationRun 列表。provider 只产生语义 face、layer、priority 与
+provenance，不选择终端颜色。renderer 在每个可见 View 上查询 provider，并按
+[07-decoration.md](07-decoration.md) 的合并顺序生成 frame cell。
+
 内建 `scheme-mode` 覆盖 `.scm`、`.ss`、`.sls` 与 `.sps` 资源，并通过 mode
 setting 选择 `scheme-static` completion provider。Scheme identifier policy 把
 reader delimiter 之外的字符视为 symbol 组成部分，因此 `-`、`?`、`!` 等标点参与

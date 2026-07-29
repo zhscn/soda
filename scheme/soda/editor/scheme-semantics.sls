@@ -23,6 +23,12 @@
           scheme-use-start
           scheme-use-end
           scheme-use-resolution
+          scheme-lexical-token?
+          scheme-lexical-token-kind
+          scheme-lexical-token-value
+          scheme-lexical-token-start
+          scheme-lexical-token-end
+          scheme-lexical-tokenize
           scheme-definition-id=?
           scheme-semantic-definitions-at
           scheme-semantic-references
@@ -54,6 +60,12 @@
 
   (define-record-type token
     (fields kind value start end))
+
+  (define scheme-lexical-token? token?)
+  (define scheme-lexical-token-kind token-kind)
+  (define scheme-lexical-token-value token-value)
+  (define scheme-lexical-token-start token-start)
+  (define scheme-lexical-token-end token-end)
 
   (define (exact-non-negative-integer? value)
     (and (integer? value) (exact? value) (not (negative? value))))
@@ -156,15 +168,41 @@
                 [(whitespace-byte? byte)
                  (loop (+ index 1) tokens)]
                 [(= byte 59)
-                 (loop
-                   (scan-line-comment bytes (+ index 1) size)
-                   tokens)]
+                 (let ([end
+                         (scan-line-comment
+                           bytes
+                           (+ index 1)
+                           size)])
+                   (loop
+                     end
+                     (cons
+                       (make-token
+                         'comment
+                         #f
+                         index
+                         end)
+                       tokens)))]
                 [(= byte 34)
-                 (loop (scan-string bytes index size) tokens)]
+                 (let ([end (scan-string bytes index size)])
+                   (loop
+                     end
+                     (cons
+                       (make-token 'string #f index end)
+                       tokens)))]
                 [(and (< (+ index 1) size)
                       (= byte 35)
                       (= (bytevector-u8-ref bytes (+ index 1)) 124))
-                 (loop (scan-block-comment bytes index size) tokens)]
+                 (let ([end
+                         (scan-block-comment bytes index size)])
+                   (loop
+                     end
+                     (cons
+                       (make-token
+                         'comment
+                         #f
+                         index
+                         end)
+                       tokens)))]
                 [(and (< (+ index 1) size)
                       (= byte 35)
                       (= (bytevector-u8-ref bytes (+ index 1)) 59))
@@ -180,9 +218,20 @@
                 [(and (< (+ index 1) size)
                       (= byte 35)
                       (= (bytevector-u8-ref bytes (+ index 1)) 92))
-                 (loop
-                   (scan-character-literal bytes index size)
-                   tokens)]
+                 (let ([end
+                         (scan-character-literal
+                           bytes
+                           index
+                           size)])
+                   (loop
+                     end
+                     (cons
+                       (make-token
+                         'character
+                         #f
+                         index
+                         end)
+                       tokens)))]
                 [(open-byte? byte)
                  (loop
                    (+ index 1)
@@ -225,6 +274,16 @@
                              index
                              end)
                            tokens))))]))))))
+
+  (define scheme-lexical-tokenize tokenize)
+
+  (define (semantic-tokens bytes)
+    (filter
+      (lambda (value)
+        (not (memq
+               (token-kind value)
+               '(comment string character))))
+      (tokenize bytes)))
 
   (define (skip-datum tokens)
     (cond
@@ -391,7 +450,7 @@
         '("quote" "quasiquote" "syntax" "quasisyntax"))))
 
   (define (scan-definitions document-id revision bytes)
-    (let loop ([tokens (remove-ignored-data (tokenize bytes))]
+    (let loop ([tokens (remove-ignored-data (semantic-tokens bytes))]
                [definitions '()])
       (if (null? tokens)
           (reverse definitions)
@@ -548,7 +607,7 @@
       definitions))
 
   (define (scan-uses bytes definitions)
-    (let loop ([tokens (remove-ignored-data (tokenize bytes))]
+    (let loop ([tokens (remove-ignored-data (semantic-tokens bytes))]
                [uses '()])
       (cond
         [(null? tokens) (reverse uses)]

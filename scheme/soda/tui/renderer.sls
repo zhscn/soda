@@ -4,7 +4,9 @@
           (soda document)
           (soda editor buffer)
           (soda editor core)
+          (soda editor decoration)
           (soda editor display)
+          (soda editor language)
           (soda editor window)
           (soda tui component)
           (soda tui frame)
@@ -14,6 +16,7 @@
     (fields editor
             view
             buffer
+            snapshot
             text
             caret-line
             caret-column
@@ -34,6 +37,44 @@
 
   (define selection-style
     (make-style 'default 'default '(reverse)))
+
+  (define (face-style face)
+    (case face
+      [(syntax-comment) (make-style 244 'default '(italic))]
+      [(syntax-string) (make-style 114 'default '())]
+      [(syntax-constant) (make-style 173 'default '())]
+      [(syntax-number) (make-style 173 'default '())]
+      [(syntax-keyword) (make-style 141 'default '(bold))]
+      [(syntax-builtin) (make-style 75 'default '())]
+      [(syntax-definition) (make-style 81 'default '(bold))]
+      [(syntax-type) (make-style 80 'default '())]
+      [(syntax-delimiter) (make-style 246 'default '())]
+      [(selection) selection-style]
+      [else default-style]))
+
+  (define (adjoin value values)
+    (if (memq value values) values (append values (list value))))
+
+  (define (merge-style base overlay)
+    (make-style
+      (if (eq? (style-foreground overlay) 'default)
+          (style-foreground base)
+          (style-foreground overlay))
+      (if (eq? (style-background overlay) 'default)
+          (style-background base)
+          (style-background overlay))
+      (fold-left
+        (lambda (attributes attribute)
+          (adjoin attribute attributes))
+        (style-attributes base)
+        (style-attributes overlay))))
+
+  (define (resolve-faces faces)
+    (fold-left
+      (lambda (style face)
+        (merge-style style (face-style face)))
+      default-style
+      faces))
 
   (define (decode-text bytes)
     (utf8->string bytes))
@@ -60,23 +101,39 @@
             position
             detail
             component-id
+            decorations
             selection-start
             selection-end)
-    (let ([selected?
+    (let* ([runs (decoration-runs-at decorations position)]
+           [decoration-faces (map decoration-run-face runs)]
+           [selected?
             (and
               selection-start
               selection-end
               (<= selection-start position)
-              (< position selection-end))])
+              (< position selection-end))]
+           [faces
+             (append
+               (cons 'default decoration-faces)
+               (if selected? '(selection) '()))]
+           [decoration-sources
+             (map
+               (lambda (run)
+                 (make-cell-source
+                   (decoration-run-layer run)
+                   (decoration-run-owner run)
+                   (decoration-run-detail run)))
+               runs)])
       (make-cell
         text
         width
-        (if selected? '(default selection) '(default))
-        (if selected? selection-style default-style)
+        faces
+        (resolve-faces faces)
         position
-        (list
-          (document-source buffer-id position detail)
-          (component-source component-id)))))
+        (append
+          (list (document-source buffer-id position detail))
+          decoration-sources
+          (list (component-source component-id))))))
 
   (define (draw-document-line!
             frame
@@ -89,6 +146,7 @@
             first-column
             buffer-id
             component-id
+            decorations
             selection-start
             selection-end)
     (let ([value (decode-text bytes)]
@@ -112,6 +170,7 @@
                     line-end
                     'line-end
                     component-id
+                    decorations
                     selection-start
                     selection-end)))
               column)
@@ -162,6 +221,7 @@
                            byte-position
                            'tab
                            component-id
+                           decorations
                            selection-start
                            selection-end)))))
                  (loop
@@ -184,6 +244,7 @@
                        byte-position
                        character
                        component-id
+                       decorations
                        selection-start
                        selection-end)))
                  (loop
@@ -257,7 +318,51 @@
                (component-source component-id))]
            [region (view-region view)]
            [selection-start (and region (car region))]
-           [selection-end (and region (cdr region))])
+           [selection-end (and region (cdr region))]
+           [visible-start
+             (if
+               (< (editor-render-context-first-line context)
+                  (editor-render-context-line-count context))
+               (text-line-start
+                 text
+                 (editor-render-context-first-line context))
+               (text-size text))]
+           [last-line
+             (min
+               (editor-render-context-line-count context)
+               (+ (editor-render-context-first-line context)
+                  (rect-rows rectangle)))]
+           [visible-end
+             (if (zero? last-line)
+                 0
+                 (if (= last-line
+                        (editor-render-context-line-count context))
+                     (text-size text)
+                     (text-line-start text last-line)))]
+           [profile (buffer-language-profile buffer)]
+           [highlighter
+             (and profile (language-profile-highlights profile))]
+           [decorations
+             (if highlighter
+                 (let ([runs
+                         (highlighter
+                           (snapshot-document-id
+                             (editor-render-context-snapshot context))
+                           (snapshot-revision
+                             (editor-render-context-snapshot context))
+                           (text->bytevector text)
+                           visible-start
+                           visible-end)])
+                   (unless
+                     (and (list? runs)
+                          (for-all decoration-run? runs))
+                     (assertion-violation
+                       'render-text-component!
+                       "highlighter returned invalid decoration runs"
+                       runs))
+                   (decoration-runs-in-range
+                     runs visible-start visible-end))
+                 '())])
       (frame-fill-rect!
         frame
         rectangle
@@ -290,6 +395,7 @@
                 (editor-render-context-first-column context)
                 (buffer-id buffer)
                 component-id
+                decorations
                 selection-start
                 selection-end)))))
       (let ([cursor-row
@@ -432,6 +538,7 @@
                           (view-first-column view)
                           (buffer-id buffer)
                           component-id
+                          '()
                           #f
                           #f)
                         (if (and (= caret-line line)
@@ -719,6 +826,7 @@
                       editor
                       view
                       buffer
+                      snapshot
                       text
                       caret-line
                       caret-column
@@ -761,6 +869,7 @@
                            editor
                            view
                            buffer
+                           snapshot
                            text
                            (car position)
                            (text-cell-column
