@@ -18,6 +18,7 @@ enum class EventKind : std::uint8_t {
     FdReady = 2,
     FileRead = 3,
     FileWrite = 4,
+    DirectoryScan = 5,
 };
 
 enum class FdEvent : std::uint8_t {

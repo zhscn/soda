@@ -1,7 +1,8 @@
 #!r6rs
 (import (rnrs)
-        (only (chezscheme) getenv)
-        (soda runtime))
+        (only (chezscheme) getenv path-last path-parent)
+        (soda runtime)
+        (soda vfs))
 
 (define runtime (make-runtime))
 (define timer (runtime-start-timer! runtime 1 0))
@@ -36,6 +37,36 @@
     (error 'runtime-tests "file read failed" event))
   (unless (positive? (bytevector-length (event-data event)))
     (error 'runtime-tests "file read returned no data" event)))
+
+(define directory-scan
+  (runtime-scan-directory! runtime (path-parent test-file)))
+(let* ([events (runtime-poll! runtime)]
+       [event (and (= (length events) 1) (car events))]
+       [entries
+         (and
+           event
+           (zero? (event-status event))
+           (decode-vfs-directory-entries
+             (event-data event)))]
+       [test-entry
+         (and
+           entries
+           (find
+             (lambda (entry)
+               (string=?
+                 (vfs-entry-name entry)
+                 (path-last test-file)))
+             entries))])
+  (unless
+    (and
+      event
+      (= (event-source event) directory-scan)
+      (eq? (event-kind event) 'directory-scan)
+      test-entry
+      (eq? (vfs-entry-kind test-entry) 'file))
+    (error 'runtime-tests
+           "directory scan did not return typed VFS entries"
+           events)))
 
 (define save-file (getenv "SODA_SAVE_TEST_FILE"))
 (when (file-exists? save-file)

@@ -87,6 +87,7 @@
           completion-request-start
           completion-request-end
           completion-request-query
+          completion-request-context
           completion-session-schedule-requests!
           completion-session-cancel-requests!
           completion-session-selected-index
@@ -189,7 +190,8 @@
             target-revision
             start
             end
-            query))
+            query
+            context))
 
   (define (exact-non-negative-integer? value)
     (and (integer? value) (exact? value) (not (negative? value))))
@@ -962,7 +964,8 @@
            (document-completion-target-revision target)
            (document-completion-target-start target)
            (document-completion-target-end target)
-           (completion-session-query session))]
+           (completion-session-query session)
+           (completion-session-context session))]
         [(prompt-completion-target? target)
          (make-completion-request
            (completion-session-id session)
@@ -973,7 +976,8 @@
            #f
            (prompt-completion-target-start target)
            (prompt-completion-target-end target)
-           (completion-session-query session))]
+           (completion-session-query session)
+           (completion-session-context session))]
         [else
          (assertion-violation
            'completion-session-request

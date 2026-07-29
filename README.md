@@ -21,7 +21,8 @@ The native core is split by data ownership:
   values, explainable indentation decisions, and commands that return the
   resulting caret and normalized document change.
 - `soda_runtime` owns libuv handles and exposes pull-based timer, descriptor
-  readiness, and filesystem completion events through a C ABI.
+  readiness, file I/O, and typed directory-scan completion events through a C
+  ABI.
 - `soda_native_core` is the aggregate target for native consumers.
 
 The parser consumes document values and change sets. It has no dependency on

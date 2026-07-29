@@ -384,6 +384,7 @@
           completion-request-start
           completion-request-end
           completion-request-query
+          completion-request-context
           make-completion-provider
           completion-provider?
           completion-provider-name

@@ -30,6 +30,7 @@ public:
     [[nodiscard]] SourceId watch_fd(int fd, FdEvent events);
     [[nodiscard]] SourceId read_file(std::string path);
     [[nodiscard]] SourceId write_file(std::string path, std::vector<std::byte> data);
+    [[nodiscard]] SourceId scan_directory(std::string path);
     bool cancel(SourceId source);
 
     std::size_t poll(PollMode mode);

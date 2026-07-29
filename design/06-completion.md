@@ -38,6 +38,11 @@ CompletionResponse {
 }
 ```
 
+`CompletionRequest` 同时携带 query 与 source context。query 只参与候选匹配；
+context 是 provider 可读取的不可变值。Prompt context 包含完整 input、point 和
+choice source metadata，因此 filesystem provider 可以取得 base directory 和当前
+路径前缀，而不把路径编码进 query。
+
 provider 和 worker 只构造 response，不持有或修改 Editor、View、Buffer 与
 DocumentTransaction。command loop 接收 response 后验证会话、generation、target
 identity 和 revision，再以 provider 为单位替换结果集。这个边界使 native worker、
@@ -151,6 +156,10 @@ session 分别保存用于匹配的 query 和 source context identity。多字�
 在 query 相同而上下文变化时重新产生候选；Prompt completion 的 context 由完整
 input 和 point 构成，Document completion 使用 document target 与 revision
 约束上下文。
+
+filesystem provider 通过 VFS runtime 异步扫描当前目录。每个 scan source 与
+completion request identity 绑定；generation 更新或 session 关闭时取消 source 并
+移除关联。取消后已经进入 native event queue 的结果也因关联已删除而被忽略。
 
 匹配文本优先使用 `filter_text`，否则使用 `label`。choice source metadata 选择按
 顺序尝试的 `prefix`、`substring`、`flex` style 和大小写策略。匹配产出

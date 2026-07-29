@@ -5,6 +5,8 @@
 #include "runtime/c_api.h"
 #include "runtime/runtime.hpp"
 
+#include <uv.h>
+
 #include <algorithm>
 #include <array>
 #include <chrono>
@@ -95,6 +97,54 @@ TEST_CASE("file read failures are completion events") {
     CHECK(event->source == read);
     CHECK(event->status < 0);
     CHECK(event->data.empty());
+}
+
+TEST_CASE("asynchronous directory scan returns typed entries") {
+    namespace fs = std::filesystem;
+    const fs::path directory =
+        fs::temp_directory_path() /
+        ("soda-runtime-scan-" +
+         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    REQUIRE(fs::create_directory(directory));
+    {
+        std::ofstream output(directory / "source.scm", std::ios::binary);
+        output << "value";
+    }
+    REQUIRE(fs::create_directory(directory / "nested"));
+
+    Runtime runtime;
+    const SourceId scan = runtime.scan_directory(directory.string());
+    while (runtime.pending_events() == 0) {
+        (void)runtime.poll(PollMode::Once);
+    }
+    const auto event = runtime.next_event();
+    REQUIRE(event.has_value());
+    CHECK(event->kind == EventKind::DirectoryScan);
+    CHECK(event->source == scan);
+    CHECK(event->status == 0);
+
+    bool saw_file = false;
+    bool saw_directory = false;
+    std::size_t offset = 0;
+    while (offset < event->data.size()) {
+        REQUIRE(offset + 5 <= event->data.size());
+        const auto type = std::to_integer<std::uint8_t>(event->data[offset]);
+        std::uint32_t size = 0;
+        for (unsigned int index = 0; index < 4; ++index) {
+            size |= static_cast<std::uint32_t>(
+                        std::to_integer<std::uint8_t>(event->data[offset + 1 + index]))
+                    << (index * 8U);
+        }
+        offset += 5;
+        REQUIRE(offset + size <= event->data.size());
+        const std::string name(reinterpret_cast<const char*>(event->data.data() + offset), size);
+        saw_file = saw_file || (name == "source.scm" && type == UV_DIRENT_FILE);
+        saw_directory = saw_directory || (name == "nested" && type == UV_DIRENT_DIR);
+        offset += size;
+    }
+    CHECK(saw_file);
+    CHECK(saw_directory);
+    fs::remove_all(directory);
 }
 
 TEST_CASE("asynchronous file write owns bytes and reports completion") {
@@ -374,6 +424,34 @@ TEST_CASE("C ABI classifies asynchronous filesystem failures") {
     CHECK_FALSE(std::string(soda_runtime_status_message(status)).empty());
 
     soda_runtime_destroy(runtime);
+}
+
+TEST_CASE("C ABI exposes directory scan events") {
+    namespace fs = std::filesystem;
+    const fs::path directory =
+        fs::temp_directory_path() /
+        ("soda-runtime-c-abi-scan-" +
+         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    REQUIRE(fs::create_directory(directory));
+    {
+        std::ofstream output(directory / "entry", std::ios::binary);
+        output << "value";
+    }
+    soda_runtime* runtime = soda_runtime_create();
+    REQUIRE(runtime != nullptr);
+    const std::string path = directory.string();
+    const std::uint64_t source = soda_runtime_scan_directory(runtime, path.c_str());
+    REQUIRE(source != 0);
+
+    REQUIRE(soda_runtime_poll(runtime, SODA_POLL_ONCE) == 0);
+    REQUIRE(soda_runtime_next_event(runtime) == 1);
+    CHECK(soda_runtime_event_kind(runtime) == SODA_EVENT_DIRECTORY_SCAN);
+    CHECK(soda_runtime_event_source(runtime) == source);
+    CHECK(soda_runtime_event_status(runtime) == 0);
+    CHECK(soda_runtime_event_data_size(runtime) > 0);
+
+    soda_runtime_destroy(runtime);
+    fs::remove_all(directory);
 }
 
 TEST_CASE("file event data constructs native Text without a Scheme copy") {

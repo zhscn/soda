@@ -8,6 +8,7 @@
           runtime-watch-fd!
           runtime-read-file!
           runtime-write-file!
+          runtime-scan-directory!
           runtime-cancel!
           runtime-status-name
           runtime-status-message
@@ -39,7 +40,7 @@
     (foreign-procedure __atomic "soda_runtime_abi_version" () unsigned-32))
 
   (define abi-version-checked
-    (unless (= (%abi-version) 3)
+    (unless (= (%abi-version) 4)
       (error 'soda-runtime "unsupported native runtime ABI version")))
 
   (define %runtime-create
@@ -59,6 +60,10 @@
   (define %write-file
     (foreign-procedure __atomic "soda_runtime_write_file"
                        (void* string u8* size_t)
+                       unsigned-64))
+  (define %scan-directory
+    (foreign-procedure __atomic "soda_runtime_scan_directory"
+                       (void* string)
                        unsigned-64))
   (define %cancel
     (foreign-procedure __atomic "soda_runtime_cancel" (void* unsigned-64) int))
@@ -202,6 +207,21 @@
           (native-error 'runtime-write-file! runtime)
           source)))
 
+  (define (runtime-scan-directory! runtime path)
+    (require-runtime 'runtime-scan-directory! runtime)
+    (unless (and (string? path) (positive? (string-length path)))
+      (assertion-violation
+        'runtime-scan-directory!
+        "path must be a non-empty string"
+        path))
+    (let ([source
+            (%scan-directory
+              (runtime-pointer runtime)
+              path)])
+      (if (zero? source)
+          (native-error 'runtime-scan-directory! runtime)
+          source)))
+
   (define (runtime-cancel! runtime source)
     (require-runtime 'runtime-cancel! runtime)
     (let ([status (%cancel (runtime-pointer runtime) source)])
@@ -337,6 +357,7 @@
       [(2) 'fd-ready]
       [(3) 'file-read]
       [(4) 'file-write]
+      [(5) 'directory-scan]
       [else (error 'runtime-poll! "unknown native event kind" value)]))
 
   (define (copy-current-data pointer)

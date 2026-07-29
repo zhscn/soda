@@ -143,7 +143,8 @@ redo 和 mode 切换。这一约束使 indentation 等 native 机制不需要依
 
 `file.find` 通过带 file category completion 的 minibuffer 读取路径。初始值是活动
 Buffer 所在目录；没有文件路径的 Buffer 使用进程当前目录。choice source 以路径
-分隔符划分 field，列出当前 field 所属目录，并用尾部分隔符标记目录候选。提交目录
+分隔符划分 field，filesystem provider 通过异步 VFS 扫描当前 field 所属目录，并用
+尾部分隔符标记目录候选。提交目录
 候选后继续读取下一个 field；直接接受一个现有目录也会继续同一次 find-file
 工作流。`.` 和 `..` 不进入候选集合；parent navigation 由 minibuffer 编辑操作
 表达，不作为可插入的文件名。相对路径按发起操作的 Buffer 目录解析，`~` 和 `~/`

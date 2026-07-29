@@ -111,6 +111,15 @@ uint64_t soda_runtime_write_file(soda_runtime* runtime, const char* path, const 
     });
 }
 
+uint64_t soda_runtime_scan_directory(soda_runtime* runtime, const char* path) {
+    return guard(runtime, uint64_t{0}, [&] {
+        if (path == nullptr) {
+            throw std::invalid_argument("directory scan path is null");
+        }
+        return runtime->runtime.scan_directory(path).value;
+    });
+}
+
 int soda_runtime_cancel(soda_runtime* runtime, uint64_t source) {
     return guard(runtime, -1,
                  [&] { return runtime->runtime.cancel(soda::runtime::SourceId{source}) ? 1 : 0; });

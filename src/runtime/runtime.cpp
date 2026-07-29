@@ -87,6 +87,13 @@ struct Runtime::Impl {
         int status = 0;
     };
 
+    struct DirectoryScan {
+        Impl* owner = nullptr;
+        SourceId id;
+        uv_fs_t request{};
+        std::string path;
+    };
+
     Impl() : owner_thread(std::this_thread::get_id()) {
         const int status = uv_loop_init(&loop);
         if (status < 0) {
@@ -115,6 +122,10 @@ struct Runtime::Impl {
         for (auto& [id, write] : file_writes) {
             (void)id;
             (void)uv_cancel(reinterpret_cast<uv_req_t*>(&write->request));
+        }
+        for (auto& [id, scan] : directory_scans) {
+            (void)id;
+            (void)uv_cancel(reinterpret_cast<uv_req_t*>(&scan->request));
         }
 
         while (uv_loop_alive(&loop) != 0) {
@@ -265,6 +276,31 @@ struct Runtime::Impl {
         return id;
     }
 
+    SourceId scan_directory(std::string path) {
+        require_owner_thread();
+        if (path.empty()) {
+            throw std::invalid_argument("directory scan has no path");
+        }
+
+        auto scan = std::make_unique<DirectoryScan>();
+        scan->owner = this;
+        scan->id = allocate_id();
+        scan->path = std::move(path);
+        scan->request.data = scan.get();
+        const SourceId id = scan->id;
+        directory_scans.emplace(id.value, std::move(scan));
+
+        DirectoryScan& operation = *directory_scans.at(id.value);
+        const int status =
+            uv_fs_scandir(&loop, &operation.request, operation.path.c_str(), 0, on_directory_scan);
+        if (status < 0) {
+            uv_fs_req_cleanup(&operation.request);
+            queue_directory_scan_result(operation, status, {});
+            directory_scans.erase(id.value);
+        }
+        return id;
+    }
+
     bool cancel(SourceId source) {
         require_owner_thread();
         if (!source.valid()) {
@@ -289,6 +325,9 @@ struct Runtime::Impl {
         }
         if (const auto write = file_writes.find(source.value); write != file_writes.end()) {
             return uv_cancel(reinterpret_cast<uv_req_t*>(&write->second->request)) == 0;
+        }
+        if (const auto scan = directory_scans.find(source.value); scan != directory_scans.end()) {
+            return uv_cancel(reinterpret_cast<uv_req_t*>(&scan->second->request)) == 0;
         }
         return false;
     }
@@ -393,6 +432,64 @@ struct Runtime::Impl {
             .status = status,
             .flags = 0,
             .data = {},
+        });
+    }
+
+    void queue_directory_scan_result(DirectoryScan& operation, int status,
+                                     std::vector<std::byte> data) {
+        events.push_back({
+            .kind = EventKind::DirectoryScan,
+            .source = operation.id,
+            .status = status,
+            .flags = 0,
+            .data = std::move(data),
+        });
+    }
+
+    static void append_u32(std::vector<std::byte>& data, std::uint32_t value) {
+        for (unsigned int shift = 0; shift < 32; shift += 8) {
+            data.push_back(static_cast<std::byte>((value >> shift) & 0xffU));
+        }
+    }
+
+    static void on_directory_scan(uv_fs_t* request) noexcept {
+        guard_callback([&] {
+            auto& operation = *static_cast<DirectoryScan*>(request->data);
+            Impl& owner = *operation.owner;
+            int status = request->result < 0 ? static_cast<int>(request->result) : 0;
+            std::vector<std::byte> data;
+            if (status == 0 && !owner.shutting_down) {
+                uv_dirent_t entry{};
+                for (;;) {
+                    const int next = uv_fs_scandir_next(request, &entry);
+                    if (next == UV_EOF) {
+                        break;
+                    }
+                    if (next < 0) {
+                        status = next;
+                        data.clear();
+                        break;
+                    }
+                    const std::string_view name{entry.name};
+                    if (name.size() > std::numeric_limits<std::uint32_t>::max()) {
+                        status = UV_ENAMETOOLONG;
+                        data.clear();
+                        break;
+                    }
+                    data.push_back(static_cast<std::byte>(entry.type));
+                    append_u32(data, static_cast<std::uint32_t>(name.size()));
+                    data.insert(data.end(), reinterpret_cast<const std::byte*>(name.data()),
+                                reinterpret_cast<const std::byte*>(name.data() + name.size()));
+                }
+            } else if (owner.shutting_down) {
+                status = UV_ECANCELED;
+            }
+            uv_fs_req_cleanup(request);
+            const auto id = operation.id.value;
+            if (!owner.shutting_down) {
+                owner.queue_directory_scan_result(operation, status, std::move(data));
+            }
+            owner.directory_scans.erase(id);
         });
     }
 
@@ -668,6 +765,7 @@ struct Runtime::Impl {
     std::unordered_map<int, SourceId> watched_fds;
     std::unordered_map<std::uint64_t, std::unique_ptr<FileRead>> file_reads;
     std::unordered_map<std::uint64_t, std::unique_ptr<FileWrite>> file_writes;
+    std::unordered_map<std::uint64_t, std::unique_ptr<DirectoryScan>> directory_scans;
 };
 
 Runtime::Runtime() : impl_(std::make_unique<Impl>()) {}
@@ -687,6 +785,10 @@ SourceId Runtime::read_file(std::string path) {
 
 SourceId Runtime::write_file(std::string path, std::vector<std::byte> data) {
     return impl_->write_file(std::move(path), std::move(data));
+}
+
+SourceId Runtime::scan_directory(std::string path) {
+    return impl_->scan_directory(std::move(path));
 }
 
 bool Runtime::cancel(SourceId source) {

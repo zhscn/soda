@@ -11,6 +11,7 @@
           (soda editor file)
           (soda editor file-runtime)
           (soda editor repl)
+          (soda editor vfs-runtime)
           (soda runtime)
           (soda tui commands)
           (soda tui input)
@@ -166,7 +167,8 @@
           [output-source #f]
           [decoder (make-input-decoder)]
           [executor (make-effect-executor)]
-          [file-adapter #f])
+          [file-adapter #f]
+          [vfs-adapter #f])
       (define (cancel-flush-timer!)
         (when flush-timer
           (guard (condition [else #f])
@@ -274,6 +276,8 @@
         (lambda (payload) (make-effect-result #f '())))
       (set! file-adapter
         (install-file-runtime! executor runtime))
+      (set! vfs-adapter
+        (install-vfs-runtime! editor runtime))
       (install-interaction-effect-handler! executor editor)
       (install-completion-effect-handlers!
         executor
@@ -324,6 +328,21 @@
                    (let ([message
                            (file-runtime-handle-event
                              file-adapter
+                             (car events))])
+                     (process
+                       (cdr events)
+                       (and
+                         continue?
+                         (or
+                           (not message)
+                           (handle-editor-message!
+                             editor
+                             executor
+                             message)))))]
+                  [(eq? (event-kind (car events)) 'directory-scan)
+                   (let ([message
+                           (vfs-runtime-handle-event
+                             vfs-adapter
                              (car events))])
                      (process
                        (cdr events)

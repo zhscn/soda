@@ -34,7 +34,6 @@
   (import (rnrs)
           (only (chezscheme)
                 current-directory
-                directory-list
                 directory-separator
                 file-directory?
                 getenv
@@ -308,55 +307,18 @@
                 [else (loop (+ index 1))]))])
       (cons start end)))
 
-  (define (directory-entries path)
-    (guard (condition [else '()])
-      (if
-        (file-directory? path)
-        (filter
-          (lambda (entry)
-            (not (or (string=? entry ".")
-                     (string=? entry ".."))))
-          (directory-list path))
-        '())))
-
   (define (make-file-choice-source base-directory)
-    (let ([candidate-directory base-directory])
-      (make-choice-source
-        'file
-        '((category . file)
-          (styles . (prefix flex))
-          (preselect . #f))
-        (lambda (input point)
-          (let* ([range (path-field-boundaries input point)]
-                 [prefix (substring input 0 (car range))])
-            (set! candidate-directory
-              (resolve-file-path base-directory prefix))
-            range))
-        (lambda (query)
-          (map
-            (lambda (entry)
-              (let* ([full-path
-                       (normalize-file-path
-                         (path-build candidate-directory entry))]
-                     [directory? (file-directory-safe? full-path)]
-                     [text
-                       (if directory?
-                           (string-append
-                             entry
-                             (string (directory-separator)))
-                           entry)])
-                (make-completion-item
-                  full-path
-                  'file-system
-                  text
-                  text
-                  text
-                  (if directory? "directory" "file")
-                  candidate-directory
-                  full-path)))
-            (directory-entries candidate-directory)))
-        (lambda (value) #t)
-        (lambda (generation) #f))))
+    (make-choice-source
+      'file
+      `((category . file)
+        (styles . (prefix flex))
+        (preselect . #f)
+        (providers . (filesystem))
+        (base-directory . ,base-directory))
+      path-field-boundaries
+      (lambda (query) '())
+      (lambda (value) #t)
+      (lambda (generation) #f)))
 
   (define (file-major-mode-for-path path)
     (unless (or (not path) (string? path))

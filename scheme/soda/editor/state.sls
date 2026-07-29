@@ -1558,7 +1558,10 @@
                         start
                         caret
                         replacement-end)
-                      (cons input point)))))
+                      (vector
+                        input
+                        point
+                        (choice-source-metadata source))))))
               (lambda () (text-close! text)))))
         (lambda () (snapshot-close! snapshot)))))
 
@@ -1598,6 +1601,24 @@
                 (cdr entry)))
             (cdr entry))
           #f)))
+
+  (define (prompt-completion-provider-names source)
+    (let ([entry
+            (assq
+              'providers
+              (choice-source-metadata source))])
+      (if entry
+          (begin
+            (unless
+              (and
+                (list? (cdr entry))
+                (for-all symbol? (cdr entry)))
+              (assertion-violation
+                'editor-open-prompt!
+                "completion providers metadata must be a list of symbols"
+                (cdr entry)))
+            (cdr entry))
+          '())))
 
   (define (editor-open-prompt! value request)
     (require-open-editor 'editor-open-prompt! value)
@@ -1645,7 +1666,8 @@
                  (make-prompt-completion-target
                    id 0 0 0)
                  (prompt-request-completion-source request)
-                 '()
+                 (prompt-completion-provider-names
+                   (prompt-request-completion-source request))
                  (prompt-completion-preselect?
                    (prompt-request-completion-source request))))]
            [session

@@ -8,10 +8,12 @@
         (soda document)
         (soda editor buffer)
         (soda editor core)
+        (soda editor completion-runtime)
         (soda editor effect)
         (soda editor event)
         (soda editor file)
         (soda editor file-runtime)
+        (soda editor vfs-runtime)
         (soda editor keymap)
         (soda editor prompt)
         (soda runtime))
@@ -56,6 +58,10 @@
 (define runtime (make-runtime))
 (define executor (make-effect-executor))
 (define adapter (install-file-runtime! executor runtime))
+(define vfs-adapter (install-vfs-runtime! editor runtime))
+(install-completion-effect-handlers!
+  executor
+  (editor-completion-provider-catalog editor))
 
 (call-with-values
   (lambda ()
@@ -144,6 +150,23 @@
            (if (eq? (event-kind (car events)) 'file-read)
                (car events)
                (find (cdr events))))]))))
+
+(define (finish-directory-scan!)
+  (let loop ()
+    (let find ([events (runtime-poll! runtime)])
+      (cond
+        [(null? events) (loop)]
+        [(eq? (event-kind (car events)) 'directory-scan)
+         (let ([message
+                 (vfs-runtime-handle-event
+                   vfs-adapter
+                   (car events))])
+           (if message
+               (begin
+                 (dispatch! message)
+                 (car events))
+               (find (cdr events))))]
+        [else (find (cdr events))]))))
 
 (define (insert! offset text)
   (let ([change #f])
@@ -278,6 +301,7 @@
     (string (directory-separator))))
 (define save-name (path-last save-path))
 (dispatch! (make-command-message 'file.find #f))
+(finish-directory-scan!)
 (let* ([session (editor-active-prompt editor)]
        [request (and session (prompt-session-request session))]
        [completion
@@ -322,6 +346,7 @@
   (make-command-message
     'edit.backward-kill-word
     #f))
+(finish-directory-scan!)
 (let* ([parent-directory
          (string-append
            (path-parent (path-parent save-path))
@@ -351,6 +376,26 @@
                 "directory"))
     (error 'file-tests
            "editing a path prefix did not refresh completion context")))
+(dispatch! (make-command-message 'prompt.abort #f))
+
+(dispatch! (make-command-message 'file.find #f))
+(define stale-scan-generation
+  (completion-session-generation
+    (editor-active-prompt-completion editor)))
+(dispatch!
+  (make-command-message
+    'edit.backward-kill-word
+    #f))
+(finish-directory-scan!)
+(let ([completion (editor-active-prompt-completion editor)])
+  (unless
+    (and
+      (> (completion-session-generation completion)
+         stale-scan-generation)
+      (not (completion-session-pending? completion))
+      (pair? (completion-session-items completion)))
+    (error 'file-tests
+           "stale directory scan survived completion cancellation")))
 (dispatch! (make-command-message 'prompt.abort #f))
 
 (define find-origin-view-id (view-id (editor-active-view editor)))
