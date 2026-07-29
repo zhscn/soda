@@ -247,6 +247,35 @@ caret 与 selection endpoint 使用 Document anchor，多个 View 显示同一 B
 首行和首个 display column；纵向 motion 按 tab 与宽字符展开后的 display column
 维持目标列。
 
+Editor 的 WindowLayout 是由 leaf 和 split 组成的树：
+
+```text
+WindowNode =
+    WindowLeaf { id, view_id }
+  | WindowSplit {
+      id,
+      orientation: horizontal | vertical,
+      children
+    }
+```
+
+leaf 引用 durable View，split 的 children 按相等 flex weight 分配矩形。切分 active
+leaf 时复制当前 View 的 Buffer、point、mark、viewport 和 keymap policy，两个
+View 随后独立维护 point、selection、completion 和 location walk。选择已有 View
+时把它换入 active leaf；若该 View 已显示在另一 leaf，则两个 leaf 交换 View，
+避免一个 View 同时占据多个 Window。
+
+`C-x 2` 产生上下 split，`C-x 3` 产生左右 split，`C-x o` 按 leaf 顺序切换焦点，
+`C-x 0` 删除 active leaf 并折叠单子节点 split，`C-x 1` 只保留 active leaf。
+negative prefix 可让 `other-window` 反向遍历。Window 删除时同时释放其 View 和
+per-View navigation anchors；直接关闭仍被 leaf 显示的 View 是生命周期错误。
+
+TUI renderer 递归映射 Window tree。每个 leaf rectangle 由 text 区和一行 modeline
+组成，只有 active leaf 设置终端 cursor。minibuffer 和 prompt completion 位于
+整棵 Window tree 下方；出现或消失时 resize 从根重新分配所有 leaf viewport。
+document completion popup 使用 active leaf 的局部 text rectangle 定位，并作为
+根级 overlay 最后绘制。
+
 结构化 frame 是 renderer 与 terminal presenter 之间的边界：
 
 ```text

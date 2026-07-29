@@ -17,6 +17,11 @@
           editor-set-active-view!
           editor-set-view-buffer!
           editor-base-view
+          editor-window-root
+          editor-active-window-id
+          editor-set-window-root!
+          editor-set-active-window-id!
+          editor-allocate-window-id!
           editor-prompts
           editor-active-prompt
           editor-open-prompt!
@@ -113,7 +118,8 @@
           (soda editor language)
           (soda editor location)
           (soda editor prefix)
-          (soda editor prompt))
+          (soda editor prompt)
+          (soda editor window))
 
   (define-record-type (view %make-view view?)
     (fields
@@ -155,6 +161,13 @@
                editor-active-view-id
                editor-active-view-id-set!)
       (mutable next-view-id editor-next-view-id editor-next-view-id-set!)
+      (mutable window-root editor-window-root editor-window-root-set!)
+      (mutable active-window-id
+               editor-active-window-id
+               editor-active-window-id-set!)
+      (mutable next-window-id
+               editor-next-window-id
+               editor-next-window-id-set!)
       (immutable prompt-table editor-prompt-table)
       (mutable prompt-ids editor-prompt-ids editor-prompt-ids-set!)
       (mutable next-prompt-id
@@ -556,6 +569,15 @@
 
   (define (close-view-unchecked! value id)
     (let ([view (editor-view-ref value id)])
+      (when
+        (exists
+          (lambda (leaf)
+            (= (window-leaf-view-id leaf) id))
+          (window-node-leaves (editor-window-root value)))
+        (assertion-violation
+          'editor-close-view!
+          "displayed views are owned by their editor window"
+          id))
       (when (= (length (editor-view-ids value)) 1)
         (assertion-violation
           'editor-close-view!
@@ -592,6 +614,40 @@
     (require-open-editor 'editor-active-view value)
     (editor-view-ref value (editor-active-view-id value)))
 
+  (define (editor-set-window-root! value root)
+    (require-open-editor 'editor-set-window-root! value)
+    (unless (window-node? root)
+      (assertion-violation
+        'editor-set-window-root!
+        "expected a window node"
+        root))
+    (for-each
+      (lambda (leaf)
+        (editor-view-ref value (window-leaf-view-id leaf)))
+      (window-node-leaves root))
+    (editor-window-root-set! value root)
+    (unless
+      (window-node-find root (editor-active-window-id value))
+      (editor-active-window-id-set!
+        value
+        (window-leaf-id (car (window-node-leaves root))))))
+
+  (define (editor-set-active-window-id! value id)
+    (require-open-editor 'editor-set-active-window-id! value)
+    (let ([window (window-node-find (editor-window-root value) id)])
+      (unless (window-leaf? window)
+        (assertion-violation
+          'editor-set-active-window-id!
+          "active window must identify a window leaf"
+          id))
+      (editor-active-window-id-set! value id)))
+
+  (define (editor-allocate-window-id! value)
+    (require-open-editor 'editor-allocate-window-id! value)
+    (let ([id (editor-next-window-id value)])
+      (editor-next-window-id-set! value (+ id 1))
+      id))
+
   (define (editor-set-active-view! value id)
     (require-open-editor 'editor-set-active-view! value)
     (editor-view-ref value id)
@@ -603,7 +659,26 @@
           id)))
     (unless (= id (editor-active-view-id value))
       (cancel-view-completion! value (editor-active-view value)))
-    (editor-active-view-id-set! value id))
+    (editor-active-view-id-set! value id)
+    (unless (editor-active-prompt value)
+      (let* ([root (editor-window-root value)]
+             [window
+              (window-node-find
+                root
+                (editor-active-window-id value))]
+             [other
+               (find
+                 (lambda (leaf)
+                   (= (window-leaf-view-id leaf) id))
+                 (window-node-leaves root))])
+        (when (window-leaf? window)
+          (when (and other
+                     (not (= (window-leaf-id other)
+                             (window-leaf-id window))))
+            (window-leaf-set-view-id!
+              other
+              (window-leaf-view-id window)))
+          (window-leaf-set-view-id! window id)))))
 
   (define (editor-set-view-buffer! value view-id buffer-id)
     (require-open-editor 'editor-set-view-buffer! value)
@@ -1830,6 +1905,9 @@
                (+ (document-id (buffer-document buffer)) 1)
                views
                '(1)
+               1
+               2
+               (make-window-leaf 1 1)
                1
                2
                prompts

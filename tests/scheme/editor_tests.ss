@@ -1367,6 +1367,123 @@
   (error 'editor-tests "query-replace all did not replace remaining matches"))
 (editor-close! search-editor)
 
+(define window-document
+  (make-document "one\ntwo\nthree" 981))
+(define window-buffer
+  (make-buffer
+    981
+    window-document
+    "*windows*"
+    'fundamental-mode))
+(define window-editor (make-editor window-buffer))
+(define window-decoder (make-input-decoder))
+(send! window-editor window-decoder (bytes 24 50))
+(unless
+  (and
+    (= (length (editor-window-leaves window-editor)) 2)
+    (= (length (editor-visible-views window-editor)) 2)
+    (window-split? (editor-window-root window-editor))
+    (eq? (window-split-orientation
+           (editor-window-root window-editor))
+         'vertical))
+  (error 'editor-tests "C-x 2 did not create a vertical window split"))
+(define first-window-view (editor-active-view window-editor))
+(send! window-editor window-decoder (bytes 24 111))
+(define second-window-view (editor-active-view window-editor))
+(unless
+  (and
+    (not (= (view-id first-window-view)
+            (view-id second-window-view)))
+    (= (editor-active-window-id window-editor)
+       (window-leaf-id
+         (cadr (editor-window-leaves window-editor)))))
+  (error 'editor-tests "C-x o did not change the active window"))
+(editor-update!
+  window-editor
+  (make-command-message 'move.buffer-end #f))
+(unless (and (= (view-caret second-window-view) 13)
+             (= (view-caret first-window-view) 0))
+  (error 'editor-tests "split windows did not retain independent point"))
+
+(send! window-editor window-decoder (bytes 24 51))
+(unless
+  (and
+    (= (length (editor-window-leaves window-editor)) 3)
+    (exists
+      (lambda (node)
+        (and (window-split? node)
+             (eq? (window-split-orientation node) 'horizontal)))
+      (window-split-children
+        (editor-window-root window-editor))))
+  (error 'editor-tests "C-x 3 did not nest a horizontal split"))
+(editor-update! window-editor (make-resize-message 6 20))
+(define multi-window-frame
+  (render-editor-frame window-editor 6 20))
+(let* ([layout (frame-layout multi-window-frame)]
+       [top-modeline (frame-cell-ref multi-window-frame 2 0)]
+       [bottom-modeline (frame-cell-ref multi-window-frame 5 0)]
+       [lower-right-path
+         (component-node-path-at layout 3 15)])
+  (unless
+    (and
+      (string=? (cell-text (frame-cell-ref multi-window-frame 0 0))
+                "o")
+      (eq? (cell-face top-modeline) 'modeline)
+      (eq? (cell-face bottom-modeline) 'modeline)
+      (= (length
+           (filter
+             (lambda (node)
+               (eq? (component-node-id node) 'editor.text))
+             lower-right-path))
+         1)
+      (frame-cursor-visible? multi-window-frame)
+      (= (frame-cursor-row multi-window-frame) 3)
+      (= (frame-cursor-column multi-window-frame) 0))
+    (error 'editor-tests
+           "multi-window renderer did not preserve pane geometry and focus"
+           (cell-text (frame-cell-ref multi-window-frame 0 0))
+           (cell-face top-modeline)
+           (cell-face bottom-modeline)
+           (map component-node-id lower-right-path)
+           (frame-cursor-visible? multi-window-frame)
+           (string-append
+             (number->string (frame-cursor-row multi-window-frame))
+             ":"
+             (number->string
+               (frame-cursor-column multi-window-frame))))))
+(send! window-editor window-decoder (bytes 27 120))
+(editor-update! window-editor (make-resize-message 7 20))
+(define multi-window-prompt-frame
+  (render-editor-frame window-editor 7 20))
+(unless
+  (and
+    (component-node-find
+      (frame-layout multi-window-prompt-frame)
+      'editor.minibuffer)
+    (= (frame-cursor-row multi-window-prompt-frame) 6)
+    (= (view-viewport-rows first-window-view) 1)
+    (= (view-viewport-rows second-window-view) 1))
+  (error 'editor-tests
+         "minibuffer did not reflow the complete window tree"
+         (and
+           (component-node-find
+             (frame-layout multi-window-prompt-frame)
+             'editor.minibuffer)
+           #t)
+         (frame-cursor-row multi-window-prompt-frame)
+         (view-viewport-rows first-window-view)
+         (view-viewport-rows second-window-view)))
+(send! window-editor window-decoder (bytes 7))
+(editor-other-window! window-editor -1)
+(send! window-editor window-decoder (bytes 24 48))
+(unless (= (length (editor-window-leaves window-editor)) 2)
+  (error 'editor-tests "C-x 0 did not collapse its parent split"))
+(send! window-editor window-decoder (bytes 24 49))
+(unless (and (= (length (editor-window-leaves window-editor)) 1)
+             (= (length (editor-visible-views window-editor)) 1))
+  (error 'editor-tests "C-x 1 did not retain only the active window"))
+(editor-close! window-editor)
+
 (define prompt-document (make-document "body" 91))
 (define prompt-buffer
   (make-buffer

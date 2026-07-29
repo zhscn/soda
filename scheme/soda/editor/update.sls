@@ -11,7 +11,8 @@
           (soda editor keymap)
           (soda editor language)
           (soda editor prompt)
-          (soda editor state))
+          (soda editor state)
+          (soda editor window))
 
   (define (condition->string condition)
     (call-with-values
@@ -193,9 +194,61 @@
                (max
                  1
                  (- rows
-                    (if session (+ 2 completion-rows) 1)))])
-        (view-set-viewport! view body-rows columns)
-        (ensure-view-visible! view)
+                    (if session
+                        (+ 1 completion-rows)
+                        0)))])
+        (if (null?
+              (cdr
+                (window-node-leaves
+                  (editor-window-root editor))))
+            (begin
+              (view-set-viewport!
+                view
+                (max 1 (- body-rows 1))
+                columns)
+              (ensure-view-visible! view))
+            (let allocate
+              ([node (editor-window-root editor)]
+               [available-rows body-rows]
+               [available-columns columns])
+              (if (window-leaf? node)
+                  (let ([leaf-view
+                          (editor-view-ref
+                            editor
+                            (window-leaf-view-id node))])
+                    (view-set-viewport!
+                      leaf-view
+                      (max 1 (- available-rows 1))
+                      (max 1 available-columns))
+                    (ensure-view-visible! leaf-view))
+                  (let* ([children (window-split-children node)]
+                         [count (length children)]
+                         [vertical?
+                           (eq?
+                             (window-split-orientation node)
+                             'vertical)]
+                         [total
+                           (if vertical?
+                               available-rows
+                               available-columns)]
+                         [base (div total count)]
+                         [extra (mod total count)])
+                    (let loop
+                      ([children children]
+                       [index 0])
+                      (unless (null? children)
+                        (let ([amount
+                                (+ base
+                                   (if (< index extra) 1 0))])
+                          (allocate
+                            (car children)
+                            (if vertical?
+                                amount
+                                available-rows)
+                            (if vertical?
+                                available-columns
+                                amount))
+                          (loop (cdr children) (+ index 1)))))))))
         (when session
           (let* ([prompt-view
                    (editor-view-ref

@@ -16,6 +16,22 @@
           editor-set-active-view!
           editor-set-view-buffer!
           editor-base-view
+          editor-window-root
+          editor-active-window-id
+          editor-window-leaves
+          editor-active-window
+          editor-visible-views
+          editor-split-window!
+          editor-delete-window!
+          editor-delete-other-windows!
+          editor-other-window!
+          window-leaf?
+          window-leaf-id
+          window-leaf-view-id
+          window-split?
+          window-split-id
+          window-split-orientation
+          window-split-children
           editor-prompts
           editor-active-prompt
           editor-open-prompt!
@@ -319,7 +335,9 @@
           (soda editor scheme-repl-completion)
           (soda editor search)
           (soda editor state)
-          (soda editor update))
+          (soda editor update)
+          (soda editor window)
+          (soda editor window-runtime))
 
   (define (make-editor buffer)
     (let ([editor (make-editor-state buffer)])
@@ -340,4 +358,5 @@
       (install-interaction-commands! editor)
       (install-prompt-commands! editor)
       (install-search-commands! editor)
+      (install-window-commands! editor)
       editor)))

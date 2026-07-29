@@ -5,6 +5,7 @@
           (soda editor buffer)
           (soda editor core)
           (soda editor display)
+          (soda editor window)
           (soda tui component)
           (soda tui frame)
           (soda tui layout))
@@ -19,7 +20,8 @@
             tab-width
             first-line
             first-column
-            line-count))
+            line-count
+            focused?))
 
   (define modeline-style
     (make-style 'default 'default '(reverse)))
@@ -298,7 +300,8 @@
               (+ (rect-column rectangle)
                  (- (editor-render-context-caret-column context)
                     (editor-render-context-first-column context)))])
-        (if (and (rect-contains? rectangle cursor-row cursor-column)
+        (if (and (editor-render-context-focused? context)
+                 (rect-contains? rectangle cursor-row cursor-column)
                  (< cursor-row (frame-rows frame))
                  (< cursor-column (frame-columns frame)))
             (frame-set-cursor!
@@ -306,7 +309,8 @@
               cursor-row
               cursor-column
               #t)
-            (frame-set-cursor! frame 0 0 #f)))))
+            (when (editor-render-context-focused? context)
+              (frame-set-cursor! frame 0 0 #f))))))
 
   (define (render-modeline-component! context frame rectangle)
     (let* ([source (make-cell-source 'chrome 'modeline #f)]
@@ -632,7 +636,7 @@
             popup-rows
             popup-columns)))))
 
-  (define (render-editor-frame editor rows columns)
+  (define (render-single-editor-frame editor rows columns)
     (unless (editor? editor)
       (assertion-violation
         'render-editor-frame
@@ -721,8 +725,291 @@
                       tab-width
                       first-line
                       first-column
-                      line-count)
+                      line-count
+                      #t)
                     frame)
                   frame))
               (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot))))))
+        (lambda () (snapshot-close! snapshot)))))
+
+  (define (call-with-view-render-context editor view focused? procedure)
+    (let* ([buffer (view-buffer view)]
+           [snapshot
+             (document-snapshot (buffer-document buffer))])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (let ([text (snapshot-text snapshot)])
+            (dynamic-wind
+              (lambda () #f)
+              (lambda ()
+                (let* ([position
+                         (text-position text (view-caret view))]
+                       [tab-width
+                         (let ([setting
+                                 (buffer-setting-ref
+                                   buffer
+                                   'tab-width
+                                   8)])
+                           (if (and (integer? setting)
+                                    (exact? setting)
+                                    (positive? setting))
+                               setting
+                               8))]
+                       [context
+                         (make-editor-render-context
+                           editor
+                           view
+                           buffer
+                           text
+                           (car position)
+                           (text-cell-column
+                             text
+                             (view-caret view)
+                             tab-width)
+                           tab-width
+                           (view-first-line view)
+                           (view-first-column view)
+                           (text-line-count text)
+                           focused?)])
+                  (procedure context)))
+              (lambda () (text-close! text)))))
+        (lambda () (snapshot-close! snapshot)))))
+
+  (define (window-component-id prefix id)
+    (string->symbol
+      (string-append prefix (number->string id))))
+
+  (define (make-window-component-tree editor node rectangle focused-view-id)
+    (cond
+      [(window-leaf? node)
+       (let* ([view
+                (editor-view-ref
+                  editor
+                  (window-leaf-view-id node))]
+              [rectangles
+                (layout-split
+                  rectangle
+                  'vertical
+                  (list
+                    (make-flex-extent 1)
+                    (make-fixed-extent 1)))]
+              [text-rectangle (car rectangles)]
+              [modeline-rectangle (cadr rectangles)]
+              [id
+                (window-component-id
+                  "editor.window."
+                  (window-leaf-id node))]
+              [component
+                (make-component
+                  id
+                  (lambda (ignored frame ignored-rectangle)
+                    (call-with-view-render-context
+                      editor
+                      view
+                      (= (view-id view) focused-view-id)
+                      (lambda (context)
+                        (render-text-component!
+                          context frame text-rectangle)
+                        (render-modeline-component!
+                          context frame modeline-rectangle)))))]
+              [text-node
+                (make-component-node
+                  'editor.text
+                  text-rectangle
+                  #f
+                  '())]
+              [modeline-node
+                (make-component-node
+                  'editor.modeline
+                  modeline-rectangle
+                  #f
+                  '())])
+         (make-component-node
+           id
+           rectangle
+           component
+           (list text-node modeline-node)))]
+      [else
+       (let* ([children (window-split-children node)]
+              [rectangles
+                (layout-split
+                  rectangle
+                  (window-split-orientation node)
+                  (map
+                    (lambda (child) (make-flex-extent 1))
+                    children))]
+              [id
+                (window-component-id
+                  "editor.split."
+                  (window-split-id node))])
+         (make-component-node
+           id
+           rectangle
+           #f
+           (map
+             (lambda (child child-rectangle)
+               (make-window-component-tree
+                 editor
+                 child
+                 child-rectangle
+                 focused-view-id))
+             children
+             rectangles)))]))
+
+  (define (render-multi-window-frame editor rows columns)
+    (unless (and (integer? rows) (exact? rows) (>= rows 2)
+                 (integer? columns) (exact? columns)
+                 (positive? columns))
+      (assertion-violation
+        'render-editor-frame
+        "frame dimensions are invalid"
+        rows
+        columns))
+    (let* ([prompt (editor-active-prompt editor)]
+           [prompt-completion
+             (editor-active-prompt-completion editor)]
+           [prompt-completion-rows
+             (if prompt-completion
+                 (min
+                   6
+                   (length
+                     (completion-session-items prompt-completion))
+                   (max 0 (- rows 2)))
+                 0)]
+           [root-rectangle (make-rect 0 0 rows columns)]
+           [rectangles
+             (layout-split
+               root-rectangle
+               'vertical
+               (if prompt
+                   (list
+                     (make-flex-extent 1)
+                     (make-fixed-extent prompt-completion-rows)
+                     (make-fixed-extent 1))
+                   (list (make-flex-extent 1))))]
+           [windows-rectangle (car rectangles)]
+           [focused-view-id
+             (view-id
+               (if prompt
+                   (editor-view-ref
+                     editor
+                     (prompt-session-origin-view-id prompt))
+                   (editor-active-view editor)))]
+           [windows-tree
+             (make-window-component-tree
+               editor
+               (editor-window-root editor)
+               windows-rectangle
+               (if prompt -1 focused-view-id))]
+           [active-view
+             (editor-view-ref editor focused-view-id)]
+           [frame (make-frame rows columns)])
+      (call-with-view-render-context
+        editor
+        active-view
+        #f
+        (lambda (root-context)
+          (let* ([active-leaf
+                   (find
+                     (lambda (leaf)
+                       (= (window-leaf-view-id leaf)
+                          focused-view-id))
+                     (window-node-leaves
+                       (editor-window-root editor)))]
+                 [active-window-node
+                   (and
+                     active-leaf
+                     (component-node-find
+                       windows-tree
+                       (window-component-id
+                         "editor.window."
+                         (window-leaf-id active-leaf))))]
+                 [active-text-node
+                   (and
+                     active-window-node
+                     (component-node-find
+                       active-window-node
+                       'editor.text))]
+                 [document-completion
+                   (and
+                     (not prompt)
+                     (view-completion active-view))]
+                 [document-completion-node
+                   (and
+                     document-completion
+                     active-text-node
+                     (let* ([text-rectangle
+                              (component-node-rect
+                                active-text-node)]
+                            [local
+                              (document-completion-rectangle
+                                document-completion
+                                (+ (rect-rows text-rectangle) 1)
+                                (rect-columns text-rectangle)
+                                (-
+                                  (editor-render-context-caret-line
+                                    root-context)
+                                  (editor-render-context-first-line
+                                    root-context))
+                                (-
+                                  (editor-render-context-caret-column
+                                    root-context)
+                                  (editor-render-context-first-column
+                                    root-context)))])
+                       (and
+                         local
+                         (make-component-node
+                           'editor.completions
+                           (make-rect
+                             (+ (rect-row text-rectangle)
+                                (rect-row local))
+                             (+ (rect-column text-rectangle)
+                                (rect-column local))
+                             (rect-rows local)
+                             (rect-columns local))
+                           editor-completions-component
+                           '()))))]
+                 [completion-node
+                   (and
+                     prompt
+                     (positive? prompt-completion-rows)
+                     (make-component-node
+                       'editor.completions
+                       (cadr rectangles)
+                       editor-completions-component
+                       '()))]
+                 [minibuffer-node
+                   (and
+                     prompt
+                     (make-component-node
+                       'editor.minibuffer
+                       (caddr rectangles)
+                       editor-minibuffer-component
+                       '()))]
+                 [tree
+                   (make-component-node
+                     'editor.root
+                     root-rectangle
+                     #f
+                     (append
+                       (list windows-tree)
+                       (if completion-node
+                           (list completion-node)
+                           '())
+                       (if minibuffer-node
+                           (list minibuffer-node)
+                           '())
+                       (if document-completion-node
+                           (list document-completion-node)
+                           '())))])
+            (frame-set-layout! frame tree)
+            (component-node-render!
+              tree root-context frame)
+            frame)))))
+
+  (define (render-editor-frame editor rows columns)
+    (if (null? (cdr (editor-window-leaves editor)))
+        (render-single-editor-frame editor rows columns)
+        (render-multi-window-frame editor rows columns)))
+)
