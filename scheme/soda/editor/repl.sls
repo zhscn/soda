@@ -3,6 +3,7 @@
           install-interaction-effect-handler!
           editor-open-repl!)
   (import (rnrs)
+          (only (chezscheme) port-position)
           (soda document)
           (soda editor buffer)
           (soda editor command)
@@ -130,6 +131,30 @@
       start
       end))
 
+  (define (buffer-range-source buffer start end)
+    (let ([snapshot (document-snapshot (buffer-document buffer))])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (let ([text (snapshot-text snapshot)])
+            (dynamic-wind
+              (lambda () #f)
+              (lambda ()
+                (unless (and (integer? start)
+                             (exact? start)
+                             (integer? end)
+                             (exact? end)
+                             (<= 0 start end (text-size text)))
+                  (assertion-violation
+                    'buffer-range-source
+                    "evaluation range is outside the buffer"
+                    start
+                    end))
+                (utf8->string
+                  (text-subbytevector text start end)))
+              (lambda () (text-close! text)))))
+        (lambda () (snapshot-close! snapshot)))))
+
   (define (session-submit-source! editor session source echo? origin)
     (when (eq? (interaction-session-state session) 'evaluating)
       (assertion-violation
@@ -213,6 +238,81 @@
         source
         #t
         (buffer-origin source-buffer #f #f))))
+
+  (define (submit-buffer-range! context start end)
+    (when (= start end)
+      (assertion-violation
+        'scheme.eval-range
+        "evaluation range is empty"))
+    (let* ([editor (command-context-editor context)]
+           [buffer (view-buffer (command-context-view context))]
+           [source (buffer-range-source buffer start end)]
+           [origin (buffer-origin buffer start end)]
+           [session (editor-open-repl! editor)])
+      (session-submit-source!
+        editor
+        session
+        source
+        #t
+        origin)))
+
+  (define (eval-region-command context)
+    (let* ([view (command-context-view context)]
+           [region (view-region view)])
+      (unless region
+        (assertion-violation
+          'scheme.eval-region
+          "no active region"))
+      (submit-buffer-range! context (car region) (cdr region))))
+
+  (define (eval-buffer-command context)
+    (submit-buffer-range!
+      context
+      0
+      (buffer-size
+        (view-buffer (command-context-view context)))))
+
+  (define (last-datum-character-range source)
+    (define (skip-whitespace start end)
+      (let loop ([offset start])
+        (if (and (< offset end)
+                 (char-whitespace? (string-ref source offset)))
+            (loop (+ offset 1))
+            offset)))
+    (let ([port (open-string-input-port source)])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (let loop ([last #f])
+            (let* ([start (port-position port)]
+                   [datum (read port)]
+                   [end (port-position port)])
+              (if (eof-object? datum)
+                  last
+                  (loop
+                    (cons
+                      (skip-whitespace start end)
+                      end))))))
+        (lambda () (close-port port)))))
+
+  (define (character-offset->byte-offset source offset)
+    (bytevector-length
+      (string->utf8 (substring source 0 offset))))
+
+  (define (eval-last-sexp-command context)
+    (let* ([view (command-context-view context)]
+           [buffer (view-buffer view)]
+           [caret (view-caret view)]
+           [source (buffer-range-source buffer 0 caret)]
+           [range (last-datum-character-range source)])
+      (unless range
+        (assertion-violation
+          'scheme.eval-last-sexp
+          "no complete Scheme datum before point"))
+      (submit-buffer-range!
+        context
+        (character-offset->byte-offset source (car range))
+        (character-offset->byte-offset source (cdr range)))))
 
   (define (matching-result-session editor result)
     (let* ([request (evaluation-result-request result)]
@@ -327,6 +427,18 @@
           eval-expression-command
           "Evaluate a Scheme expression in the persistent REPL session.")
         (list
+          'scheme.eval-region
+          eval-region-command
+          "Evaluate the active region in the persistent REPL session.")
+        (list
+          'scheme.eval-buffer
+          eval-buffer-command
+          "Evaluate the active buffer in the persistent REPL session.")
+        (list
+          'scheme.eval-last-sexp
+          eval-last-sexp-command
+          "Evaluate the complete Scheme datum before point.")
+        (list
           'scheme.apply-evaluation-result
           apply-evaluation-result-command
           "Apply an evaluator result to its interaction session.")
@@ -387,6 +499,18 @@
         (make-key-stroke 'character (char->integer #\c) 4)
         (make-key-stroke 'character (char->integer #\z) 4))
       'scheme.open-repl)
+    (editor-bind-key!
+      editor
+      (list
+        (make-key-stroke 'character (char->integer #\x) 4)
+        (make-key-stroke 'character (char->integer #\e) 4))
+      'scheme.eval-last-sexp)
+    (editor-bind-key!
+      editor
+      (list
+        (make-key-stroke 'character (char->integer #\x) 4)
+        (make-key-stroke 'character (char->integer #\r) 4))
+      'scheme.eval-region)
     editor)
 
   (define (install-interaction-effect-handler! executor editor)

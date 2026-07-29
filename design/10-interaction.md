@@ -103,6 +103,18 @@ keymap 提供以下操作：
 session。求值命令暂存草稿，将待求值 source 投影到 transcript；结果和新 prompt
 写入后再恢复草稿。debug retry 使用相同机制保留失败 prompt 后正在编辑的输入。
 
+源码求值命令共享同一提交入口：
+
+- `scheme.eval-region` 提交 active region；
+- `scheme.eval-buffer` 提交当前 Buffer 的完整 snapshot；
+- `scheme.eval-last-sexp` 用 Chez reader 在 point 前定位最后一个完整 datum；
+- `scheme.eval-expression` 接受调用者直接提供的 string 或 UTF-8 bytes。
+
+range 命令在切换到 transcript View 前捕获 Buffer identity、resource、revision
+和 byte range，并把它们写入 `EvaluationOrigin`。last-sexp 的 reader position 是
+字符 offset，命令在创建 origin 前按 UTF-8 编码转换为 byte offset。源码命令使用
+现有持久 evaluator 和 effect 回流，不创建独立 environment 或递归 command loop。
+
 ## 编辑器 API
 
 evaluator 在 session environment 中提供：

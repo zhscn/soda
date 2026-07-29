@@ -480,6 +480,75 @@
   (error 'repl-tests
          "completed multiline Scheme input was not submitted"))
 
+(define source-form "(define source-eval-value 10)")
+(define source-tail "(+ source-eval-value 2)")
+(define source-text
+  (string-append source-form "\n" source-tail))
+(dispatch! (make-command-message 'scheme.open-repl #f))
+(insert-text! source-text)
+(define source-revision (buffer-revision buffer))
+(dispatch! (make-command-message 'scheme.eval-buffer #f))
+(let* ([result (interaction-session-last-result session)]
+       [origin
+         (evaluation-request-origin
+           (evaluation-result-request result))])
+  (unless
+    (and
+      (string-contains? (buffer-string repl-buffer) "12\n> ")
+      (evaluation-origin? origin)
+      (= (evaluation-origin-buffer-id origin) (buffer-id buffer))
+      (= (evaluation-origin-revision origin) source-revision)
+      (= (evaluation-origin-start origin) 0)
+      (= (evaluation-origin-end origin)
+         (bytevector-length (string->utf8 source-text))))
+    (error 'repl-tests
+           "eval-buffer did not retain its complete source origin")))
+
+(dispatch! (make-command-message 'scheme.open-repl #f))
+(dispatch! (make-command-message 'scheme.eval-last-sexp #f))
+(let* ([result (interaction-session-last-result session)]
+       [request (evaluation-result-request result)]
+       [origin (evaluation-request-origin request)]
+       [tail-start
+         (bytevector-length
+           (string->utf8
+             (string-append source-form "\n")))])
+  (unless
+    (and
+      (string=? (evaluation-request-source request) source-tail)
+      (= (evaluation-origin-start origin) tail-start)
+      (= (evaluation-origin-end origin)
+         (bytevector-length (string->utf8 source-text))))
+    (error 'repl-tests
+           "eval-last-sexp did not select the datum before point"
+           (evaluation-request-source request)
+           (evaluation-origin-start origin)
+           (evaluation-origin-end origin)
+           tail-start)))
+
+(dispatch! (make-command-message 'scheme.open-repl #f))
+(dispatch! (make-command-message 'move.buffer-start #f))
+(dispatch! (make-command-message 'mark.set #f))
+(dispatch!
+  (make-command-message
+    'move.forward-character
+    #f
+    (prefix-argument-digit
+      (prefix-argument-digit #f 2)
+      9)))
+(dispatch! (make-command-message 'scheme.eval-region #f))
+(let* ([result (interaction-session-last-result session)]
+       [request (evaluation-result-request result)]
+       [origin (evaluation-request-origin request)])
+  (unless
+    (and
+      (string=? (evaluation-request-source request) source-form)
+      (= (evaluation-origin-start origin) 0)
+      (= (evaluation-origin-end origin)
+         (bytevector-length (string->utf8 source-form))))
+    (error 'repl-tests
+           "eval-region did not submit the active source range")))
+
 (define transcript-before-protected-delete
   (buffer-bytes repl-buffer))
 (dispatch!
