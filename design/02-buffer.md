@@ -154,6 +154,12 @@ redo 和 mode 切换。这一约束使 indentation 等 native 机制不需要依
 候选携带 Buffer identity，显示名只用于筛选和呈现。minibuffer 自身的临时 Buffer
 因此不会进入候选集合，重名 Buffer 使用 identity 后缀区分。
 
+`buffer.kill` 使用同一候选模型选择目标。关闭前，所有显示目标的 View 切换到替代
+Buffer；关闭最后一个用户 Buffer 时创建 `*scratch*`，维持 editor 至少拥有一个
+View 和一个 Buffer 的不变量。pending save 和 interaction session 拥有的 Buffer
+保持存活。modified Buffer 要求先保存，或通过显式的
+`buffer.force-kill-current` 放弃修改。
+
 ## 保存
 
 `file.save` 在 update turn 中从当前 snapshot 构造不可变 request：

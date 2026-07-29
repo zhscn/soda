@@ -69,6 +69,31 @@
       (lambda (buffer) (= (buffer-id buffer) id))
       (editor-buffers editor)))
 
+  (define (prompt-result-buffer editor result)
+    (let* ([candidate
+             (and
+               (prompt-result? result)
+               (prompt-result-candidate result))]
+           [candidate-id
+             (and
+               candidate
+               (exact-non-negative-integer?
+                 (completion-item-payload candidate))
+               (completion-item-payload candidate))])
+      (cond
+        [candidate-id
+         (find-buffer-by-id editor candidate-id)]
+        [(and
+           (prompt-result? result)
+           (eq? (prompt-result-status result) 'accepted))
+         (find
+           (lambda (buffer)
+             (string=?
+               (prompt-result-value result)
+               (buffer-display-label editor buffer)))
+           (editor-buffers editor))]
+        [else #f])))
+
   (define (switch-buffer-command context)
     (let* ([editor (command-context-editor context)]
            [view (command-context-view context)]
@@ -89,30 +114,7 @@
   (define (apply-switch-buffer-command context)
     (let* ([editor (command-context-editor context)]
            [result (command-context-argument context)]
-           [candidate
-             (and
-               (prompt-result? result)
-               (prompt-result-candidate result))]
-           [candidate-id
-             (and
-               candidate
-               (exact-non-negative-integer?
-                 (completion-item-payload candidate))
-               (completion-item-payload candidate))]
-           [buffer
-             (cond
-               [candidate-id
-                (find-buffer-by-id editor candidate-id)]
-               [(and
-                  (prompt-result? result)
-                  (eq? (prompt-result-status result) 'accepted))
-                (find
-                  (lambda (item)
-                    (string=?
-                      (prompt-result-value result)
-                      (buffer-display-label editor item)))
-                  (editor-buffers editor))]
-               [else #f])])
+           [buffer (prompt-result-buffer editor result)])
       (if (not buffer)
           (editor-set-status-message!
             editor
@@ -129,6 +131,81 @@
                 (buffer-display-label editor buffer)))))
       '()))
 
+  (define (kill-buffer-command context)
+    (let* ([editor (command-context-editor context)]
+           [view (command-context-view context)]
+           [source (buffer-choice-source editor)])
+      (editor-open-prompt!
+        editor
+        (make-completing-prompt-request
+          "Kill buffer: "
+          ""
+          'buffer-name
+          (buffer-display-label editor (view-buffer view))
+          'must-match
+          source
+          'buffer.apply-kill
+          #f)))
+    '())
+
+  (define (replacement-buffer! editor target)
+    (or
+      (find
+        (lambda (buffer) (not (eq? buffer target)))
+        (editor-buffers editor))
+      (editor-create-buffer!
+        editor
+        "*scratch*"
+        'fundamental-mode
+        "")))
+
+  (define (try-kill-buffer! editor target force?)
+    (cond
+      [(not target)
+       (editor-set-status-message! editor "No buffer selected")]
+      [(buffer-save-pending? target)
+       (editor-set-status-message!
+         editor
+         "Cannot kill a buffer while saving")]
+      [(editor-interaction-for-buffer editor (buffer-id target))
+       (editor-set-status-message!
+         editor
+         "Interaction buffers are owned by their sessions")]
+      [(and (buffer-modified? target) (not force?))
+       (editor-set-status-message!
+         editor
+         "Buffer is modified; save it or use buffer.force-kill-current")]
+      [else
+       (let ([label (buffer-display-label editor target)]
+             [replacement (replacement-buffer! editor target)])
+         (for-each
+           (lambda (view)
+             (when (eq? (view-buffer view) target)
+               (editor-set-view-buffer!
+                 editor
+                 (view-id view)
+                 (buffer-id replacement))))
+           (editor-views editor))
+         (editor-remove-buffer! editor (buffer-id target))
+         (editor-set-status-message!
+           editor
+           (string-append "Killed " label)))])
+    '())
+
+  (define (apply-kill-buffer-command context)
+    (let* ([editor (command-context-editor context)]
+           [result (command-context-argument context)])
+      (try-kill-buffer!
+        editor
+        (prompt-result-buffer editor result)
+        #f)))
+
+  (define (force-kill-current-buffer-command context)
+    (try-kill-buffer!
+      (command-context-editor context)
+      (view-buffer (command-context-view context))
+      #t))
+
   (define (install-buffer-commands! editor)
     (editor-register-command!
       editor
@@ -140,10 +217,31 @@
       'buffer.apply-switch
       apply-switch-buffer-command
       "Display the buffer selected by the minibuffer.")
+    (editor-register-command!
+      editor
+      'buffer.kill
+      kill-buffer-command
+      "Read a buffer name and close that buffer.")
+    (editor-register-command!
+      editor
+      'buffer.apply-kill
+      apply-kill-buffer-command
+      "Close the buffer selected by the minibuffer.")
+    (editor-register-command!
+      editor
+      'buffer.force-kill-current
+      force-kill-current-buffer-command
+      "Close the active buffer without checking its modified state.")
     (editor-bind-key!
       editor
       (list
         (make-key-stroke 'character (char->integer #\x) 4)
         (make-key-stroke 'character (char->integer #\b) 0))
       'buffer.switch)
+    (editor-bind-key!
+      editor
+      (list
+        (make-key-stroke 'character (char->integer #\x) 4)
+        (make-key-stroke 'character (char->integer #\k) 0))
+      'buffer.kill)
     editor))

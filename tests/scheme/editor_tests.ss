@@ -8,6 +8,7 @@
         (soda editor event)
         (soda editor keymap)
         (soda editor language)
+        (soda editor prompt)
         (soda editor scheme-semantics)
         (soda tui commands)
         (soda tui component)
@@ -594,6 +595,102 @@
              (buffer-closed? display-buffer)
              (buffer-closed? recreated-buffer))
   (error 'editor-tests "closing the editor did not release its buffer"))
+
+(define kill-document (make-document "" 960))
+(define kill-buffer
+  (make-buffer
+    960
+    kill-document
+    "*kill-one*"
+    'fundamental-mode))
+(define kill-editor (make-editor kill-buffer))
+(define kill-second
+  (editor-create-buffer!
+    kill-editor
+    "*kill-two*"
+    'fundamental-mode
+    "second"))
+
+(call-with-values
+  (lambda ()
+    (keymaps-resolve
+      (list (editor-keymap kill-editor))
+      (list
+        (make-key-stroke 'character (char->integer #\x) 4)
+        (make-key-stroke 'character (char->integer #\k) 0))))
+  (lambda (status command)
+    (unless (and (eq? status 'command)
+                 (eq? command 'buffer.kill))
+      (error 'editor-tests "C-x k was not bound to buffer.kill"))))
+
+(editor-update!
+  kill-editor
+  (make-command-message 'edit.self-insert (string->utf8 "dirty")))
+(editor-update!
+  kill-editor
+  (make-command-message
+    'buffer.apply-kill
+    (make-prompt-result
+      200
+      'accepted
+      "*kill-one*"
+      (view-id (editor-active-view kill-editor))
+      #f)))
+(unless
+  (and
+    (not (buffer-closed? kill-buffer))
+    (string-contains?
+      (editor-status-message kill-editor)
+      "modified"))
+  (error 'editor-tests "ordinary kill discarded a modified buffer"))
+
+(editor-update!
+  kill-editor
+  (make-command-message 'buffer.force-kill-current #f))
+(unless
+  (and
+    (buffer-closed? kill-buffer)
+    (= (length (editor-buffers kill-editor)) 1)
+    (eq? (view-buffer (editor-active-view kill-editor))
+         kill-second))
+  (error 'editor-tests "force kill left a view on the closed buffer"))
+
+(buffer-begin-save! kill-second (buffer-revision kill-second))
+(editor-update!
+  kill-editor
+  (make-command-message 'buffer.force-kill-current #f))
+(unless
+  (and
+    (not (buffer-closed? kill-second))
+    (string-contains?
+      (editor-status-message kill-editor)
+      "while saving"))
+  (error 'editor-tests "force kill discarded a pending save"))
+(buffer-finish-save!
+  kill-second
+  (buffer-revision kill-second)
+  #f)
+
+(editor-update!
+  kill-editor
+  (make-command-message
+    'buffer.apply-kill
+    (make-prompt-result
+      201
+      'accepted
+      "*kill-two*"
+      (view-id (editor-active-view kill-editor))
+      #f)))
+(unless
+  (and
+    (buffer-closed? kill-second)
+    (= (length (editor-buffers kill-editor)) 1)
+    (string=?
+      (buffer-resource
+        (view-buffer (editor-active-view kill-editor)))
+      "*scratch*"))
+  (error 'editor-tests "killing the last buffer did not create scratch"))
+(editor-close! kill-editor)
 
 (define prompt-document (make-document "body" 91))
 (define prompt-buffer
