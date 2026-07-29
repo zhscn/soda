@@ -1645,7 +1645,199 @@
            (cell-faces selected-keyword)
            (style-attributes
              (cell-style selected-keyword)))))
+
+(define diagnostic-error
+  (make-diagnostic
+    'answer-error
+    8
+    14
+    'error
+    "answer is invalid"
+    'error-payload))
+(define diagnostic-warning
+  (make-diagnostic
+    'string-warning
+    15
+    20
+    'warning
+    "string needs review"
+    'warning-payload))
+(define diagnostic-set
+  (make-buffer-annotation-set
+    highlight-buffer
+    'test-diagnostics
+    (buffer-revision highlight-buffer)
+    1
+    (list diagnostic-warning diagnostic-error)))
+(unless
+  (editor-publish-annotation-set!
+    highlight-editor
+    diagnostic-set)
+  (error 'editor-tests "initial diagnostics were rejected"))
+
+(define rejected-diagnostic-set
+  (make-buffer-annotation-set
+    highlight-buffer
+    'test-diagnostics
+    (buffer-revision highlight-buffer)
+    1
+    (list diagnostic-error)))
+(unless
+  (and
+    (not
+      (editor-publish-annotation-set!
+        highlight-editor
+        rejected-diagnostic-set))
+    (annotation-set-closed? rejected-diagnostic-set))
+  (error 'editor-tests
+         "stale diagnostic generation was not rejected and released"))
+
+(let* ([frame
+         (render-editor-frame highlight-editor 4 50)]
+       [cell (frame-cell-ref frame 0 8)])
+  (unless
+    (and
+      (equal?
+        (cell-faces cell)
+        '(default syntax-definition diagnostic-error))
+      (memq 'underline
+            (style-attributes (cell-style cell)))
+      (exists
+        (lambda (source)
+          (and
+            (eq? (cell-source-layer source) 'diagnostic)
+            (eq? (cell-source-owner source)
+                 'test-diagnostics)
+            (eq? (cell-source-detail source)
+                 diagnostic-error)))
+        (cell-sources cell)))
+    (error 'editor-tests
+           "diagnostic decoration did not compose with syntax")))
+
+(editor-update!
+  highlight-editor
+  (make-command-message 'diagnostics.list #f))
+(let ([locations
+        (editor-current-location-list highlight-editor)])
+  (unless
+    (and
+      (location-list? locations)
+      (eq? (location-list-source locations) 'diagnostics)
+      (= (length (location-list-items locations)) 2)
+      (= (view-caret
+           (editor-active-view highlight-editor))
+         8))
+    (error 'editor-tests
+           "diagnostics did not publish a sorted location list")))
+(let ([description
+        (describe-caret
+          highlight-editor
+          (render-editor-frame highlight-editor 4 50))])
+  (unless
+    (and
+      (memq 'diagnostic-error
+            (character-description-faces description))
+      (exists
+        (lambda (source)
+          (eq? (cell-source-owner source)
+               'test-diagnostics))
+        (character-description-sources description)))
+    (error 'editor-tests
+           "describe-char omitted diagnostic provenance")))
+(editor-update!
+  highlight-editor
+  (make-command-message 'xref.next-location #f))
+(unless
+  (= (view-caret (editor-active-view highlight-editor)) 15)
+  (error 'editor-tests
+         "generic next-location did not navigate diagnostics"))
+
+(let ([end
+        (bytevector-length
+          (buffer-bytes highlight-buffer))])
+  (buffer-replace-range!
+    highlight-buffer
+    end
+    end
+    (string->utf8 "; changed")))
+(unless
+  (and
+    (annotation-set-stale?
+      diagnostic-set
+      (buffer-revision highlight-buffer))
+    (not
+      (memq
+        'diagnostic-error
+        (cell-faces
+          (frame-cell-ref
+            (render-editor-frame highlight-editor 4 50)
+            0
+            8)))))
+  (error 'editor-tests
+         "stale diagnostics remained visible after an edit"))
+(editor-update!
+  highlight-editor
+  (make-command-message 'diagnostics.list #f))
+(unless
+  (not (editor-current-location-list highlight-editor))
+  (error 'editor-tests
+         "stale diagnostics remained navigable"))
+
+(define refreshed-diagnostic-set
+  (make-buffer-annotation-set
+    highlight-buffer
+    'test-diagnostics
+    (buffer-revision highlight-buffer)
+    2
+    (list diagnostic-error)))
+(unless
+  (and
+    (editor-publish-annotation-set!
+      highlight-editor
+      refreshed-diagnostic-set)
+    (annotation-set-closed? diagnostic-set)
+    (= (length
+         (editor-annotation-sets-for-buffer
+           highlight-editor
+           (buffer-id highlight-buffer)))
+       1))
+  (error 'editor-tests
+         "new diagnostic generation did not atomically replace the old set"))
+(editor-update!
+  highlight-editor
+  (make-command-message 'diagnostics.list #f))
+(unless
+  (and
+    (= (editor-clear-annotation-sets!
+         highlight-editor
+         'test-diagnostics
+         (buffer-id highlight-buffer))
+       1)
+    (annotation-set-closed? refreshed-diagnostic-set)
+    (null?
+      (editor-annotation-sets-for-buffer
+        highlight-editor
+        (buffer-id highlight-buffer)))
+    (not (editor-current-location-list highlight-editor)))
+  (error 'editor-tests
+         "diagnostic namespace was not cleared"))
+(define editor-owned-diagnostic-set
+  (make-buffer-annotation-set
+    highlight-buffer
+    'close-test
+    (buffer-revision highlight-buffer)
+    1
+    (list diagnostic-error)))
+(unless
+  (editor-publish-annotation-set!
+    highlight-editor
+    editor-owned-diagnostic-set)
+  (error 'editor-tests
+         "editor did not accept a lifecycle test annotation set"))
 (editor-close! highlight-editor)
+(unless (annotation-set-closed? editor-owned-diagnostic-set)
+  (error 'editor-tests
+         "closing the editor did not release annotation anchors"))
 
 (define prompt-document (make-document "body" 91))
 (define prompt-buffer

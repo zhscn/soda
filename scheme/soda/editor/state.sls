@@ -67,6 +67,10 @@
           editor-set-last-yank!
           editor-current-location-list
           editor-set-current-location-list!
+          editor-annotation-sets
+          editor-annotation-sets-for-buffer
+          editor-publish-annotation-set!
+          editor-clear-annotation-sets!
           editor-pending-prefix
           editor-set-pending-prefix!
           editor-clear-pending-prefix!
@@ -108,6 +112,7 @@
           ensure-view-visible!)
   (import (rnrs)
           (soda document)
+          (soda editor annotation)
           (soda editor buffer)
           (soda editor command)
           (soda editor completion)
@@ -202,6 +207,9 @@
       (mutable current-location-list
                editor-current-location-list
                editor-current-location-list-set!)
+      (mutable annotation-sets
+               editor-annotation-sets
+               editor-annotation-sets-set!)
       (mutable pending-prefix
                editor-pending-prefix
                editor-pending-prefix-set!)
@@ -243,6 +251,120 @@
         "expected a location list or #f"
         locations))
     (editor-current-location-list-set! editor locations))
+
+  (define (same-annotation-owner? set namespace buffer-id)
+    (and
+      (eq? (annotation-set-namespace set) namespace)
+      (= (annotation-set-buffer-id set) buffer-id)))
+
+  (define (invalidate-diagnostic-list-for-buffers! editor buffer-ids)
+    (let ([locations (editor-current-location-list editor)])
+      (when
+        (and
+          locations
+          (eq? (location-list-source locations) 'diagnostics)
+          (exists
+            (lambda (item)
+              (memv
+                (location-item-buffer-id item)
+                buffer-ids))
+            (location-list-items locations)))
+        (editor-current-location-list-set! editor #f))))
+
+  (define (editor-annotation-sets-for-buffer editor buffer-id)
+    (require-open-editor 'editor-annotation-sets-for-buffer editor)
+    (editor-buffer-ref editor buffer-id)
+    (filter
+      (lambda (set)
+        (= (annotation-set-buffer-id set) buffer-id))
+      (editor-annotation-sets editor)))
+
+  (define (editor-publish-annotation-set! editor set)
+    (require-open-editor 'editor-publish-annotation-set! editor)
+    (unless (annotation-set? set)
+      (assertion-violation
+        'editor-publish-annotation-set!
+        "expected an annotation set"
+        set))
+    (when (annotation-set-closed? set)
+      (assertion-violation
+        'editor-publish-annotation-set!
+        "annotation set is closed"
+        set))
+    (let* ([buffer-id (annotation-set-buffer-id set)]
+           [buffer (editor-buffer-ref editor buffer-id)]
+           [namespace (annotation-set-namespace set)]
+           [current
+             (find
+               (lambda (candidate)
+                 (same-annotation-owner?
+                   candidate namespace buffer-id))
+               (editor-annotation-sets editor))])
+      (unless (= (annotation-set-document-id set)
+                 (document-id (buffer-document buffer)))
+        (assertion-violation
+          'editor-publish-annotation-set!
+          "annotation set belongs to another document"
+          (annotation-set-document-id set)
+          (document-id (buffer-document buffer))))
+      (if
+        (and current
+             (<= (annotation-set-generation set)
+                 (annotation-set-generation current)))
+        (begin
+          (annotation-set-close! set)
+          #f)
+        (begin
+          (when current (annotation-set-close! current))
+          (invalidate-diagnostic-list-for-buffers!
+            editor
+            (list buffer-id))
+          (editor-annotation-sets-set!
+            editor
+            (cons
+              set
+              (filter
+                (lambda (candidate)
+                  (not
+                    (same-annotation-owner?
+                      candidate namespace buffer-id)))
+                (editor-annotation-sets editor))))
+          #t))))
+
+  (define (editor-clear-annotation-sets!
+            editor
+            namespace
+            buffer-id)
+    (require-open-editor 'editor-clear-annotation-sets! editor)
+    (unless (symbol? namespace)
+      (assertion-violation
+        'editor-clear-annotation-sets!
+        "namespace must be a symbol"
+        namespace))
+    (unless
+      (or (not buffer-id)
+          (exact-non-negative-integer? buffer-id))
+      (assertion-violation
+        'editor-clear-annotation-sets!
+        "buffer id must be a non-negative exact integer or #f"
+        buffer-id))
+    (let-values
+      ([(removed retained)
+        (partition
+          (lambda (set)
+            (and
+              (eq? (annotation-set-namespace set) namespace)
+              (or
+                (not buffer-id)
+                (= (annotation-set-buffer-id set) buffer-id))))
+          (editor-annotation-sets editor))])
+      (for-each annotation-set-close! removed)
+      (unless (null? removed)
+        (invalidate-diagnostic-list-for-buffers!
+          editor
+          (map annotation-set-buffer-id removed)))
+      (editor-annotation-sets-set! editor retained)
+      (length removed)))
 
   (define (editor-clear-pending-prefix! editor)
     (require-open-editor 'editor-clear-pending-prefix! editor)
@@ -465,6 +587,18 @@
                 (= (location-item-buffer-id item) id))
               (location-list-items locations))))
         (editor-current-location-list-set! value #f))
+      (for-each
+        annotation-set-close!
+        (filter
+          (lambda (set)
+            (= (annotation-set-buffer-id set) id))
+          (editor-annotation-sets value)))
+      (editor-annotation-sets-set!
+        value
+        (filter
+          (lambda (set)
+            (not (= (annotation-set-buffer-id set) id)))
+          (editor-annotation-sets value)))
       (buffer-close! buffer)))
 
   (define (editor-interactions value)
@@ -1950,6 +2084,7 @@
                '()
                #f
                #f
+               '()
                #f
                #f
                #f
@@ -1983,6 +2118,10 @@
         (table-values
           (editor-interaction-table value)
           (editor-interaction-ids value)))
+      (for-each
+        annotation-set-close!
+        (editor-annotation-sets value))
+      (editor-annotation-sets-set! value '())
       (for-each
         (lambda (view)
           (when (view-completion view)

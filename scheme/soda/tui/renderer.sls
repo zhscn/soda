@@ -2,6 +2,7 @@
   (export render-editor-frame character-cell-width)
   (import (rnrs)
           (soda document)
+          (soda editor annotation)
           (soda editor buffer)
           (soda editor core)
           (soda editor decoration)
@@ -49,6 +50,10 @@
       [(syntax-definition) (make-style 81 'default '(bold))]
       [(syntax-type) (make-style 80 'default '())]
       [(syntax-delimiter) (make-style 246 'default '())]
+      [(diagnostic-error) (make-style 203 'default '(underline))]
+      [(diagnostic-warning) (make-style 214 'default '(underline))]
+      [(diagnostic-info) (make-style 75 'default '(underline))]
+      [(diagnostic-hint) (make-style 244 'default '(underline))]
       [(selection) selection-style]
       [else default-style]))
 
@@ -342,7 +347,7 @@
            [profile (buffer-language-profile buffer)]
            [highlighter
              (and profile (language-profile-highlights profile))]
-           [decorations
+           [syntax-decorations
              (if highlighter
                  (let ([runs
                          (highlighter
@@ -362,7 +367,28 @@
                        runs))
                    (decoration-runs-in-range
                      runs visible-start visible-end))
-                 '())])
+                 '())]
+           [external-decorations
+             (fold-left
+               (lambda (runs set)
+                 (append
+                   runs
+                   (annotation-set-decoration-runs
+                     set
+                     (buffer-revision buffer)
+                     visible-start
+                     visible-end)))
+               '()
+               (editor-annotation-sets-for-buffer
+                 (editor-render-context-editor context)
+                 (buffer-id buffer)))]
+           [decorations
+             (decoration-runs-in-range
+               (append
+                 syntax-decorations
+                 external-decorations)
+               visible-start
+               visible-end)])
       (frame-fill-rect!
         frame
         rectangle

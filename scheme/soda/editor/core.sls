@@ -121,6 +121,35 @@
           decoration-run-covers?
           decoration-runs-in-range
           decoration-runs-at
+          make-annotation
+          make-diagnostic
+          annotation?
+          annotation-id
+          annotation-start
+          annotation-end
+          annotation-kind
+          annotation-face
+          annotation-severity
+          annotation-message
+          annotation-payload
+          make-buffer-annotation-set
+          annotation-set?
+          annotation-set-namespace
+          annotation-set-buffer-id
+          annotation-set-resource
+          annotation-set-document-id
+          annotation-set-source-revision
+          annotation-set-generation
+          annotation-set-annotations
+          annotation-set-closed?
+          annotation-set-stale?
+          annotation-set-decoration-runs
+          annotation-set-location-items
+          annotation-set-close!
+          editor-annotation-sets
+          editor-annotation-sets-for-buffer
+          editor-publish-annotation-set!
+          editor-clear-annotation-sets!
           prefix-argument?
           prefix-argument-value
           prefix-argument-universal
@@ -336,6 +365,7 @@
           command-effect-kind
           command-effect-payload)
   (import (rnrs)
+          (soda editor annotation)
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
@@ -348,6 +378,7 @@
           (soda editor completion-provider)
           (soda editor completion-runtime)
           (soda editor decoration)
+          (soda editor diagnostics)
           (soda editor edit)
           (soda editor event)
           (soda editor file)
@@ -392,4 +423,5 @@
       (install-search-commands! editor)
       (install-window-commands! editor)
       (install-scheme-xref-commands! editor)
+      (install-diagnostic-commands! editor)
       editor)))

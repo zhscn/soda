@@ -39,14 +39,14 @@ tokens。发布新 generation 原子替换同 namespace 的旧集合。大 paylo
 table，区间树只保存排序和渲染需要的轻字段。
 
 source range 在发布时解析到对应 snapshot，并转为 anchor range。Document commit
-后，AnnotationSet 使用 normalized changes 重放到新 revision。producer 新结果到达
-时按 generation 与 revision 校验，再替换集合。
+后 anchor 继续维护可回收的位置所有权。strict-source 集合只在 source revision
+显示；Buffer revision 改变后整组进入 stale 状态，直到 producer 针对新 revision
+发布更高 generation。新结果按 `(namespace, buffer, generation)` 校验并原子替换
+旧集合；被替换、拒绝、清除或随 Buffer 销毁的集合同时释放全部 anchor。
 
-stale 是显式 policy：
-
-- diagnostic 可以在覆盖行发生编辑时立即隐藏；
-- inlay hint 可以保留并标 stale，等待刷新；
-- semantic token 可以重放未触及区间，仅重查受影响范围。
+stale policy 由 annotation channel 定义。diagnostic 使用 strict-source policy，
+编辑后立即隐藏整组。需要跨 revision 保留的 producer 在发布前负责把结果映射到
+目标 snapshot，并以新 generation 交给 Editor。
 
 ## 合并管线
 
@@ -120,7 +120,10 @@ GeneratedBuffer {
 
 diagnostic producer 将协议坐标解析到发布 snapshot，再创建 AnnotationSet。gutter、
 下划线、行尾消息和 location list 都消费同一 annotation identity 与 payload。
-location list 是呈现/导航投影，不复制诊断所有权。
+location list 是呈现/导航投影，不复制诊断所有权。`diagnostics.list` 把活动 Buffer
+的当前 diagnostics 按 byte range 排序并发布为通用 LocationList；后续导航复用
+`xref.next-location` 与 `xref.previous-location`。替换或清除集合会同时废弃引用
+旧 annotation identity 的 current diagnostics list。
 
 ## 设计依据
 
