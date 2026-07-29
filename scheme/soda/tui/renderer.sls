@@ -7,7 +7,6 @@
           (soda editor core)
           (soda editor decoration)
           (soda editor display)
-          (soda editor language)
           (soda editor window)
           (soda tui component)
           (soda tui frame)
@@ -110,10 +109,13 @@
             position
             detail
             component-id
-            decorations
+            decoration-sweep
             selection-start
             selection-end)
-    (let* ([runs (decoration-runs-at decorations position)]
+    (let* ([runs
+             (decoration-sweep-runs-at!
+               decoration-sweep
+               position)]
            [decoration-faces (map decoration-run-face runs)]
            [selected?
             (and
@@ -155,7 +157,7 @@
             first-column
             buffer-id
             component-id
-            decorations
+            decoration-sweep
             selection-start
             selection-end)
     (let ([value (decode-text bytes)]
@@ -179,7 +181,7 @@
                     line-end
                     'line-end
                     component-id
-                    decorations
+                    decoration-sweep
                     selection-start
                     selection-end)))
               column)
@@ -230,7 +232,7 @@
                            byte-position
                            'tab
                            component-id
-                           decorations
+                           decoration-sweep
                            selection-start
                            selection-end)))))
                  (loop
@@ -253,7 +255,7 @@
                        byte-position
                        character
                        component-id
-                       decorations
+                       decoration-sweep
                        selection-start
                        selection-end)))
                  (loop
@@ -381,30 +383,11 @@
                         (editor-render-context-line-count context))
                      (text-size text)
                      (text-line-start text last-line)))]
-           [profile (buffer-language-profile buffer)]
-           [highlighter
-             (and profile (language-profile-highlights profile))]
            [syntax-decorations
-             (if highlighter
-                 (let ([runs
-                         (highlighter
-                           (snapshot-document-id
-                             (editor-render-context-snapshot context))
-                           (snapshot-revision
-                             (editor-render-context-snapshot context))
-                           (text->bytevector text)
-                           visible-start
-                           visible-end)])
-                   (unless
-                     (and (list? runs)
-                          (for-all decoration-run? runs))
-                     (assertion-violation
-                       'render-text-component!
-                       "highlighter returned invalid decoration runs"
-                       runs))
-                   (decoration-runs-in-range
-                     runs visible-start visible-end))
-                 '())]
+             (buffer-highlight-runs
+               buffer
+               visible-start
+               visible-end)]
            [external-decorations
              (fold-left
                (lambda (runs set)
@@ -419,13 +402,12 @@
                (editor-annotation-sets-for-buffer
                  (editor-render-context-editor context)
                  (buffer-id buffer)))]
-           [decorations
-             (decoration-runs-in-range
+           [decoration-sweep
+             (make-decoration-sweep
                (append
                  syntax-decorations
                  external-decorations)
-               visible-start
-               visible-end)])
+               visible-start)])
       (frame-fill-rect!
         frame
         rectangle
@@ -473,7 +455,7 @@
                 (editor-render-context-first-column context)
                 (buffer-id buffer)
                 component-id
-                decorations
+                decoration-sweep
                 selection-start
                 selection-end)))))
       (let ([cursor-row
@@ -619,7 +601,7 @@
                           (view-first-column view)
                           (buffer-id buffer)
                           component-id
-                          '()
+                          (make-decoration-sweep '() line-start)
                           #f
                           #f)
                         (if (and (= caret-line line)

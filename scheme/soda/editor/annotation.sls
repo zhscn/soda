@@ -48,6 +48,7 @@
             generation
             document
             entries
+            decoration-index
             (mutable closed?
                      annotation-set-closed?
                      annotation-set-closed?-set!)))
@@ -168,6 +169,40 @@
             (when end-anchor
               (document-remove-anchor! document end-anchor)))))))
 
+  (define (severity-priority severity)
+    (case severity
+      [(error) 40]
+      [(warning) 30]
+      [(info) 20]
+      [(hint) 10]
+      [else 0]))
+
+  (define (render-range-for-size source-size start end)
+    (cond
+      [(< start end) (cons start end)]
+      [(< end source-size) (cons end (+ end 1))]
+      [(positive? start) (cons (- start 1) start)]
+      [else #f]))
+
+  (define (annotation->decoration-run namespace source-size annotation)
+    (let ([range
+            (render-range-for-size
+              source-size
+              (annotation-start annotation)
+              (annotation-end annotation))])
+      (and
+        range
+        (make-decoration-run
+          (car range)
+          (cdr range)
+          (annotation-face annotation)
+          (if (eq? (annotation-kind annotation) 'diagnostic)
+              'diagnostic
+              'semantic)
+          (severity-priority (annotation-severity annotation))
+          namespace
+          annotation))))
+
   (define (make-buffer-annotation-set
             buffer
             namespace
@@ -252,6 +287,14 @@
             generation
             document
             (reverse entries)
+            (make-decoration-index
+              (filter
+                (lambda (run) run)
+                (map
+                  (lambda (annotation)
+                    (annotation->decoration-run
+                      namespace size annotation))
+                  annotations)))
             #f))
         (lambda ()
           (unless complete?
@@ -286,23 +329,6 @@
         (annotation-set-document value)
         (annotation-entry-end-anchor entry))))
 
-  (define (severity-priority severity)
-    (case severity
-      [(error) 40]
-      [(warning) 30]
-      [(info) 20]
-      [(hint) 10]
-      [else 0]))
-
-  (define (render-range value range)
-    (let ([start (car range)] [end (cdr range)])
-      (cond
-        [(< start end) range]
-        [(< end (annotation-set-source-size value))
-         (cons end (+ end 1))]
-        [(positive? start) (cons (- start 1) start)]
-        [else #f])))
-
   (define (annotation-set-decoration-runs
             value
             revision
@@ -323,31 +349,10 @@
         end))
     (if (annotation-set-stale? value revision)
         '()
-        (filter
-          (lambda (run) run)
-          (map
-            (lambda (entry)
-              (let* ([annotation
-                       (annotation-entry-annotation entry)]
-                     [range
-                       (render-range value (entry-range value entry))])
-                (and
-                  range
-                  (< (car range) end)
-                  (< start (cdr range))
-                  (make-decoration-run
-                    (car range)
-                    (cdr range)
-                    (annotation-face annotation)
-                    (if (eq? (annotation-kind annotation)
-                             'diagnostic)
-                        'diagnostic
-                        'semantic)
-                    (severity-priority
-                      (annotation-severity annotation))
-                    (annotation-set-namespace value)
-                    annotation))))
-            (annotation-set-entries value)))))
+        (decoration-index-runs-in-range
+          (annotation-set-decoration-index value)
+          start
+          end)))
 
   (define (annotation-set-location-items value revision)
     (require-open-set 'annotation-set-location-items value)

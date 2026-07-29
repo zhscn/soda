@@ -8,50 +8,65 @@
     (and (< (scheme-lexical-token-start token) end)
          (< start (scheme-lexical-token-end token))))
 
-  (define (definition-token? token definitions)
-    (exists
-      (lambda (definition)
-        (and
-          (= (scheme-lexical-token-start token)
-             (scheme-definition-start definition))
-          (= (scheme-lexical-token-end token)
-             (scheme-definition-end definition))))
-      definitions))
+  (define (make-definition-starts definitions)
+    (let ([starts (make-eqv-hashtable)])
+      (for-each
+        (lambda (definition)
+          (hashtable-set!
+            starts
+            (scheme-definition-start definition)
+            (scheme-definition-end definition)))
+        definitions)
+      starts))
 
-  (define (resolved-kind semantic token)
-    (let ([definitions
-            (scheme-semantic-definitions-at
-              semantic
-              (scheme-lexical-token-start token))])
-      (and (pair? definitions)
-           (scheme-definition-kind (car definitions)))))
+  (define (make-kinds-by-name definitions)
+    (let ([kinds (make-hashtable string-hash string=?)])
+      (for-each
+        (lambda (definition)
+          (hashtable-set!
+            kinds
+            (scheme-definition-name definition)
+            (scheme-definition-kind definition)))
+        scheme-primitive-definitions)
+      (for-each
+        (lambda (definition)
+          (hashtable-set!
+            kinds
+            (scheme-definition-name definition)
+            (scheme-definition-kind definition)))
+        definitions)
+      kinds))
 
-  (define (symbol-face semantic token)
+  (define (symbol-face definition-starts kinds-by-name token)
     (let ([value (scheme-lexical-token-value token)])
       (cond
-        [(definition-token?
-           token
-           (scheme-semantic-snapshot-definitions semantic))
+        [(equal?
+           (hashtable-ref
+             definition-starts
+             (scheme-lexical-token-start token)
+             #f)
+           (scheme-lexical-token-end token))
          'syntax-definition]
         [(string->number value) 'syntax-number]
         [else
-         (case (resolved-kind semantic token)
+         (case (hashtable-ref kinds-by-name value #f)
            [(syntax) 'syntax-keyword]
            [(procedure) 'syntax-builtin]
            [(record) 'syntax-type]
            [else #f])])))
 
-  (define (token-face semantic token)
+  (define (token-face definition-starts kinds-by-name token)
     (case (scheme-lexical-token-kind token)
       [(comment) 'syntax-comment]
       [(string) 'syntax-string]
       [(character) 'syntax-constant]
       [(open close prefix datum-comment) 'syntax-delimiter]
-      [(symbol) (symbol-face semantic token)]
+      [(symbol) (symbol-face definition-starts kinds-by-name token)]
       [else #f]))
 
-  (define (token->run semantic token)
-    (let ([face (token-face semantic token)])
+  (define (token->run definition-starts kinds-by-name token)
+    (let ([face
+            (token-face definition-starts kinds-by-name token)])
       (and
         face
         (make-decoration-run
@@ -89,17 +104,26 @@
         revision
         start
         end))
-    (let ([semantic
-            (make-scheme-semantic-snapshot
-              document-id
-              revision
-              bytes)])
+    (let* ([semantic
+             (make-scheme-semantic-snapshot
+               document-id
+               revision
+               bytes)]
+           [definitions
+             (scheme-semantic-snapshot-definitions semantic)]
+           [definition-starts
+             (make-definition-starts definitions)]
+           [kinds-by-name
+             (make-kinds-by-name definitions)])
       (filter
         (lambda (run) run)
         (map
           (lambda (token)
-            (token->run semantic token))
+            (token->run
+              definition-starts
+              kinds-by-name
+              token))
           (filter
             (lambda (token)
               (token-overlaps? token start end))
-            (scheme-lexical-tokenize bytes)))))))
+            (scheme-semantic-snapshot-tokens semantic)))))))

@@ -25,6 +25,7 @@
           buffer-language-session
           buffer-language-revision
           buffer-language-error
+          buffer-highlight-runs
           buffer-setting-ref
           buffer-set-local-setting!
           buffer-clear-local-setting!
@@ -36,6 +37,7 @@
           buffer-undo-to!)
   (import (rnrs)
           (soda document)
+          (soda editor decoration)
           (soda editor language))
 
   (define-record-type
@@ -44,7 +46,10 @@
       (immutable profile language-runtime-profile)
       (mutable session language-runtime-session language-runtime-session-set!)
       (mutable revision language-runtime-revision language-runtime-revision-set!)
-      (mutable error language-runtime-error language-runtime-error-set!)))
+      (mutable error language-runtime-error language-runtime-error-set!)
+      (mutable highlight-index
+               language-runtime-highlight-index
+               language-runtime-highlight-index-set!)))
 
   (define-record-type (buffer %make-buffer buffer?)
     (fields
@@ -90,13 +95,33 @@
             (syntax-close! provider session)))
         (language-runtime-session-set! runtime #f))))
 
+  (define (snapshot-highlight-index profile snapshot)
+    (let ([highlighter (language-profile-highlights profile)])
+      (if (not highlighter)
+          (make-decoration-index '())
+          (let ([text (snapshot-text snapshot)])
+            (dynamic-wind
+              (lambda () #f)
+              (lambda ()
+                (make-decoration-index
+                  (highlighter
+                    (snapshot-document-id snapshot)
+                    (snapshot-revision snapshot)
+                    (text->bytevector text)
+                    0
+                    (text-size text))))
+              (lambda () (text-close! text)))))))
+
   (define (open-runtime profile snapshot)
-    (let ([provider (language-profile-syntax profile)])
+    (let ([provider (language-profile-syntax profile)]
+          [highlight-index
+            (snapshot-highlight-index profile snapshot)])
       (%make-language-runtime
         profile
         (and provider (syntax-open provider snapshot))
         (snapshot-revision snapshot)
-        #f)))
+        #f
+        highlight-index)))
 
   (define (profile-for-mode catalog mode-name)
     (let ([language
@@ -313,6 +338,27 @@
     (let ([runtime (buffer-language-runtime value)])
       (and runtime (language-runtime-error runtime))))
 
+  (define (buffer-highlight-runs value start end)
+    (require-open-buffer 'buffer-highlight-runs value)
+    (unless
+      (and (integer? start)
+           (exact? start)
+           (integer? end)
+           (exact? end)
+           (<= 0 start end))
+      (assertion-violation
+        'buffer-highlight-runs
+        "invalid highlight range"
+        start
+        end))
+    (let ([runtime (buffer-language-runtime value)])
+      (if runtime
+          (decoration-index-runs-in-range
+            (language-runtime-highlight-index runtime)
+            start
+            end)
+          '())))
+
   (define buffer-setting-ref
     (case-lambda
       [(value key) (buffer-setting-ref value key #f)]
@@ -366,14 +412,27 @@
         (guard (reopen-condition
                  [else
                   (language-runtime-error-set!
-                    runtime
-                    (cons condition reopen-condition))])
+            runtime
+            (cons condition reopen-condition))])
           (language-runtime-session-set!
             runtime
             (syntax-open provider snapshot))
           (language-runtime-revision-set!
             runtime
             (snapshot-revision snapshot))))))
+
+  (define (refresh-highlights! runtime snapshot)
+    (guard (condition
+             [else
+              (language-runtime-highlight-index-set!
+                runtime
+                (make-decoration-index '()))
+              (language-runtime-error-set! runtime condition)])
+      (language-runtime-highlight-index-set!
+        runtime
+        (snapshot-highlight-index
+          (language-runtime-profile runtime)
+          snapshot))))
 
   (define (sync-change! value change)
     (let ([runtime (buffer-language-runtime value)])
@@ -410,7 +469,8 @@
                      (language-runtime-revision-set!
                        runtime
                        (snapshot-revision snapshot))
-                     (language-runtime-error-set! runtime #f))])))
+                     (language-runtime-error-set! runtime #f))])
+                (refresh-highlights! runtime snapshot)))
             (lambda () (snapshot-close! snapshot)))))))
 
   (define (transaction-pending-edits transaction)

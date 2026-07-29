@@ -5,6 +5,7 @@
           scheme-semantic-snapshot-revision
           scheme-semantic-snapshot-definitions
           scheme-semantic-snapshot-uses
+          scheme-semantic-snapshot-tokens
           scheme-definition-id?
           scheme-definition-id-source
           scheme-definition-id-document-id
@@ -56,7 +57,7 @@
     (scheme-semantic-snapshot
       %make-scheme-semantic-snapshot
       scheme-semantic-snapshot?)
-    (fields document-id revision definitions uses))
+    (fields document-id revision definitions uses tokens))
 
   (define-record-type token
     (fields kind value start end))
@@ -277,13 +278,13 @@
 
   (define scheme-lexical-tokenize tokenize)
 
-  (define (semantic-tokens bytes)
+  (define (semantic-tokens tokens)
     (filter
       (lambda (value)
         (not (memq
                (token-kind value)
                '(comment string character))))
-      (tokenize bytes)))
+      tokens))
 
   (define (skip-datum tokens)
     (cond
@@ -449,8 +450,8 @@
         (lambda (name) (token-symbol=? (cadr tokens) name))
         '("quote" "quasiquote" "syntax" "quasisyntax"))))
 
-  (define (scan-definitions document-id revision bytes)
-    (let loop ([tokens (remove-ignored-data (semantic-tokens bytes))]
+  (define (scan-definitions document-id revision tokens)
+    (let loop ([tokens (remove-ignored-data tokens)]
                [definitions '()])
       (if (null? tokens)
           (reverse definitions)
@@ -606,8 +607,8 @@
                 (scheme-definition-end definition))))
       definitions))
 
-  (define (scan-uses bytes definitions)
-    (let loop ([tokens (remove-ignored-data (semantic-tokens bytes))]
+  (define (scan-uses tokens definitions)
+    (let loop ([tokens (remove-ignored-data tokens)]
                [uses '()])
       (cond
         [(null? tokens) (reverse uses)]
@@ -728,10 +729,13 @@
         'make-scheme-semantic-snapshot
         "expected source bytes"
         bytes))
-    (let ([definitions
-            (scan-definitions document-id revision bytes)])
+    (let* ([tokens (tokenize bytes)]
+           [semantic (semantic-tokens tokens)]
+           [definitions
+             (scan-definitions document-id revision semantic)])
       (%make-scheme-semantic-snapshot
         document-id
         revision
         definitions
-        (scan-uses bytes definitions)))))
+        (scan-uses semantic definitions)
+        tokens))))

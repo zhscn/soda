@@ -2,6 +2,7 @@
 (import (rnrs)
         (soda document)
         (soda editor buffer)
+        (soda editor decoration)
         (soda editor language))
 
 (define events '())
@@ -294,3 +295,101 @@
 (change-close! following-change)
 (change-close! external-change)
 (buffer-close! external-buffer)
+
+(define highlight-build-count 0)
+(define (counting-highlighter document-id revision bytes start end)
+  (set! highlight-build-count (+ highlight-build-count 1))
+  (if (positive? (bytevector-length bytes))
+      (list
+        (make-decoration-run
+          0
+          (bytevector-length bytes)
+          'syntax-test
+          'base-syntax
+          0
+          'test
+          revision))
+      '()))
+
+(register-language-profile!
+  (make-language-profile
+    'highlight-test
+    #f
+    #f
+    '()
+    #f
+    counting-highlighter
+    #f
+    '()
+    #f))
+(register-major-mode!
+  (make-major-mode
+    'highlight-test-mode
+    'fundamental-mode
+    'highlight-test
+    'editing
+    #f
+    '()))
+
+(define highlight-cache-document (make-document "abcdef" 44))
+(define highlight-cache-buffer
+  (make-buffer
+    10
+    highlight-cache-document
+    "highlight-test"
+    'highlight-test-mode))
+(unless (= highlight-build-count 1)
+  (error 'buffer-tests "initial highlight snapshot was not built once"))
+(unless
+  (and
+    (= (length (buffer-highlight-runs highlight-cache-buffer 0 1)) 1)
+    (= (length (buffer-highlight-runs highlight-cache-buffer 4 6)) 1)
+    (= highlight-build-count 1))
+  (error 'buffer-tests "highlight range query rebuilt the snapshot"))
+
+(define highlight-cache-change #f)
+(call-with-values
+  (lambda ()
+    (call-with-buffer-transaction
+      highlight-cache-buffer
+      (lambda (transaction)
+        (transaction-insert! transaction 6 "!"))))
+  (lambda (result committed-change)
+    (set! highlight-cache-change committed-change)))
+(unless
+  (and
+    (= highlight-build-count 2)
+    (= (length
+         (buffer-highlight-runs highlight-cache-buffer 6 7))
+       1))
+  (error 'buffer-tests "highlight snapshot did not follow revision"))
+
+(let* ([low
+         (make-decoration-run
+           0 8 'low 'base-syntax 0 'test 'low)]
+       [high
+         (make-decoration-run
+           2 4 'high 'diagnostic 10 'test 'high)]
+       [index (make-decoration-index (list high low))]
+       [sweep
+         (make-decoration-sweep
+           (decoration-index-runs-in-range index 1 6)
+           1)])
+  (unless
+    (and
+      (equal?
+        (map decoration-run-face
+             (decoration-sweep-runs-at! sweep 1))
+        '(low))
+      (equal?
+        (map decoration-run-face
+             (decoration-sweep-runs-at! sweep 2))
+        '(low high))
+      (equal?
+        (map decoration-run-face
+             (decoration-sweep-runs-at! sweep 4))
+        '(low)))
+    (error 'buffer-tests "decoration index and sweep order differ")))
+
+(change-close! highlight-cache-change)
+(buffer-close! highlight-cache-buffer)
