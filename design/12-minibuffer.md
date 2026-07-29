@@ -134,6 +134,10 @@ query 是 `[start, point)`；应用候选时原子替换 `[start, end)`，因此
 新的空 field，例如 `root/usr/|`。`RET` 遇到这种边界会提交当前 field 并继续读取，
 直到候选没有引入后续 field 才结束 prompt。`TAB` 始终只提交当前 field。
 
+Prompt completion 使用完整 input 和 point 作为 source context identity。query
+不变但 field 外文本发生变化时仍会推进 generation 并重新产生候选。例如从路径
+末尾删除一个目录分量后，新目录的空 query 不会复用旧目录的空 query 结果。
+
 choice source metadata 为匹配和选择声明策略：
 
 ```text

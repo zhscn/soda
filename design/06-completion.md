@@ -147,6 +147,11 @@ completion。
 - incomplete provider 重新请求并替换自己的 item set；
 - query 退回触发点之前时关闭会话。
 
+session 分别保存用于匹配的 query 和 source context identity。多字段 source 可以
+在 query 相同而上下文变化时重新产生候选；Prompt completion 的 context 由完整
+input 和 point 构成，Document completion 使用 document target 与 revision
+约束上下文。
+
 匹配文本优先使用 `filter_text`，否则使用 `label`。choice source metadata 选择按
 顺序尝试的 `prefix`、`substring`、`flex` style 和大小写策略。匹配产出
 `CompletionMatch(score, ranges, exact)`，其中 ranges 使用 `filter_text` 字符索引，

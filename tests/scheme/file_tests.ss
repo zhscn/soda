@@ -312,6 +312,42 @@
       (not (completion-session-selected-item completion)))
     (error 'file-tests
            "find-file completion exposed invalid directory entries")))
+(define find-generation-before-parent-edit
+  (completion-session-generation
+    (editor-active-prompt-completion editor)))
+(dispatch!
+  (make-command-message
+    'edit.backward-kill-word
+    #f))
+(let* ([parent-directory
+         (string-append
+           (path-parent (path-parent save-path))
+           (string (directory-separator)))]
+       [directory-name
+         (string-append
+           (path-last (path-parent save-path))
+           (string (directory-separator)))]
+       [completion
+         (editor-active-prompt-completion editor)]
+       [directory-candidate
+         (find
+           (lambda (item)
+             (string=?
+               (completion-item-insert-text item)
+               directory-name))
+           (completion-session-items completion))])
+  (unless
+    (and
+      (string=?
+        (editor-active-prompt-input editor)
+        parent-directory)
+      (> (completion-session-generation completion)
+         find-generation-before-parent-edit)
+      directory-candidate
+      (string=? (completion-item-annotation directory-candidate)
+                "directory"))
+    (error 'file-tests
+           "editing a path prefix did not refresh completion context")))
 (dispatch! (make-command-message 'prompt.abort #f))
 
 (define find-origin-view-id (view-id (editor-active-view editor)))

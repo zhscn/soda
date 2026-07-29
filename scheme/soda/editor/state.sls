@@ -1557,7 +1557,8 @@
                         (prompt-session-id session)
                         start
                         caret
-                        replacement-end)))))
+                        replacement-end)
+                      (cons input point)))))
               (lambda () (text-close! text)))))
         (lambda () (snapshot-close! snapshot)))))
 
@@ -1568,11 +1569,12 @@
         (call-with-values
           (lambda ()
             (prompt-completion-context value completion))
-          (lambda (query target)
+          (lambda (query target context)
             (let ([generation
                     (completion-session-generation completion)])
               (completion-session-target-set! completion target)
-              (completion-session-refresh! completion query)
+              (completion-session-refresh!
+                completion query context)
               (unless
                 (= generation
                    (completion-session-generation completion))

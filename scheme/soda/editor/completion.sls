@@ -169,6 +169,7 @@
             provider-names
             (mutable generation)
             (mutable query)
+            (mutable context)
             (mutable provider-results)
             (mutable active-requests)
             (mutable items)
@@ -885,6 +886,7 @@
          provider-names
          0
          #f
+         #f
          '()
          '()
          '()
@@ -1003,34 +1005,43 @@
       (completion-session-active-requests-set! session '())
       requests))
 
-  (define (completion-session-refresh! session query)
-    (unless (completion-session? session)
-      (assertion-violation
-        'completion-session-refresh!
-        "expected a completion session"
-        session))
-    (unless (string? query)
-      (assertion-violation
-        'completion-session-refresh!
-        "query must be a string"
-        query))
-    (unless (and (string? (completion-session-query session))
-                 (string=? query (completion-session-query session)))
-      (let* ([generation (+ (completion-session-generation session) 1)]
-             [source (completion-session-source session)]
-             [items
-               (choice-source-candidates source query)])
-        (choice-source-cancel!
-          source
-          (completion-session-generation session))
-        (completion-session-generation-set! session generation)
-        (completion-session-query-set! session query)
-        (completion-session-provider-results-set!
-          session
-          (provider-groups->results
-            (items->provider-results items)))
-        (rebuild-session-items! session #f)))
-    session)
+  (define completion-session-refresh!
+    (case-lambda
+      [(session query)
+       (completion-session-refresh! session query #f)]
+      [(session query context)
+       (unless (completion-session? session)
+         (assertion-violation
+           'completion-session-refresh!
+           "expected a completion session"
+           session))
+       (unless (string? query)
+         (assertion-violation
+           'completion-session-refresh!
+           "query must be a string"
+           query))
+       (unless
+         (and
+           (string? (completion-session-query session))
+           (string=? query (completion-session-query session))
+           (equal? context (completion-session-context session)))
+         (let* ([generation
+                  (+ (completion-session-generation session) 1)]
+                [source (completion-session-source session)]
+                [items
+                  (choice-source-candidates source query)])
+           (choice-source-cancel!
+             source
+             (completion-session-generation session))
+           (completion-session-generation-set! session generation)
+           (completion-session-query-set! session query)
+           (completion-session-context-set! session context)
+           (completion-session-provider-results-set!
+             session
+             (provider-groups->results
+               (items->provider-results items)))
+           (rebuild-session-items! session #f)))
+       session]))
 
   (define (completion-session-provider-request-active?
             session
