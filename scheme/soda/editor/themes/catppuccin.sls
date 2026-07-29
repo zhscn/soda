@@ -61,6 +61,8 @@
         (cons 'syntax-definition (pface 'blue 'inherit '(bold)))
         (cons 'syntax-type (pface 'yellow 'inherit '()))
         (cons 'syntax-delimiter (pface 'overlay2 'inherit '()))
+        (cons 'syntax-preprocessor (pface 'mauve 'inherit '()))
+        (cons 'syntax-invalid (pface 'red 'inherit '(underline)))
         (cons 'diagnostic-error (pface 'red 'inherit '(underline)))
         (cons 'diagnostic-warning (pface 'yellow 'inherit '(underline)))
         (cons 'diagnostic-info (pface 'sapphire 'inherit '(underline)))

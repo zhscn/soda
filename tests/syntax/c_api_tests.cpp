@@ -105,6 +105,53 @@ TEST_CASE("analysis ABI advances across a committed document change") {
     CHECK(end == 18);
 }
 
+TEST_CASE("analysis ABI classifies revisioned lexical highlights") {
+    constexpr std::string_view source =
+        "#include <vector>\nconst int value = 42;\n// note\nconst char* text = \"ok\";\n";
+    DocumentHandle document = make_document(source);
+    SnapshotHandle snapshot(soda_document_snapshot(document.get()));
+    AnalyzerHandle analyzer(soda_cpp_analyzer_create());
+    REQUIRE(soda_cpp_analyzer_analyze(analyzer.get(), snapshot.get()) == 0);
+
+    bool preprocessor = false;
+    bool keyword = false;
+    bool type = false;
+    bool number = false;
+    bool comment = false;
+    bool string = false;
+    bool delimiter = false;
+    const std::uint32_t count = soda_cpp_analyzer_highlight_count(analyzer.get());
+    REQUIRE(count != SODA_SYNTAX_NODE_NONE);
+    for (std::uint32_t index = 0; index < count; ++index) {
+        std::uint32_t start = SODA_TEXT_NPOS;
+        std::uint32_t end = SODA_TEXT_NPOS;
+        const int category = soda_cpp_analyzer_highlight_at(analyzer.get(), index, &start, &end);
+        REQUIRE(category >= SODA_CPP_HIGHLIGHT_NONE);
+        REQUIRE(start <= end);
+        REQUIRE(end <= source.size());
+        const std::string_view spelling = source.substr(start, end - start);
+        preprocessor |= category == SODA_CPP_HIGHLIGHT_PREPROCESSOR && spelling == "include";
+        keyword |= category == SODA_CPP_HIGHLIGHT_KEYWORD && spelling == "const";
+        type |= category == SODA_CPP_HIGHLIGHT_TYPE && spelling == "int";
+        number |= category == SODA_CPP_HIGHLIGHT_NUMBER && spelling == "42";
+        comment |= category == SODA_CPP_HIGHLIGHT_COMMENT && spelling == "// note";
+        string |= category == SODA_CPP_HIGHLIGHT_STRING && spelling == "\"ok\"";
+        delimiter |= category == SODA_CPP_HIGHLIGHT_DELIMITER && spelling == ";";
+    }
+    CHECK(preprocessor);
+    CHECK(keyword);
+    CHECK(type);
+    CHECK(number);
+    CHECK(comment);
+    CHECK(string);
+    CHECK(delimiter);
+
+    std::uint32_t start = 0;
+    std::uint32_t end = 0;
+    CHECK(soda_cpp_analyzer_highlight_at(analyzer.get(), count, &start, &end) == -1);
+    CHECK(std::strlen(soda_cpp_analysis_last_error()) != 0);
+}
+
 TEST_CASE("analysis ABI rejects stale and fabricated node ids") {
     DocumentHandle document = make_document("int value;\n");
     SnapshotHandle snapshot(soda_document_snapshot(document.get()));

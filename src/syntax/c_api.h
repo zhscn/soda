@@ -20,7 +20,7 @@ extern "C" {
 
 typedef struct soda_cpp_analyzer soda_cpp_analyzer;
 
-#define SODA_CPP_ANALYSIS_ABI_VERSION 1U
+#define SODA_CPP_ANALYSIS_ABI_VERSION 2U
 #define SODA_SYNTAX_NODE_NONE UINT32_MAX
 #define SODA_CPP_ANALYSIS_REVISION_NONE UINT64_MAX
 
@@ -51,6 +51,17 @@ typedef struct soda_cpp_analyzer soda_cpp_analyzer;
 #define SODA_SYNTAX_PP_REOPENED_SCOPE 24
 #define SODA_SYNTAX_MISSING_TOKEN 25
 #define SODA_SYNTAX_ERROR 26
+
+#define SODA_CPP_HIGHLIGHT_NONE 0
+#define SODA_CPP_HIGHLIGHT_COMMENT 1
+#define SODA_CPP_HIGHLIGHT_STRING 2
+#define SODA_CPP_HIGHLIGHT_CONSTANT 3
+#define SODA_CPP_HIGHLIGHT_NUMBER 4
+#define SODA_CPP_HIGHLIGHT_KEYWORD 5
+#define SODA_CPP_HIGHLIGHT_TYPE 6
+#define SODA_CPP_HIGHLIGHT_DELIMITER 7
+#define SODA_CPP_HIGHLIGHT_PREPROCESSOR 8
+#define SODA_CPP_HIGHLIGHT_INVALID 9
 
 // An analyzer is mutable, belongs to its creating thread, and retains the
 // latest analyzed snapshot. Node ids are valid only until the next operation
@@ -91,6 +102,15 @@ SODA_CPP_ANALYSIS_API uint32_t soda_cpp_analyzer_node_child(soda_cpp_analyzer* a
                                                             uint32_t node, uint32_t child_index);
 SODA_CPP_ANALYSIS_API int soda_cpp_analyzer_node_incomplete(soda_cpp_analyzer* analyzer,
                                                             uint32_t node);
+
+// Lexical highlighting is revision-consistent with the syntax tree. The count
+// includes unstyled tokens; highlight_at returns one SODA_CPP_HIGHLIGHT_*
+// category and writes that token's byte range. Token indices are valid until
+// analyze or apply advances the analyzer.
+SODA_CPP_ANALYSIS_API uint32_t soda_cpp_analyzer_highlight_count(const soda_cpp_analyzer* analyzer);
+SODA_CPP_ANALYSIS_API int soda_cpp_analyzer_highlight_at(soda_cpp_analyzer* analyzer,
+                                                         uint32_t token_index, uint32_t* start,
+                                                         uint32_t* end);
 
 // Optional structural queries return 1 and write a range when found, 0 when
 // no range exists, and -1 on error.

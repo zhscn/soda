@@ -2413,6 +2413,65 @@
          "C++ speculative syntax view leaked or desynchronized"))
 (editor-close! cpp-enter-editor)
 
+(define cpp-highlight-document
+  (make-document
+    "const int answer = 42; // note\n"
+    986))
+(define cpp-highlight-buffer
+  (make-buffer
+    986
+    cpp-highlight-document
+    "highlight.cpp"
+    'cpp-mode))
+(define cpp-highlight-editor
+  (make-editor cpp-highlight-buffer))
+(editor-update!
+  cpp-highlight-editor
+  (make-resize-message 4 50))
+(let* ([frame
+         (render-editor-frame cpp-highlight-editor 4 50)]
+       [keyword-cell (frame-cell-ref frame 0 0)]
+       [type-cell (frame-cell-ref frame 0 6)]
+       [number-cell (frame-cell-ref frame 0 19)]
+       [comment-cell (frame-cell-ref frame 0 23)])
+  (unless
+    (and
+      (memq 'syntax-keyword (cell-faces keyword-cell))
+      (memq 'syntax-type (cell-faces type-cell))
+      (memq 'syntax-number (cell-faces number-cell))
+      (memq 'syntax-comment (cell-faces comment-cell))
+      (exists
+        (lambda (source)
+          (and
+            (eq? (cell-source-layer source) 'base-syntax)
+            (eq? (cell-source-owner source) 'cpp)))
+        (cell-sources number-cell)))
+    (error 'editor-tests
+           "C++ highlighting did not reach frame faces and sources")))
+(buffer-replace-range!
+  cpp-highlight-buffer
+  19
+  21
+  (string->utf8 "7"))
+(let ([frame
+        (render-editor-frame cpp-highlight-editor 4 50)])
+  (unless
+    (and
+      (memq
+        'syntax-number
+        (cell-faces (frame-cell-ref frame 0 19)))
+      (memq
+        'syntax-comment
+        (cell-faces (frame-cell-ref frame 0 22)))
+      (= (cpp-analyzer-revision
+           (cpp-language-session-analyzer
+             (buffer-language-session
+               cpp-highlight-buffer)))
+         (buffer-revision cpp-highlight-buffer)))
+    (error 'editor-tests
+           "C++ highlights did not follow the buffer revision")))
+(editor-close! cpp-highlight-editor)
+
 (define cpp-indent-document
   (make-document
     "int main() {\nreturn 0;\n}\n"

@@ -15,6 +15,11 @@
           cpp-analyzer-node-child-count
           cpp-analyzer-node-child
           cpp-analyzer-node-incomplete?
+          cpp-analyzer-highlights
+          cpp-highlight?
+          cpp-highlight-category
+          cpp-highlight-start
+          cpp-highlight-end
           cpp-analyzer-sexp-forward
           cpp-analyzer-sexp-backward
           cpp-analyzer-enclosing-list
@@ -63,13 +68,28 @@
        missing-token
        error))
 
+  (define highlight-categories
+    '#(none
+       comment
+       string
+       constant
+       number
+       keyword
+       type
+       delimiter
+       preprocessor
+       invalid))
+
+  (define-record-type cpp-highlight
+    (fields category start end))
+
   (define %abi-version
     (foreign-procedure __atomic "soda_cpp_analysis_abi_version" () unsigned-32))
   (define %last-error
     (foreign-procedure __atomic "soda_cpp_analysis_last_error" () string))
 
   (define abi-version-checked
-    (unless (= (%abi-version) 1)
+    (unless (= (%abi-version) 2)
       (error 'soda-cpp-analysis "unsupported native C++ analysis ABI version")))
 
   (define %analyzer-create
@@ -123,6 +143,14 @@
   (define %analyzer-node-incomplete
     (foreign-procedure __atomic "soda_cpp_analyzer_node_incomplete"
                        (void* unsigned-32)
+                       int))
+  (define %analyzer-highlight-count
+    (foreign-procedure __atomic "soda_cpp_analyzer_highlight_count"
+                       (void*)
+                       unsigned-32))
+  (define %analyzer-highlight-at
+    (foreign-procedure __atomic "soda_cpp_analyzer_highlight_at"
+                       (void* unsigned-32 void* void*)
                        int))
   (define %analyzer-sexp-forward
     (foreign-procedure __atomic "soda_cpp_analyzer_sexp_forward"
@@ -303,6 +331,52 @@
       (if (negative? incomplete)
           (native-error 'cpp-analyzer-node-incomplete?)
           (not (zero? incomplete)))))
+
+  (define (cpp-analyzer-highlights value)
+    (require-open 'cpp-analyzer-highlights value)
+    (let ([count
+            (%analyzer-highlight-count
+              (cpp-analyzer-pointer value))])
+      (when (= count syntax-node-none)
+        (native-error 'cpp-analyzer-highlights))
+      (let ([start (foreign-alloc 4)]
+            [end (foreign-alloc 4)])
+        (dynamic-wind
+          (lambda () #f)
+          (lambda ()
+            (let loop ([index 0] [result '()])
+              (if (= index count)
+                  (reverse result)
+                  (let ([category
+                          (%analyzer-highlight-at
+                            (cpp-analyzer-pointer value)
+                            index
+                            start
+                            end)])
+                    (when (or (negative? category)
+                              (>= category
+                                  (vector-length
+                                    highlight-categories)))
+                      (native-error 'cpp-analyzer-highlights))
+                    (let ([name
+                            (vector-ref
+                              highlight-categories
+                              category)])
+                      (loop
+                        (+ index 1)
+                        (if (eq? name 'none)
+                            result
+                            (cons
+                              (make-cpp-highlight
+                                name
+                                (foreign-ref
+                                  'unsigned-32 start 0)
+                                (foreign-ref
+                                  'unsigned-32 end 0))
+                              result))))))))
+          (lambda ()
+            (foreign-free start)
+            (foreign-free end))))))
 
   (define (optional-query who value operation)
     (require-open who value)

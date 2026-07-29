@@ -8,14 +8,58 @@
   (import (rnrs)
           (soda cpp-analysis)
           (soda document)
+          (soda editor decoration)
           (soda editor language)
           (soda indentation))
 
-  (define-record-type cpp-language-session
-    (fields analyzer))
+  (define-record-type
+    (cpp-language-session
+      %make-cpp-language-session
+      cpp-language-session?)
+    (fields
+      (immutable analyzer cpp-language-session-analyzer)
+      (mutable highlights
+               cpp-language-session-highlights
+               cpp-language-session-highlights-set!)))
 
   (define-record-type cpp-syntax-view
     (fields analyzer owned?))
+
+  (define (highlight-face category)
+    (case category
+      [(comment) 'syntax-comment]
+      [(string) 'syntax-string]
+      [(constant) 'syntax-constant]
+      [(number) 'syntax-number]
+      [(keyword) 'syntax-keyword]
+      [(type) 'syntax-type]
+      [(delimiter) 'syntax-delimiter]
+      [(preprocessor) 'syntax-preprocessor]
+      [(invalid) 'syntax-invalid]
+      [else #f]))
+
+  (define (cpp-highlight-index analyzer)
+    (make-decoration-index
+      (filter
+        (lambda (run) run)
+        (map
+          (lambda (highlight)
+            (let ([face
+                    (highlight-face
+                      (cpp-highlight-category highlight))])
+              (and
+                face
+                (< (cpp-highlight-start highlight)
+                   (cpp-highlight-end highlight))
+                (make-decoration-run
+                  (cpp-highlight-start highlight)
+                  (cpp-highlight-end highlight)
+                  face
+                  'base-syntax
+                  0
+                  'cpp
+                  (cpp-highlight-category highlight)))))
+          (cpp-analyzer-highlights analyzer)))))
 
   (define (open-cpp-session snapshot)
     (let ([analyzer (make-cpp-analyzer)]
@@ -25,7 +69,9 @@
         (lambda ()
           (cpp-analyzer-analyze! analyzer snapshot)
           (set! complete? #t)
-          (make-cpp-language-session analyzer))
+          (%make-cpp-language-session
+            analyzer
+            (cpp-highlight-index analyzer)))
         (lambda ()
           (unless complete?
             (cpp-analyzer-close! analyzer))))))
@@ -42,7 +88,10 @@
         [(= analyzer-revision old-revision)
          (cpp-analyzer-apply! analyzer change snapshot)]
         [else
-         (cpp-analyzer-analyze! analyzer snapshot)])))
+         (cpp-analyzer-analyze! analyzer snapshot)])
+      (cpp-language-session-highlights-set!
+        session
+        (cpp-highlight-index analyzer))))
 
   (define (open-cpp-view
             session
@@ -80,9 +129,21 @@
     (cpp-analyzer-close!
       (cpp-language-session-analyzer session)))
 
+  (define (cpp-syntax-highlights session start end)
+    (unless (cpp-language-session? session)
+      (assertion-violation
+        'cpp-syntax-highlights
+        "expected a C++ language session"
+        session))
+    (decoration-index-runs-in-range
+      (cpp-language-session-highlights session)
+      start
+      end))
+
   (define cpp-syntax-provider
     (make-syntax-provider
       '(structure
+        highlight
         matching-delimiter
         sexp-motion
         selection
@@ -91,6 +152,7 @@
       sync-cpp-session!
       open-cpp-view
       close-cpp-view!
+      cpp-syntax-highlights
       close-cpp-session!))
 
   (define (cpp-language-compute-indent
