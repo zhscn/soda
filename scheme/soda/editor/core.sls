@@ -64,6 +64,17 @@
           buffer-replace-range!
           buffer-delete-range!
           editor-last-command-class
+          make-buffer-location
+          editor-location?
+          editor-location-buffer-id
+          editor-location-resource
+          editor-location-revision
+          editor-location-offset
+          editor-location-close!
+          editor-jump-to-location!
+          editor-jump-to-buffer!
+          editor-jump-back!
+          editor-jump-forward!
           prefix-argument?
           prefix-argument-value
           prefix-argument-universal
@@ -295,6 +306,8 @@
           (soda editor input-state)
           (soda editor interaction)
           (soda editor kill)
+          (soda editor location)
+          (soda editor navigation)
           (soda editor prompt)
           (soda editor prompt-commands)
           (soda editor prompt-runtime)
@@ -311,6 +324,7 @@
       (install-prefix-commands! editor)
       (install-basic-commands! editor)
       (install-transform-commands! editor)
+      (install-navigation-commands! editor)
       (install-buffer-commands! editor)
       (install-comint-commands! editor)
       (install-completion-commands! editor)

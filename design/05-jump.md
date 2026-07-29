@@ -30,6 +30,16 @@ walk 记录用户实际经过的顺序，也可包含不值得建图节点的普
 关闭 buffer 后保留 line/column fallback 与 excerpt。重新打开时先尝试 fallback，
 再用 excerpt 校验或在邻域内重锚定。
 
+command loop 的线性导航使用 `EditorLocation` 作为 live location。该值保存
+buffer/resource、创建时 revision、DocumentAnchor 和 byte offset fallback。
+`editor-jump-to-location!` 接管 target 的生命周期；每个 View 持有有界 walk，
+View 关闭时释放 walk 内的 anchor。Buffer 从 Editor 移除前，所有 walk 先把对应
+location detach 为 fallback，随后才关闭 Document。
+
+显式 jump 在 walk 尾部追加 target。用户从历史中间发起新 jump 时，walk 先追加
+当前位置的 revisit，再追加新 target，因此 back 能回到分叉点，继续 back 仍可
+经过原来的访问序列。back/forward 在离开当前 entry 前用实时 caret 替换它。
+
 自动语义边只在 [04-workbench.md](04-workbench.md) 的 display 入口写入。request
 中的 origin 形成 from，落点形成 to，intent 映射为 edge kind。回放 jump history
 时抑制再次写入。

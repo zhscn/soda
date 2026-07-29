@@ -1156,6 +1156,79 @@
   (error 'editor-tests "yank-pop accepted a stale yank range"))
 (editor-close! yank-pop-editor)
 
+(define navigation-document-a
+  (make-document "abcdef" 978))
+(define navigation-buffer-a
+  (make-buffer
+    978
+    navigation-document-a
+    "*navigation-a*"
+    'fundamental-mode))
+(define navigation-document-b
+  (make-document "uvwxyz" 979))
+(define navigation-buffer-b
+  (make-buffer
+    979
+    navigation-document-b
+    "*navigation-b*"
+    'fundamental-mode))
+(define navigation-editor (make-editor navigation-buffer-a))
+(editor-add-buffer! navigation-editor navigation-buffer-b)
+(define navigation-view (editor-active-view navigation-editor))
+(editor-update!
+  navigation-editor
+  (make-command-message
+    'move.forward-character
+    #f
+    (prefix-argument-digit #f 2)))
+(editor-jump-to-buffer!
+  navigation-editor
+  navigation-buffer-b
+  3)
+(unless
+  (and
+    (eq? (view-buffer navigation-view) navigation-buffer-b)
+    (= (view-caret navigation-view) 3))
+  (error 'editor-tests "cross-buffer jump did not activate its target"))
+
+(buffer-replace-range!
+  navigation-buffer-a
+  0
+  0
+  (string->utf8 "!"))
+(unless
+  (and
+    (editor-jump-back! navigation-editor)
+    (eq? (view-buffer navigation-view) navigation-buffer-a)
+    (= (view-caret navigation-view) 3))
+  (error 'editor-tests "jump history did not track source edits"))
+(unless
+  (and
+    (editor-jump-forward! navigation-editor)
+    (eq? (view-buffer navigation-view) navigation-buffer-b)
+    (= (view-caret navigation-view) 3))
+  (error 'editor-tests "jump-forward did not restore its target"))
+
+(editor-jump-back! navigation-editor)
+(editor-jump-to-buffer!
+  navigation-editor
+  navigation-buffer-b
+  5)
+(unless
+  (and
+    (editor-jump-back! navigation-editor)
+    (eq? (view-buffer navigation-view) navigation-buffer-a)
+    (= (view-caret navigation-view) 3)
+    (editor-jump-back! navigation-editor)
+    (eq? (view-buffer navigation-view) navigation-buffer-b)
+    (= (view-caret navigation-view) 3))
+  (error 'editor-tests "a branched jump discarded the earlier walk"))
+(editor-jump-back! navigation-editor)
+(editor-remove-buffer!
+  navigation-editor
+  (buffer-id navigation-buffer-b))
+(editor-close! navigation-editor)
+
 (define prompt-document (make-document "body" 91))
 (define prompt-buffer
   (make-buffer

@@ -86,6 +86,7 @@
           view-viewport-columns
           view-keymap-layers
           view-input-states
+          view-navigation-walk
           view-completion
           view-current-input-state
           view-push-input-state!
@@ -110,6 +111,7 @@
           (soda editor interaction)
           (soda editor keymap)
           (soda editor language)
+          (soda editor location)
           (soda editor prefix)
           (soda editor prompt))
 
@@ -134,7 +136,8 @@
       (mutable keymap-layers view-keymap-layers view-keymap-layers-set!)
       (mutable input-states view-input-states view-input-states-set!)
       (mutable completion view-completion view-completion-set!)
-      (mutable pending-keys view-pending-keys view-pending-keys-set!)))
+      (mutable pending-keys view-pending-keys view-pending-keys-set!)
+      (immutable navigation-walk view-navigation-walk)))
 
   (define-record-type (editor %make-editor editor?)
     (fields
@@ -418,6 +421,14 @@
         (filter
           (lambda (registered-id) (not (= registered-id id)))
           (editor-buffer-ids value)))
+      (for-each
+        (lambda (view)
+          (navigation-walk-detach-buffer!
+            (view-navigation-walk view)
+            id))
+        (table-values
+          (editor-view-table value)
+          (editor-view-ids value)))
       (buffer-close! buffer)))
 
   (define (editor-interactions value)
@@ -527,7 +538,8 @@
                    '()
                    'accept))
                #f
-               '())])
+               '()
+               (make-navigation-walk))])
       (hashtable-set! (editor-view-table value) id view)
       (editor-view-ids-set!
         value
@@ -556,7 +568,8 @@
           (view-mark-anchor view)))
       (document-remove-anchor!
         (buffer-document (view-buffer view))
-        (view-caret-anchor view)))
+        (view-caret-anchor view))
+      (navigation-walk-close! (view-navigation-walk view)))
     (hashtable-delete! (editor-view-table value) id)
     (let ([remaining
             (filter
@@ -1807,7 +1820,8 @@
                    '()
                    'accept))
                #f
-               '())]
+               '()
+               (make-navigation-walk))]
            [value
              (%make-editor
                buffers
@@ -1887,7 +1901,8 @@
             (view-mark-anchor-set! view #f))
           (document-remove-anchor!
             (buffer-document (view-buffer view))
-            (view-caret-anchor view)))
+            (view-caret-anchor view))
+          (navigation-walk-close! (view-navigation-walk view)))
         (table-values (editor-view-table value) (editor-view-ids value)))
       (for-each
         (lambda (buffer)
