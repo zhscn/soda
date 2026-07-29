@@ -31,10 +31,20 @@
           save-result-detail
           save-result-adopt-path?)
   (import (rnrs)
+          (only (chezscheme)
+                current-directory
+                directory-list
+                directory-separator
+                file-directory?
+                getenv
+                path-absolute?
+                path-build
+                path-parent)
           (soda document)
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
+          (soda editor completion)
           (soda editor event)
           (soda editor keymap)
           (soda editor prompt)
@@ -149,6 +159,195 @@
           value
           (- (string-length value) (string-length suffix))
           (string-length value)))))
+
+  (define (path-separator? character)
+    (or
+      (char=? character #\/)
+      (char=? character (directory-separator))))
+
+  (define (directory-path path)
+    (if
+      (and
+        (positive? (string-length path))
+        (path-separator?
+          (string-ref path (- (string-length path) 1))))
+      path
+      (string-append
+        path
+        (string (directory-separator)))))
+
+  (define (expand-home-path path)
+    (let ([home (getenv "HOME")])
+      (cond
+        [(or (not home) (zero? (string-length path))) path]
+        [(string=? path "~") home]
+        [(and
+           (> (string-length path) 1)
+           (char=? (string-ref path 0) #\~)
+           (path-separator? (string-ref path 1)))
+         (if (= (string-length path) 2)
+             (directory-path home)
+             (path-build home (substring path 2 (string-length path))))]
+        [else path])))
+
+  (define (path-components path)
+    (let ([length (string-length path)])
+      (let loop ([index 0] [start 0] [components '()])
+        (cond
+          [(= index length)
+           (reverse
+             (if (= start length)
+                 components
+                 (cons (substring path start length) components)))]
+          [(path-separator? (string-ref path index))
+           (loop
+             (+ index 1)
+             (+ index 1)
+             (if (= start index)
+                 components
+                 (cons (substring path start index) components)))]
+          [else
+           (loop (+ index 1) start components)]))))
+
+  (define (normalize-path-components components absolute?)
+    (let loop ([remaining components] [result '()])
+      (cond
+        [(null? remaining) (reverse result)]
+        [(or (string=? (car remaining) "")
+             (string=? (car remaining) "."))
+         (loop (cdr remaining) result)]
+        [(string=? (car remaining) "..")
+         (cond
+           [(and
+              (pair? result)
+              (not (string=? (car result) "..")))
+            (loop (cdr remaining) (cdr result))]
+           [absolute?
+            (loop (cdr remaining) result)]
+           [else
+            (loop (cdr remaining) (cons ".." result))])]
+        [else
+         (loop (cdr remaining) (cons (car remaining) result))])))
+
+  (define (join-path-components components)
+    (if
+      (null? components)
+      ""
+      (let loop ([remaining (cdr components)]
+                 [result (car components)])
+        (if
+          (null? remaining)
+          result
+          (loop
+            (cdr remaining)
+            (string-append
+              result
+              (string (directory-separator))
+              (car remaining)))))))
+
+  (define (normalize-file-path path)
+    (let* ([absolute? (path-absolute? path)]
+           [body
+             (join-path-components
+               (normalize-path-components
+                 (path-components path)
+                 absolute?))])
+      (cond
+        [(and absolute? (zero? (string-length body)))
+         (string (directory-separator))]
+        [absolute?
+         (string-append
+           (string (directory-separator))
+           body)]
+        [(zero? (string-length body)) "."]
+        [else body])))
+
+  (define (resolve-file-path base-directory path)
+    (let ([expanded (expand-home-path path)])
+      (normalize-file-path
+        (if (path-absolute? expanded)
+            expanded
+            (path-build base-directory expanded)))))
+
+  (define (file-directory-safe? path)
+    (guard (condition [else #f])
+      (file-directory? path)))
+
+  (define (buffer-default-directory buffer)
+    (let ([path (buffer-file-path buffer)]
+          [fallback (directory-path (current-directory))])
+      (if path
+          (directory-path
+            (path-parent
+              (resolve-file-path fallback path)))
+          fallback)))
+
+  (define (path-field-boundaries input point)
+    (let ([start
+            (let loop ([index (- point 1)])
+              (cond
+                [(negative? index) 0]
+                [(path-separator? (string-ref input index))
+                 (+ index 1)]
+                [else (loop (- index 1))]))]
+          [end
+            (let loop ([index point])
+              (cond
+                [(= index (string-length input)) index]
+                [(path-separator? (string-ref input index))
+                 (+ index 1)]
+                [else (loop (+ index 1))]))])
+      (cons start end)))
+
+  (define (directory-entries path)
+    (guard (condition [else '()])
+      (if
+        (file-directory? path)
+        (filter
+          (lambda (entry)
+            (not (or (string=? entry ".")
+                     (string=? entry ".."))))
+          (directory-list path))
+        '())))
+
+  (define (make-file-choice-source base-directory)
+    (let ([candidate-directory base-directory])
+      (make-choice-source
+        'file
+        '((category . file)
+          (styles . (prefix flex))
+          (preselect . #f))
+        (lambda (input point)
+          (let* ([range (path-field-boundaries input point)]
+                 [prefix (substring input 0 (car range))])
+            (set! candidate-directory
+              (resolve-file-path base-directory prefix))
+            range))
+        (lambda (query)
+          (map
+            (lambda (entry)
+              (let* ([full-path
+                       (normalize-file-path
+                         (path-build candidate-directory entry))]
+                     [directory? (file-directory-safe? full-path)]
+                     [text
+                       (if directory?
+                           (string-append
+                             entry
+                             (string (directory-separator)))
+                           entry)])
+                (make-completion-item
+                  full-path
+                  'file-system
+                  text
+                  text
+                  text
+                  (if directory? "directory" "file")
+                  candidate-directory
+                  full-path)))
+            (directory-entries candidate-directory)))
+        (lambda (value) #t)
+        (lambda (generation) #f))))
 
   (define (file-major-mode-for-path path)
     (unless (or (not path) (string? path))
@@ -344,11 +543,18 @@
         (lambda () (snapshot-close! snapshot)))))
 
   (define (find-buffer-by-path editor path)
-    (find
-      (lambda (buffer)
-        (let ([candidate (buffer-file-path buffer)])
-          (and candidate (string=? candidate path))))
-      (editor-buffers editor)))
+    (let* ([fallback (directory-path (current-directory))]
+           [normalized-path
+             (resolve-file-path fallback path)])
+      (find
+        (lambda (buffer)
+          (let ([candidate (buffer-file-path buffer)])
+            (and
+              candidate
+              (string=?
+                (resolve-file-path fallback candidate)
+                normalized-path))))
+        (editor-buffers editor))))
 
   (define (find-view-by-id editor id)
     (find
@@ -365,32 +571,70 @@
           #t)
         #f))
 
-  (define (find-file-command context)
-    (let ([editor (command-context-editor context)])
+  (define (view-default-directory editor view-id)
+    (let ([view (find-view-by-id editor view-id)])
+      (if view
+          (buffer-default-directory (view-buffer view))
+          (directory-path (current-directory)))))
+
+  (define (open-find-file-prompt! editor view initial)
+    (let* ([base-directory
+             (buffer-default-directory (view-buffer view))]
+           [initial-path
+             (or initial base-directory)])
       (editor-open-prompt!
         editor
-        (make-prompt-request
+        (make-completing-prompt-request
           "Find file: "
-          ""
+          initial-path
           'file-name
           #f
           'free
-          #f
+          (make-file-choice-source base-directory)
           'file.open-path
-          #f)))
+          #f))))
+
+  (define (find-file-command context)
+    (open-find-file-prompt!
+      (command-context-editor context)
+      (command-context-view context)
+      #f)
     '())
 
   (define (open-path-command context)
     (let* ([editor (command-context-editor context)]
            [result (command-context-argument context)]
-           [path
+           [input
              (and
                (prompt-result? result)
                (eq? (prompt-result-status result) 'accepted)
-               (prompt-result-value result))])
+               (prompt-result-value result))]
+           [path
+             (and
+               input
+               (positive? (string-length input))
+               (resolve-file-path
+                 (view-default-directory
+                   editor
+                   (prompt-result-origin-view-id result))
+                 input))])
       (cond
         [(or (not path) (zero? (string-length path)))
          (editor-set-status-message! editor "No file name")
+         '()]
+        [(file-directory-safe? path)
+         (let ([view
+                 (find-view-by-id
+                   editor
+                   (prompt-result-origin-view-id result))])
+           (if view
+               (open-find-file-prompt!
+                 editor
+                 view
+                 (directory-path path))
+               (editor-set-status-message!
+                 editor
+                 "Find-file origin view is no longer available")))
          '()]
         [(find-buffer-by-path editor path) =>
          (lambda (buffer)

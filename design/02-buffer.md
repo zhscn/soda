@@ -141,10 +141,20 @@ redo 和 mode 切换。这一约束使 indentation 等 native 机制不需要依
 
 ## 打开与切换
 
-`file.find` 通过 minibuffer 读取路径，并把读取工作提交为 `file.read` effect。
-请求携带发起操作的 view identity；runtime adapter 只负责把 native source 与请求
-关联，文件内容和完成状态以 internal command 返回 editor。成功结果创建带
-`file_path` 的 Buffer，根据路径选择初始 major mode，并记录原始换行约定。
+`file.find` 通过带 file category completion 的 minibuffer 读取路径。初始值是活动
+Buffer 所在目录；没有文件路径的 Buffer 使用进程当前目录。choice source 以路径
+分隔符划分 field，列出当前 field 所属目录，并用尾部分隔符标记目录候选。提交目录
+候选后继续读取下一个 field；直接接受一个现有目录也会继续同一次 find-file
+工作流。`.` 和 `..` 不进入候选集合；parent navigation 由 minibuffer 编辑操作
+表达，不作为可插入的文件名。相对路径按发起操作的 Buffer 目录解析，`~` 和 `~/`
+按用户主目录展开。
+解析结果在进入 Buffer identity 和异步读取请求前折叠空 field、`.`、`..` 与重复
+分隔符，使不同的词法写法引用同一个文件 Buffer。
+
+最终文件路径通过 `file.read` effect 提交。请求携带发起操作的 view identity；
+runtime adapter 只负责把 native source 与请求关联，文件内容和完成状态以 internal
+command 返回 editor。成功结果创建带 `file_path` 的 Buffer，根据路径选择初始
+major mode，并记录原始换行约定。
 
 同一路径已有 Buffer 时复用其 identity，不重复读取或创建 Document。异步读取完成
 时，结果显示到发起请求的 view；该 view 已关闭时，Buffer 仍加入全局 Buffer 集合，

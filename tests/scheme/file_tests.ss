@@ -1,6 +1,10 @@
 #!r6rs
 (import (rnrs)
-        (only (chezscheme) getenv)
+        (only (chezscheme)
+              directory-separator
+              getenv
+              path-last
+              path-parent)
         (soda document)
         (soda editor buffer)
         (soda editor core)
@@ -264,6 +268,124 @@
     (read-file-bytes save-path)
     (string->utf8 "base one two newer\r\nlast"))
   (error 'file-tests "save did not preserve the CRLF file convention"))
+
+(define save-directory
+  (string-append
+    (path-parent save-path)
+    (string (directory-separator))))
+(define save-name (path-last save-path))
+(dispatch! (make-command-message 'file.find #f))
+(let* ([session (editor-active-prompt editor)]
+       [request (and session (prompt-session-request session))]
+       [completion
+         (and session (prompt-session-completion session))]
+       [file-candidate
+         (and
+           completion
+           (find
+             (lambda (item)
+               (string=?
+                 (completion-item-insert-text item)
+                 save-name))
+             (completion-session-items completion)))]
+       [parent-candidate
+         (and
+           completion
+           (find
+             (lambda (item)
+               (string=?
+                 (completion-item-insert-text item)
+                 (string-append
+                   ".."
+                   (string (directory-separator)))))
+             (completion-session-items completion)))])
+  (unless
+    (and
+      request
+      (string=? (prompt-request-initial request) save-directory)
+      (eq? (choice-source-category
+             (prompt-request-completion-source request))
+           'file)
+      file-candidate
+      (string=? (completion-item-annotation file-candidate) "file")
+      (not parent-candidate)
+      (not (completion-session-selected-item completion)))
+    (error 'file-tests
+           "find-file completion exposed invalid directory entries")))
+(dispatch! (make-command-message 'prompt.abort #f))
+
+(define find-origin-view-id (view-id (editor-active-view editor)))
+(dispatch!
+  (make-command-message
+    'file.open-path
+    (make-prompt-result
+      98
+      'accepted
+      save-name
+      find-origin-view-id
+      #f)))
+(unless
+  (and
+    (eq? (view-buffer (editor-active-view editor)) buffer)
+    (string-contains?
+      (editor-status-message editor)
+      "Switched"))
+  (error 'file-tests
+         "find-file did not resolve a relative path against its buffer"))
+
+(define parent-relative-save-path
+  (string-append
+    save-directory
+    "intermediate"
+    (string (directory-separator))
+    ".."
+    (string (directory-separator))
+    save-name))
+(dispatch!
+  (make-command-message
+    'file.open-path
+    (make-prompt-result
+      99
+      'accepted
+      parent-relative-save-path
+      find-origin-view-id
+      #f)))
+(unless
+  (and
+    (eq? (view-buffer (editor-active-view editor)) buffer)
+    (string-contains?
+      (editor-status-message editor)
+      save-path)
+    (not
+      (string-contains?
+        (editor-status-message editor)
+        (string-append
+          (string (directory-separator))
+          ".."
+          (string (directory-separator))))))
+  (error 'file-tests
+         "find-file did not normalize parent path components"))
+
+(dispatch!
+  (make-command-message
+    'file.open-path
+    (make-prompt-result
+      100
+      'accepted
+      save-directory
+      find-origin-view-id
+      #f)))
+(unless
+  (and
+    (editor-active-prompt editor)
+    (string=?
+      (prompt-request-initial
+        (prompt-session-request
+          (editor-active-prompt editor)))
+      save-directory))
+  (error 'file-tests
+         "accepting a directory did not continue find-file"))
+(dispatch! (make-command-message 'prompt.abort #f))
 
 (define origin-view-id (view-id (editor-active-view editor)))
 (dispatch! (make-command-message 'file.save-as #f))
