@@ -91,6 +91,24 @@
           editor-jump-to-buffer!
           editor-jump-back!
           editor-jump-forward!
+          make-location-item
+          location-item?
+          location-item-buffer-id
+          location-item-resource
+          location-item-revision
+          location-item-start
+          location-item-end
+          location-item-excerpt
+          location-item-metadata
+          make-location-list
+          location-list?
+          location-list-source
+          location-list-items
+          location-list-index
+          location-list-set-index!
+          location-list-current
+          editor-current-location-list
+          editor-set-current-location-list!
           prefix-argument?
           prefix-argument-value
           prefix-argument-universal
@@ -333,6 +351,7 @@
           (soda editor repl)
           (soda editor scheme-completion)
           (soda editor scheme-repl-completion)
+          (soda editor scheme-xref)
           (soda editor search)
           (soda editor state)
           (soda editor update)
@@ -359,4 +378,5 @@
       (install-prompt-commands! editor)
       (install-search-commands! editor)
       (install-window-commands! editor)
+      (install-scheme-xref-commands! editor)
       editor)))

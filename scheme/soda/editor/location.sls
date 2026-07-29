@@ -7,6 +7,22 @@
           editor-location-offset
           editor-location-close!
           editor-location-detach-buffer!
+          make-location-item
+          location-item?
+          location-item-buffer-id
+          location-item-resource
+          location-item-revision
+          location-item-start
+          location-item-end
+          location-item-excerpt
+          location-item-metadata
+          make-location-list
+          location-list?
+          location-list-source
+          location-list-items
+          location-list-index
+          location-list-set-index!
+          location-list-current
           make-navigation-walk
           navigation-walk?
           navigation-walk-entries
@@ -35,6 +51,25 @@
       (mutable entries)
       (mutable cursor)))
 
+  (define-record-type
+    (location-item %make-location-item location-item?)
+    (fields buffer-id
+            resource
+            revision
+            start
+            end
+            excerpt
+            metadata))
+
+  (define-record-type
+    (location-list %make-location-list location-list?)
+    (fields source items (mutable index)))
+
+  (define (exact-non-negative-integer? value)
+    (and (integer? value)
+         (exact? value)
+         (not (negative? value))))
+
   (define (make-buffer-location buffer offset)
     (unless (buffer? buffer)
       (assertion-violation
@@ -60,6 +95,79 @@
           anchor-after-insertion)
         offset
         #f)))
+
+  (define (make-location-item
+            buffer-id
+            resource
+            revision
+            start
+            end
+            excerpt
+            metadata)
+    (unless (and (exact-non-negative-integer? buffer-id)
+                 (or (not resource) (string? resource))
+                 (integer? revision)
+                 (exact? revision)
+                 (not (negative? revision))
+                 (integer? start)
+                 (exact? start)
+                 (integer? end)
+                 (exact? end)
+                 (<= 0 start end)
+                 (or (not excerpt) (string? excerpt)))
+      (assertion-violation
+        'make-location-item
+        "invalid location item"
+        buffer-id
+        resource
+        revision
+        start
+        end
+        excerpt))
+    (%make-location-item
+      buffer-id resource revision start end excerpt metadata))
+
+  (define (make-location-list source items)
+    (unless (symbol? source)
+      (assertion-violation
+        'make-location-list
+        "source must be a symbol"
+        source))
+    (unless (and (list? items) (for-all location-item? items))
+      (assertion-violation
+        'make-location-list
+        "items must be location items"
+        items))
+    (%make-location-list source items (and (pair? items) 0)))
+
+  (define (location-list-set-index! list index)
+    (unless (location-list? list)
+      (assertion-violation
+        'location-list-set-index!
+        "expected a location list"
+        list))
+    (unless (or (and (null? (location-list-items list))
+                     (not index))
+                (and (integer? index)
+                     (exact? index)
+                     (<= 0 index)
+                     (< index (length (location-list-items list)))))
+      (assertion-violation
+        'location-list-set-index!
+        "location list index is outside the list"
+        index))
+    (location-list-index-set! list index))
+
+  (define (location-list-current list)
+    (unless (location-list? list)
+      (assertion-violation
+        'location-list-current
+        "expected a location list"
+        list))
+    (and (location-list-index list)
+         (list-ref
+           (location-list-items list)
+           (location-list-index list))))
 
   (define (editor-location-offset location)
     (unless (editor-location? location)

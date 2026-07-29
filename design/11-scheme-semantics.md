@@ -253,10 +253,22 @@ R6RS/Chez primitive metadata 转换为通用 CompletionItem。
 名称、constructor 与 predicate 分别形成稳定定义。未闭合的外围 form 不妨碍已经
 出现的定义进入 snapshot。
 
+同一次扫描也产生 `SchemeUse { name, start, end, resolution }`。声明 token 不重复
+记录为 use，quote、quasiquote、syntax 及 datum comment 内的 symbol 不进入 use
+集合。本文件 definition 按名字遮蔽 primitive metadata；其余可识别的 primitive
+use 解析到静态 primitive DefinitionId，未解析 identifier 保留空 resolution。
+cursor query 在 declaration range 上直接返回自身 DefinitionId，在 use range 上
+读取 resolution。references 只比较结构化 DefinitionId，不以文本同名作为引用。
+
 文档定义的 DefinitionId 由 document id、revision、声明 byte offset 和 name
 组成；primitive DefinitionId 使用静态 metadata identity。文档定义按名字遮蔽
 primitive。scope graph 可在同一 snapshot 和 DefinitionId 接口之后增加，provider
 catalog、completion session 和 TUI 不依赖 scanner 的内部 token 表示。
+
+自举 xref provider 把 definition 和 resolved uses 转成通用 LocationList。当前
+Document 的 declaration 与 references 可立即导航；primitive 只有 metadata、
+没有 source location 时返回明确的无源码结果。跨 library references 在 workspace
+层解析 import/export edges 后进入同一 LocationList 接口。
 
 ## Definition、references 与 rename
 

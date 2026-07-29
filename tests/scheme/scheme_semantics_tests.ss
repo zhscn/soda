@@ -29,7 +29,8 @@
     "(define-record-type (editor-state make-editor-state editor-state?)\n"
     "  (fields value))\n"
     "(define λ-value 6)\n"
-    "(define unfinished"))
+    "(define unfinished\n"
+    "(render-frame current-value)\n"))
 
 (define snapshot
   (make-scheme-semantic-snapshot
@@ -39,6 +40,8 @@
 
 (define definitions
   (scheme-semantic-snapshot-definitions snapshot))
+(define uses
+  (scheme-semantic-snapshot-uses snapshot))
 
 (define (exact-non-negative-integer? value)
   (and (integer? value) (exact? value) (not (negative? value))))
@@ -119,3 +122,49 @@
       scheme-primitive-definitions))
   (error 'scheme-semantics-tests
          "primitive metadata did not expose core Scheme bindings"))
+
+(define (uses-by-name name)
+  (filter
+    (lambda (use)
+      (string=? (scheme-use-name use) name))
+    uses))
+
+(let* ([definition (definition-by-name "render-frame")]
+       [matching-uses (uses-by-name "render-frame")]
+       [references
+         (scheme-semantic-references
+           snapshot
+           (scheme-definition-id definition))])
+  (unless
+    (and
+      (= (length matching-uses) 1)
+      (= (length references) 1)
+      (= (length
+           (scheme-use-resolution (car matching-uses)))
+         1)
+      (scheme-definition-id=?
+        (car (scheme-use-resolution (car matching-uses)))
+        (scheme-definition-id definition))
+      (equal?
+        (scheme-semantic-definitions-at
+          snapshot
+          (scheme-use-start (car matching-uses)))
+        (list definition)))
+    (error 'scheme-semantics-tests
+           "Scheme uses did not resolve through DefinitionId")))
+
+(unless
+  (and
+    (null? (uses-by-name "ignored-quote"))
+    (null? (uses-by-name "ignored-long-quote"))
+    (exists
+      (lambda (use)
+        (and
+          (string=? (scheme-use-name use) "define")
+          (exists
+            (lambda (id)
+              (eq? (scheme-definition-id-source id) 'primitive))
+            (scheme-use-resolution use))))
+      uses))
+  (error 'scheme-semantics-tests
+         "use scanner included quoted data or missed primitive resolution"))

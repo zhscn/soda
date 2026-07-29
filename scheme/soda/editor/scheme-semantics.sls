@@ -4,6 +4,7 @@
           scheme-semantic-snapshot-document-id
           scheme-semantic-snapshot-revision
           scheme-semantic-snapshot-definitions
+          scheme-semantic-snapshot-uses
           scheme-definition-id?
           scheme-definition-id-source
           scheme-definition-id-document-id
@@ -17,6 +18,14 @@
           scheme-definition-start
           scheme-definition-end
           scheme-definition-detail
+          scheme-use?
+          scheme-use-name
+          scheme-use-start
+          scheme-use-end
+          scheme-use-resolution
+          scheme-definition-id=?
+          scheme-semantic-definitions-at
+          scheme-semantic-references
           scheme-primitive-definitions)
   (import (rnrs))
 
@@ -34,11 +43,14 @@
   (define-record-type scheme-definition
     (fields id name kind start end detail))
 
+  (define-record-type scheme-use
+    (fields name start end resolution))
+
   (define-record-type
     (scheme-semantic-snapshot
       %make-scheme-semantic-snapshot
       scheme-semantic-snapshot?)
-    (fields document-id revision definitions))
+    (fields document-id revision definitions uses))
 
   (define-record-type token
     (fields kind value start end))
@@ -506,6 +518,141 @@
             "R6RS/Chez")))
       primitive-specifications))
 
+  (define (scheme-definition-id=? left right)
+    (and (scheme-definition-id? left)
+         (scheme-definition-id? right)
+         (eq? (scheme-definition-id-source left)
+              (scheme-definition-id-source right))
+         (equal? (scheme-definition-id-document-id left)
+                 (scheme-definition-id-document-id right))
+         (equal? (scheme-definition-id-revision left)
+                 (scheme-definition-id-revision right))
+         (equal? (scheme-definition-id-offset left)
+                 (scheme-definition-id-offset right))
+         (string=? (scheme-definition-id-name left)
+                   (scheme-definition-id-name right))))
+
+  (define (definitions-named name definitions)
+    (filter
+      (lambda (definition)
+        (string=? name (scheme-definition-name definition)))
+      definitions))
+
+  (define (definition-token? token definitions)
+    (exists
+      (lambda (definition)
+        (and (= (token-start token)
+                (scheme-definition-start definition))
+             (= (token-end token)
+                (scheme-definition-end definition))))
+      definitions))
+
+  (define (scan-uses bytes definitions)
+    (let loop ([tokens (remove-ignored-data (tokenize bytes))]
+               [uses '()])
+      (cond
+        [(null? tokens) (reverse uses)]
+        [(quoted-form? tokens)
+         (loop (skip-datum tokens) uses)]
+        [(and (symbol-token? (car tokens))
+              (not (definition-token? (car tokens) definitions)))
+         (let* ([token (car tokens)]
+                [name (token-value token)]
+                [local (definitions-named name definitions)]
+                [resolved
+                  (if (pair? local)
+                      local
+                      (definitions-named
+                        name
+                        scheme-primitive-definitions))])
+           (loop
+             (cdr tokens)
+             (cons
+               (make-scheme-use
+                 name
+                 (token-start token)
+                 (token-end token)
+                 (map scheme-definition-id resolved))
+               uses)))]
+        [else (loop (cdr tokens) uses)])))
+
+  (define (offset-in-range? offset start end)
+    (and (integer? start)
+         (integer? end)
+         (<= start offset)
+         (< offset end)))
+
+  (define (definition-by-id definitions id)
+    (find
+      (lambda (definition)
+        (scheme-definition-id=?
+          (scheme-definition-id definition)
+          id))
+      definitions))
+
+  (define (scheme-semantic-definitions-at snapshot offset)
+    (unless (scheme-semantic-snapshot? snapshot)
+      (assertion-violation
+        'scheme-semantic-definitions-at
+        "expected a Scheme semantic snapshot"
+        snapshot))
+    (unless (exact-non-negative-integer? offset)
+      (assertion-violation
+        'scheme-semantic-definitions-at
+        "offset must be an exact non-negative integer"
+        offset))
+    (let* ([definitions
+             (scheme-semantic-snapshot-definitions snapshot)]
+           [declaration
+             (find
+               (lambda (definition)
+                 (offset-in-range?
+                   offset
+                   (scheme-definition-start definition)
+                   (scheme-definition-end definition)))
+               definitions)])
+      (if declaration
+          (list declaration)
+          (let ([use
+                  (find
+                    (lambda (use)
+                      (offset-in-range?
+                        offset
+                        (scheme-use-start use)
+                        (scheme-use-end use)))
+                    (scheme-semantic-snapshot-uses snapshot))])
+            (if (not use)
+                '()
+                (filter
+                  (lambda (definition) definition)
+                  (map
+                    (lambda (id)
+                      (or
+                        (definition-by-id definitions id)
+                        (definition-by-id
+                          scheme-primitive-definitions
+                          id)))
+                    (scheme-use-resolution use))))))))
+
+  (define (scheme-semantic-references snapshot definition-id)
+    (unless (scheme-semantic-snapshot? snapshot)
+      (assertion-violation
+        'scheme-semantic-references
+        "expected a Scheme semantic snapshot"
+        snapshot))
+    (unless (scheme-definition-id? definition-id)
+      (assertion-violation
+        'scheme-semantic-references
+        "expected a Scheme definition id"
+        definition-id))
+    (filter
+      (lambda (use)
+        (exists
+          (lambda (resolved)
+            (scheme-definition-id=? resolved definition-id))
+          (scheme-use-resolution use)))
+      (scheme-semantic-snapshot-uses snapshot)))
+
   (define (make-scheme-semantic-snapshot
             document-id
             revision
@@ -522,7 +669,10 @@
         'make-scheme-semantic-snapshot
         "expected source bytes"
         bytes))
-    (%make-scheme-semantic-snapshot
-      document-id
-      revision
-      (scan-definitions document-id revision bytes))))
+    (let ([definitions
+            (scan-definitions document-id revision bytes)])
+      (%make-scheme-semantic-snapshot
+        document-id
+        revision
+        definitions
+        (scan-uses bytes definitions)))))

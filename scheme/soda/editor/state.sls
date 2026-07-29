@@ -65,6 +65,8 @@
           editor-set-kill-ring!
           editor-last-yank
           editor-set-last-yank!
+          editor-current-location-list
+          editor-set-current-location-list!
           editor-pending-prefix
           editor-set-pending-prefix!
           editor-clear-pending-prefix!
@@ -197,6 +199,9 @@
                editor-status-message-set!)
       (mutable kill-ring editor-kill-ring editor-kill-ring-set!)
       (mutable last-yank editor-last-yank editor-last-yank-set!)
+      (mutable current-location-list
+               editor-current-location-list
+               editor-current-location-list-set!)
       (mutable pending-prefix
                editor-pending-prefix
                editor-pending-prefix-set!)
@@ -229,6 +234,15 @@
   (define (editor-set-last-yank! editor state)
     (require-open-editor 'editor-set-last-yank! editor)
     (editor-last-yank-set! editor state))
+
+  (define (editor-set-current-location-list! editor locations)
+    (require-open-editor 'editor-set-current-location-list! editor)
+    (unless (or (not locations) (location-list? locations))
+      (assertion-violation
+        'editor-set-current-location-list!
+        "expected a location list or #f"
+        locations))
+    (editor-current-location-list-set! editor locations))
 
   (define (editor-clear-pending-prefix! editor)
     (require-open-editor 'editor-clear-pending-prefix! editor)
@@ -442,6 +456,15 @@
         (table-values
           (editor-view-table value)
           (editor-view-ids value)))
+      (when
+        (let ([locations (editor-current-location-list value)])
+          (and
+            locations
+            (exists
+              (lambda (item)
+                (= (location-item-buffer-id item) id))
+              (location-list-items locations))))
+        (editor-current-location-list-set! value #f))
       (buffer-close! buffer)))
 
   (define (editor-interactions value)
@@ -1925,6 +1948,7 @@
                '()
                #f
                '()
+               #f
                #f
                #f
                #f

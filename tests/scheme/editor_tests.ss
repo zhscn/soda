@@ -1484,6 +1484,93 @@
   (error 'editor-tests "C-x 1 did not retain only the active window"))
 (editor-close! window-editor)
 
+(define xref-source
+  "(define target 1)\n(+ target target)\n")
+(define xref-document (make-document xref-source 982))
+(define xref-buffer
+  (make-buffer
+    982
+    xref-document
+    "*xref*"
+    'scheme-mode))
+(define xref-editor (make-editor xref-buffer))
+(define xref-view (editor-active-view xref-editor))
+(editor-update!
+  xref-editor
+  (make-command-message
+    'move.forward-character
+    #f
+    (prefix-argument-digit
+      (prefix-argument-digit #f 2)
+      3)))
+(editor-update!
+  xref-editor
+  (make-command-message 'xref.find-definition #f))
+(unless
+  (and
+    (= (view-caret xref-view) 8)
+    (location-list?
+      (editor-current-location-list xref-editor))
+    (eq?
+      (location-list-source
+        (editor-current-location-list xref-editor))
+      'scheme-definition))
+  (error 'editor-tests "Scheme xref did not jump to a definition"))
+(unless
+  (and
+    (editor-jump-back! xref-editor)
+    (= (view-caret xref-view) 23))
+  (error 'editor-tests "xref definition did not use location history"))
+
+(editor-update!
+  xref-editor
+  (make-command-message 'xref.find-references #f))
+(let ([locations (editor-current-location-list xref-editor)])
+  (unless
+    (and
+      (location-list? locations)
+      (eq? (location-list-source locations) 'scheme-references)
+      (= (length (location-list-items locations)) 3)
+      (= (view-caret xref-view) 8))
+    (error 'editor-tests "Scheme xref did not publish references")))
+(editor-update!
+  xref-editor
+  (make-command-message 'xref.next-location #f))
+(unless (= (view-caret xref-view) 21)
+  (error 'editor-tests "xref next did not visit the first use"))
+(editor-update!
+  xref-editor
+  (make-command-message 'xref.next-location #f))
+(unless (= (view-caret xref-view) 28)
+  (error 'editor-tests "xref next did not visit the second use"))
+(editor-update!
+  xref-editor
+  (make-command-message 'xref.previous-location #f))
+(unless (= (view-caret xref-view) 21)
+  (error 'editor-tests "xref previous did not reverse the location list"))
+(buffer-replace-range!
+  xref-buffer
+  (bytevector-length (buffer-bytes xref-buffer))
+  (bytevector-length (buffer-bytes xref-buffer))
+  (string->utf8 "; changed"))
+(editor-update!
+  xref-editor
+  (make-command-message 'xref.next-location #f))
+(unless
+  (and
+    (= (view-caret xref-view) 21)
+    (= (location-list-index
+         (editor-current-location-list xref-editor))
+       1)
+    (string? (editor-status-message xref-editor)))
+  (error 'editor-tests
+         "xref moved through a stale location list"
+         (view-caret xref-view)
+         (location-list-index
+           (editor-current-location-list xref-editor))
+         (editor-status-message xref-editor)))
+(editor-close! xref-editor)
+
 (define prompt-document (make-document "body" 91))
 (define prompt-buffer
   (make-buffer
