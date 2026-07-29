@@ -250,7 +250,26 @@
           interaction-session-last-output-start
           interaction-session-last-output-end
           interaction-session-last-result
+          interaction-session-debugger
           interaction-session-debug-actions
+          debugger-session?
+          debugger-session-interaction-id
+          debugger-session-generation
+          debugger-session-condition
+          debugger-session-frames
+          debugger-session-selected-index
+          debugger-session-selected-frame
+          debugger-frame?
+          debugger-frame-index
+          debugger-frame-name
+          debugger-frame-source-path
+          debugger-frame-source-line
+          debugger-frame-source-character
+          debugger-frame-variables
+          debugger-variable?
+          debugger-variable-index
+          debugger-variable-name
+          debugger-variable-preview
           make-prompt-request
           make-completing-prompt-request
           prompt-request?
@@ -379,6 +398,7 @@
           (soda editor completion-runtime)
           (soda editor cpp-commands)
           (soda editor cpp-language)
+          (soda editor debugger)
           (soda editor decoration)
           (soda editor diagnostics)
           (soda editor edit)

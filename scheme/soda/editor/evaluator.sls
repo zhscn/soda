@@ -97,7 +97,8 @@
                 (parameterize
                   ([current-input-port input-port]
                    [current-output-port output-port]
-                   [current-error-port error-port])
+                   [current-error-port error-port]
+                   [generate-inspector-information #t])
                   (set! result-values
                     (evaluate-source
                       environment

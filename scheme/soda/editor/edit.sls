@@ -1,14 +1,15 @@
 (library (soda editor edit)
   (export buffer-replace-range!
+          buffer-replace-range-internal!
           buffer-delete-range!)
   (import (rnrs)
           (soda document)
           (soda editor buffer))
 
-  (define (buffer-replace-range! buffer start end bytes)
+  (define (replace-buffer-range! who buffer start end bytes)
     (unless (bytevector? bytes)
       (assertion-violation
-        'buffer-replace-range!
+        who
         "replacement must be a bytevector"
         bytes))
     (let ([change #f])
@@ -31,6 +32,27 @@
         (lambda ()
           (when change
             (change-close! change))))))
+
+  (define (buffer-replace-range! buffer start end bytes)
+    (when (buffer-setting-ref buffer 'read-only? #f)
+      (assertion-violation
+        'buffer-replace-range!
+        "buffer is read-only"
+        (buffer-id buffer)))
+    (replace-buffer-range!
+      'buffer-replace-range!
+      buffer
+      start
+      end
+      bytes))
+
+  (define (buffer-replace-range-internal! buffer start end bytes)
+    (replace-buffer-range!
+      'buffer-replace-range-internal!
+      buffer
+      start
+      end
+      bytes))
 
   (define (buffer-delete-range! buffer start end)
     (buffer-replace-range!

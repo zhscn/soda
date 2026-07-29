@@ -25,6 +25,8 @@
           interaction-session-last-output-start
           interaction-session-last-output-end
           interaction-session-last-result
+          interaction-session-debugger
+          interaction-session-set-debugger!
           interaction-session-begin!
           interaction-session-complete!
           interaction-session-dismiss-failure!
@@ -77,6 +79,9 @@
       (mutable last-result
                interaction-session-last-result
                interaction-session-last-result-set!)
+      (mutable debugger
+               interaction-session-debugger
+               interaction-session-debugger-set!)
       (mutable closed?
                interaction-session-closed?
                interaction-session-closed?-set!)))
@@ -214,6 +219,7 @@
       0
       (make-interaction-history 200)
       #f
+      #f
       #f))
 
   (define (require-open-session who session)
@@ -311,6 +317,13 @@
           'ready))
     result)
 
+  (define (interaction-session-set-debugger! session debugger)
+    (require-open-session
+      'interaction-session-set-debugger!
+      session)
+    (interaction-session-debugger-set! session debugger)
+    debugger)
+
   (define (interaction-session-dismiss-failure! session)
     (require-open-session 'interaction-session-dismiss-failure! session)
     (when (eq? (interaction-session-state session) 'failed)
@@ -320,7 +333,9 @@
   (define (interaction-session-debug-actions session)
     (require-open-session 'interaction-session-debug-actions session)
     (if (eq? (interaction-session-state session) 'failed)
-        '(retry dismiss)
+        (if (interaction-session-debugger session)
+            '(open next-frame previous-frame evaluate retry dismiss)
+            '(retry dismiss))
         '()))
 
   (define (interaction-session-close! session)
@@ -328,6 +343,8 @@
                (not (interaction-session-closed? session)))
       (interaction-transcript-close!
         (interaction-session-transcript session))
+      (interaction-session-last-result-set! session #f)
+      (interaction-session-debugger-set! session #f)
       (interaction-session-state-set! session 'closed)
       (interaction-session-closed?-set! session #t)))
 

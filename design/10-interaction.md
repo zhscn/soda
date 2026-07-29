@@ -14,6 +14,7 @@ stdin 由 TUI input decoder 持有，Scheme 求值不会启动第二个终端 RE
 | `InteractionTranscript` | session 所有的 Document anchors | prompt、输入边界以及最近一次 input/output ranges |
 | `InteractionHistory` | session 所有的有界 ring | entries、浏览位置与浏览前草稿 |
 | `EvaluationRequest` | session id + generation | 源码、来源 Buffer、resource、revision 与 byte range |
+| `DebuggerSession` | 失败 request 的 generation | condition continuation、frame inspector、选择位置与工具 Buffer |
 | transcript Buffer | 普通 Buffer id | prompt、输入和 stdout/stderr/value/condition 的文本投影 |
 
 session 不以 Buffer 作为 namespace。关闭 transcript 需要先关闭所属 session；
@@ -157,17 +158,32 @@ string 猜测位置。使用 origin 前必须确认 Buffer 仍存在；需要对
 
 求值失败产生 `condition` result。session 进入 `failed` 状态并保留原始 request、
 Chez condition 和可用的 continuation；transcript 只显示 condition 的文本投影。
-debugger command 从进程内对象构造工具 Buffer 或 overlay，因此不需要把 frame、
-局部变量或任意 Scheme 值序列化成远程协议。
+evaluator 在编译和执行 request 时保留 Chez inspector information。失败结果的
+condition continuation 由 `DebuggerSession` 投影为有序 frame；每个 frame 保存
+procedure name、可用的源码位置和 variable inspector。局部值只在显示时生成有界
+preview，原始 Scheme 对象留在 Chez heap 中。
 
-失败状态提供以下基础动作：
+debugger 分为数据模型和 editor adapter。数据模型只负责 continuation inspection、
+frame selection 与 frame-relative evaluation；adapter 管理 command、major mode、
+generated Buffer、prompt 和 transcript 切换。`debugger-mode` 是 interface mode，
+其 Buffer 是 session 状态的只读文本投影。选择 frame 后会重新生成 frame 列表与
+该 frame 的 locals。
 
-- `scheme.debug-retry` 使用新的 generation 重放原始 source 和 origin；
-- `scheme.debug-dismiss` 退出失败状态并保留结果供检查。
+失败状态提供以下动作：
 
-stack frame、局部变量、restart 与 continuation 操作属于同一个 debugger 数据
-模型。呈现层通过 generated Buffer、selection 和 describe 组件访问这些对象，
-不接管 terminal stdin，也不进入递归 command loop。
+- `scheme.debug-open` 打开或重新激活 debugger Buffer；
+- `scheme.debug-next-frame` 与 `scheme.debug-previous-frame` 循环选择 frame，接受
+  prefix count；
+- `scheme.debug-eval-frame` 通过 minibuffer 读取一个 datum，并使用选中 frame 的
+  inspector environment 求值；
+- `scheme.debug-retry` 关闭当前 debugger，使用新的 generation 重放原始 source
+  和 origin；
+- `scheme.debug-dismiss` 关闭 debugger 并退出失败状态。
+
+debugger Buffer 的 `n`、`p`、`e`、`r`、`q` 分别映射到上述导航、求值、重试与
+关闭操作。重试和关闭会先把所有显示 debugger Buffer 的 View 切回 transcript，
+再释放 Buffer 与 continuation 引用。frame inspection 和 frame-relative evaluation
+都作为普通 command 执行，不接管 terminal stdin，也不进入递归 command loop。
 
 成功求值产生的顶层 binding 保存在 session 的 Chez environment 中。
 `scheme-repl` completion provider 将 environment symbol 投影为通用

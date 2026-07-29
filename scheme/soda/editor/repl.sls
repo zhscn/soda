@@ -9,6 +9,7 @@
           (soda editor command)
           (soda editor command-runtime)
           (soda editor comint)
+          (soda editor debugger-commands)
           (soda editor effect)
           (soda editor evaluator)
           (soda editor event)
@@ -344,54 +345,11 @@
           session
           (evaluation-result->transcript result))
         (interaction-session-complete! session result)
-        (editor-set-status-message!
+        (interaction-attach-debugger-result!
           editor
-          (if (eq? (evaluation-result-status result) 'condition)
-              "Evaluation failed; debugger actions: retry, dismiss"
-              #f))
+          session
+          result)
         '())))
-
-  (define (debug-retry-command context)
-    (let* ([editor (command-context-editor context)]
-           [buffer (view-buffer (command-context-view context))]
-           [session
-             (editor-interaction-for-buffer
-               editor
-               (buffer-id buffer))]
-           [result
-             (and session
-                  (interaction-session-last-result session))])
-      (unless
-        (and result
-             (eq? (interaction-session-state session) 'failed))
-        (assertion-violation
-          'scheme.debug-retry
-          "active interaction has no failed evaluation"))
-      (comint-stash-current-input! editor session)
-      (comint-replace-input! editor session ";; retry")
-      (session-submit-source!
-        editor
-        session
-        (evaluation-request-source
-          (evaluation-result-request result))
-        #f
-        (evaluation-request-origin
-          (evaluation-result-request result)))))
-
-  (define (debug-dismiss-command context)
-    (let* ([editor (command-context-editor context)]
-           [buffer (view-buffer (command-context-view context))]
-           [session
-             (editor-interaction-for-buffer
-               editor
-               (buffer-id buffer))])
-      (unless session
-        (assertion-violation
-          'scheme.debug-dismiss
-          "active buffer has no interaction session"))
-      (interaction-session-dismiss-failure! session)
-      (editor-set-status-message! editor #f)
-      '()))
 
   (define (install-interaction-commands! editor)
     (for-each
@@ -441,15 +399,8 @@
         (list
           'scheme.apply-evaluation-result
           apply-evaluation-result-command
-          "Apply an evaluator result to its interaction session.")
-        (list
-          'scheme.debug-retry
-          debug-retry-command
-          "Retry the failed evaluation in the active interaction.")
-        (list
-          'scheme.debug-dismiss
-          debug-dismiss-command
-          "Dismiss the failed evaluation in the active interaction.")))
+          "Apply an evaluator result to its interaction session.")))
+    (install-debugger-commands! editor)
     (let ([keymap
             (or
               (keymap-catalog-find

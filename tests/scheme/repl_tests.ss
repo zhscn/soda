@@ -6,6 +6,7 @@
         (soda editor completion)
         (soda editor completion-runtime)
         (soda editor core)
+        (soda editor debugger)
         (soda editor effect)
         (soda editor evaluator)
         (soda editor event)
@@ -564,7 +565,7 @@
 (dispatch!
   (make-command-message
     'scheme.eval-expression
-    "(car 1)"))
+    "(begin (define (soda-debug-inner debug-local) (car debug-local)) (soda-debug-inner 41))"))
 (define failed-result
   (interaction-session-last-result session))
 (unless
@@ -574,8 +575,18 @@
        (condition? (evaluation-result-condition failed-result))
        (procedure?
          (evaluation-result-continuation failed-result))
+       (debugger-session?
+         (interaction-session-debugger session))
+       (pair?
+         (debugger-session-frames
+           (interaction-session-debugger session)))
        (equal? (interaction-session-debug-actions session)
-               '(retry dismiss))
+               '(open
+                  next-frame
+                  previous-frame
+                  evaluate
+                  retry
+                  dismiss))
        (string-contains? (buffer-string repl-buffer) "Exception:"))
   (error 'repl-tests
          "failed evaluation did not create debugger state"))
@@ -584,11 +595,84 @@
   (interaction-session-generation session))
 (insert-text! "retry-draft")
 (dispatch!
+  (make-command-message 'scheme.debug-open #f))
+(define debugger
+  (interaction-session-debugger session))
+(define debugger-buffer
+  (view-buffer (editor-active-view editor)))
+(unless
+  (and
+    (= (buffer-id debugger-buffer)
+       (debugger-session-buffer-id debugger))
+    (eq? (buffer-major-mode-name debugger-buffer)
+         'debugger-mode)
+    (string-contains?
+      (buffer-string debugger-buffer)
+      "Soda Scheme Debugger")
+    (string-contains?
+      (buffer-string debugger-buffer)
+      "Frames:")
+    (string-contains?
+      (buffer-string debugger-buffer)
+      "Selected frame locals:"))
+  (error 'repl-tests
+         "debug open did not project the failed continuation"))
+(define debugger-text-before-insert
+  (buffer-bytes debugger-buffer))
+(insert-text! "x")
+(unless
+  (and
+    (bytevector=? debugger-text-before-insert
+                  (buffer-bytes debugger-buffer))
+    (string? (editor-status-message editor)))
+  (error 'repl-tests
+         "debugger buffer accepted an editing command"))
+(define selected-frame-before
+  (debugger-session-selected-index debugger))
+(press-key!
+  'character
+  (char->integer #\n)
+  0)
+(when (> (length (debugger-session-frames debugger)) 1)
+  (unless
+    (not
+      (= selected-frame-before
+         (debugger-session-selected-index debugger)))
+    (error 'repl-tests
+           "debug next-frame did not move the selected frame")))
+(press-key!
+  'character
+  (char->integer #\e)
+  0)
+(unless (editor-active-prompt editor)
+  (error 'repl-tests
+         "debugger eval key did not open the frame prompt"))
+(editor-abort-prompt! editor)
+(dispatch!
+  (make-command-message
+    'scheme.debug-eval-frame
+    "42"))
+(unless
+  (string-contains?
+    (editor-status-message editor)
+    "=> 42")
+  (error 'repl-tests
+         "debug frame evaluation did not expose its value"))
+(dispatch!
   (make-command-message 'scheme.debug-retry #f))
 (unless
   (and (= (interaction-session-generation session)
           (+ generation-before-retry 1))
        (eq? (interaction-session-state session) 'failed)
+       (interaction-session-debugger session)
+       (= (buffer-id (view-buffer (editor-active-view editor)))
+          (buffer-id repl-buffer))
+       (not
+         (find
+           (lambda (buffer)
+             (eq? (buffer-major-mode-name buffer)
+                  'debugger-mode))
+           (editor-buffers editor)))
        (string-contains? (buffer-string repl-buffer) ";; retry")
        (string=? (repl-input) "retry-draft")
        (string-suffix?
@@ -598,10 +682,15 @@
          "debug retry did not resubmit the failure and restore the draft"))
 
 (dispatch!
+  (make-command-message 'scheme.debug-open #f))
+(dispatch!
   (make-command-message 'scheme.debug-dismiss #f))
 (unless
   (and (eq? (interaction-session-state session) 'ready)
-       (null? (interaction-session-debug-actions session)))
+       (not (interaction-session-debugger session))
+       (null? (interaction-session-debug-actions session))
+       (= (buffer-id (view-buffer (editor-active-view editor)))
+          (buffer-id repl-buffer)))
   (error 'repl-tests
          "debug dismiss did not leave the failed state"))
 
