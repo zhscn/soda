@@ -1,19 +1,15 @@
 (library (soda editor commands basic)
-  (export install-basic-commands!
-          editor-register-command!
-          editor-bind-key!
-          editor-execute-interactive-command!
-          editor-execute-command!)
+  (export install-basic-commands!)
   (import (rnrs)
           (soda document)
           (soda editor buffer)
           (soda editor command)
+          (soda editor command-runtime)
           (soda editor display)
           (soda editor event)
           (soda editor kill)
           (soda editor keymap)
-          (soda editor language)
-          (soda editor motion)
+          (soda editor motion-runtime)
           (soda editor state))
 
   (define (with-document-text document procedure)
@@ -215,34 +211,10 @@
             (next-character-offset text (view-caret view))))))
     '())
 
-  (define (buffer-word-motion buffer)
-    (let ([setting (buffer-setting-ref buffer 'word-motion #f)])
-      (cond
-        [(word-motion? setting) setting]
-        [setting
-         (assertion-violation
-           'buffer-word-motion
-           "word-motion setting must be a word motion"
-           setting)]
-        [else
-         (let ([profile (buffer-language-profile buffer)])
-           (or (and profile (language-profile-word-motion profile))
-               default-word-motion))])))
-
-  (define (word-target buffer offset count)
-    (with-document-text
-      (buffer-document buffer)
-      (lambda (text)
-        (word-motion-target
-          (buffer-word-motion buffer)
-          text
-          offset
-          count))))
-
   (define (move-word! context count)
     (let* ([view (context-view context)]
            [target
-             (word-target
+             (buffer-word-motion-target
                (context-buffer context)
                (view-caret view)
                count)])
@@ -357,14 +329,22 @@
   (define (kill-word-command context)
     (let* ([view (context-view context)]
            [start (view-caret view)]
-           [end (word-target (context-buffer context) start 1)])
+           [end
+             (buffer-word-motion-target
+               (context-buffer context)
+               start
+               1)])
       (kill-range! context start end)
       '()))
 
   (define (backward-kill-word-command context)
     (let* ([view (context-view context)]
            [start (view-caret view)]
-           [end (word-target (context-buffer context) start -1)])
+           [end
+             (buffer-word-motion-target
+               (context-buffer context)
+               start
+               -1)])
       (kill-range! context start end)
       '()))
 
@@ -460,71 +440,6 @@
          (editor-set-pending-keys! editor '())
          (editor-set-status-message! editor #f)
          '()])))
-
-  (define editor-register-command!
-    (case-lambda
-      [(editor name procedure)
-       (require-open-editor 'editor-register-command! editor)
-       (register-command!
-         (editor-command-registry editor)
-         name
-         procedure)]
-      [(editor name procedure documentation)
-       (editor-register-command!
-         editor name procedure documentation #f)]
-      [(editor name procedure documentation class)
-       (require-open-editor 'editor-register-command! editor)
-       (register-command!
-         (editor-command-registry editor)
-         name
-         procedure
-         documentation
-         class)]))
-
-  (define (editor-bind-key! editor sequence command)
-    (require-open-editor 'editor-bind-key! editor)
-    (unless (command-registered?
-              (editor-command-registry editor)
-              command)
-      (assertion-violation
-        'editor-bind-key!
-        "cannot bind an unknown command"
-        command))
-    (keymap-bind! (editor-keymap editor) sequence command))
-
-  (define editor-execute-command!
-    (case-lambda
-      [(editor name)
-       (editor-execute-command! editor name #f #f)]
-      [(editor name event argument)
-       (require-open-editor 'editor-execute-command! editor)
-       (editor-refresh-completion! editor)
-       (let ([effects
-               (execute-command!
-                 (editor-command-registry editor)
-                 name
-                 (make-command-context
-                   editor
-                   (editor-active-view editor)
-                   event
-                   argument))])
-         (ensure-view-visible! (editor-active-view editor))
-         (editor-refresh-completion-after-command! editor)
-         (append
-           effects
-           (editor-take-completion-effects! editor)))]))
-
-  (define editor-execute-interactive-command!
-    (case-lambda
-      [(editor name)
-       (editor-execute-interactive-command! editor name #f #f)]
-      [(editor name event argument)
-       (let ([effects
-               (editor-execute-command! editor name event argument)])
-         (editor-set-last-command-class!
-           editor
-           (command-class (editor-command-registry editor) name))
-         effects)]))
 
   (define (stroke key codepoint modifiers)
     (make-key-stroke key codepoint modifiers))

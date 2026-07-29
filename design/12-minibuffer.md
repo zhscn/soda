@@ -20,11 +20,16 @@ prompt.reply effect
       │
       ▼
 internal command message
+      │
+      └── command.invoke effect ──> interactive command message
 ```
 
 minibuffer 不启动递归 command loop。发起命令创建 session 后立即返回；输入、
 渲染和异步事件继续由主循环推进。接受或取消产生 reply effect，effect handler 将
-结果转换成后续 internal command message。
+结果转换成后续 internal command message。continuation 需要执行用户选择的命令时，
+产生 `command.invoke` effect；对应 handler 把它转换成 interactive command
+message，使键绑定、直接 command message 与 `M-x` 共享错误处理和 command class
+语义。
 
 ## 请求、会话与结果
 

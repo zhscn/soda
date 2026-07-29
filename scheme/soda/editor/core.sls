@@ -63,6 +63,7 @@
           editor-bind-key!
           editor-execute-interactive-command!
           editor-execute-command!
+          install-command-effect-handler!
           editor-update!
           make-key-message
           key-message?
@@ -263,6 +264,7 @@
   (import (rnrs)
           (soda editor buffer)
           (soda editor command)
+          (soda editor command-runtime)
           (soda editor commands basic)
           (soda editor commands buffer)
           (soda editor comint)

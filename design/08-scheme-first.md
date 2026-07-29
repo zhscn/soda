@@ -72,7 +72,9 @@ native event -> message -> update(Editor)
 command 收到显式 context，不从 native 全局变量推断当前 buffer 或 window。
 编辑命令以 transaction 为原子边界，更新 View 的 caret/selection，并返回 effect
 列表。keymap 保存 command symbol；registry 中替换 procedure 后，已有绑定立即使用
-新实现。
+新实现。command runtime 独立于具体 command collection，统一承担注册、key
+binding、interactive/internal invocation、completion lifecycle 和 viewport
+结算；basic、file、completion、REPL 等 command collection 只定义和安装命令。
 
 message 是按用途区分的记录值，包括 input、resize、interactive command 和
 internal command message。input message 携带归一化的 `KeyEvent` 或

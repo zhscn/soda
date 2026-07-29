@@ -6,7 +6,7 @@
           (soda document)
           (soda editor buffer)
           (soda editor command)
-          (soda editor commands basic)
+          (soda editor command-runtime)
           (soda editor comint)
           (soda editor effect)
           (soda editor evaluator)

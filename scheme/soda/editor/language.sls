@@ -40,7 +40,7 @@
           major-mode-keymaps
           major-mode-setting-ref)
   (import (rnrs)
-          (soda editor motion))
+          (soda editor motion-protocol))
 
   (define-record-type (syntax-provider %make-syntax-provider syntax-provider?)
     (fields

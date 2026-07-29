@@ -3,6 +3,7 @@
   (import (rnrs)
           (soda document)
           (soda editor buffer)
+          (soda editor command-runtime)
           (soda editor core)
           (soda editor completion-runtime)
           (soda editor effect)
@@ -257,6 +258,7 @@
         executor
         (editor-completion-provider-catalog editor))
       (install-prompt-effect-handler! executor)
+      (install-command-effect-handler! executor)
       (dynamic-wind
         (lambda () #f)
         (lambda ()

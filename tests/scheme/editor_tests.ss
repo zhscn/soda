@@ -943,6 +943,11 @@
   (lambda (context)
     (set! selected-command 'beta)
     '()))
+(editor-register-command!
+  prompt-editor
+  'test.prompt-fail
+  (lambda (context)
+    (error 'test.prompt-fail "expected M-x failure")))
 
 (editor-update! prompt-editor (make-resize-message 5 40))
 (send! prompt-editor prompt-decoder (bytes 27 120))
@@ -1015,12 +1020,16 @@
 
 (define prompt-executor (make-effect-executor))
 (install-prompt-effect-handler! prompt-executor)
-(define prompt-effect-result
-  (execute-effects! prompt-executor prompt-effects))
-(for-each
-  (lambda (message)
-    (editor-update! prompt-editor message))
-  (effect-result-messages prompt-effect-result))
+(install-command-effect-handler! prompt-executor)
+(define (dispatch-prompt-effects! effects)
+  (unless (null? effects)
+    (let ([result (execute-effects! prompt-executor effects)])
+      (for-each
+        (lambda (message)
+          (dispatch-prompt-effects!
+            (editor-update! prompt-editor message)))
+        (effect-result-messages result)))))
+(dispatch-prompt-effects! prompt-effects)
 (unless (= prompt-invocations 1)
   (error 'editor-tests
          "prompt reply did not re-enter the command loop as a message"))
@@ -1072,12 +1081,7 @@
            "completion selection did not retain candidate identity")))
 (define selected-effects
   (send! prompt-editor prompt-decoder (bytes 13)))
-(define selected-effect-result
-  (execute-effects! prompt-executor selected-effects))
-(for-each
-  (lambda (message)
-    (editor-update! prompt-editor message))
-  (effect-result-messages selected-effect-result))
+(dispatch-prompt-effects! selected-effects)
 (unless (and (eq? selected-command 'beta)
              (equal? (editor-history-entries
                        prompt-editor
@@ -1099,12 +1103,7 @@
     #f))
 (define default-effects
   (send! prompt-editor prompt-decoder (bytes 13)))
-(define default-effect-result
-  (execute-effects! prompt-executor default-effects))
-(for-each
-  (lambda (message)
-    (editor-update! prompt-editor message))
-  (effect-result-messages default-effect-result))
+(dispatch-prompt-effects! default-effects)
 (unless (and (prompt-result? captured-prompt-result)
              (eq? (prompt-result-status captured-prompt-result)
                   'accepted)
@@ -1137,12 +1136,7 @@
 (send! prompt-editor prompt-decoder (string->utf8 "yes"))
 (define matched-effects
   (send! prompt-editor prompt-decoder (bytes 13)))
-(define matched-result
-  (execute-effects! prompt-executor matched-effects))
-(for-each
-  (lambda (message)
-    (editor-update! prompt-editor message))
-  (effect-result-messages matched-result))
+(dispatch-prompt-effects! matched-effects)
 (unless (and (prompt-result? captured-prompt-result)
              (string=? (prompt-result-value captured-prompt-result) "yes"))
   (error 'editor-tests "valid must-match input was not accepted"))
@@ -1173,6 +1167,22 @@
              (= (length (editor-buffers prompt-editor)) 1)
              (= (length (editor-views prompt-editor)) 1))
   (error 'editor-tests "closing the prompt stack leaked transient state"))
+
+(send! prompt-editor prompt-decoder (bytes 27 120))
+(send!
+  prompt-editor
+  prompt-decoder
+  (string->utf8 "test.prompt-fail"))
+(dispatch-prompt-effects!
+  (send! prompt-editor prompt-decoder (bytes 13)))
+(unless
+  (and
+    (not (editor-closed? prompt-editor))
+    (not (editor-active-prompt prompt-editor))
+    (string? (editor-status-message prompt-editor)))
+  (error
+    'editor-tests
+    "M-x command failure escaped interactive dispatch"))
 
 (editor-close! prompt-editor)
 (unless (and (editor-closed? prompt-editor)

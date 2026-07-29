@@ -4,18 +4,8 @@
           word-motion-target
           default-word-motion)
   (import (rnrs)
-          (soda document))
-
-  (define-record-type (word-motion %make-word-motion word-motion?)
-    (fields (immutable target word-motion-target-procedure)))
-
-  (define (make-word-motion target)
-    (unless (procedure? target)
-      (assertion-violation
-        'make-word-motion
-        "target must be a procedure"
-        target))
-    (%make-word-motion target))
+          (soda document)
+          (soda editor motion-protocol))
 
   (define (word-motion-target motion text offset count)
     (unless (word-motion? motion)
@@ -41,10 +31,7 @@
         "count must be an exact integer"
         count))
     (let ([target
-            ((word-motion-target-procedure motion)
-             text
-             offset
-             count)])
+            (word-motion-apply motion text offset count)])
       (unless (and (integer? target)
                    (exact? target)
                    (<= 0 target (text-size text)))

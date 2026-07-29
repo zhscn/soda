@@ -4,7 +4,7 @@
           (soda document)
           (soda editor buffer)
           (soda editor command)
-          (soda editor commands basic)
+          (soda editor command-runtime)
           (soda editor completion)
           (soda editor keymap)
           (soda editor language)

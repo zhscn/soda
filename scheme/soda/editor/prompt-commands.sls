@@ -2,8 +2,9 @@
   (export install-prompt-commands!)
   (import (rnrs)
           (soda editor command)
-          (soda editor commands basic)
+          (soda editor command-runtime)
           (soda editor completion)
+          (soda editor event)
           (soda editor keymap)
           (soda editor prompt)
           (soda editor state))
@@ -118,8 +119,10 @@
            (if (command-registered?
                  (editor-command-registry editor)
                  name)
-               (editor-execute-interactive-command!
-                 editor name #f #f)
+               (list
+                 (make-command-effect
+                   'command.invoke
+                   (make-command-message name #f)))
                (begin
                  (editor-set-status-message!
                    editor

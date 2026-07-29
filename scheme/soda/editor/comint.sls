@@ -16,7 +16,7 @@
           (soda document)
           (soda editor buffer)
           (soda editor command)
-          (soda editor commands basic)
+          (soda editor command-runtime)
           (soda editor display)
           (soda editor interaction)
           (soda editor interaction-transcript)

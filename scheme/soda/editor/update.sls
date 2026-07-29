@@ -3,7 +3,7 @@
   (import (rnrs)
           (soda editor buffer)
           (soda editor command)
-          (soda editor commands basic)
+          (soda editor command-runtime)
           (soda editor completion)
           (soda editor display)
           (soda editor event)
@@ -23,7 +23,7 @@
   (define (run-interactive-command editor name event argument)
     (unless (eq? name 'editor.quit)
       (editor-disarm-quit! editor))
-      (guard (condition
+    (guard (condition
              [else
               (editor-set-last-command-class! editor #f)
               (editor-set-status-message!
@@ -124,7 +124,7 @@
                        editor
                        event
                        (key-event-text event))
-                       (begin
+                     (begin
                        (editor-set-last-command-class! editor #f)
                        (when (pair? pending)
                          (editor-set-status-message!
