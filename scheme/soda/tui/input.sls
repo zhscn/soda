@@ -454,24 +454,40 @@
                                   (bytevector-u8-ref
                                     bytes
                                     (+ index 1))])
-                            (if (and (>= next 32) (< next 127))
-                                (parse-normal
-                                  bytes
-                                  (+ index 2)
-                                  (cons
-                                    (make-key-event
-                                      'character
-                                      next
-                                      #f
-                                      #f
-                                      2
-                                      'press
-                                      (single-byte next))
-                                    events))
-                                (parse-normal
-                                  bytes
-                                  (+ index 1)
-                                  (cons (escape-event) events))))])]
+                            (cond
+                              [(and (>= next 32) (< next 127))
+                               (parse-normal
+                                 bytes
+                                 (+ index 2)
+                                 (cons
+                                   (make-key-event
+                                     'character
+                                     next
+                                     #f
+                                     #f
+                                     2
+                                     'press
+                                     (single-byte next))
+                                   events))]
+                              [(or (= next 8) (= next 127))
+                               (parse-normal
+                                 bytes
+                                 (+ index 2)
+                                 (cons
+                                   (make-key-event
+                                     'backspace
+                                     127
+                                     #f
+                                     #f
+                                     2
+                                     'press
+                                     (make-bytevector 0))
+                                   events))]
+                              [else
+                               (parse-normal
+                                 bytes
+                                 (+ index 1)
+                                 (cons (escape-event) events))]))])]
                       [(or (< byte 32) (= byte 127))
                        (parse-normal
                          bytes

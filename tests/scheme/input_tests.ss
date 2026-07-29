@@ -84,6 +84,19 @@
              (key-event-modifier? (car legacy-ctrl-q) 'ctrl))
   (error 'input-tests "legacy ctrl-q differs" legacy-ctrl-q))
 
+(define legacy-alt-backspace
+  (input-decoder-feed! decoder (bytes 27 127)))
+(unless
+  (and
+    (= (length legacy-alt-backspace) 1)
+    (eq? (key-event-key (car legacy-alt-backspace)) 'backspace)
+    (= (key-event-codepoint (car legacy-alt-backspace)) 127)
+    (key-event-modifier? (car legacy-alt-backspace) 'alt))
+  (error
+    'input-tests
+    "legacy alt-backspace differs"
+    legacy-alt-backspace))
+
 (unless (null? (input-decoder-feed! decoder (bytes 27)))
   (error 'input-tests "pending escape produced an event"))
 (unless (input-decoder-pending? decoder)
