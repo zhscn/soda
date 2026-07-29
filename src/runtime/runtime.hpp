@@ -31,6 +31,7 @@ public:
     [[nodiscard]] SourceId read_file(std::string path);
     [[nodiscard]] SourceId write_file(std::string path, std::vector<std::byte> data);
     [[nodiscard]] SourceId scan_directory(std::string path);
+    [[nodiscard]] SourceId stat_path(std::string path, bool follow_symlinks);
     bool cancel(SourceId source);
 
     std::size_t poll(PollMode mode);

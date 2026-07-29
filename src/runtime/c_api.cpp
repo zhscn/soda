@@ -120,6 +120,15 @@ uint64_t soda_runtime_scan_directory(soda_runtime* runtime, const char* path) {
     });
 }
 
+uint64_t soda_runtime_stat_path(soda_runtime* runtime, const char* path, int follow_symlinks) {
+    return guard(runtime, uint64_t{0}, [&] {
+        if (path == nullptr) {
+            throw std::invalid_argument("stat path is null");
+        }
+        return runtime->runtime.stat_path(path, follow_symlinks != 0).value;
+    });
+}
+
 int soda_runtime_cancel(soda_runtime* runtime, uint64_t source) {
     return guard(runtime, -1,
                  [&] { return runtime->runtime.cancel(soda::runtime::SourceId{source}) ? 1 : 0; });

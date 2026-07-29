@@ -147,6 +147,42 @@ TEST_CASE("asynchronous directory scan returns typed entries") {
     fs::remove_all(directory);
 }
 
+TEST_CASE("asynchronous stat and lstat report resource metadata") {
+    namespace fs = std::filesystem;
+    const fs::path directory =
+        fs::temp_directory_path() /
+        ("soda-runtime-stat-" +
+         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    REQUIRE(fs::create_directory(directory));
+    const fs::path file = directory / "source.scm";
+    {
+        std::ofstream output(file, std::ios::binary);
+        output << "value";
+    }
+    const fs::path link = directory / "source-link";
+    REQUIRE_NOTHROW(fs::create_symlink(file.filename(), link));
+
+    Runtime runtime;
+    const auto await = [&](SourceId source) {
+        while (runtime.pending_events() == 0) {
+            (void)runtime.poll(PollMode::Once);
+        }
+        auto event = runtime.next_event();
+        REQUIRE(event.has_value());
+        CHECK(event->kind == EventKind::PathStat);
+        CHECK(event->source == source);
+        CHECK(event->status == 0);
+        CHECK(event->data.size() == 40);
+        return *event;
+    };
+
+    CHECK(await(runtime.stat_path(file.string(), true)).flags == 1);
+    CHECK(await(runtime.stat_path(directory.string(), true)).flags == 2);
+    CHECK(await(runtime.stat_path(link.string(), true)).flags == 1);
+    CHECK(await(runtime.stat_path(link.string(), false)).flags == 3);
+    fs::remove_all(directory);
+}
+
 TEST_CASE("asynchronous file write owns bytes and reports completion") {
     namespace fs = std::filesystem;
     const fs::path path =

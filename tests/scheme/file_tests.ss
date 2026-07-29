@@ -147,7 +147,14 @@
                    (car events))])
            (when message
              (dispatch! message))
-           (if (eq? (event-kind (car events)) 'file-read)
+           (if
+             (or
+               (eq? (event-kind (car events)) 'file-read)
+               (and
+                 (eq? (event-kind (car events)) 'path-stat)
+                 (or
+                   (not (zero? (event-status (car events))))
+                   (= (event-flags (car events)) 2))))
                (car events)
                (find (cdr events))))]))))
 
@@ -459,6 +466,7 @@
       save-directory
       find-origin-view-id
       #f)))
+(finish-file-read!)
 (unless
   (and
     (editor-active-prompt editor)
@@ -497,12 +505,16 @@
   (and
     (string=? (buffer-file-path buffer) save-as-path)
     (string=? (buffer-resource buffer) save-as-path)
+    (eq? (editor-buffer-for-resource editor save-as-path) buffer)
+    (not (editor-buffer-for-resource editor save-path))
     (not (buffer-modified? buffer))
     (bytevector=?
       (read-file-bytes save-as-path)
       (string->utf8 "base one two newer\r\nlast")))
   (error 'file-tests "save-as did not adopt the successfully written path"))
 
+(define coalesced-view
+  (editor-open-view! editor (buffer-id buffer)))
 (dispatch!
   (make-command-message
     'file.open-path
@@ -512,6 +524,15 @@
       open-path
       origin-view-id
       #f)))
+(dispatch!
+  (make-command-message
+    'file.open-path
+    (make-prompt-result
+      100
+      'accepted
+      open-path
+      (view-id coalesced-view)
+      #f)))
 (define opened-event (finish-file-read!))
 (define opened-buffer (view-buffer (editor-active-view editor)))
 (unless
@@ -519,6 +540,7 @@
     (zero? (event-status opened-event))
     (= (length (editor-buffers editor)) 2)
     (string=? (buffer-file-path opened-buffer) open-path)
+    (eq? (view-buffer coalesced-view) opened-buffer)
     (eq? (buffer-major-mode-name opened-buffer) 'scheme-mode)
     (positive? (bytevector-length (event-data opened-event)))
     (not (buffer-modified? opened-buffer))

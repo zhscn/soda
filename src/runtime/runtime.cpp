@@ -14,6 +14,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <sys/stat.h>
 #include <system_error>
 #include <thread>
 #include <unordered_map>
@@ -94,6 +95,13 @@ struct Runtime::Impl {
         std::string path;
     };
 
+    struct PathStat {
+        Impl* owner = nullptr;
+        SourceId id;
+        uv_fs_t request{};
+        std::string path;
+    };
+
     Impl() : owner_thread(std::this_thread::get_id()) {
         const int status = uv_loop_init(&loop);
         if (status < 0) {
@@ -126,6 +134,10 @@ struct Runtime::Impl {
         for (auto& [id, scan] : directory_scans) {
             (void)id;
             (void)uv_cancel(reinterpret_cast<uv_req_t*>(&scan->request));
+        }
+        for (auto& [id, stat] : path_stats) {
+            (void)id;
+            (void)uv_cancel(reinterpret_cast<uv_req_t*>(&stat->request));
         }
 
         while (uv_loop_alive(&loop) != 0) {
@@ -301,6 +313,33 @@ struct Runtime::Impl {
         return id;
     }
 
+    SourceId stat_path(std::string path, bool follow_symlinks) {
+        require_owner_thread();
+        if (path.empty()) {
+            throw std::invalid_argument("stat has no path");
+        }
+
+        auto stat = std::make_unique<PathStat>();
+        stat->owner = this;
+        stat->id = allocate_id();
+        stat->path = std::move(path);
+        stat->request.data = stat.get();
+        const SourceId id = stat->id;
+        path_stats.emplace(id.value, std::move(stat));
+
+        PathStat& operation = *path_stats.at(id.value);
+        const int status =
+            follow_symlinks
+                ? uv_fs_stat(&loop, &operation.request, operation.path.c_str(), on_path_stat)
+                : uv_fs_lstat(&loop, &operation.request, operation.path.c_str(), on_path_stat);
+        if (status < 0) {
+            uv_fs_req_cleanup(&operation.request);
+            queue_path_stat_result(operation, status, 0, {});
+            path_stats.erase(id.value);
+        }
+        return id;
+    }
+
     bool cancel(SourceId source) {
         require_owner_thread();
         if (!source.valid()) {
@@ -328,6 +367,9 @@ struct Runtime::Impl {
         }
         if (const auto scan = directory_scans.find(source.value); scan != directory_scans.end()) {
             return uv_cancel(reinterpret_cast<uv_req_t*>(&scan->second->request)) == 0;
+        }
+        if (const auto stat = path_stats.find(source.value); stat != path_stats.end()) {
+            return uv_cancel(reinterpret_cast<uv_req_t*>(&stat->second->request)) == 0;
         }
         return false;
     }
@@ -446,10 +488,72 @@ struct Runtime::Impl {
         });
     }
 
+    void queue_path_stat_result(PathStat& operation, int status, std::uint32_t kind,
+                                std::vector<std::byte> data) {
+        events.push_back({
+            .kind = EventKind::PathStat,
+            .source = operation.id,
+            .status = status,
+            .flags = kind,
+            .data = std::move(data),
+        });
+    }
+
     static void append_u32(std::vector<std::byte>& data, std::uint32_t value) {
         for (unsigned int shift = 0; shift < 32; shift += 8) {
             data.push_back(static_cast<std::byte>((value >> shift) & 0xffU));
         }
+    }
+
+    static void append_u64(std::vector<std::byte>& data, std::uint64_t value) {
+        for (unsigned int shift = 0; shift < 64; shift += 8) {
+            data.push_back(static_cast<std::byte>((value >> shift) & 0xffU));
+        }
+    }
+
+    static std::uint32_t stat_kind(std::uint64_t mode) {
+        if (S_ISREG(mode))
+            return 1;
+        if (S_ISDIR(mode))
+            return 2;
+        if (S_ISLNK(mode))
+            return 3;
+        if (S_ISFIFO(mode))
+            return 4;
+        if (S_ISSOCK(mode))
+            return 5;
+        if (S_ISCHR(mode))
+            return 6;
+        if (S_ISBLK(mode))
+            return 7;
+        return 0;
+    }
+
+    static void on_path_stat(uv_fs_t* request) noexcept {
+        guard_callback([&] {
+            auto& operation = *static_cast<PathStat*>(request->data);
+            Impl& owner = *operation.owner;
+            int status = request->result < 0 ? static_cast<int>(request->result) : 0;
+            std::uint32_t kind = 0;
+            std::vector<std::byte> data;
+            if (status == 0 && !owner.shutting_down) {
+                const uv_stat_t& stat = request->statbuf;
+                kind = stat_kind(stat.st_mode);
+                append_u64(data, stat.st_size);
+                append_u64(data, static_cast<std::uint64_t>(stat.st_mtim.tv_sec));
+                append_u64(data, static_cast<std::uint64_t>(stat.st_mtim.tv_nsec));
+                append_u64(data, stat.st_dev);
+                append_u64(data, stat.st_ino);
+            } else if (owner.shutting_down) {
+                status = UV_ECANCELED;
+            }
+            uv_fs_req_cleanup(request);
+            const auto id = operation.id.value;
+            if (!owner.shutting_down) {
+                owner.queue_path_stat_result(operation, status, kind, std::move(data));
+            }
+            owner.path_stats.erase(id);
+        });
     }
 
     static void on_directory_scan(uv_fs_t* request) noexcept {
@@ -766,6 +870,7 @@ struct Runtime::Impl {
     std::unordered_map<std::uint64_t, std::unique_ptr<FileRead>> file_reads;
     std::unordered_map<std::uint64_t, std::unique_ptr<FileWrite>> file_writes;
     std::unordered_map<std::uint64_t, std::unique_ptr<DirectoryScan>> directory_scans;
+    std::unordered_map<std::uint64_t, std::unique_ptr<PathStat>> path_stats;
 };
 
 Runtime::Runtime() : impl_(std::make_unique<Impl>()) {}
@@ -789,6 +894,10 @@ SourceId Runtime::write_file(std::string path, std::vector<std::byte> data) {
 
 SourceId Runtime::scan_directory(std::string path) {
     return impl_->scan_directory(std::move(path));
+}
+
+SourceId Runtime::stat_path(std::string path, bool follow_symlinks) {
+    return impl_->stat_path(std::move(path), follow_symlinks);
 }
 
 bool Runtime::cancel(SourceId source) {

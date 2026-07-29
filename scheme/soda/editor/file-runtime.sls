@@ -10,7 +10,7 @@
 
   (define-record-type
     (file-runtime %make-file-runtime file-runtime?)
-    (fields runtime pending))
+    (fields runtime pending reads-by-path))
 
   (define (condition->string condition)
     (call-with-string-output-port
@@ -31,7 +31,8 @@
     (let ([adapter
             (%make-file-runtime
               runtime
-              (make-eqv-hashtable))])
+              (make-eqv-hashtable)
+              (make-hashtable string-hash string=?))])
       (register-effect-handler!
         executor
         'file.read
@@ -41,7 +42,26 @@
               'file.read
               "expected an open request"
               request))
-          (guard (condition
+          (let* ([path (open-request-path request)]
+                 [existing
+                   (hashtable-ref
+                     (file-runtime-reads-by-path adapter)
+                     path
+                     #f)])
+            (if existing
+                (begin
+                  (unless
+                    (memv
+                      (open-request-view-id request)
+                      (vector-ref existing 1))
+                    (vector-set!
+                      existing
+                      1
+                      (append
+                        (vector-ref existing 1)
+                        (list (open-request-view-id request)))))
+                  (make-effect-result #t '()))
+                (guard (condition
                    [else
                     (make-effect-result
                       #t
@@ -54,17 +74,24 @@
                             (make-bytevector 0)
                             (condition->string condition)))))])
             (let ([source
-                    (runtime-read-file!
+                    (runtime-stat-path!
                       runtime
-                      (open-request-path request))])
+                      path)])
+              (let ([target
+                      (vector
+                        'stat
+                        (list (open-request-view-id request))
+                        path
+                        source)])
               (hashtable-set!
                 (file-runtime-pending adapter)
                 source
-                (vector
-                  'read
-                  (open-request-view-id request)
-                  (open-request-path request)))
-              (make-effect-result #t '())))))
+                target)
+              (hashtable-set!
+                (file-runtime-reads-by-path adapter)
+                path
+                target))
+              (make-effect-result #t '())))))))
       (register-effect-handler!
         executor
         'file.write
@@ -114,7 +141,7 @@
         'file-runtime-handle-event
         "expected a runtime event"
         event))
-    (if (not (memq (event-kind event) '(file-read file-write)))
+    (if (not (memq (event-kind event) '(path-stat file-read file-write)))
         #f
         (let* ([pending (file-runtime-pending adapter)]
                [target
@@ -127,7 +154,62 @@
               (begin
                 (hashtable-delete! pending (event-source event))
                 (case (vector-ref target 0)
+                  [(stat)
+                   (let ([views (vector-ref target 1)]
+                         [path (vector-ref target 2)]
+                         [status (event-status event)])
+                     (cond
+                       [(and
+                          (zero? status)
+                          (not (= (event-flags event) 2)))
+                        (guard (condition
+                                 [else
+                                  (hashtable-delete!
+                                    (file-runtime-reads-by-path adapter)
+                                    path)
+                                  (make-internal-command-message
+                                    'file.apply-open-result
+                                    (make-open-result
+                                      views
+                                      path
+                                      -1
+                                      (make-bytevector 0)
+                                      #f
+                                      (condition->string condition)
+                                      #f))])
+                          (let ([source
+                                  (runtime-read-file!
+                                    (file-runtime-runtime adapter)
+                                    path)])
+                            (vector-set! target 0 'read)
+                            (vector-set! target 3 source)
+                            (hashtable-set! pending source target)
+                            #f))]
+                       [else
+                        (hashtable-delete!
+                          (file-runtime-reads-by-path adapter)
+                          path)
+                        (make-internal-command-message
+                          'file.apply-open-result
+                          (make-open-result
+                            views
+                            path
+                            status
+                            (make-bytevector 0)
+                            (and
+                              (negative? status)
+                              (runtime-status-name status))
+                            (and
+                              (negative? status)
+                              (runtime-status-message status))
+                            (and
+                              (zero? status)
+                              (= (event-flags event) 2)
+                              'directory)))]))]
                   [(read)
+                   (hashtable-delete!
+                     (file-runtime-reads-by-path adapter)
+                     (vector-ref target 2))
                    (make-internal-command-message
                      'file.apply-open-result
                      (make-open-result
@@ -141,8 +223,9 @@
                            (event-status event)))
                        (and
                          (negative? (event-status event))
-                         (runtime-status-message
-                           (event-status event)))))]
+                           (runtime-status-message
+                           (event-status event)))
+                       #f))]
                   [(write)
                    (make-internal-command-message
                      'file.apply-save-result

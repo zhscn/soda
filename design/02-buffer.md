@@ -114,9 +114,11 @@ Buffer {
 }
 ```
 
-`Document` 不知道 resource、dirty 状态、major mode 或 view。`resource` 是显示与
-project identity，`file_path` 是可写入的本地路径；generated Buffer 可以有
-resource 而没有 file path。Buffer 比较保存时的 undo node 与当前 undo position
+`Document` 不知道 resource、dirty 状态、major mode 或 view。`resource` 是 editor
+内唯一的访问 identity，`file_path` 是可写入的本地路径；generated Buffer 可以有
+resource 而没有 file path。Editor 维护 `resource -> Buffer` 索引，Buffer 加入、
+移除或在另存为成功后更换 resource 时原子更新该索引。Buffer 比较保存时的 undo node
+与当前 undo position
 决定 modified 状态，因此 undo 回保存点会恢复 clean，沿其他分支继续编辑则保持
 modified。`saved_revision` 用于标识实际写入的 snapshot；Buffer 负责在 commit、
 undo、redo 后同步 language runtime。
@@ -153,18 +155,21 @@ Buffer 所在目录；没有文件路径的 Buffer 使用进程当前目录。ch
 分隔符，使不同的词法写法引用同一个文件 Buffer。
 
 最终文件路径通过 `file.read` effect 提交。请求携带发起操作的 view identity；
-runtime adapter 只负责把 native source 与请求关联，文件内容和完成状态以 internal
-command 返回 editor。成功结果创建带 `file_path` 的 Buffer，根据路径选择初始
-major mode，并记录原始换行约定。
+runtime adapter 先异步 stat 路径，再按结果进入目录、读取或新文件分支。目录重新
+打开以该目录为初值的 find-file，普通文件启动异步 read，`ENOENT` 直接进入新文件
+分支。文件内容和完成状态以 internal command 返回 editor。成功结果创建带
+`file_path` 的 Buffer，根据路径选择初始 major mode，并记录原始换行约定。
 
 runtime 把 libuv status 转换成稳定的错误名和消息。`ENOENT` 结果创建一个访问该
 路径的空 Buffer，并设置首次保存要求；该 Buffer 即使尚无文本编辑也处于 modified
 状态，首次 `file.save` 会创建文件并清除要求。权限、I/O 和其他读取错误只报告失败，
 不创建 Buffer。
 
-同一路径已有 Buffer 时复用其 identity，不重复读取或创建 Document。异步读取完成
-时，结果显示到发起请求的 view；该 view 已关闭时，Buffer 仍加入全局 Buffer 集合，
-供后续显示策略选择。
+同一 resource 已有 Buffer 时通过索引复用其 identity，不重复读取或创建 Document。
+同一路径在 stat 或 read 期间收到的打开请求共享一个 native 操作，并累积请求 view。
+完成时结果显示到仍然存在的全部请求 view；这些 view 均已关闭时，Buffer 仍加入全局
+Buffer 集合，供后续显示策略选择。启动参数、find-file 与 save-as 使用相同的绝对化
+和词法归一化规则；stat 默认跟随符号链接，因此符号链接目录进入目录分支。
 
 `buffer.switch` 从命令发起时存在的 Buffer 集合构造 must-match completion source。
 候选携带 Buffer identity，显示名只用于筛选和呈现。minibuffer 自身的临时 Buffer

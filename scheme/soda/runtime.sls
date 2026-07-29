@@ -9,6 +9,7 @@
           runtime-read-file!
           runtime-write-file!
           runtime-scan-directory!
+          runtime-stat-path!
           runtime-cancel!
           runtime-status-name
           runtime-status-message
@@ -40,7 +41,7 @@
     (foreign-procedure __atomic "soda_runtime_abi_version" () unsigned-32))
 
   (define abi-version-checked
-    (unless (= (%abi-version) 4)
+    (unless (= (%abi-version) 5)
       (error 'soda-runtime "unsupported native runtime ABI version")))
 
   (define %runtime-create
@@ -64,6 +65,10 @@
   (define %scan-directory
     (foreign-procedure __atomic "soda_runtime_scan_directory"
                        (void* string)
+                       unsigned-64))
+  (define %stat-path
+    (foreign-procedure __atomic "soda_runtime_stat_path"
+                       (void* string int)
                        unsigned-64))
   (define %cancel
     (foreign-procedure __atomic "soda_runtime_cancel" (void* unsigned-64) int))
@@ -222,6 +227,25 @@
           (native-error 'runtime-scan-directory! runtime)
           source)))
 
+  (define runtime-stat-path!
+    (case-lambda
+      [(runtime path) (runtime-stat-path! runtime path #t)]
+      [(runtime path follow-symlinks?)
+       (require-runtime 'runtime-stat-path! runtime)
+       (unless (and (string? path) (positive? (string-length path)))
+         (assertion-violation
+           'runtime-stat-path!
+           "path must be a non-empty string"
+           path))
+       (let ([source
+               (%stat-path
+                 (runtime-pointer runtime)
+                 path
+                 (if follow-symlinks? 1 0))])
+         (if (zero? source)
+             (native-error 'runtime-stat-path! runtime)
+             source))]))
+
   (define (runtime-cancel! runtime source)
     (require-runtime 'runtime-cancel! runtime)
     (let ([status (%cancel (runtime-pointer runtime) source)])
@@ -358,6 +382,7 @@
       [(3) 'file-read]
       [(4) 'file-write]
       [(5) 'directory-scan]
+      [(6) 'path-stat]
       [else (error 'runtime-poll! "unknown native event kind" value)]))
 
   (define (copy-current-data pointer)

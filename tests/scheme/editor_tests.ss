@@ -589,7 +589,14 @@
     ""))
 (define created-document-id
   (document-id (buffer-document created-buffer)))
+(unless
+  (eq?
+    (editor-buffer-for-resource editor "*created-one*")
+    created-buffer)
+  (error 'editor-tests "editor did not index the buffer resource"))
 (editor-remove-buffer! editor (buffer-id created-buffer))
+(when (editor-buffer-for-resource editor "*created-one*")
+  (error 'editor-tests "removed buffer remained in the resource index"))
 (define recreated-buffer
   (editor-create-buffer!
     editor

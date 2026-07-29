@@ -1,6 +1,7 @@
 (library (soda editor tui)
   (export run-tui-editor render-editor-frame)
   (import (rnrs)
+          (only (chezscheme) current-directory)
           (soda document)
           (soda editor buffer)
           (soda editor command-runtime)
@@ -13,6 +14,7 @@
           (soda editor repl)
           (soda editor vfs-runtime)
           (soda runtime)
+          (soda vfs)
           (soda tui commands)
           (soda tui input)
           (soda tui presenter)
@@ -65,17 +67,52 @@
   (define (load-bytes runtime path)
     (if (not path)
         (values (make-bytevector 0) #f)
-        (let ([source (runtime-read-file! runtime path)])
+        (let ([stat-source (runtime-stat-path! runtime path)])
           (let loop ()
             (let find ([events (runtime-poll! runtime)])
               (cond
                 [(null? events) (loop)]
-                [(and (= (event-source (car events)) source)
-                      (eq? (event-kind (car events)) 'file-read))
+                [(and (= (event-source (car events)) stat-source)
+                      (eq? (event-kind (car events)) 'path-stat))
                  (let ([status (event-status (car events))])
                    (cond
+                     [(and
+                        (zero? status)
+                        (= (event-flags (car events)) 2))
+                      (error
+                        'run-tui-editor
+                        "startup resource is a directory"
+                        path)]
                      [(zero? status)
-                      (values (event-data (car events)) #f)]
+                      (let ([read-source
+                              (runtime-read-file! runtime path)])
+                        (let read-loop ()
+                          (let read-find
+                            ([read-events (runtime-poll! runtime)])
+                            (cond
+                              [(null? read-events) (read-loop)]
+                              [(and
+                                 (= (event-source (car read-events))
+                                    read-source)
+                                 (eq?
+                                   (event-kind (car read-events))
+                                   'file-read))
+                               (if
+                                 (zero?
+                                   (event-status (car read-events)))
+                                 (values
+                                   (event-data (car read-events))
+                                   #f)
+                                 (error
+                                   'run-tui-editor
+                                   "cannot read file"
+                                   path
+                                   (runtime-status-message
+                                     (event-status
+                                       (car read-events)))))]
+                              [else
+                               (read-find
+                                 (cdr read-events))]))))]
                      [(string=?
                         (runtime-status-name status)
                         "ENOENT")
@@ -324,7 +361,7 @@
                    (process (cdr events) continue?)]
                   [(memq
                      (event-kind (car events))
-                     '(file-read file-write))
+                     '(path-stat file-read file-write))
                    (let ([message
                            (file-runtime-handle-event
                              file-adapter
@@ -378,13 +415,19 @@
   (define (run-tui-editor path)
     (call-with-runtime
       (lambda (runtime)
-        (call-with-values
-          (lambda () (load-bytes runtime path))
+        (let ([resource
+                (and
+                  path
+                  (vfs-resolve-path
+                    (vfs-directory-path (current-directory))
+                    path))])
+          (call-with-values
+          (lambda () (load-bytes runtime resource))
           (lambda (bytes new-file?)
             (call-with-editor
               bytes
-              (or path "*scratch*")
-              path
+              (or resource "*scratch*")
+              resource
               new-file?
               (lambda (editor)
                 (call-with-terminal
@@ -392,4 +435,4 @@
                     (run-editor-session
                       runtime
                       terminal
-                      editor)))))))))))
+                      editor))))))))))))

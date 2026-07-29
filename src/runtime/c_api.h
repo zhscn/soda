@@ -28,8 +28,9 @@ typedef struct soda_terminal soda_terminal;
 #define SODA_EVENT_FILE_READ 3U
 #define SODA_EVENT_FILE_WRITE 4U
 #define SODA_EVENT_DIRECTORY_SCAN 5U
+#define SODA_EVENT_PATH_STAT 6U
 
-#define SODA_RUNTIME_ABI_VERSION 4U
+#define SODA_RUNTIME_ABI_VERSION 5U
 
 #define SODA_FD_READABLE (1U << 0U)
 #define SODA_FD_WRITABLE (1U << 1U)
@@ -46,6 +47,8 @@ SODA_RUNTIME_API uint64_t soda_runtime_read_file(soda_runtime* runtime, const ch
 SODA_RUNTIME_API uint64_t soda_runtime_write_file(soda_runtime* runtime, const char* path,
                                                   const uint8_t* data, size_t size);
 SODA_RUNTIME_API uint64_t soda_runtime_scan_directory(soda_runtime* runtime, const char* path);
+SODA_RUNTIME_API uint64_t soda_runtime_stat_path(soda_runtime* runtime, const char* path,
+                                                 int follow_symlinks);
 SODA_RUNTIME_API int soda_runtime_cancel(soda_runtime* runtime, uint64_t source);
 
 SODA_RUNTIME_API int soda_runtime_poll(soda_runtime* runtime, int mode);
@@ -64,6 +67,9 @@ SODA_RUNTIME_API size_t soda_runtime_event_data_size(soda_runtime* runtime);
 // Directory-scan data is a sequence of entries:
 //   uint8_t libuv_dirent_type, uint32_t little-endian name_size,
 //   name_size bytes of UTF-8 name.
+// Successful path-stat data contains five little-endian uint64_t values:
+//   size, mtime seconds, mtime nanoseconds, device, inode.
+// Its event flags contain the libuv directory-entry type of the resource.
 // Borrowed view of the current event payload. The pointer remains valid until
 // the next operation that advances the current event or destroys the runtime.
 SODA_RUNTIME_API const uint8_t* soda_runtime_event_data(soda_runtime* runtime);

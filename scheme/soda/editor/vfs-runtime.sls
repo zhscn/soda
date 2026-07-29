@@ -3,11 +3,6 @@
           vfs-runtime?
           vfs-runtime-handle-event)
   (import (rnrs)
-          (only (chezscheme)
-                directory-separator
-                getenv
-                path-absolute?
-                path-build)
           (soda editor completion)
           (soda editor completion-provider)
           (soda editor event)
@@ -24,29 +19,6 @@
       (integer? value)
       (exact? value)
       (not (negative? value))))
-
-  (define (path-separator? character)
-    (or
-      (char=? character #\/)
-      (char=? character (directory-separator))))
-
-  (define (path-field-start input point)
-    (let loop ([index (- point 1)])
-      (cond
-        [(negative? index) 0]
-        [(path-separator? (string-ref input index)) (+ index 1)]
-        [else (loop (- index 1))])))
-
-  (define (expand-home-path path)
-    (let ([home (getenv "HOME")])
-      (if
-        (and
-          home
-          (> (string-length path) 1)
-          (char=? (string-ref path 0) #\~)
-          (path-separator? (string-ref path 1)))
-        (path-build home (substring path 2 (string-length path)))
-        path)))
 
   (define (completion-directory request)
     (let ([context (completion-request-context request)])
@@ -70,19 +42,13 @@
                  base-entry
                  (string? (cdr base-entry))
                  (cdr base-entry))]
-             [start (path-field-start input point)]
-             [prefix
-               (expand-home-path
-                 (substring input 0 start))])
+             )
         (unless base
           (assertion-violation
             'filesystem-completion
             "file completion has no base directory"
             metadata))
-        (cond
-          [(zero? (string-length prefix)) base]
-          [(path-absolute? prefix) prefix]
-          [else (path-build base prefix)]))))
+        (vfs-completion-directory base input point))))
 
   (define (entry->completion-item directory entry)
     (let* ([name (vfs-entry-name entry)]
@@ -90,11 +56,9 @@
            [directory? (eq? kind 'directory)]
            [text
              (if directory?
-                 (string-append
-                   name
-                   (string (directory-separator)))
+                 (vfs-directory-path name)
                  name)]
-           [path (path-build directory name)])
+           [path (vfs-path-join directory name)])
       (make-completion-item
         path
         'filesystem

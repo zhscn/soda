@@ -8,6 +8,8 @@
           editor-add-buffer!
           editor-create-buffer!
           editor-remove-buffer!
+          editor-buffer-for-resource
+          editor-set-buffer-resource!
           editor-views
           editor-view-ref
           editor-open-view!

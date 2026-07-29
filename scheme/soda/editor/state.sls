@@ -9,6 +9,8 @@
           editor-add-buffer!
           editor-create-buffer!
           editor-remove-buffer!
+          editor-buffer-for-resource
+          editor-set-buffer-resource!
           editor-views
           editor-view-ref
           editor-open-view!
@@ -157,6 +159,7 @@
   (define-record-type (editor %make-editor editor?)
     (fields
       (immutable buffer-table editor-buffer-table)
+      (immutable resource-table editor-resource-table)
       (mutable buffer-ids editor-buffer-ids editor-buffer-ids-set!)
       (mutable next-buffer-id
                editor-next-buffer-id
@@ -478,6 +481,87 @@
           "unknown buffer id"
           id)))
 
+  (define (editor-buffer-for-resource value resource)
+    (require-open-editor 'editor-buffer-for-resource value)
+    (unless (string? resource)
+      (assertion-violation
+        'editor-buffer-for-resource
+        "resource must be a string"
+        resource))
+    (hashtable-ref (editor-resource-table value) resource #f))
+
+  (define (register-buffer-resource! value buffer)
+    (let ([resource (buffer-resource buffer)])
+      (when resource
+        (let ([existing
+                (hashtable-ref
+                  (editor-resource-table value)
+                  resource
+                  #f)])
+          (when (and existing (not (eq? existing buffer)))
+            (assertion-violation
+              'editor-add-buffer!
+              "resource is already visited"
+              resource))
+          (hashtable-set!
+            (editor-resource-table value)
+            resource
+            buffer)))))
+
+  (define (editor-set-buffer-resource! value buffer resource)
+    (require-open-editor 'editor-set-buffer-resource! value)
+    (unless (buffer? buffer)
+      (assertion-violation
+        'editor-set-buffer-resource!
+        "expected a buffer"
+        buffer))
+    (unless (or (not resource) (string? resource))
+      (assertion-violation
+        'editor-set-buffer-resource!
+        "resource must be a string or #f"
+        resource))
+    (unless
+      (eq?
+        (hashtable-ref
+          (editor-buffer-table value)
+          (buffer-id buffer)
+          #f)
+        buffer)
+      (assertion-violation
+        'editor-set-buffer-resource!
+        "buffer is not registered with this editor"
+        buffer))
+    (let ([old-resource (buffer-resource buffer)])
+      (unless (equal? old-resource resource)
+        (when resource
+          (let ([existing
+                  (hashtable-ref
+                    (editor-resource-table value)
+                    resource
+                    #f)])
+            (when (and existing (not (eq? existing buffer)))
+              (assertion-violation
+                'editor-set-buffer-resource!
+                "resource is already visited"
+                resource))))
+        (when
+          (and
+            old-resource
+            (eq?
+              (hashtable-ref
+                (editor-resource-table value)
+                old-resource
+                #f)
+              buffer))
+          (hashtable-delete! (editor-resource-table value) old-resource))
+        (buffer-set-resource! buffer resource)
+        (when resource
+          (hashtable-set!
+            (editor-resource-table value)
+            resource
+            buffer))))
+    buffer)
+
   (define (editor-add-buffer! value buffer)
     (require-open-editor 'editor-add-buffer! value)
     (unless (buffer? buffer)
@@ -502,6 +586,7 @@
           'editor-add-buffer!
           "buffer id is already registered"
           id))
+      (register-buffer-resource! value buffer)
       (hashtable-set! (editor-buffer-table value) id buffer)
       (editor-buffer-ids-set!
         value
@@ -567,6 +652,17 @@
           "buffer is displayed by a view"
           id))
       (hashtable-delete! (editor-buffer-table value) id)
+      (let ([resource (buffer-resource buffer)])
+        (when
+          (and
+            resource
+            (eq?
+              (hashtable-ref
+                (editor-resource-table value)
+                resource
+                #f)
+              buffer))
+          (hashtable-delete! (editor-resource-table value) resource)))
       (editor-buffer-ids-set!
         value
         (filter
@@ -2383,6 +2479,7 @@
     (when (buffer-closed? buffer)
       (assertion-violation 'make-editor-state "buffer is closed" buffer))
     (let* ([buffers (make-eqv-hashtable)]
+           [resources (make-hashtable string-hash string=?)]
            [views (make-eqv-hashtable)]
            [interactions (make-eqv-hashtable)]
            [prompts (make-eqv-hashtable)]
@@ -2415,6 +2512,7 @@
            [value
              (%make-editor
                buffers
+               resources
                (list (buffer-id buffer))
                (+ (buffer-id buffer) 1)
                (+ (document-id (buffer-document buffer)) 1)
@@ -2448,6 +2546,7 @@
                #f
                #f)])
       (hashtable-set! buffers (buffer-id buffer) buffer)
+      (register-buffer-resource! value buffer)
       (hashtable-set! views 1 view)
       (keymap-catalog-register! keymaps 'editor.override (make-keymap))
       (keymap-catalog-register! keymaps 'editor.default (make-keymap))

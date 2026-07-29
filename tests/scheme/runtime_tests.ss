@@ -38,6 +38,29 @@
   (unless (positive? (bytevector-length (event-data event)))
     (error 'runtime-tests "file read returned no data" event)))
 
+(define file-stat (runtime-stat-path! runtime test-file))
+(let* ([events (runtime-poll! runtime)]
+       [event (and (= (length events) 1) (car events))]
+       [stat
+         (and
+           event
+           (zero? (event-status event))
+           (decode-vfs-stat
+             (event-flags event)
+             (event-data event)))])
+  (unless
+    (and
+      event
+      (= (event-source event) file-stat)
+      (eq? (event-kind event) 'path-stat)
+      stat
+      (eq? (vfs-stat-kind stat) 'file)
+      (positive? (vfs-stat-size stat))
+      (positive? (vfs-stat-inode stat)))
+    (error 'runtime-tests
+           "stat did not return typed VFS metadata"
+           events)))
+
 (define directory-scan
   (runtime-scan-directory! runtime (path-parent test-file)))
 (let* ([events (runtime-poll! runtime)]
