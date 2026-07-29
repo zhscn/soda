@@ -115,15 +115,28 @@ state，并保留栈底 state。该命令位于 Editor override 层，因此普�
 
 ## Selection、motion 与 verb
 
-Selection 属于 View：
+View 持有一个 primary region：
 
 ```text
-Range {
-  anchor: DocumentAnchor,
-  head: DocumentAnchor,
-  granularity: char | line | block | node
+PrimaryRegion {
+  mark: DocumentAnchor?,
+  head: DocumentAnchor,       // caret
+  active: bool
 }
+```
 
+mark 与 caret 都使用 Document anchor，因此 region 可跨普通编辑、undo 和 redo
+存活。普通 motion 在 mark active 时移动 head 并扩展 region；插入、删除、kill
+和 yank 把 active region 作为替换范围。切换 View 的 Buffer 或关闭 View 会释放
+mark anchor。
+
+Editor 拥有有界 kill ring。copy-region 和 kill-region 把 UTF-8 bytes 复制到 ring，
+yank 插入最新条目。ring 不属于 Document，不进入 undo tree；由 yank 产生的文本
+修改仍是普通 Buffer transaction。
+
+多 range selection 可以把 primary region 泛化为：
+
+```text
 Selection {
   ranges: non-empty vector<Range>,
   primary,
@@ -131,8 +144,7 @@ Selection {
 }
 ```
 
-primary range 的 head 是 caret。多 range 命令把全部 edit 放进一个 transaction。
-selection 使用 Document anchor，因此可跨普通编辑存活。
+多 range 命令把全部 edit 放进一个 transaction。
 
 motion 是纯函数：
 

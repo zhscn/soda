@@ -105,10 +105,12 @@ cmk build -c Debug
 
 Printable input inserts text. Backspace deletes the previous UTF-8 code point,
 the arrow keys move the caret, Enter inserts a newline, `C-x =` describes the
-character and rendered faces at point, `C-c C-z` toggles the Chez REPL, and
-`C-x C-s` saves a buffer that has a file path. `C-q` exits clean state, waits
-for an active save, and requires a second press before discarding modified
-buffers. Enter submits the editable input while the REPL transcript is active.
+character and rendered faces at point, `C-Space` sets the mark, `M-w` copies
+the region, `C-w` kills it, and `C-y` yanks the latest kill. `C-c C-z` toggles
+the Chez REPL, and `C-x C-s` saves the active buffer. `C-q` exits clean state,
+waits for an active save, and requires a second press before discarding
+modified buffers. Enter submits the editable input while the REPL transcript
+is active.
 File saves capture a document revision and undo node, atomically replace the
 target, and complete asynchronously; edits made while a save is in flight
 remain marked as modified.

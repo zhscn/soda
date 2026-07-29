@@ -30,6 +30,9 @@
   (define completion-selected-style
     (make-style 'default 'default '(reverse)))
 
+  (define selection-style
+    (make-style 'default 'default '(reverse)))
+
   (define (decode-text bytes)
     (utf8->string bytes))
 
@@ -54,16 +57,24 @@
             buffer-id
             position
             detail
-            component-id)
-    (make-cell
-      text
-      width
-      '(default)
-      default-style
-      position
-      (list
-        (document-source buffer-id position detail)
-        (component-source component-id))))
+            component-id
+            selection-start
+            selection-end)
+    (let ([selected?
+            (and
+              selection-start
+              selection-end
+              (<= selection-start position)
+              (< position selection-end))])
+      (make-cell
+        text
+        width
+        (if selected? '(default selection) '(default))
+        (if selected? selection-style default-style)
+        position
+        (list
+          (document-source buffer-id position detail)
+          (component-source component-id)))))
 
   (define (draw-document-line!
             frame
@@ -75,7 +86,9 @@
             tab-width
             first-column
             buffer-id
-            component-id)
+            component-id
+            selection-start
+            selection-end)
     (let ([value (decode-text bytes)]
           [limit (+ first-column (rect-columns rectangle))])
       (let loop ([index 0]
@@ -96,7 +109,9 @@
                     buffer-id
                     line-end
                     'line-end
-                    component-id)))
+                    component-id
+                    selection-start
+                    selection-end)))
               column)
             (let* ([character (string-ref value index)]
                    [byte-length (character-byte-length character)]
@@ -144,7 +159,9 @@
                            buffer-id
                            byte-position
                            'tab
-                           component-id)))))
+                           component-id
+                           selection-start
+                           selection-end)))))
                  (loop
                    (+ index 1)
                    (+ byte-position byte-length)
@@ -164,7 +181,9 @@
                        buffer-id
                        byte-position
                        character
-                       component-id)))
+                       component-id
+                       selection-start
+                       selection-end)))
                  (loop
                    (+ index 1)
                    (+ byte-position byte-length)
@@ -233,7 +252,10 @@
            [sources
              (list
                background-source
-               (component-source component-id))])
+               (component-source component-id))]
+           [region (view-region view)]
+           [selection-start (and region (car region))]
+           [selection-end (and region (cdr region))])
       (frame-fill-rect!
         frame
         rectangle
@@ -265,7 +287,9 @@
                 (editor-render-context-tab-width context)
                 (editor-render-context-first-column context)
                 (buffer-id buffer)
-                component-id)))))
+                component-id
+                selection-start
+                selection-end)))))
       (let ([cursor-row
               (+ (rect-row rectangle)
                  (- (editor-render-context-caret-line context)
@@ -403,7 +427,9 @@
                           8
                           (view-first-column view)
                           (buffer-id buffer)
-                          component-id)
+                          component-id
+                          #f
+                          #f)
                         (if (and (= caret-line line)
                                  (rect-contains?
                                    input-rectangle

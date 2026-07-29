@@ -52,6 +52,9 @@
           editor-pending-keys
           editor-status-message
           editor-set-status-message!
+          editor-kill-ring
+          editor-push-kill!
+          editor-current-kill
           editor-register-command!
           editor-bind-key!
           editor-execute-command!
@@ -92,6 +95,12 @@
           view-id
           view-buffer
           view-caret
+          view-mark
+          view-mark-active?
+          view-set-mark!
+          view-deactivate-mark!
+          view-clear-mark!
+          view-region
           view-first-line
           view-first-column
           view-viewport-rows

@@ -42,6 +42,18 @@
           (when change
             (change-close! change))))))
 
+  (define (buffer-range-bytes buffer start end)
+    (let ([snapshot (document-snapshot (buffer-document buffer))])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (let ([text (snapshot-text snapshot)])
+            (dynamic-wind
+              (lambda () #f)
+              (lambda () (text-subbytevector text start end))
+              (lambda () (text-close! text)))))
+        (lambda () (snapshot-close! snapshot)))))
+
   (define (previous-character-offset text caret)
     (if (zero? caret)
         0
@@ -118,54 +130,77 @@
                [(and event (key-event? event)) (key-event-text event)]
                [else (make-bytevector 0)])]
            [view (context-view context)]
-           [caret (view-caret view)])
+           [caret (view-caret view)]
+           [region (view-region view)]
+           [start (if region (car region) caret)]
+           [end (if region (cdr region) caret)])
       (unless (zero? (bytevector-length bytes))
-        (replace! (context-buffer context) caret caret bytes)
-        (view-set-caret! view (+ caret (bytevector-length bytes))))
+        (replace! (context-buffer context) start end bytes)
+        (view-set-caret! view (+ start (bytevector-length bytes)))
+        (when region
+          (view-clear-mark! view)))
       '()))
 
   (define (backward-delete-command context)
     (let* ([view (context-view context)]
            [caret (view-caret view)]
+           [region (view-region view)]
            [start
-             (with-document-text
-               (context-document context)
-               (lambda (text)
-                 (previous-character-offset text caret)))])
-      (when (< start caret)
+             (if region
+                 (car region)
+                 (with-document-text
+                   (context-document context)
+                   (lambda (text)
+                     (previous-character-offset text caret))))]
+           [end (if region (cdr region) caret)])
+      (when (< start end)
         (replace!
           (context-buffer context)
           start
-          caret
+          end
           (make-bytevector 0)))
       (view-set-caret! view start)
+      (when region
+        (view-clear-mark! view))
       '()))
 
   (define (forward-delete-command context)
     (let* ([view (context-view context)]
            [caret (view-caret view)]
+           [region (view-region view)]
+           [start (if region (car region) caret)]
            [end
-             (with-document-text
-               (context-document context)
-               (lambda (text)
-                 (next-character-offset text caret)))])
-      (when (> end caret)
+             (if region
+                 (cdr region)
+                 (with-document-text
+                   (context-document context)
+                   (lambda (text)
+                     (next-character-offset text caret))))])
+      (when (> end start)
         (replace!
           (context-buffer context)
-          caret
+          start
           end
           (make-bytevector 0)))
+      (when region
+        (view-set-caret! view start)
+        (view-clear-mark! view))
       '()))
 
   (define (newline-command context)
     (let* ([view (context-view context)]
-           [caret (view-caret view)])
+           [caret (view-caret view)]
+           [region (view-region view)]
+           [start (if region (car region) caret)]
+           [end (if region (cdr region) caret)])
       (replace!
         (context-buffer context)
-        caret
-        caret
+        start
+        end
         (make-bytevector 1 10))
-      (view-set-caret! view (+ caret 1))
+      (view-set-caret! view (+ start 1))
+      (when region
+        (view-clear-mark! view))
       '()))
 
   (define (backward-character-command context)
@@ -219,6 +254,88 @@
               text
               (car (text-position text (view-caret view))))))))
     '())
+
+  (define (set-mark-command context)
+    (let* ([editor (command-context-editor context)]
+           [view (context-view context)]
+           [caret (view-caret view)])
+      (view-set-mark! view caret)
+      (editor-set-status-message! editor "Mark set")
+      '()))
+
+  (define (exchange-point-and-mark-command context)
+    (let* ([editor (command-context-editor context)]
+           [view (context-view context)]
+           [mark (view-mark view)])
+      (if (not mark)
+          (editor-set-status-message! editor "No mark set")
+          (let ([caret (view-caret view)])
+            (view-set-mark! view caret)
+            (view-set-caret! view mark)
+            (editor-set-status-message!
+              editor
+              "Point and mark exchanged")))
+      '()))
+
+  (define (copy-region-command context)
+    (let* ([editor (command-context-editor context)]
+           [view (context-view context)]
+           [region (view-region view)])
+      (if (or (not region) (= (car region) (cdr region)))
+          (editor-set-status-message! editor "Region is empty")
+          (begin
+            (editor-push-kill!
+              editor
+              (buffer-range-bytes
+                (context-buffer context)
+                (car region)
+                (cdr region)))
+            (view-deactivate-mark! view)
+            (editor-set-status-message! editor "Region copied")))
+      '()))
+
+  (define (kill-region-command context)
+    (let* ([editor (command-context-editor context)]
+           [view (context-view context)]
+           [region (view-region view)])
+      (if (or (not region) (= (car region) (cdr region)))
+          (editor-set-status-message! editor "Region is empty")
+          (let ([start (car region)] [end (cdr region)])
+            (editor-push-kill!
+              editor
+              (buffer-range-bytes
+                (context-buffer context)
+                start
+                end))
+            (replace!
+              (context-buffer context)
+              start
+              end
+              (make-bytevector 0))
+            (view-set-caret! view start)
+            (view-clear-mark! view)
+            (editor-set-status-message! editor "Region killed")))
+      '()))
+
+  (define (yank-command context)
+    (let* ([editor (command-context-editor context)]
+           [view (context-view context)]
+           [bytes (editor-current-kill editor)]
+           [region (view-region view)]
+           [caret (view-caret view)]
+           [start (if region (car region) caret)]
+           [end (if region (cdr region) caret)])
+      (if (not bytes)
+          (editor-set-status-message! editor "Kill ring is empty")
+          (begin
+            (replace! (context-buffer context) start end bytes)
+            (view-set-caret!
+              view
+              (+ start (bytevector-length bytes)))
+            (when region
+              (view-clear-mark! view))
+            (editor-set-status-message! editor "Yanked")))
+      '()))
 
   (define (apply-history-command context operation empty-message success-message)
     (let* ([editor (command-context-editor context)]
@@ -282,10 +399,12 @@
                '()))]
         [(view-completion view)
          (editor-cancel-completion! editor)
+         (view-deactivate-mark! view)
          (editor-set-pending-keys! editor '())
          (editor-set-status-message! editor #f)
          '()]
         [else
+         (view-deactivate-mark! view)
          (view-reset-input-states! view)
          (editor-set-pending-keys! editor '())
          (editor-set-status-message! editor #f)
@@ -392,7 +511,24 @@
           line-end-command
           "Move to the end of the line.")
         (list 'edit.undo undo-command "Undo the previous buffer change.")
-        (list 'edit.redo redo-command "Redo the next buffer change.")))
+        (list 'edit.redo redo-command "Redo the next buffer change.")
+        (list 'mark.set set-mark-command "Set the mark at point.")
+        (list
+          'mark.exchange-point-and-mark
+          exchange-point-and-mark-command
+          "Exchange point and mark.")
+        (list
+          'edit.copy-region
+          copy-region-command
+          "Copy the active region to the kill ring.")
+        (list
+          'edit.kill-region
+          kill-region-command
+          "Kill the active region.")
+        (list
+          'edit.yank
+          yank-command
+          "Insert the newest kill-ring entry.")))
     (for-each
       (lambda (entry)
         (editor-bind-key! editor (list (car entry)) (cdr entry)))
@@ -409,13 +545,23 @@
         (cons (stroke 'end #f 0) 'move.line-end)
         (cons (stroke 'character (char->integer #\z) 4) 'edit.undo)
         (cons (stroke 'character (char->integer #\/) 4) 'edit.undo)
-        (cons (stroke 'character (char->integer #\z) 5) 'edit.redo)))
+        (cons (stroke 'character (char->integer #\z) 5) 'edit.redo)
+        (cons (stroke 'character (char->integer #\space) 4) 'mark.set)
+        (cons (stroke 'character (char->integer #\w) 2) 'edit.copy-region)
+        (cons (stroke 'character (char->integer #\w) 4) 'edit.kill-region)
+        (cons (stroke 'character (char->integer #\y) 4) 'edit.yank)))
     (editor-bind-key!
       editor
       (list
         (stroke 'character (char->integer #\x) 4)
         (stroke 'character (char->integer #\u) 0))
       'edit.undo)
+    (editor-bind-key!
+      editor
+      (list
+        (stroke 'character (char->integer #\x) 4)
+        (stroke 'character (char->integer #\x) 4))
+      'mark.exchange-point-and-mark)
     (keymap-bind!
       (keymap-catalog-ref
         (editor-keymap-catalog editor)

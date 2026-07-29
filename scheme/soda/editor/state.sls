@@ -56,6 +56,9 @@
           editor-set-pending-keys!
           editor-status-message
           editor-set-status-message!
+          editor-kill-ring
+          editor-push-kill!
+          editor-current-kill
           editor-quit-armed?
           editor-arm-quit!
           editor-disarm-quit!
@@ -63,6 +66,12 @@
           view-id
           view-buffer
           view-caret
+          view-mark
+          view-mark-active?
+          view-set-mark!
+          view-deactivate-mark!
+          view-clear-mark!
+          view-region
           view-preferred-column
           view-first-line
           view-first-column
@@ -101,6 +110,8 @@
       (immutable id view-id)
       (mutable buffer view-buffer view-buffer-set!)
       (mutable caret-anchor view-caret-anchor view-caret-anchor-set!)
+      (mutable mark-anchor view-mark-anchor view-mark-anchor-set!)
+      (mutable mark-active? view-mark-active? view-mark-active?-set!)
       (mutable preferred-column
                view-preferred-column
                view-preferred-column-set!)
@@ -160,6 +171,7 @@
       (mutable status-message
                editor-status-message
                editor-status-message-set!)
+      (mutable kill-ring editor-kill-ring editor-kill-ring-set!)
       (mutable quit-armed?
                editor-quit-armed?
                editor-quit-armed?-set!)
@@ -464,6 +476,8 @@
                  0
                  anchor-after-insertion)
                #f
+               #f
+               #f
                0
                0
                1
@@ -498,6 +512,10 @@
           "an open editor requires at least one view"
           id))
       (cancel-view-completion! value view)
+      (when (view-mark-anchor view)
+        (document-remove-anchor!
+          (buffer-document (view-buffer view))
+          (view-mark-anchor view)))
       (document-remove-anchor!
         (buffer-document (view-buffer view))
         (view-caret-anchor view)))
@@ -554,8 +572,14 @@
         (document-remove-anchor!
           (buffer-document (view-buffer view))
           (view-caret-anchor view))
+        (when (view-mark-anchor view)
+          (document-remove-anchor!
+            (buffer-document (view-buffer view))
+            (view-mark-anchor view)))
         (view-buffer-set! view buffer)
-        (view-caret-anchor-set! view anchor))
+        (view-caret-anchor-set! view anchor)
+        (view-mark-anchor-set! view #f)
+        (view-mark-active?-set! view #f))
       (view-first-line-set! view 0)
       (view-first-column-set! view 0)
       (view-reset-input-states! view)
@@ -1425,6 +1449,104 @@
       (buffer-document (view-buffer value))
       (view-caret-anchor value)))
 
+  (define (view-mark value)
+    (unless (view? value)
+      (assertion-violation 'view-mark "expected a view" value))
+    (and
+      (view-mark-anchor value)
+      (document-anchor-offset
+        (buffer-document (view-buffer value))
+        (view-mark-anchor value))))
+
+  (define (view-set-mark! value offset)
+    (unless (view? value)
+      (assertion-violation 'view-set-mark! "expected a view" value))
+    (unless (exact-non-negative-integer? offset)
+      (assertion-violation
+        'view-set-mark!
+        "offset must be a non-negative exact integer"
+        offset))
+    (let ([document (buffer-document (view-buffer value))])
+      (when (view-mark-anchor value)
+        (document-remove-anchor!
+          document
+          (view-mark-anchor value)))
+      (view-mark-anchor-set!
+        value
+        (document-create-anchor!
+          document
+          offset
+          anchor-before-insertion))
+      (view-mark-active?-set! value #t))
+    offset)
+
+  (define (view-deactivate-mark! value)
+    (unless (view? value)
+      (assertion-violation
+        'view-deactivate-mark!
+        "expected a view"
+        value))
+    (view-mark-active?-set! value #f))
+
+  (define (view-clear-mark! value)
+    (unless (view? value)
+      (assertion-violation 'view-clear-mark! "expected a view" value))
+    (when (view-mark-anchor value)
+      (document-remove-anchor!
+        (buffer-document (view-buffer value))
+        (view-mark-anchor value))
+      (view-mark-anchor-set! value #f))
+    (view-mark-active?-set! value #f))
+
+  (define (view-region value)
+    (unless (view? value)
+      (assertion-violation 'view-region "expected a view" value))
+    (let ([mark (and (view-mark-active? value) (view-mark value))])
+      (and mark
+           (let ([caret (view-caret value)])
+             (cons (min mark caret) (max mark caret))))))
+
+  (define (copy-bytevector value)
+    (let ([result (make-bytevector (bytevector-length value))])
+      (bytevector-copy!
+        value
+        0
+        result
+        0
+        (bytevector-length value))
+      result))
+
+  (define (take-prefix values count)
+    (if (or (zero? count) (null? values))
+        '()
+        (cons
+          (car values)
+          (take-prefix (cdr values) (- count 1)))))
+
+  (define (editor-push-kill! value bytes)
+    (require-open-editor 'editor-push-kill! value)
+    (unless (bytevector? bytes)
+      (assertion-violation
+        'editor-push-kill!
+        "kill text must be a bytevector"
+        bytes))
+    (editor-kill-ring-set!
+      value
+      (let ([entries
+              (cons
+                (copy-bytevector bytes)
+                (editor-kill-ring value))])
+        (if (> (length entries) 60)
+            (take-prefix entries 60)
+            entries)))
+    bytes)
+
+  (define (editor-current-kill value)
+    (require-open-editor 'editor-current-kill value)
+    (and
+      (pair? (editor-kill-ring value))
+      (copy-bytevector (car (editor-kill-ring value)))))
+
   (define (replace-view-caret-anchor! value offset)
     (let* ([document (buffer-document (view-buffer value))]
            [anchor
@@ -1655,6 +1777,8 @@
                  0
                  anchor-after-insertion)
                #f
+               #f
+               #f
                0
                0
                1
@@ -1691,6 +1815,7 @@
                (make-completion-provider-catalog)
                '()
                #f
+               '()
                #f
                #f)])
       (hashtable-set! buffers (buffer-id buffer) buffer)
@@ -1735,6 +1860,11 @@
                 (view-completion view)))
             (view-completion-set! view #f))
           (view-pending-keys-set! view '())
+          (when (view-mark-anchor view)
+            (document-remove-anchor!
+              (buffer-document (view-buffer view))
+              (view-mark-anchor view))
+            (view-mark-anchor-set! view #f))
           (document-remove-anchor!
             (buffer-document (view-buffer view))
             (view-caret-anchor view)))

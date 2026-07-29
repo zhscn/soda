@@ -692,6 +692,103 @@
   (error 'editor-tests "killing the last buffer did not create scratch"))
 (editor-close! kill-editor)
 
+(define region-document (make-document "alpha beta" 970))
+(define region-buffer
+  (make-buffer
+    970
+    region-document
+    "*region*"
+    'fundamental-mode))
+(define region-editor (make-editor region-buffer))
+(define region-view (editor-active-view region-editor))
+(editor-update! region-editor (make-resize-message 3 20))
+
+(editor-update!
+  region-editor
+  (make-command-message 'mark.set #f))
+(do ([index 0 (+ index 1)])
+    ((= index 5))
+  (editor-update!
+    region-editor
+    (make-command-message 'move.forward-character #f)))
+(unless
+  (and
+    (view-mark-active? region-view)
+    (= (view-mark region-view) 0)
+    (equal? (view-region region-view) '(0 . 5)))
+  (error 'editor-tests "mark and motion did not create a region"))
+
+(define region-frame (render-editor-frame region-editor 3 20))
+(unless
+  (and
+    (eq? (cell-face (frame-cell-ref region-frame 0 0))
+         'selection)
+    (equal?
+      (style-attributes
+        (cell-style (frame-cell-ref region-frame 0 0)))
+      '(reverse))
+    (eq? (cell-face (frame-cell-ref region-frame 0 5))
+         'default))
+  (error 'editor-tests "active region was not rendered as selection"))
+
+(editor-update!
+  region-editor
+  (make-command-message 'edit.copy-region #f))
+(unless
+  (and
+    (not (view-mark-active? region-view))
+    (bytevector=?
+      (editor-current-kill region-editor)
+      (string->utf8 "alpha"))
+    (bytevector=?
+      (buffer-bytes region-buffer)
+      (string->utf8 "alpha beta")))
+  (error 'editor-tests "copy-region did not populate the kill ring"))
+
+(editor-update!
+  region-editor
+  (make-command-message 'edit.yank #f))
+(unless
+  (and
+    (= (view-caret region-view) 10)
+    (bytevector=?
+      (buffer-bytes region-buffer)
+      (string->utf8 "alphaalpha beta")))
+  (error 'editor-tests "yank did not insert the latest kill"))
+
+(editor-update!
+  region-editor
+  (make-command-message 'edit.undo #f))
+(editor-update!
+  region-editor
+  (make-command-message 'mark.set #f))
+(editor-update!
+  region-editor
+  (make-command-message 'move.line-end #f))
+(editor-update!
+  region-editor
+  (make-command-message 'edit.kill-region #f))
+(unless
+  (and
+    (not (view-mark-active? region-view))
+    (bytevector=?
+      (editor-current-kill region-editor)
+      (string->utf8 " beta"))
+    (bytevector=?
+      (buffer-bytes region-buffer)
+      (string->utf8 "alpha")))
+  (error 'editor-tests "kill-region did not delete and retain the region"))
+
+(editor-update!
+  region-editor
+  (make-command-message 'edit.yank #f))
+(unless
+  (bytevector=?
+    (buffer-bytes region-buffer)
+    (string->utf8 "alpha beta"))
+  (error 'editor-tests "kill followed by yank did not restore text"))
+(editor-close! region-editor)
+
 (define prompt-document (make-document "body" 91))
 (define prompt-buffer
   (make-buffer
