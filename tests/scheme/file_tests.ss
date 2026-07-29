@@ -25,9 +25,12 @@
              (loop (+ index 1)))))))
 
 (define save-path (getenv "SODA_EDITOR_SAVE_TEST_FILE"))
+(define save-as-path (getenv "SODA_EDITOR_SAVE_AS_TEST_FILE"))
 (define open-path (getenv "SODA_EDITOR_OPEN_TEST_FILE"))
 (when (file-exists? save-path)
   (delete-file save-path))
+(when (file-exists? save-as-path)
+  (delete-file save-as-path))
 
 (define document (make-document "base" 801))
 (define buffer
@@ -76,6 +79,11 @@
     (make-key-stroke 'character (char->integer #\x) 4)
     (make-key-stroke 'character (char->integer #\b) 0))
   'buffer.switch)
+(assert-key-binding
+  (list
+    (make-key-stroke 'character (char->integer #\x) 4)
+    (make-key-stroke 'character (char->integer #\w) 4))
+  'file.save-as)
 
 (define (dispatch! message)
   (let loop ([messages (list message)])
@@ -142,8 +150,8 @@
         (when change
           (change-close! change))))))
 
-(define (read-saved-bytes)
-  (let ([source (runtime-read-file! runtime save-path)])
+(define (read-file-bytes path)
+  (let ([source (runtime-read-file! runtime path)])
     (let loop ()
       (let find ([events (runtime-poll! runtime)])
         (cond
@@ -184,7 +192,7 @@
        (not (buffer-save-pending? buffer))
        (= (buffer-saved-revision buffer) first-save-revision)
        (bytevector=?
-         (read-saved-bytes)
+         (read-file-bytes save-path)
          (string->utf8 "base one"))
        (string-contains?
          (editor-status-message editor)
@@ -201,7 +209,7 @@
        (not (buffer-save-pending? buffer))
        (= (buffer-saved-revision buffer) in-flight-revision)
        (bytevector=?
-         (read-saved-bytes)
+         (read-file-bytes save-path)
          (string->utf8 "base one two"))
        (string-contains?
          (editor-status-message editor)
@@ -226,9 +234,16 @@
 
 (buffer-set-file-path! buffer #f)
 (dispatch! (make-command-message 'file.save #f))
-(unless (string=? (editor-status-message editor)
-                  "Buffer has no file path")
-  (error 'file-tests "pathless buffer did not report save-as requirement"))
+(unless
+  (and
+    (editor-active-prompt editor)
+    (string=?
+      (prompt-request-prompt
+        (prompt-session-request
+          (editor-active-prompt editor)))
+      "Save as: "))
+  (error 'file-tests "pathless buffer did not enter save-as"))
+(dispatch! (make-command-message 'prompt.abort #f))
 
 (buffer-set-file-path! buffer save-path)
 (buffer-set-local-setting! buffer 'file-line-ending 'crlf)
@@ -237,11 +252,42 @@
 (finish-file-write!)
 (unless
   (bytevector=?
-    (read-saved-bytes)
+    (read-file-bytes save-path)
     (string->utf8 "base one two newer\r\nlast"))
   (error 'file-tests "save did not preserve the CRLF file convention"))
 
 (define origin-view-id (view-id (editor-active-view editor)))
+(dispatch! (make-command-message 'file.save-as #f))
+(unless
+  (and
+    (editor-active-prompt editor)
+    (string=?
+      (prompt-request-initial
+        (prompt-session-request
+          (editor-active-prompt editor)))
+      save-path))
+  (error 'file-tests "save-as did not initialize from the current path"))
+(dispatch! (make-command-message 'prompt.abort #f))
+(dispatch!
+  (make-command-message
+    'file.save-to-path
+    (make-prompt-result
+      99
+      'accepted
+      save-as-path
+      origin-view-id
+      #f)))
+(finish-file-write!)
+(unless
+  (and
+    (string=? (buffer-file-path buffer) save-as-path)
+    (string=? (buffer-resource buffer) save-as-path)
+    (not (buffer-modified? buffer))
+    (bytevector=?
+      (read-file-bytes save-as-path)
+      (string->utf8 "base one two newer\r\nlast")))
+  (error 'file-tests "save-as did not adopt the successfully written path"))
+
 (dispatch!
   (make-command-message
     'file.open-path
@@ -337,3 +383,5 @@
 (runtime-close! runtime)
 (when (file-exists? save-path)
   (delete-file save-path))
+(when (file-exists? save-as-path)
+  (delete-file save-as-path))

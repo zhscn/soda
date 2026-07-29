@@ -4,6 +4,7 @@
           buffer-id
           buffer-document
           buffer-resource
+          buffer-set-resource!
           buffer-closed?
           buffer-close!
           buffer-language-catalog
@@ -48,7 +49,7 @@
     (fields
       (immutable id buffer-id)
       (immutable document buffer-document)
-      (immutable resource buffer-resource)
+      (mutable resource buffer-resource buffer-resource-set!)
       (immutable local-settings buffer-local-settings)
       (immutable language-catalog buffer-language-catalog)
       (mutable revision buffer-revision buffer-revision-set!)
@@ -182,6 +183,16 @@
         path))
     (buffer-file-path-set! value path)
     path)
+
+  (define (buffer-set-resource! value resource)
+    (require-open-buffer 'buffer-set-resource! value)
+    (unless (or (not resource) (string? resource))
+      (assertion-violation
+        'buffer-set-resource!
+        "resource must be a string or #f"
+        resource))
+    (buffer-resource-set! value resource)
+    resource)
 
   (define (buffer-modified? value)
     (require-open-buffer 'buffer-modified? value)

@@ -145,6 +145,7 @@ if(CHEZ_SCHEME_EXECUTABLE)
       SODA_DOCUMENT_LIBRARY=$<TARGET_FILE:soda_document>
       SODA_RUNTIME_LIBRARY=$<TARGET_FILE:soda_runtime>
       SODA_EDITOR_OPEN_TEST_FILE=${CMAKE_CURRENT_SOURCE_DIR}/scheme/file_tests.ss
+      SODA_EDITOR_SAVE_AS_TEST_FILE=${CMAKE_CURRENT_BINARY_DIR}/scheme_editor_save_as_test.txt
       SODA_EDITOR_SAVE_TEST_FILE=${CMAKE_CURRENT_BINARY_DIR}/scheme_editor_save_test.txt
       ${CHEZ_SCHEME_EXECUTABLE}
       --libdirs ${PROJECT_SOURCE_DIR}/scheme

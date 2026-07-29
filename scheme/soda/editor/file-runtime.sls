@@ -98,7 +98,8 @@
                   (save-request-buffer-id request)
                   (save-request-document-id request)
                   (save-request-revision request)
-                  (save-request-path request)))
+                  (save-request-path request)
+                  (save-request-adopt-path? request)))
               (make-effect-result #t '())))))
       adapter))
 
@@ -144,7 +145,8 @@
                        (vector-ref target 3)
                        (vector-ref target 4)
                        (event-status event)
-                       #f))]
+                       #f
+                       (vector-ref target 5)))]
                   [else
                    (assertion-violation
                      'file-runtime-handle-event

@@ -20,6 +20,7 @@
           save-request-revision
           save-request-path
           save-request-data
+          save-request-adopt-path?
           make-save-result
           save-result?
           save-result-buffer-id
@@ -27,7 +28,8 @@
           save-result-revision
           save-result-path
           save-result-status
-          save-result-detail)
+          save-result-detail
+          save-result-adopt-path?)
   (import (rnrs)
           (soda document)
           (soda editor buffer)
@@ -48,11 +50,17 @@
 
   (define-record-type
     (save-request %make-save-request save-request?)
-    (fields buffer-id document-id revision path data))
+    (fields buffer-id document-id revision path data adopt-path?))
 
   (define-record-type
     (save-result %make-save-result save-result?)
-    (fields buffer-id document-id revision path status detail))
+    (fields buffer-id
+            document-id
+            revision
+            path
+            status
+            detail
+            adopt-path?))
 
   (define (exact-non-negative-integer? value)
     (and (integer? value) (exact? value) (not (negative? value))))
@@ -158,37 +166,48 @@
           'scheme-mode
           'fundamental-mode)))
 
-  (define (make-save-request
-            buffer-id
-            document-id
-            revision
-            path
-            data)
-    (unless (and (exact-non-negative-integer? buffer-id)
-                 (exact-non-negative-integer? document-id)
-                 (exact-non-negative-integer? revision))
-      (assertion-violation
-        'make-save-request
-        "buffer id, document id, and revision must be non-negative exact integers"
-        buffer-id
-        document-id
-        revision))
-    (unless (and (string? path) (positive? (string-length path)))
-      (assertion-violation
-        'make-save-request
-        "path must be a non-empty string"
-        path))
-    (unless (bytevector? data)
-      (assertion-violation
-        'make-save-request
-        "data must be a bytevector"
-        data))
-    (%make-save-request
-      buffer-id
-      document-id
-      revision
-      path
-      data))
+  (define make-save-request
+    (case-lambda
+      [(buffer-id document-id revision path data)
+       (make-save-request
+         buffer-id
+         document-id
+         revision
+         path
+         data
+         #f)]
+      [(buffer-id document-id revision path data adopt-path?)
+       (unless (and (exact-non-negative-integer? buffer-id)
+                    (exact-non-negative-integer? document-id)
+                    (exact-non-negative-integer? revision))
+         (assertion-violation
+           'make-save-request
+           "buffer id, document id, and revision must be non-negative exact integers"
+           buffer-id
+           document-id
+           revision))
+       (unless (and (string? path) (positive? (string-length path)))
+         (assertion-violation
+           'make-save-request
+           "path must be a non-empty string"
+           path))
+       (unless (bytevector? data)
+         (assertion-violation
+           'make-save-request
+           "data must be a bytevector"
+           data))
+       (unless (boolean? adopt-path?)
+         (assertion-violation
+           'make-save-request
+           "adopt-path flag must be a boolean"
+           adopt-path?))
+       (%make-save-request
+         buffer-id
+         document-id
+         revision
+         path
+         data
+         adopt-path?)]))
 
   (define make-save-result
     (case-lambda
@@ -204,8 +223,24 @@
          (save-request-revision request)
          (save-request-path request)
          status
-         detail)]
+         detail
+         (save-request-adopt-path? request))]
       [(buffer-id document-id revision path status detail)
+       (make-save-result
+         buffer-id
+         document-id
+         revision
+         path
+         status
+         detail
+         #f)]
+      [(buffer-id
+         document-id
+         revision
+         path
+         status
+         detail
+         adopt-path?)
        (unless (and (exact-non-negative-integer? buffer-id)
                     (exact-non-negative-integer? document-id)
                     (exact-non-negative-integer? revision))
@@ -230,13 +265,19 @@
            'make-save-result
            "detail must be a string or #f"
            detail))
+       (unless (boolean? adopt-path?)
+         (assertion-violation
+           'make-save-result
+           "adopt-path flag must be a boolean"
+           adopt-path?))
        (%make-save-result
          buffer-id
          document-id
          revision
          path
          status
-         detail)]))
+         detail
+         adopt-path?)]))
 
   (define (encode-file-data data line-ending)
     (case line-ending
@@ -268,7 +309,7 @@
          "file-line-ending must be lf, crlf, or cr"
          line-ending)]))
 
-  (define (snapshot-save-request buffer path)
+  (define (snapshot-save-request buffer path adopt-path?)
     (let* ([document (buffer-document buffer)]
            [snapshot (document-snapshot document)])
       (dynamic-wind
@@ -288,7 +329,8 @@
                     (buffer-setting-ref
                       buffer
                       'file-line-ending
-                      'lf))))
+                      'lf))
+                  adopt-path?))
               (lambda () (text-close! text)))))
         (lambda () (snapshot-close! snapshot)))))
 
@@ -431,15 +473,40 @@
                  " in a background buffer")))
            '())])))
 
+  (define (open-save-as-prompt! editor buffer)
+    (editor-open-prompt!
+      editor
+      (make-prompt-request
+        "Save as: "
+        (or (buffer-file-path buffer) "")
+        'file-name
+        #f
+        'free
+        #f
+        'file.save-to-path
+        #f)))
+
+  (define (begin-save! editor buffer path adopt-path?)
+    (let ([request
+            (snapshot-save-request
+              buffer
+              path
+              adopt-path?)])
+      (buffer-begin-save!
+        buffer
+        (save-request-revision request))
+      (editor-set-status-message!
+        editor
+        (string-append "Saving " path))
+      (list (make-command-effect 'file.write request))))
+
   (define (save-buffer-command context)
     (let* ([editor (command-context-editor context)]
            [buffer (view-buffer (command-context-view context))]
            [path (buffer-file-path buffer)])
       (cond
         [(not path)
-         (editor-set-status-message!
-           editor
-           "Buffer has no file path")
+         (open-save-as-prompt! editor buffer)
          '()]
         [(buffer-save-pending? buffer)
          (editor-set-status-message!
@@ -452,14 +519,55 @@
            "No changes need saving")
          '()]
         [else
-         (let ([request (snapshot-save-request buffer path)])
-           (buffer-begin-save!
-             buffer
-             (save-request-revision request))
-           (editor-set-status-message!
-             editor
-             (string-append "Saving " path))
-           (list (make-command-effect 'file.write request)))])))
+         (begin-save! editor buffer path #f)])))
+
+  (define (save-as-command context)
+    (let ([editor (command-context-editor context)]
+          [buffer (view-buffer (command-context-view context))])
+      (if (buffer-save-pending? buffer)
+          (editor-set-status-message!
+            editor
+            "Save already in progress")
+          (open-save-as-prompt! editor buffer))
+      '()))
+
+  (define (save-to-path-command context)
+    (let* ([editor (command-context-editor context)]
+           [result (command-context-argument context)]
+           [path
+             (and
+               (prompt-result? result)
+               (eq? (prompt-result-status result) 'accepted)
+               (prompt-result-value result))]
+           [view
+             (and
+               (prompt-result? result)
+               (find-view-by-id
+                 editor
+                 (prompt-result-origin-view-id result)))]
+           [buffer (and view (view-buffer view))])
+      (cond
+        [(or (not path) (zero? (string-length path)))
+         (editor-set-status-message! editor "No file name")
+         '()]
+        [(not buffer)
+         (editor-set-status-message!
+           editor
+           "Save origin is no longer available")
+         '()]
+        [(buffer-save-pending? buffer)
+         (editor-set-status-message!
+           editor
+           "Save already in progress")
+         '()]
+        [(let ([existing (find-buffer-by-path editor path)])
+           (and existing (not (eq? existing buffer))))
+         (editor-set-status-message!
+           editor
+           (string-append "Path already visited: " path))
+         '()]
+        [else
+         (begin-save! editor buffer path #t)])))
 
   (define (apply-save-result-command context)
     (let ([editor (command-context-editor context)]
@@ -486,6 +594,9 @@
           buffer
           (save-result-revision result)
           success?)
+        (when (and success? (save-result-adopt-path? result))
+          (buffer-set-file-path! buffer (save-result-path result))
+          (buffer-set-resource! buffer (save-result-path result)))
         (editor-set-status-message!
           editor
           (cond
@@ -534,6 +645,16 @@
       "Save the active buffer to its file path.")
     (editor-register-command!
       editor
+      'file.save-as
+      save-as-command
+      "Write the active buffer to a path read from the minibuffer.")
+    (editor-register-command!
+      editor
+      'file.save-to-path
+      save-to-path-command
+      "Start an asynchronous save-as request.")
+    (editor-register-command!
+      editor
       'file.apply-save-result
       apply-save-result-command
       "Apply an asynchronous file save result.")
@@ -549,4 +670,10 @@
         (make-key-stroke 'character (char->integer #\x) 4)
         (make-key-stroke 'character (char->integer #\s) 4))
       'file.save)
+    (editor-bind-key!
+      editor
+      (list
+        (make-key-stroke 'character (char->integer #\x) 4)
+        (make-key-stroke 'character (char->integer #\w) 4))
+      'file.save-as)
     editor))

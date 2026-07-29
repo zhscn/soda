@@ -164,7 +164,8 @@ SaveRequest {
   document_id,
   revision,
   path,
-  bytes
+  bytes,
+  adopt_path
 }
 ```
 
@@ -180,6 +181,9 @@ effect 在目标目录创建临时文件，写入全部 bytes，执行 `fsync`�
 
 同一 request 协议支持由 minibuffer/resource policy 选择目标 path 的另存为流程，
 也允许替换 file effect handler 而不改变 Buffer revision 与 undo node 语义。
+`file.save-as` 和无 `file_path` Buffer 上的 `file.save` 通过 minibuffer 选择目标。
+带 `adopt_path` 的 request 仅在写入成功后更新 Buffer 的 `resource` 与 `file_path`；
+失败保留原关联。目标 path 已由另一个 Buffer 访问时，editor 不启动写入。
 
 ## ABI 与线程归属
 
