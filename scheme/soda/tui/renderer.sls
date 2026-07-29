@@ -39,6 +39,9 @@
   (define selection-style
     (make-style 'default 'default '(reverse)))
 
+  (define line-number-style
+    (make-style 244 'default '()))
+
   (define (face-style face)
     (case face
       [(syntax-comment) (make-style 244 'default '(italic))]
@@ -311,10 +314,43 @@
             (string-append "  " message)
             "  C-q quit "))))
 
+  (define (render-context-gutter-width context columns)
+    (if
+      (buffer-setting-ref
+        (editor-render-context-buffer context)
+        'show-line-numbers?
+        #f)
+      (min
+        (line-number-gutter-width
+          (editor-render-context-line-count context))
+        (max 0 (- columns 1)))
+      0))
+
+  (define (line-number-text line width)
+    (let* ([number (number->string (+ line 1))]
+           [padding
+             (max
+               0
+               (- width (string-length number) 1))])
+      (string-append
+        (make-string padding #\space)
+        number
+        " ")))
+
   (define (render-text-component! context frame rectangle)
     (let* ([view (editor-render-context-view context)]
            [buffer (editor-render-context-buffer context)]
            [text (editor-render-context-text context)]
+           [gutter-width
+             (render-context-gutter-width
+               context
+               (rect-columns rectangle))]
+           [text-rectangle
+             (make-rect
+               (rect-row rectangle)
+               (+ (rect-column rectangle) gutter-width)
+               (rect-rows rectangle)
+               (- (rect-columns rectangle) gutter-width))]
            [component-id 'editor.text]
            [background-source
              (make-cell-source 'view (view-id view) 'background)]
@@ -408,9 +444,24 @@
           (when (< line (editor-render-context-line-count context))
             (let ([line-start (text-line-start text line)]
                   [line-end (text-line-content-end text line)])
+              (when (positive? gutter-width)
+                (draw-string!
+                  frame
+                  (+ (rect-row rectangle) row-offset)
+                  (rect-column rectangle)
+                  gutter-width
+                  (line-number-text line gutter-width)
+                  '(line-number)
+                  line-number-style
+                  (list
+                    (make-cell-source
+                      'chrome
+                      'line-number
+                      line)
+                    (component-source component-id))))
               (draw-document-line!
                 frame
-                rectangle
+                text-rectangle
                 (+ (rect-row rectangle) row-offset)
                 (text-subbytevector
                   text
@@ -426,15 +477,18 @@
                 selection-start
                 selection-end)))))
       (let ([cursor-row
-              (+ (rect-row rectangle)
+              (+ (rect-row text-rectangle)
                  (- (editor-render-context-caret-line context)
                     (editor-render-context-first-line context)))]
             [cursor-column
-              (+ (rect-column rectangle)
+              (+ (rect-column text-rectangle)
                  (- (editor-render-context-caret-column context)
                     (editor-render-context-first-column context)))])
         (if (and (editor-render-context-focused? context)
-                 (rect-contains? rectangle cursor-row cursor-column)
+                 (rect-contains?
+                   text-rectangle
+                   cursor-row
+                   cursor-column)
                  (< cursor-row (frame-rows frame))
                  (< cursor-column (frame-columns frame)))
             (frame-set-cursor!
@@ -955,19 +1009,46 @@
                        [first-line (view-first-line view)]
                        [first-column (view-first-column view)]
                        [line-count (text-line-count text)]
+                       [gutter-width
+                         (render-context-gutter-width
+                           (make-editor-render-context
+                             editor
+                             view
+                             buffer
+                             snapshot
+                             text
+                             caret-line
+                             caret-column
+                             tab-width
+                             first-line
+                             first-column
+                             line-count
+                             #t)
+                           columns)]
                        [document-completion
                          (and
                            (not (editor-active-prompt editor))
                            (view-completion view))]
-                       [completion-rectangle
+                       [local-completion-rectangle
                          (and
                            document-completion
                            (document-completion-rectangle
                              document-completion
                              rows
-                             columns
+                             (- columns gutter-width)
                              (- caret-line first-line)
                              (- caret-column first-column)))]
+                       [completion-rectangle
+                         (and
+                           local-completion-rectangle
+                           (make-rect
+                             (rect-row local-completion-rectangle)
+                             (+ gutter-width
+                                (rect-column
+                                  local-completion-rectangle))
+                             (rect-rows local-completion-rectangle)
+                             (rect-columns
+                               local-completion-rectangle)))]
                        [component-tree
                          (make-editor-component-tree
                            rows
@@ -1209,11 +1290,16 @@
                      (let* ([text-rectangle
                               (component-node-rect
                                 active-text-node)]
+                            [gutter-width
+                              (render-context-gutter-width
+                                root-context
+                                (rect-columns text-rectangle))]
                             [local
                               (document-completion-rectangle
                                 document-completion
                                 (+ (rect-rows text-rectangle) 1)
-                                (rect-columns text-rectangle)
+                                (- (rect-columns text-rectangle)
+                                   gutter-width)
                                 (-
                                   (editor-render-context-caret-line
                                     root-context)
@@ -1232,6 +1318,7 @@
                              (+ (rect-row text-rectangle)
                                 (rect-row local))
                              (+ (rect-column text-rectangle)
+                                gutter-width
                                 (rect-column local))
                              (rect-rows local)
                              (rect-columns local))

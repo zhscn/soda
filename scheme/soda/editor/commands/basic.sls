@@ -11,6 +11,7 @@
           (soda editor kill)
           (soda editor keymap)
           (soda editor motion-runtime)
+          (soda editor prompt)
           (soda editor state))
 
   (define (with-document-text document procedure)
@@ -276,6 +277,166 @@
       (context-view context)
       (command-context-count context))
     '())
+
+  (define (move-page! context direction)
+    (let* ([view (context-view context)]
+           [rows (max 1 (view-viewport-rows view))]
+           [distance
+             (* direction
+                rows
+                (command-context-count context))])
+      (with-document-text
+        (context-document context)
+        (lambda (text)
+          (let* ([line-count (text-line-count text)]
+                 [maximum-first-line
+                   (max 0 (- line-count rows))]
+                 [first-line
+                   (max
+                     0
+                     (min
+                       maximum-first-line
+                       (+ (view-first-line view) distance)))])
+            (view-set-first-line! view first-line))))
+      (move-vertical! view distance)
+      '()))
+
+  (define (previous-page-command context)
+    (move-page! context -1))
+
+  (define (next-page-command context)
+    (move-page! context 1))
+
+  (define (find-view-by-id editor id)
+    (find
+      (lambda (view) (= (view-id view) id))
+      (editor-views editor)))
+
+  (define (parse-positive-integer value)
+    (let ([number (string->number value)])
+      (and
+        (integer? number)
+        (exact? number)
+        (positive? number)
+        number)))
+
+  (define (split-line-column value)
+    (let ([comma
+            (let loop ([index 0])
+              (cond
+                [(= index (string-length value)) #f]
+                [(char=? (string-ref value index) #\,) index]
+                [else (loop (+ index 1))]))])
+      (if comma
+          (let ([line
+                  (parse-positive-integer
+                    (substring value 0 comma))]
+                [column
+                  (parse-positive-integer
+                    (substring
+                      value
+                      (+ comma 1)
+                      (string-length value)))])
+            (and line column (cons line column)))
+          (let ([line (parse-positive-integer value)])
+            (and line (cons line 1))))))
+
+  (define (goto-line-column-command context)
+    (let* ([editor (command-context-editor context)]
+           [view (context-view context)]
+           [position
+             (with-document-text
+               (context-document context)
+               (lambda (text)
+                 (text-position text (view-caret view))))])
+      (editor-open-prompt!
+        editor
+        (make-prompt-request
+          "Go to line,column: "
+          (number->string (+ (car position) 1))
+          'goto-line-column
+          #f
+          'free
+          #f
+          'move.goto-line-column.accept
+          #f))
+      '()))
+
+  (define (goto-line-column-accept-command context)
+    (let* ([editor (command-context-editor context)]
+           [result (command-context-argument context)]
+           [target
+             (and
+               (prompt-result? result)
+               (eq? (prompt-result-status result) 'accepted)
+               (split-line-column (prompt-result-value result)))]
+           [view
+             (and
+               target
+               (find-view-by-id
+                 editor
+                 (prompt-result-origin-view-id result)))])
+      (cond
+        [(not target)
+         (editor-set-status-message!
+           editor
+           "Line and column must be positive integers")
+         '()]
+        [(not view)
+         (editor-set-status-message!
+           editor
+           "Go-to origin view is no longer available")
+         '()]
+        [else
+         (with-document-text
+           (buffer-document (view-buffer view))
+           (lambda (text)
+             (let* ([tab-width
+                      (let ([setting
+                              (buffer-setting-ref
+                                (view-buffer view)
+                                'tab-width
+                                8)])
+                        (if
+                          (and
+                            (integer? setting)
+                            (exact? setting)
+                            (positive? setting))
+                          setting
+                          8))]
+                    [line
+                      (min
+                        (- (text-line-count text) 1)
+                        (- (car target) 1))]
+                    [column (- (cdr target) 1)])
+               (view-set-caret!
+                 view
+                 (text-offset-at-cell-column
+                   text
+                   line
+                   column
+                   tab-width)))))
+         '()])))
+
+  (define (toggle-line-numbers-command context)
+    (let* ([editor (command-context-editor context)]
+           [buffer (context-buffer context)]
+           [enabled?
+             (not
+               (buffer-setting-ref
+                 buffer
+                 'show-line-numbers?
+                 #f))])
+      (buffer-set-local-setting!
+        buffer
+        'show-line-numbers?
+        enabled?)
+      (editor-set-status-message!
+        editor
+        (if enabled?
+            "Line numbers enabled"
+            "Line numbers disabled"))
+      '()))
 
   (define (line-start-command context)
     (let ([view (context-view context)])
@@ -622,6 +783,26 @@
           next-line-command
           "Move to the next line.")
         (list
+          'move.previous-page
+          previous-page-command
+          "Move backward by one viewport.")
+        (list
+          'move.next-page
+          next-page-command
+          "Move forward by one viewport.")
+        (list
+          'move.goto-line-column
+          goto-line-column-command
+          "Read a one-based line and optional column to visit.")
+        (list
+          'move.goto-line-column.accept
+          goto-line-column-accept-command
+          "Move to a line and column returned by the minibuffer.")
+        (list
+          'display.toggle-line-numbers
+          toggle-line-numbers-command
+          "Toggle line numbers in the active buffer.")
+        (list
           'move.line-start
           line-start-command
           "Move to the start of the line.")
@@ -693,6 +874,13 @@
         (cons (stroke 'character (char->integer #\f) 2) 'move.forward-word)
         (cons (stroke 'up #f 0) 'move.previous-line)
         (cons (stroke 'down #f 0) 'move.next-line)
+        (cons (stroke 'page-up #f 0) 'move.previous-page)
+        (cons (stroke 'page-down #f 0) 'move.next-page)
+        (cons (stroke 'character (char->integer #\v) 2) 'move.previous-page)
+        (cons (stroke 'character (char->integer #\v) 4) 'move.next-page)
+        (cons
+          (stroke 'character (char->integer #\n) 2)
+          'display.toggle-line-numbers)
         (cons (stroke 'home #f 0) 'move.line-start)
         (cons (stroke 'end #f 0) 'move.line-end)
         (cons (stroke 'character (char->integer #\<) 2) 'move.buffer-start)
@@ -713,6 +901,12 @@
         (cons (stroke 'delete #f 4) 'edit.kill-word)
         (cons (stroke 'character (char->integer #\y) 4) 'edit.yank)
         (cons (stroke 'character (char->integer #\y) 2) 'edit.yank-pop)))
+    (editor-bind-key!
+      editor
+      (list
+        (stroke 'character (char->integer #\g) 2)
+        (stroke 'character (char->integer #\g) 0))
+      'move.goto-line-column)
     (editor-bind-key!
       editor
       (list

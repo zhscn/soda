@@ -3,7 +3,8 @@
           next-tab-stop
           string-cell-width
           text-cell-column
-          text-offset-at-cell-column)
+          text-offset-at-cell-column
+          line-number-gutter-width)
   (import (rnrs)
           (soda document))
 
@@ -83,4 +84,16 @@
                   (loop
                     (+ index 1)
                     (+ offset (character-byte-length character))
-                    next-column))))))))
+                    next-column)))))))
+
+  (define (line-number-gutter-width line-count)
+    (unless
+      (and
+        (integer? line-count)
+        (exact? line-count)
+        (positive? line-count))
+      (assertion-violation
+        'line-number-gutter-width
+        "line count must be a positive exact integer"
+        line-count))
+    (+ (string-length (number->string line-count)) 2)))

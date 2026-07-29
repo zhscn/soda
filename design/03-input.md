@@ -245,7 +245,10 @@ View 持有 selection、viewport 和输入状态；Window 把 View 放入 layout
 caret 与 selection endpoint 使用 Document anchor，多个 View 显示同一 Buffer
 时会随提交、undo 和 redo 结算，不会保留失效的裸 byte offset。viewport 同时保存
 首行和首个 display column；纵向 motion 按 tab 与宽字符展开后的 display column
-维持目标列。
+维持目标列。Page Up/Page Down 以正文 viewport 高度同时推进 point 和首行，并在
+Buffer 边界夹紧；`M-v`、`C-v` 与终端的 Page Up/Page Down 键进入同一组命令。
+`M-g g` 通过 minibuffer 读取从 1 开始的 `line[,column]`，目标 column 使用 display
+cell 坐标，因此 tab 和宽字符仍遵循普通纵向 motion 的列语义。
 
 Editor 的 WindowLayout 是由 leaf 和 split 组成的树：
 
@@ -337,6 +340,11 @@ presenter 是唯一生成 ANSI 控制序列的组件。首帧与尺寸变化使�
 比较 cell 的 text、width、continuation 与 style，只写入发生显示变化的 cell。
 光标、modeline、minibuffer、popup 和工具区域都使用 cells 表达，不会向 Document
 写入控制序列或虚拟文本。
+
+Buffer 的 `show-line-numbers?` 显示设置控制正文左侧的行号 gutter，`M-n` 切换该
+设置。gutter 宽度由 Buffer 总行数确定，至少保留数字与右侧间隔；正文、结构化
+cursor 和 completion popup 都使用扣除 gutter 后的内容矩形。行号 cell 属于 chrome
+source，不映射为 Document 正文。
 
 presenter 输出进入有序 byte queue。terminal ABI 尝试 partial write；would-block
 时由 runtime 注册 output fd writable interest，后续事件继续发送未写 suffix。

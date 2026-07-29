@@ -3087,3 +3087,83 @@
   (error 'editor-tests
          "completion accepted a candidate against a stale revision"))
 (editor-close! stale-editor)
+
+(define navigation-text
+  (let loop ([line 1] [result ""])
+    (if
+      (> line 30)
+      result
+      (loop
+        (+ line 1)
+        (string-append result "line\n")))))
+(define navigation-document
+  (make-document navigation-text 950))
+(define navigation-buffer
+  (make-buffer
+    950
+    navigation-document
+    "*navigation*"
+    'fundamental-mode))
+(define nano-navigation-editor (make-editor navigation-buffer))
+(define nano-navigation-view
+  (editor-active-view nano-navigation-editor))
+(editor-update!
+  nano-navigation-editor
+  (make-resize-message 6 20))
+(editor-update!
+  nano-navigation-editor
+  (make-command-message 'move.next-page #f))
+(unless
+  (and
+    (= (view-caret nano-navigation-view) 25)
+    (= (view-first-line nano-navigation-view) 5))
+  (error 'editor-tests
+         "page-down did not move the caret and viewport together"))
+(editor-update!
+  nano-navigation-editor
+  (make-command-message 'move.previous-page #f))
+(unless
+  (and
+    (zero? (view-caret nano-navigation-view))
+    (zero? (view-first-line nano-navigation-view)))
+  (error 'editor-tests
+         "page-up did not restore the previous viewport"))
+(editor-update!
+  nano-navigation-editor
+  (make-command-message 'move.goto-line-column #f))
+(unless (editor-active-prompt nano-navigation-editor)
+  (error 'editor-tests "goto-line-column did not open a prompt"))
+(editor-abort-prompt! nano-navigation-editor)
+(editor-update!
+  nano-navigation-editor
+  (make-internal-command-message
+    'move.goto-line-column.accept
+    (make-prompt-result
+      1
+      'accepted
+      "12,3"
+      (view-id nano-navigation-view)
+      #f)))
+(unless (= (view-caret nano-navigation-view) 57)
+  (error 'editor-tests
+         "goto-line-column did not use one-based line and column input"))
+(editor-update!
+  nano-navigation-editor
+  (make-command-message 'move.buffer-start #f))
+(editor-update!
+  nano-navigation-editor
+  (make-command-message 'display.toggle-line-numbers #f))
+(define line-number-frame
+  (render-editor-frame nano-navigation-editor 6 20))
+(unless
+  (and
+    (buffer-setting-ref
+      navigation-buffer
+      'show-line-numbers?
+      #f)
+    (string=? (cell-text (frame-cell-ref line-number-frame 0 2)) "1")
+    (string=? (cell-text (frame-cell-ref line-number-frame 0 4)) "l")
+    (= (frame-cursor-column line-number-frame) 4))
+  (error 'editor-tests
+         "line-number gutter did not reserve cells before document text"))
+(editor-close! nano-navigation-editor)

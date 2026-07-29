@@ -2445,18 +2445,35 @@
              (with-document-text
                document
                (lambda (text)
-                 (cons
+                 (list
                    (car (text-position text (view-caret view)))
                    (text-cell-column
                      text
                      (view-caret view)
-                     tab-width))))]
+                     tab-width)
+                   (text-line-count text))))]
            [caret-line (car caret-position)]
-           [caret-column (cdr caret-position)]
+           [caret-column (cadr caret-position)]
+           [line-count (caddr caret-position)]
            [first-line (view-first-line view)]
            [rows (max 1 (view-viewport-rows view))]
            [first-column (view-first-column view)]
-           [columns (max 1 (view-viewport-columns view))])
+           [viewport-columns
+             (max 1 (view-viewport-columns view))]
+           [columns
+             (if
+               (buffer-setting-ref
+                 buffer
+                 'show-line-numbers?
+                 #f)
+               (max
+                 1
+                 (-
+                   viewport-columns
+                   (min
+                     (line-number-gutter-width line-count)
+                     (max 0 (- viewport-columns 1)))))
+               viewport-columns)])
       (cond
         [(< caret-line first-line)
          (view-first-line-set! view caret-line)]
