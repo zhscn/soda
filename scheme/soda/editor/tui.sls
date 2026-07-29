@@ -17,6 +17,7 @@
           (soda vfs)
           (soda tui commands)
           (soda tui input)
+          (soda tui output)
           (soda tui presenter)
           (soda tui renderer))
 
@@ -24,21 +25,6 @@
 
   (define (ansi suffix)
     (string-append escape suffix))
-
-  (define (render! terminal editor previous-frame write!)
-    (let ([size (terminal-size terminal)])
-      (editor-update!
-        editor
-        (make-resize-message
-          (max 2 (car size))
-          (max 1 (cdr size))))
-      (let ([frame
-              (render-editor-frame
-                editor
-                (max 2 (car size))
-                (max 1 (cdr size)))])
-        (write! (frame-diff->ansi previous-frame frame))
-        frame)))
 
   (define (handle-editor-message! editor executor message)
     (let loop ([messages (list message)])
@@ -201,11 +187,13 @@
   (define (run-editor-session runtime terminal editor)
     (let ([input-source #f]
           [flush-timer #f]
+          [resize-timer #f]
           [raw? #f]
           [screen? #f]
-          [previous-frame #f]
-          [pending-output #f]
-          [pending-output-offset 0]
+          [rendered-generation -1]
+          [terminal-rows 0]
+          [terminal-columns 0]
+          [output-state (make-terminal-output-state)]
           [output-source #f]
           [decoder (make-input-decoder)]
           [executor (make-effect-executor)]
@@ -221,79 +209,71 @@
           (guard (condition [else #f])
             (runtime-cancel! runtime output-source))
           (set! output-source #f)))
-      (define (clear-pending-output!)
-        (set! pending-output #f)
-        (set! pending-output-offset 0)
-        (cancel-output-source!))
       (define (arm-output-source!)
         (unless output-source
           (set! output-source
             (runtime-watch-fd! runtime 1 fd-writable))))
       (define (flush-output!)
         (let loop ()
-          (when pending-output
+          (if (not (terminal-output-pending? output-state))
+              (cancel-output-source!)
             (let ([written
                     (terminal-write-some!
                       terminal
-                      pending-output
-                      pending-output-offset)])
+                      (terminal-output-pending-bytes output-state)
+                      (terminal-output-pending-offset output-state))])
               (cond
                 [(not written) (arm-output-source!)]
-                [(zero? written)
-                 (if (= pending-output-offset
-                        (bytevector-length pending-output))
-                     (clear-pending-output!)
-                     (arm-output-source!))]
+                [(zero? written) (arm-output-source!)]
                 [else
-                 (set! pending-output-offset
-                   (+ pending-output-offset written))
-                 (if (= pending-output-offset
-                        (bytevector-length pending-output))
-                     (clear-pending-output!)
-                     (loop))])))))
-      (define (append-output! data)
-        (let* ([bytes
-                 (if (bytevector? data)
-                     data
-                     (string->utf8 data))]
-               [remaining
-                 (if pending-output
-                     (- (bytevector-length pending-output)
-                        pending-output-offset)
-                     0)]
-               [combined
-                 (make-bytevector
-                   (+ remaining (bytevector-length bytes)))])
-          (when (positive? remaining)
-            (bytevector-copy!
-              pending-output
-              pending-output-offset
-              combined
-              0
-              remaining))
-          (bytevector-copy!
-            bytes
-            0
-            combined
-            remaining
-            (bytevector-length bytes))
-          (set! pending-output combined)
-          (set! pending-output-offset 0)
-          (flush-output!)))
+                 (terminal-output-advance!
+                   output-state written)
+                 (loop)])))))
+      (define (queue-control-output! data)
+        (terminal-output-enqueue-control! output-state data)
+        (flush-output!))
+      (define (queue-frame! frame)
+        (terminal-output-request-frame! output-state frame)
+        (flush-output!))
       (define (drain-output!)
-        (when pending-output
-          (let* ([remaining
-                   (- (bytevector-length pending-output)
-                      pending-output-offset)]
-                 [bytes (make-bytevector remaining)])
-            (bytevector-copy!
-              pending-output
-              pending-output-offset
-              bytes
-              0
-              remaining)
-            (terminal-write! terminal bytes))
-          (clear-pending-output!)))
+        (let loop ()
+          (when (terminal-output-pending? output-state)
+            (let* ([remaining
+                     (- (bytevector-length
+                          (terminal-output-pending-bytes output-state))
+                        (terminal-output-pending-offset output-state))]
+                   [bytes (make-bytevector remaining)])
+              (bytevector-copy!
+                (terminal-output-pending-bytes output-state)
+                (terminal-output-pending-offset output-state)
+                bytes
+                0
+                remaining)
+              (terminal-write! terminal bytes)
+              (terminal-output-advance! output-state remaining)
+              (loop)))
+          (cancel-output-source!)))
+      (define (refresh-terminal-size!)
+        (let* ([size (terminal-size terminal)]
+               [rows (max 2 (car size))]
+               [columns (max 1 (cdr size))])
+          (unless (and (= rows terminal-rows)
+                       (= columns terminal-columns))
+            (set! terminal-rows rows)
+            (set! terminal-columns columns)
+            (editor-update!
+              editor
+              (make-resize-message rows columns)))))
+      (define (render-if-dirty!)
+        (let ([generation (editor-render-generation editor)])
+          (when (not (= generation rendered-generation))
+            (set! rendered-generation generation)
+            (editor-take-dirty-reasons! editor)
+            (queue-frame!
+              (render-editor-frame
+                editor
+                terminal-rows
+                terminal-columns)))))
       (define (arm-flush-timer!)
         (cancel-flush-timer!)
         (when (input-decoder-pending? decoder)
@@ -308,10 +288,8 @@
                 (handle-input-events editor executor events)))))
       (define (handle-flush!)
         (set! flush-timer #f)
-        (handle-input-events
-          editor
-          executor
-          (input-decoder-flush! decoder)))
+        (let ([events (input-decoder-flush! decoder)])
+          (handle-input-events editor executor events)))
       (register-effect-handler!
         executor
         'quit
@@ -332,21 +310,19 @@
           (terminal-enter-raw! terminal)
           (set! raw? #t)
           (set! screen? #t)
-          (append-output!
+          (queue-control-output!
             (string-append
               (ansi "[?1049h")
               (ansi "[>1u")
               (ansi "[?2004h")))
           (set! input-source
             (runtime-watch-fd! runtime 0 fd-readable))
+          (set! resize-timer
+            (runtime-start-timer! runtime 100 100))
+          (refresh-terminal-size!)
           (let loop ([running? #t])
             (when running?
-              (set! previous-frame
-                (render!
-                  terminal
-                  editor
-                  previous-frame
-                  append-output!))
+              (render-if-dirty!)
               (let process
                 ([events (runtime-poll! runtime)] [continue? #t])
                 (cond
@@ -363,6 +339,11 @@
                         (= (event-source (car events)) output-source)
                         (eq? (event-kind (car events)) 'fd-ready))
                    (flush-output!)
+                   (process (cdr events) continue?)]
+                  [(and resize-timer
+                        (= (event-source (car events)) resize-timer)
+                        (eq? (event-kind (car events)) 'timer))
+                   (refresh-terminal-size!)
                    (process (cdr events) continue?)]
                   [(memq
                      (event-kind (car events))
@@ -402,6 +383,9 @@
           (when input-source
             (guard (condition [else #f])
               (runtime-cancel! runtime input-source)))
+          (when resize-timer
+            (guard (condition [else #f])
+              (runtime-cancel! runtime resize-timer)))
           (guard (condition [else #f])
             (drain-output!))
           (when screen?

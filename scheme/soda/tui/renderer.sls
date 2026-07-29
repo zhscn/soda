@@ -26,63 +26,16 @@
             line-count
             focused?))
 
-  (define modeline-style
-    (make-style 'default 'default '(reverse)))
-
-  (define minibuffer-prompt-style
-    (make-style 'default 'default '(bold)))
-
-  (define completion-selected-style
-    (make-style 'default 'default '(reverse)))
-
-  (define selection-style
-    (make-style 'default 'default '(reverse)))
-
-  (define line-number-style
-    (make-style 244 'default '()))
-
-  (define (face-style face)
-    (case face
-      [(syntax-comment) (make-style 244 'default '(italic))]
-      [(syntax-string) (make-style 114 'default '())]
-      [(syntax-constant) (make-style 173 'default '())]
-      [(syntax-number) (make-style 173 'default '())]
-      [(syntax-keyword) (make-style 141 'default '(bold))]
-      [(syntax-builtin) (make-style 75 'default '())]
-      [(syntax-definition) (make-style 81 'default '(bold))]
-      [(syntax-type) (make-style 80 'default '())]
-      [(syntax-delimiter) (make-style 246 'default '())]
-      [(diagnostic-error) (make-style 203 'default '(underline))]
-      [(diagnostic-warning) (make-style 214 'default '(underline))]
-      [(diagnostic-info) (make-style 75 'default '(underline))]
-      [(diagnostic-hint) (make-style 244 'default '(underline))]
-      [(completion-match) (make-style 75 'default '(bold))]
-      [(selection) selection-style]
-      [else default-style]))
-
-  (define (adjoin value values)
-    (if (memq value values) values (append values (list value))))
-
-  (define (merge-style base overlay)
-    (make-style
-      (if (eq? (style-foreground overlay) 'default)
-          (style-foreground base)
-          (style-foreground overlay))
-      (if (eq? (style-background overlay) 'default)
-          (style-background base)
-          (style-background overlay))
-      (fold-left
-        (lambda (attributes attribute)
-          (adjoin attribute attributes))
-        (style-attributes base)
-        (style-attributes overlay))))
-
-  (define (resolve-faces faces)
-    (fold-left
-      (lambda (style face)
-        (merge-style style (face-style face)))
-      default-style
-      faces))
+  (define (resolve-faces theme faces)
+    (let ([spec (theme-resolve-faces theme faces)])
+      (make-style
+        (if (eq? (face-spec-foreground spec) 'inherit)
+            'default
+            (face-spec-foreground spec))
+        (if (eq? (face-spec-background spec) 'inherit)
+            'default
+            (face-spec-background spec))
+        (face-spec-attributes-add spec))))
 
   (define (decode-text bytes)
     (utf8->string bytes))
@@ -109,24 +62,16 @@
             position
             detail
             component-id
-            decoration-sweep
-            selection-start
-            selection-end)
-    (let* ([runs
-             (decoration-sweep-runs-at!
-               decoration-sweep
+            theme
+            styled-chunks)
+    (let* ([chunk
+             (styled-chunk-cursor-at!
+               styled-chunks
                position)]
+           [runs (if chunk (styled-chunk-runs chunk) '())]
            [decoration-faces (map decoration-run-face runs)]
-           [selected?
-            (and
-              selection-start
-              selection-end
-              (<= selection-start position)
-              (< position selection-end))]
            [faces
-             (append
-               (cons 'default decoration-faces)
-               (if selected? '(selection) '()))]
+             (cons 'default decoration-faces)]
            [decoration-sources
              (map
                (lambda (run)
@@ -139,7 +84,7 @@
         text
         width
         faces
-        (resolve-faces faces)
+        (resolve-faces theme faces)
         position
         (append
           (list (document-source buffer-id position detail))
@@ -157,9 +102,8 @@
             first-column
             buffer-id
             component-id
-            decoration-sweep
-            selection-start
-            selection-end)
+            theme
+            styled-chunks)
     (let ([value (decode-text bytes)]
           [limit (+ first-column (rect-columns rectangle))])
       (let loop ([index 0]
@@ -181,9 +125,8 @@
                     line-end
                     'line-end
                     component-id
-                    decoration-sweep
-                    selection-start
-                    selection-end)))
+                    theme
+                    styled-chunks)))
               column)
             (let* ([character (string-ref value index)]
                    [byte-length (character-byte-length character)]
@@ -232,9 +175,8 @@
                            byte-position
                            'tab
                            component-id
-                           decoration-sweep
-                           selection-start
-                           selection-end)))))
+                           theme
+                           styled-chunks)))))
                  (loop
                    (+ index 1)
                    (+ byte-position byte-length)
@@ -255,9 +197,8 @@
                        byte-position
                        character
                        component-id
-                       decoration-sweep
-                       selection-start
-                       selection-end)))
+                       theme
+                       styled-chunks)))
                  (loop
                    (+ index 1)
                    (+ byte-position byte-length)
@@ -341,6 +282,9 @@
 
   (define (render-text-component! context frame rectangle)
     (let* ([view (editor-render-context-view context)]
+           [theme
+             (editor-theme
+               (editor-render-context-editor context))]
            [buffer (editor-render-context-buffer context)]
            [text (editor-render-context-text context)]
            [gutter-width
@@ -402,11 +346,33 @@
                (editor-annotation-sets-for-buffer
                  (editor-render-context-editor context)
                  (buffer-id buffer)))]
-           [decoration-sweep
-             (make-decoration-sweep
-               (append
-                 syntax-decorations
-                 external-decorations)
+           [selection-decorations
+             (if
+               (and
+                 selection-start
+                 selection-end
+                 (< selection-start selection-end)
+                 (< selection-start visible-end)
+                 (< visible-start selection-end))
+               (list
+                 (make-decoration-run
+                   (max selection-start visible-start)
+                   (min selection-end visible-end)
+                   'selection
+                   'selection
+                   0
+                   'view
+                   (view-id view)))
+               '())]
+           [styled-chunks
+             (make-styled-chunk-cursor
+               (decoration-runs->styled-chunks
+                 (append
+                   syntax-decorations
+                   external-decorations
+                   selection-decorations)
+                 visible-start
+                 visible-end)
                visible-start)])
       (frame-fill-rect!
         frame
@@ -415,7 +381,7 @@
           " "
           1
           '(default)
-          default-style
+          (resolve-faces theme '(default))
           #f
           sources))
       (do ([row-offset 0 (+ row-offset 1)])
@@ -434,7 +400,7 @@
                   gutter-width
                   (line-number-text line gutter-width)
                   '(line-number)
-                  line-number-style
+                  (resolve-faces theme '(line-number))
                   (list
                     (make-cell-source
                       'chrome
@@ -455,9 +421,8 @@
                 (editor-render-context-first-column context)
                 (buffer-id buffer)
                 component-id
-                decoration-sweep
-                selection-start
-                selection-end)))))
+                theme
+                styled-chunks)))))
       (let ([cursor-row
               (+ (rect-row text-rectangle)
                  (- (editor-render-context-caret-line context)
@@ -482,7 +447,11 @@
               (frame-set-cursor! frame 0 0 #f))))))
 
   (define (render-modeline-component! context frame rectangle)
-    (let* ([source (make-cell-source 'chrome 'modeline #f)]
+    (let* ([theme
+             (editor-theme
+               (editor-render-context-editor context))]
+           [style (resolve-faces theme '(modeline))]
+           [source (make-cell-source 'chrome 'modeline #f)]
            [sources
              (list
                source
@@ -492,7 +461,7 @@
                " "
                1
                '(modeline)
-               modeline-style
+               style
                #f
                sources)])
       (frame-fill-rect! frame rectangle fill)
@@ -508,11 +477,12 @@
             (editor-render-context-caret-line context)
             (editor-render-context-caret-column context))
           '(modeline)
-          modeline-style
+          style
           sources))))
 
   (define (render-minibuffer-component! context frame rectangle)
     (let* ([editor (editor-render-context-editor context)]
+           [theme (editor-theme editor)]
            [session (editor-active-prompt editor)]
            [component-id 'editor.minibuffer]
            [sources
@@ -526,7 +496,7 @@
           " "
           1
           '(default)
-          default-style
+          (resolve-faces theme '(default))
           #f
           sources))
       (when (and session (positive? (rect-rows rectangle)))
@@ -551,7 +521,7 @@
             prompt-columns
             prompt
             '(minibuffer-prompt)
-            minibuffer-prompt-style
+            (resolve-faces theme '(minibuffer-prompt))
             sources)
           (dynamic-wind
             (lambda () #f)
@@ -601,9 +571,13 @@
                           (view-first-column view)
                           (buffer-id buffer)
                           component-id
-                          (make-decoration-sweep '() line-start)
-                          #f
-                          #f)
+                          theme
+                          (make-styled-chunk-cursor
+                            (decoration-runs->styled-chunks
+                              '()
+                              line-start
+                              line-end)
+                            line-start))
                         (if (and (= caret-line line)
                                  (rect-contains?
                                    input-rectangle
@@ -645,6 +619,7 @@
             selected?
             base-faces
             base-style
+            theme
             sources
             annotation-column)
     (let* ([label (completion-item-label item)]
@@ -666,9 +641,7 @@
                        base-faces)]
                  [style
                    (if matched?
-                       (merge-style
-                         base-style
-                         (face-style 'completion-match))
+                       (resolve-faces theme faces)
                        base-style)])
             (when (<= (+ cell-column width) columns)
               (draw-string!
@@ -696,6 +669,7 @@
 
   (define (render-completions-component! context frame rectangle)
     (let* ([editor (editor-render-context-editor context)]
+           [theme (editor-theme editor)]
            [completion (editor-active-completion editor)]
            [component-id 'editor.completions]
            [background-sources
@@ -709,7 +683,7 @@
           " "
           1
           '(completion)
-          default-style
+          (resolve-faces theme '(completion))
           #f
           background-sources))
       (when completion
@@ -726,7 +700,7 @@
                 "[Pending completions]"
                 "[No match]")
               '(completion)
-              default-style
+              (resolve-faces theme '(completion))
               background-sources)
             (let* ([start
                      (if selected
@@ -777,8 +751,10 @@
                          (and selected (= selected item-index))]
                        [style
                          (if selected?
-                             completion-selected-style
-                             default-style)]
+                             (resolve-faces
+                               theme
+                               '(completion-selected))
+                             (resolve-faces theme '(default)))]
                        [faces
                          (if selected?
                              '(completion-selected)
@@ -803,11 +779,12 @@
                     (+ (rect-row rectangle) row)
                     (rect-column rectangle)
                     (rect-columns rectangle)
-                      item
+                    item
                     (completion-session-item-match completion item)
                     selected?
                     faces
                     style
+                    theme
                     sources
                     annotation-column)))
               (draw-string!
@@ -817,7 +794,7 @@
                 (- (rect-columns rectangle) indicator-column)
                 indicator
                 '(completion)
-                default-style
+                (resolve-faces theme '(completion))
                 background-sources)))))))
 
   (define editor-text-component

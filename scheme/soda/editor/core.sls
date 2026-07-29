@@ -73,6 +73,26 @@
           editor-pending-prefix
           editor-status-message
           editor-set-status-message!
+          editor-theme
+          editor-set-theme!
+          editor-render-generation
+          editor-dirty-reasons
+          editor-invalidate!
+          editor-take-dirty-reasons!
+          make-face-spec
+          face-spec?
+          face-spec-foreground
+          face-spec-background
+          face-spec-attributes-add
+          face-spec-attributes-remove
+          make-theme
+          theme?
+          theme-name
+          theme-appearance
+          theme-generation
+          theme-face-spec
+          theme-resolve-faces
+          default-theme
           editor-kill-ring
           editor-push-kill!
           editor-record-kill!
@@ -123,8 +143,18 @@
           decoration-run-owner
           decoration-run-detail
           decoration-run-covers?
+          make-decoration-index
+          decoration-index?
+          decoration-index-runs-in-range
+          decoration-runs->styled-chunks
+          styled-chunk?
+          styled-chunk-start
+          styled-chunk-end
+          styled-chunk-runs
+          make-styled-chunk-cursor
+          styled-chunk-cursor?
+          styled-chunk-cursor-at!
           decoration-runs-in-range
-          decoration-runs-at
           make-annotation
           make-diagnostic
           annotation?
@@ -442,6 +472,7 @@
           (soda editor scheme-xref)
           (soda editor search)
           (soda editor state)
+          (soda editor theme)
           (soda editor update)
           (soda editor window)
           (soda editor window-runtime))

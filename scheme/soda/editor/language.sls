@@ -5,6 +5,7 @@
           syntax-open
           syntax-sync!
           syntax-view
+          syntax-highlights
           syntax-close-view!
           syntax-close!
           make-language-profile
@@ -15,7 +16,6 @@
           language-profile-pairs
           language-profile-lexical
           language-profile-word-motion
-          language-profile-highlights
           language-profile-text-objects
           language-profile-electric
           language-profile-enter
@@ -40,6 +40,8 @@
           major-mode-keymaps
           major-mode-setting-ref)
   (import (rnrs)
+          (soda document)
+          (soda editor decoration)
           (soda editor motion-protocol)
           (soda editor scheme-highlighting))
 
@@ -50,15 +52,21 @@
       (immutable sync syntax-provider-sync)
       (immutable view syntax-provider-view)
       (immutable close-view syntax-provider-close-view)
+      (immutable highlights syntax-provider-highlights)
       (immutable close syntax-provider-close)))
 
   (define make-syntax-provider
     (case-lambda
       [(capabilities open sync close)
-       (make-syntax-provider capabilities open sync #f #f close)]
+       (make-syntax-provider
+         capabilities open sync #f #f #f close)]
       [(capabilities open sync view close)
-       (make-syntax-provider capabilities open sync view #f close)]
+       (make-syntax-provider
+         capabilities open sync view #f #f close)]
       [(capabilities open sync view close-view close)
+       (make-syntax-provider
+         capabilities open sync view close-view #f close)]
+      [(capabilities open sync view close-view highlights close)
        (unless (and (list? capabilities) (for-all symbol? capabilities))
          (assertion-violation
            'make-syntax-provider
@@ -78,9 +86,21 @@
            'make-syntax-provider
            "close-view must be a procedure or #f"
            close-view))
+       (unless (or (not highlights) (procedure? highlights))
+         (assertion-violation
+           'make-syntax-provider
+           "highlights must be a procedure or #f"
+           highlights))
        (unless (procedure? close)
          (assertion-violation 'make-syntax-provider "close must be a procedure" close))
-       (%make-syntax-provider capabilities open sync view close-view close)]))
+       (%make-syntax-provider
+         capabilities
+         open
+         sync
+         view
+         close-view
+         highlights
+         close)]))
 
   (define (require-syntax-provider who provider)
     (unless (syntax-provider? provider)
@@ -103,6 +123,32 @@
     (let ([view (syntax-provider-view provider)])
       (and view (view session snapshot pending-edits))))
 
+  (define (syntax-highlights provider session start end)
+    (require-syntax-provider 'syntax-highlights provider)
+    (unless
+      (and
+        (integer? start)
+        (exact? start)
+        (integer? end)
+        (exact? end)
+        (<= 0 start end))
+      (assertion-violation
+        'syntax-highlights
+        "invalid syntax highlight range"
+        start
+        end))
+    (let ([highlights (syntax-provider-highlights provider)])
+      (if (not highlights)
+          #f
+          (let ([runs (highlights session start end)])
+            (unless
+              (and (list? runs) (for-all decoration-run? runs))
+              (assertion-violation
+                'syntax-highlights
+                "syntax provider returned invalid highlight runs"
+                runs))
+            runs))))
+
   (define (syntax-close-view! provider view)
     (require-syntax-provider 'syntax-close-view! provider)
     (let ([close-view (syntax-provider-close-view provider)])
@@ -122,7 +168,6 @@
       (immutable pairs language-profile-pairs)
       (immutable lexical language-profile-lexical)
       (immutable word-motion language-profile-word-motion)
-      (immutable highlights language-profile-highlights)
       (immutable text-objects language-profile-text-objects)
       (immutable electric language-profile-electric)
       (immutable enter language-profile-enter)))
@@ -130,11 +175,12 @@
   (define make-language-profile
     (case-lambda
       [(name syntax)
-       (make-language-profile name syntax #f '() #f #f #f #f '() #f)]
-      [(name syntax indent pairs lexical highlights text-objects electric enter)
        (make-language-profile
-         name syntax indent pairs lexical #f highlights text-objects electric enter)]
-      [(name syntax indent pairs lexical word-motion highlights text-objects electric enter)
+         name syntax #f '() #f #f #f '() #f)]
+      [(name syntax indent pairs lexical text-objects electric enter)
+       (make-language-profile
+         name syntax indent pairs lexical #f text-objects electric enter)]
+      [(name syntax indent pairs lexical word-motion text-objects electric enter)
        (unless (symbol? name)
          (assertion-violation
            'make-language-profile
@@ -157,11 +203,6 @@
           'make-language-profile
           "lexical policy must be a procedure or #f"
           lexical))
-       (unless (or (not highlights) (procedure? highlights))
-         (assertion-violation
-           'make-language-profile
-           "highlights must be a procedure or #f"
-           highlights))
        (unless (or (not word-motion) (word-motion? word-motion))
          (assertion-violation
            'make-language-profile
@@ -184,7 +225,6 @@
          pairs
          lexical
          word-motion
-         highlights
          text-objects
          electric
          enter)]))
@@ -475,6 +515,88 @@
               (loop (- index 1))
               (cons index point))))))
 
+  (define-record-type
+    (scheme-syntax-session
+      %make-scheme-syntax-session
+      scheme-syntax-session?)
+    (fields
+      document-id
+      (mutable revision
+               scheme-syntax-session-revision
+               scheme-syntax-session-revision-set!)
+      (mutable highlights
+               scheme-syntax-session-highlights
+               scheme-syntax-session-highlights-set!)))
+
+  (define (scheme-highlight-index snapshot)
+    (let ([text (snapshot-text snapshot)])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (make-decoration-index
+            (scheme-highlight-runs
+              (snapshot-document-id snapshot)
+              (snapshot-revision snapshot)
+              (text->bytevector text)
+              0
+              (text-size text))))
+        (lambda () (text-close! text)))))
+
+  (define (open-scheme-syntax-session snapshot)
+    (%make-scheme-syntax-session
+      (snapshot-document-id snapshot)
+      (snapshot-revision snapshot)
+      (scheme-highlight-index snapshot)))
+
+  (define (sync-scheme-syntax-session! session change snapshot)
+    (unless (scheme-syntax-session? session)
+      (assertion-violation
+        'sync-scheme-syntax-session!
+        "expected a Scheme syntax session"
+        session))
+    (unless
+      (and
+        (= (scheme-syntax-session-document-id session)
+           (snapshot-document-id snapshot))
+        (= (scheme-syntax-session-revision session)
+           (change-old-revision change))
+        (= (change-new-revision change)
+           (snapshot-revision snapshot)))
+      (assertion-violation
+        'sync-scheme-syntax-session!
+        "Scheme syntax session revision differs from change"
+        (scheme-syntax-session-revision session)
+        (change-old-revision change)
+        (change-new-revision change)
+        (snapshot-revision snapshot)))
+    (scheme-syntax-session-highlights-set!
+      session
+      (scheme-highlight-index snapshot))
+    (scheme-syntax-session-revision-set!
+      session
+      (snapshot-revision snapshot)))
+
+  (define (scheme-syntax-highlights session start end)
+    (unless (scheme-syntax-session? session)
+      (assertion-violation
+        'scheme-syntax-highlights
+        "expected a Scheme syntax session"
+        session))
+    (decoration-index-runs-in-range
+      (scheme-syntax-session-highlights session)
+      start
+      end))
+
+  (define scheme-syntax-provider
+    (make-syntax-provider
+      '(highlight)
+      open-scheme-syntax-session
+      sync-scheme-syntax-session!
+      #f
+      #f
+      scheme-syntax-highlights
+      (lambda (session) #f)))
+
   (register-major-mode!
     default-language-catalog
     (make-major-mode 'fundamental-mode #f #f 'editing #f '()))
@@ -483,13 +605,12 @@
     default-language-catalog
     (make-language-profile
       'scheme
-      #f
+      scheme-syntax-provider
       #f
       '((#\( . #\))
         (#\[ . #\])
         (#\{ . #\}))
       scheme-identifier-character?
-      scheme-highlight-runs
       #f
       '()
       #f))

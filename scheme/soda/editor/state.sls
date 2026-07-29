@@ -65,6 +65,12 @@
           editor-set-pending-keys!
           editor-status-message
           editor-set-status-message!
+          editor-theme
+          editor-set-theme!
+          editor-render-generation
+          editor-dirty-reasons
+          editor-invalidate!
+          editor-take-dirty-reasons!
           editor-kill-ring
           editor-set-kill-ring!
           editor-last-yank
@@ -127,6 +133,7 @@
           (soda editor location)
           (soda editor prefix)
           (soda editor prompt)
+          (soda editor theme)
           (soda editor window))
 
   (define-record-type (view %make-view view?)
@@ -218,6 +225,13 @@
       (mutable last-command-class
                editor-last-command-class
                editor-last-command-class-set!)
+      (mutable theme editor-theme editor-theme-set!)
+      (mutable render-generation
+               editor-render-generation
+               editor-render-generation-set!)
+      (mutable dirty-reasons
+               editor-dirty-reasons
+               editor-dirty-reasons-set!)
       (mutable closed? editor-closed? editor-closed?-set!)))
 
   (define (require-open-editor who value)
@@ -328,6 +342,7 @@
                     (same-annotation-owner?
                       candidate namespace buffer-id)))
                 (editor-annotation-sets editor))))
+          (editor-invalidate! editor 'overlay)
           #t))))
 
   (define (editor-clear-annotation-sets!
@@ -363,6 +378,8 @@
           editor
           (map annotation-set-buffer-id removed)))
       (editor-annotation-sets-set! editor retained)
+      (unless (null? removed)
+        (editor-invalidate! editor 'overlay))
       (length removed)))
 
   (define (editor-clear-pending-prefix! editor)
@@ -2167,6 +2184,40 @@
         message))
     (editor-status-message-set! value message))
 
+  (define (editor-invalidate! value reason)
+    (require-open-editor 'editor-invalidate! value)
+    (unless (symbol? reason)
+      (assertion-violation
+        'editor-invalidate!
+        "dirty reason must be a symbol"
+        reason))
+    (editor-render-generation-set!
+      value
+      (+ (editor-render-generation value) 1))
+    (unless (memq reason (editor-dirty-reasons value))
+      (editor-dirty-reasons-set!
+        value
+        (append (editor-dirty-reasons value) (list reason))))
+    (editor-render-generation value))
+
+  (define (editor-take-dirty-reasons! value)
+    (require-open-editor 'editor-take-dirty-reasons! value)
+    (let ([reasons (editor-dirty-reasons value)])
+      (editor-dirty-reasons-set! value '())
+      reasons))
+
+  (define (editor-set-theme! value theme)
+    (require-open-editor 'editor-set-theme! value)
+    (unless (theme? theme)
+      (assertion-violation
+        'editor-set-theme!
+        "expected a theme"
+        theme))
+    (unless (eq? theme (editor-theme value))
+      (editor-theme-set! value theme)
+      (editor-invalidate! value 'theme))
+    theme)
+
   (define (view-caret value)
     (unless (view? value)
       (assertion-violation 'view-caret "expected a view" value))
@@ -2546,6 +2597,9 @@
                '()
                #f
                #f
+               default-theme
+               0
+               '(initial)
                #f)])
       (hashtable-set! buffers (buffer-id buffer) buffer)
       (register-buffer-resource! value buffer)

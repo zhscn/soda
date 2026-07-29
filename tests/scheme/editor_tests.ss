@@ -23,6 +23,7 @@
         (soda tui input)
         (soda tui inspect)
         (soda tui layout)
+        (soda tui output)
         (soda tui presenter)
         (soda tui renderer))
 
@@ -598,6 +599,129 @@
            diff-output
            (string-append (string (integer->char 27)) "[H"))))
   (error 'editor-tests "frame diff did not limit output to changed cells"))
+
+(define span-previous-frame (make-frame 1 4))
+(define span-current-frame (make-frame 1 4))
+(frame-put-cell!
+  span-current-frame
+  0
+  0
+  (make-cell "x" 1 '(default) default-style #f '()))
+(frame-put-cell!
+  span-current-frame
+  0
+  1
+  (make-cell "y" 1 '(default) default-style #f '()))
+(let ([output
+        (frame-diff->ansi
+          span-previous-frame
+          span-current-frame)])
+  (unless
+    (and
+      (string-contains?
+        output
+        (string-append
+          (string (integer->char 27))
+          "[1;1Hxy"))
+      (not
+        (string-contains?
+          output
+          (string-append
+            (string (integer->char 27))
+            "[1;2H"))))
+    (error 'editor-tests
+           "presenter did not merge adjacent cells into a row span")))
+(unless
+  (string=?
+    (frame-diff->ansi span-current-frame span-current-frame)
+    "")
+  (error 'editor-tests "unchanged frame produced terminal output"))
+
+(define output-state (make-terminal-output-state))
+(define output-frame-one (make-frame 1 2))
+(define output-frame-two (make-frame 1 2))
+(frame-put-cell!
+  output-frame-one
+  0
+  0
+  (make-cell "a" 1 '(default) default-style #f '()))
+(frame-put-cell!
+  output-frame-two
+  0
+  0
+  (make-cell "b" 1 '(default) default-style #f '()))
+(terminal-output-request-frame! output-state output-frame-one)
+(terminal-output-request-frame! output-state output-frame-two)
+(let ([pending
+        (utf8->string
+          (terminal-output-pending-bytes output-state))])
+  (unless
+    (and
+      (string-contains? pending "b")
+      (not (string-contains? pending "a")))
+    (error 'editor-tests
+           "unsent frame diff was not replaced by the latest frame")))
+(let ([remaining
+        (- (bytevector-length
+             (terminal-output-pending-bytes output-state))
+           (terminal-output-pending-offset output-state))])
+  (terminal-output-advance! output-state remaining))
+(unless
+  (and
+    (eq? (terminal-output-committed-frame output-state)
+         output-frame-two)
+    (not (terminal-output-pending? output-state)))
+  (error 'editor-tests "terminal output did not commit sent frame"))
+
+(define output-frame-three (make-frame 1 2))
+(define output-frame-four (make-frame 1 2))
+(frame-put-cell!
+  output-frame-three
+  0
+  0
+  (make-cell "c" 1 '(default) default-style #f '()))
+(frame-put-cell!
+  output-frame-four
+  0
+  0
+  (make-cell "d" 1 '(default) default-style #f '()))
+(terminal-output-request-frame! output-state output-frame-three)
+(let ([inflight
+        (terminal-output-pending-bytes output-state)])
+  (terminal-output-advance! output-state 1)
+  (terminal-output-request-frame! output-state output-frame-four)
+  (unless
+    (eq? inflight (terminal-output-pending-bytes output-state))
+    (error 'editor-tests
+           "partially sent frame transaction was replaced"))
+  (terminal-output-advance!
+    output-state
+    (- (bytevector-length inflight)
+       (terminal-output-pending-offset output-state))))
+(unless
+  (and
+    (eq? (terminal-output-committed-frame output-state)
+         output-frame-three)
+    (eq? (terminal-output-desired-frame output-state)
+         output-frame-four)
+    (terminal-output-pending? output-state)
+    (string-contains?
+      (utf8->string
+        (terminal-output-pending-bytes output-state))
+      "d"))
+  (error 'editor-tests
+         "terminal output did not follow an inflight frame with latest desired"))
+(terminal-output-advance!
+  output-state
+  (- (bytevector-length
+       (terminal-output-pending-bytes output-state))
+     (terminal-output-pending-offset output-state)))
+(unless
+  (and
+    (eq? (terminal-output-committed-frame output-state)
+         output-frame-four)
+    (not (terminal-output-pending? output-state)))
+  (error 'editor-tests "terminal output did not reach desired frame"))
 
 (define created-buffer
   (editor-create-buffer!
@@ -1988,6 +2112,46 @@
     (not (editor-current-location-list highlight-editor)))
   (error 'editor-tests
          "diagnostic namespace was not cleared"))
+
+(define custom-theme
+  (make-theme
+    'test-theme
+    'dark
+    1
+    (list
+      (cons
+        'default
+        (make-face-spec 'default 'default '() '()))
+      (cons
+        'syntax-comment
+        (make-face-spec 33 'inherit '(italic) '()))
+      (cons
+        'syntax.comment
+        (make-face-spec 44 'inherit '() '())))))
+(unless
+  (= (face-spec-foreground
+       (theme-face-spec
+         custom-theme
+         'syntax.comment.documentation))
+     44)
+  (error 'editor-tests "theme face hierarchy did not fall back"))
+(let ([generation (editor-render-generation highlight-editor)])
+  (editor-set-theme! highlight-editor custom-theme)
+  (unless
+    (and
+      (= (editor-render-generation highlight-editor)
+         (+ generation 1))
+      (memq 'theme (editor-dirty-reasons highlight-editor))
+      (= (style-foreground
+           (cell-style
+             (frame-cell-ref
+               (render-editor-frame highlight-editor 4 50)
+               0
+               22)))
+         33))
+    (error 'editor-tests
+           "theme switch did not invalidate and restyle the frame")))
+
 (define editor-owned-diagnostic-set
   (make-buffer-annotation-set
     highlight-buffer

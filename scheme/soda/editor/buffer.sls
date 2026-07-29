@@ -37,7 +37,6 @@
           buffer-undo-to!)
   (import (rnrs)
           (soda document)
-          (soda editor decoration)
           (soda editor language))
 
   (define-record-type
@@ -46,10 +45,7 @@
       (immutable profile language-runtime-profile)
       (mutable session language-runtime-session language-runtime-session-set!)
       (mutable revision language-runtime-revision language-runtime-revision-set!)
-      (mutable error language-runtime-error language-runtime-error-set!)
-      (mutable highlight-index
-               language-runtime-highlight-index
-               language-runtime-highlight-index-set!)))
+      (mutable error language-runtime-error language-runtime-error-set!)))
 
   (define-record-type (buffer %make-buffer buffer?)
     (fields
@@ -95,33 +91,13 @@
             (syntax-close! provider session)))
         (language-runtime-session-set! runtime #f))))
 
-  (define (snapshot-highlight-index profile snapshot)
-    (let ([highlighter (language-profile-highlights profile)])
-      (if (not highlighter)
-          (make-decoration-index '())
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda ()
-                (make-decoration-index
-                  (highlighter
-                    (snapshot-document-id snapshot)
-                    (snapshot-revision snapshot)
-                    (text->bytevector text)
-                    0
-                    (text-size text))))
-              (lambda () (text-close! text)))))))
-
   (define (open-runtime profile snapshot)
-    (let ([provider (language-profile-syntax profile)]
-          [highlight-index
-            (snapshot-highlight-index profile snapshot)])
+    (let ([provider (language-profile-syntax profile)])
       (%make-language-runtime
         profile
         (and provider (syntax-open provider snapshot))
         (snapshot-revision snapshot)
-        #f
-        highlight-index)))
+        #f)))
 
   (define (profile-for-mode catalog mode-name)
     (let ([language
@@ -352,12 +328,25 @@
         start
         end))
     (let ([runtime (buffer-language-runtime value)])
-      (if runtime
-          (decoration-index-runs-in-range
-            (language-runtime-highlight-index runtime)
-            start
-            end)
-          '())))
+      (if (not runtime)
+          '()
+          (let* ([profile (language-runtime-profile runtime)]
+                 [provider (language-profile-syntax profile)]
+                 [session (language-runtime-session runtime)]
+                 [provided
+                   (and
+                     provider
+                     session
+                     (= (buffer-revision value)
+                        (language-runtime-revision runtime))
+                     (guard (condition
+                              [else
+                               (language-runtime-error-set!
+                                 runtime condition)
+                               #f])
+                       (syntax-highlights
+                         provider session start end)))])
+            (if provided provided '())))))
 
   (define buffer-setting-ref
     (case-lambda
@@ -421,19 +410,6 @@
             runtime
             (snapshot-revision snapshot))))))
 
-  (define (refresh-highlights! runtime snapshot)
-    (guard (condition
-             [else
-              (language-runtime-highlight-index-set!
-                runtime
-                (make-decoration-index '()))
-              (language-runtime-error-set! runtime condition)])
-      (language-runtime-highlight-index-set!
-        runtime
-        (snapshot-highlight-index
-          (language-runtime-profile runtime)
-          snapshot))))
-
   (define (sync-change! value change)
     (let ([runtime (buffer-language-runtime value)])
       (when runtime
@@ -469,8 +445,7 @@
                      (language-runtime-revision-set!
                        runtime
                        (snapshot-revision snapshot))
-                     (language-runtime-error-set! runtime #f))])
-                (refresh-highlights! runtime snapshot)))
+                     (language-runtime-error-set! runtime #f))])))
             (lambda () (snapshot-close! snapshot)))))))
 
   (define (transaction-pending-edits transaction)

@@ -133,7 +133,6 @@
           (#\{ . #\}))
         cpp-identifier-character?
         #f
-        #f
         '()
         #f))
     (register-major-mode!

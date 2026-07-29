@@ -15,8 +15,15 @@
           make-decoration-sweep
           decoration-sweep?
           decoration-sweep-runs-at!
-          decoration-runs-in-range
-          decoration-runs-at)
+          decoration-runs->styled-chunks
+          styled-chunk?
+          styled-chunk-start
+          styled-chunk-end
+          styled-chunk-runs
+          make-styled-chunk-cursor
+          styled-chunk-cursor?
+          styled-chunk-cursor-at!
+          decoration-runs-in-range)
   (import (rnrs))
 
   (define-record-type
@@ -39,6 +46,21 @@
       (mutable position
                decoration-sweep-position
                decoration-sweep-position-set!)))
+
+  (define-record-type styled-chunk
+    (fields start end runs))
+
+  (define-record-type
+    (styled-chunk-cursor
+      %make-styled-chunk-cursor
+      styled-chunk-cursor?)
+    (fields
+      (mutable chunks
+               styled-chunk-cursor-chunks
+               styled-chunk-cursor-chunks-set!)
+      (mutable position
+               styled-chunk-cursor-position
+               styled-chunk-cursor-position-set!)))
 
   (define valid-layers
     '(base-syntax semantic diagnostic search selection transient))
@@ -122,10 +144,7 @@
       [else (cons (car runs) (insert-run run (cdr runs)))]))
 
   (define (sort-runs runs)
-    (fold-left
-      (lambda (result run) (insert-run run result))
-      '()
-      runs))
+    (list-sort run-before? runs))
 
   (define (run-position-before? left right)
     (cond
@@ -143,21 +162,8 @@
        #f]
       [else (run-before? left right)]))
 
-  (define (insert-positioned-run run runs)
-    (cond
-      [(null? runs) (list run)]
-      [(run-position-before? run (car runs)) (cons run runs)]
-      [else
-       (cons
-         (car runs)
-         (insert-positioned-run run (cdr runs)))]))
-
   (define (sort-positioned-runs runs)
-    (fold-left
-      (lambda (result run)
-        (insert-positioned-run run result))
-      '()
-      runs))
+    (list-sort run-position-before? runs))
 
   (define (require-run-list who runs)
     (unless (and (list? runs) (for-all decoration-run? runs))
@@ -276,6 +282,103 @@
              (insert-run (car pending) active))]
           [else (activate (cdr pending) active)]))))
 
+  (define (decoration-sweep-next-boundary value end)
+    (let ([next
+            (fold-left
+              (lambda (boundary run)
+                (min boundary (decoration-run-end run)))
+              end
+              (decoration-sweep-active value))])
+      (if (null? (decoration-sweep-pending value))
+          next
+          (min
+            next
+            (decoration-run-start
+              (car (decoration-sweep-pending value)))))))
+
+  (define (decoration-runs->styled-chunks runs start end)
+    (require-run-list 'decoration-runs->styled-chunks runs)
+    (unless
+      (and
+        (exact-integer? start)
+        (exact-integer? end)
+        (<= 0 start end))
+      (assertion-violation
+        'decoration-runs->styled-chunks
+        "invalid styled chunk range"
+        start
+        end))
+    (let ([sweep (make-decoration-sweep runs start)])
+      (let loop ([position start] [chunks '()])
+        (if (= position end)
+            (reverse chunks)
+            (let* ([active
+                     (decoration-sweep-runs-at!
+                       sweep position)]
+                   [boundary
+                     (decoration-sweep-next-boundary sweep end)])
+              (unless (> boundary position)
+                (assertion-violation
+                  'decoration-runs->styled-chunks
+                  "decoration boundary did not advance"
+                  position
+                  boundary))
+              (loop
+                boundary
+                (cons
+                  (make-styled-chunk
+                    position boundary active)
+                  chunks)))))))
+
+  (define (make-styled-chunk-cursor chunks start)
+    (unless
+      (and
+        (list? chunks)
+        (for-all styled-chunk? chunks)
+        (exact-integer? start)
+        (not (negative? start)))
+      (assertion-violation
+        'make-styled-chunk-cursor
+        "invalid styled chunk cursor"
+        chunks
+        start))
+    (%make-styled-chunk-cursor chunks start))
+
+  (define (styled-chunk-cursor-at! value position)
+    (unless (styled-chunk-cursor? value)
+      (assertion-violation
+        'styled-chunk-cursor-at!
+        "expected a styled chunk cursor"
+        value))
+    (unless
+      (and
+        (exact-integer? position)
+        (>= position (styled-chunk-cursor-position value)))
+      (assertion-violation
+        'styled-chunk-cursor-at!
+        "styled chunk positions must be non-negative and monotonic"
+        position
+        (styled-chunk-cursor-position value)))
+    (let loop ([chunks (styled-chunk-cursor-chunks value)])
+      (cond
+        [(null? chunks)
+         (styled-chunk-cursor-chunks-set! value '())
+         (styled-chunk-cursor-position-set! value position)
+         #f]
+        [(>= position (styled-chunk-end (car chunks)))
+         (loop (cdr chunks))]
+        [else
+         (unless
+           (<= (styled-chunk-start (car chunks)) position)
+           (assertion-violation
+             'styled-chunk-cursor-at!
+             "position precedes the current styled chunk"
+             position
+             (styled-chunk-start (car chunks))))
+         (styled-chunk-cursor-chunks-set! value chunks)
+         (styled-chunk-cursor-position-set! value position)
+         (car chunks)])))
+
   (define (decoration-runs-in-range runs start end)
     (unless
       (and (list? runs)
@@ -295,17 +398,4 @@
                (< start (decoration-run-end run))))
         runs)))
 
-  (define (decoration-runs-at runs position)
-    (unless
-      (and (list? runs)
-           (for-all decoration-run? runs)
-           (exact-integer? position)
-           (not (negative? position)))
-      (assertion-violation
-        'decoration-runs-at
-        "invalid decoration point query"
-        position))
-    (sort-runs
-      (filter
-        (lambda (run) (decoration-run-covers? run position))
-        runs))))
+)

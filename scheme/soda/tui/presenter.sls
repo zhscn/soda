@@ -129,6 +129,87 @@
           (display (ansi "[?25h") port))
         (display (ansi "[?25l") port)))
 
+  (define (frame-cursor-display=? left right)
+    (and
+      (eq? (frame-cursor-visible? left)
+           (frame-cursor-visible? right))
+      (or
+        (not (frame-cursor-visible? left))
+        (and
+          (= (frame-cursor-row left) (frame-cursor-row right))
+          (= (frame-cursor-column left)
+             (frame-cursor-column right))))))
+
+  (define (cell-changed? previous value row column)
+    (not
+      (cell-display=?
+        (frame-cell-ref previous row column)
+        (frame-cell-ref value row column))))
+
+  (define (row-first-change previous value row start)
+    (let loop ([column start])
+      (cond
+        [(= column (frame-columns value)) #f]
+        [(cell-changed? previous value row column)
+         (let rewind ([start column])
+           (if
+             (and
+               (positive? start)
+               (cell-continuation?
+                 (frame-cell-ref value row start)))
+             (rewind (- start 1))
+             start))]
+        [else (loop (+ column 1))])))
+
+  (define (row-change-end previous value row start)
+    (let loop ([column start])
+      (cond
+        [(= column (frame-columns value)) column]
+        [(cell-changed? previous value row column)
+         (loop (+ column 1))]
+        [(and
+           (cell-continuation?
+             (frame-cell-ref value row column))
+           (positive? column)
+           (cell-changed? previous value row (- column 1)))
+         (loop (+ column 1))]
+        [else column])))
+
+  (define (write-row-span!
+            port
+            value
+            row
+            start
+            end
+            current-style)
+    (display (cursor-sequence row start) port)
+    (let loop ([column start] [current-style current-style])
+      (if (= column end)
+          current-style
+          (let ([cell (frame-cell-ref value row column)])
+            (if (cell-continuation? cell)
+                (loop (+ column 1) current-style)
+                (begin
+                  (unless (style=? current-style (cell-style cell))
+                    (display
+                      (style-sequence (cell-style cell))
+                      port))
+                  (display (cell-text cell) port)
+                  (loop
+                    (+ column 1)
+                    (cell-style cell))))))))
+
+  (define (frames-display=? previous value)
+    (let row-loop ([row 0])
+      (or
+        (= row (frame-rows value))
+        (let column-loop ([column 0])
+          (cond
+            [(= column (frame-columns value))
+             (row-loop (+ row 1))]
+            [(cell-changed? previous value row column) #f]
+            [else (column-loop (+ column 1))])))))
+
   (define (frame-diff->ansi previous value)
     (unless (frame? value)
       (assertion-violation
@@ -144,27 +225,37 @@
             (not (= (frame-rows previous) (frame-rows value)))
             (not (= (frame-columns previous) (frame-columns value))))
         (frame->ansi value)
-        (call-with-values
-          open-string-output-port
-          (lambda (port extract)
-            (display (ansi "[?25l") port)
-            (let ([current-style default-style])
-              (do ([row 0 (+ row 1)])
-                  ((= row (frame-rows value)))
-                (do ([column 0 (+ column 1)])
-                    ((= column (frame-columns value)))
-                  (let ([cell (frame-cell-ref value row column)]
-                        [old-cell
-                          (frame-cell-ref previous row column)])
-                    (when (and
-                            (not (cell-continuation? cell))
-                            (not (cell-display=? old-cell cell)))
-                      (display (cursor-sequence row column) port)
-                      (unless (style=? current-style (cell-style cell))
-                        (display (style-sequence (cell-style cell)) port)
-                        (set! current-style (cell-style cell)))
-                      (display (cell-text cell) port)))))
-              (unless (style=? current-style default-style)
-                (display (ansi "[0m") port)))
-            (write-final-cursor! port value)
-            (extract))))))
+        (let ([display-same? (frames-display=? previous value)]
+              [cursor-same?
+                (frame-cursor-display=? previous value)])
+          (if (and display-same? cursor-same?)
+              ""
+              (call-with-values
+                open-string-output-port
+                (lambda (port extract)
+                  (unless display-same?
+                    (display (ansi "[?25l") port)
+                    (let ([current-style default-style])
+                      (do ([row 0 (+ row 1)])
+                          ((= row (frame-rows value)))
+                        (let span-loop ([column 0])
+                          (let ([start
+                                  (row-first-change
+                                    previous value row column)])
+                            (when start
+                              (let ([end
+                                      (row-change-end
+                                        previous value row start)])
+                                (set! current-style
+                                  (write-row-span!
+                                    port
+                                    value
+                                    row
+                                    start
+                                    end
+                                    current-style))
+                                (span-loop end)))))
+                      (unless (style=? current-style default-style)
+                        (display (ansi "[0m") port))))
+                  (write-final-cursor! port value)
+                  (extract)))))))))

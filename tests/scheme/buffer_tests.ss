@@ -297,31 +297,49 @@
 (buffer-close! external-buffer)
 
 (define highlight-build-count 0)
-(define (counting-highlighter document-id revision bytes start end)
+(define (counting-highlight-index snapshot)
   (set! highlight-build-count (+ highlight-build-count 1))
-  (if (positive? (bytevector-length bytes))
-      (list
-        (make-decoration-run
-          0
-          (bytevector-length bytes)
-          'syntax-test
-          'base-syntax
-          0
-          'test
-          revision))
-      '()))
+  (let ([text (snapshot-text snapshot)])
+    (dynamic-wind
+      (lambda () #f)
+      (lambda ()
+        (make-decoration-index
+          (if (positive? (text-size text))
+              (list
+                (make-decoration-run
+                  0
+                  (text-size text)
+                  'syntax-test
+                  'base-syntax
+                  0
+                  'test
+                  (snapshot-revision snapshot)))
+              '())))
+      (lambda () (text-close! text)))))
+
+(define counting-highlight-provider
+  (make-syntax-provider
+    '(highlight)
+    (lambda (snapshot)
+      (vector
+        (snapshot-revision snapshot)
+        (counting-highlight-index snapshot)))
+    (lambda (session change snapshot)
+      (vector-set! session 0 (snapshot-revision snapshot))
+      (vector-set! session 1 (counting-highlight-index snapshot)))
+    #f
+    #f
+    (lambda (session start end)
+      (decoration-index-runs-in-range
+        (vector-ref session 1)
+        start
+        end))
+    (lambda (session) #f)))
 
 (register-language-profile!
   (make-language-profile
     'highlight-test
-    #f
-    #f
-    '()
-    #f
-    counting-highlighter
-    #f
-    '()
-    #f))
+    counting-highlight-provider))
 (register-major-mode!
   (make-major-mode
     'highlight-test-mode
@@ -371,6 +389,11 @@
          (make-decoration-run
            2 4 'high 'diagnostic 10 'test 'high)]
        [index (make-decoration-index (list high low))]
+       [chunks
+         (decoration-runs->styled-chunks
+           (decoration-index-runs-in-range index 0 8)
+           0
+           8)]
        [sweep
          (make-decoration-sweep
            (decoration-index-runs-in-range index 1 6)
@@ -388,7 +411,19 @@
       (equal?
         (map decoration-run-face
              (decoration-sweep-runs-at! sweep 4))
-        '(low)))
+        '(low))
+      (equal?
+        (map
+          (lambda (chunk)
+            (list
+              (styled-chunk-start chunk)
+              (styled-chunk-end chunk)
+              (map decoration-run-face
+                   (styled-chunk-runs chunk))))
+          chunks)
+        '((0 2 (low))
+          (2 4 (low high))
+          (4 8 (low)))))
     (error 'buffer-tests "decoration index and sweep order differ")))
 
 (change-close! highlight-cache-change)

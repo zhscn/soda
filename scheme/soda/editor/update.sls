@@ -266,30 +266,42 @@
 
   (define (editor-update! editor message)
     (require-open-editor 'editor-update! editor)
-    (cond
-      [(input-message? message)
-       (handle-input-event! editor (input-message-event message))]
-      [(key-message? message)
-       (handle-key-event! editor (key-message-event message))]
-      [(resize-message? message)
-       (handle-resize-message! editor message)]
-      [(command-message? message)
-       (run-interactive-command
-         editor
-         (command-message-name message)
-         #f
-         (command-message-argument message)
-         (command-message-prefix message))]
-      [(internal-command-message? message)
-       (run-internal-command
-         editor
-         (internal-command-message-name message)
-         (internal-command-message-argument message))]
-      [(completion-response-message? message)
-       (editor-apply-completion-response! editor message)
-       '()]
-      [else
-       (assertion-violation
-         'editor-update!
-         "expected an editor message"
-         message)])))
+    (let ([result
+            (cond
+              [(input-message? message)
+               (handle-input-event!
+                 editor
+                 (input-message-event message))]
+              [(key-message? message)
+               (handle-key-event! editor (key-message-event message))]
+              [(resize-message? message)
+               (handle-resize-message! editor message)]
+              [(command-message? message)
+               (run-interactive-command
+                 editor
+                 (command-message-name message)
+                 #f
+                 (command-message-argument message)
+                 (command-message-prefix message))]
+              [(internal-command-message? message)
+               (run-internal-command
+                 editor
+                 (internal-command-message-name message)
+                 (internal-command-message-argument message))]
+              [(completion-response-message? message)
+               (editor-apply-completion-response! editor message)
+               '()]
+              [else
+               (assertion-violation
+                 'editor-update!
+                 "expected an editor message"
+                 message)])])
+      (editor-invalidate!
+        editor
+        (cond
+          [(resize-message? message) 'resize]
+          [(completion-response-message? message) 'overlay]
+          [(or (input-message? message) (key-message? message))
+           'cursor]
+          [else 'document]))
+      result)))
