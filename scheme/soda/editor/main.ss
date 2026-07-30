@@ -1,7 +1,9 @@
-#!r6rs
-(import (rnrs)
-        (rnrs programs)
+#!chezscheme
+(import (chezscheme)
         (soda editor tui))
 
-(define arguments (cdr (command-line)))
-(run-tui-editor (and (pair? arguments) (car arguments)))
+(scheme-start
+  (lambda arguments
+    (run-tui-editor
+      (and (pair? arguments) (car arguments)))
+    0))

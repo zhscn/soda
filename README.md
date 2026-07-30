@@ -1,9 +1,9 @@
 # soda
 
-soda is a Scheme-first native editor. Chez Scheme owns the command loop and
-editor policy. Native libraries provide persistent text values, transactional
-documents, incremental C++ analysis, indentation mechanisms, asynchronous I/O,
-and terminal access.
+soda is a Scheme-first native editor distributed as one executable. Chez Scheme
+owns the command loop and editor policy. Statically linked native components
+provide persistent text values, transactional documents, incremental C++
+analysis, indentation mechanisms, asynchronous I/O, and terminal access.
 
 ## Native core
 
@@ -23,7 +23,7 @@ The native core is split by data ownership:
 - `soda_runtime` owns libuv handles and exposes pull-based timer, descriptor
   readiness, file I/O, and typed directory-scan completion events through a C
   ABI.
-- `soda_native_core` is the aggregate target for native consumers.
+- `soda_native_core` is the aggregate static target for native consumers.
 
 The parser consumes document values and change sets. It has no dependency on
 editor buffers, views, command registries, Scheme objects, or frontend state.
@@ -95,17 +95,26 @@ editor thread.
 
 ## TUI bootstrap
 
-Configure and build the Debug libraries, then start an empty buffer or open a
-UTF-8 file:
+Configure and build the executable, then start an empty buffer or open a UTF-8
+file:
 
 ```sh
 cmk build -c Debug
-./bin/soda
-./bin/soda path/to/file
+cmk run -c Debug soda
+cmk run -c Debug soda -- path/to/file
 ```
 
 When the path does not exist, Soda starts an empty visiting buffer whose first
 save creates the file. Other startup read failures remain fatal.
+
+The `soda` target is a self-contained ELF application. Its C entry point embeds
+the Chez runtime and compiled editor boot images, registers the statically
+linked native ABI, builds the Scheme heap, and transfers control to the editor
+command loop. Installation copies only the executable:
+
+```sh
+cmk install -c Release --prefix ./dist
+```
 
 Printable input inserts text. Backspace deletes the previous UTF-8 code point,
 the arrow keys move the caret, Enter inserts a newline, `C-x =` describes the

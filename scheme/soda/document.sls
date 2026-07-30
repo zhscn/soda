@@ -70,12 +70,11 @@
           anchor-before-insertion
           anchor-after-insertion)
   (import (chezscheme)
+          (soda native)
           (soda document handles))
 
-  (define shared-library
-    (let ([path (or (getenv "SODA_DOCUMENT_LIBRARY") "libsoda_document.so")])
-      (load-shared-object path)
-      path))
+  (define native-library-loaded
+    (load-soda-native-library! "SODA_DOCUMENT_LIBRARY"))
 
   (define text-npos #xffffffff)
   (define revision-none #xffffffffffffffff)

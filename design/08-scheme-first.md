@@ -2,16 +2,18 @@
 
 ## 组合根
 
-Chez Scheme 是编辑器的组合根。它持有 command loop、buffer registry、mode、
-language catalog、keymap catalog、window/workbench、导航、补全会话、用户配置和
-REPL。native library
-提供有界机制，不保存 Scheme 对象，也不反向调用 Scheme。
+ELF executable 是部署容器，Chez Scheme 是编辑器的组合根。C 入口嵌入 Chez
+runtime boot 和已编译的 editor boot，注册静态 native ABI，构建 Chez heap 后把
+控制权交给 Scheme startup procedure。Chez 持有 command loop、buffer registry、
+mode、language catalog、keymap catalog、window/workbench、导航、补全会话、用户
+配置和 REPL。native library 提供有界机制，不保存 Scheme 对象，也不反向调用
+Scheme。
 
 ```text
 terminal / files / timers
           │
           ▼
-     soda_runtime
+ static soda_runtime / libuv
           │ plain event values
           ▼
  Chez command loop ───── editor state and policy
@@ -22,6 +24,33 @@ terminal / files / timers
     ▼
 terminal writes
 ```
+
+## 构建与启动
+
+native document、C++ analysis、indentation 和 runtime 组件构建为 static
+libraries。libuv 由 CMake FetchContent 获取并链接其 static target。Chez 的
+`petite.boot` 与 `scheme.boot` 合成为自包含 runtime boot；editor libraries 和
+top-level program 经过 whole-program compilation 后生成以该 runtime 为基底的
+editor boot。两个 boot image 由 `xxd` 转换为 C arrays 并链接进 `soda`。
+
+进程启动顺序固定为：
+
+```text
+C main
+  -> verify Chez kernel/header compatibility
+  -> initialize Chez static runtime
+  -> register embedded runtime and editor boot images
+  -> register every soda_* foreign symbol
+  -> build Chez heap
+  -> invoke scheme-start
+  -> run editor command loop
+  -> deinitialize Chez
+```
+
+Scheme wrapper 在嵌入式进程中直接解析 C 入口注册的 foreign symbols。独立 Scheme
+测试可以通过 `SODA_*_LIBRARY` 环境变量装载测试用的 monolithic native module；
+该 module 不属于安装产物。foreign symbol table 从公开 C ABI headers 生成，因此
+完整 ABI 在嵌入式 Chez 环境和 REPL 中均可解析。
 
 ## 所有权
 

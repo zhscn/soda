@@ -5,6 +5,11 @@ log_user 0
 
 spawn -noecho $editor $input_file
 expect -exact "\033\[?1049h\033\[>1u"
+if {[string first "Chez Scheme Version" $expect_out(buffer)] >= 0} {
+  close
+  wait
+  exit 1
+}
 expect -exact "\033\[?2004h"
 send -- "abc"
 after 50

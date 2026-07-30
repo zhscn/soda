@@ -27,14 +27,12 @@
           cpp-analyzer-expand-selection
           cpp-analyzer-soft-kill-end)
   (import (chezscheme)
+          (soda native)
           (soda cpp-analysis handles)
           (soda document handles))
 
-  (define shared-library
-    (let ([path (or (getenv "SODA_CPP_ANALYSIS_LIBRARY")
-                    "libsoda_cpp_analysis.so")])
-      (load-shared-object path)
-      path))
+  (define native-library-loaded
+    (load-soda-native-library! "SODA_CPP_ANALYSIS_LIBRARY"))
 
   (define syntax-node-none #xffffffff)
   (define revision-none #xffffffffffffffff)

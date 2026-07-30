@@ -20,14 +20,12 @@
           indent-result-trace
           indent-result-take-change!)
   (import (chezscheme)
+          (soda native)
           (soda cpp-analysis handles)
           (soda document handles))
 
-  (define shared-library
-    (let ([path (or (getenv "SODA_INDENTATION_LIBRARY")
-                    "libsoda_indentation.so")])
-      (load-shared-object path)
-      path))
+  (define native-library-loaded
+    (load-soda-native-library! "SODA_INDENTATION_LIBRARY"))
 
   (define text-npos #xffffffff)
 
