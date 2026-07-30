@@ -654,6 +654,22 @@
   (define (positive-exact-integer? value)
     (and (integer? value) (exact? value) (positive? value)))
 
+  (define (scheme-library-name? value)
+    (and
+      (list? value)
+      (pair? value)
+      (for-all
+        (lambda (part)
+          (or
+            (symbol? part)
+            (and (integer? part) (exact? part))))
+        value)))
+
+  (define (scheme-library-name-list? value)
+    (and
+      (list? value)
+      (for-all scheme-library-name? value)))
+
   (define (symbol-list? value)
     (and (list? value) (for-all symbol? value)))
 
@@ -717,6 +733,12 @@
           "Procedure that computes the completion range at point."
           'overlay)
         (make-setting-definition
+          'scheme-environment-libraries
+          '()
+          scheme-library-name-list?
+          "Libraries supplied by the Scheme evaluation environment."
+          'document)
+        (make-setting-definition
           'word-motion
           #f
           (lambda (value) (or (not value) (word-motion? value)))
@@ -756,7 +778,11 @@
         (buffer-set-local-setting!
           buffer
           'confirm-on-exit?
-          #f))
+          #f)
+        (buffer-set-local-setting!
+          buffer
+          'scheme-environment-libraries
+          '((soda editor core))))
       (install-core-auto-modes! editor)
       (install-command-runtime-commands! editor)
       (install-prefix-commands! editor)

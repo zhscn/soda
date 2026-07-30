@@ -4853,7 +4853,8 @@
             revision
             bytes
             library-index
-            library-catalog)
+            library-catalog
+            environment-libraries)
     (unless (and (exact-non-negative-integer? document-id)
                  (exact-non-negative-integer? revision))
       (assertion-violation
@@ -4879,6 +4880,14 @@
         'make-scheme-semantic-snapshot-with-library-index
         "library catalog must contain library names"
         library-catalog))
+    (unless
+      (and
+        (list? environment-libraries)
+        (for-all library-name? environment-libraries))
+      (assertion-violation
+        'make-scheme-semantic-snapshot-with-library-index
+        "environment libraries must contain library names"
+        environment-libraries))
     (let* ([library-table
              (library-table-with-index library-index)]
            [tokens (tokenize bytes)]
@@ -4887,8 +4896,27 @@
              (source-library-ranges semantic)]
            [import-locations
              (source-import-locations tokens)]
-           [import-bindings
+           [explicit-import-bindings
              (map car import-locations)]
+           [import-bindings
+             (fold-left
+               (lambda (bindings library)
+                 (if
+                   (exists
+                     (lambda (binding)
+                       (equal?
+                         (import-binding-library binding)
+                         library))
+                     bindings)
+                   bindings
+                   (append
+                     bindings
+                     (list
+                       (make-import-binding
+                         library
+                         '())))))
+               explicit-import-bindings
+               environment-libraries)]
            [imports
              (map import-binding-library import-bindings)]
            [visible-index
@@ -4941,12 +4969,19 @@
                 visible-index)
               visible-index))))))
 
-  (define (make-scheme-semantic-snapshot
-            document-id
-            revision
-            bytes)
-    (make-scheme-semantic-snapshot/internal
-      document-id revision bytes '() '()))
+  (define make-scheme-semantic-snapshot
+    (case-lambda
+      [(document-id revision bytes)
+       (make-scheme-semantic-snapshot
+         document-id revision bytes '())]
+      [(document-id revision bytes environment-libraries)
+       (make-scheme-semantic-snapshot/internal
+         document-id
+         revision
+         bytes
+         '()
+         '()
+         environment-libraries)]))
 
   (define make-scheme-semantic-snapshot-with-library-index
     (case-lambda
@@ -4956,11 +4991,26 @@
          revision
          bytes
          library-index
+         '()
          '())]
       [(document-id revision bytes library-index library-catalog)
+       (make-scheme-semantic-snapshot-with-library-index
+         document-id
+         revision
+         bytes
+         library-index
+         library-catalog
+         '())]
+      [(document-id
+         revision
+         bytes
+         library-index
+         library-catalog
+         environment-libraries)
        (make-scheme-semantic-snapshot/internal
          document-id
          revision
          bytes
          library-index
-         library-catalog)])))
+         library-catalog
+         environment-libraries)])))

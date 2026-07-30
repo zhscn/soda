@@ -5,6 +5,7 @@
           (soda editor buffer)
           (soda editor completion)
           (soda editor completion-provider)
+          (soda editor scheme-query)
           (soda editor scheme-semantics)
           (soda editor scheme-workspace)
           (soda editor state))
@@ -162,7 +163,9 @@
                                (make-scheme-semantic-snapshot
                                  document-id
                                  revision
-                                 bytes))]
+                                 bytes
+                                 (buffer-scheme-environment-libraries
+                                   buffer)))]
                          [role
                            (scheme-semantic-completion-role
                              snapshot

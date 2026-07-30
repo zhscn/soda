@@ -166,6 +166,10 @@
           buffer
           'confirm-on-exit?
           #f)
+        (buffer-set-local-setting!
+          buffer
+          'scheme-environment-libraries
+          '((soda editor core)))
         buffer)))
 
   (define (try-kill-buffer! editor target force?)

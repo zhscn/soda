@@ -128,8 +128,9 @@ undo、redo 后同步 language runtime。
 持久用户 Buffer 默认跟踪 modified。transcript 等可再生成 Buffer 通过
 `track-modified?` 关闭 modified 跟踪，不把求值输出当作待保存的用户修改。
 `confirm-on-exit?` 独立控制 modified Buffer 是否参与 Editor 退出确认。
-`*scratch*` 使用 `scheme-mode` 并设置 `confirm-on-exit? = #f`：编辑仍产生正常的
-modified 状态、undo history 和 modeline 标记，但退出 Editor 时不要求保存。
+`*scratch*` 使用 `scheme-mode`，以 `(soda editor core)` 作为 Scheme 环境 library，
+并设置 `confirm-on-exit? = #f`：编辑仍产生正常的 modified 状态、undo history 和
+modeline 标记，但退出 Editor 时不要求保存。
 
 文件加载边界在 Document 规范化换行前记录 `file-line-ending`。Document 和编辑
 命令统一使用 LF；保存 request 按该设置重新编码为 LF、CRLF 或 CR，使整文件写入

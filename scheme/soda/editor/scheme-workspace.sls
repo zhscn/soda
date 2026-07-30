@@ -59,6 +59,7 @@
       document-id
       revision
       bytes
+      environment-libraries
       (mutable snapshot)
       (mutable needs-analysis?)))
 
@@ -177,7 +178,11 @@
         (document-id (buffer-document buffer)))
       (equal?
         (scheme-workspace-document-resource document)
-        (buffer-resource buffer))))
+        (buffer-resource buffer))
+      (equal?
+        (scheme-workspace-document-environment-libraries
+          document)
+        (buffer-scheme-environment-libraries buffer))))
 
   (define (all-workspace-documents index)
     (let-values
@@ -212,7 +217,9 @@
                     (scheme-workspace-index-library-index
                       index)
                     (scheme-workspace-index-library-catalog
-                      index))])
+                      index)
+                    (buffer-scheme-environment-libraries
+                      buffer))])
            (hashtable-set!
              table
              id
@@ -222,6 +229,7 @@
                (scheme-semantic-snapshot-document-id snapshot)
                (scheme-semantic-snapshot-revision snapshot)
                bytes
+               (buffer-scheme-environment-libraries buffer)
                snapshot
                #f))
            (scheme-workspace-index-catalog-dirty?-set!
@@ -270,7 +278,9 @@
         (scheme-workspace-document-revision document)
         (scheme-workspace-document-bytes document)
         library-index
-        library-catalog))
+        library-catalog
+        (scheme-workspace-document-environment-libraries
+          document)))
     (scheme-workspace-document-needs-analysis?-set!
       document #f))
 

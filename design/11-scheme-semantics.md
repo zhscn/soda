@@ -398,6 +398,12 @@ definition，按当前位置的拼写应用 lexical shadowing，然后转换为�
 `CompletionItem`。REPL provider 通过 target Document 在 Editor registry 中找到
 所属 InteractionSession，并查询其 evaluator environment：
 
+Buffer 可以通过 `scheme-environment-libraries` 声明求值环境预装的 library。环境
+library 与源码中的显式 import 一同参与 binding resolution 和静态补全，但不产生
+unused-import 诊断。普通 `scheme-mode` Buffer 使用空环境，保持标准 Scheme 的显式
+import 边界；`*scratch*` 使用 `(soda editor core)` 环境，使编辑器扩展接口可直接
+补全和解析。
+
 ```text
 provider_data: {
   definition_id,

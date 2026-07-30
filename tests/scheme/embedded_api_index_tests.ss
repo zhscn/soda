@@ -993,3 +993,99 @@
       "workspace symbol command did not expose the embedded API catalog")))
 (editor-abort-prompt! xref-editor)
 (editor-close! xref-editor)
+
+(define scratch-completion-buffer
+  (make-buffer
+    203
+    (make-document
+      (string->utf8 "(editor-reg")
+      203)
+    "*scratch*"
+    'fundamental-mode))
+(define scratch-completion-editor
+  (make-editor scratch-completion-buffer))
+(view-set-caret!
+  (editor-active-view scratch-completion-editor)
+  (bytevector-length
+    (string->utf8 "(editor-reg")))
+(define scratch-completion-effects
+  (editor-update!
+    scratch-completion-editor
+    (make-command-message 'completion.at-point #f)))
+(for-each
+  (lambda (effect)
+    (let ([request (command-effect-payload effect)])
+      (when
+        (eq? (completion-request-provider request)
+             'scheme-static)
+        (for-each
+          (lambda (message)
+            (editor-update!
+              scratch-completion-editor
+              message))
+          (completion-provider-start
+            (completion-provider-catalog-ref
+              (editor-completion-provider-catalog
+                scratch-completion-editor)
+              'scheme-static)
+            request)))))
+  scratch-completion-effects)
+(let ([completion
+        (editor-active-completion
+          scratch-completion-editor)])
+  (unless
+    (and
+      (eq?
+        (buffer-major-mode-name
+          scratch-completion-buffer)
+        'scheme-mode)
+      (equal?
+        (buffer-setting-ref
+          scratch-completion-buffer
+          'scheme-environment-libraries
+          '())
+        '((soda editor core)))
+      completion
+      (exists
+        (lambda (item)
+          (and
+            (eq? (completion-item-provider item)
+                 'scheme-static)
+            (string=?
+              (completion-item-insert-text item)
+              "editor-register-command!")
+            (string=?
+              (completion-item-group item)
+              "Soda API")))
+        (completion-session-items completion)))
+    (error
+      'embedded-api-index-tests
+      "scratch completion did not expose the Soda editor environment"
+      (and completion
+           (map
+             completion-item-insert-text
+             (completion-session-items completion))))))
+(let* ([snapshot
+         (make-scheme-semantic-snapshot
+           204
+           0
+           (string->utf8
+             "(editor-register-command!)")
+           '((soda editor core)))]
+       [use
+         (use-named
+           snapshot
+           "editor-register-command!")])
+  (unless
+    (and
+      use
+      (= (length (scheme-use-resolution use)) 1)
+      (equal?
+        (scheme-definition-id-revision
+          (car (scheme-use-resolution use)))
+        '(soda editor core)))
+    (error
+      'embedded-api-index-tests
+      "Scheme environment library did not resolve its embedded API"
+      (and use (scheme-use-resolution use)))))
+(editor-close! scratch-completion-editor)

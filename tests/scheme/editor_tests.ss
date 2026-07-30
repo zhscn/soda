@@ -1107,7 +1107,13 @@
       (buffer-setting-ref
         (view-buffer (editor-active-view kill-editor))
         'confirm-on-exit?
-        #t)))
+        #t))
+    (equal?
+      (buffer-setting-ref
+        (view-buffer (editor-active-view kill-editor))
+        'scheme-environment-libraries
+        '())
+      '((soda editor core))))
   (error 'editor-tests "killing the last buffer did not create scratch"))
 (editor-update!
   kill-editor

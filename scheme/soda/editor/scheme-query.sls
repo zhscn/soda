@@ -1,5 +1,6 @@
 (library (soda editor scheme-query)
   (export scheme-buffer?
+          buffer-scheme-environment-libraries
           buffer-scheme-semantic-snapshot
           scheme-definitions-at-point
           scheme-symbol-name-at-point)
@@ -17,6 +18,17 @@
           (buffer-language-catalog buffer)
           (buffer-major-mode-name buffer))
         'scheme)))
+
+  (define (buffer-scheme-environment-libraries buffer)
+    (unless (buffer? buffer)
+      (assertion-violation
+        'buffer-scheme-environment-libraries
+        "expected a buffer"
+        buffer))
+    (buffer-setting-ref
+      buffer
+      'scheme-environment-libraries
+      '()))
 
   (define (buffer-scheme-semantic-snapshot buffer)
     (unless (buffer? buffer)
@@ -36,7 +48,9 @@
                 (make-scheme-semantic-snapshot
                   (snapshot-document-id snapshot)
                   (snapshot-revision snapshot)
-                  (text->bytevector text)))
+                  (text->bytevector text)
+                  (buffer-scheme-environment-libraries
+                    buffer)))
               (lambda () (text-close! text)))))
         (lambda () (snapshot-close! snapshot)))))
 
