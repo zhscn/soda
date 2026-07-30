@@ -61,7 +61,8 @@
       'command
       '((category . command)
         (styles . (fzf))
-        (ignore-case . #t))
+        (ignore-case . #t)
+        (preselect . #t))
       (lambda (input point)
         (cons 0 (string-length input)))
       (lambda (query)

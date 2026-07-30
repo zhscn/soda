@@ -3386,7 +3386,7 @@
                          "t")
                (eq? (cell-face (frame-cell-ref prompt-frame 2 0))
                     'completion-match)
-               (string=? (cell-text (frame-cell-ref prompt-frame 1 0)) "!")
+               (string=? (cell-text (frame-cell-ref prompt-frame 1 0)) "1")
                (string=? (cell-text (frame-cell-ref prompt-frame 1 1)) "/")
                (string=? (cell-text (frame-cell-ref prompt-frame 1 7)) "M")
                (string=? (cell-text (frame-cell-ref prompt-frame 1 11)) "t")
@@ -3486,7 +3486,7 @@
 (let ([completion
         (editor-active-prompt-completion prompt-editor)])
   (do ([count 0 (+ count 1)])
-      ((= count 7))
+      ((= count 6))
     (editor-prompt-completion-next! prompt-editor))
   (unless
     (and
@@ -3991,10 +3991,11 @@
                  'candidates)
                (eq?
                  (completion-session-selection-state completion)
-                 'unset)
-               (not (completion-session-selected-item completion)))
+                 'candidate)
+               (= (completion-session-selected-index completion) 0)
+               (completion-session-selected-item completion))
     (error 'editor-tests
-           "typing did not expose candidates with no implicit selection")))
+           "M-x did not preselect its first matching command")))
 (let ([completion
         (editor-active-prompt-completion prompt-editor)])
   (editor-prompt-completion-next! prompt-editor)
@@ -4006,9 +4007,12 @@
 (editor-prompt-completion-next! prompt-editor)
 (send! prompt-editor prompt-decoder (string->utf8 "a"))
 (let ([completion (editor-active-prompt-completion prompt-editor)])
-  (unless (not (completion-session-selected-item completion))
+  (unless
+    (and
+      (= (completion-session-selected-index completion) 0)
+      (completion-session-selected-item completion))
     (error 'editor-tests
-           "editing the prompt did not clear its completion selection"
+           "editing M-x did not preselect the first refreshed candidate"
            (completion-session-query completion)
            (and
              (completion-session-selected-item completion)

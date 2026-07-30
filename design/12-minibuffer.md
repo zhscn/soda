@@ -203,7 +203,8 @@ completion component 始终显式表示 pending、无匹配、候选数量和当
 选择不会因排序位置变化而漂移。
 
 `M-x` 使用 command registry choice source 和 `extended-command` history 读取
-command symbol。它使用大小写不敏感的 `fzf` 匹配，并保持无预选状态。发起
+command symbol。它使用只包含 candidates 的 selection domain、大小写不敏感的
+`fzf` 匹配，并默认选择第一项；输入变化后重新选择刷新结果的第一项。发起
 `M-x` 的 prefix argument 作为 request data 跨 prompt
 生命周期保存，`prompt.execute-command` 把它放入 interactive command message，
 因此最终命令收到与直接按键调用相同的 `CommandContext`。
