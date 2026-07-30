@@ -104,7 +104,11 @@
             end
             excerpt
             metadata)
-    (unless (and (exact-non-negative-integer? buffer-id)
+    (unless (and (or
+                   (exact-non-negative-integer? buffer-id)
+                   (and
+                     (not buffer-id)
+                     (string? resource)))
                  (or (not resource) (string? resource))
                  (integer? revision)
                  (exact? revision)

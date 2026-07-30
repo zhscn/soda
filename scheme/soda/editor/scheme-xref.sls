@@ -1,6 +1,8 @@
 (library (soda editor scheme-xref)
-  (export install-scheme-xref-commands!)
+  (export install-scheme-xref-commands!
+          editor-scheme-workspace)
   (import (rnrs)
+          (only (chezscheme) make-weak-eq-hashtable)
           (soda document)
           (soda editor buffer)
           (soda editor command)
@@ -15,6 +17,12 @@
           (soda editor scheme-semantics)
           (soda editor scheme-workspace)
           (soda editor state))
+
+  (define editor-workspaces
+    (make-weak-eq-hashtable))
+
+  (define (editor-scheme-workspace editor)
+    (hashtable-ref editor-workspaces editor #f))
 
   (define (exact-non-negative-integer? value)
     (and
@@ -103,42 +111,65 @@
                 (scheme-definition-id definition))
               (scheme-definition-start definition)))))))
 
-  (define (use-location buffer revision use)
+  (define (use-location
+            buffer-id
+            resource
+            revision
+            use)
     (make-location-item
-      (buffer-id buffer)
-      (buffer-resource buffer)
+      buffer-id
+      resource
       revision
       (scheme-use-start use)
       (scheme-use-end use)
       (scheme-use-name use)
       use))
 
-  (define (jump-to-item! editor item)
-    (let ([buffer
-            (editor-buffer-ref
-              editor
-              (location-item-buffer-id item))])
-      (unless (= (buffer-revision buffer)
-                 (location-item-revision item))
-        (assertion-violation
-          'xref.jump
-          "xref location is stale"
-          (location-item-revision item)
-          (buffer-revision buffer)))
-      (editor-jump-to-buffer!
-        editor
-        buffer
-        (location-item-start item))))
-
-  (define (publish-and-jump! editor source items)
-    (if (null? items)
-        (begin
-          (editor-set-current-location-list! editor #f)
+  (define (jump-to-item! context item)
+    (let* ([editor (command-context-editor context)]
+           [buffer-id (location-item-buffer-id item)])
+      (if
+        buffer-id
+        (let ([buffer
+                (editor-buffer-ref editor buffer-id)])
+          (unless (= (buffer-revision buffer)
+                     (location-item-revision item))
+            (assertion-violation
+              'xref.jump
+              "xref location is stale"
+              (location-item-revision item)
+              (buffer-revision buffer)))
+          (editor-jump-to-buffer!
+            editor
+            buffer
+            (location-item-start item))
           #f)
-        (let ([locations (make-location-list source items)])
-          (editor-set-current-location-list! editor locations)
-          (jump-to-item! editor (location-list-current locations))
-          locations)))
+        (let ([resource (location-item-resource item)])
+          (and
+            (string? resource)
+            (let ([view (command-context-view context)])
+              (editor-jump-to-buffer!
+                editor
+                (view-buffer view)
+                (view-caret view))
+              (make-command-effect
+                'file.read
+                (make-open-request
+                  (view-id view)
+                  resource
+                  (location-item-start item)))))))))
+
+  (define (publish-and-jump! context source items)
+    (let ([editor (command-context-editor context)])
+      (if (null? items)
+          (begin
+            (editor-set-current-location-list! editor #f)
+            #f)
+          (let ([locations (make-location-list source items)])
+            (editor-set-current-location-list! editor locations)
+            (jump-to-item!
+              context
+              (location-list-current locations))))))
 
   (define (semantic-query workspace context)
     (let* ([view (command-context-view context)]
@@ -171,20 +202,22 @@
                         (definition-location editor definition))
                       definitions))])
             (cond
-              [(publish-and-jump!
-                 editor
-                 'scheme-definition
-                 items)
-               (editor-set-status-message!
-                 editor
-                 (string-append
-                   "Definition"
-                   (if (> (length items) 1)
-                       (string-append
-                         "s: "
-                         (number->string (length items)))
-                       "")))
-               '()]
+              [(pair? items)
+               (let ([effect
+                       (publish-and-jump!
+                         context
+                         'scheme-definition
+                         items)])
+                 (editor-set-status-message!
+                   editor
+                   (string-append
+                     "Definition"
+                     (if (> (length items) 1)
+                         (string-append
+                           "s: "
+                           (number->string (length items)))
+                         "")))
+                 (if effect (list effect) '()))]
               [(definition-open-effect context definitions) =>
                (lambda (effect)
                  (editor-set-status-message!
@@ -223,70 +256,79 @@
                          (if declaration (list declaration) '())
                          (map
                            (lambda (reference)
-                             (let ([target
-                                     (editor-buffer-ref
-                                       editor
-                                       (scheme-workspace-reference-buffer-id
-                                         reference))])
-                               (use-location
-                                 target
-                                 (scheme-workspace-reference-revision
-                                   reference)
-                                 (scheme-workspace-reference-use
-                                   reference))))
+                             (use-location
+                               (scheme-workspace-reference-buffer-id
+                                 reference)
+                               (scheme-workspace-reference-resource
+                                 reference)
+                               (scheme-workspace-reference-revision
+                                 reference)
+                               (scheme-workspace-reference-use
+                                 reference)))
                            references))])
-                (publish-and-jump!
-                  editor
-                  'scheme-references
-                  items)
-                (editor-set-status-message!
-                  editor
-                  (string-append
-                    "References: "
-                    (number->string (length items))))))))
-      '()))
+                (let ([effect
+                        (publish-and-jump!
+                          context
+                          'scheme-references
+                          items)])
+                  (editor-set-status-message!
+                    editor
+                    (string-append
+                      "References: "
+                      (number->string (length items))))
+                  (if effect (list effect) '()))))))))
 
-  (define (move-location-list! editor delta)
-    (let ([locations (editor-current-location-list editor)])
-      (if (or (not locations)
-              (null? (location-list-items locations)))
-          #f
-          (let* ([items (location-list-items locations)]
-                 [index
-                   (mod
-                     (+ (location-list-index locations) delta)
-                     (length items))])
-            (jump-to-item!
-              editor
-              (list-ref items index))
-            (location-list-set-index! locations index)
-            (editor-set-status-message!
-              editor
-              (string-append
-                (number->string (+ index 1))
-                "/"
-                (number->string (length items))))
-            #t))))
+  (define (move-location-list! context delta)
+    (let ([editor (command-context-editor context)])
+      (let ([locations (editor-current-location-list editor)])
+        (if (or (not locations)
+                (null? (location-list-items locations)))
+            #f
+            (let* ([items (location-list-items locations)]
+                   [index
+                     (mod
+                       (+ (location-list-index locations) delta)
+                       (length items))]
+                   [effect
+                     (jump-to-item!
+                       context
+                       (list-ref items index))])
+              (location-list-set-index! locations index)
+              (editor-set-status-message!
+                editor
+                (string-append
+                  (number->string (+ index 1))
+                  "/"
+                  (number->string (length items))))
+              (or effect #t))))))
 
   (define (next-location-command context)
-    (unless
-      (move-location-list!
-        (command-context-editor context)
-        (command-context-count context))
-      (editor-set-status-message!
-        (command-context-editor context)
-        "No current location list"))
-    '())
+    (let ([result
+            (move-location-list!
+              context
+              (command-context-count context))])
+      (cond
+        [(not result)
+         (editor-set-status-message!
+           (command-context-editor context)
+           "No current location list")
+         '()]
+        [(command-effect? result) (list result)]
+        [else '()])))
 
   (define (previous-location-command context)
-    (unless
-      (move-location-list!
-        (command-context-editor context)
-        (- (command-context-count context)))
-      (editor-set-status-message!
-        (command-context-editor context)
-        "No current location list"))
-    '())
+    (let ([result
+            (move-location-list!
+              context
+              (- (command-context-count context)))])
+      (cond
+        [(not result)
+         (editor-set-status-message!
+           (command-context-editor context)
+           "No current location list")
+         '()]
+        [(command-effect? result) (list result)]
+        [else '()])))
 
   (define (workspace-symbol-detail symbol)
     (let ([resource
@@ -392,10 +434,24 @@
              editor
              (scheme-workspace-symbol-name symbol))
            '())]
-        [(definition-open-effect
-           context
-           (list
-             (scheme-workspace-symbol-definition symbol))) =>
+        [(let ([resource
+                 (scheme-workspace-symbol-resource symbol)]
+               [start
+                 (scheme-workspace-symbol-start symbol)])
+           (and
+             (string? resource)
+             (exact-non-negative-integer? start)
+             (let ([view (command-context-view context)])
+               (editor-jump-to-buffer!
+                 editor
+                 (view-buffer view)
+                 (view-caret view))
+               (make-command-effect
+                 'file.read
+                 (make-open-request
+                   (view-id view)
+                   resource
+                   start))))) =>
          list]
         [else
          (editor-set-status-message!
@@ -428,6 +484,7 @@
 
   (define (install-scheme-xref-commands! editor)
     (let ([workspace (make-scheme-workspace-index)])
+      (hashtable-set! editor-workspaces editor workspace)
       (scheme-workspace-sync-editor! workspace editor)
       (for-each
         (lambda (entry)

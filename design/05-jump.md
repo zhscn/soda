@@ -75,11 +75,13 @@ LocationList {
 
 Editor 保存一个 current LocationList 及其当前 index。provider 发布列表后可以跳到
 首项；`xref.next-location` 和 `xref.previous-location` 按 prefix count 在列表内
-双向回绕，并通过普通 navigation jump 写入当前 View 的 walk。LocationItem 带
-Buffer identity、resource、source revision、byte range、excerpt 和 provider
-metadata；实际跳转前必须再次验证 Buffer revision。Buffer 移除时，引用该 Buffer
-的 current list 一并失效。provider 通过 editor 公共 API 发布列表；列表游标也是
-公共操作，因此 grep、diagnostics 和 build provider 可以复用同一导航命令。
+双向回绕，并通过普通 navigation jump 写入当前 View 的 walk。已解析 LocationItem
+带 Buffer identity、resource、source revision、byte range、excerpt 和 provider
+metadata；实际跳转前必须再次验证 Buffer revision。尚未打开的 LocationItem 使用
+resource、revision 与 byte range，跳转时发出异步文件读取请求。Buffer 移除时，
+引用该 Buffer 的 current list 一并失效，纯 resource item 保持有效。provider
+通过 editor 公共 API 发布列表；列表游标也是公共操作，因此 grep、diagnostics 和
+build provider 可以复用同一导航命令。
 
 grep、references、implementations、diagnostics、build errors 和外部语义索引只是
 不同 producer。创建列表不打开文件；坐标保持 producer 的原始编码，直到资源被

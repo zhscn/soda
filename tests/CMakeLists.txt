@@ -176,6 +176,21 @@ if(CHEZ_SCHEME_EXECUTABLE)
       --program ${CMAKE_CURRENT_SOURCE_DIR}/scheme/file_tests.ss
   )
 
+  add_test(
+    NAME scheme_project_runtime_tests
+    CONFIGURATIONS Debug Release
+    COMMAND
+      ${CMAKE_COMMAND} -E env
+      SODA_DOCUMENT_LIBRARY=${SODA_SCHEME_NATIVE_LIBRARY}
+      SODA_CPP_ANALYSIS_LIBRARY=${SODA_SCHEME_NATIVE_LIBRARY}
+      SODA_INDENTATION_LIBRARY=${SODA_SCHEME_NATIVE_LIBRARY}
+      SODA_RUNTIME_LIBRARY=${SODA_SCHEME_NATIVE_LIBRARY}
+      SODA_SCHEME_PROJECT_TEST_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/scheme_project
+      ${CHEZ_SCHEME_EXECUTABLE}
+      --libdirs ${PROJECT_SOURCE_DIR}/scheme
+      --program ${CMAKE_CURRENT_SOURCE_DIR}/scheme/scheme_project_runtime_tests.ss
+  )
+
   if(EXPECT_EXECUTABLE)
     add_test(
       NAME tui_smoke_tests

@@ -39,6 +39,12 @@ Project 拥有：
 Project 不拥有 Buffer、Window 或 layout。同一 project 可以出现在多个 workbench
 scope 中；是否保持 scope 互斥由 Scheme policy 决定。
 
+本地 TUI session 以启动工作目录作为初始 Project root。resource enumerator 通过
+libuv directory scan 逐层展开目录，通过异步 file read 产生 language source
+snapshot。隐藏目录、VCS metadata、构建输出和依赖目录由枚举 policy 排除。
+enumerator 只发布 resource 与内容，不为后台索引创建 Buffer；用户访问资源时才由
+普通文件打开流程建立 Buffer identity。
+
 ## Workbench 成员语义
 
 某 workbench 可见的 buffer 集合是：

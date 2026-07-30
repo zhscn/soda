@@ -1036,7 +1036,9 @@
             locations
             (exists
               (lambda (item)
-                (= (location-item-buffer-id item) id))
+                (let ([buffer-id
+                        (location-item-buffer-id item)])
+                  (and buffer-id (= buffer-id id))))
               (location-list-items locations))))
         (editor-current-location-list-set! value #f))
       (for-each

@@ -2,10 +2,13 @@
   (export make-scheme-workspace-index
           scheme-workspace-index?
           scheme-workspace-sync-editor!
+          scheme-workspace-index-source!
+          scheme-workspace-remove-source!
           scheme-workspace-snapshot-for-buffer
           scheme-workspace-references
           scheme-workspace-reference?
           scheme-workspace-reference-buffer-id
+          scheme-workspace-reference-resource
           scheme-workspace-reference-revision
           scheme-workspace-reference-use
           scheme-workspace-symbols
@@ -40,13 +43,14 @@
       scheme-workspace-index?)
     (fields
       documents
+      sources
       references
       (mutable dirty?
                scheme-workspace-index-dirty?
                scheme-workspace-index-dirty?-set!)))
 
   (define-record-type scheme-workspace-reference
-    (fields buffer-id revision use))
+    (fields buffer-id resource revision use))
 
   (define-record-type scheme-workspace-symbol
     (fields
@@ -63,6 +67,7 @@
   (define (make-scheme-workspace-index)
     (%make-scheme-workspace-index
       (make-eqv-hashtable)
+      (make-hashtable string-hash string=?)
       (make-hashtable
         equal-hash
         scheme-definition-id=?)
@@ -90,10 +95,38 @@
 
   (define (workspace-documents index)
     (let-values
-      ([(ids documents)
+      ([(ids buffer-documents)
         (hashtable-entries
-          (scheme-workspace-index-documents index))])
-      (vector->list documents)))
+          (scheme-workspace-index-documents index))]
+       [(resources source-documents)
+        (hashtable-entries
+          (scheme-workspace-index-sources index))])
+      (let* ([buffers (vector->list buffer-documents)]
+             [open-resources
+               (make-hashtable string-hash string=?)])
+        (for-each
+          (lambda (document)
+            (let ([resource
+                    (scheme-workspace-document-resource
+                      document)])
+              (when (string? resource)
+                (hashtable-set!
+                  open-resources resource #t))))
+          buffers)
+        (append
+          buffers
+          (filter
+            (lambda (document)
+              (let ([resource
+                      (scheme-workspace-document-resource
+                        document)])
+                (or
+                  (not (string? resource))
+                  (not
+                    (hashtable-contains?
+                      open-resources
+                      resource)))))
+            (vector->list source-documents))))))
 
   (define (sync-buffer! index buffer)
     (let* ([table
@@ -141,6 +174,8 @@
                       (make-scheme-workspace-reference
                         (scheme-workspace-document-buffer-id
                           document)
+                        (scheme-workspace-document-resource
+                          document)
                         (scheme-workspace-document-revision
                           document)
                         use)])
@@ -179,6 +214,65 @@
             (loop (+ position 1))))))
     (when (scheme-workspace-index-dirty? index)
       (rebuild-references! index))
+    index)
+
+  (define (scheme-workspace-index-source!
+            index
+            resource
+            document-id
+            revision
+            bytes)
+    (require-index 'scheme-workspace-index-source! index)
+    (unless
+      (and
+        (string? resource)
+        (integer? document-id)
+        (exact? document-id)
+        (not (negative? document-id))
+        (integer? revision)
+        (exact? revision)
+        (not (negative? revision))
+        (bytevector? bytes))
+      (assertion-violation
+        'scheme-workspace-index-source!
+        "invalid Scheme project source"
+        resource
+        document-id
+        revision))
+    (let* ([snapshot
+             (make-scheme-semantic-snapshot
+               document-id
+               revision
+               bytes)]
+           [document
+             (make-scheme-workspace-document
+               #f
+               resource
+               document-id
+               revision
+               snapshot)])
+      (hashtable-set!
+        (scheme-workspace-index-sources index)
+        resource
+        document)
+      (scheme-workspace-index-dirty?-set! index #t)
+      snapshot))
+
+  (define (scheme-workspace-remove-source! index resource)
+    (require-index 'scheme-workspace-remove-source! index)
+    (unless (string? resource)
+      (assertion-violation
+        'scheme-workspace-remove-source!
+        "resource must be a string"
+        resource))
+    (when
+      (hashtable-contains?
+        (scheme-workspace-index-sources index)
+        resource)
+      (hashtable-delete!
+        (scheme-workspace-index-sources index)
+        resource)
+      (scheme-workspace-index-dirty?-set! index #t))
     index)
 
   (define (scheme-workspace-snapshot-for-buffer
@@ -302,9 +396,12 @@
           [right-use
             (scheme-workspace-reference-use right)])
       (and
-        (=
+        (equal?
           (scheme-workspace-reference-buffer-id left)
           (scheme-workspace-reference-buffer-id right))
+        (equal?
+          (scheme-workspace-reference-resource left)
+          (scheme-workspace-reference-resource right))
         (=
           (scheme-use-start left-use)
           (scheme-use-start right-use))
@@ -352,12 +449,20 @@
           [resource
             (scheme-workspace-document-resource document)])
       (make-scheme-workspace-symbol
-        (list
-          'buffer
+        (if
           buffer-id
-          revision
-          (scheme-definition-start definition)
-          (scheme-definition-name definition))
+          (list
+            'buffer
+            buffer-id
+            revision
+            (scheme-definition-start definition)
+            (scheme-definition-name definition))
+          (list
+            'resource
+            resource
+            revision
+            (scheme-definition-start definition)
+            (scheme-definition-name definition)))
         (scheme-definition-name definition)
         (scheme-definition-kind definition)
         buffer-id
@@ -438,7 +543,11 @@
                    (let ([resource
                            (scheme-workspace-document-resource
                              document)])
-                     (when (string? resource)
+                     (when
+                       (and
+                         (scheme-workspace-document-buffer-id
+                           document)
+                         (string? resource))
                        (hashtable-set!
                          resources
                          resource
@@ -456,7 +565,20 @@
                      (scheme-semantic-snapshot-root-definitions
                        (scheme-workspace-document-snapshot
                          document))))
-                 documents))]
+                 (filter
+                   (lambda (document)
+                     (let ([resource
+                             (scheme-workspace-document-resource
+                               document)])
+                       (or
+                         (scheme-workspace-document-buffer-id
+                           document)
+                         (not (string? resource))
+                         (not
+                           (hashtable-contains?
+                             open-resources
+                             resource)))))
+                   documents)))]
            [index-symbols
              (map
                index-symbol

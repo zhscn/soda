@@ -13,6 +13,7 @@
           (soda editor file)
           (soda editor file-runtime)
           (soda editor repl)
+          (soda editor scheme-project-runtime)
           (soda editor vfs-runtime)
           (soda runtime)
           (soda vfs)
@@ -232,7 +233,8 @@
           [decoder (make-input-decoder)]
           [executor (make-effect-executor)]
           [file-adapter #f]
-          [vfs-adapter #f])
+          [vfs-adapter #f]
+          [scheme-project-adapter #f])
       (define (cancel-flush-timer!)
         (when flush-timer
           (guard (condition [else #f])
@@ -332,6 +334,11 @@
         (install-file-runtime! executor runtime))
       (set! vfs-adapter
         (install-vfs-runtime! editor runtime))
+      (set! scheme-project-adapter
+        (install-scheme-project-runtime!
+          editor
+          runtime
+          (current-directory)))
       (install-interaction-effect-handler! executor editor)
       (install-completion-effect-handlers!
         executor
@@ -382,6 +389,9 @@
                   [(memq
                      (event-kind (car events))
                      '(path-stat file-read file-write))
+                   (scheme-project-runtime-handle-event
+                     scheme-project-adapter
+                     (car events))
                    (let ([message
                            (file-runtime-handle-event
                              file-adapter
@@ -397,6 +407,9 @@
                              executor
                              message)))))]
                   [(eq? (event-kind (car events)) 'directory-scan)
+                   (scheme-project-runtime-handle-event
+                     scheme-project-adapter
+                     (car events))
                    (let ([message
                            (vfs-runtime-handle-event
                              vfs-adapter
