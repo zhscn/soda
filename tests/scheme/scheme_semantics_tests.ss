@@ -124,6 +124,57 @@
     "ignored-long-quote"
     "ignored-string"))
 
+(define call-source
+  (string-append
+    "(define render-case\n"
+    "  (case-lambda [() #f] [(value) value]))\n"
+    "(render-case \"first\" "))
+(define call-snapshot
+  (make-scheme-semantic-snapshot
+    73
+    0
+    (string->utf8 call-source)))
+(define call-context
+  (scheme-semantic-call-context-at
+    call-snapshot
+    (bytevector-length (string->utf8 call-source))))
+
+(unless
+  (and
+    call-context
+    (string=? (scheme-call-context-name call-context) "render-case")
+    (= (scheme-call-context-argument-index call-context) 1)
+    (= (length (scheme-call-context-definitions call-context)) 1)
+    (equal?
+      (scheme-definition-signatures
+        (car (scheme-call-context-definitions call-context)))
+      '("(render-case)" "(render-case value)")))
+  (error 'scheme-semantics-tests
+         "call context did not retain callee signatures and argument index"))
+
+(define quoted-call-source "'(render-case \"first\" ")
+(define explicit-quoted-call-source
+  "(quote (render-case \"first\" ")
+(unless
+  (and
+    (not
+      (scheme-semantic-call-context-at
+        (make-scheme-semantic-snapshot
+          74
+          0
+          (string->utf8 quoted-call-source))
+        (bytevector-length (string->utf8 quoted-call-source))))
+    (not
+      (scheme-semantic-call-context-at
+        (make-scheme-semantic-snapshot
+          75
+          0
+          (string->utf8 explicit-quoted-call-source))
+        (bytevector-length
+          (string->utf8 explicit-quoted-call-source)))))
+  (error 'scheme-semantics-tests
+         "quoted data produced a callable context"))
+
 (let* ([definition (definition-by-name "render-frame")]
        [identity (scheme-definition-id definition)])
   (unless

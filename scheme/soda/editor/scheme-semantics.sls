@@ -23,6 +23,14 @@
           scheme-definition-detail
           scheme-definition-signatures
           scheme-definition-documentation
+          scheme-call-context?
+          scheme-call-context-name
+          scheme-call-context-start
+          scheme-call-context-end
+          scheme-call-context-callee-start
+          scheme-call-context-callee-end
+          scheme-call-context-argument-index
+          scheme-call-context-definitions
           scheme-use?
           scheme-use-name
           scheme-use-start
@@ -36,6 +44,7 @@
           scheme-lexical-tokenize
           scheme-definition-id=?
           scheme-semantic-definitions-at
+          scheme-semantic-call-context-at
           scheme-semantic-references
           scheme-primitive-definitions
           scheme-index-definitions
@@ -56,6 +65,16 @@
 
   (define-record-type scheme-definition
     (fields id name kind start end detail formals documentation))
+
+  (define-record-type scheme-call-context
+    (fields
+      name
+      start
+      end
+      callee-start
+      callee-end
+      argument-index
+      definitions))
 
   (define-record-type scheme-use
     (fields name start end resolution))
@@ -1103,6 +1122,99 @@
                           scheme-global-definitions
                           id)))
                     (scheme-use-resolution use))))))))
+
+  (define (call-context-tokens snapshot)
+    (let loop
+      ([remaining
+         (remove-ignored-data
+           (filter
+             (lambda (value)
+               (not (eq? (token-kind value) 'comment)))
+             (scheme-semantic-snapshot-tokens snapshot)))]
+       [result '()])
+      (cond
+        [(null? remaining) (reverse result)]
+        [(quoted-form? remaining)
+         (loop (skip-datum remaining) result)]
+        [else
+         (loop
+           (cdr remaining)
+           (cons (car remaining) result))])))
+
+  (define (innermost-open-token tokens offset)
+    (let loop ([remaining tokens] [stack '()])
+      (if (or
+            (null? remaining)
+            (>= (token-start (car remaining)) offset))
+          (and (pair? stack) (car stack))
+          (case (token-kind (car remaining))
+            [(open)
+             (loop
+               (cdr remaining)
+               (cons (car remaining) stack))]
+            [(close)
+             (loop
+               (cdr remaining)
+               (if (pair? stack) (cdr stack) stack))]
+            [else
+             (loop (cdr remaining) stack)]))))
+
+  (define (tokens-after target tokens)
+    (let loop ([remaining tokens])
+      (cond
+        [(null? remaining) '()]
+        [(eq? target (car remaining)) (cdr remaining)]
+        [else (loop (cdr remaining))])))
+
+  (define (list-item-count-before tokens offset)
+    (let loop ([remaining tokens] [count 0])
+      (cond
+        [(or
+           (null? remaining)
+           (>= (token-start (car remaining)) offset)
+           (eq? (token-kind (car remaining)) 'close))
+         count]
+        [else
+         (loop
+           (skip-datum remaining)
+           (+ count 1))])))
+
+  (define (scheme-semantic-call-context-at snapshot offset)
+    (unless (scheme-semantic-snapshot? snapshot)
+      (assertion-violation
+        'scheme-semantic-call-context-at
+        "expected a Scheme semantic snapshot"
+        snapshot))
+    (unless (exact-non-negative-integer? offset)
+      (assertion-violation
+        'scheme-semantic-call-context-at
+        "offset must be an exact non-negative integer"
+        offset))
+    (let* ([tokens (call-context-tokens snapshot)]
+           [open (innermost-open-token tokens offset)]
+           [tail (and open (tokens-after open tokens))]
+           [callee
+             (and
+               (pair? tail)
+               (< (token-start (car tail)) offset)
+               (symbol-token? (car tail))
+               (car tail))])
+      (and
+        callee
+        (let ([definitions
+                (scheme-semantic-definitions-at
+                  snapshot
+                  (token-start callee))])
+          (make-scheme-call-context
+            (token-value callee)
+            (token-start open)
+            offset
+            (token-start callee)
+            (token-end callee)
+            (max
+              0
+              (- (list-item-count-before tail offset) 1))
+            definitions)))))
 
   (define (scheme-semantic-references snapshot definition-id)
     (unless (scheme-semantic-snapshot? snapshot)

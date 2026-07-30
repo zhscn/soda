@@ -199,6 +199,40 @@
 (view-set-caret!
   (editor-active-view xref-editor)
   (scheme-use-start xref-use))
+(editor-update!
+  xref-editor
+  (make-command-message 'help.describe-symbol #f))
+(unless
+  (string=?
+    (editor-status-message xref-editor)
+    (string-append
+      "(editor-register-command! editor definition)"
+      " — Exported by (soda editor core)"))
+  (error
+    'embedded-api-index-tests
+    "Scheme symbol help did not expose embedded API metadata"
+    (editor-status-message xref-editor)))
+
+(view-set-caret!
+  (editor-active-view xref-editor)
+  (bytevector-length (string->utf8 xref-source)))
+(editor-update!
+  xref-editor
+  (make-command-message 'scheme.signature-help #f))
+(unless
+  (string=?
+    (editor-status-message xref-editor)
+    (string-append
+      "Argument 1: "
+      "(editor-register-command! editor definition)"))
+  (error
+    'embedded-api-index-tests
+    "Scheme signature help did not resolve the active call"
+    (editor-status-message xref-editor)))
+
+(view-set-caret!
+  (editor-active-view xref-editor)
+  (scheme-use-start xref-use))
 (define xref-effects
   (editor-update!
     xref-editor

@@ -265,6 +265,34 @@ buffer-local policy 选择 provider 组合；组合时遵循：
 completion item 的 text edit、generation、resolve 和 apply 继续遵循通用补全
 管线；Scheme provider 不直接修改 Buffer。
 
+## Symbol inspection 与调用签名
+
+symbol inspection 与调用签名读取和 completion、xref 相同 revision 的 semantic
+snapshot。光标落在 definition 或 resolved use 上时，查询返回 canonical
+`SchemeDefinition`，呈现层可读取 kind、signature、library detail、documentation
+和 source location。`help.describe-symbol` 通过 `C-h o` 把这些字段组合成简短描述。
+
+调用现场使用独立的数据模型：
+
+```text
+SchemeCallContext {
+  name,
+  range,
+  callee_range,
+  argument_index,
+  definitions: SchemeDefinition[]
+}
+```
+
+`argument_index` 从零开始，按当前 list 中 callee 后的直接 datum 计算；嵌套 list、
+string 和 character 各计为一个参数。quoted datum、datum comment 和显式 quote
+form 不产生调用现场。callee resolution 复用 `SchemeUse.resolution`，因此本地定义、
+import modifier 和嵌入 Soda API 具有相同的查询行为。
+
+`scheme.signature-help` 通过 `C-c C-s` 显示当前参数位置以及所有已解析签名。
+`SchemeCallContext` 不包含 TUI 状态，后续 inline overlay、详情窗口和自动触发策略
+直接消费同一查询结果。
+
 ## 自举静态 Provider
 
 `scheme-mode` 通过 `completion-providers` setting 启用 `scheme-static`。provider
