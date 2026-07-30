@@ -22,7 +22,6 @@
           (soda editor effect)
           (soda editor event)
           (soda editor keymap)
-          (soda editor prefix)
           (soda editor prompt)
           (soda editor state))
 

@@ -13,6 +13,13 @@
           scheme-workspace-reference-resource
           scheme-workspace-reference-revision
           scheme-workspace-reference-use
+          scheme-workspace-diagnostics
+          scheme-workspace-diagnostic?
+          scheme-workspace-diagnostic-buffer-id
+          scheme-workspace-diagnostic-resource
+          scheme-workspace-diagnostic-revision
+          scheme-workspace-diagnostic-excerpt
+          scheme-workspace-diagnostic-diagnostic
           scheme-workspace-text-edit?
           scheme-workspace-text-edit-buffer-id
           scheme-workspace-text-edit-resource
@@ -69,6 +76,9 @@
 
   (define-record-type scheme-workspace-reference
     (fields buffer-id resource revision use))
+
+  (define-record-type scheme-workspace-diagnostic
+    (fields buffer-id resource revision excerpt diagnostic))
 
   (define-record-type scheme-workspace-text-edit
     (fields buffer-id resource revision start end text))
@@ -693,6 +703,108 @@
                 id
                 '()))
             ids)))))
+
+  (define (line-start-in-bytes bytes offset)
+    (let loop ([position (min offset (bytevector-length bytes))])
+      (if
+        (or
+          (zero? position)
+          (memv
+            (bytevector-u8-ref bytes (- position 1))
+            '(10 13)))
+        position
+        (loop (- position 1)))))
+
+  (define (line-end-in-bytes bytes offset)
+    (let ([size (bytevector-length bytes)])
+      (let loop ([position (min offset size)])
+        (if
+          (or
+            (= position size)
+            (memv
+              (bytevector-u8-ref bytes position)
+              '(10 13)))
+          position
+          (loop (+ position 1))))))
+
+  (define (diagnostic-excerpt bytes diagnostic)
+    (let* ([start
+             (line-start-in-bytes
+               bytes
+               (scheme-diagnostic-start diagnostic))]
+           [end
+             (line-end-in-bytes
+               bytes
+               (scheme-diagnostic-end diagnostic))]
+           [result
+             (make-bytevector (- end start))])
+      (bytevector-copy!
+        bytes start result 0 (- end start))
+      (guard (condition [else #f])
+        (utf8->string result))))
+
+  (define (workspace-document-diagnostics document)
+    (map
+      (lambda (diagnostic)
+        (make-scheme-workspace-diagnostic
+          (scheme-workspace-document-buffer-id document)
+          (scheme-workspace-document-resource document)
+          (scheme-workspace-document-revision document)
+          (diagnostic-excerpt
+            (scheme-workspace-document-bytes document)
+            diagnostic)
+          diagnostic))
+      (scheme-semantic-snapshot-diagnostics
+        (scheme-workspace-document-snapshot document))))
+
+  (define (diagnostic-source-before? left right)
+    (let ([left-resource
+            (scheme-workspace-diagnostic-resource left)]
+          [right-resource
+            (scheme-workspace-diagnostic-resource right)])
+      (cond
+        [(and
+           (string? left-resource)
+           (string? right-resource)
+           (not (string=? left-resource right-resource)))
+         (string<? left-resource right-resource)]
+        [(string? left-resource)
+         (not (string? right-resource))]
+        [(string? right-resource) #f]
+        [(not
+           (equal?
+             (scheme-workspace-diagnostic-buffer-id left)
+             (scheme-workspace-diagnostic-buffer-id right)))
+         (<
+           (scheme-workspace-diagnostic-buffer-id left)
+           (scheme-workspace-diagnostic-buffer-id right))]
+        [else
+         (let ([left-diagnostic
+                 (scheme-workspace-diagnostic-diagnostic left)]
+               [right-diagnostic
+                 (scheme-workspace-diagnostic-diagnostic right)])
+           (or
+             (<
+               (scheme-diagnostic-start left-diagnostic)
+               (scheme-diagnostic-start right-diagnostic))
+             (and
+               (=
+                 (scheme-diagnostic-start left-diagnostic)
+                 (scheme-diagnostic-start right-diagnostic))
+               (<
+                 (scheme-diagnostic-end left-diagnostic)
+                 (scheme-diagnostic-end right-diagnostic)))))])))
+
+  (define (scheme-workspace-diagnostics index editor)
+    (require-index 'scheme-workspace-diagnostics index)
+    (scheme-workspace-sync-editor! index editor)
+    (list-sort
+      diagnostic-source-before?
+      (apply
+        append
+        (map
+          workspace-document-diagnostics
+          (workspace-documents index)))))
 
   (define (definition-owner-document index definition)
     (let* ([id (scheme-definition-id definition)]

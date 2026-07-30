@@ -9,7 +9,6 @@
   (import (rnrs)
           (soda editor scheme-workspace)
           (soda editor scheme-xref)
-          (soda editor state)
           (soda runtime)
           (soda vfs))
 

@@ -286,6 +286,26 @@ namespace 为 `scheme-semantic-diagnostics`，source revision 与 semantic snaps
 一致。annotation payload 保留原始 `SchemeDiagnostic`，describe-char、LocationList
 和后续 quick-fix 可以共享同一个诊断身份。
 
+显式的 workspace diagnostics 查询同步 editor Buffer 与后台 project source
+snapshot，并产生按 resource、range 排序的 `SchemeWorkspaceDiagnostic`：
+
+```text
+SchemeWorkspaceDiagnostic {
+  buffer_id?,
+  resource?,
+  revision,
+  excerpt,
+  diagnostic
+}
+```
+
+同一 resource 已经打开时，Buffer snapshot 取代后台 project source snapshot。
+`diagnostics.list-workspace` 将查询结果发布为普通 LocationList，使
+`xref.next-location` 和 `xref.previous-location` 可以复用统一的导航协议。
+Buffer-backed item 直接切换 view；后台 resource item 通过异步 `file.read`
+打开，并在文件到达后跳转到诊断 range。Buffer 的诊断 annotation 更新会使包含
+该 Buffer 的 diagnostics LocationList 失效，避免导航到过期 revision。
+
 自举诊断覆盖：
 
 - 不匹配、意外出现和未闭合的 list delimiter；

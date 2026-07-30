@@ -10,8 +10,6 @@
           (soda editor comint)
           (soda editor debugger)
           (soda editor edit)
-          (soda editor effect)
-          (soda editor evaluator)
           (soda editor interaction)
           (soda editor keymap)
           (soda editor language)

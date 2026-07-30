@@ -20,7 +20,6 @@
           (soda tui commands)
           (soda tui input)
           (soda tui output)
-          (soda tui presenter)
           (soda tui renderer))
 
   (define escape (string (integer->char 27)))

@@ -463,7 +463,9 @@
       (when
         (and
           locations
-          (eq? (location-list-source locations) 'diagnostics)
+          (memq
+            (location-list-source locations)
+            '(diagnostics workspace-diagnostics))
           (exists
             (lambda (item)
               (memv

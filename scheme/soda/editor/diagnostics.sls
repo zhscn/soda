@@ -7,6 +7,7 @@
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
+          (soda editor file)
           (soda editor keymap)
           (soda editor location)
           (soda editor navigation)
@@ -245,6 +246,92 @@
                 (number->string (length items))))))
       '()))
 
+  (define (workspace-diagnostic-item value)
+    (let ([diagnostic
+            (scheme-workspace-diagnostic-diagnostic value)])
+      (make-location-item
+        (scheme-workspace-diagnostic-buffer-id value)
+        (scheme-workspace-diagnostic-resource value)
+        (scheme-workspace-diagnostic-revision value)
+        (scheme-diagnostic-start diagnostic)
+        (scheme-diagnostic-end diagnostic)
+        (scheme-workspace-diagnostic-excerpt value)
+        diagnostic)))
+
+  (define (jump-to-workspace-diagnostic!
+            context
+            item)
+    (let* ([editor (command-context-editor context)]
+           [buffer-id (location-item-buffer-id item)])
+      (if
+        buffer-id
+        (let ([buffer
+                (editor-buffer-ref editor buffer-id)])
+          (unless
+            (=
+              (buffer-revision buffer)
+              (location-item-revision item))
+            (assertion-violation
+              'diagnostics.list-workspace
+              "workspace diagnostic is stale"
+              (location-item-revision item)
+              (buffer-revision buffer)))
+          (editor-jump-to-buffer!
+            editor
+            buffer
+            (location-item-start item))
+          #f)
+        (let ([resource
+                (location-item-resource item)])
+          (and
+            (string? resource)
+            (let ([view
+                    (command-context-view context)])
+              (editor-jump-to-buffer!
+                editor
+                (view-buffer view)
+                (view-caret view))
+              (make-command-effect
+                'file.read
+                (make-open-request
+                  (view-id view)
+                  resource
+                  (location-item-start item)))))))))
+
+  (define (list-workspace-diagnostics-command
+            workspace
+            context)
+    (let* ([editor (command-context-editor context)]
+           [items
+             (map
+               workspace-diagnostic-item
+               (scheme-workspace-diagnostics
+                 workspace editor))])
+      (if
+        (null? items)
+        (begin
+          (editor-set-current-location-list! editor #f)
+          (editor-set-status-message!
+            editor
+            "No workspace diagnostics")
+          '())
+        (let* ([locations
+                 (make-location-list
+                   'workspace-diagnostics
+                   items)]
+               [effect
+                 (jump-to-workspace-diagnostic!
+                   context
+                   (location-list-current locations))])
+          (editor-set-current-location-list!
+            editor locations)
+          (editor-set-status-message!
+            editor
+            (string-append
+              "Workspace diagnostics: "
+              (number->string (length items))))
+          (if effect (list effect) '())))))
+
   (define (stroke character modifiers)
     (make-key-stroke
       'character
@@ -273,6 +360,15 @@
         'diagnostics.list
         list-diagnostics-command
         "Publish current-buffer diagnostics as a location list."))
+    (when workspace
+      (editor-register-command!
+        editor
+        (make-interactive-context-command
+          'diagnostics.list-workspace
+          (lambda (context)
+            (list-workspace-diagnostics-command
+              workspace context))
+          "Publish Scheme workspace diagnostics as a location list.")))
     (editor-bind-key!
       editor
       (list (stroke #\g 2) (stroke #\d 0))

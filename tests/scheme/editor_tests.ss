@@ -10,6 +10,7 @@
         (soda editor diagnostics)
         (soda editor effect)
         (soda editor event)
+        (soda editor file)
         (only (soda editor interaction)
               interaction-session-evaluator)
         (soda editor keymap)
@@ -2245,6 +2246,81 @@
   (error
     'editor-tests
     "project catalog did not participate in published Scheme diagnostics"))
+
+(define background-diagnostic-resource
+  "!/project/background-diagnostic.sls")
+(scheme-workspace-index-source!
+  project-diagnostic-workspace
+  background-diagnostic-resource
+  1987
+  0
+  (string->utf8
+    (string-append
+      "(import (rnrs))\n"
+      "(define (background-procedure unused)\n"
+      "  missing-background-value)\n")))
+(define workspace-diagnostic-effects
+  (editor-update!
+    project-diagnostic-editor
+    (make-command-message
+      'diagnostics.list-workspace
+      #f)))
+(let ([locations
+        (editor-current-location-list
+          project-diagnostic-editor)])
+  (unless
+    (and
+      (location-list? locations)
+      (eq?
+        (location-list-source locations)
+        'workspace-diagnostics)
+      (= (length
+           (location-list-items locations))
+         2)
+      (exists
+        (lambda (item)
+          (and
+            (equal?
+              (location-item-buffer-id item)
+              (buffer-id
+                project-diagnostic-buffer))
+            (scheme-diagnostic?
+              (location-item-metadata item))))
+        (location-list-items locations))
+      (exists
+        (lambda (item)
+          (and
+            (not
+              (location-item-buffer-id item))
+            (string=?
+              (location-item-resource item)
+              background-diagnostic-resource)
+            (string?
+              (location-item-excerpt item))
+            (scheme-diagnostic?
+              (location-item-metadata item))))
+        (location-list-items locations))
+      (= (length workspace-diagnostic-effects) 1)
+      (eq?
+        (command-effect-kind
+          (car workspace-diagnostic-effects))
+        'file.read)
+      (string=?
+        (open-request-path
+          (command-effect-payload
+            (car workspace-diagnostic-effects)))
+        background-diagnostic-resource))
+    (error
+      'editor-tests
+      "workspace diagnostics did not include navigable background sources"
+      locations
+      workspace-diagnostic-effects)))
+(scheme-workspace-remove-source!
+  project-diagnostic-workspace
+  background-diagnostic-resource)
+(editor-set-current-location-list!
+  project-diagnostic-editor
+  #f)
 
 (scheme-workspace-index-source!
   project-diagnostic-workspace
