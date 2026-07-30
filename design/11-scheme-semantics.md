@@ -315,19 +315,32 @@ import modifier 和嵌入 Soda API 具有相同的查询行为。
 名称、constructor、predicate、accessor 与 mutator 分别形成稳定定义。未闭合的
 外围 form 不妨碍已经出现的定义进入 snapshot。
 
+scanner 同时从容错 syntax form 建立 lexical scope tree。procedure definition、
+`lambda` 和每个 `case-lambda` clause 为 parameters 建立独立 scope；rest parameter
+使用同一 binding 模型。`let` 的 binding 只在 body scope 可见，`let*` 为每个
+binding 建立依次嵌套的 scope，`letrec` 与 `letrec*` 在 initializer 和 body 中都
+暴露全部 binding。`let-values` 与 `let*-values` 对每组 formals 应用对应的并行或
+顺序可见性。named let 的过程名和参数位于 body scope。未闭合 form 的 scope range
+延伸到 Document 末尾，使编辑中的参数和局部 binding 仍可参与补全。
+
 同一次扫描也产生 `SchemeUse { name, start, end, resolution }`。声明 token 不重复
 记录为 use，quote、quasiquote、syntax 及 datum comment 内的 symbol 不进入 use
-集合。本文件 definition 按名字遮蔽 primitive metadata；其余可识别的 primitive
-use 解析到静态 primitive DefinitionId，未解析 identifier 保留空 resolution。
+集合。resolution 从光标所在的最内层 scope 向 parent scope 查找，同一名称在首次
+命中的 scope 截止；root definition 随后遮蔽 library metadata 与 primitive。
+其余可识别的 primitive use 解析到静态 primitive DefinitionId，未解析 identifier
+保留空 resolution。
 cursor query 在 declaration range 上直接返回自身 DefinitionId，在 use range 上
 读取 resolution。references 只比较结构化 DefinitionId，不以文本同名作为引用。
+Scheme highlighting 同样按每个 use 的 resolved DefinitionId 选择 kind face，不用
+整文件的名字表推断语义颜色；局部 binding 因而不会污染其他 scope 的高亮。
 
 文档定义的 DefinitionId 由 document id、revision、声明 byte offset 和 name
 组成；Soda API DefinitionId 使用 library、resource、声明 byte offset 和 name；
-primitive DefinitionId 使用静态 metadata identity。文档定义按名字遮蔽 library
-catalog 与 primitive。scope graph 可在同一 snapshot 和 DefinitionId 接口之后
-增加，provider catalog、completion session 和 TUI 不依赖 scanner 的内部 token
-表示。
+primitive DefinitionId 使用静态 metadata identity。静态 completion 在请求位置
+查询 point-visible definitions，本地同名 binding 按 scope 遮蔽外层 binding。
+构建索引器只消费 root scope definitions，局部参数和 let binding 不进入 library
+export surface。provider catalog、completion session 和 TUI 不依赖 scanner 的
+内部 token 表示。
 
 自举 xref provider 把 definition 和 resolved uses 转成通用 LocationList。当前
 Document 的 declaration 与 references 可立即导航。带 source resource 的嵌入 API

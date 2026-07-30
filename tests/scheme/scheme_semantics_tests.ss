@@ -1,7 +1,9 @@
 #!r6rs
 (import (rnrs)
+        (soda editor decoration)
         (soda editor language)
         (soda editor scheme-api-indexer)
+        (soda editor scheme-highlighting)
         (soda editor scheme-semantics))
 
 (unless
@@ -199,6 +201,416 @@
   (error 'scheme-semantics-tests
          "quoted data produced a callable context"))
 
+(define lexical-source
+  (string-append
+    "(define shadow 0)\n"
+    "(define first 10)\n"
+    "(define (scope-test shadow)\n"
+    "  shadow\n"
+    "  (define inside shadow)\n"
+    "  inside\n"
+    "  (let ((local shadow)\n"
+    "        (parallel first))\n"
+    "    local)\n"
+    "  (let* ((serial shadow)\n"
+    "         (later serial))\n"
+    "    later)\n"
+    "  (let-values (((left right) (values shadow first)))\n"
+    "    left)\n"
+    "  (let*-values (((value-a value-b) (values shadow first))\n"
+    "                ((value-c) (values value-a)))\n"
+    "    value-c)\n"
+    "  (let named-loop ((counter shadow))\n"
+    "    (if counter (named-loop #f) counter))\n"
+    "  (letrec ((loop (lambda (flag)\n"
+    "                   (if flag (loop #f) shadow))))\n"
+    "    loop))\n"
+    "shadow\n"))
+(define lexical-snapshot
+  (make-scheme-semantic-snapshot
+    76
+    0
+    (string->utf8 lexical-source)))
+
+(define (snapshot-definitions-named snapshot name)
+  (filter
+    (lambda (definition)
+      (string=? (scheme-definition-name definition) name))
+    (scheme-semantic-snapshot-definitions snapshot)))
+
+(define (snapshot-uses-named snapshot name)
+  (filter
+    (lambda (use)
+      (string=? (scheme-use-name use) name))
+    (scheme-semantic-snapshot-uses snapshot)))
+
+(define (definition-at-use snapshot use)
+  (let ([resolved
+          (scheme-semantic-definitions-at
+            snapshot
+            (scheme-use-start use))])
+    (and (= (length resolved) 1) (car resolved))))
+
+(let* ([shadow-definitions
+         (snapshot-definitions-named
+           lexical-snapshot
+           "shadow")]
+       [root-shadow
+         (find
+           (lambda (definition)
+             (eq? (scheme-definition-kind definition) 'variable))
+           shadow-definitions)]
+       [parameter-shadow
+         (find
+           (lambda (definition)
+             (eq? (scheme-definition-kind definition) 'parameter))
+           shadow-definitions)]
+       [shadow-uses
+         (snapshot-uses-named lexical-snapshot "shadow")]
+       [resolved
+         (map
+           (lambda (use)
+             (definition-at-use lexical-snapshot use))
+           shadow-uses)])
+  (unless
+    (and
+      root-shadow
+      parameter-shadow
+      (= (length shadow-uses) 9)
+      (for-all
+        (lambda (definition)
+          (and
+            definition
+            (scheme-definition-id=?
+              (scheme-definition-id definition)
+              (scheme-definition-id parameter-shadow))))
+        (list
+          (list-ref resolved 0)
+          (list-ref resolved 1)
+          (list-ref resolved 2)
+          (list-ref resolved 3)
+          (list-ref resolved 4)
+          (list-ref resolved 5)
+          (list-ref resolved 6)
+          (list-ref resolved 7)))
+      (scheme-definition-id=?
+        (scheme-definition-id (list-ref resolved 8))
+        (scheme-definition-id root-shadow))
+      (= (length
+           (scheme-semantic-references
+             lexical-snapshot
+             (scheme-definition-id parameter-shadow)))
+         8)
+      (= (length
+           (scheme-semantic-references
+             lexical-snapshot
+             (scheme-definition-id root-shadow)))
+         1))
+    (error 'scheme-semantics-tests
+           "lexical parameter did not shadow the root definition")))
+
+(for-each
+  (lambda (specification)
+    (let* ([name (car specification)]
+           [expected-kind (cadr specification)]
+           [uses
+             (snapshot-uses-named
+               lexical-snapshot
+               name)]
+           [definition
+             (and
+               (= (length uses) 1)
+               (definition-at-use
+                 lexical-snapshot
+                 (car uses)))])
+      (unless
+        (and
+          definition
+          (eq?
+            (scheme-definition-kind definition)
+            expected-kind))
+        (error 'scheme-semantics-tests
+               "let binding did not resolve in its lexical scope"
+               name))))
+  '(("local" variable)
+    ("inside" variable)
+    ("serial" variable)
+    ("later" variable)
+    ("left" variable)
+    ("value-a" variable)
+    ("value-c" variable)))
+
+(define (visible-name-at-use? snapshot use name)
+  (exists
+    (lambda (definition)
+      (string=? (scheme-definition-name definition) name))
+    (scheme-semantic-visible-definitions-at
+      snapshot
+      (scheme-use-start use))))
+
+(let ([body-use
+        (car
+          (snapshot-uses-named
+            lexical-snapshot
+            "local"))]
+      [sequential-use
+        (car
+          (snapshot-uses-named
+            lexical-snapshot
+            "serial"))])
+  (unless
+    (and
+      (visible-name-at-use?
+        lexical-snapshot
+        body-use
+        "parallel")
+      (visible-name-at-use?
+        lexical-snapshot
+        sequential-use
+        "serial")
+      (not
+        (visible-name-at-use?
+          lexical-snapshot
+          sequential-use
+          "later"))
+      (let ([values-use
+              (car
+                (snapshot-uses-named
+                  lexical-snapshot
+                  "value-a"))])
+        (and
+          (visible-name-at-use?
+            lexical-snapshot
+            values-use
+            "value-b")
+          (not
+            (visible-name-at-use?
+              lexical-snapshot
+              values-use
+              "value-c")))))
+    (error 'scheme-semantics-tests
+           "point-visible definitions did not follow let visibility")))
+
+(let* ([uses
+         (snapshot-uses-named lexical-snapshot "first")]
+       [definitions
+         (map
+           (lambda (use)
+             (definition-at-use lexical-snapshot use))
+           uses)]
+       [definition
+         (and
+           (= (length uses) 3)
+           (car definitions))])
+  (unless
+    (and
+      definition
+      (eq? (scheme-definition-kind definition) 'variable)
+      (for-all
+        (lambda (candidate)
+          (and
+            candidate
+            (scheme-definition-id=?
+              (scheme-definition-id candidate)
+              (scheme-definition-id definition))))
+        definitions)
+      (not
+        (visible-name-at-use?
+          lexical-snapshot
+          (car uses)
+          "parallel"))
+      (member
+        definition
+        (scheme-semantic-snapshot-root-definitions
+          lexical-snapshot)))
+    (error 'scheme-semantics-tests
+           "plain let initializer did not resolve in the outer scope")))
+
+(let ([loop-uses
+        (snapshot-uses-named lexical-snapshot "loop")])
+  (unless
+    (and
+      (= (length loop-uses) 2)
+      (let ([left
+              (definition-at-use
+                lexical-snapshot
+                (car loop-uses))]
+            [right
+              (definition-at-use
+                lexical-snapshot
+                (cadr loop-uses))])
+        (and
+          left
+          right
+          (scheme-definition-id=?
+            (scheme-definition-id left)
+            (scheme-definition-id right)))))
+    (error 'scheme-semantics-tests
+           "letrec binding was not visible in its initializer and body")))
+
+(let* ([name-uses
+         (snapshot-uses-named
+           lexical-snapshot
+           "named-loop")]
+       [name-definition
+         (and
+           (= (length name-uses) 1)
+           (definition-at-use
+             lexical-snapshot
+             (car name-uses)))]
+       [parameter-uses
+         (snapshot-uses-named
+           lexical-snapshot
+           "counter")]
+       [parameter-definitions
+         (map
+           (lambda (use)
+             (definition-at-use lexical-snapshot use))
+           parameter-uses)])
+  (unless
+    (and
+      name-definition
+      (eq?
+        (scheme-definition-kind name-definition)
+        'procedure)
+      (equal?
+        (scheme-definition-signatures name-definition)
+        '("(named-loop counter)"))
+      (= (length parameter-definitions) 2)
+      (for-all
+        (lambda (definition)
+          (and
+            definition
+            (scheme-definition-id=?
+              (scheme-definition-id definition)
+              (scheme-definition-id
+                (car parameter-definitions)))))
+        parameter-definitions))
+    (error 'scheme-semantics-tests
+           "named let bindings did not share the body scope")))
+
+(let* ([top-use
+         (car
+           (reverse
+             (snapshot-uses-named
+               lexical-snapshot
+               "shadow")))]
+       [visible
+         (scheme-semantic-visible-definitions-at
+           lexical-snapshot
+           (scheme-use-start top-use))])
+  (unless
+    (and
+      (not
+        (exists
+          (lambda (definition)
+            (member
+              (scheme-definition-name definition)
+              '("local"
+                "inside"
+                "parallel"
+                "serial"
+                "later"
+                "left"
+                "right"
+                "value-a"
+                "value-b"
+                "value-c"
+                "named-loop"
+                "counter"
+                "loop")))
+          visible))
+      (exists
+        (lambda (definition)
+          (and
+            (string=? (scheme-definition-name definition) "shadow")
+            (eq? (scheme-definition-kind definition) 'variable)))
+        visible))
+    (error 'scheme-semantics-tests
+           "point-visible definitions leaked a closed lexical scope")))
+
+(define case-lambda-source
+  (string-append
+    "(case-lambda\n"
+    "  [(value) value]\n"
+    "  [(value extra) value])"))
+(define case-lambda-snapshot
+  (make-scheme-semantic-snapshot
+    77
+    0
+    (string->utf8 case-lambda-source)))
+(let* ([uses
+         (snapshot-uses-named
+           case-lambda-snapshot
+           "value")]
+       [left
+         (and
+           (= (length uses) 2)
+           (definition-at-use
+             case-lambda-snapshot
+             (car uses)))]
+       [right
+         (and
+           (= (length uses) 2)
+           (definition-at-use
+             case-lambda-snapshot
+             (cadr uses)))])
+  (unless
+    (and
+      left
+      right
+      (eq? (scheme-definition-kind left) 'parameter)
+      (not
+        (scheme-definition-id=?
+          (scheme-definition-id left)
+          (scheme-definition-id right))))
+    (error 'scheme-semantics-tests
+           "case-lambda clauses did not receive independent scopes")))
+
+(define highlight-scope-source
+  (string-append
+    "(map values)\n"
+    "((lambda (map) map) values)\n"
+    "map"))
+(define highlight-scope-bytes
+  (string->utf8 highlight-scope-source))
+(define highlight-scope-runs
+  (scheme-highlight-runs
+    78
+    0
+    highlight-scope-bytes
+    0
+    (bytevector-length highlight-scope-bytes)))
+(define local-map-offset
+  (bytevector-length
+    (string->utf8
+      (string-append
+        "(map values)\n"
+        "((lambda (map) "))))
+(define final-map-offset
+  (bytevector-length
+    (string->utf8
+      (string-append
+        "(map values)\n"
+        "((lambda (map) map) values)\n"))))
+(define (highlight-face-at offset)
+  (let ([run
+          (find
+            (lambda (candidate)
+              (= (decoration-run-start candidate) offset))
+            highlight-scope-runs)])
+    (and run (decoration-run-face run))))
+
+(unless
+  (and
+    (eq? (highlight-face-at 1) 'syntax-builtin)
+    (not (highlight-face-at local-map-offset))
+    (eq?
+      (highlight-face-at final-map-offset)
+      'syntax-builtin))
+  (error 'scheme-semantics-tests
+         "Scheme highlighting ignored lexical shadowing"))
+
 (let* ([definition (definition-by-name "render-frame")]
        [identity (scheme-definition-id definition)])
   (unless
@@ -312,7 +724,7 @@
           "      [(value) value]))\n"
           "  (define-record-type alpha-cell\n"
           "    (fields (mutable value)))\n"
-          "  (define (alpha-run) alpha-value)))\n")))
+          "  (define (alpha-run alpha-value) alpha-value)))\n")))
     (cons
       "facade.sls"
       (string->utf8
@@ -349,7 +761,7 @@
       (eq? (cadr renamed) 'procedure)
       (string=? (list-ref renamed 3) "alpha.sls")
       (exact-non-negative-integer? (list-ref renamed 4))
-      (equal? (list-ref renamed 6) '(()))
+      (equal? (list-ref renamed 6) '((alpha-value)))
       overloaded
       (equal? (list-ref overloaded 6) '(() (value)))
       accessor

@@ -66,7 +66,7 @@
             resource
             (cadr form)
             (export-pairs (cddr form))
-            (scheme-semantic-snapshot-definitions snapshot))))))
+            (scheme-semantic-snapshot-root-definitions snapshot))))))
 
   (define (definitions-named name definitions)
     (filter

@@ -36,7 +36,7 @@
               (lambda () (text-close! text)))))
         (lambda () (snapshot-close! snapshot)))))
 
-  (define (visible-definitions snapshot)
+  (define (visible-definitions snapshot position)
     (let ([seen (make-hashtable string-hash string=?)]
           [result '()])
       (for-each
@@ -46,7 +46,9 @@
               (hashtable-set! seen name #t)
               (set! result (cons definition result)))))
         (append
-          (scheme-semantic-snapshot-definitions snapshot)
+          (scheme-semantic-visible-definitions-at
+            snapshot
+            position)
           (scheme-semantic-snapshot-visible-index-definitions
             snapshot)
           scheme-primitive-definitions))
@@ -118,7 +120,9 @@
                         request
                         (map
                           definition->completion-item
-                          (visible-definitions snapshot))
+                          (visible-definitions
+                            snapshot
+                            (completion-request-end request)))
                         #t)))))))))
 
   (define (make-scheme-static-completion-provider editor)

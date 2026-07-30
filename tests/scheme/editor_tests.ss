@@ -4266,7 +4266,8 @@
       (string-append
         "(define (render-frame frame) frame)\n"
         "(define-syntax render-with (syntax-rules ()))\n"
-        "ren"))
+        "(define (scope-demo frame)\n"
+        "  fra"))
     942))
 (define scheme-completion-buffer
   (make-buffer
@@ -4286,6 +4287,7 @@
   scheme-completion-editor
   scheme-completion-decoder
   (bytes
+    #x1b #x5b #x42
     #x1b #x5b #x42
     #x1b #x5b #x42
     #x1b #x5b #x46))
@@ -4323,27 +4325,34 @@
            (lambda (item)
              (eq? (completion-item-provider item) 'scheme-static))
            (completion-session-items completion))]
-       [render-frame
+       [frame-parameter
          (find
            (lambda (item)
              (string=? (completion-item-insert-text item)
-                       "render-frame"))
+                       "frame"))
            static-items)])
   (unless
     (and
       completion
-      (= (length static-items) 2)
-      render-frame
+      (= (length static-items) 1)
+      frame-parameter
       (scheme-definition-id?
-        (completion-item-id render-frame))
+        (completion-item-id frame-parameter))
       (eq? (scheme-definition-kind
-             (completion-item-provider-data render-frame))
-           'procedure)
+             (completion-item-provider-data frame-parameter))
+           'parameter)
       (string=?
-        (completion-item-annotation render-frame)
-        "(render-frame frame)"))
+        (completion-item-annotation frame-parameter)
+        "lexical parameter"))
     (error 'editor-tests
-           "scheme static provider did not expose semantic definitions")))
+           "scheme static provider did not expose semantic definitions"
+           (map
+             (lambda (item)
+               (list
+                 (completion-item-insert-text item)
+                 (completion-item-kind item)
+                 (completion-item-annotation item)))
+             static-items))))
 (let loop ([remaining 2])
   (let ([selected
           (completion-session-selected-item
@@ -4353,7 +4362,7 @@
         selected
         (string=?
           (completion-item-insert-text selected)
-          "render-frame"))
+          "frame"))
       (when (zero? remaining)
         (error 'editor-tests
                "scheme semantic completion could not select its definition"))
@@ -4374,7 +4383,8 @@
       (string-append
         "(define (render-frame frame) frame)\n"
         "(define-syntax render-with (syntax-rules ()))\n"
-        "render-frame")))
+        "(define (scope-demo frame)\n"
+        "  frame")))
   (error 'editor-tests
          "scheme semantic completion did not apply its definition"
          (utf8->string (buffer-bytes scheme-completion-buffer))))

@@ -19,25 +19,58 @@
         definitions)
       starts))
 
-  (define (make-kinds-by-name definitions)
-    (let ([kinds (make-hashtable string-hash string=?)])
+  (define (definition-id-key definition)
+    (let ([id (scheme-definition-id definition)])
+      (list
+        (scheme-definition-id-source id)
+        (scheme-definition-id-document-id id)
+        (scheme-definition-id-revision id)
+        (scheme-definition-id-offset id)
+        (scheme-definition-id-name id))))
+
+  (define (make-kinds-by-start snapshot)
+    (let ([definitions-by-id
+            (make-hashtable equal-hash equal?)]
+          [kinds (make-eqv-hashtable)])
       (for-each
         (lambda (definition)
           (hashtable-set!
-            kinds
-            (scheme-definition-name definition)
+            definitions-by-id
+            (definition-id-key definition)
             (scheme-definition-kind definition)))
-        scheme-primitive-definitions)
+        (append
+          (scheme-semantic-snapshot-definitions snapshot)
+          (scheme-semantic-snapshot-visible-index-definitions
+            snapshot)
+          scheme-primitive-definitions))
       (for-each
-        (lambda (definition)
-          (hashtable-set!
-            kinds
-            (scheme-definition-name definition)
-            (scheme-definition-kind definition)))
-        definitions)
+        (lambda (use)
+          (let ([resolved (scheme-use-resolution use)])
+            (when (pair? resolved)
+              (let ([kind
+                      (hashtable-ref
+                        definitions-by-id
+                        (list
+                          (scheme-definition-id-source
+                            (car resolved))
+                          (scheme-definition-id-document-id
+                            (car resolved))
+                          (scheme-definition-id-revision
+                            (car resolved))
+                          (scheme-definition-id-offset
+                            (car resolved))
+                          (scheme-definition-id-name
+                            (car resolved)))
+                        #f)])
+                (when kind
+                  (hashtable-set!
+                    kinds
+                    (scheme-use-start use)
+                    kind))))))
+        (scheme-semantic-snapshot-uses snapshot))
       kinds))
 
-  (define (symbol-face definition-starts kinds-by-name token)
+  (define (symbol-face definition-starts kinds-by-start token)
     (let ([value (scheme-lexical-token-value token)])
       (cond
         [(equal?
@@ -49,25 +82,29 @@
          'syntax-definition]
         [(string->number value) 'syntax-number]
         [else
-         (case (hashtable-ref kinds-by-name value #f)
+         (case
+           (hashtable-ref
+             kinds-by-start
+             (scheme-lexical-token-start token)
+             #f)
            [(syntax) 'syntax-keyword]
            [(procedure constructor predicate accessor mutator)
             'syntax-builtin]
            [(record) 'syntax-type]
            [else #f])])))
 
-  (define (token-face definition-starts kinds-by-name token)
+  (define (token-face definition-starts kinds-by-start token)
     (case (scheme-lexical-token-kind token)
       [(comment) 'syntax-comment]
       [(string) 'syntax-string]
       [(character) 'syntax-constant]
       [(open close prefix datum-comment) 'syntax-delimiter]
-      [(symbol) (symbol-face definition-starts kinds-by-name token)]
+      [(symbol) (symbol-face definition-starts kinds-by-start token)]
       [else #f]))
 
-  (define (token->run definition-starts kinds-by-name token)
+  (define (token->run definition-starts kinds-by-start token)
     (let ([face
-            (token-face definition-starts kinds-by-name token)])
+            (token-face definition-starts kinds-by-start token)])
       (and
         face
         (make-decoration-run
@@ -114,16 +151,16 @@
              (scheme-semantic-snapshot-definitions semantic)]
            [definition-starts
              (make-definition-starts definitions)]
-           [kinds-by-name
-             (make-kinds-by-name definitions)])
+           [kinds-by-start
+             (make-kinds-by-start semantic)])
       (filter
         (lambda (run) run)
         (map
           (lambda (token)
-            (token->run
-              definition-starts
-              kinds-by-name
-              token))
+              (token->run
+                definition-starts
+                kinds-by-start
+                token))
           (filter
             (lambda (token)
               (token-overlaps? token start end))

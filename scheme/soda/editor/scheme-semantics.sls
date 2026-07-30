@@ -6,8 +6,17 @@
           scheme-semantic-snapshot-definitions
           scheme-semantic-snapshot-uses
           scheme-semantic-snapshot-tokens
+          scheme-semantic-snapshot-scopes
           scheme-semantic-snapshot-imports
           scheme-semantic-snapshot-visible-index-definitions
+          scheme-semantic-snapshot-root-definitions
+          scheme-semantic-visible-definitions-at
+          scheme-scope?
+          scheme-scope-id
+          scheme-scope-parent-id
+          scheme-scope-start
+          scheme-scope-end
+          scheme-scope-definitions
           scheme-definition-id?
           scheme-definition-id-source
           scheme-definition-id-document-id
@@ -88,6 +97,21 @@
   (define-record-type scheme-use
     (fields name start end resolution))
 
+  (define-record-type scheme-scope
+    (fields id parent-id start end definitions))
+
+  (define-record-type
+    (scope-builder make-scope-builder scope-builder?)
+    (fields
+      id
+      parent-id
+      start
+      end
+      (mutable definitions)))
+
+  (define-record-type syntax-form
+    (fields kind token start end children))
+
   (define-record-type
     (scheme-semantic-snapshot
       %make-scheme-semantic-snapshot
@@ -98,6 +122,7 @@
       definitions
       uses
       tokens
+      scopes
       imports
       visible-index-definitions))
 
@@ -741,12 +766,6 @@
           [else '()]))
       '()))
 
-  (define (definition-name-member? name definitions)
-    (exists
-      (lambda (definition)
-        (string=? name (scheme-definition-name definition)))
-      definitions))
-
   (define (quoted-form? tokens)
     (and
       (pair? tokens)
@@ -769,12 +788,7 @@
                   (cdr tokens)
                   (fold-left
                     (lambda (result definition)
-                      (if
-                        (definition-name-member?
-                          (scheme-definition-name definition)
-                          result)
-                        result
-                        (cons definition result)))
+                      (cons definition result))
                     definitions
                     candidates)))))))
 
@@ -1258,6 +1272,519 @@
         (string=? name (scheme-definition-name definition)))
       definitions))
 
+  (define (parse-syntax-form tokens)
+    (cond
+      [(null? tokens) (values #f '())]
+      [(eq? (token-kind (car tokens)) 'open)
+       (let ([open (car tokens)])
+         (let loop
+           ([remaining (cdr tokens)]
+            [children '()]
+            [end (token-end open)])
+           (cond
+             [(null? remaining)
+              (values
+                (make-syntax-form
+                  'list
+                  open
+                  (token-start open)
+                  (+ end 1)
+                  (reverse children))
+                '())]
+             [(eq? (token-kind (car remaining)) 'close)
+              (values
+                (make-syntax-form
+                  'list
+                  open
+                  (token-start open)
+                  (token-end (car remaining))
+                  (reverse children))
+                (cdr remaining))]
+             [else
+              (call-with-values
+                (lambda () (parse-syntax-form remaining))
+                (lambda (child tail)
+                  (if child
+                      (loop
+                        tail
+                        (cons child children)
+                        (syntax-form-end child))
+                      (loop
+                        tail
+                        children
+                        end))))])))]
+      [(eq? (token-kind (car tokens)) 'close)
+       (values #f (cdr tokens))]
+      [else
+       (let ([value (car tokens)])
+         (values
+           (make-syntax-form
+             'atom
+             value
+             (token-start value)
+             (token-end value)
+             '())
+           (cdr tokens)))]))
+
+  (define (parse-syntax-forms tokens)
+    (let loop ([remaining tokens] [forms '()])
+      (if
+        (null? remaining)
+        (reverse forms)
+        (call-with-values
+          (lambda () (parse-syntax-form remaining))
+          (lambda (form tail)
+            (loop
+              tail
+              (if form (cons form forms) forms)))))))
+
+  (define (syntax-list? form)
+    (and
+      (syntax-form? form)
+      (eq? (syntax-form-kind form) 'list)))
+
+  (define (syntax-symbol? form)
+    (and
+      (syntax-form? form)
+      (eq? (syntax-form-kind form) 'atom)
+      (symbol-token? (syntax-form-token form))))
+
+  (define (syntax-symbol=? form name)
+    (and
+      (syntax-symbol? form)
+      (string=?
+        (token-value (syntax-form-token form))
+        name)))
+
+  (define (syntax-head-symbol form)
+    (and
+      (syntax-list? form)
+      (pair? (syntax-form-children form))
+      (syntax-symbol? (car (syntax-form-children form)))
+      (token-value
+        (syntax-form-token
+          (car (syntax-form-children form))))))
+
+  (define (formal-nodes form)
+    (cond
+      [(syntax-symbol? form)
+       (if (syntax-symbol=? form ".") '() (list form))]
+      [(syntax-list? form)
+       (filter
+         (lambda (child)
+           (and
+             (syntax-symbol? child)
+             (not (syntax-symbol=? child "."))))
+         (syntax-form-children form))]
+      [else '()]))
+
+  (define (binding-forms form)
+    (if
+      (syntax-list? form)
+      (filter
+        (lambda (child)
+          (and
+            (syntax-list? child)
+            (pair? (syntax-form-children child))
+            (syntax-symbol?
+              (car (syntax-form-children child)))))
+        (syntax-form-children form))
+      '()))
+
+  (define (scope-builder-add-definition! builder definition)
+    (scope-builder-definitions-set!
+      builder
+      (cons definition (scope-builder-definitions builder))))
+
+  (define (builder-contains-offset? builder offset)
+    (and
+      (<= (scope-builder-start builder) offset)
+      (< offset (scope-builder-end builder))))
+
+  (define (innermost-scope-builder builders offset)
+    (fold-left
+      (lambda (selected candidate)
+        (if
+          (and
+            (builder-contains-offset? candidate offset)
+            (or
+              (not selected)
+              (and
+                (>= (scope-builder-start candidate)
+                    (scope-builder-start selected))
+                (<= (scope-builder-end candidate)
+                    (scope-builder-end selected)))))
+          candidate
+          selected))
+      #f
+      builders))
+
+  (define (collect-lexical-scopes
+            document-id
+            revision
+            size
+            tokens
+            source-definitions)
+    (let* ([root (make-scope-builder 0 #f 0 (+ size 1) '())]
+           [builders (list root)]
+           [next-id 1]
+           [generated '()])
+      (define (new-scope parent start end)
+        (let ([scope
+                (make-scope-builder
+                  next-id
+                  (scope-builder-id parent)
+                  start
+                  end
+                  '())])
+          (set! next-id (+ next-id 1))
+          (set! builders (cons scope builders))
+          scope))
+      (define (make-binding node kind detail)
+        (let ([definition
+                (local-definition
+                  document-id
+                  revision
+                  (syntax-form-token node)
+                  kind
+                  detail
+                  '())])
+          (set! generated (cons definition generated))
+          definition))
+      (define (add-binding! scope node kind detail)
+        (when (syntax-symbol? node)
+          (scope-builder-add-definition!
+            scope
+            (make-binding node kind detail))))
+      (define (add-parameters! scope form)
+        (for-each
+          (lambda (node)
+            (add-binding!
+              scope
+              node
+              'parameter
+              "lexical parameter"))
+          (formal-nodes form)))
+      (define (analyze-sequence forms scope)
+        (for-each
+          (lambda (form) (analyze-form form scope))
+          forms))
+      (define (analyze-lambda form scope)
+        (let ([children (syntax-form-children form)])
+          (when (pair? (cdr children))
+            (let* ([formals (cadr children)]
+                   [body (cddr children)]
+                   [body-scope
+                     (new-scope
+                       scope
+                       (syntax-form-end formals)
+                       (syntax-form-end form))])
+              (add-parameters! body-scope formals)
+              (analyze-sequence body body-scope)))))
+      (define (analyze-case-lambda form scope)
+        (for-each
+          (lambda (clause)
+            (when
+              (and
+                (syntax-list? clause)
+                (pair? (syntax-form-children clause)))
+              (let* ([children (syntax-form-children clause)]
+                     [formals (car children)]
+                     [body-scope
+                       (new-scope
+                         scope
+                         (syntax-form-end formals)
+                         (syntax-form-end clause))])
+                (add-parameters! body-scope formals)
+                (analyze-sequence
+                  (cdr children)
+                  body-scope))))
+          (cdr (syntax-form-children form))))
+      (define (analyze-procedure-definition form scope)
+        (let* ([children (syntax-form-children form)]
+               [head (cadr children)]
+               [head-children (syntax-form-children head)]
+               [formals
+                 (make-syntax-form
+                   'list
+                   (syntax-form-token head)
+                   (syntax-form-start head)
+                   (syntax-form-end head)
+                   (cdr head-children))]
+               [body-scope
+                 (new-scope
+                   scope
+                   (syntax-form-end head)
+                   (syntax-form-end form))])
+          (add-parameters! body-scope formals)
+          (analyze-sequence
+            (cddr children)
+            body-scope)))
+      (define (add-let-binding! scope binding)
+        (let ([children (syntax-form-children binding)])
+          (when (pair? children)
+            (add-binding!
+              scope
+              (car children)
+              'variable
+              "local binding"))))
+      (define (analyze-binding-initializers bindings scope)
+        (for-each
+          (lambda (binding)
+            (analyze-sequence
+              (cdr (syntax-form-children binding))
+              scope))
+          bindings))
+      (define (value-binding-forms form)
+        (if
+          (syntax-list? form)
+          (filter
+            (lambda (child)
+              (and
+                (syntax-list? child)
+                (pair? (syntax-form-children child))
+                (let ([formals
+                        (car
+                          (syntax-form-children child))])
+                  (or
+                    (syntax-symbol? formals)
+                    (syntax-list? formals)))))
+            (syntax-form-children form))
+          '()))
+      (define (add-value-bindings! scope binding)
+        (let ([children (syntax-form-children binding)])
+          (when (pair? children)
+            (for-each
+              (lambda (node)
+                (add-binding!
+                  scope
+                  node
+                  'variable
+                  "local values binding"))
+              (formal-nodes (car children))))))
+      (define (analyze-value-initializers bindings scope)
+        (for-each
+          (lambda (binding)
+            (analyze-sequence
+              (cdr (syntax-form-children binding))
+              scope))
+          bindings))
+      (define (analyze-let-values form scope sequential?)
+        (let* ([children (syntax-form-children form)]
+               [bindings-node
+                 (and
+                   (pair? (cdr children))
+                   (cadr children))]
+               [bindings
+                 (value-binding-forms bindings-node)]
+               [body
+                 (if bindings-node (cddr children) '())]
+               [scope-end (syntax-form-end form)])
+          (if
+            (not bindings-node)
+            (analyze-sequence (cdr children) scope)
+            (if
+              sequential?
+              (let loop
+                ([remaining bindings]
+                 [visible-scope scope])
+                (if
+                  (null? remaining)
+                  (analyze-sequence body visible-scope)
+                  (let* ([binding (car remaining)]
+                         [initializer
+                           (cdr
+                             (syntax-form-children binding))])
+                    (analyze-sequence
+                      initializer
+                      visible-scope)
+                    (let ([next-scope
+                            (new-scope
+                              visible-scope
+                              (syntax-form-end binding)
+                              scope-end)])
+                      (add-value-bindings!
+                        next-scope
+                        binding)
+                      (loop
+                        (cdr remaining)
+                        next-scope)))))
+              (begin
+                (analyze-value-initializers bindings scope)
+                (let ([body-scope
+                        (new-scope
+                          scope
+                          (syntax-form-end bindings-node)
+                          scope-end)])
+                  (for-each
+                    (lambda (binding)
+                      (add-value-bindings!
+                        body-scope
+                        binding))
+                    bindings)
+                  (analyze-sequence body body-scope)))))))
+      (define (analyze-let form scope recursive? sequential?)
+        (let* ([children (syntax-form-children form)]
+               [named?
+                 (and
+                   (pair? (cdr children))
+                   (syntax-symbol? (cadr children)))]
+               [name-node (and named? (cadr children))]
+               [bindings-node
+                 (and
+                   (if named?
+                       (pair? (cddr children))
+                       (pair? (cdr children)))
+                   (if named? (caddr children) (cadr children)))]
+               [body
+                 (if
+                   (not bindings-node)
+                   '()
+                   (if named? (cdddr children) (cddr children)))]
+               [bindings (binding-forms bindings-node)]
+               [scope-end (syntax-form-end form)])
+          (cond
+            [(not bindings-node)
+             (analyze-sequence (cdr children) scope)]
+            [sequential?
+             (let loop
+               ([remaining bindings]
+                [visible-scope scope])
+               (if
+                 (null? remaining)
+                 (analyze-sequence body visible-scope)
+                 (let* ([binding (car remaining)]
+                        [initializer
+                          (cdr (syntax-form-children binding))])
+                   (analyze-sequence initializer visible-scope)
+                   (let ([next-scope
+                           (new-scope
+                             visible-scope
+                             (syntax-form-end binding)
+                             scope-end)])
+                     (add-let-binding! next-scope binding)
+                     (loop (cdr remaining) next-scope)))))]
+            [recursive?
+             (let ([body-scope
+                     (new-scope
+                       scope
+                       (syntax-form-start bindings-node)
+                       scope-end)])
+               (for-each
+                 (lambda (binding)
+                   (add-let-binding! body-scope binding))
+                 bindings)
+               (analyze-binding-initializers
+                 bindings
+                 body-scope)
+               (analyze-sequence body body-scope))]
+            [else
+             (analyze-binding-initializers bindings scope)
+             (let ([body-scope
+                     (new-scope
+                       scope
+                       (syntax-form-end bindings-node)
+                       scope-end)])
+               (when name-node
+                 (let* ([parameter-nodes
+                          (map
+                            (lambda (binding)
+                              (car
+                                (syntax-form-children binding)))
+                            bindings)]
+                        [definition
+                          (local-definition
+                            document-id
+                            revision
+                            (syntax-form-token name-node)
+                            'procedure
+                            "named let"
+                            (list
+                              (map
+                                (lambda (node)
+                                  (string->symbol
+                                    (token-value
+                                      (syntax-form-token node))))
+                                parameter-nodes)))])
+                   (set! generated (cons definition generated))
+                   (scope-builder-add-definition!
+                     body-scope
+                     definition)))
+               (for-each
+                 (lambda (binding)
+                   (add-let-binding! body-scope binding))
+                 bindings)
+               (analyze-sequence body body-scope))])))
+      (define (analyze-form form scope)
+        (when (syntax-list? form)
+          (let ([head (syntax-head-symbol form)]
+                [children (syntax-form-children form)])
+            (cond
+              [(not head)
+               (analyze-sequence children scope)]
+              [(string=? head "lambda")
+               (analyze-lambda form scope)]
+              [(string=? head "case-lambda")
+               (analyze-case-lambda form scope)]
+              [(and
+                 (string=? head "define")
+                 (pair? (cdr children))
+                 (syntax-list? (cadr children))
+                 (pair?
+                   (syntax-form-children
+                     (cadr children))))
+               (analyze-procedure-definition form scope)]
+              [(string=? head "define")
+               (analyze-sequence (cddr children) scope)]
+              [(string=? head "let")
+               (analyze-let form scope #f #f)]
+              [(string=? head "let*")
+               (analyze-let form scope #f #t)]
+              [(string=? head "let-values")
+               (analyze-let-values form scope #f)]
+              [(string=? head "let*-values")
+               (analyze-let-values form scope #t)]
+              [(or
+                 (string=? head "letrec")
+                 (string=? head "letrec*"))
+               (analyze-let form scope #t #f)]
+              [(string=? head "define-record-type") #f]
+              [else
+               (analyze-sequence children scope)]))))
+      (analyze-sequence
+        (parse-syntax-forms (call-context-tokens-from tokens))
+        root)
+      (for-each
+        (lambda (definition)
+          (let ([scope
+                  (or
+                    (innermost-scope-builder
+                      builders
+                      (scheme-definition-start definition))
+                    root)])
+            (scope-builder-add-definition!
+              scope
+              definition)))
+        source-definitions)
+      (let ([scopes
+              (map
+                (lambda (builder)
+                  (make-scheme-scope
+                    (scope-builder-id builder)
+                    (scope-builder-parent-id builder)
+                    (scope-builder-start builder)
+                    (scope-builder-end builder)
+                    (reverse
+                      (scope-builder-definitions builder))))
+                (list-sort
+                  (lambda (left right)
+                    (< (scope-builder-id left)
+                       (scope-builder-id right)))
+                  builders))])
+        (values
+          (append source-definitions (reverse generated))
+          scopes))))
+
   (define (definition-token? token definitions)
     (exists
       (lambda (definition)
@@ -1267,7 +1794,51 @@
                 (scheme-definition-end definition))))
       definitions))
 
-  (define (scan-uses tokens definitions global-table)
+  (define (scope-ref scopes id)
+    (find
+      (lambda (scope)
+        (= (scheme-scope-id scope) id))
+      scopes))
+
+  (define (scope-at scopes offset)
+    (fold-left
+      (lambda (selected candidate)
+        (if
+          (and
+            (<= (scheme-scope-start candidate) offset)
+            (< offset (scheme-scope-end candidate))
+            (or
+              (not selected)
+              (and
+                (>= (scheme-scope-start candidate)
+                    (scheme-scope-start selected))
+                (<= (scheme-scope-end candidate)
+                    (scheme-scope-end selected)))))
+          candidate
+          selected))
+      #f
+      scopes))
+
+  (define (resolve-in-scopes scopes offset name)
+    (let loop ([scope (scope-at scopes offset)])
+      (if
+        (not scope)
+        '()
+        (let ([matches
+                (definitions-named
+                  name
+                  (scheme-scope-definitions scope))])
+          (if
+            (pair? matches)
+            matches
+            (loop
+              (and
+                (scheme-scope-parent-id scope)
+                (scope-ref
+                  scopes
+                  (scheme-scope-parent-id scope)))))))))
+
+  (define (scan-uses tokens definitions global-table scopes)
     (let loop ([tokens (remove-ignored-data tokens)]
                [uses '()])
       (cond
@@ -1278,7 +1849,11 @@
               (not (definition-token? (car tokens) definitions)))
          (let* ([token (car tokens)]
                 [name (token-value token)]
-                [local (definitions-named name definitions)]
+               [local
+                 (resolve-in-scopes
+                   scopes
+                   (token-start token)
+                   name)]
                 [resolved
                   (if (pair? local)
                       local
@@ -1355,14 +1930,58 @@
                           id)))
                     (scheme-use-resolution use))))))))
 
-  (define (call-context-tokens snapshot)
+  (define (scheme-semantic-snapshot-root-definitions snapshot)
+    (unless (scheme-semantic-snapshot? snapshot)
+      (assertion-violation
+        'scheme-semantic-snapshot-root-definitions
+        "expected a Scheme semantic snapshot"
+        snapshot))
+    (let ([root
+            (scope-ref
+              (scheme-semantic-snapshot-scopes snapshot)
+              0)])
+      (if root (scheme-scope-definitions root) '())))
+
+  (define (scheme-semantic-visible-definitions-at snapshot offset)
+    (unless (scheme-semantic-snapshot? snapshot)
+      (assertion-violation
+        'scheme-semantic-visible-definitions-at
+        "expected a Scheme semantic snapshot"
+        snapshot))
+    (unless (exact-non-negative-integer? offset)
+      (assertion-violation
+        'scheme-semantic-visible-definitions-at
+        "offset must be an exact non-negative integer"
+        offset))
+    (let ([scopes (scheme-semantic-snapshot-scopes snapshot)]
+          [seen (make-hashtable string-hash string=?)]
+          [result '()])
+      (let loop ([scope (scope-at scopes offset)])
+        (when scope
+          (for-each
+            (lambda (definition)
+              (let ([name (scheme-definition-name definition)])
+                (unless (hashtable-contains? seen name)
+                  (hashtable-set! seen name #t)
+                  (set! result
+                    (cons definition result)))))
+            (scheme-scope-definitions scope))
+          (loop
+            (and
+              (scheme-scope-parent-id scope)
+              (scope-ref
+                scopes
+                (scheme-scope-parent-id scope))))))
+      (reverse result)))
+
+  (define (call-context-tokens-from tokens)
     (let loop
       ([remaining
          (remove-ignored-data
            (filter
              (lambda (value)
                (not (eq? (token-kind value) 'comment)))
-             (scheme-semantic-snapshot-tokens snapshot)))]
+             tokens))]
        [result '()])
       (cond
         [(null? remaining) (reverse result)]
@@ -1372,6 +1991,10 @@
          (loop
            (cdr remaining)
            (cons (car remaining) result))])))
+
+  (define (call-context-tokens snapshot)
+    (call-context-tokens-from
+      (scheme-semantic-snapshot-tokens snapshot)))
 
   (define (innermost-open-token tokens offset)
     (let loop ([remaining tokens] [stack '()])
@@ -1497,11 +2120,25 @@
                  scheme-primitive-definitions))]
            [definitions
              (scan-definitions document-id revision semantic)])
-      (%make-scheme-semantic-snapshot
-        document-id
-        revision
-        definitions
-        (scan-uses semantic definitions global-table)
-        tokens
-        imports
-        visible-index))))
+      (call-with-values
+        (lambda ()
+          (collect-lexical-scopes
+            document-id
+            revision
+            (bytevector-length bytes)
+            tokens
+            definitions))
+        (lambda (scoped-definitions scopes)
+          (%make-scheme-semantic-snapshot
+            document-id
+            revision
+            scoped-definitions
+            (scan-uses
+              semantic
+              scoped-definitions
+              global-table
+              scopes)
+            tokens
+            scopes
+            imports
+            visible-index))))))
