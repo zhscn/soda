@@ -433,8 +433,8 @@ surface、primitive、其他 Buffer 或局部 lexical binding。每个结果复�
 `SchemeWorkspaceSymbol` 的 DefinitionId、kind、buffer、revision 与 declaration
 range，并按源码位置排序。`xref.find-document-symbol`（`M-g i`）使用通用
 completing-read 与 fzf matching 打开当前文档候选，接受后通过普通 jump graph
-移动到声明。`xref.find-symbol`（`M-g I`）仍独立合并整个 Project、打开的 Buffer
-和带源码的嵌入 API。
+移动到声明。`xref.find-symbol`（`M-g I`）独立合并显式 language session、打开的
+Buffer 和带源码的嵌入 API。
 
 document highlight 查询解析光标下的 declaration 或 use，并在当前 semantic
 snapshot 中返回同一 DefinitionId 的 declaration 与 reference range。lexical
@@ -467,8 +467,12 @@ binding 建立依次嵌套的 scope，`letrec` 与 `letrec*` 在 initializer 和
 暴露全部 binding。`let-values` 与 `let*-values` 对每组 formals 应用对应的并行或
 顺序可见性。`do` initializer 在外层 scope 求值，step、termination 和 body 共享
 loop binding；`guard` condition binding 只在 handler clauses 中可见。named let
-的过程名和参数位于 body scope。未闭合 form 的 scope range 延伸到 Document
-末尾，使编辑中的参数和局部 binding 仍可参与补全。
+的过程名和参数位于 body scope。每个 `syntax-rules` rule 为 pattern variable 建立
+独立的 `syntax-parameter` scope，排除 rule keyword、literal identifier、`_` 和
+默认或自定义 ellipsis identifier；嵌套 pattern 中的变量使用同一 rule scope，并在
+template 中参与补全、definition、references、document highlight 和 rename。
+未闭合 form 的 scope range 延伸到 Document 末尾，使编辑中的参数和局部 binding
+仍可参与补全。
 
 同一次扫描也产生 `SchemeUse { name, start, end, resolution }`。声明 token 不重复
 记录为 use，quote、quasiquote、syntax 及 datum comment 内的 symbol 不进入 use
@@ -491,7 +495,7 @@ export surface。provider catalog、completion session 和 TUI 不依赖 scanner
 
 自举 xref provider 把 definition 和 resolved uses 转成通用 LocationList。当前
 Document 的 declaration 与 references 可立即导航。editor 持有一个
-`SchemeWorkspaceIndex`，保存 editor 已知 Scheme Buffer 和 Project resource 的
+`SchemeWorkspaceIndex`，保存 editor 已知 Scheme Buffer 和显式 session source 的
 semantic snapshot。查询前同步 Buffer 集合；document id、resource 或 revision
 改变时替换对应 snapshot，已关闭或离开 Scheme mode 的 Buffer 从实时集合移除。
 session snapshot 独立于 Buffer 生命周期。未变化的 snapshot 直接复用。source set
@@ -504,7 +508,7 @@ name、export surface 与源码 definition，生成与嵌入 API catalog 相同�
 entry。session catalog 分别保存 library name 集合和 export symbol 集合，没有
 export 的 library 仍具有独立 identity。source set 或 revision 改变时先重建两个
 catalog，并按 library 比较存在性与新旧 export surface。发生变化的 source snapshot
-与直接 import 对应 library 的 consumer snapshot 使用合并后的 embedded/project
+与直接 import 对应 library 的 consumer snapshot 使用合并后的 built-in/session
 catalog 重新分析；不受影响的 snapshot 保持对象 identity。暂不参与查询的 session
 snapshot 标记为待分析，在重新进入实时集合时按需刷新。snapshot 更新后重建
 references 倒排表。连续异步文件读取只标记 catalog dirty，首次 completion 或 xref

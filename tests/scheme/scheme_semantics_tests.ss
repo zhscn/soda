@@ -378,6 +378,163 @@
             (scheme-use-start use))])
     (and (= (length resolved) 1) (car resolved))))
 
+(define syntax-rules-source
+  (string-append
+    "(define-syntax collect\n"
+    "  (syntax-rules (literal)\n"
+    "    [(collect target ((item literal) ... ) fallback)\n"
+    "     (list target item ... fallback)]))\n"))
+(define syntax-rules-snapshot
+  (make-scheme-semantic-snapshot
+    710
+    0
+    (string->utf8 syntax-rules-source)))
+(define syntax-item-definitions
+  (snapshot-definitions-named
+    syntax-rules-snapshot
+    "item"))
+(define syntax-item-uses
+  (snapshot-uses-named
+    syntax-rules-snapshot
+    "item"))
+(define syntax-item-definition
+  (and
+    (= (length syntax-item-definitions) 1)
+    (car syntax-item-definitions)))
+
+(unless
+  (and
+    syntax-item-definition
+    (eq?
+      (scheme-definition-kind syntax-item-definition)
+      'syntax-parameter)
+    (= (length syntax-item-uses) 1)
+    (scheme-definition-id=?
+      (scheme-definition-id syntax-item-definition)
+      (scheme-definition-id
+        (definition-at-use
+          syntax-rules-snapshot
+          (car syntax-item-uses))))
+    (= (length
+         (scheme-semantic-references
+           syntax-rules-snapshot
+           (scheme-definition-id
+             syntax-item-definition)))
+       1)
+    (= (length
+         (scheme-semantic-document-highlights-at
+           syntax-rules-snapshot
+           (scheme-definition-start
+             syntax-item-definition)))
+       2)
+    (for-all
+      (lambda (name)
+        (exists
+          (lambda (definition)
+            (string=?
+              (scheme-definition-name definition)
+              name))
+          (scheme-semantic-visible-definitions-at
+            syntax-rules-snapshot
+            (scheme-use-start
+              (car syntax-item-uses)))))
+      '("target" "item" "fallback"))
+    (= (length
+         (snapshot-definitions-named
+           syntax-rules-snapshot
+           "collect"))
+       1)
+    (null?
+      (snapshot-definitions-named
+        syntax-rules-snapshot
+        "literal"))
+    (not
+      (exists
+        (lambda (diagnostic)
+          (and
+            (eq?
+              (scheme-diagnostic-code diagnostic)
+              'unused-parameter)
+            (equal?
+              (scheme-diagnostic-payload diagnostic)
+              (scheme-definition-id
+                syntax-item-definition))))
+        (scheme-semantic-snapshot-diagnostics
+          syntax-rules-snapshot))))
+  (error
+    'scheme-semantics-tests
+    "syntax-rules pattern variables did not receive lexical identity"))
+
+(define custom-ellipsis-source
+  (string-append
+    "(define-syntax custom-list\n"
+    "  (syntax-rules ::: (marker)\n"
+    "    [(_ ((element marker) :::))\n"
+    "     (list element :::)]))\n"))
+(define custom-ellipsis-snapshot
+  (make-scheme-semantic-snapshot
+    711
+    0
+    (string->utf8 custom-ellipsis-source)))
+(unless
+  (and
+    (= (length
+         (snapshot-definitions-named
+           custom-ellipsis-snapshot
+           "element"))
+       1)
+    (null?
+      (snapshot-definitions-named
+        custom-ellipsis-snapshot
+        "marker"))
+    (null?
+      (snapshot-definitions-named
+        custom-ellipsis-snapshot
+        ":::"))
+    (= (length
+         (snapshot-uses-named
+           custom-ellipsis-snapshot
+           "element"))
+       1))
+  (error
+    'scheme-semantics-tests
+    "custom syntax-rules ellipsis changed pattern variable discovery"))
+
+(define generated-template-source
+  (string-append
+    "(define-syntax define-hidden\n"
+    "  (syntax-rules ()\n"
+    "    [(_ name)\n"
+    "     (define name 1)]))\n"))
+(define generated-template-snapshot
+  (make-scheme-semantic-snapshot
+    712
+    0
+    (string->utf8 generated-template-source)))
+(let ([name-definitions
+        (snapshot-definitions-named
+          generated-template-snapshot
+          "name")])
+  (unless
+    (and
+      (= (length name-definitions) 1)
+      (eq?
+        (scheme-definition-kind
+          (car name-definitions))
+        'syntax-parameter)
+      (not
+        (exists
+          (lambda (definition)
+            (string=?
+              (scheme-definition-name definition)
+              "name"))
+          (scheme-semantic-snapshot-root-definitions
+            generated-template-snapshot))))
+    (error
+      'scheme-semantics-tests
+      "syntax-rules template leaked generated declarations into source scope"
+      name-definitions)))
+
 (let* ([shadow-definitions
          (snapshot-definitions-named
            lexical-snapshot

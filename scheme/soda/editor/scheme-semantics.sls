@@ -880,12 +880,22 @@
         (lambda (name) (token-symbol=? (cadr tokens) name))
         '("quote" "quasiquote" "syntax" "quasisyntax"))))
 
+  (define (syntax-rules-form? tokens)
+    (and
+      (pair? tokens)
+      (eq? (token-kind (car tokens)) 'open)
+      (pair? (cdr tokens))
+      (token-symbol=? (cadr tokens) "syntax-rules")))
+
   (define (scan-definitions document-id revision tokens)
     (let loop ([tokens (remove-ignored-data tokens)]
                [definitions '()])
       (if (null? tokens)
           (reverse definitions)
-          (if (quoted-form? tokens)
+          (if
+            (or
+              (quoted-form? tokens)
+              (syntax-rules-form? tokens))
               (loop (skip-datum tokens) definitions)
               (let ([candidates
                       (definitions-at tokens document-id revision)])
@@ -2327,6 +2337,109 @@
           (analyze-sequence
             (if handler (cddr children) (cdr children))
             scope)))
+      (define (syntax-rules-layout form)
+        (let ([children (syntax-form-children form)])
+          (cond
+            [(and
+               (pair? (cdr children))
+               (syntax-list? (cadr children)))
+             (values
+               "..."
+               (syntax-form-children (cadr children))
+               (cddr children))]
+            [(and
+               (pair? (cddr children))
+               (syntax-symbol? (cadr children))
+               (syntax-list? (caddr children)))
+             (values
+               (token-value
+                 (syntax-form-token (cadr children)))
+               (syntax-form-children (caddr children))
+               (cdddr children))]
+            [else
+             (values "..." '() '())])))
+      (define (syntax-pattern-variables
+                pattern
+                ellipsis
+                literals)
+        (let ([literal-names
+                (fold-right
+                  (lambda (literal names)
+                    (if
+                      (syntax-symbol? literal)
+                      (cons
+                        (token-value
+                          (syntax-form-token literal))
+                        names)
+                      names))
+                  '()
+                  literals)])
+          (define (pattern-variable? node)
+            (and
+              (syntax-symbol? node)
+              (let ([name
+                      (token-value
+                        (syntax-form-token node))])
+                (and
+                  (not (string=? name "_"))
+                  (not (string=? name "."))
+                  (not (string=? name ellipsis))
+                  (not (member name literal-names))))))
+          (define (walk node)
+            (cond
+              [(pattern-variable? node) (list node)]
+              [(syntax-list? node)
+               (apply
+                 append
+                 (map walk
+                   (syntax-form-children node)))]
+              [else '()]))
+          (if
+            (and
+              (syntax-list? pattern)
+              (pair?
+                (syntax-form-children pattern)))
+            (apply
+              append
+              (map walk
+                (cdr
+                  (syntax-form-children pattern))))
+            '())))
+      (define (analyze-syntax-rule
+                rule
+                scope
+                ellipsis
+                literals)
+        (when
+          (and
+            (syntax-list? rule)
+            (pair? (syntax-form-children rule)))
+          (let* ([children (syntax-form-children rule)]
+                 [pattern (car children)]
+                 [rule-scope
+                   (new-scope
+                     scope
+                     (syntax-form-start pattern)
+                     (syntax-form-end rule))])
+            (for-each
+              (lambda (node)
+                (add-binding!
+                  rule-scope
+                  node
+                  'syntax-parameter
+                  "syntax-rules pattern variable"))
+              (syntax-pattern-variables
+                pattern ellipsis literals)))))
+      (define (analyze-syntax-rules form scope)
+        (call-with-values
+          (lambda ()
+            (syntax-rules-layout form))
+          (lambda (ellipsis literals rules)
+            (for-each
+              (lambda (rule)
+                (analyze-syntax-rule
+                  rule scope ellipsis literals))
+              rules))))
       (define (analyze-form form scope)
         (when (syntax-list? form)
           (let ([head (syntax-head-symbol form)]
@@ -2366,6 +2479,8 @@
                (analyze-do form scope)]
               [(string=? head "guard")
                (analyze-guard form scope)]
+              [(string=? head "syntax-rules")
+               (analyze-syntax-rules form scope)]
               [(string=? head "define-record-type") #f]
               [else
                (analyze-sequence children scope)]))))

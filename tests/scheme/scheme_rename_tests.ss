@@ -316,6 +316,79 @@
     "generated record binding without source spelling was renamed"))
 (editor-close! generated-editor)
 
+(define syntax-pattern-buffer
+  (make-buffer
+    21
+    (make-document
+      (string-append
+        "(define-syntax collect\n"
+        "  (syntax-rules (literal)\n"
+        "    [(_ (item literal) ...)\n"
+        "     (list item ...)]))\n")
+      21)
+    "/project/rename-syntax-pattern.scm"
+    'scheme-mode))
+(define syntax-pattern-editor
+  (make-editor syntax-pattern-buffer))
+(define syntax-pattern-workspace
+  (editor-scheme-workspace syntax-pattern-editor))
+(define syntax-pattern-snapshot
+  (scheme-workspace-snapshot-for-buffer
+    syntax-pattern-workspace
+    syntax-pattern-buffer))
+(define syntax-pattern-definition
+  (find
+    (lambda (definition)
+      (and
+        (string=?
+          (scheme-definition-name definition)
+          "item")
+        (eq?
+          (scheme-definition-kind definition)
+          'syntax-parameter)))
+    (scheme-semantic-snapshot-definitions
+      syntax-pattern-snapshot)))
+(unless syntax-pattern-definition
+  (error
+    'scheme-rename-tests
+    "syntax-rules pattern variable was not indexed"))
+(define syntax-pattern-context
+  (make-command-context
+    syntax-pattern-editor
+    (editor-active-view syntax-pattern-editor)
+    #f
+    #f))
+(define syntax-pattern-effects
+  ((command-procedure
+     (editor-command-registry syntax-pattern-editor)
+     'scheme.rename)
+   syntax-pattern-context
+   syntax-pattern-definition
+   "element"))
+(define renamed-syntax-pattern
+  (buffer-string syntax-pattern-buffer))
+(unless
+  (and
+    (null? syntax-pattern-effects)
+    (string-contains
+      renamed-syntax-pattern
+      "(_ (element literal) ...)")
+    (string-contains
+      renamed-syntax-pattern
+      "(list element ...)")
+    (not
+      (string-contains
+        renamed-syntax-pattern
+        "(item literal)"))
+    (string=?
+      (editor-status-message syntax-pattern-editor)
+      "Renamed to element in 2 places"))
+  (error
+    'scheme-rename-tests
+    "syntax-rules pattern variable rename lost lexical identity"
+    renamed-syntax-pattern))
+(editor-close! syntax-pattern-editor)
+
 (define compiled-rename-stem
   (string-append
     "/tmp/soda-compiled-rename-"
