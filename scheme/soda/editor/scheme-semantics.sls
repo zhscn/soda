@@ -2738,7 +2738,8 @@
 
   (define (import-specification-diagnostics
             form
-            library-table)
+            library-table
+            library-catalog)
     (let ([datum (syntax-form->datum form)])
       (cond
         [(library-name? datum)
@@ -2747,7 +2748,8 @@
                    (hashtable-contains?
                      library-table datum)
                    (hashtable-contains?
-                     scheme-known-library-table datum))])
+                     scheme-known-library-table datum)
+                   (member datum library-catalog))])
            (values
              known?
              (if
@@ -2773,7 +2775,8 @@
              (lambda ()
                (import-specification-diagnostics
                  (cadr children)
-                 library-table))
+                 library-table
+                 library-catalog))
              (lambda
                (known?
                  definitions
@@ -2884,7 +2887,8 @@
 
   (define (identifier-not-exported-diagnostics
             import-locations
-            library-table)
+            library-table
+            library-catalog)
     (apply
       append
       (map
@@ -2893,7 +2897,8 @@
             (lambda ()
               (import-specification-diagnostics
                 (cdr location)
-                library-table))
+                library-table
+                library-catalog))
             (lambda
               (known? definitions diagnostics library)
               diagnostics)))
@@ -3038,7 +3043,8 @@
             scopes
             import-locations
             uses
-            library-table)
+            library-table
+            library-catalog)
     (list-sort
       diagnostic-before?
       (append
@@ -3048,7 +3054,9 @@
         (unknown-soda-library-diagnostics
           import-locations)
         (identifier-not-exported-diagnostics
-          import-locations library-table)
+          import-locations
+          library-table
+          library-catalog)
         (unused-parameter-diagnostics scopes uses)
         (unused-import-diagnostics
           import-locations uses library-table)
@@ -3059,7 +3067,8 @@
             document-id
             revision
             bytes
-            library-index)
+            library-index
+            library-catalog)
     (unless (and (exact-non-negative-integer? document-id)
                  (exact-non-negative-integer? revision))
       (assertion-violation
@@ -3077,6 +3086,14 @@
         'make-scheme-semantic-snapshot-with-library-index
         "library index must be a list"
         library-index))
+    (unless
+      (and
+        (list? library-catalog)
+        (for-all library-name? library-catalog))
+      (assertion-violation
+        'make-scheme-semantic-snapshot-with-library-index
+        "library catalog must contain library names"
+        library-catalog))
     (let* ([library-table
              (library-table-with-index library-index)]
            [tokens (tokenize bytes)]
@@ -3128,7 +3145,8 @@
                 scopes
                 import-locations
                 uses
-                library-table)
+                library-table
+                library-catalog)
               visible-index))))))
 
   (define (make-scheme-semantic-snapshot
@@ -3136,12 +3154,21 @@
             revision
             bytes)
     (make-scheme-semantic-snapshot/internal
-      document-id revision bytes '()))
+      document-id revision bytes '() '()))
 
-  (define (make-scheme-semantic-snapshot-with-library-index
-            document-id
-            revision
-            bytes
-            library-index)
-    (make-scheme-semantic-snapshot/internal
-      document-id revision bytes library-index)))
+  (define make-scheme-semantic-snapshot-with-library-index
+    (case-lambda
+      [(document-id revision bytes library-index)
+       (make-scheme-semantic-snapshot/internal
+         document-id
+         revision
+         bytes
+         library-index
+         '())]
+      [(document-id revision bytes library-index library-catalog)
+       (make-scheme-semantic-snapshot/internal
+         document-id
+         revision
+         bytes
+         library-index
+         library-catalog)])))

@@ -57,6 +57,7 @@
       sources
       references
       (mutable library-index)
+      (mutable library-catalog)
       (mutable catalog-dirty?)
       (mutable dirty?
                scheme-workspace-index-dirty?
@@ -87,6 +88,7 @@
       (make-hashtable
         equal-hash
         scheme-definition-id=?)
+      '()
       '()
       #t
       #t))
@@ -180,6 +182,8 @@
                     (buffer-revision buffer)
                     bytes
                     (scheme-workspace-index-library-index
+                      index)
+                    (scheme-workspace-index-library-catalog
                       index))])
            (hashtable-set!
              table
@@ -227,14 +231,18 @@
                   document)))))
         (workspace-documents index))))
 
-  (define (refresh-document-snapshot! document library-index)
+  (define (refresh-document-snapshot!
+            document
+            library-index
+            library-catalog)
     (scheme-workspace-document-snapshot-set!
       document
       (make-scheme-semantic-snapshot-with-library-index
         (scheme-workspace-document-document-id document)
         (scheme-workspace-document-revision document)
         (scheme-workspace-document-bytes document)
-        library-index))
+        library-index
+        library-catalog))
     (scheme-workspace-document-needs-analysis?-set!
       document #f))
 
@@ -251,7 +259,11 @@
         index-entries)
       table))
 
-  (define (changed-library-names old-index new-index)
+  (define (changed-library-names
+            old-index
+            new-index
+            old-catalog
+            new-catalog)
     (let ([old-table (library-index-table old-index)]
           [new-table (library-index-table new-index)]
           [names (make-hashtable equal-hash equal?)]
@@ -260,14 +272,22 @@
         (lambda (entry)
           (hashtable-set! names (caddr entry) #t))
         (append old-index new-index))
+      (for-each
+        (lambda (library)
+          (hashtable-set! names library #t))
+        (append old-catalog new-catalog))
       (let-values ([(keys values) (hashtable-entries names)])
         (let loop ([position 0])
           (when (< position (vector-length keys))
             (let ([library (vector-ref keys position)])
               (unless
-                (equal?
-                  (hashtable-ref old-table library '())
-                  (hashtable-ref new-table library '()))
+                (and
+                  (equal?
+                    (hashtable-ref old-table library '())
+                    (hashtable-ref new-table library '()))
+                  (eq?
+                    (and (member library old-catalog) #t)
+                    (and (member library new-catalog) #t)))
                 (set! result (cons library result))))
             (loop (+ position 1)))))
       result))
@@ -287,17 +307,25 @@
   (define (ensure-library-index! index)
     (when
       (scheme-workspace-index-catalog-dirty? index)
-      (let ([library-index
+      (let* ([sources (catalog-sources index)]
+             [library-index
               (scheme-sources-api-index
-                (catalog-sources index))])
+                sources)]
+             [library-catalog
+              (scheme-sources-library-index
+                sources)])
         (let ([changed-libraries
                 (changed-library-names
                   (scheme-workspace-index-library-index index)
-                  library-index)]
+                  library-index
+                  (scheme-workspace-index-library-catalog index)
+                  library-catalog)]
               [active-documents
                 (workspace-documents index)])
           (scheme-workspace-index-library-index-set!
             index library-index)
+          (scheme-workspace-index-library-catalog-set!
+            index library-catalog)
           (for-each
             (lambda (document)
               (when
@@ -310,7 +338,9 @@
                 (if
                   (memq document active-documents)
                   (refresh-document-snapshot!
-                    document library-index)
+                    document
+                    library-index
+                    library-catalog)
                   (scheme-workspace-document-needs-analysis?-set!
                     document #t))))
             (all-workspace-documents index))
@@ -413,6 +443,8 @@
                revision
                bytes
                (scheme-workspace-index-library-index
+                 index)
+               (scheme-workspace-index-library-catalog
                  index))]
            [document
              (make-scheme-workspace-document

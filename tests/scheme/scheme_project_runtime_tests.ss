@@ -27,6 +27,8 @@
   (vfs-path-join root "root.sls"))
 (define consumer-resource
   (vfs-path-join root "consumer.sls"))
+(define empty-resource
+  (vfs-path-join root "empty.sls"))
 (define (string-suffix? suffix value)
   (let ([suffix-length (string-length suffix)]
         [value-length (string-length value)])
@@ -88,7 +90,7 @@
 
 (unless
   (and
-    (= (scheme-project-runtime-indexed-count adapter) 3)
+    (= (scheme-project-runtime-indexed-count adapter) 4)
     (= (length (symbols-named "project-root-symbol")) 1)
     (= (length (symbols-named "project-nested-symbol")) 1)
     (null? (symbols-named "not-a-scheme-source"))
@@ -104,6 +106,87 @@
     'scheme-project-runtime-tests
     "project discovery did not index the Scheme source set"
     symbols))
+
+(define empty-import-buffer
+  (make-buffer
+    5
+    (make-document
+      (string-append
+        "(import\n"
+        "  (only (fixture project-empty) missing))\n")
+      5)
+    (vfs-path-join root "empty-import.scm")
+    'scheme-mode))
+(editor-add-buffer! editor empty-import-buffer)
+(define empty-import-snapshot
+  (scheme-workspace-snapshot-for-buffer
+    workspace empty-import-buffer))
+(unless
+  (exists
+    (lambda (diagnostic)
+      (and
+        (eq?
+          (scheme-diagnostic-code diagnostic)
+          'identifier-not-exported)
+        (string=?
+          (scheme-diagnostic-message diagnostic)
+          (string-append
+            "Identifier missing is not exported by "
+            "(fixture project-empty)"))))
+    (scheme-semantic-snapshot-diagnostics
+      empty-import-snapshot))
+  (error
+    'scheme-project-runtime-tests
+    "empty project library was absent from the semantic catalog"))
+(scheme-workspace-remove-source!
+  workspace empty-resource)
+(scheme-workspace-sync-editor! workspace editor)
+(define empty-import-without-library
+  (scheme-workspace-snapshot-for-buffer
+    workspace empty-import-buffer))
+(unless
+  (and
+    (not
+      (eq?
+        empty-import-snapshot
+        empty-import-without-library))
+    (not
+      (exists
+        (lambda (diagnostic)
+          (eq?
+            (scheme-diagnostic-code diagnostic)
+            'identifier-not-exported))
+        (scheme-semantic-snapshot-diagnostics
+          empty-import-without-library))))
+  (error
+    'scheme-project-runtime-tests
+    "library catalog removal did not invalidate its consumer"))
+(scheme-workspace-index-source!
+  workspace
+  empty-resource
+  1004
+  0
+  (call-with-input-file
+    empty-resource
+    (lambda (port)
+      (string->utf8
+        (get-string-all port)))))
+(scheme-workspace-sync-editor! workspace editor)
+(unless
+  (exists
+    (lambda (diagnostic)
+      (eq?
+        (scheme-diagnostic-code diagnostic)
+        'identifier-not-exported))
+    (scheme-semantic-snapshot-diagnostics
+      (scheme-workspace-snapshot-for-buffer
+        workspace empty-import-buffer)))
+  (error
+    'scheme-project-runtime-tests
+    "library catalog restoration did not reanalyze its consumer"))
+(editor-remove-buffer!
+  editor
+  (buffer-id empty-import-buffer))
 
 (define project-consumer-source
   (string-append

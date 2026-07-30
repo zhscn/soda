@@ -977,7 +977,8 @@
     "  (rename (sample project)\n"
     "          (missing-source local-name))\n"
     "  (only (prefix (sample project) p:)\n"
-    "        p:project-value p:missing))\n"))
+    "        p:project-value p:missing)\n"
+    "  (only (sample empty) missing-empty))\n"))
 (define invalid-import-bytes
   (string->utf8 invalid-import-source))
 (define invalid-import-snapshot
@@ -985,7 +986,8 @@
     74
     0
     invalid-import-bytes
-    dynamic-library-index))
+    dynamic-library-index
+    '((sample project) (sample empty))))
 (define invalid-import-diagnostics
   (filter
     (lambda (diagnostic)
@@ -1005,7 +1007,7 @@
 
 (unless
   (and
-    (= (length invalid-import-diagnostics) 4)
+    (= (length invalid-import-diagnostics) 5)
     (for-all
       (lambda (name)
         (exists
@@ -1021,7 +1023,8 @@
       '("missing-only"
         "missing-except"
         "missing-source"
-        "p:missing")))
+        "p:missing"
+        "missing-empty")))
   (error
     'scheme-semantics-tests
     "import selector diagnostics lost nested import-set semantics"

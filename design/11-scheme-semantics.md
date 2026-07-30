@@ -408,12 +408,14 @@ identity 的 buckets。
 
 Workspace 从 Project source 和带 resource 的 Scheme Buffer 提取 R6RS library
 name、export surface 与源码 definition，生成与嵌入 API catalog 相同的 library
-entry。source set 或 revision 改变时先重建 project library catalog，并按 library
-比较新旧 export surface。发生变化的 source snapshot 与直接 import 对应 library
-的 consumer snapshot 使用合并后的 embedded/project catalog 重新分析；不受影响的
-snapshot 保持对象 identity。暂不参与查询的 Project snapshot 标记为待分析，在重新
-进入实时集合时按需刷新。snapshot 更新后重建 references 倒排表。连续异步文件读取
-只标记 catalog dirty，首次 completion 或 xref 查询负责合并这一批更新。
+entry。Project catalog 分别保存 library name 集合和 export symbol 集合，没有
+export 的 library 仍具有独立 identity。source set 或 revision 改变时先重建两个
+catalog，并按 library 比较存在性与新旧 export surface。发生变化的 source snapshot
+与直接 import 对应 library 的 consumer snapshot 使用合并后的 embedded/project
+catalog 重新分析；不受影响的 snapshot 保持对象 identity。暂不参与查询的 Project
+snapshot 标记为待分析，在重新进入实时集合时按需刷新。snapshot 更新后重建
+references 倒排表。连续异步文件读取只标记 catalog dirty，首次 completion 或 xref
+查询负责合并这一批更新。
 
 project library entry 保留声明 resource、byte range、kind 与 procedure formals。
 consumer 的 `only`、`except`、`prefix`、`rename` 和 `for` import modifier 由通用
