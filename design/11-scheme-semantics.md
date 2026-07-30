@@ -344,7 +344,9 @@ Buffer-backed item 直接切换 view；后台 resource item 通过异步 `file.r
   `rename` selector 引用了 import set 未导出的 identifier；
 - 嵌入 Soda library catalog 中不存在的 `(soda ...)` import；
 - 静态 import environment 完整时，expression position 中没有 lexical、library
-  或 primitive definition 的 identifier。
+  或 primitive definition 的 identifier；
+- 已完整闭合、callee 解析到具有静态 formals 的 procedure call，其参数数量不匹配
+  任一 procedure signature。
 
 重复 binding 按 scope graph 判断。`let*` 和 `let*-values` 的逐级 scope 允许后续
 binding 遮蔽前一层，`lambda`、并行 let 和同一 `case-lambda` clause 中的重复名字
@@ -368,6 +370,15 @@ signature 建立普通 parameter scope，`interactive` clause 作为命令声明
 command body 继续按 expression 分析。只要文档存在未知 library import，当前
 snapshot 的 import surface 就被视为不完整，不发布推测性的 undefined identifier
 诊断。
+
+call arity 诊断复用 callee 的 `SchemeUse.resolution` 和
+`SchemeDefinition.signature_formals`。本地 procedure definition、`lambda` 或
+`case-lambda` initializer、Project interface 与嵌入 Soda/Chez API 使用同一规则。
+proper formals 要求精确参数数量，dotted formals 要求满足固定前缀的最小数量，
+单 identifier formals 接受任意数量。任一候选是 syntax、缺少 formals metadata，
+或调用 list 尚未闭合时不发布诊断；quoted/syntax datum 也不进入调用分析。payload
+保存 callee name、实际参数数量和全部候选 formals，供 describe 与 quick-fix
+呈现层复用。
 
 publisher 在 buffer 创建、major mode 变化和 revert 后同步诊断，并在顶层交互命令
 结束后检查所有 Scheme buffer。诊断、completion 和 xref 从 editor 的同一个

@@ -1584,6 +1584,28 @@
             (values (reverse result) '())]
            [(eq? (token-kind (car remaining)) 'close)
             (values (reverse result) (cdr remaining))]
+           [(and
+              (pair? result)
+              (eq? (token-kind (car remaining)) 'symbol)
+              (string=? (token-value (car remaining)) ".")
+              (pair? (cdr remaining)))
+            (call-with-values
+              (lambda ()
+                (partial-datum (cdr remaining)))
+              (lambda (tail-datum tail)
+                (if
+                  (and
+                    tail-datum
+                    (pair? tail)
+                    (eq? (token-kind (car tail)) 'close))
+                  (values
+                    (fold-left
+                      (lambda (tail-value item)
+                        (cons item tail-value))
+                      tail-datum
+                      result)
+                    (cdr tail))
+                  (loop tail result))))]
            [else
             (call-with-values
               (lambda () (partial-datum remaining))
@@ -4565,6 +4587,172 @@
           '()
           uses))))
 
+  (define (closed-list-form? form close-ends)
+    (and
+      (syntax-list? form)
+      (hashtable-contains?
+        close-ends
+        (syntax-form-end form))))
+
+  (define (formals-accept-argument-count?
+            formals
+            argument-count)
+    (let loop ([remaining formals] [minimum 0])
+      (cond
+        [(null? remaining)
+         (= argument-count minimum)]
+        [(symbol? remaining)
+         (>= argument-count minimum)]
+        [(pair? remaining)
+         (loop (cdr remaining) (+ minimum 1))]
+        [else #f])))
+
+  (define (join-signatures signatures)
+    (let loop ([remaining signatures] [result ""])
+      (if
+        (null? remaining)
+        result
+        (loop
+          (cdr remaining)
+          (string-append
+            result
+            (if (zero? (string-length result))
+                ""
+                " or ")
+            (datum->string (car remaining)))))))
+
+  (define (call-arity-diagnostics
+            tokens
+            definitions
+            visible-index
+            uses)
+    (let* ([semantic-tokens
+             (call-context-tokens-from tokens)]
+           [all-definitions
+             (append
+               definitions
+               visible-index
+               scheme-primitive-definitions)]
+           [definition-table
+             (make-hashtable
+               scheme-definition-id-hash
+               scheme-definition-id=?)]
+           [close-ends (make-eqv-hashtable)]
+           [result '()])
+      (define (resolved-definitions use)
+        (filter
+          (lambda (definition) definition)
+          (map
+            (lambda (id)
+              (hashtable-ref
+                definition-table id #f))
+            (scheme-use-resolution use))))
+      (define (check-call! form)
+        (let* ([children (syntax-form-children form)]
+               [head
+                 (and
+                   (pair? children)
+                   (car children))]
+               [use
+                 (and
+                   (syntax-symbol? head)
+                   (use-at-form uses head))]
+               [resolved
+                 (and use
+                      (resolved-definitions use))])
+          (when
+            (and
+              (closed-list-form? form close-ends)
+              use
+              (pair? resolved)
+              (not
+                (exists
+                  (lambda (definition)
+                    (eq?
+                      (scheme-definition-kind definition)
+                      'syntax))
+                  resolved))
+              (for-all
+                (lambda (definition)
+                  (pair?
+                    (scheme-definition-signature-formals
+                      definition)))
+                resolved)
+              (not
+                (exists
+                  (lambda (child)
+                    (and
+                      (eq? (syntax-form-kind child) 'atom)
+                      (eq?
+                        (token-kind
+                          (syntax-form-token child))
+                        'symbol)
+                      (string=?
+                        (token-value
+                          (syntax-form-token child))
+                        ".")))
+                  children)))
+            (let* ([argument-count
+                     (- (length children) 1)]
+                   [signatures
+                     (apply
+                       append
+                       (map
+                         scheme-definition-signature-formals
+                         resolved))])
+              (unless
+                (exists
+                  (lambda (formals)
+                    (formals-accept-argument-count?
+                      formals argument-count))
+                  signatures)
+                (set! result
+                  (cons
+                    (make-scheme-diagnostic
+                      'call-arity
+                      (syntax-form-start head)
+                      (syntax-form-end head)
+                      'error
+                      (string-append
+                        "Call to "
+                        (scheme-use-name use)
+                        " has "
+                        (number->string argument-count)
+                        (if (= argument-count 1)
+                            " argument; expected "
+                            " arguments; expected ")
+                        (join-signatures signatures))
+                      (list
+                        (scheme-use-name use)
+                        argument-count
+                        signatures))
+                    result)))))))
+      (define (walk form)
+        (when (syntax-list? form)
+          (check-call! form)
+          (for-each
+            walk
+            (syntax-form-children form))))
+      (for-each
+        (lambda (definition)
+          (hashtable-set!
+            definition-table
+            (scheme-definition-id definition)
+            definition))
+        all-definitions)
+      (for-each
+        (lambda (value)
+          (when (eq? (token-kind value) 'close)
+            (hashtable-set!
+              close-ends
+              (token-end value)
+              #t)))
+        semantic-tokens)
+      (for-each
+        walk
+        (parse-syntax-forms semantic-tokens))
+      result))
+
   (define (diagnostic-before? left right)
     (or
       (< (scheme-diagnostic-start left)
@@ -4605,6 +4793,8 @@
           uses
           library-table
           library-catalog)
+        (call-arity-diagnostics
+          tokens definitions visible-index uses)
         (unused-parameter-diagnostics scopes uses)
         (unused-import-diagnostics
           import-locations uses library-table)

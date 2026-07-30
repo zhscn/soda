@@ -200,6 +200,119 @@
            "parameter usage did not drive unused diagnostics"
            (map scheme-diagnostic-message unused))))
 
+(let* ([call-source
+         (string-append
+           "(define (fixed left right) left)\n"
+           "(define (variadic first . rest) first)\n"
+           "(define zero (lambda () 0))\n"
+           "(define choose\n"
+           "  (case-lambda\n"
+           "    [() 0]\n"
+           "    [(left right) left]))\n"
+           "(fixed 1)\n"
+           "(fixed 1 2)\n"
+           "(fixed 1 2 3)\n"
+           "(variadic)\n"
+           "(variadic 1 2 3)\n"
+           "(zero 1)\n"
+           "(choose)\n"
+           "(choose 1)\n"
+           "(choose 1 2)\n"
+           "(when #t)\n")]
+       [call-snapshot
+         (make-scheme-semantic-snapshot
+           82
+           0
+           (string->utf8 call-source))]
+       [arity-errors
+         (filter
+           (lambda (diagnostic)
+             (eq?
+               (scheme-diagnostic-code diagnostic)
+               'call-arity))
+           (scheme-semantic-snapshot-diagnostics
+             call-snapshot))]
+       [payloads
+         (map scheme-diagnostic-payload arity-errors)])
+  (unless
+    (and
+      (= (length arity-errors) 5)
+      (member '("fixed" 1 ((left right))) payloads)
+      (member '("fixed" 3 ((left right))) payloads)
+      (member '("variadic" 0 ((first . rest))) payloads)
+      (member '("zero" 1 (())) payloads)
+      (member
+        '("choose" 1 (() (left right)))
+        payloads)
+      (for-all
+        (lambda (diagnostic)
+          (and
+            (eq?
+              (scheme-diagnostic-severity diagnostic)
+              'error)
+            (positive?
+              (string-length
+                (scheme-diagnostic-message diagnostic)))))
+        arity-errors))
+    (error 'scheme-semantics-tests
+           "static call arity diagnostics were incomplete or speculative"
+           payloads)))
+
+(let* ([indexed-call-snapshot
+         (make-scheme-semantic-snapshot-with-library-index
+           84
+           0
+           (string->utf8
+             (string-append
+               "(import (example call))\n"
+               "(indexed-call 1)\n"
+               "(indexed-call 1 2)\n"))
+           '(("indexed-call"
+              procedure
+              (example call)
+              #f
+              #f
+              #f
+              ((left right))
+              #f)))]
+       [arity-errors
+         (filter
+           (lambda (diagnostic)
+             (eq?
+               (scheme-diagnostic-code diagnostic)
+               'call-arity))
+           (scheme-semantic-snapshot-diagnostics
+             indexed-call-snapshot))])
+  (unless
+    (and
+      (= (length arity-errors) 1)
+      (equal?
+        (scheme-diagnostic-payload
+          (car arity-errors))
+        '("indexed-call" 1 ((left right)))))
+    (error 'scheme-semantics-tests
+           "library interface signatures did not drive call arity analysis"
+           (map scheme-diagnostic-payload arity-errors))))
+
+(let* ([incomplete-snapshot
+         (make-scheme-semantic-snapshot
+           83
+           0
+           (string->utf8
+             "(define (fixed left right) left)\n(fixed 1"))]
+       [arity-errors
+         (filter
+           (lambda (diagnostic)
+             (eq?
+               (scheme-diagnostic-code diagnostic)
+               'call-arity))
+           (scheme-semantic-snapshot-diagnostics
+             incomplete-snapshot))])
+  (unless (null? arity-errors)
+    (error 'scheme-semantics-tests
+           "incomplete calls produced premature arity diagnostics"
+           (map scheme-diagnostic-message arity-errors))))
+
 (unless
   (and
     (exists
