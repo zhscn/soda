@@ -875,6 +875,40 @@
                   "local procedure"
                   (procedure-head-formals tail)))]
              [else '()])]
+          [(token-symbol=? head "define-values")
+           (let ([bindings
+                   (cond
+                     [(and
+                        (pair? tail)
+                        (symbol-token? (car tail))
+                        (not
+                          (token-symbol=? (car tail) ".")))
+                      (list (car tail))]
+                     [(and
+                        (pair? tail)
+                        (eq?
+                          (token-kind (car tail))
+                          'open))
+                      (filter
+                        (lambda (token)
+                          (and
+                            (symbol-token? token)
+                            (not
+                              (token-symbol=? token "."))))
+                        (tokens-before-tail
+                          tail
+                          (skip-datum tail)))]
+                     [else '()])])
+             (map
+               (lambda (binding)
+                 (local-definition
+                   document-id
+                   revision
+                   binding
+                   'variable
+                   "local values definition"
+                   '()))
+               bindings))]
           [(or (token-symbol=? head "define-syntax")
                (token-symbol=? head "define-syntax-rule"))
            (if
@@ -964,6 +998,7 @@
       (let syntax)
       (let* syntax)
       (letrec syntax)
+      (fluid-let syntax)
       (let-syntax syntax)
       (letrec-syntax syntax)
       (fluid-let-syntax syntax)
@@ -2722,7 +2757,7 @@
                         scope)))
                 bindings)
               (analyze-sequence body body-scope)))))
-      (define (analyze-fluid-let-syntax
+      (define (analyze-fluid-let
                 form
                 scope)
         (let* ([children
@@ -2784,8 +2819,10 @@
                (analyze-local-syntax form scope #f)]
               [(string=? head "letrec-syntax")
                (analyze-local-syntax form scope #t)]
-              [(string=? head "fluid-let-syntax")
-               (analyze-fluid-let-syntax form scope)]
+              [(or
+                 (string=? head "fluid-let")
+                 (string=? head "fluid-let-syntax"))
+               (analyze-fluid-let form scope)]
               [(string=? head "do")
                (analyze-do form scope)]
               [(string=? head "guard")
@@ -3907,6 +3944,7 @@
       "case-lambda"
       "cond"
       "define"
+      "define-values"
       "define-command"
       "do"
       "guard"
@@ -3920,6 +3958,7 @@
       "letrec*"
       "let-syntax"
       "letrec-syntax"
+      "fluid-let"
       "fluid-let-syntax"
       "or"
       "parameterize"

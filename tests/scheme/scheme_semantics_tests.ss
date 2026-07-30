@@ -1026,6 +1026,84 @@
     'scheme-semantics-tests
     "fluid-let-syntax did not preserve the outer syntax identity"))
 
+(define define-values-source
+  (string-append
+    "(define-values (first second . remaining)\n"
+    "  (values 1 2 '()))\n"
+    "(define-values all-values\n"
+    "  (values 3 4))\n"
+    "(list first second remaining all-values)\n"))
+(define define-values-snapshot
+  (make-scheme-semantic-snapshot
+    722
+    0
+    (string->utf8 define-values-source)))
+(unless
+  (for-all
+    (lambda (name)
+      (let ([definitions
+              (snapshot-definitions-named
+                define-values-snapshot
+                name)])
+        (and
+          (= (length definitions) 1)
+          (eq?
+            (scheme-definition-kind
+              (car definitions))
+            'variable)
+          (=
+            (length
+              (scheme-semantic-references
+                define-values-snapshot
+                (scheme-definition-id
+                  (car definitions))))
+            1))))
+    '("first" "second" "remaining" "all-values"))
+  (error
+    'scheme-semantics-tests
+    "define-values bindings were not indexed"))
+
+(define fluid-let-source
+  (string-append
+    "(define setting 1)\n"
+    "(fluid-let\n"
+    "    ([setting (+ setting 1)])\n"
+    "  (+ setting setting))\n"
+    "(fluid-let ([missing 2]) missing)\n"))
+(define fluid-let-snapshot
+  (make-scheme-semantic-snapshot
+    723
+    0
+    (string->utf8 fluid-let-source)))
+(define fluid-let-setting-definition
+  (car
+    (snapshot-definitions-named
+      fluid-let-snapshot
+      "setting")))
+(unless
+  (and
+    (=
+      (length
+        (scheme-semantic-references
+          fluid-let-snapshot
+          (scheme-definition-id
+            fluid-let-setting-definition)))
+      4)
+    (null?
+      (snapshot-definitions-named
+        fluid-let-snapshot
+        "missing"))
+    (for-all
+      (lambda (use)
+        (null?
+          (scheme-use-resolution use)))
+      (snapshot-uses-named
+        fluid-let-snapshot
+        "missing")))
+  (error
+    'scheme-semantics-tests
+    "fluid-let did not preserve the outer variable identity"))
+
 (let* ([shadow-definitions
          (snapshot-definitions-named
            lexical-snapshot

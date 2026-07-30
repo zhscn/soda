@@ -178,7 +178,7 @@ BindingRuleResult {
 
 核心规则覆盖：
 
-- `define`、procedure definition 与顶层定义；
+- `define`、`define-values`、procedure definition 与顶层定义；
 - `lambda`、`case-lambda` 与 rest parameter；
 - `let`、`let*`、`letrec` 及 values 变体；
 - `do` 与局部递归绑定；
@@ -460,7 +460,9 @@ annotation 的生命周期不受光标高亮替换影响。光标刷新只同步
 
 自举 scanner 直接读取 UTF-8 snapshot，识别 Scheme identifier 中的标点，并容错
 跳过字符串、行注释、嵌套 block comment、datum comment 以及 quoted datum。它提取
-`define`、procedure definition、`define-syntax` 和 `define-record-type`；record
+`define`、`define-values`、procedure definition、`define-syntax` 和
+`define-record-type`；`define-values` 的 proper list、dotted list 与单 identifier
+左值分别产生稳定 variable DefinitionId。record
 名称、constructor、predicate、accessor 与 mutator 分别形成稳定定义。未闭合的
 外围 form 不妨碍已经出现的定义进入 snapshot。
 
@@ -484,10 +486,10 @@ definition、references 和 rename，重复名称使用普通 scope duplicate di
 扩展形式的 `identifier-syntax` 分别为 getter identifier 和 setter target/value
 建立互相隔离的 `syntax-parameter` scope；模板中的引用解析到对应 pattern binding，
 模板里的生成声明不进入 source scope。单模板形式不声明 pattern binding。
-`fluid-let-syntax` 的 binding identifier 是对现有外层 syntax binding 的引用；
-transformer initializer 在外层 scope 分析，body 继续使用同一 DefinitionId，从而
-表达 Chez 临时替换 transformer 而不创建新 lexical identity 的语义。无法解析到
-外层 binding 的 identifier 保持 unresolved。
+`fluid-let` 与 `fluid-let-syntax` 的 binding identifier 分别是对现有外层 variable
+或 syntax binding 的引用；initializer 在外层 scope 分析，body 继续使用同一
+DefinitionId，从而表达 Chez 临时替换 binding 而不创建新 lexical identity 的语义。
+无法解析到外层 binding 的 identifier 保持 unresolved。
 未闭合 form 的 scope range 延伸到 Document 末尾，使编辑中的参数和局部 binding
 仍可参与补全。
 

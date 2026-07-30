@@ -708,6 +708,142 @@
     renamed-fluid-let-syntax))
 (editor-close! fluid-let-syntax-editor)
 
+(define define-values-buffer
+  (make-buffer
+    26
+    (make-document
+      (string-append
+        "(define-values (primary secondary)\n"
+        "  (values 1 2))\n"
+        "(list primary secondary)\n")
+      26)
+    "/project/rename-define-values.scm"
+    'scheme-mode))
+(define define-values-editor
+  (make-editor define-values-buffer))
+(define define-values-workspace
+  (editor-scheme-workspace
+    define-values-editor))
+(define define-values-snapshot
+  (scheme-workspace-snapshot-for-buffer
+    define-values-workspace
+    define-values-buffer))
+(define define-values-primary
+  (find
+    (lambda (definition)
+      (string=?
+        (scheme-definition-name definition)
+        "primary"))
+    (scheme-semantic-snapshot-definitions
+      define-values-snapshot)))
+(unless define-values-primary
+  (error
+    'scheme-rename-tests
+    "define-values binding was not indexed"))
+(define define-values-context
+  (make-command-context
+    define-values-editor
+    (editor-active-view define-values-editor)
+    #f
+    #f))
+(define define-values-effects
+  ((command-procedure
+     (editor-command-registry
+       define-values-editor)
+     'scheme.rename)
+   define-values-context
+   define-values-primary
+   "main-value"))
+(define renamed-define-values
+  (buffer-string define-values-buffer))
+(unless
+  (and
+    (null? define-values-effects)
+    (string-contains
+      renamed-define-values
+      "(main-value secondary)")
+    (string-contains
+      renamed-define-values
+      "(list main-value secondary)")
+    (string=?
+      (editor-status-message
+        define-values-editor)
+      "Renamed to main-value in 2 places"))
+  (error
+    'scheme-rename-tests
+    "define-values rename lost its binding identity"
+    renamed-define-values))
+(editor-close! define-values-editor)
+
+(define fluid-let-buffer
+  (make-buffer
+    27
+    (make-document
+      (string-append
+        "(define setting 1)\n"
+        "(fluid-let\n"
+        "    ([setting (+ setting 1)])\n"
+        "  (+ setting setting))\n")
+      27)
+    "/project/rename-fluid-let.scm"
+    'scheme-mode))
+(define fluid-let-editor
+  (make-editor fluid-let-buffer))
+(define fluid-let-workspace
+  (editor-scheme-workspace fluid-let-editor))
+(define fluid-let-snapshot
+  (scheme-workspace-snapshot-for-buffer
+    fluid-let-workspace
+    fluid-let-buffer))
+(define fluid-let-setting
+  (find
+    (lambda (definition)
+      (string=?
+        (scheme-definition-name definition)
+        "setting"))
+    (scheme-semantic-snapshot-definitions
+      fluid-let-snapshot)))
+(unless fluid-let-setting
+  (error
+    'scheme-rename-tests
+    "fluid-let outer variable was not indexed"))
+(define fluid-let-context
+  (make-command-context
+    fluid-let-editor
+    (editor-active-view fluid-let-editor)
+    #f
+    #f))
+(define fluid-let-effects
+  ((command-procedure
+     (editor-command-registry fluid-let-editor)
+     'scheme.rename)
+   fluid-let-context
+   fluid-let-setting
+   "dynamic-setting"))
+(define renamed-fluid-let
+  (buffer-string fluid-let-buffer))
+(unless
+  (and
+    (null? fluid-let-effects)
+    (string-contains
+      renamed-fluid-let
+      "(define dynamic-setting 1)")
+    (string-contains
+      renamed-fluid-let
+      "([dynamic-setting (+ dynamic-setting 1)])")
+    (string-contains
+      renamed-fluid-let
+      "(+ dynamic-setting dynamic-setting)")
+    (string=?
+      (editor-status-message
+        fluid-let-editor)
+      "Renamed to dynamic-setting in 5 places"))
+  (error
+    'scheme-rename-tests
+    "fluid-let rename did not preserve the outer variable identity"
+    renamed-fluid-let))
+(editor-close! fluid-let-editor)
+
 (define compiled-rename-stem
   (string-append
     "/tmp/soda-compiled-rename-"
