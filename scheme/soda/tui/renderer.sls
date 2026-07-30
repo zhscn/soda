@@ -377,6 +377,7 @@
       position
       major-mode
       minor-modes
+      mode-close
       process
       right-align
       message
@@ -494,8 +495,15 @@
                    'end)
                  (modeline-segment
                    'minor-modes
-                   (if (null? hidden) ")" " ≡)")
+                   (if (null? hidden) "" " ≡")
                    'modeline.minor-modes
+                   50
+                   0
+                   'end)
+                 (modeline-segment
+                   'mode-close
+                   ")"
+                   'modeline.mode
                    50
                    0
                    'end)

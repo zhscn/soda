@@ -203,6 +203,7 @@ ModelineSpan {
  position
  major-mode
  minor-modes
+ mode-close
  process
  right-align
  message
@@ -222,7 +223,8 @@ segment；buffer identification 保留最小宽度并从中间省略，使同名
 
 Minor mode 使用 Minions 风格的默认呈现。Buffer local `minor-modes` 保存有序的
 active mode 名称，`modeline-prominent-minor-modes` 指定仍在 mode 区域直接显示的
-子集；其余 active minor modes 折叠为 `≡`。segment 的 chrome source 保留
+子集；其余 active minor modes 折叠为 `≡`。包围 mode 区域的括号使用
+`modeline.mode`，折叠标记单独使用 `modeline.minor-modes`。segment 的 chrome source 保留
 `minor-modes` identity，供 TUI picker、鼠标前端和 describe 工具解析，而无需从
 绘制文本反推状态。
 

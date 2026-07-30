@@ -51,6 +51,20 @@
                  needle)
                (loop (+ index 1)))))))
 
+(define (substring-position value needle)
+  (let ([limit (- (string-length value) (string-length needle))])
+    (let loop ([index 0])
+      (cond
+        [(> index limit) #f]
+        [(string=?
+           (substring
+             value
+             index
+             (+ index (string-length needle)))
+           needle)
+         index]
+        [else (loop (+ index 1))]))))
+
 (define (frame-row-text frame row)
   (let loop ([column 0] [result ""])
     (if (= column (frame-columns frame))
@@ -4007,6 +4021,10 @@
   (render-editor-frame modeline-editor 3 80))
 (define full-modeline-text
   (frame-row-text full-modeline-frame 2))
+(define full-modeline-mode-position
+  (substring-position
+    full-modeline-text
+    "(Fundamental Auto Fill ≡)"))
 (unless
   (and
     (string-contains? full-modeline-text "-U:---")
@@ -4017,6 +4035,16 @@
     (string-contains?
       full-modeline-text
       "(Fundamental Auto Fill ≡)")
+    full-modeline-mode-position
+    (eq?
+      (cell-face
+        (frame-cell-ref
+          full-modeline-frame
+          2
+          (+
+            full-modeline-mode-position
+            (- (string-length "(Fundamental Auto Fill ≡)") 1))))
+      'modeline.mode)
     (string-contains? full-modeline-text "-%-")
     (eq?
       (cell-face
