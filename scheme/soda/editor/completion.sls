@@ -66,6 +66,7 @@
           completion-session-prompt-id
           completion-session-source
           completion-session-provider-names
+          completion-session-input-selectable?
           completion-session-generation
           completion-session-query
           completion-session-items
@@ -177,6 +178,7 @@
             (mutable items)
             (mutable matches)
             preselect?
+            input-selectable?
             (mutable selected-index)))
 
   (define-record-type completion-provider-result
@@ -899,11 +901,35 @@
   (define make-completion-session
     (case-lambda
       [(id target source)
-       (make-completion-session id target source '() #t)]
+       (make-completion-session
+         id
+         target
+         source
+         '()
+         #t
+         (prompt-completion-target? target))]
       [(id target source provider-names)
        (make-completion-session
-         id target source provider-names #t)]
+         id
+         target
+         source
+         provider-names
+         #t
+         (prompt-completion-target? target))]
       [(id target source provider-names preselect?)
+       (make-completion-session
+         id
+         target
+         source
+         provider-names
+         preselect?
+         (prompt-completion-target? target))]
+      [(id
+         target
+         source
+         provider-names
+         preselect?
+         input-selectable?)
        (unless (exact-non-negative-integer? id)
          (assertion-violation
            'make-completion-session
@@ -924,6 +950,16 @@
            'make-completion-session
            "preselect flag must be a boolean"
            preselect?))
+       (unless
+         (and
+           (boolean? input-selectable?)
+           (or
+             (not input-selectable?)
+             (prompt-completion-target? target)))
+         (assertion-violation
+           'make-completion-session
+           "input selection requires a prompt completion target"
+           input-selectable?))
        (unless (and
                  (list? provider-names)
                  (for-all symbol? provider-names))
@@ -952,6 +988,7 @@
          '()
          '()
          preselect?
+         input-selectable?
          #f)]))
 
   (define (completion-session-prompt-id session)
@@ -1189,13 +1226,17 @@
         'completion-session-select-next!
         "expected a completion session"
         session))
-    (let ([count (length (completion-session-items session))])
+    (let ([count (length (completion-session-items session))]
+          [index (completion-session-selected-index session)])
       (when (positive? count)
         (completion-session-selected-index-set!
           session
-          (mod
-            (+ (or (completion-session-selected-index session) -1) 1)
-            count))))
+          (if (prompt-completion-target?
+                (completion-session-target session))
+              (if index
+                  (min (+ index 1) (- count 1))
+                  0)
+              (mod (+ (or index -1) 1) count)))))
     session)
 
   (define (completion-session-select-previous! session)
@@ -1204,13 +1245,21 @@
         'completion-session-select-previous!
         "expected a completion session"
         session))
-    (let ([count (length (completion-session-items session))])
+    (let ([count (length (completion-session-items session))]
+          [index (completion-session-selected-index session)])
       (when (positive? count)
         (completion-session-selected-index-set!
           session
-          (mod
-            (-
-              (or (completion-session-selected-index session) 0)
-              1)
-            count))))
+          (if (prompt-completion-target?
+                (completion-session-target session))
+              (cond
+                [(not index)
+                 (and
+                   (not
+                     (completion-session-input-selectable? session))
+                   (- count 1))]
+                [(positive? index) (- index 1)]
+                [(completion-session-input-selectable? session) #f]
+                [else 0])
+              (mod (- (or index 0) 1) count)))))
     session))

@@ -1780,7 +1780,10 @@
                  (prompt-completion-provider-names
                    (prompt-request-completion-source request))
                  (prompt-completion-preselect?
-                   (prompt-request-completion-source request))))]
+                   (prompt-request-completion-source request))
+                 (eq?
+                   (prompt-request-accept-policy request)
+                   'free)))]
            [session
              (make-prompt-session
                id
@@ -1803,7 +1806,8 @@
             (view-viewport-columns origin-view)
             (string-cell-width
               (prompt-request-prompt request)
-              8))))
+              8)
+            (if completion 7 0))))
       (view-set-caret!
         view
         (buffer-text-size buffer))

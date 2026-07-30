@@ -149,9 +149,21 @@ preselect:   boolean
 ```
 
 styles 按顺序尝试，每个匹配结果包含 score、匹配区间和 exact 标记。presenter 使用
-匹配区间高亮 label，并对可见候选统一对齐 annotation。默认不预选候选；键入会使
-选择保持为空，避免 `RET` 意外接受列表首项。需要传统首项选择行为的 source 可以
-设置 `preselect`。
+匹配区间高亮 label，并对可见候选统一对齐 annotation。默认不预选 candidate；键入
+会清除 candidate selection，避免 `RET` 意外接受列表首项。需要传统首项选择行为的
+source 可以设置 `preselect`。
+
+`CompletionSession` 根据 reader 的接受策略定义导航域。`free` reader 的域为
+`input + candidates`，其中空的 selected index 表示 input；`must-match` reader 的
+域只包含 candidates，空 index 表示尚未选择。候选导航默认不循环：从 input 向后
+进入第一项，从第一项向前返回 input，最后一项向后保持不动。只包含 candidates 的
+reader 在第一项向前时保持第一项。
+
+minibuffer 左侧使用 `position/total` 指示当前域位置。candidate 使用从 1 开始的
+位置，`*` 表示可接受的原始 input，`!` 表示尚未选择 candidate 且原始 input 不是
+导航项。input 成为当前项时叠加 `completion-selected` face；候选成为当前项时只
+高亮对应候选行。`RET` 接受当前项，`M-RET` 始终接受 input。`TAB` 将当前候选写入
+input 并刷新 field，刷新后的选择由新 field 的 reader 策略决定。
 
 minibuffer 的命令、Buffer、主题和文件 source 使用 `fzf` 风格。matcher 按字符边界、
 路径分隔符、camelCase 转换和连续匹配加权，并对间隔匹配扣分；同分候选依次按匹配

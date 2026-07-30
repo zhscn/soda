@@ -408,6 +408,7 @@
           completion-session-prompt-id
           completion-session-source
           completion-session-provider-names
+          completion-session-input-selectable?
           completion-session-generation
           completion-session-query
           completion-session-items

@@ -26,6 +26,8 @@
             line-count
             focused?))
 
+  (define minibuffer-completion-indicator-columns 7)
+
   (define (resolve-faces theme faces)
     (let ([spec (theme-resolve-faces theme faces)])
       (make-style
@@ -62,7 +64,7 @@
             position
             detail
             component-id
-            base-face
+            base-faces
             theme
             styled-chunks)
     (let* ([chunk
@@ -72,7 +74,7 @@
            [runs (if chunk (styled-chunk-runs chunk) '())]
            [decoration-faces (map decoration-run-face runs)]
            [faces
-             (cons base-face decoration-faces)]
+             (append base-faces decoration-faces)]
            [decoration-sources
              (map
                (lambda (run)
@@ -103,7 +105,7 @@
             first-column
             buffer-id
             component-id
-            base-face
+            base-faces
             theme
             styled-chunks)
     (let ([value (decode-text bytes)]
@@ -127,7 +129,7 @@
                     line-end
                     'line-end
                     component-id
-                    base-face
+                    base-faces
                     theme
                     styled-chunks)))
               column)
@@ -178,7 +180,7 @@
                            byte-position
                            'tab
                            component-id
-                           base-face
+                           base-faces
                            theme
                            styled-chunks)))))
                  (loop
@@ -201,7 +203,7 @@
                        byte-position
                        character
                        component-id
-                       base-face
+                       base-faces
                        theme
                        styled-chunks)))
                  (loop
@@ -426,7 +428,7 @@
                 (editor-render-context-first-column context)
                 (buffer-id buffer)
                 component-id
-                'default
+                '(default)
                 theme
                 styled-chunks)))))
       (let ([cursor-row
@@ -490,6 +492,19 @@
     (let* ([editor (editor-render-context-editor context)]
            [theme (editor-theme editor)]
            [session (editor-active-prompt editor)]
+           [completion
+             (and session
+                  (editor-active-prompt-completion editor))]
+           [input-selected?
+             (and
+               completion
+               (completion-session-input-selectable? completion)
+               (not
+                 (completion-session-selected-index completion)))]
+           [input-faces
+             (if input-selected?
+                 '(minibuffer-input completion-selected)
+                 '(minibuffer-input))]
            [component-id 'editor.minibuffer]
            [sources
              (list
@@ -501,19 +516,59 @@
         (make-cell
           " "
           1
-          '(minibuffer-input)
-          (resolve-faces theme '(minibuffer-input))
+          input-faces
+          (resolve-faces theme input-faces)
           #f
           sources))
       (when (and session (positive? (rect-rows rectangle)))
         (let* ([request (prompt-session-request session)]
                [prompt (prompt-request-prompt request)]
+               [indicator
+                 (if completion
+                     (let* ([selected
+                              (completion-session-selected-index
+                                completion)]
+                            [marker
+                              (cond
+                                [selected
+                                 (number->string (+ selected 1))]
+                                [(completion-session-input-selectable?
+                                   completion)
+                                 "*"]
+                                [else "!"])]
+                            [raw
+                              (string-append
+                                marker
+                                "/"
+                                (number->string
+                                  (length
+                                    (completion-session-items
+                                      completion))))])
+                       (string-append
+                         raw
+                         (make-string
+                           (max
+                             0
+                             (-
+                               minibuffer-completion-indicator-columns
+                               (string-length raw)))
+                           #\space)))
+                     "")]
+               [indicator-columns
+                 (if completion
+                     (min
+                       (rect-columns rectangle)
+                       minibuffer-completion-indicator-columns)
+                     0)]
                [prompt-columns
                  (min
-                   (rect-columns rectangle)
+                   (- (rect-columns rectangle)
+                      indicator-columns)
                    (string-cell-width prompt 8))]
                [input-columns
-                 (- (rect-columns rectangle) prompt-columns)]
+                 (- (rect-columns rectangle)
+                    indicator-columns
+                    prompt-columns)]
                [view
                  (editor-view-ref
                    editor
@@ -524,6 +579,15 @@
             frame
             (rect-row rectangle)
             (rect-column rectangle)
+            indicator-columns
+            indicator
+            '(minibuffer-prompt)
+            (resolve-faces theme '(minibuffer-prompt))
+            sources)
+          (draw-string!
+            frame
+            (rect-row rectangle)
+            (+ (rect-column rectangle) indicator-columns)
             prompt-columns
             prompt
             '(minibuffer-prompt)
@@ -548,6 +612,7 @@
                                (make-rect
                                  (rect-row rectangle)
                                  (+ (rect-column rectangle)
+                                    indicator-columns
                                     prompt-columns)
                                  1
                                  input-columns)]
@@ -577,7 +642,7 @@
                           (view-first-column view)
                           (buffer-id buffer)
                           component-id
-                          'minibuffer-input
+                          input-faces
                           theme
                           (make-styled-chunk-cursor
                             (decoration-runs->styled-chunks
@@ -738,18 +803,23 @@
                          0
                          visible))]
                    [indicator
-                     (if selected
-                         (string-append
-                           (number->string (+ selected 1))
-                           "/"
-                           (number->string (length items)))
-                         (number->string (length items)))]
+                     (and
+                       (document-completion-target?
+                         (completion-session-target completion))
+                       (if selected
+                           (string-append
+                             (number->string (+ selected 1))
+                             "/"
+                             (number->string (length items)))
+                           (number->string (length items))))]
                    [indicator-column
-                     (max
-                       0
-                       (-
-                         (rect-columns rectangle)
-                         (string-cell-width indicator 8)))])
+                     (and
+                       indicator
+                       (max
+                         0
+                         (-
+                           (rect-columns rectangle)
+                           (string-cell-width indicator 8))))])
               (do ([row 0 (+ row 1)])
                   ((= row (length visible)))
                 (let* ([item (list-ref visible row)]
@@ -794,15 +864,16 @@
                     theme
                     sources
                     annotation-column)))
-              (draw-string!
-                frame
-                (rect-row rectangle)
-                (+ (rect-column rectangle) indicator-column)
-                (- (rect-columns rectangle) indicator-column)
-                indicator
-                '(completion)
-                (resolve-faces theme '(completion))
-                background-sources)))))))
+              (when indicator
+                (draw-string!
+                  frame
+                  (rect-row rectangle)
+                  (+ (rect-column rectangle) indicator-column)
+                  (- (rect-columns rectangle) indicator-column)
+                  indicator
+                  '(completion)
+                  (resolve-faces theme '(completion))
+                  background-sources))))))))
 
   (define editor-text-component
     (make-component 'editor.text render-text-component!))

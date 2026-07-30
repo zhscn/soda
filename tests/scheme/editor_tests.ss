@@ -2643,20 +2643,22 @@
                          "t")
                (eq? (cell-face (frame-cell-ref prompt-frame 4 0))
                     'completion-match)
-               (string=? (cell-text (frame-cell-ref prompt-frame 3 0)) "M")
-               (string=? (cell-text (frame-cell-ref prompt-frame 3 4)) "t")
+               (string=? (cell-text (frame-cell-ref prompt-frame 3 0)) "!")
+               (string=? (cell-text (frame-cell-ref prompt-frame 3 1)) "/")
+               (string=? (cell-text (frame-cell-ref prompt-frame 3 7)) "M")
+               (string=? (cell-text (frame-cell-ref prompt-frame 3 11)) "t")
                (eq? (cell-face (frame-cell-ref prompt-frame 3 0))
                     'minibuffer-prompt)
-               (eq? (cell-face (frame-cell-ref prompt-frame 3 4))
+               (eq? (cell-face (frame-cell-ref prompt-frame 3 11))
                     'minibuffer-input)
                (not
                  (equal?
                    (style-background
                      (cell-style
-                       (frame-cell-ref prompt-frame 3 0)))
+                       (frame-cell-ref prompt-frame 3 7)))
                    (style-background
                      (cell-style
-                       (frame-cell-ref prompt-frame 3 4)))))
+                       (frame-cell-ref prompt-frame 3 11)))))
                (= (view-viewport-rows
                     (editor-base-view prompt-editor))
                   2)
@@ -2744,9 +2746,19 @@
 (let ([completion (editor-active-prompt-completion prompt-editor)])
   (unless (and completion
                (= (length (completion-session-items completion)) 2)
+               (not
+                 (completion-session-input-selectable? completion))
                (not (completion-session-selected-item completion)))
     (error 'editor-tests
            "typing did not expose candidates with no implicit selection")))
+(let ([completion
+        (editor-active-prompt-completion prompt-editor)])
+  (editor-prompt-completion-next! prompt-editor)
+  (editor-prompt-completion-previous! prompt-editor)
+  (unless
+    (= (completion-session-selected-index completion) 0)
+    (error 'editor-tests
+           "must-match completion navigated into prompt input")))
 (editor-prompt-completion-next! prompt-editor)
 (send! prompt-editor prompt-decoder (string->utf8 "a"))
 (let ([completion (editor-active-prompt-completion prompt-editor)])
@@ -2829,7 +2841,7 @@
     "root/us"
     #f
     #f
-    'must-match
+    'free
     path-completion-source
     'test.capture-prompt
     #f))
@@ -2845,6 +2857,51 @@
       (not (completion-session-selected-item completion)))
     (error 'editor-tests
            "prompt completion did not track its current field")))
+(let ([completion
+        (editor-active-prompt-completion prompt-editor)])
+  (unless (completion-session-input-selectable? completion)
+    (error 'editor-tests
+           "free prompt did not include its input in navigation"))
+  (let* ([frame (render-editor-frame prompt-editor 5 40)]
+         [node
+           (component-node-find
+             (frame-layout frame)
+             'editor.minibuffer)]
+         [row (rect-row (component-node-rect node))])
+    (unless
+      (and
+        (string=? (cell-text (frame-cell-ref frame row 0)) "*")
+        (eq? (cell-face (frame-cell-ref frame row 13))
+             'completion-selected))
+      (error 'editor-tests
+             "free prompt selection was not represented by */N"
+             (cell-text (frame-cell-ref frame row 0))
+             (cell-face (frame-cell-ref frame row 13)))))
+  (editor-prompt-completion-next! prompt-editor)
+  (unless
+    (= (completion-session-selected-index completion) 0)
+    (error 'editor-tests
+           "next completion did not leave prompt selection"))
+  (let* ([frame (render-editor-frame prompt-editor 5 40)]
+         [node
+           (component-node-find
+             (frame-layout frame)
+             'editor.minibuffer)]
+         [row (rect-row (component-node-rect node))])
+    (unless
+      (and
+        (string=? (cell-text (frame-cell-ref frame row 0)) "1")
+        (eq? (cell-face (frame-cell-ref frame row 13))
+             'minibuffer-input))
+      (error 'editor-tests
+             "candidate selection was not represented by its index"
+             (cell-text (frame-cell-ref frame row 0))
+             (cell-face (frame-cell-ref frame row 13)))))
+  (editor-prompt-completion-previous! prompt-editor)
+  (unless
+    (not (completion-session-selected-index completion))
+    (error 'editor-tests
+           "previous completion did not restore prompt selection")))
 (send! prompt-editor prompt-decoder (bytes #x1b #x5b #x42))
 (unless
   (null? (send! prompt-editor prompt-decoder (bytes 13)))
