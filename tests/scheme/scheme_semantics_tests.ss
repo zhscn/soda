@@ -49,6 +49,12 @@
     9
     (string->utf8 source)))
 
+(define equivalent-snapshot
+  (make-scheme-semantic-snapshot
+    71
+    9
+    (string->utf8 source)))
+
 (define definitions
   (scheme-semantic-snapshot-definitions snapshot))
 (define uses
@@ -64,6 +70,29 @@
     (lambda (definition)
       (string=? name (scheme-definition-name definition)))
     definitions))
+
+(let* ([left
+         (scheme-definition-id
+           (definition-by-name "render-frame"))]
+       [right
+         (scheme-definition-id
+           (find
+             (lambda (definition)
+               (string=?
+                 (scheme-definition-name definition)
+                 "render-frame"))
+             (scheme-semantic-snapshot-definitions
+               equivalent-snapshot)))])
+  (unless
+    (and
+      (scheme-definition-id=? left right)
+      (=
+        (scheme-definition-id-hash left)
+        (scheme-definition-id-hash right)))
+    (error
+      'scheme-semantics-tests
+      "DefinitionId hash is inconsistent with field equality"
+      left right)))
 
 (define diagnostic-source
   (string-append

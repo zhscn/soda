@@ -43,6 +43,7 @@
   (import (rnrs)
           (soda document)
           (soda editor buffer)
+          (soda editor builtin-api-index)
           (soda editor scheme-api-indexer)
           (soda editor scheme-query)
           (soda editor scheme-semantics)
@@ -100,11 +101,11 @@
       (make-eqv-hashtable)
       (make-hashtable string-hash string=?)
       (make-hashtable
-        equal-hash
+        scheme-definition-id-hash
         scheme-definition-id=?)
       0
-      '()
-      '()
+      soda-built-in-api-index
+      soda-built-in-library-index
       #t
       #t))
 
@@ -214,7 +215,7 @@
                (scheme-semantic-snapshot-revision snapshot)
                bytes
                snapshot
-               #t))
+               #f))
            (scheme-workspace-index-catalog-dirty?-set!
              index #t)
            (scheme-workspace-index-dirty?-set!
@@ -311,6 +312,28 @@
             (loop (+ position 1)))))
       result))
 
+  (define (merge-library-index
+            baseline
+            project
+            project-catalog)
+    (append
+      (filter
+        (lambda (entry)
+          (not
+            (member
+              (list-ref entry 2)
+              project-catalog)))
+        baseline)
+      project))
+
+  (define (merge-library-catalog baseline project)
+    (append
+      baseline
+      (filter
+        (lambda (library)
+          (not (member library baseline)))
+        project)))
+
   (define (document-imports-library?
             document
             libraries)
@@ -327,12 +350,21 @@
     (when
       (scheme-workspace-index-catalog-dirty? index)
       (let* ([sources (catalog-sources index)]
+             [project-library-index
+               (scheme-sources-api-index
+                 sources)]
+             [project-library-catalog
+               (scheme-sources-library-index
+                 sources)]
              [library-index
-              (scheme-sources-api-index
-                sources)]
+               (merge-library-index
+                 soda-built-in-api-index
+                 project-library-index
+                 project-library-catalog)]
              [library-catalog
-              (scheme-sources-library-index
-                sources)])
+               (merge-library-catalog
+                 soda-built-in-library-index
+                 project-library-catalog)])
         (let ([changed-libraries
                 (changed-library-names
                   (scheme-workspace-index-library-index index)
@@ -496,7 +528,7 @@
                revision
                bytes
                snapshot
-               #t)])
+               #f)])
       (hashtable-set!
         (scheme-workspace-index-sources index)
         resource

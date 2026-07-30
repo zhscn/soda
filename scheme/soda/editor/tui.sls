@@ -40,17 +40,6 @@
                   (effect-result-messages result)
                   (cdr messages))))))))
 
-  (define (handle-input-events editor executor events)
-    (let loop ([events events])
-      (if (null? events)
-          #t
-          (and
-            (handle-editor-message!
-              editor
-              executor
-              (make-input-message (car events)))
-            (loop (cdr events))))))
-
   (define (load-bytes runtime path)
     (if (not path)
         (values (make-bytevector 0) #f #f)
@@ -314,17 +303,45 @@
         (when (input-decoder-pending? decoder)
           (set! flush-timer
             (runtime-start-timer! runtime 25 0))))
+      (define (ensure-scheme-project-runtime!)
+        (unless scheme-project-adapter
+          (when
+            (exists
+              (lambda (buffer)
+                (string? (buffer-file-path buffer)))
+              (editor-buffers editor))
+            (set! scheme-project-adapter
+              (install-scheme-project-runtime!
+                editor
+                runtime
+                (current-directory))))))
+      (define (handle-session-message! message)
+        (let ([continue?
+                (handle-editor-message!
+                  editor
+                  executor
+                  message)])
+          (ensure-scheme-project-runtime!)
+          continue?))
+      (define (handle-session-input-events! events)
+        (let loop ([events events])
+          (if (null? events)
+              #t
+              (and
+                (handle-session-message!
+                  (make-input-message (car events)))
+                (loop (cdr events))))))
       (define (handle-input!)
         (let ([input (terminal-read terminal)])
           (if (zero? (bytevector-length input))
               #t
               (let ([events (input-decoder-feed! decoder input)])
                 (arm-flush-timer!)
-                (handle-input-events editor executor events)))))
+                (handle-session-input-events! events)))))
       (define (handle-flush!)
         (set! flush-timer #f)
         (let ([events (input-decoder-flush! decoder)])
-          (handle-input-events editor executor events)))
+          (handle-session-input-events! events)))
       (register-effect-handler!
         executor
         'quit
@@ -333,11 +350,7 @@
         (install-file-runtime! executor runtime))
       (set! vfs-adapter
         (install-vfs-runtime! editor runtime))
-      (set! scheme-project-adapter
-        (install-scheme-project-runtime!
-          editor
-          runtime
-          (current-directory)))
+      (ensure-scheme-project-runtime!)
       (install-interaction-effect-handler! executor editor)
       (install-completion-effect-handlers!
         executor
@@ -386,6 +399,7 @@
                    (refresh-terminal-size!)
                    (process (cdr events) continue?)]
                   [(and
+                     scheme-project-adapter
                      (eq? (event-kind (car events)) 'timer)
                      (scheme-project-runtime-handle-event
                        scheme-project-adapter
@@ -394,9 +408,10 @@
                   [(memq
                      (event-kind (car events))
                      '(path-stat path-change file-read file-write))
-                   (scheme-project-runtime-handle-event
-                     scheme-project-adapter
-                     (car events))
+                   (when scheme-project-adapter
+                     (scheme-project-runtime-handle-event
+                       scheme-project-adapter
+                       (car events)))
                    (let ([message
                            (file-runtime-handle-event
                              file-adapter
@@ -407,14 +422,13 @@
                          continue?
                          (or
                            (not message)
-                           (handle-editor-message!
-                             editor
-                             executor
+                           (handle-session-message!
                              message)))))]
                   [(eq? (event-kind (car events)) 'directory-scan)
-                   (scheme-project-runtime-handle-event
-                     scheme-project-adapter
-                     (car events))
+                   (when scheme-project-adapter
+                     (scheme-project-runtime-handle-event
+                       scheme-project-adapter
+                       (car events)))
                    (let ([message
                            (vfs-runtime-handle-event
                              vfs-adapter
@@ -425,9 +439,7 @@
                          continue?
                          (or
                            (not message)
-                           (handle-editor-message!
-                             editor
-                             executor
+                           (handle-session-message!
                              message)))))]
                   [else (process (cdr events) continue?)])))))
         (lambda ()

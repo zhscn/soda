@@ -186,6 +186,12 @@
 (editor-add-buffer! workspace-editor workspace-source-buffer)
 (define workspace-index (make-scheme-workspace-index))
 (scheme-workspace-sync-editor! workspace-index workspace-editor)
+(unless
+  (zero? (scheme-workspace-generation workspace-index))
+  (error
+    'embedded-api-index-tests
+    "unchanged Soda sources invalidated the embedded library catalog"
+    (scheme-workspace-generation workspace-index)))
 (define workspace-source-snapshot
   (scheme-workspace-snapshot-for-buffer
     workspace-index

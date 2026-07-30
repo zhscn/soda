@@ -67,6 +67,7 @@
           scheme-lexical-token-end
           scheme-lexical-tokenize
           scheme-definition-id=?
+          scheme-definition-id-hash
           scheme-semantic-definitions-at
           scheme-semantic-call-context-at
           scheme-semantic-references
@@ -1303,37 +1304,99 @@
           (definitions-for-import binding library-table))
         bindings)))
 
-  (define (library-table-with-index entries)
-    (let ([table (make-hashtable equal-hash equal?)])
+  (define (scheme-definition-id=? left right)
+    (and (scheme-definition-id? left)
+         (scheme-definition-id? right)
+         (eq? (scheme-definition-id-source left)
+              (scheme-definition-id-source right))
+         (equal? (scheme-definition-id-document-id left)
+                 (scheme-definition-id-document-id right))
+         (equal? (scheme-definition-id-revision left)
+                 (scheme-definition-id-revision right))
+         (equal? (scheme-definition-id-offset left)
+                 (scheme-definition-id-offset right))
+         (string=? (scheme-definition-id-name left)
+                   (scheme-definition-id-name right))))
+
+  (define definition-id-hash-modulus 536870909)
+
+  (define (combine-definition-id-hash seed value)
+    (mod
+      (+ (* seed 33) value)
+      definition-id-hash-modulus))
+
+  (define (scheme-definition-id-hash value)
+    (unless (scheme-definition-id? value)
+      (assertion-violation
+        'scheme-definition-id-hash
+        "expected a Scheme definition id"
+        value))
+    (fold-left
+      combine-definition-id-hash
+      5381
+      (list
+        (equal-hash
+          (scheme-definition-id-source value))
+        (equal-hash
+          (scheme-definition-id-document-id value))
+        (equal-hash
+          (scheme-definition-id-revision value))
+        (equal-hash
+          (scheme-definition-id-offset value))
+        (string-hash
+          (scheme-definition-id-name value)))))
+
+  (define (make-library-table definitions)
+    (let ([table (make-hashtable equal-hash equal?)]
+          [seen
+            (make-hashtable
+              scheme-definition-id-hash
+              scheme-definition-id=?)])
       (for-each
         (lambda (definition)
-          (let* ([library
-                   (scheme-definition-library definition)]
-                 [existing
-                   (hashtable-ref table library '())])
-            (unless
-              (exists
-                (lambda (candidate)
-                  (scheme-definition-id=?
-                    (scheme-definition-id candidate)
-                    (scheme-definition-id definition)))
-                existing)
-              (hashtable-set!
-                table
-                library
-                (cons definition existing)))))
-        (append
-          scheme-index-definitions
-          (map
-            (lambda (entry)
-              (unless (valid-index-entry? entry)
-                (assertion-violation
-                  'make-scheme-semantic-snapshot-with-library-index
-                  "invalid Scheme library index entry"
-                  entry))
-              (index-entry->definition entry))
-            entries)))
+          (let ([id (scheme-definition-id definition)])
+            (unless (hashtable-contains? seen id)
+              (let ([library
+                      (scheme-definition-library definition)])
+                (hashtable-set! seen id #t)
+                (hashtable-set!
+                  table
+                  library
+                  (cons
+                    definition
+                    (hashtable-ref table library '())))))))
+        definitions)
       table))
+
+  (define scheme-index-library-table
+    (make-library-table scheme-index-definitions))
+
+  (define cached-library-index #f)
+  (define cached-library-table #f)
+
+  (define (library-table-with-index entries)
+    (cond
+      [(null? entries)
+       scheme-index-library-table]
+      [(eq? entries cached-library-index)
+       cached-library-table]
+      [else
+       (let ([table
+               (make-library-table
+                 (append
+                   scheme-index-definitions
+                   (map
+                     (lambda (entry)
+                       (unless (valid-index-entry? entry)
+                         (assertion-violation
+                           'make-scheme-semantic-snapshot-with-library-index
+                           "invalid Scheme library index entry"
+                           entry))
+                       (index-entry->definition entry))
+                     entries)))])
+         (set! cached-library-index entries)
+         (set! cached-library-table table)
+         table)]))
 
   (define (make-definition-table definitions)
     (let ([table (make-hashtable string-hash string=?)])
@@ -1349,31 +1412,18 @@
         definitions)
       table))
 
-  (define (primitive-fallback-definitions definitions)
-    (filter
-      (lambda (primitive)
-        (not
-          (exists
-            (lambda (definition)
-              (string=?
-                (scheme-definition-name definition)
-                (scheme-definition-name primitive)))
-            definitions)))
-      scheme-primitive-definitions))
-
-  (define (scheme-definition-id=? left right)
-    (and (scheme-definition-id? left)
-         (scheme-definition-id? right)
-         (eq? (scheme-definition-id-source left)
-              (scheme-definition-id-source right))
-         (equal? (scheme-definition-id-document-id left)
-                 (scheme-definition-id-document-id right))
-         (equal? (scheme-definition-id-revision left)
-                 (scheme-definition-id-revision right))
-         (equal? (scheme-definition-id-offset left)
-                 (scheme-definition-id-offset right))
-         (string=? (scheme-definition-id-name left)
-                   (scheme-definition-id-name right))))
+  (define (make-definition-table-with-primitives definitions)
+    (let ([table (make-definition-table definitions)])
+      (for-each
+        (lambda (primitive)
+          (let ([name (scheme-definition-name primitive)])
+            (unless (hashtable-contains? table name)
+              (hashtable-set!
+                table
+                name
+                (list primitive)))))
+        scheme-primitive-definitions)
+      table))
 
   (define (definitions-named name definitions)
     (filter
@@ -3704,11 +3754,8 @@
                import-bindings
                library-table)]
            [global-table
-             (make-definition-table
-               (append
-                 visible-index
-                 (primitive-fallback-definitions
-                   visible-index)))]
+             (make-definition-table-with-primitives
+               visible-index)]
            [definitions
              (scan-definitions document-id revision semantic)])
       (call-with-values

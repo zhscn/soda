@@ -266,6 +266,14 @@ surface，`prefix` 重写全部可见名称，`rename` 重写指定名称，`for
 identity。重写后的候选保存显示名称和原始 DefinitionId；补全插入显示名称，
 definition 与 references 查询沿原始 identity 工作。
 
+Soda application build 从全部内置 Scheme library 生成 API 与 library catalog，
+随 editor boot image 静态嵌入。运行时把该 catalog 转换为共享的 library lookup
+table；使用同一 project catalog 的 semantic snapshot 复用对应 lookup table。
+单个文档分析只处理文档 token、scope、definition、use 和 diagnostics，不重复构造
+内置 API 索引。Project 中与内置 library 同名的 source 以完整 export surface
+覆盖嵌入版本，使 Soda 能分析正在编辑的自身源码。Project source 的变更产生新的
+catalog identity，并使下一次分析建立一份新的共享 lookup table。
+
 ## Diagnostics
 
 `SchemeSemanticSnapshot` 保存结构化的 `SchemeDiagnostic`：
