@@ -21,6 +21,8 @@
           scheme-definition-start
           scheme-definition-end
           scheme-definition-detail
+          scheme-definition-signatures
+          scheme-definition-documentation
           scheme-use?
           scheme-use-name
           scheme-use-start
@@ -53,7 +55,7 @@
       (immutable name scheme-definition-id-name)))
 
   (define-record-type scheme-definition
-    (fields id name kind start end detail))
+    (fields id name kind start end detail formals documentation))
 
   (define-record-type scheme-use
     (fields name start end resolution))
@@ -344,7 +346,8 @@
             revision
             value
             kind
-            detail)
+            detail
+            formals)
     (make-scheme-definition
       (make-scheme-definition-id
         'document
@@ -356,7 +359,38 @@
       kind
       (token-start value)
       (token-end value)
-      detail))
+      detail
+      formals
+      #f))
+
+  (define (procedure-head-formals tokens)
+    (call-with-values
+      (lambda () (partial-datum tokens))
+      (lambda (datum remaining)
+        (if (and (pair? datum) (symbol? (car datum)))
+            (list (cdr datum))
+            '()))))
+
+  (define (initializer-formals tokens)
+    (call-with-values
+      (lambda () (partial-datum tokens))
+      (lambda (datum remaining)
+        (cond
+          [(and
+             (pair? datum)
+             (eq? (car datum) 'lambda)
+             (pair? (cdr datum)))
+           (list (cadr datum))]
+          [(and
+             (pair? datum)
+             (eq? (car datum) 'case-lambda))
+           (filter
+             (lambda (value) value)
+             (map
+               (lambda (clause)
+                 (and (pair? clause) (car clause)))
+               (cdr datum)))]
+          [else '()]))))
 
   (define (record-name-definitions
             tail
@@ -370,7 +404,8 @@
            revision
            (car tail)
            'record
-           "local record type"))]
+           "local record type"
+           '()))]
       [(and (pair? tail)
             (eq? (token-kind (car tail)) 'open))
        (let take ([remaining (cdr tail)]
@@ -393,7 +428,8 @@
                   (if (zero? index) 'record 'procedure)
                   (if (zero? index)
                       "local record type"
-                      "record binding"))
+                      "record binding")
+                  '())
                 definitions))]
            [else
             (take (cdr remaining) index definitions)]))]
@@ -411,13 +447,18 @@
           [(token-symbol=? head "define")
            (cond
              [(and (pair? tail) (symbol-token? (car tail)))
-              (list
-                (local-definition
-                  document-id
-                  revision
-                  (car tail)
-                  'variable
-                  "local definition"))]
+              (let ([formals
+                      (initializer-formals (cdr tail))])
+                (list
+                  (local-definition
+                    document-id
+                    revision
+                    (car tail)
+                    (if (pair? formals) 'procedure 'variable)
+                    (if (pair? formals)
+                        "local procedure"
+                        "local definition")
+                    formals)))]
              [(and (pair? tail)
                    (eq? (token-kind (car tail)) 'open)
                    (pair? (cdr tail))
@@ -428,7 +469,8 @@
                   revision
                   (cadr tail)
                   'procedure
-                  "local procedure"))]
+                  "local procedure"
+                  (procedure-head-formals tail)))]
              [else '()])]
           [(or (token-symbol=? head "define-syntax")
                (token-symbol=? head "define-syntax-rule"))
@@ -440,7 +482,8 @@
                  revision
                  (car tail)
                  'syntax
-                 "local syntax"))
+                 "local syntax"
+                 '()))
              '())]
           [(token-symbol=? head "define-record-type")
            (record-name-definitions tail document-id revision)]
@@ -587,7 +630,9 @@
             kind
             #f
             #f
-            "R6RS/Chez")))
+            "R6RS/Chez"
+            '()
+            #f)))
       primitive-specifications))
 
   (define (library-name->string name)
@@ -609,7 +654,7 @@
   (define (valid-index-entry? entry)
     (and
       (list? entry)
-      (= (length entry) 6)
+      (= (length entry) 8)
       (string? (list-ref entry 0))
       (symbol? (list-ref entry 1))
       (list? (list-ref entry 2))
@@ -624,7 +669,11 @@
       (or (not (list-ref entry 4))
           (exact-non-negative-integer? (list-ref entry 4)))
       (or (not (list-ref entry 5))
-          (exact-non-negative-integer? (list-ref entry 5)))))
+          (exact-non-negative-integer? (list-ref entry 5)))
+      (list? (list-ref entry 6))
+      (or
+        (not (list-ref entry 7))
+        (string? (list-ref entry 7)))))
 
   (define (index-entry->definition entry)
     (let ([name (list-ref entry 0)]
@@ -632,7 +681,9 @@
           [library (list-ref entry 2)]
           [resource (list-ref entry 3)]
           [start (list-ref entry 4)]
-          [end (list-ref entry 5)])
+          [end (list-ref entry 5)]
+          [formals (list-ref entry 6)]
+          [documentation (list-ref entry 7)])
       (make-scheme-definition
         (make-scheme-definition-id
           'index
@@ -646,7 +697,27 @@
         end
         (string-append
           "Exported by "
-          (library-name->string library)))))
+          (library-name->string library))
+        formals
+        documentation)))
+
+  (define (datum->string datum)
+    (call-with-string-output-port
+      (lambda (port) (write datum port))))
+
+  (define (scheme-definition-signatures definition)
+    (unless (scheme-definition? definition)
+      (assertion-violation
+        'scheme-definition-signatures
+        "expected a Scheme definition"
+        definition))
+    (map
+      (lambda (formals)
+        (datum->string
+          (cons
+            (string->symbol (scheme-definition-name definition))
+            formals)))
+      (scheme-definition-formals definition)))
 
   (define scheme-index-definitions
     (map
@@ -831,7 +902,9 @@
           (string-append
             (scheme-definition-detail definition)
             " as "
-            name))))
+            name)
+          (scheme-definition-formals definition)
+          (scheme-definition-documentation definition))))
 
   (define (symbol-names symbols)
     (map symbol->string symbols))

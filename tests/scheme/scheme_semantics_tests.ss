@@ -25,6 +25,11 @@
     "'(define ignored-quote 5)\n"
     "(quote (define ignored-long-quote 6))\n"
     "(define (render-frame frame) frame)\n"
+    "(define render-lambda (lambda (frame options) frame))\n"
+    "(define render-case\n"
+    "  (case-lambda\n"
+    "    [() #f]\n"
+    "    [(frame) frame]))\n"
     "(define current-value \"(define ignored-string 7)\")\n"
     "(define-syntax with-value (syntax-rules ()))\n"
     "(define-record-type (editor-state make-editor-state editor-state?)\n"
@@ -80,6 +85,18 @@
     (eq? (scheme-definition-kind
            (definition-by-name "render-frame"))
          'procedure)
+    (equal?
+      (scheme-definition-signatures
+        (definition-by-name "render-frame"))
+      '("(render-frame frame)"))
+    (equal?
+      (scheme-definition-signatures
+        (definition-by-name "render-lambda"))
+      '("(render-lambda frame options)"))
+    (equal?
+      (scheme-definition-signatures
+        (definition-by-name "render-case"))
+      '("(render-case)" "(render-case frame)"))
     (definition-by-name "current-value")
     (definition-by-name "with-value")
     (eq? (scheme-definition-kind
@@ -196,9 +213,13 @@
       (string->utf8
         (string-append
           "(library (sample alpha)\n"
-          "  (export alpha-value (rename (alpha-run run)))\n"
+          "  (export alpha-value alpha-case (rename (alpha-run run)))\n"
           "  (import (rnrs))\n"
           "  (define alpha-value 1)\n"
+          "  (define alpha-case\n"
+          "    (case-lambda\n"
+          "      [() alpha-value]\n"
+          "      [(value) value]))\n"
           "  (define (alpha-run) alpha-value)))\n")))
     (cons
       "facade.sls"
@@ -222,14 +243,19 @@
 (unless
   (let ([renamed
           (index-entry "run" '(sample alpha))]
+        [overloaded
+          (index-entry "alpha-case" '(sample alpha))]
         [reexported
           (index-entry "alpha-value" '(sample facade))])
     (and
-      (= (length generated-index) 4)
+      (= (length generated-index) 5)
       renamed
       (eq? (cadr renamed) 'procedure)
       (string=? (list-ref renamed 3) "alpha.sls")
       (exact-non-negative-integer? (list-ref renamed 4))
+      (equal? (list-ref renamed 6) '(()))
+      overloaded
+      (equal? (list-ref overloaded 6) '(() (value)))
       reexported
       (eq? (cadr reexported) 'variable)
       (string=? (list-ref reexported 3) "alpha.sls")))

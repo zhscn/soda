@@ -217,6 +217,12 @@ R6RS `library` 与 `export` form，归一化直接导出和 rename，并把 re-e
 可用的源码定义。生成结果是只含不可变 datum 的 Scheme library，随 whole-program
 editor boot 一起编译和嵌入。
 
+procedure metadata 从过程定义、以 `lambda` 初始化的定义和 `case-lambda` 分支提取
+formals。索引保存不带过程名的原始 formals datum；呈现签名时使用当前可见 binding
+名称，因此 `prefix` 和 `rename` 后的补全签名与实际插入文本一致。源码 Document
+中的同类定义使用相同的签名表示，未闭合 form 的容错扫描仍可保留已经完整出现的
+参数表。
+
 运行时 catalog 保留每个 export 的 library identity。semantic snapshot 从容错
 reader 提取当前文档的 import library；即使外围 library form 尚未闭合，已经出现的
 import clause 仍然有效。静态 completion 只暴露当前文档 import 的 Soda library，
@@ -244,8 +250,10 @@ provider_data: {
 }
 ```
 
-静态候选提供 name、kind、library、signature 和 definition location。runtime
-provider 从 session environment 提供已经求值的顶层 binding。language mode 或
+静态候选提供 name、kind、library、signature 和 definition location。候选
+annotation 显示首个 signature，多分支 signature 保留在 definition metadata 中供
+详情视图和参数提示使用。运行时 provider 从 session environment 提供已经求值的
+顶层 binding。language mode 或
 buffer-local policy 选择 provider 组合；组合时遵循：
 
 - lexical definition 优先于同名 runtime binding；

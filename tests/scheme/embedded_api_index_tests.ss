@@ -23,7 +23,8 @@
     (eq? (cadr editor-command-entry) 'procedure)
     (string? (list-ref editor-command-entry 3))
     (integer? (list-ref editor-command-entry 4))
-    (integer? (list-ref editor-command-entry 5)))
+    (integer? (list-ref editor-command-entry 5))
+    (pair? (list-ref editor-command-entry 6)))
   (error
     'embedded-api-index-tests
     "embedded Scheme API catalog is missing the editor command interface"))
@@ -76,6 +77,12 @@
 
 (define (visible-name? snapshot name)
   (exists
+    (lambda (definition)
+      (string=? (scheme-definition-name definition) name))
+    (scheme-semantic-snapshot-visible-index-definitions snapshot)))
+
+(define (visible-definition snapshot name)
+  (find
     (lambda (definition)
       (string=? (scheme-definition-name definition) name))
     (scheme-semantic-snapshot-visible-index-definitions snapshot)))
@@ -141,13 +148,18 @@
     "(register!"))
 
 (unless
-  (let ([renamed-use (use-named rename-snapshot "register!")])
+  (let ([renamed-use (use-named rename-snapshot "register!")]
+        [renamed-definition
+          (visible-definition rename-snapshot "register!")])
     (and
-      (visible-name? rename-snapshot "register!")
+      renamed-definition
       (not
         (visible-name?
           rename-snapshot
           "editor-register-command!"))
+      (equal?
+        (scheme-definition-signatures renamed-definition)
+        '("(register! editor definition)"))
       renamed-use
       (= (length (scheme-use-resolution renamed-use)) 1)
       (string=?

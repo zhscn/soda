@@ -61,7 +61,13 @@
       [else "R6RS/Chez"]))
 
   (define (definition->completion-item definition)
-    (let ([name (scheme-definition-name definition)])
+    (let* ([name (scheme-definition-name definition)]
+           [signatures
+             (scheme-definition-signatures definition)]
+           [annotation
+             (if (pair? signatures)
+                 (car signatures)
+                 (scheme-definition-detail definition))])
       (make-completion-item
         (scheme-definition-id definition)
         'scheme-static
@@ -74,9 +80,9 @@
         name
         #f
         #t
-        #f
+        (scheme-definition-documentation definition)
         definition
-        (scheme-definition-detail definition)
+        annotation
         (definition-group definition))))
 
   (define (start-scheme-completion editor request)

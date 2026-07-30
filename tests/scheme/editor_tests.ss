@@ -4264,7 +4264,7 @@
   (make-document
     (string->utf8
       (string-append
-        "(define render-frame 1)\n"
+        "(define (render-frame frame) frame)\n"
         "(define-syntax render-with (syntax-rules ()))\n"
         "ren"))
     942))
@@ -4338,7 +4338,10 @@
         (completion-item-id render-frame))
       (eq? (scheme-definition-kind
              (completion-item-provider-data render-frame))
-           'variable))
+           'procedure)
+      (string=?
+        (completion-item-annotation render-frame)
+        "(render-frame frame)"))
     (error 'editor-tests
            "scheme static provider did not expose semantic definitions")))
 (let loop ([remaining 2])
@@ -4369,7 +4372,7 @@
     (buffer-bytes scheme-completion-buffer)
     (string->utf8
       (string-append
-        "(define render-frame 1)\n"
+        "(define (render-frame frame) frame)\n"
         "(define-syntax render-with (syntax-rules ()))\n"
         "render-frame")))
   (error 'editor-tests
