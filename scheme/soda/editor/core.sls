@@ -331,6 +331,9 @@
           prompt-request-completion-source
           prompt-request-data
           prompt-request-change-command
+          minibuffer-completion-indicator-columns
+          prompt-input-viewport-columns
+          prompt-request-completion-selection-policy
           prompt-session?
           prompt-session-id
           prompt-session-request
@@ -382,6 +385,8 @@
           choice-source?
           choice-source-category
           choice-source-metadata
+          choice-source-provider-names
+          choice-source-preselect?
           choice-source-boundaries
           choice-source-candidates
           choice-source-valid?
@@ -392,6 +397,11 @@
           prompt-completion-target-start
           prompt-completion-target-end
           prompt-completion-target-replacement-end
+          make-prompt-completion-context
+          prompt-completion-context?
+          prompt-completion-context-input
+          prompt-completion-context-point
+          prompt-completion-context-metadata
           make-document-completion-target
           document-completion-target?
           document-completion-target-view-id
@@ -402,13 +412,19 @@
           document-completion-target-end
           document-completion-target-replacement-end
           completion-target?
+          make-completion-selection-policy
+          completion-selection-policy?
+          completion-selection-policy-domain
+          completion-selection-policy-initial
+          completion-selection-policy-cycle?
           completion-session?
           completion-session-id
           completion-session-target
           completion-session-prompt-id
           completion-session-source
           completion-session-provider-names
-          completion-session-input-selectable?
+          completion-session-selection-policy
+          completion-session-selection-state
           completion-session-generation
           completion-session-query
           completion-session-items

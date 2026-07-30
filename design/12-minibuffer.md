@@ -90,7 +90,8 @@ TUI root 在 session 活动时按正文、modeline、minibuffer 和可选 comple
 布局。候选列表从 minibuffer 的下一行向下展开；两者占用底部保留行并参与 reflow。
 prompt 与 transient input 分别使用 `minibuffer-prompt` 和 `minibuffer-input`
 face。输入 cell 保留 transient Document position 和 component source，因此光标与
-`describe-char` 仍使用统一的 frame 数据。
+`describe-char` 仍使用统一的 frame 数据。带 completion 的 prompt 为位置指示器保留
+固定列宽；初次打开和 terminal resize 使用同一个 input viewport 计算契约。
 
 ## Keymap 与 history
 
@@ -119,11 +120,21 @@ draft；向前越过最新条目时恢复 draft。只有通过验证的非空接
 CompletionTarget =
     DocumentTarget(document-id, revision, range)
   | PromptTarget(prompt-session-id, field-start, point, replacement-end)
+
+PromptCompletionContext {
+  input,
+  point,
+  source-metadata
+}
 ```
 
 两类目标共享 `CompletionItem`、generation、候选身份、过滤排序、选择状态和 TUI
 presenter。language provider 继续产生 revision-aware edit；命令、Buffer、路径和
 Scheme binding 等离散集合通过 choice source 归一化成相同的候选条目。
+
+异步 prompt provider 从类型化的 `PromptCompletionContext` 读取完整 input、字符
+位置和 source metadata。context 使用结构相等性参与 generation identity；query
+和 context 都未改变时，重复 refresh 不会取消或重启 provider。
 
 choice source 显式提供 metadata、boundaries、candidates、validate 和 cancel 操作。
 候选分别保存 insert text、label、annotation、group、source 和 payload，显示文本
@@ -153,11 +164,21 @@ styles 按顺序尝试，每个匹配结果包含 score、匹配区间和 exact 
 会清除 candidate selection，避免 `RET` 意外接受列表首项。需要传统首项选择行为的
 source 可以设置 `preselect`。
 
-`CompletionSession` 根据 reader 的接受策略定义导航域。`free` reader 的域为
-`input + candidates`，其中空的 selected index 表示 input；`must-match` reader 的
-域只包含 candidates，空 index 表示尚未选择。候选导航默认不循环：从 input 向后
-进入第一项，从第一项向前返回 input，最后一项向后保持不动。只包含 candidates 的
-reader 在第一项向前时保持第一项。
+`CompletionSession` 持有显式的选择策略：
+
+```text
+SelectionPolicy {
+  domain:  candidates | input-and-candidates,
+  initial: none | input | first,
+  cycle?: boolean
+}
+```
+
+`free` reader 使用 `input-and-candidates`，其中空的 selected index 表示 input；
+`must-match` reader 使用 `candidates`，空 index 表示尚未选择。minibuffer 默认不
+循环：从 input 向后进入第一项，从第一项向前返回 input，最后一项向后保持不动。
+只包含 candidates 的 reader 在第一项向前时保持第一项。Document completion 使用
+可循环的 candidates 域，并默认选择第一项。
 
 minibuffer 左侧使用 `position/total` 指示当前域位置。candidate 使用从 1 开始的
 位置，`*` 表示可接受的原始 input，`!` 表示尚未选择 candidate 且原始 input 不是

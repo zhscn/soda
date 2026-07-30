@@ -5,7 +5,6 @@
           (soda editor command)
           (soda editor command-runtime)
           (soda editor completion)
-          (soda editor display)
           (soda editor event)
           (soda editor input-state)
           (soda editor keymap)
@@ -248,19 +247,16 @@
                                 amount))
                           (loop (cdr children) (+ index 1)))))))))
         (when session
-          (let* ([prompt-view
-                   (editor-view-ref
-                     editor
-                     (prompt-session-view-id session))]
-                 [prompt-width
-                   (string-cell-width
-                     (prompt-request-prompt
-                       (prompt-session-request session))
-                     8)])
+          (let ([prompt-view
+                  (editor-view-ref
+                    editor
+                    (prompt-session-view-id session))])
             (view-set-viewport!
               prompt-view
               1
-              (max 1 (- columns prompt-width)))
+              (prompt-input-viewport-columns
+                (prompt-session-request session)
+                columns))
             (ensure-view-visible! prompt-view))))
       '()))
 

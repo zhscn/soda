@@ -36,6 +36,8 @@
           choice-source?
           choice-source-category
           choice-source-metadata
+          choice-source-provider-names
+          choice-source-preselect?
           choice-source-boundaries
           choice-source-candidates
           choice-source-valid?
@@ -46,6 +48,11 @@
           prompt-completion-target-start
           prompt-completion-target-end
           prompt-completion-target-replacement-end
+          make-prompt-completion-context
+          prompt-completion-context?
+          prompt-completion-context-input
+          prompt-completion-context-point
+          prompt-completion-context-metadata
           make-document-completion-target
           document-completion-target?
           document-completion-target-view-id
@@ -58,6 +65,11 @@
           document-completion-target-refresh!
           document-completion-target-close!
           completion-target?
+          make-completion-selection-policy
+          completion-selection-policy?
+          completion-selection-policy-domain
+          completion-selection-policy-initial
+          completion-selection-policy-cycle?
           make-completion-session
           completion-session?
           completion-session-id
@@ -66,7 +78,8 @@
           completion-session-prompt-id
           completion-session-source
           completion-session-provider-names
-          completion-session-input-selectable?
+          completion-session-selection-policy
+          completion-session-selection-state
           completion-session-generation
           completion-session-query
           completion-session-items
@@ -151,6 +164,18 @@
     (fields prompt-id start end replacement-end))
 
   (define-record-type
+    (prompt-completion-context
+      %make-prompt-completion-context
+      prompt-completion-context?)
+    (fields input point metadata))
+
+  (define-record-type
+    (completion-selection-policy
+      %make-completion-selection-policy
+      completion-selection-policy?)
+    (fields domain initial cycle?))
+
+  (define-record-type
     (document-completion-target
       %make-document-completion-target
       document-completion-target?)
@@ -177,8 +202,7 @@
             (mutable active-requests)
             (mutable items)
             (mutable matches)
-            preselect?
-            input-selectable?
+            selection-policy
             (mutable selected-index)))
 
   (define-record-type completion-provider-result
@@ -203,6 +227,41 @@
     (and (exact-non-negative-integer? start)
          (exact-non-negative-integer? end)
          (<= start end)))
+
+  (define (make-prompt-completion-context input point metadata)
+    (unless
+      (and
+        (string? input)
+        (exact-non-negative-integer? point)
+        (<= point (string-length input))
+        (list? metadata))
+      (assertion-violation
+        'make-prompt-completion-context
+        "prompt completion context is invalid"
+        input
+        point
+        metadata))
+    (%make-prompt-completion-context input point metadata))
+
+  (define (make-completion-selection-policy
+            domain initial cycle?)
+    (unless
+      (and
+        (memq domain '(candidates input-and-candidates))
+        (memq initial '(none input first))
+        (boolean? cycle?)
+        (case domain
+          [(input-and-candidates)
+           (memq initial '(input first))]
+          [(candidates)
+           (memq initial '(none first))]))
+      (assertion-violation
+        'make-completion-selection-policy
+        "completion selection policy is invalid"
+        domain
+        initial
+        cycle?))
+    (%make-completion-selection-policy domain initial cycle?))
 
   (define make-prompt-completion-target
     (case-lambda
@@ -545,6 +604,39 @@
   (define (choice-source-option source key fallback)
     (let ([entry (assq key (choice-source-metadata source))])
       (if entry (cdr entry) fallback)))
+
+  (define (choice-source-provider-names source)
+    (unless (choice-source? source)
+      (assertion-violation
+        'choice-source-provider-names
+        "expected a choice source"
+        source))
+    (let ([providers
+            (choice-source-option source 'providers '())])
+      (unless
+        (and
+          (list? providers)
+          (for-all symbol? providers))
+        (assertion-violation
+          'choice-source-provider-names
+          "providers metadata must be a list of symbols"
+          providers))
+      providers))
+
+  (define (choice-source-preselect? source)
+    (unless (choice-source? source)
+      (assertion-violation
+        'choice-source-preselect?
+        "expected a choice source"
+        source))
+    (let ([preselect?
+            (choice-source-option source 'preselect #f)])
+      (unless (boolean? preselect?)
+        (assertion-violation
+          'choice-source-preselect?
+          "preselect metadata must be a boolean"
+          preselect?))
+      preselect?))
 
   (define (normalize-string value ignore-case?)
     (if ignore-case? (string-downcase value) value))
@@ -893,10 +985,22 @@
         session
         (or
           selected-index
-          (and
-            (completion-session-preselect? session)
-            (pair? items)
-            0)))))
+          (case
+            (completion-selection-policy-initial
+              (completion-session-selection-policy session))
+            [(first) (and (pair? items) 0)]
+            [else #f])))))
+
+  (define (default-selection-policy target)
+    (if (prompt-completion-target? target)
+        (make-completion-selection-policy
+          'input-and-candidates
+          'input
+          #f)
+        (make-completion-selection-policy
+          'candidates
+          'first
+          #t)))
 
   (define make-completion-session
     (case-lambda
@@ -906,30 +1010,19 @@
          target
          source
          '()
-         #t
-         (prompt-completion-target? target))]
+         (default-selection-policy target))]
       [(id target source provider-names)
        (make-completion-session
          id
          target
          source
          provider-names
-         #t
-         (prompt-completion-target? target))]
-      [(id target source provider-names preselect?)
-       (make-completion-session
-         id
-         target
-         source
-         provider-names
-         preselect?
-         (prompt-completion-target? target))]
+         (default-selection-policy target))]
       [(id
          target
          source
          provider-names
-         preselect?
-         input-selectable?)
+         selection-policy)
        (unless (exact-non-negative-integer? id)
          (assertion-violation
            'make-completion-session
@@ -945,21 +1038,23 @@
            'make-completion-session
            "expected a choice source"
            source))
-       (unless (boolean? preselect?)
+       (unless (completion-selection-policy? selection-policy)
          (assertion-violation
            'make-completion-session
-           "preselect flag must be a boolean"
-           preselect?))
+           "expected a completion selection policy"
+           selection-policy))
        (unless
-         (and
-           (boolean? input-selectable?)
-           (or
-             (not input-selectable?)
-             (prompt-completion-target? target)))
+         (or
+           (not
+             (eq?
+               (completion-selection-policy-domain
+                 selection-policy)
+               'input-and-candidates))
+           (prompt-completion-target? target))
          (assertion-violation
            'make-completion-session
            "input selection requires a prompt completion target"
-           input-selectable?))
+           selection-policy))
        (unless (and
                  (list? provider-names)
                  (for-all symbol? provider-names))
@@ -987,9 +1082,23 @@
          '()
          '()
          '()
-         preselect?
-         input-selectable?
+         selection-policy
          #f)]))
+
+  (define (completion-session-selection-state session)
+    (unless (completion-session? session)
+      (assertion-violation
+        'completion-session-selection-state
+        "expected a completion session"
+        session))
+    (cond
+      [(completion-session-selected-index session) 'candidate]
+      [(eq?
+         (completion-selection-policy-domain
+           (completion-session-selection-policy session))
+         'input-and-candidates)
+       'input]
+      [else 'unset]))
 
   (define (completion-session-prompt-id session)
     (unless (completion-session? session)
@@ -1104,6 +1213,23 @@
       (completion-session-active-requests-set! session '())
       requests))
 
+  (define (completion-context=? left right)
+    (cond
+      [(and
+         (prompt-completion-context? left)
+         (prompt-completion-context? right))
+       (and
+         (string=?
+           (prompt-completion-context-input left)
+           (prompt-completion-context-input right))
+         (=
+           (prompt-completion-context-point left)
+           (prompt-completion-context-point right))
+         (equal?
+           (prompt-completion-context-metadata left)
+           (prompt-completion-context-metadata right)))]
+      [else (equal? left right)]))
+
   (define completion-session-refresh!
     (case-lambda
       [(session query)
@@ -1123,7 +1249,9 @@
          (and
            (string? (completion-session-query session))
            (string=? query (completion-session-query session))
-           (equal? context (completion-session-context session)))
+           (completion-context=?
+             context
+             (completion-session-context session)))
          (let* ([generation
                   (+ (completion-session-generation session) 1)]
                 [source (completion-session-source session)]
@@ -1226,17 +1354,26 @@
         'completion-session-select-next!
         "expected a completion session"
         session))
-    (let ([count (length (completion-session-items session))]
-          [index (completion-session-selected-index session)])
+    (let* ([count (length (completion-session-items session))]
+           [index (completion-session-selected-index session)]
+           [policy (completion-session-selection-policy session)]
+           [input?
+             (eq?
+               (completion-selection-policy-domain policy)
+               'input-and-candidates)])
       (when (positive? count)
         (completion-session-selected-index-set!
           session
-          (if (prompt-completion-target?
-                (completion-session-target session))
-              (if index
-                  (min (+ index 1) (- count 1))
-                  0)
-              (mod (+ (or index -1) 1) count)))))
+          (cond
+            [(not index) 0]
+            [(and
+               input?
+               (completion-selection-policy-cycle? policy)
+               (= index (- count 1)))
+             #f]
+            [(completion-selection-policy-cycle? policy)
+             (mod (+ index 1) count)]
+            [else (min (+ index 1) (- count 1))]))))
     session)
 
   (define (completion-session-select-previous! session)
@@ -1245,21 +1382,26 @@
         'completion-session-select-previous!
         "expected a completion session"
         session))
-    (let ([count (length (completion-session-items session))]
-          [index (completion-session-selected-index session)])
+    (let* ([count (length (completion-session-items session))]
+           [index (completion-session-selected-index session)]
+           [policy (completion-session-selection-policy session)]
+           [input?
+             (eq?
+               (completion-selection-policy-domain policy)
+               'input-and-candidates)])
       (when (positive? count)
         (completion-session-selected-index-set!
           session
-          (if (prompt-completion-target?
-                (completion-session-target session))
-              (cond
-                [(not index)
-                 (and
-                   (not
-                     (completion-session-input-selectable? session))
-                   (- count 1))]
-                [(positive? index) (- index 1)]
-                [(completion-session-input-selectable? session) #f]
-                [else 0])
-              (mod (- (or index 0) 1) count)))))
+          (cond
+            [(not index)
+             (and
+               (or
+                 (not input?)
+                 (completion-selection-policy-cycle? policy))
+               (- count 1))]
+            [(positive? index) (- index 1)]
+            [input? #f]
+            [(completion-selection-policy-cycle? policy)
+             (- count 1)]
+            [else 0]))))
     session))

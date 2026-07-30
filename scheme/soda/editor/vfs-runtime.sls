@@ -14,35 +14,23 @@
     (vfs-runtime %make-vfs-runtime vfs-runtime?)
     (fields runtime by-source by-request))
 
-  (define (exact-non-negative-integer? value)
-    (and
-      (integer? value)
-      (exact? value)
-      (not (negative? value))))
-
   (define (completion-directory request)
     (let ([context (completion-request-context request)])
-      (unless
-        (and
-          (vector? context)
-          (= (vector-length context) 3)
-          (string? (vector-ref context 0))
-          (exact-non-negative-integer? (vector-ref context 1))
-          (list? (vector-ref context 2)))
+      (unless (prompt-completion-context? context)
         (assertion-violation
           'filesystem-completion
           "prompt completion context is invalid"
           context))
-      (let* ([input (vector-ref context 0)]
-             [point (vector-ref context 1)]
-             [metadata (vector-ref context 2)]
+      (let* ([input (prompt-completion-context-input context)]
+             [point (prompt-completion-context-point context)]
+             [metadata
+               (prompt-completion-context-metadata context)]
              [base-entry (assq 'base-directory metadata)]
              [base
                (and
                  base-entry
                  (string? (cdr base-entry))
-                 (cdr base-entry))]
-             )
+                 (cdr base-entry))])
         (unless base
           (assertion-violation
             'filesystem-completion

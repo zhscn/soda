@@ -2608,6 +2608,9 @@
                          "M-x ")
                (= (length (editor-buffers prompt-editor)) 2)
                (= (length (editor-views prompt-editor)) 2)
+               (= (view-viewport-columns
+                    (editor-active-view prompt-editor))
+                  29)
                (eq? (view-buffer (editor-base-view prompt-editor))
                     prompt-buffer)
                (not (eq? (editor-active-view prompt-editor)
@@ -2623,9 +2626,25 @@
                   "test.prompt-target")
   (error 'editor-tests
          "minibuffer text did not stay in its transient buffer"))
+(let* ([completion
+         (editor-active-prompt-completion prompt-editor)]
+       [generation
+         (completion-session-generation completion)])
+  (editor-refresh-prompt-completion! prompt-editor)
+  (unless
+    (= generation (completion-session-generation completion))
+    (error 'editor-tests
+           "equivalent typed prompt context advanced generation")))
 (unless (bytevector=? (buffer-bytes prompt-buffer) (string->utf8 "body"))
   (error 'editor-tests "minibuffer input changed the origin buffer"))
 
+(editor-update! prompt-editor (make-resize-message 5 47))
+(unless
+  (= (view-viewport-columns
+       (editor-active-view prompt-editor))
+     36)
+  (error 'editor-tests
+         "resizing did not reserve completion indicator columns"))
 (editor-update! prompt-editor (make-resize-message 5 40))
 (define prompt-frame (render-editor-frame prompt-editor 5 40))
 (let* ([layout (frame-layout prompt-frame)]
@@ -2746,8 +2765,13 @@
 (let ([completion (editor-active-prompt-completion prompt-editor)])
   (unless (and completion
                (= (length (completion-session-items completion)) 2)
-               (not
-                 (completion-session-input-selectable? completion))
+               (eq?
+                 (completion-selection-policy-domain
+                   (completion-session-selection-policy completion))
+                 'candidates)
+               (eq?
+                 (completion-session-selection-state completion)
+                 'unset)
                (not (completion-session-selected-item completion)))
     (error 'editor-tests
            "typing did not expose candidates with no implicit selection")))
@@ -2859,7 +2883,15 @@
            "prompt completion did not track its current field")))
 (let ([completion
         (editor-active-prompt-completion prompt-editor)])
-  (unless (completion-session-input-selectable? completion)
+  (unless
+    (and
+      (eq?
+        (completion-selection-policy-domain
+          (completion-session-selection-policy completion))
+        'input-and-candidates)
+      (eq?
+        (completion-session-selection-state completion)
+        'input))
     (error 'editor-tests
            "free prompt did not include its input in navigation"))
   (let* ([frame (render-editor-frame prompt-editor 5 40)]
@@ -3135,9 +3167,20 @@
          (string=?
            (completion-item-insert-text
              (completion-session-selected-item completion))
-           "alpha"))
+         "alpha"))
     (error 'editor-tests
          "completion provider request did not populate the session")))
+(let ([completion (editor-active-completion completion-editor)])
+  (editor-completion-previous! completion-editor)
+  (unless
+    (= (completion-session-selected-index completion) 2)
+    (error 'editor-tests
+           "document completion policy did not cycle backward"))
+  (editor-completion-next! completion-editor)
+  (unless
+    (= (completion-session-selected-index completion) 0)
+    (error 'editor-tests
+           "document completion policy did not cycle forward")))
 
 (define completion-frame
   (render-editor-frame completion-editor 6 30))

@@ -13,6 +13,9 @@
           prompt-request-completion-source
           prompt-request-data
           prompt-request-change-command
+          minibuffer-completion-indicator-columns
+          prompt-input-viewport-columns
+          prompt-request-completion-selection-policy
           make-prompt-session
           prompt-session?
           prompt-session-id
@@ -45,7 +48,10 @@
           prompt-reply-command
           prompt-reply-result)
   (import (rnrs)
-          (soda editor completion))
+          (soda editor completion)
+          (soda editor display))
+
+  (define minibuffer-completion-indicator-columns 7)
 
   (define-record-type
     (prompt-request %make-prompt-request prompt-request?)
@@ -81,6 +87,55 @@
 
   (define-record-type prompt-reply
     (fields command result))
+
+  (define (prompt-input-viewport-columns
+            request
+            total-columns)
+    (unless (prompt-request? request)
+      (assertion-violation
+        'prompt-input-viewport-columns
+        "expected a prompt request"
+        request))
+    (unless
+      (and
+        (integer? total-columns)
+        (exact? total-columns)
+        (positive? total-columns))
+      (assertion-violation
+        'prompt-input-viewport-columns
+        "total columns must be a positive exact integer"
+        total-columns))
+    (max
+      1
+      (-
+        total-columns
+        (string-cell-width (prompt-request-prompt request) 8)
+        (if (prompt-request-completion-source request)
+            minibuffer-completion-indicator-columns
+            0))))
+
+  (define (prompt-request-completion-selection-policy request)
+    (unless (prompt-request? request)
+      (assertion-violation
+        'prompt-request-completion-selection-policy
+        "expected a prompt request"
+        request))
+    (let ([source (prompt-request-completion-source request)])
+      (and
+        source
+        (let ([input?
+                (eq?
+                  (prompt-request-accept-policy request)
+                  'free)])
+          (make-completion-selection-policy
+            (if input?
+                'input-and-candidates
+                'candidates)
+            (cond
+              [(choice-source-preselect? source) 'first]
+              [input? 'input]
+              [else 'none])
+            #f)))))
 
   (define make-prompt-request
     (case-lambda

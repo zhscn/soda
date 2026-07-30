@@ -1606,7 +1606,7 @@
         (editor-set-status-message! value "No completions"))
       accepted?))
 
-  (define (prompt-completion-context value completion)
+  (define (compute-prompt-completion-context value completion)
     (let* ([session
              (active-prompt-session
                'editor-refresh-prompt-completion!
@@ -1669,7 +1669,7 @@
                         start
                         caret
                         replacement-end)
-                      (vector
+                      (make-prompt-completion-context
                         input
                         point
                         (choice-source-metadata source))))))
@@ -1682,7 +1682,7 @@
       (when completion
         (call-with-values
           (lambda ()
-            (prompt-completion-context value completion))
+            (compute-prompt-completion-context value completion))
           (lambda (query target context)
             (let ([generation
                     (completion-session-generation completion)])
@@ -1700,36 +1700,6 @@
 
   (define (editor-prompt-completion-previous! value)
     (editor-completion-previous! value))
-
-  (define (prompt-completion-preselect? source)
-    (let ([entry (assq 'preselect (choice-source-metadata source))])
-      (if entry
-          (begin
-            (unless (boolean? (cdr entry))
-              (assertion-violation
-                'editor-open-prompt!
-                "completion preselect metadata must be a boolean"
-                (cdr entry)))
-            (cdr entry))
-          #f)))
-
-  (define (prompt-completion-provider-names source)
-    (let ([entry
-            (assq
-              'providers
-              (choice-source-metadata source))])
-      (if entry
-          (begin
-            (unless
-              (and
-                (list? (cdr entry))
-                (for-all symbol? (cdr entry)))
-              (assertion-violation
-                'editor-open-prompt!
-                "completion providers metadata must be a list of symbols"
-                (cdr entry)))
-            (cdr entry))
-          '())))
 
   (define (editor-open-prompt! value request)
     (require-open-editor 'editor-open-prompt! value)
@@ -1772,18 +1742,16 @@
            [completion
              (and
                (prompt-request-completion-source request)
-               (make-completion-session
-                 completion-id
-                 (make-prompt-completion-target
-                   id 0 0 0)
-                 (prompt-request-completion-source request)
-                 (prompt-completion-provider-names
-                   (prompt-request-completion-source request))
-                 (prompt-completion-preselect?
-                   (prompt-request-completion-source request))
-                 (eq?
-                   (prompt-request-accept-policy request)
-                   'free)))]
+               (let ([source
+                       (prompt-request-completion-source request)])
+                 (make-completion-session
+                   completion-id
+                   (make-prompt-completion-target
+                     id 0 0 0)
+                   source
+                   (choice-source-provider-names source)
+                   (prompt-request-completion-selection-policy
+                     request))))]
            [session
              (make-prompt-session
                id
@@ -1800,14 +1768,9 @@
       (view-set-viewport!
         view
         1
-        (max
-          1
-          (-
-            (view-viewport-columns origin-view)
-            (string-cell-width
-              (prompt-request-prompt request)
-              8)
-            (if completion 7 0))))
+        (prompt-input-viewport-columns
+          request
+          (view-viewport-columns origin-view)))
       (view-set-caret!
         view
         (buffer-text-size buffer))

@@ -26,8 +26,6 @@
             line-count
             focused?))
 
-  (define minibuffer-completion-indicator-columns 7)
-
   (define (resolve-faces theme faces)
     (let ([spec (theme-resolve-faces theme faces)])
       (make-style
@@ -498,9 +496,9 @@
            [input-selected?
              (and
                completion
-               (completion-session-input-selectable? completion)
-               (not
-                 (completion-session-selected-index completion)))]
+               (eq?
+                 (completion-session-selection-state completion)
+                 'input))]
            [input-faces
              (if input-selected?
                  '(minibuffer-input completion-selected)
@@ -529,12 +527,12 @@
                               (completion-session-selected-index
                                 completion)]
                             [marker
-                              (cond
-                                [selected
+                              (case
+                                (completion-session-selection-state
+                                  completion)
+                                [(candidate)
                                  (number->string (+ selected 1))]
-                                [(completion-session-input-selectable?
-                                   completion)
-                                 "*"]
+                                [(input) "*"]
                                 [else "!"])]
                             [raw
                               (string-append
