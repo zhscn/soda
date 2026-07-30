@@ -81,6 +81,84 @@
     'embedded-api-index-tests
     "unknown Soda imports did not produce a source-ranged diagnostic"))
 
+(define unused-import-source
+  (string-append
+    "(import\n"
+    "  (only (soda editor core) editor-register-command!))\n"))
+(define unused-import-snapshot
+  (make-scheme-semantic-snapshot
+    4
+    0
+    (string->utf8 unused-import-source)))
+(define unused-import-diagnostics
+  (filter
+    (lambda (diagnostic)
+      (eq?
+        (scheme-diagnostic-code diagnostic)
+        'unused-import))
+    (scheme-semantic-snapshot-diagnostics
+      unused-import-snapshot)))
+
+(unless
+  (and
+    (= (length unused-import-diagnostics) 1)
+    (null?
+      (filter
+        (lambda (use)
+          (string=?
+            (scheme-use-name use)
+            "editor-register-command!"))
+        (scheme-semantic-snapshot-uses
+          unused-import-snapshot))))
+  (error
+    'embedded-api-index-tests
+    "import declarations were counted as symbol uses"))
+
+(define used-import-snapshot
+  (make-scheme-semantic-snapshot
+    5
+    0
+    (string->utf8
+      (string-append
+        unused-import-source
+        "(editor-register-command!)\n"))))
+
+(when
+  (exists
+    (lambda (diagnostic)
+      (eq?
+        (scheme-diagnostic-code diagnostic)
+        'unused-import))
+    (scheme-semantic-snapshot-diagnostics
+      used-import-snapshot))
+  (error
+    'embedded-api-index-tests
+    "resolved imported API remained marked unused"))
+
+(define duplicate-import-snapshot
+  (make-scheme-semantic-snapshot
+    6
+    0
+    (string->utf8
+      (string-append
+        "(import\n"
+        "  (soda editor core)\n"
+        "  (only (soda editor core) editor-register-command!))\n"))))
+
+(unless
+  (= 1
+     (length
+       (filter
+         (lambda (diagnostic)
+           (eq?
+             (scheme-diagnostic-code diagnostic)
+             'duplicate-import))
+         (scheme-semantic-snapshot-diagnostics
+           duplicate-import-snapshot))))
+  (error
+    'embedded-api-index-tests
+    "duplicate imports were not diagnosed"))
+
 (define partial-source
   (string-append
     "(library (sample incomplete)\n"
@@ -144,6 +222,12 @@
     (lambda (use)
       (string=? (scheme-use-name use) name))
     (scheme-semantic-snapshot-uses snapshot)))
+
+(define (diagnostic-code? snapshot code)
+  (exists
+    (lambda (diagnostic)
+      (eq? (scheme-diagnostic-code diagnostic) code))
+    (scheme-semantic-snapshot-diagnostics snapshot)))
 
 (define only-snapshot
   (snapshot-for-import
@@ -221,6 +305,15 @@
   (error
     'embedded-api-index-tests
     "rename import did not preserve canonical API identity"))
+
+(when
+  (exists
+    (lambda (snapshot)
+      (diagnostic-code? snapshot 'unused-import))
+    (list only-snapshot prefix-snapshot rename-snapshot))
+  (error
+    'embedded-api-index-tests
+    "import modifiers did not attribute resolved uses to their binding"))
 
 (define record-api-snapshot
   (snapshot-for-import

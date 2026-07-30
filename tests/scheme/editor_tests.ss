@@ -2130,7 +2130,15 @@
       (=
         (annotation-set-source-revision refreshed)
         (buffer-revision semantic-diagnostic-buffer))
-      (null? (annotation-set-annotations refreshed)))
+      (= (length
+           (annotation-set-annotations refreshed))
+         1)
+      (eq?
+        (scheme-diagnostic-code
+          (annotation-payload
+            (car
+              (annotation-set-annotations refreshed))))
+        'unused-parameter))
     (error 'editor-tests
            "post-command diagnostics did not replace the stale revision")))
 (editor-close! semantic-diagnostic-editor)

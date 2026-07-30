@@ -136,6 +136,33 @@
     (cons "|unfinished" 'unterminated-symbol)
     (cons "#| unfinished" 'unterminated-block-comment)))
 
+(let* ([parameter-source
+         "(lambda (used unused) used)"]
+       [parameter-snapshot
+         (make-scheme-semantic-snapshot
+           81
+           0
+           (string->utf8 parameter-source))]
+       [unused
+         (filter
+           (lambda (diagnostic)
+             (eq?
+               (scheme-diagnostic-code diagnostic)
+               'unused-parameter))
+           (scheme-semantic-snapshot-diagnostics
+             parameter-snapshot))])
+  (unless
+    (and
+      (= (length unused) 1)
+      (= (scheme-diagnostic-start (car unused)) 14)
+      (= (scheme-diagnostic-end (car unused)) 20)
+      (eq?
+        (scheme-diagnostic-severity (car unused))
+        'warning))
+    (error 'scheme-semantics-tests
+           "parameter usage did not drive unused diagnostics"
+           (map scheme-diagnostic-message unused))))
+
 (unless
   (and
     (exists

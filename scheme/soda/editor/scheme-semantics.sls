@@ -1878,13 +1878,35 @@
                   scopes
                   (scheme-scope-parent-id scope)))))))))
 
-  (define (scan-uses tokens definitions global-table scopes)
+  (define (token-in-import-specification?
+            token
+            import-locations)
+    (exists
+      (lambda (location)
+        (let ([form (cdr location)])
+          (and
+            (<= (syntax-form-start form)
+                (token-start token))
+            (<= (token-end token)
+                (syntax-form-end form)))))
+      import-locations))
+
+  (define (scan-uses
+            tokens
+            definitions
+            global-table
+            scopes
+            import-locations)
     (let loop ([tokens (remove-ignored-data tokens)]
                [uses '()])
       (cond
         [(null? tokens) (reverse uses)]
         [(quoted-form? tokens)
          (loop (skip-datum tokens) uses)]
+        [(token-in-import-specification?
+           (car tokens)
+           import-locations)
+         (loop (cdr tokens) uses)]
         [(and (symbol-token? (car tokens))
               (not (definition-token? (car tokens) definitions)))
          (let* ([token (car tokens)]
@@ -2345,6 +2367,125 @@
       '()
       import-locations))
 
+  (define (definition-used? definition uses)
+    (exists
+      (lambda (use)
+        (exists
+          (lambda (resolved)
+            (scheme-definition-id=?
+              resolved
+              (scheme-definition-id definition)))
+          (scheme-use-resolution use)))
+      uses))
+
+  (define (unused-parameter-diagnostics scopes uses)
+    (apply
+      append
+      (map
+        (lambda (scope)
+          (fold-left
+            (lambda (result definition)
+              (if
+                (and
+                  (eq?
+                    (scheme-definition-kind definition)
+                    'parameter)
+                  (not
+                    (definition-used? definition uses)))
+                (cons
+                  (make-scheme-diagnostic
+                    'unused-parameter
+                    (scheme-definition-start definition)
+                    (scheme-definition-end definition)
+                    'warning
+                    (string-append
+                      "Unused parameter "
+                      (scheme-definition-name definition))
+                    (scheme-definition-id definition))
+                  result)
+                result))
+            '()
+            (scheme-scope-definitions scope)))
+        scopes)))
+
+  (define (import-binding-used? binding uses)
+    (let ([definitions
+            (definitions-for-import binding)])
+      (and
+        (pair? definitions)
+        (exists
+          (lambda (definition)
+            (exists
+              (lambda (use)
+                (and
+                  (string=?
+                    (scheme-use-name use)
+                    (scheme-definition-name definition))
+                  (exists
+                    (lambda (resolved)
+                      (scheme-definition-id=?
+                        resolved
+                        (scheme-definition-id definition)))
+                    (scheme-use-resolution use))))
+              uses))
+          definitions))))
+
+  (define (unused-import-diagnostics
+            import-locations
+            uses)
+    (fold-left
+      (lambda (result location)
+        (let* ([binding (car location)]
+               [form (cdr location)]
+               [library (import-binding-library binding)]
+               [definitions
+                 (definitions-for-import binding)])
+          (if
+            (and
+              (pair? definitions)
+              (not
+                (import-binding-used? binding uses)))
+            (cons
+              (make-scheme-diagnostic
+                'unused-import
+                (syntax-form-start form)
+                (syntax-form-end form)
+                'warning
+                (string-append
+                  "Unused import "
+                  (library-name->string library))
+                library)
+              result)
+            result)))
+      '()
+      import-locations))
+
+  (define (duplicate-import-diagnostics import-locations)
+    (let ([seen (make-hashtable equal-hash equal?)])
+      (fold-left
+        (lambda (result location)
+          (let* ([binding (car location)]
+                 [form (cdr location)]
+                 [library (import-binding-library binding)])
+            (if
+              (hashtable-contains? seen library)
+              (cons
+                (make-scheme-diagnostic
+                  'duplicate-import
+                  (syntax-form-start form)
+                  (syntax-form-end form)
+                  'warning
+                  (string-append
+                    "Duplicate import "
+                    (library-name->string library))
+                  library)
+                result)
+              (begin
+                (hashtable-set! seen library #t)
+                result))))
+        '()
+        import-locations)))
+
   (define (diagnostic-before? left right)
     (or
       (< (scheme-diagnostic-start left)
@@ -2359,7 +2500,8 @@
             bytes
             tokens
             scopes
-            import-locations)
+            import-locations
+            uses)
     (list-sort
       diagnostic-before?
       (append
@@ -2367,6 +2509,10 @@
         (delimiter-diagnostics tokens)
         (duplicate-definition-diagnostics scopes)
         (unknown-soda-library-diagnostics
+          import-locations)
+        (unused-parameter-diagnostics scopes uses)
+        (unused-import-diagnostics import-locations uses)
+        (duplicate-import-diagnostics
           import-locations))))
 
   (define (make-scheme-semantic-snapshot
@@ -2411,21 +2557,25 @@
             tokens
             definitions))
         (lambda (scoped-definitions scopes)
-          (%make-scheme-semantic-snapshot
-            document-id
-            revision
-            scoped-definitions
-            (scan-uses
-              semantic
+          (let ([uses
+                  (scan-uses
+                    semantic
+                    scoped-definitions
+                    global-table
+                    scopes
+                    import-locations)])
+            (%make-scheme-semantic-snapshot
+              document-id
+              revision
               scoped-definitions
-              global-table
-              scopes)
-            tokens
-            scopes
-            imports
-            (semantic-diagnostics
-              bytes
+              uses
               tokens
               scopes
-              import-locations)
-            visible-index))))))
+              imports
+              (semantic-diagnostics
+                bytes
+                tokens
+                scopes
+                import-locations
+                uses)
+              visible-index)))))))
