@@ -3,6 +3,7 @@
           scheme-workspace-index?
           scheme-workspace-generation
           scheme-workspace-sync-editor!
+          scheme-workspace-refresh-buffer!
           scheme-workspace-index-source!
           scheme-workspace-remove-source!
           scheme-workspace-snapshot-for-buffer
@@ -427,6 +428,23 @@
     (when (scheme-workspace-index-dirty? index)
       (rebuild-references! index))
     index)
+
+  (define (scheme-workspace-refresh-buffer! index buffer)
+    (require-index 'scheme-workspace-refresh-buffer! index)
+    (unless (buffer? buffer)
+      (assertion-violation
+        'scheme-workspace-refresh-buffer!
+        "expected a buffer"
+        buffer))
+    (sync-buffer! index buffer)
+    (let ([document
+            (hashtable-ref
+              (scheme-workspace-index-documents index)
+              (buffer-id buffer)
+              #f)])
+      (and
+        document
+        (scheme-workspace-document-snapshot document))))
 
   (define (scheme-workspace-index-source!
             index

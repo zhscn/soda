@@ -40,7 +40,7 @@
             buffer)
     (if
       workspace
-      (scheme-workspace-snapshot-for-buffer
+      (scheme-workspace-refresh-buffer!
         workspace buffer)
       (buffer-scheme-semantic-snapshot
         buffer)))
@@ -92,12 +92,11 @@
            [view (editor-base-view editor)]
            [buffer (view-buffer view)]
            [caret (view-caret view)]
-           [synchronized
+           [snapshot
              (and
-               workspace
                (scheme-buffer? buffer)
-               (scheme-workspace-sync-editor!
-                 workspace editor))]
+               (semantic-snapshot
+                 editor workspace buffer))]
            [state
              (if
                (scheme-buffer? buffer)
@@ -119,8 +118,7 @@
           (publish-highlights!
             editor
             buffer
-            (semantic-snapshot
-              editor workspace buffer)
+            snapshot
             caret)
           (clear-highlights! editor)))
       editor))

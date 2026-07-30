@@ -20,6 +20,12 @@
     (fields kind path))
 
   (define-record-type
+    (scheme-project-source-update
+      make-scheme-project-source-update
+      scheme-project-source-update?)
+    (fields path document-id revision bytes))
+
+  (define-record-type
     (scheme-project-runtime
       %make-scheme-project-runtime
       scheme-project-runtime?)
@@ -31,6 +37,9 @@
       pending
       pending-directories
       pending-sources
+      analysis-pending
+      (mutable analysis-queue)
+      (mutable analysis-timer)
       watched-directories
       watch-sources
       files-by-directory
@@ -174,6 +183,16 @@
     (hashtable-delete!
       (scheme-project-runtime-dirty-sources adapter)
       path)
+    (hashtable-delete!
+      (scheme-project-runtime-analysis-pending adapter)
+      path)
+    (scheme-project-runtime-analysis-queue-set!
+      adapter
+      (filter
+        (lambda (candidate)
+          (not (string=? candidate path)))
+        (scheme-project-runtime-analysis-queue
+          adapter)))
     (let ([pending
             (hashtable-ref
               (scheme-project-runtime-pending-sources adapter)
@@ -363,17 +382,10 @@
            (hashtable-contains?
              (scheme-project-runtime-known-sources adapter)
              path))
-         (scheme-workspace-index-source!
-           (scheme-project-runtime-workspace adapter)
-           path
-           (source-document-id adapter path)
-           (source-revision adapter path)
-           (event-data event))
-         (scheme-project-runtime-indexed-count-set!
+         (queue-source-analysis!
            adapter
-           (+ 1
-              (scheme-project-runtime-indexed-count
-                adapter)))
+           path
+           (event-data event))
          (when
            (hashtable-contains?
              (scheme-project-runtime-dirty-sources adapter)
@@ -381,6 +393,78 @@
            (refresh-source! adapter path))]
         [(negative? (event-status event))
          (remove-source! adapter path)])))
+
+  (define (arm-analysis-timer! adapter)
+    (when
+      (and
+        (not
+          (scheme-project-runtime-analysis-timer adapter))
+        (pair?
+          (scheme-project-runtime-analysis-queue adapter))
+        (not
+          (scheme-project-runtime-closed? adapter)))
+      (scheme-project-runtime-analysis-timer-set!
+        adapter
+        (runtime-start-timer!
+          (scheme-project-runtime-runtime adapter)
+          1
+          0))))
+
+  (define (queue-source-analysis!
+            adapter
+            path
+            bytes)
+    (let ([pending
+            (scheme-project-runtime-analysis-pending
+              adapter)])
+      (unless (hashtable-contains? pending path)
+        (scheme-project-runtime-analysis-queue-set!
+          adapter
+          (cons
+            path
+            (scheme-project-runtime-analysis-queue
+              adapter))))
+      (hashtable-set!
+        pending
+        path
+        (make-scheme-project-source-update
+          path
+          (source-document-id adapter path)
+          (source-revision adapter path)
+          bytes))
+      (arm-analysis-timer! adapter)))
+
+  (define (process-source-analysis! adapter)
+    (scheme-project-runtime-analysis-timer-set!
+      adapter #f)
+    (let ([queue
+            (scheme-project-runtime-analysis-queue
+              adapter)])
+      (when (pair? queue)
+        (let* ([path (car queue)]
+               [pending
+                 (scheme-project-runtime-analysis-pending
+                   adapter)]
+               [update
+                 (hashtable-ref
+                   pending path #f)])
+          (scheme-project-runtime-analysis-queue-set!
+            adapter
+            (cdr queue))
+          (when update
+            (hashtable-delete! pending path)
+            (scheme-workspace-index-source!
+              (scheme-project-runtime-workspace adapter)
+              (scheme-project-source-update-path update)
+              (scheme-project-source-update-document-id update)
+              (scheme-project-source-update-revision update)
+              (scheme-project-source-update-bytes update))
+            (scheme-project-runtime-indexed-count-set!
+              adapter
+              (+ 1
+                 (scheme-project-runtime-indexed-count
+                   adapter)))))))
+    (arm-analysis-timer! adapter))
 
   (define (install-scheme-project-runtime!
             editor
@@ -414,6 +498,9 @@
                 (make-hashtable string-hash string=?)
                 (make-hashtable string-hash string=?)
                 (make-hashtable string-hash string=?)
+                '()
+                #f
+                (make-hashtable string-hash string=?)
                 (make-eqv-hashtable)
                 (make-hashtable string-hash string=?)
                 (make-hashtable string-hash string=?)
@@ -435,8 +522,12 @@
         'scheme-project-runtime-pending-count
         "expected a Scheme project runtime"
         adapter))
-    (hashtable-size
-      (scheme-project-runtime-pending adapter)))
+    (+
+      (hashtable-size
+        (scheme-project-runtime-pending adapter))
+      (hashtable-size
+        (scheme-project-runtime-analysis-pending
+          adapter))))
 
   (define (scheme-project-runtime-close! adapter)
     (unless (scheme-project-runtime? adapter)
@@ -446,6 +537,13 @@
         adapter))
     (unless (scheme-project-runtime-closed? adapter)
       (scheme-project-runtime-closed?-set! adapter #t)
+      (when
+        (scheme-project-runtime-analysis-timer adapter)
+        (cancel-source!
+          adapter
+          (scheme-project-runtime-analysis-timer adapter))
+        (scheme-project-runtime-analysis-timer-set!
+          adapter #f))
       (let-values
         ([(sources operations)
           (hashtable-entries
@@ -472,6 +570,10 @@
         (scheme-project-runtime-pending-directories adapter))
       (hashtable-clear!
         (scheme-project-runtime-pending-sources adapter))
+      (hashtable-clear!
+        (scheme-project-runtime-analysis-pending adapter))
+      (scheme-project-runtime-analysis-queue-set!
+        adapter '())
       (hashtable-clear!
         (scheme-project-runtime-watched-directories adapter))
       (hashtable-clear!
@@ -539,6 +641,15 @@
                source
                #f)])
       (cond
+        [(and
+           (scheme-project-runtime-analysis-timer adapter)
+           (=
+             source
+             (scheme-project-runtime-analysis-timer
+               adapter))
+           (eq? (event-kind event) 'timer))
+         (process-source-analysis! adapter)
+         #t]
         [(and
            watch-path
            (eq? (event-kind event) 'path-change))

@@ -2192,6 +2192,36 @@
   (project-library-source
     "project-value"
     "  (define (project-value value) value)\n"))
+(define project-diagnostic-generation-before-command
+  (scheme-workspace-generation
+    project-diagnostic-workspace))
+(define project-diagnostic-set-before-command
+  (project-diagnostic-set))
+(editor-update!
+  project-diagnostic-editor
+  (make-command-message 'move.forward-character #f))
+(unless
+  (and
+    (=
+      (scheme-workspace-generation
+        project-diagnostic-workspace)
+      project-diagnostic-generation-before-command)
+    (eq?
+      (project-diagnostic-set)
+      project-diagnostic-set-before-command))
+  (error
+    'editor-tests
+    "ordinary commands forced a pending Scheme project catalog rebuild"
+    project-diagnostic-generation-before-command
+    (scheme-workspace-generation
+      project-diagnostic-workspace)
+    (eq?
+      (project-diagnostic-set)
+      project-diagnostic-set-before-command)
+    (and
+      project-diagnostic-set-before-command
+      (annotation-set-closed?
+        project-diagnostic-set-before-command))))
 (editor-refresh-scheme-diagnostics!
   project-diagnostic-editor)
 (define unresolved-project-diagnostic-set

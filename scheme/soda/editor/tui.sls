@@ -386,6 +386,12 @@
                         (eq? (event-kind (car events)) 'timer))
                    (refresh-terminal-size!)
                    (process (cdr events) continue?)]
+                  [(and
+                     (eq? (event-kind (car events)) 'timer)
+                     (scheme-project-runtime-handle-event
+                       scheme-project-adapter
+                       (car events)))
+                   (process (cdr events) continue?)]
                   [(memq
                      (event-kind (car events))
                      '(path-stat path-change file-read file-write))

@@ -58,12 +58,17 @@
             editor
             buffer
             current
-            workspace)
+            workspace
+            synchronize-workspace?)
     (let* ([snapshot
              (if
                workspace
-               (scheme-workspace-snapshot-for-buffer
-                 workspace buffer)
+               (if
+                 synchronize-workspace?
+                 (scheme-workspace-snapshot-for-buffer
+                   workspace buffer)
+                 (scheme-workspace-refresh-buffer!
+                   workspace buffer))
                (buffer-scheme-semantic-snapshot buffer))]
            [revision
              (scheme-semantic-snapshot-revision snapshot)]
@@ -102,11 +107,14 @@
           (next-generation current)
           '()))))
 
-  (define (editor-refresh-scheme-diagnostics! editor)
+  (define (refresh-scheme-diagnostics!
+            editor
+            synchronize-workspace?)
     (let ([workspace
             (hashtable-ref
               editor-workspaces editor #f)])
-      (when workspace
+      (when
+        (and workspace synchronize-workspace?)
         (scheme-workspace-sync-editor!
           workspace editor))
       (for-each
@@ -134,12 +142,16 @@
                    editor
                    buffer
                    current
-                   workspace))]
+                   workspace
+                   synchronize-workspace?))]
               [current
                (clear-scheme-diagnostics!
                  editor buffer current)])))
         (editor-buffers editor))
       editor))
+
+  (define (editor-refresh-scheme-diagnostics! editor)
+    (refresh-scheme-diagnostics! editor #t))
 
   (define (refresh-after-buffer-event
             editor
@@ -154,8 +166,9 @@
             effects
             condition)
     (guard (failure [else #f])
-      (editor-refresh-scheme-diagnostics!
-        (command-context-editor context))))
+      (refresh-scheme-diagnostics!
+        (command-context-editor context)
+        #f)))
 
   (define (diagnostic-item? item)
     (let ([metadata (location-item-metadata item)])

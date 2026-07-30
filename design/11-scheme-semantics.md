@@ -329,7 +329,9 @@ publisher 在 buffer 创建、major mode 变化和 revert 后同步诊断，并�
 workspace library catalog generation；项目 export surface 变化时，即使 consumer
 Buffer 没有修改，也会重新分析其 import 和诊断。新结果用更高 annotation
 generation 原子替换同 namespace 的 annotation set。空诊断集仍记录已分析
-revision 和 catalog generation，使普通光标移动只执行 freshness 检查。
+revision 和 catalog generation，使普通光标移动只执行 freshness 检查。post-command
+刷新只同步发生变化的 Buffer，并复用最近一次已提交的 library catalog；显式
+workspace 查询负责合并待处理的 Project catalog，避免输入路径触发全项目重建。
 
 ## Completion
 
@@ -409,7 +411,8 @@ editor 在每个顶层命令结束后按 Buffer revision、caret 和 workspace c
 generation 刷新当前 Scheme Buffer 的结果。结果发布到独立的
 `scheme-document-highlight` annotation namespace，使用 `symbol-highlight` face 和
 search decoration layer。selection layer 保持更高优先级，diagnostic 与 semantic
-annotation 的生命周期不受光标高亮替换影响。
+annotation 的生命周期不受光标高亮替换影响。光标刷新只同步当前 Buffer，并使用
+最近一次已提交的 Project catalog。
 
 ## 自举静态 Provider
 
@@ -498,7 +501,9 @@ name` 建立这两种身份的等价集合。references 查询在每个已索引
 成功扫描的每个目录注册独立 path watch。文件系统事件按目录合并为重新扫描请求；
 扫描结果添加、更新或删除 Project source，并为新目录递归建立 watch。每次成功读取
 递增对应 resource revision，使异步外部修改与 Buffer revision 使用同一 freshness
-规则。
+规则。file-read completion 只更新按 resource 合并的待分析队列；一次性 runtime
+timer 每个 command-loop turn 最多提交一个 source snapshot。输入、resize 和输出
+事件因而可以在大型 Project 的初始索引期间继续推进。
 后台 source snapshot 不创建 Buffer；引用位置以 `resource + revision + byte
 range` 保存，首次跳转时通过普通异步文件打开流程解析成 Buffer location。
 

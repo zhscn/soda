@@ -64,14 +64,29 @@
   (install-scheme-project-runtime!
     editor runtime root))
 
+(define observed-deferred-source-analysis? #f)
 (let loop ()
   (when
     (positive?
       (scheme-project-runtime-pending-count adapter))
     (for-each
       (lambda (event)
-        (scheme-project-runtime-handle-event
-          adapter event))
+        (let ([before
+                (scheme-project-runtime-indexed-count
+                  adapter)])
+          (scheme-project-runtime-handle-event
+            adapter event)
+          (when
+            (and
+              (eq? (event-kind event) 'file-read)
+              (zero? (event-status event))
+              (=
+                before
+                (scheme-project-runtime-indexed-count
+                  adapter)))
+            (set!
+              observed-deferred-source-analysis?
+              #t))))
       (runtime-poll! runtime))
     (loop)))
 
@@ -90,6 +105,7 @@
 
 (unless
   (and
+    observed-deferred-source-analysis?
     (= (scheme-project-runtime-indexed-count adapter) 4)
     (= (length (symbols-named "project-root-symbol")) 1)
     (= (length (symbols-named "project-nested-symbol")) 1)
