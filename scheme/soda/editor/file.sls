@@ -462,7 +462,7 @@
       'file
       `((category . file)
         (styles . (fzf))
-        (preselect . #f)
+        (preselect . #t)
         (providers . (filesystem))
         (base-directory . ,base-directory))
       vfs-path-field-boundaries

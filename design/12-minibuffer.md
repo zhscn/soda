@@ -162,7 +162,8 @@ preselect:   boolean
 styles 按顺序尝试，每个匹配结果包含 score、匹配区间和 exact 标记。presenter 使用
 匹配区间高亮 label，并对可见候选统一对齐 annotation。默认不预选 candidate；键入
 会清除 candidate selection，避免 `RET` 意外接受列表首项。需要传统首项选择行为的
-source 可以设置 `preselect`。
+source 可以设置 `preselect`。文件 reader 采用首项预选，因此目录结果出现时显示
+`1/n`；从第一项向前移动会选择原始文件名输入并显示 `*/n`，允许提交任意路径。
 
 `CompletionSession` 持有显式的选择策略：
 
