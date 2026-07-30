@@ -310,15 +310,15 @@
                           (max 1 (- line-count 1))))))
                   "%")])])
       (string-append
-        "  "
+        " "
         position
-        " ("
+        "  "
         (number->string
           (+ (editor-render-context-caret-line context) 1))
-        ","
+        ":"
         (number->string
           (editor-render-context-caret-column context))
-        ")")))
+        " ")))
 
   (define (minor-mode-names editor buffer)
     (editor-active-minor-modes editor buffer))
@@ -350,12 +350,33 @@
                   (car remaining))
                 (mode-display-name (car remaining))))))))
 
-  (define (modeline-state-text buffer)
-    (string-append
-      "-U:"
-      (if (buffer-modified? buffer) "*" "-")
-      (if (buffer-setting-ref buffer 'read-only? #f) "%" "-")
-      (if (buffer-save-pending? buffer) "S" "-")))
+  (define (input-state-label name)
+    (case name
+      [(editing) "INS"]
+      [(completion) "CMP"]
+      [(minibuffer) "MIN"]
+      [(query-replace) "RPL"]
+      [else
+       (let ([text (string-upcase (symbol->string name))])
+         (if (> (string-length text) 3)
+             (substring text 0 3)
+             text))]))
+
+  (define (modeline-state-label context buffer)
+    (if (buffer-setting-ref buffer 'read-only? #f)
+        "RO"
+        (input-state-label
+          (input-state-name
+            (view-current-input-state
+              (editor-render-context-view context))))))
+
+  (define (modeline-state-face context buffer label)
+    (cond
+      [(not (editor-render-context-focused? context)) #f]
+      [(buffer-setting-ref buffer 'read-only? #f)
+       'modeline.state.read-only]
+      [(string=? label "INS") 'modeline.state]
+      [else 'modeline.state.transient]))
 
   (define (modeline-segment
             id
@@ -375,13 +396,12 @@
   (define default-modeline-format
     '(state
       buffer
+      right-align
+      message
+      process
       position
       major-mode
       minor-modes
-      mode-close
-      process
-      right-align
-      message
       end))
 
   (define (modeline-format buffer segments)
@@ -453,6 +473,7 @@
            [message
              (and (editor-render-context-focused? context)
                   (editor-status-message editor))]
+           [state-label (modeline-state-label context buffer)]
            [segments
              (map
                (lambda (segment)
@@ -462,16 +483,18 @@
                (list
                  (modeline-segment
                    'state
-                   (modeline-state-text buffer)
-                   'modeline.status
+                   (string-append " " state-label " ")
+                   (modeline-state-face context buffer state-label)
                    100
-                   6
+                   5
                    'end)
                  (modeline-segment
                    'buffer
                    (string-append
                      " "
-                     (modeline-buffer-name buffer))
+                     (modeline-buffer-name buffer)
+                     (if (buffer-modified? buffer) " [+]" "")
+                     (if (buffer-save-pending? buffer) " [s]" ""))
                    'modeline.buffer-id
                    90
                    4
@@ -486,7 +509,7 @@
                  (modeline-segment
                    'major-mode
                    (string-append
-                     "  ("
+                     " "
                      (mode-display-name
                        (buffer-major-mode-name buffer))
                      (join-mode-names editor prominent))
@@ -498,13 +521,6 @@
                    'minor-modes
                    (if (null? hidden) "" " ≡")
                    'modeline.minor-modes
-                   50
-                   0
-                   'end)
-                 (modeline-segment
-                   'mode-close
-                   ")"
-                   'modeline.mode
                    50
                    0
                    'end)
@@ -526,13 +542,18 @@
                    (if message
                        (string-append " " message)
                        "")
-                   'modeline.message
+                   (case (and message
+                              (editor-status-message-severity editor))
+                     [(error) 'status.error]
+                     [(warning) 'status.warning]
+                     [(info) 'status.info]
+                     [else 'modeline.message])
                    20
                    0
                    'end)
                  (modeline-segment
                    'end
-                   " -%-"
+                   " "
                    'modeline.status
                    10
                    0
@@ -664,50 +685,90 @@
         (make-cell
           " "
           1
-          '(default)
-          (resolve-faces theme '(default))
+          '(editor.background)
+          (resolve-faces theme '(editor.background))
           #f
           sources))
-      (do ([row-offset 0 (+ row-offset 1)])
-          ((= row-offset (rect-rows rectangle)))
-        (let ([line
-                (+ (editor-render-context-first-line context)
-                   row-offset)])
-          (when (< line (editor-render-context-line-count context))
-            (let ([line-start (text-line-start text line)]
-                  [line-end (text-line-content-end text line)])
-              (when (positive? gutter-width)
-                (draw-string!
-                  frame
-                  (+ (rect-row rectangle) row-offset)
-                  (rect-column rectangle)
-                  gutter-width
-                  (line-number-text line gutter-width)
-                  '(line-number)
-                  (resolve-faces theme '(line-number))
-                  (list
-                    (make-cell-source
-                      'chrome
-                      'line-number
-                      line)
-                    (component-source component-id))))
-              (draw-document-line!
+      (let ([caret-line (editor-render-context-caret-line context)]
+            [cursorline?
+              (and
+                (editor-render-context-focused? context)
+                (buffer-setting-ref buffer 'show-cursorline? #f))])
+        (when cursorline?
+          (let ([caret-offset
+                  (- caret-line
+                     (editor-render-context-first-line context))])
+            (when (and (<= 0 caret-offset)
+                       (< caret-offset (rect-rows rectangle)))
+              (frame-fill-rect!
                 frame
-                text-rectangle
-                (+ (rect-row rectangle) row-offset)
-                (text-subbytevector
-                  text
+                (make-rect
+                  (+ (rect-row rectangle) caret-offset)
+                  (rect-column rectangle)
+                  1
+                  (rect-columns rectangle))
+                (make-cell
+                  " "
+                  1
+                  '(editor.background cursorline)
+                  (resolve-faces theme '(editor.background cursorline))
+                  #f
+                  sources)))))
+        (do ([row-offset 0 (+ row-offset 1)])
+            ((= row-offset (rect-rows rectangle)))
+          (let ([line
+                  (+ (editor-render-context-first-line context)
+                     row-offset)])
+            (when (< line (editor-render-context-line-count context))
+              (let* ([line-start (text-line-start text line)]
+                     [line-end (text-line-content-end text line)]
+                     [caret-row?
+                       (and
+                         (= line caret-line)
+                         (editor-render-context-focused? context))]
+                     [gutter-faces
+                       (cond
+                         [(and caret-row? cursorline?)
+                          '(line-number line-number.active cursorline)]
+                         [caret-row?
+                          '(line-number line-number.active)]
+                         [else '(line-number)])]
+                     [line-faces
+                       (if (and caret-row? cursorline?)
+                           '(default cursorline)
+                           '(default))])
+                (when (positive? gutter-width)
+                  (draw-string!
+                    frame
+                    (+ (rect-row rectangle) row-offset)
+                    (rect-column rectangle)
+                    gutter-width
+                    (line-number-text line gutter-width)
+                    gutter-faces
+                    (resolve-faces theme gutter-faces)
+                    (list
+                      (make-cell-source
+                        'chrome
+                        'line-number
+                        line)
+                      (component-source component-id))))
+                (draw-document-line!
+                  frame
+                  text-rectangle
+                  (+ (rect-row rectangle) row-offset)
+                  (text-subbytevector
+                    text
+                    line-start
+                    line-end)
                   line-start
-                  line-end)
-                line-start
-                line-end
-                (editor-render-context-tab-width context)
-                (editor-render-context-first-column context)
-                (buffer-id buffer)
-                component-id
-                '(default)
-                theme
-                styled-chunks)))))
+                  line-end
+                  (editor-render-context-tab-width context)
+                  (editor-render-context-first-column context)
+                  (buffer-id buffer)
+                  component-id
+                  line-faces
+                  theme
+                  styled-chunks))))))
       (let ([cursor-row
               (+ (rect-row text-rectangle)
                  (- (editor-render-context-caret-line context)
@@ -803,8 +864,8 @@
                  'input))]
            [input-faces
              (if input-selected?
-                 '(minibuffer-input completion-selected)
-                 '(minibuffer-input))]
+                 '(minibuffer.input popup.selected)
+                 '(minibuffer.input))]
            [component-id 'editor.minibuffer]
            [sources
              (list
@@ -881,8 +942,8 @@
             (rect-column rectangle)
             indicator-columns
             indicator
-            '(minibuffer-prompt)
-            (resolve-faces theme '(minibuffer-prompt))
+            '(minibuffer.prompt)
+            (resolve-faces theme '(minibuffer.prompt))
             sources)
           (draw-string!
             frame
@@ -890,8 +951,8 @@
             (+ (rect-column rectangle) indicator-columns)
             prompt-columns
             prompt
-            '(minibuffer-prompt)
-            (resolve-faces theme '(minibuffer-prompt))
+            '(minibuffer.prompt)
+            (resolve-faces theme '(minibuffer.prompt))
             sources)
           (dynamic-wind
             (lambda () #f)
@@ -1054,8 +1115,8 @@
         (make-cell
           " "
           1
-          '(completion)
-          (resolve-faces theme '(completion))
+          '(popup)
+          (resolve-faces theme '(popup))
           #f
           background-sources))
       (when completion
@@ -1071,8 +1132,8 @@
                 (completion-session-pending? completion)
                 "[Pending completions]"
                 "[No match]")
-              '(completion)
-              (resolve-faces theme '(completion))
+              '(popup)
+              (resolve-faces theme '(popup))
               background-sources)
             (let* ([start
                      (let* ([rows (rect-rows rectangle)]
@@ -1128,51 +1189,94 @@
                          0
                          (-
                            (rect-columns rectangle)
+                           (if (> (length items) (rect-rows rectangle))
+                               1
+                               0)
                            (string-cell-width indicator 8))))])
-              (do ([row 0 (+ row 1)])
-                  ((= row (length visible)))
-                (let* ([item (list-ref visible row)]
-                       [item-index (+ start row)]
-                       [selected?
-                         (and selected (= selected item-index))]
-                       [style
-                         (if selected?
-                             (resolve-faces
-                               theme
-                               '(completion-selected))
-                             (resolve-faces theme '(default)))]
-                       [faces
-                         (if selected?
-                             '(completion-selected)
-                             '(completion))]
-                       [sources
-                         (list
-                           (make-cell-source
-                             'completion
-                             (completion-item-id item)
-                             (completion-item-source item))
-                           (component-source component-id))])
-                  (frame-fill-rect!
-                    frame
-                    (make-rect
+              (let* ([total (length items)]
+                     [visible-rows (length visible)]
+                     [scrollbar? (> total visible-rows)]
+                     [item-columns
+                       (max
+                         0
+                         (- (rect-columns rectangle)
+                            (if scrollbar? 1 0)))]
+                     [thumb-rows
+                       (and scrollbar?
+                            (max
+                              1
+                              (div
+                                (* visible-rows visible-rows)
+                                total)))]
+                     [thumb-start
+                       (and scrollbar?
+                            (min
+                              (- visible-rows thumb-rows)
+                              (div (* start visible-rows) total)))])
+                (do ([row 0 (+ row 1)])
+                    ((= row visible-rows))
+                  (let* ([item (list-ref visible row)]
+                         [item-index (+ start row)]
+                         [selected?
+                           (and selected (= selected item-index))]
+                         [style
+                           (if selected?
+                               (resolve-faces
+                                 theme
+                                 '(popup.selected))
+                               (resolve-faces theme '(popup)))]
+                         [faces
+                           (if selected?
+                               '(popup.selected)
+                               '(popup))]
+                         [sources
+                           (list
+                             (make-cell-source
+                               'completion
+                               (completion-item-id item)
+                               (completion-item-source item))
+                             (component-source component-id))])
+                    (frame-fill-rect!
+                      frame
+                      (make-rect
+                        (+ (rect-row rectangle) row)
+                        (rect-column rectangle)
+                        1
+                        (rect-columns rectangle))
+                      (make-cell " " 1 faces style #f sources))
+                    (draw-completion-item!
+                      frame
                       (+ (rect-row rectangle) row)
                       (rect-column rectangle)
-                      1
-                      (rect-columns rectangle))
-                    (make-cell " " 1 faces style #f sources))
-                  (draw-completion-item!
-                    frame
-                    (+ (rect-row rectangle) row)
-                    (rect-column rectangle)
-                    (rect-columns rectangle)
-                    item
-                    (completion-session-item-match completion item)
-                    selected?
-                    faces
-                    style
-                    theme
-                    sources
-                    annotation-column)))
+                      item-columns
+                      item
+                      (completion-session-item-match completion item)
+                      selected?
+                      faces
+                      style
+                      theme
+                      sources
+                      annotation-column)
+                    (when
+                      (and
+                        scrollbar?
+                        (<= thumb-start row)
+                        (< row (+ thumb-start thumb-rows))
+                        (positive? (rect-columns rectangle)))
+                      (frame-put-cell!
+                        frame
+                        (+ (rect-row rectangle) row)
+                        (+ (rect-column rectangle)
+                           (- (rect-columns rectangle) 1))
+                        (make-cell
+                          " "
+                          1
+                          '(popup popup.scrollbar)
+                          (resolve-faces
+                            theme
+                            '(popup popup.scrollbar))
+                          #f
+                          background-sources))))))
               (when indicator
                 (draw-string!
                   frame
@@ -1180,8 +1284,8 @@
                   (+ (rect-column rectangle) indicator-column)
                   (- (rect-columns rectangle) indicator-column)
                   indicator
-                  '(completion)
-                  (resolve-faces theme '(completion))
+                  '(popup)
+                  (resolve-faces theme '(popup))
                   background-sources))))))))
 
   (define editor-text-component

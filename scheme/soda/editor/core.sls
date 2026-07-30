@@ -148,6 +148,7 @@
           editor-pending-keys
           editor-pending-prefix
           editor-status-message
+          editor-status-message-severity
           editor-set-status-message!
           editor-user-error
           editor-user-error-condition?
@@ -707,6 +708,18 @@
           #f
           boolean?
           "Whether editing commands may modify the buffer."
+          'chrome)
+        (make-setting-definition
+          'show-line-numbers?
+          #f
+          boolean?
+          "Whether the view renders a line-number gutter."
+          'chrome)
+        (make-setting-definition
+          'show-cursorline?
+          #f
+          boolean?
+          "Whether the focused view highlights the caret line."
           'chrome)
         (make-setting-definition
           'track-modified?

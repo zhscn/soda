@@ -228,6 +228,7 @@
           [terminal-columns 0]
           [output-state (make-terminal-output-state)]
           [output-source #f]
+          [cursor-color #f]
           [decoder (make-input-decoder)]
           [executor (make-effect-executor)]
           [file-adapter #f]
@@ -270,6 +271,33 @@
       (define (queue-frame! frame)
         (terminal-output-request-frame! output-state frame)
         (flush-output!))
+      (define (color-hex component)
+        (let ([text (number->string component 16)])
+          (if (= (string-length text) 1)
+              (string-append "0" text)
+              text)))
+      (define (theme-cursor-color)
+        (let ([spec
+                (theme-resolve-faces
+                  (editor-theme editor)
+                  '(cursor))])
+          (let ([background (face-spec-background spec)])
+            (and (vector? background) background))))
+      (define (cursor-color-control color)
+        (if color
+            (string-append
+              (ansi "]12;#")
+              (color-hex (vector-ref color 0))
+              (color-hex (vector-ref color 1))
+              (color-hex (vector-ref color 2))
+              "\a")
+            (string-append (ansi "]112") "\a")))
+      (define (sync-cursor-color!)
+        (let ([color (theme-cursor-color)])
+          (unless (equal? color cursor-color)
+            (set! cursor-color color)
+            (queue-control-output!
+              (cursor-color-control color)))))
       (define (drain-output!)
         (let loop ()
           (when (terminal-output-pending? output-state)
@@ -304,6 +332,7 @@
           (when (not (= generation rendered-generation))
             (set! rendered-generation generation)
             (editor-take-dirty-reasons! editor)
+            (sync-cursor-color!)
             (queue-frame!
               (render-editor-frame
                 editor
@@ -468,6 +497,9 @@
               (terminal-write!
                 terminal
                 (string-append
+                  (if cursor-color
+                      (string-append (ansi "]112") "\a")
+                      "")
                   (ansi "[<u")
                   (ansi "[?2004l")
                   (ansi "[?7h")
@@ -495,6 +527,14 @@
               resource
               new-file?
               (lambda (editor)
+                (editor-set-global-setting!
+                  editor
+                  'show-line-numbers?
+                  #t)
+                (editor-set-global-setting!
+                  editor
+                  'show-cursorline?
+                  #t)
                 (when observed-state
                   (buffer-set-local-setting!
                     (view-buffer (editor-active-view editor))

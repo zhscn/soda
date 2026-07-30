@@ -689,9 +689,10 @@
                  (cell-sources text-cell))
                (memq 'modeline (cell-faces modeline-cell))
                (memq 'modeline.active (cell-faces modeline-cell))
+               (memq 'modeline.state (cell-faces modeline-cell))
                (equal?
                  (style-background (cell-style modeline-cell))
-                 (vector #x31 #x32 #x44))
+                 (vector #xb4 #xbe #xfe))
                (memq 'bold
                      (style-attributes (cell-style modeline-cell)))
                (component-node? layout)
@@ -3397,9 +3398,9 @@
                (string=? (cell-text (frame-cell-ref prompt-frame 1 7)) "M")
                (string=? (cell-text (frame-cell-ref prompt-frame 1 11)) "t")
                (eq? (cell-face (frame-cell-ref prompt-frame 1 0))
-                    'minibuffer-prompt)
+                    'minibuffer.prompt)
                (eq? (cell-face (frame-cell-ref prompt-frame 1 11))
-                    'minibuffer-input)
+                    'minibuffer.input)
                (not
                  (equal?
                    (style-background
@@ -3523,7 +3524,7 @@
         (= (completion-session-viewport-start completion) 1)
         (= selected-row
            (+ (rect-row (component-node-rect node)) 4))
-        (memq 'completion-selected (cell-faces selected-cell)))
+        (memq 'popup.selected (cell-faces selected-cell)))
       (error 'editor-tests
              "reverse completion navigation kept selection at the bottom"
              (completion-session-selected-index completion)
@@ -3798,7 +3799,7 @@
         'test.minor-mode-map
         (editor-minor-mode-keymap-layers
           prompt-editor prompt-buffer))
-      (string-contains? modeline "(Fundamental Test)"))
+      (string-contains? modeline "Fundamental Test"))
     (error 'editor-tests
            "minor mode lifecycle, keymap, or lighter was not applied"
            modeline)))
@@ -4134,7 +4135,7 @@
       (and
         (string=? (cell-text (frame-cell-ref frame row 0)) "*")
         (eq? (cell-face (frame-cell-ref frame row 13))
-             'completion-selected))
+             'popup.selected))
       (error 'editor-tests
              "free prompt selection was not represented by */N"
              (cell-text (frame-cell-ref frame row 0))
@@ -4154,7 +4155,7 @@
       (and
         (string=? (cell-text (frame-cell-ref frame row 0)) "1")
         (eq? (cell-face (frame-cell-ref frame row 13))
-             'minibuffer-input))
+             'minibuffer.input))
       (error 'editor-tests
              "candidate selection was not represented by its index"
              (cell-text (frame-cell-ref frame row 0))
@@ -5564,17 +5565,17 @@
 (define full-modeline-mode-position
   (substring-position
     full-modeline-text
-    "(Fundamental Auto Fill ≡)"))
+    "Fundamental Auto Fill"))
 (unless
   (and
-    (string-contains? full-modeline-text "-U:---")
+    (string-contains? full-modeline-text " INS ")
     (string-contains?
       full-modeline-text
       "a-very-long-buffer-name.scm")
-    (string-contains? full-modeline-text "All (1,0)")
+    (string-contains? full-modeline-text "All  1:0")
     (string-contains?
       full-modeline-text
-      "(Fundamental Auto Fill ≡)")
+      "Fundamental Auto Fill ≡")
     full-modeline-mode-position
     (eq?
       (cell-face
@@ -5583,15 +5584,17 @@
           2
           (+
             full-modeline-mode-position
-            (- (string-length "(Fundamental Auto Fill ≡)") 1))))
+            (- (string-length "Fundamental Auto Fill") 1))))
       'modeline.mode)
-    (string-contains? full-modeline-text "-%-")
+    (eq?
+      (cell-face (frame-cell-ref full-modeline-frame 2 0))
+      'modeline.state)
     (eq?
       (cell-face
         (frame-cell-ref full-modeline-frame 2 7))
       'modeline.buffer-id))
   (error 'editor-tests
-         "full modeline did not use Emacs-compatible segments"
+         "full modeline did not use Helix-style segments"
          full-modeline-text))
 (define narrow-modeline-frame
   (render-editor-frame modeline-editor 3 12))
@@ -5599,7 +5602,7 @@
   (frame-row-text narrow-modeline-frame 2))
 (unless
   (and
-    (string-contains? narrow-modeline-text "-U:---")
+    (string-contains? narrow-modeline-text " INS ")
     (string-contains? narrow-modeline-text "…")
     (not (string-contains? narrow-modeline-text "Fundamental"))
     (not (string-contains? narrow-modeline-text "Auto Fill")))
@@ -5616,11 +5619,11 @@
     2))
 (unless
   (and
-    (not (string-contains? custom-modeline-text "-U:---"))
+    (not (string-contains? custom-modeline-text " INS "))
     (string-contains?
       custom-modeline-text
       "a-very-long-buffer-name.scm")
-    (string-contains? custom-modeline-text "All (1,0)"))
+    (string-contains? custom-modeline-text "All  1:0"))
   (error 'editor-tests
          "buffer-local modeline format was not applied"
          custom-modeline-text))
@@ -6880,3 +6883,84 @@
          "editor close did not release extension resources"))
 
 (editor-close! configuration-editor)
+
+(define chrome-document (make-document "alpha\nbeta\ngamma" 9902))
+(define chrome-buffer
+  (make-buffer
+    9902
+    chrome-document
+    "*chrome*"
+    'fundamental-mode))
+(define chrome-editor (make-editor chrome-buffer))
+(editor-set-global-setting! chrome-editor 'show-line-numbers? #t)
+(editor-set-global-setting! chrome-editor 'show-cursorline? #t)
+(editor-update! chrome-editor (make-resize-message 4 20))
+(editor-update!
+  chrome-editor
+  (make-command-message 'move.next-line #f))
+(define chrome-frame (render-editor-frame chrome-editor 4 20))
+(let ([active-number (frame-cell-ref chrome-frame 1 1)]
+      [inactive-number (frame-cell-ref chrome-frame 0 1)]
+      [caret-line-cell (frame-cell-ref chrome-frame 1 10)]
+      [other-line-cell (frame-cell-ref chrome-frame 0 10)])
+  (unless
+    (and
+      (string=? (cell-text active-number) "2")
+      (memq 'line-number.active (cell-faces active-number))
+      (memq 'cursorline (cell-faces active-number))
+      (equal?
+        (style-background (cell-style active-number))
+        (vector #x31 #x32 #x44))
+      (string=? (cell-text inactive-number) "1")
+      (not
+        (memq 'line-number.active (cell-faces inactive-number)))
+      (memq 'cursorline (cell-faces caret-line-cell))
+      (equal?
+        (style-background (cell-style caret-line-cell))
+        (vector #x31 #x32 #x44))
+      (equal?
+        (style-background (cell-style other-line-cell))
+        (vector #x1e #x1e #x2e)))
+    (error 'editor-tests
+           "cursorline and active line number were not rendered"
+           (cell-faces active-number)
+           (cell-faces caret-line-cell))))
+(buffer-set-local-setting! chrome-buffer 'read-only? #t)
+(define chrome-ro-frame (render-editor-frame chrome-editor 4 20))
+(let ([state-cell (frame-cell-ref chrome-ro-frame 3 1)])
+  (unless
+    (and
+      (string=? (cell-text state-cell) "R")
+      (eq? (cell-face state-cell) 'modeline.state.read-only)
+      (equal?
+        (style-background (cell-style state-cell))
+        (vector #xfa #xb3 #x87)))
+    (error 'editor-tests
+           "read-only state block was not rendered"
+           (cell-text state-cell)
+           (cell-faces state-cell))))
+(editor-set-status-message! chrome-editor "boom" 'error)
+(define chrome-message-frame
+  (render-editor-frame chrome-editor 4 60))
+(define chrome-message-text
+  (frame-row-text chrome-message-frame 3))
+(define chrome-message-position
+  (substring-position chrome-message-text "boom"))
+(unless
+  (and
+    (string=? (editor-status-message chrome-editor) "boom")
+    (eq?
+      (editor-status-message-severity chrome-editor)
+      'error)
+    chrome-message-position
+    (eq?
+      (cell-face
+        (frame-cell-ref
+          chrome-message-frame
+          3
+          chrome-message-position))
+      'status.error))
+  (error 'editor-tests
+         "status severity did not style the message"
+         chrome-message-text))
+(editor-close! chrome-editor)

@@ -106,6 +106,7 @@
           editor-pending-keys
           editor-set-pending-keys!
           editor-status-message
+          editor-status-message-severity
           editor-set-status-message!
           editor-theme-catalog
           editor-register-theme!
@@ -273,8 +274,8 @@
                editor-completion-effects
                editor-completion-effects-set!)
       (mutable status-message
-               editor-status-message
-               editor-status-message-set!)
+               %editor-status-message
+               %editor-status-message-set!)
       (mutable kill-ring editor-kill-ring editor-kill-ring-set!)
       (mutable last-yank editor-last-yank editor-last-yank-set!)
       (mutable current-location-list
@@ -3322,14 +3323,37 @@
     (require-open-editor 'editor-set-pending-keys! value)
     (view-pending-keys-set! (editor-active-view value) sequence))
 
-  (define (editor-set-status-message! value message)
-    (require-open-editor 'editor-set-status-message! value)
-    (unless (or (not message) (string? message))
-      (assertion-violation
-        'editor-set-status-message!
-        "status message must be a string or #f"
-        message))
-    (editor-status-message-set! value message))
+  (define editor-set-status-message!
+    (case-lambda
+      [(value message)
+       (editor-set-status-message! value message #f)]
+      [(value message severity)
+       (require-open-editor 'editor-set-status-message! value)
+       (unless (or (not message) (string? message))
+         (assertion-violation
+           'editor-set-status-message!
+           "status message must be a string or #f"
+           message))
+       (unless (memq severity '(#f info warning error))
+         (assertion-violation
+           'editor-set-status-message!
+           "status severity must be #f, info, warning, or error"
+           severity))
+       (%editor-status-message-set!
+         value
+         (if (and message severity)
+             (cons severity message)
+             message))]))
+
+  (define (editor-status-message value)
+    (let ([message (%editor-status-message value)])
+      (if (pair? message)
+          (cdr message)
+          message)))
+
+  (define (editor-status-message-severity value)
+    (let ([message (%editor-status-message value)])
+      (and (pair? message) (car message))))
 
   (define (editor-invalidate! value reason)
     (require-open-editor 'editor-invalidate! value)

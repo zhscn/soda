@@ -133,10 +133,12 @@ editor.background
 editor.foreground
 cursor
 selection
+cursorline
 line-number
 line-number.active
 modeline.active
 modeline.inactive
+modeline.state
 minibuffer.prompt
 popup
 popup.selected
@@ -144,6 +146,17 @@ status.info
 status.warning
 status.error
 ```
+
+`cursorline` 为 focused View 的 caret 行提供整行背景；`line-number.active` 高亮
+caret 行的行号。两者与行号 gutter 由 `show-cursorline?` 和 `show-line-numbers?`
+设置控制；TUI 入口在启动时把两者的 editor 全局值设为开启，库层默认保持关闭，
+buffer local 设置仍可覆盖。
+
+`editor.background` 覆盖正文以外的文本区填充；`popup` 与 `popup.selected`
+覆盖 completion 等 caret-relative 临时层，实现另提供 `popup.scrollbar`、
+`minibuffer.input` 与 `completion-match` 扩展 role。`cursor` role 的背景色
+定义终端光标颜色：TUI 会话在首帧与主题切换时发射 OSC 12，退出时以 OSC 112
+复位；theme 未给出具体颜色时不发射。
 
 chrome component 通过 role 请求 face。syntax provider、annotation producer 和
 View decoration 也只发布 face identity。默认 theme 为每个内建 role 和通用 syntax
@@ -195,26 +208,32 @@ ModelineSpan {
 }
 ```
 
-默认格式沿用 Emacs 的信息层次，并以 `right-align` 分隔左右区域：
+默认格式向 Helix statusline 靠拢，并以 `right-align` 分隔左右区域：
 
 ```scheme
 (state
  buffer
+ right-align
+ message
+ process
  position
  major-mode
  minor-modes
- mode-close
- process
- right-align
- message
  end)
 ```
 
 Buffer local `modeline-format` 可以重排、隐藏这些 segment 或移动
-`right-align`。`state` 显示字符编码、modified、read-only 和 pending-save
-状态；`buffer` 使用 buffer identification 而不是完整资源路径；`position`
-显示 Top、Bot、All 或百分比以及一基行号、零基列号；mode 区域显示 major mode、
-minor modes 和 interaction process；focused View 的 Editor message 位于右侧。
+`right-align`。`state` 是彩色 mode block：read-only buffer 显示 `RO` 并使用
+`modeline.state.read-only`；基础 `editing` input state 显示 `INS` 并使用
+`modeline.state`；其余瞬时 input state 显示三字母缩写并使用
+`modeline.state.transient`。非 focused Window 的 state segment 不着色。
+`buffer` 使用 buffer identification 而不是完整资源路径，并附加 `[+]`
+modified 与 `[s]` pending-save 标记；`position` 显示 Top、Bot、All 或百分比
+以及一基行号、零基列号；mode 区域显示 major mode、minor modes 和 interaction
+process；focused View 的 Editor message 位于右侧。message 可携带 info、
+warning、error severity，message segment 相应使用 `status.info`、
+`status.warning`、`status.error` face，无 severity 时使用
+`modeline.message`。
 
 布局器按 display cell width 计算 Unicode 文本。宽度不足时依次收缩低优先级
 segment；buffer identification 保留最小宽度并从中间省略，使同名文件的前后信息
@@ -223,8 +242,8 @@ segment；buffer identification 保留最小宽度并从中间省略，使同名
 
 Minor mode 使用 Minions 风格的默认呈现。Buffer local `minor-modes` 保存有序的
 active mode 名称，`modeline-prominent-minor-modes` 指定仍在 mode 区域直接显示的
-子集；其余 active minor modes 折叠为 `≡`。包围 mode 区域的括号使用
-`modeline.mode`，折叠标记单独使用 `modeline.minor-modes`。segment 的 chrome source 保留
+子集；其余 active minor modes 折叠为 `≡`。mode 名称使用 `modeline.mode`，
+折叠标记单独使用 `modeline.minor-modes`。segment 的 chrome source 保留
 `minor-modes` identity，供 TUI picker、鼠标前端和 describe 工具解析，而无需从
 绘制文本反推状态。
 
@@ -233,6 +252,9 @@ modeline 使用分层 chrome face：
 ```text
 modeline.active
 modeline.inactive
+modeline.state
+modeline.state.read-only
+modeline.state.transient
 modeline.buffer-id
 modeline.status
 modeline.position
