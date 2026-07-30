@@ -18,6 +18,7 @@
         (soda editor scheme-interface-commands)
         (soda editor scheme-interface-index)
         (soda editor scheme-interface-runtime)
+        (soda editor scheme-project-build-runtime)
         (soda editor scheme-project-session)
         (soda editor scheme-semantics)
         (soda editor scheme-workspace)
@@ -52,6 +53,38 @@
       (string=?
         prefix
         (substring value 0 prefix-length)))))
+(define (string-contains? value needle)
+  (let ([limit
+          (-
+            (string-length value)
+            (string-length needle))])
+    (let loop ([index 0])
+      (and
+        (<= index limit)
+        (or
+          (string=?
+            needle
+            (substring
+              value
+              index
+              (+ index
+                 (string-length needle))))
+          (loop (+ index 1)))))))
+(define (buffer-string buffer)
+  (let ([snapshot
+          (document-snapshot
+            (buffer-document buffer))])
+    (dynamic-wind
+      (lambda () #f)
+      (lambda ()
+        (let ([text (snapshot-text snapshot)])
+          (dynamic-wind
+            (lambda () #f)
+            (lambda ()
+              (utf8->string
+                (text->bytevector text)))
+            (lambda () (text-close! text)))))
+      (lambda () (snapshot-close! snapshot)))))
 (define consumer-source
   (string-append
     "(import (rnrs))\n"
@@ -124,6 +157,10 @@
 (scheme-interface-index-write-file!
   compiled-interface-index
   compiled-interface-path)
+(define compiled-interface-next-path
+  (vfs-path-join root "compiled-interface-next.fasl"))
+(when (file-exists? compiled-interface-next-path)
+  (delete-file compiled-interface-next-path))
 (define compiled-project-path
   (vfs-path-join root "soda-project.scm"))
 (when (file-exists? compiled-project-path)
@@ -132,15 +169,32 @@
   compiled-project-path
   (lambda (port)
     (write
-      '(soda-scheme-project
-         (format-version 1)
-         (interface-index
-           "compiled-interface.fasl"))
+      (list
+        'soda-scheme-project
+        '(format-version 1)
+        '(interface-index
+           "compiled-interface.fasl")
+        (list
+          'build-command
+          (list
+            "/bin/sh"
+            "-c"
+            (string-append
+              "printf 'building fixture\\n'; "
+              "/bin/cp \"$1\" \"$2\"")
+            "soda-build"
+            compiled-interface-next-path
+            compiled-interface-path))
+        '(working-directory "."))
       port)))
 (define compiled-interface-executor
   (make-effect-executor))
 (define compiled-interface-adapter
   (install-scheme-interface-runtime!
+    compiled-interface-executor
+    runtime))
+(define compiled-build-adapter
+  (install-scheme-project-build-runtime!
     compiled-interface-executor
     runtime))
 (execute-effects!
@@ -172,8 +226,6 @@
                 (set! loaded? #t))))))
       (runtime-poll! runtime))
     (unless loaded? (load-loop))))
-(delete-file compiled-project-path)
-(delete-file compiled-interface-path)
 
 (define compiled-consumer-source
   (string-append
@@ -243,8 +295,7 @@
 
 (define compiled-interface-generation
   (scheme-workspace-generation workspace))
-(scheme-workspace-install-interface-index!
-  workspace
+(scheme-interface-index-write-file!
   (scheme-sources->interface-index
     "fixture-build"
     "content-revision-2"
@@ -256,8 +307,59 @@
             "(library (fixture compiled-dependency)\n"
             "  (export compiled-call)\n"
             "  (import (rnrs))\n"
-            "  (define (compiled-call value) value))\n"))))))
-(scheme-workspace-sync-editor! workspace editor)
+            "  (define (compiled-call value) value))\n")))))
+  compiled-interface-next-path)
+(execute-effects!
+  compiled-interface-executor
+  (editor-update!
+    editor
+    (make-internal-command-message
+      'scheme.build-project-path
+      compiled-project-path)))
+(let build-loop ()
+  (for-each
+    (lambda (event)
+      (let ([build-message
+              (scheme-project-build-runtime-handle-event
+                compiled-build-adapter
+                event)]
+            [interface-message
+              (scheme-interface-runtime-handle-event
+                compiled-interface-adapter
+                event)])
+        (when build-message
+          (execute-effects!
+            compiled-interface-executor
+            (editor-update! editor build-message)))
+        (when interface-message
+          (execute-effects!
+            compiled-interface-executor
+            (editor-update! editor interface-message)))))
+    (runtime-poll! runtime))
+  (unless
+    (>
+      (scheme-workspace-generation workspace)
+      compiled-interface-generation)
+    (build-loop)))
+(let ([build-buffer
+        (editor-buffer-for-resource
+          editor
+          "*scheme-build*")])
+  (unless
+    (and
+      build-buffer
+      (string-contains?
+        (buffer-string build-buffer)
+        "building fixture")
+      (string-contains?
+        (buffer-string build-buffer)
+        "Scheme build finished"))
+    (error
+      'scheme-project-runtime-tests
+      "Scheme build transcript did not retain process output")))
+(delete-file compiled-project-path)
+(delete-file compiled-interface-path)
+(delete-file compiled-interface-next-path)
 (let* ([snapshot
          (scheme-workspace-snapshot-for-buffer
            workspace

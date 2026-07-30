@@ -14,6 +14,7 @@
           (soda editor file-runtime)
           (soda editor repl)
           (soda editor scheme-interface-runtime)
+          (soda editor scheme-project-build-runtime)
           (soda editor vfs-runtime)
           (soda runtime)
           (soda vfs)
@@ -222,6 +223,7 @@
           [executor (make-effect-executor)]
           [file-adapter #f]
           [scheme-interface-adapter #f]
+          [scheme-project-build-adapter #f]
           [vfs-adapter #f])
       (define (cancel-flush-timer!)
         (when flush-timer
@@ -338,6 +340,9 @@
       (set! scheme-interface-adapter
         (install-scheme-interface-runtime!
           executor runtime))
+      (set! scheme-project-build-adapter
+        (install-scheme-project-build-runtime!
+          executor runtime))
       (set! vfs-adapter
         (install-vfs-runtime! editor runtime))
       (install-interaction-effect-handler! executor editor)
@@ -414,6 +419,21 @@
                    (let ([message
                            (vfs-runtime-handle-event
                              vfs-adapter
+                             (car events))])
+                     (process
+                       (cdr events)
+                       (and
+                         continue?
+                         (or
+                           (not message)
+                           (handle-session-message!
+                             message)))))]
+                  [(memq
+                     (event-kind (car events))
+                     '(process-output process-exit))
+                   (let ([message
+                           (scheme-project-build-runtime-handle-event
+                             scheme-project-build-adapter
                              (car events))])
                      (process
                        (cdr events)

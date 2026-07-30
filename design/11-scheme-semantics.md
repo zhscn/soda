@@ -556,15 +556,25 @@ Scheme project manifest 把一次显式 language session 连接到构建产物�
 ```scheme
 (soda-scheme-project
   (format-version 1)
-  (interface-index "build/scheme-interfaces.fasl"))
+  (interface-index "build/scheme-interfaces.fasl")
+  (build-command
+    ("scheme" "--script" "tools/build-project.ss"))
+  (working-directory "."))
 ```
 
 `interface-index` 相对 manifest 所在目录解析。`scheme.load-project` 异步读取并验证
 manifest，再安装对应 interface index；`scheme.unload-project` 从当前已安装的 owner
 中选择并撤销 session。加载普通文件、识别 Project root 和枚举 Project resource
-不会启动 Scheme 索引。构建过程调用 `scheme-sources->interface-index-file!`，将本次
-实际参与编译的 source 集合写入 manifest 指向的产物；成功构建后重新加载同一
-manifest 即可按 owner 替换 language surface。
+不会启动 Scheme 索引。`build-command` 是直接传给 process runtime 的 argument
+vector，`working-directory` 相对 manifest 所在目录解析；两者省略时 manifest 仍可
+作为只加载 artifact 的 session。
+
+`scheme.build-project` 只列出已经显式加载且声明 build command 的 manifest。构建
+stdout/stderr 增量写入 `*scheme-build*` Buffer，不阻塞 command loop；同一 manifest
+同时只运行一个 build，`scheme.cancel-project-build` 终止活动 process。构建过程调用
+`scheme-sources->interface-index-file!`，将本次实际参与编译的 source 集合、owner
+和内容 revision 写入 manifest 指向的产物。process 成功退出后 Editor 异步读取该
+artifact，并按 owner 原子替换 language surface；构建失败保留原 interface index。
 
 目录扫描 runtime 是显式启用的 source adapter。它以 libuv directory scan 发现
 `.scm`、`.ss`、`.sls` 和 `.sps`，再以异步 file read 把源码交给 workspace，并为
