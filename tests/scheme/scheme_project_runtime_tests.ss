@@ -7,10 +7,12 @@
               mkdir)
         (soda document)
         (soda editor buffer)
+        (soda editor command)
         (soda editor completion-runtime)
         (soda editor core)
         (soda editor effect)
         (soda editor file)
+        (soda editor file-runtime)
         (soda editor scheme-project-runtime)
         (soda editor scheme-query)
         (soda editor scheme-semantics)
@@ -36,6 +38,14 @@
           value
           (- value-length suffix-length)
           value-length)))))
+(define (string-prefix? prefix value)
+  (let ([prefix-length (string-length prefix)]
+        [value-length (string-length value)])
+    (and
+      (<= prefix-length value-length)
+      (string=?
+        prefix
+        (substring value 0 prefix-length)))))
 (define consumer-source
   (string-append
     "(import (rnrs))\n"
@@ -160,6 +170,42 @@
       scheme-definition-name
       (scheme-semantic-snapshot-visible-index-definitions
         project-consumer-snapshot))))
+
+(define project-rename-edits
+  (scheme-workspace-rename-edits
+    workspace
+    editor
+    (car project-root-definitions)
+    "project-root-renamed"))
+(unless
+  (and
+    (>= (length project-rename-edits) 3)
+    (exists
+      (lambda (edit)
+        (and
+          (not
+            (scheme-workspace-text-edit-buffer-id edit))
+          (string=?
+            (scheme-workspace-text-edit-resource edit)
+            root-resource)
+          (string=?
+            (scheme-workspace-text-edit-text edit)
+            "project-root-renamed")))
+      project-rename-edits)
+    (exists
+      (lambda (edit)
+        (and
+          (equal?
+            (scheme-workspace-text-edit-buffer-id edit)
+            (buffer-id project-consumer-buffer))
+          (string=?
+            (scheme-workspace-text-edit-text edit)
+            "project-root-renamed")))
+      project-rename-edits))
+  (error
+    'scheme-project-runtime-tests
+    "workspace rename did not cover the project declaration, export, and consumer"
+    project-rename-edits))
 
 (editor-set-view-buffer!
   editor
@@ -475,6 +521,113 @@
 
 (scheme-project-runtime-close! watched-adapter)
 (delete-directory watched-root)
+
+(scheme-workspace-index-source!
+  workspace
+  root-resource
+  1001
+  2
+  (call-with-input-file
+    root-resource
+    (lambda (port)
+      (string->utf8
+        (get-string-all port)))))
+(scheme-workspace-sync-editor! workspace editor)
+(define final-root-symbol
+  (car (symbols-named "project-root-symbol")))
+(define final-rename-executor
+  (make-effect-executor))
+(define final-file-adapter
+  (install-file-runtime!
+    final-rename-executor runtime))
+(define final-rename-context
+  (make-command-context
+    editor
+    (editor-active-view editor)
+    #f
+    #f))
+(define final-rename-effects
+  ((command-procedure
+     (editor-command-registry editor)
+     'scheme.rename)
+   final-rename-context
+   (scheme-workspace-symbol-definition
+     final-root-symbol)
+   "project-root-final"))
+
+(unless
+  (and
+    (= (length final-rename-effects) 2)
+    (for-all
+      (lambda (effect)
+        (and
+          (eq?
+            (command-effect-kind effect)
+            'file.read)
+          (not
+            (open-request-view-id
+              (command-effect-payload effect)))))
+      final-rename-effects)
+    (exists
+      (lambda (effect)
+        (string=?
+          (open-request-path
+            (command-effect-payload effect))
+          root-resource))
+      final-rename-effects))
+  (error
+    'scheme-project-runtime-tests
+    "rename did not request an unopened target as a background read"
+    final-rename-effects))
+
+(execute-effects!
+  final-rename-executor
+  final-rename-effects)
+(define final-rename-timeout
+  (runtime-start-timer! runtime 10 10))
+(let loop ([turn 0])
+  (when (= turn 100)
+    (error
+      'scheme-project-runtime-tests
+      "background rename did not finish"
+      (editor-status-message editor)
+      (map buffer-resource (editor-buffers editor))))
+  (unless
+    (and
+      (editor-buffer-for-resource editor root-resource)
+      (let ([message
+              (editor-status-message editor)])
+        (and
+          message
+          (string-prefix?
+            "Renamed to project-root-final"
+            message))))
+    (for-each
+      (lambda (event)
+        (scheme-project-runtime-handle-event
+          adapter event)
+        (let ([message
+                (file-runtime-handle-event
+                  final-file-adapter event)])
+          (when message
+            (editor-update! editor message))))
+      (runtime-poll! runtime))
+    (loop (+ turn 1))))
+(runtime-cancel! runtime final-rename-timeout)
+
+(unless
+  (and
+    (not
+      (eq?
+        (view-buffer (editor-active-view editor))
+        (editor-buffer-for-resource
+          editor root-resource)))
+    (null? (symbols-named "project-root-symbol"))
+    (= (length (symbols-named "project-root-final")) 1))
+  (error
+    'scheme-project-runtime-tests
+    "background rename did not update the workspace without activating its source"))
+
 (scheme-project-runtime-close! adapter)
 (editor-close! editor)
 (runtime-close! runtime)

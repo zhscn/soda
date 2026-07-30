@@ -615,6 +615,7 @@
           (soda editor scheme-completion)
           (soda editor scheme-help)
           (soda editor scheme-repl-completion)
+          (soda editor scheme-rename)
           (soda editor scheme-xref)
           (soda editor search)
           (soda editor setting)
@@ -735,6 +736,8 @@
         editor
         (make-scheme-repl-completion-provider editor))
       (install-file-commands! editor)
+      (install-scheme-rename-command!
+        editor scheme-workspace)
       (install-interaction-commands! editor)
       (install-prompt-commands! editor)
       (install-search-commands! editor)

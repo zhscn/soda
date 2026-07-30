@@ -67,7 +67,16 @@
           scheme-semantic-references
           scheme-primitive-definitions
           scheme-index-definitions
-          scheme-definition-library)
+          scheme-definition-library
+          scheme-rename-replacement?
+          scheme-rename-replacement-start
+          scheme-rename-replacement-end
+          scheme-rename-replacement-text
+          scheme-import-rename-plan?
+          scheme-import-rename-plan-replacements
+          scheme-import-rename-plan-mappings
+          scheme-semantic-import-rename-plan
+          scheme-semantic-export-rename-replacements)
   (import (rnrs)
           (soda editor builtin-api-index))
 
@@ -105,6 +114,12 @@
 
   (define-record-type scheme-use
     (fields name start end resolution))
+
+  (define-record-type scheme-rename-replacement
+    (fields start end text))
+
+  (define-record-type scheme-import-rename-plan
+    (fields replacements mappings))
 
   (define-record-type scheme-diagnostic
     (fields code start end severity message payload))
@@ -1425,6 +1440,291 @@
             [else '()]))
         (parse-syntax-forms
           (call-context-tokens-from tokens)))))
+
+  (define (rename-replacement form text)
+    (and
+      (syntax-symbol? form)
+      (not
+        (string=?
+          (token-value (syntax-form-token form))
+          text))
+      (make-scheme-rename-replacement
+        (syntax-form-start form)
+        (syntax-form-end form)
+        text)))
+
+  (define (import-specification-rename
+            form
+            library
+            old-name
+            new-name)
+    (let ([datum
+            (syntax-form->datum form)])
+      (cond
+        [(and
+           (library-name? datum)
+           (equal? datum library))
+         (values #t '() old-name new-name)]
+        [(not
+           (and
+             (syntax-list? form)
+             (pair? (syntax-form-children form))))
+         (values #f '() #f #f)]
+        [else
+         (let* ([children (syntax-form-children form)]
+                [head (syntax-head-symbol form)])
+           (if
+             (or
+               (not head)
+               (not (pair? (cdr children))))
+             (values #f '() #f #f)
+             (call-with-values
+               (lambda ()
+                 (import-specification-rename
+                   (cadr children)
+                   library
+                   old-name
+                   new-name))
+               (lambda
+                 (matched?
+                   nested-replacements
+                   visible-old
+                   visible-new)
+                 (if
+                   (not matched?)
+                   (values #f '() #f #f)
+                   (cond
+                     [(or
+                        (string=? head "only")
+                        (string=? head "except"))
+                      (values
+                        #t
+                        (append
+                          nested-replacements
+                          (filter
+                            scheme-rename-replacement?
+                            (map
+                              (lambda (identifier)
+                                (and
+                                  (syntax-symbol=? identifier visible-old)
+                                  (rename-replacement
+                                    identifier visible-new)))
+                              (cddr children))))
+                        visible-old
+                        visible-new)]
+                     [(and
+                        (string=? head "prefix")
+                        (pair? (cddr children))
+                        (syntax-symbol? (caddr children)))
+                      (let ([prefix
+                              (token-value
+                                (syntax-form-token
+                                  (caddr children)))])
+                        (values
+                          #t
+                          nested-replacements
+                          (string-append prefix visible-old)
+                          (string-append prefix visible-new)))]
+                     [(string=? head "rename")
+                      (let loop
+                        ([pairs (cddr children)]
+                         [replacements nested-replacements])
+                        (cond
+                          [(null? pairs)
+                           (values
+                             #t replacements
+                             visible-old visible-new)]
+                          [(let ([pair (car pairs)])
+                             (and
+                               (syntax-list? pair)
+                               (= (length
+                                    (syntax-form-children pair))
+                                  2)
+                               (syntax-symbol=?
+                                 (car
+                                   (syntax-form-children pair))
+                                 visible-old))) =>
+                           (lambda (matched-pair)
+                             (let* ([pair
+                                      (car pairs)]
+                                    [parts
+                                      (syntax-form-children pair)]
+                                    [alias
+                                      (and
+                                        (syntax-symbol? (cadr parts))
+                                        (token-value
+                                          (syntax-form-token
+                                            (cadr parts))))])
+                               (if alias
+                                   (values
+                                     #t
+                                     (let ([replacement
+                                             (rename-replacement
+                                               (car parts)
+                                               visible-new)])
+                                       (if replacement
+                                           (append
+                                             replacements
+                                             (list replacement))
+                                           replacements))
+                                     alias
+                                     alias)
+                                   (loop
+                                     (cdr pairs)
+                                     replacements))))]
+                          [else
+                           (loop
+                             (cdr pairs)
+                             replacements)]))]
+                     [(string=? head "for")
+                      (values
+                        #t
+                        nested-replacements
+                        visible-old
+                        visible-new)]
+                     [else
+                      (values #f '() #f #f)]))))))])))
+
+  (define (scheme-semantic-import-rename-plan
+            snapshot
+            library
+            old-name
+            new-name)
+    (unless (scheme-semantic-snapshot? snapshot)
+      (assertion-violation
+        'scheme-semantic-import-rename-plan
+        "expected a Scheme semantic snapshot"
+        snapshot))
+    (unless
+      (and
+        (library-name? library)
+        (string? old-name)
+        (string? new-name))
+      (assertion-violation
+        'scheme-semantic-import-rename-plan
+        "invalid Scheme import rename request"
+        library old-name new-name))
+    (fold-left
+      (lambda (plan location)
+        (call-with-values
+          (lambda ()
+            (import-specification-rename
+              (cdr location)
+              library
+              old-name
+              new-name))
+          (lambda
+            (matched? replacements visible-old visible-new)
+            (if
+              matched?
+              (make-scheme-import-rename-plan
+                (append
+                  (scheme-import-rename-plan-replacements plan)
+                  replacements)
+                (cons
+                  (cons visible-old visible-new)
+                  (scheme-import-rename-plan-mappings plan)))
+              plan))))
+      (make-scheme-import-rename-plan '() '())
+      (source-import-locations
+        (scheme-semantic-snapshot-tokens snapshot))))
+
+  (define (export-entry-rename-replacements
+            entry
+            old-name
+            new-name)
+    (cond
+      [(syntax-symbol=? entry old-name)
+       (let ([replacement
+               (rename-replacement entry new-name)])
+         (if replacement (list replacement) '()))]
+      [(and
+         (syntax-list? entry)
+         (string=?
+           (or (syntax-head-symbol entry) "")
+           "rename"))
+       (fold-left
+         (lambda (result pair)
+           (if
+             (and
+               (syntax-list? pair)
+               (= (length (syntax-form-children pair)) 2)
+               (syntax-symbol=?
+                 (car (syntax-form-children pair))
+                 old-name))
+             (let ([replacement
+                     (rename-replacement
+                       (car (syntax-form-children pair))
+                       new-name)])
+               (if replacement
+                   (append result (list replacement))
+                   result))
+             result))
+         '()
+         (cdr (syntax-form-children entry)))]
+      [else '()]))
+
+  (define (export-form-rename-replacements
+            form
+            old-name
+            new-name)
+    (if
+      (and
+        (syntax-list? form)
+        (string=?
+          (or (syntax-head-symbol form) "")
+          "export"))
+      (apply
+        append
+        (map
+          (lambda (entry)
+            (export-entry-rename-replacements
+              entry old-name new-name))
+          (cdr (syntax-form-children form))))
+      '()))
+
+  (define (scheme-semantic-export-rename-replacements
+            snapshot
+            old-name
+            new-name)
+    (unless (scheme-semantic-snapshot? snapshot)
+      (assertion-violation
+        'scheme-semantic-export-rename-replacements
+        "expected a Scheme semantic snapshot"
+        snapshot))
+    (unless (and (string? old-name) (string? new-name))
+      (assertion-violation
+        'scheme-semantic-export-rename-replacements
+        "rename names must be strings"
+        old-name new-name))
+    (apply
+      append
+      (map
+        (lambda (form)
+          (cond
+            [(and
+               (syntax-list? form)
+               (string=?
+                 (or (syntax-head-symbol form) "")
+                 "library"))
+             (apply
+               append
+               (map
+                 (lambda (child)
+                   (export-form-rename-replacements
+                     child old-name new-name))
+                 (let ([children
+                         (syntax-form-children form)])
+                   (if
+                     (pair? (cdr children))
+                     (cddr children)
+                     '()))))]
+            [else
+             (export-form-rename-replacements
+               form old-name new-name)]))
+        (parse-syntax-forms
+          (call-context-tokens-from
+            (scheme-semantic-snapshot-tokens snapshot))))))
 
   (define (formal-nodes form)
     (cond

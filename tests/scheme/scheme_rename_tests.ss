@@ -1,0 +1,285 @@
+#!r6rs
+(import (rnrs)
+        (soda document)
+        (soda editor buffer)
+        (soda editor command)
+        (soda editor core)
+        (soda editor prompt)
+        (soda editor scheme-semantics)
+        (soda editor scheme-workspace)
+        (soda editor scheme-xref)
+        (soda editor state))
+
+(define owner-source
+  (string-append
+    "(library (fixture rename-owner)\n"
+    "  (export alpha-run)\n"
+    "  (import (rnrs))\n"
+    "  (define (alpha-run value) value))\n"))
+(define prefix-source
+  (string-append
+    "(library (fixture rename-prefix)\n"
+    "  (export call-alpha)\n"
+    "  (import (rnrs) "
+    "(prefix (fixture rename-owner) p:))\n"
+    "  (define (call-alpha value) (p:alpha-run value)))\n"))
+(define alias-source
+  (string-append
+    "(library (fixture rename-alias)\n"
+    "  (export call-run)\n"
+    "  (import (rnrs) "
+    "(rename (fixture rename-owner) (alpha-run run)))\n"
+    "  (define (call-run value) (run value)))\n"))
+
+(define owner
+  (make-buffer
+    1
+    (make-document owner-source 1)
+    "/project/rename-owner.sls"
+    'scheme-mode))
+(define editor (make-editor owner))
+(define prefix
+  (make-buffer
+    2
+    (make-document prefix-source 2)
+    "/project/rename-prefix.sls"
+    'scheme-mode))
+(define alias
+  (make-buffer
+    3
+    (make-document alias-source 3)
+    "/project/rename-alias.sls"
+    'scheme-mode))
+(editor-add-buffer! editor prefix)
+(editor-add-buffer! editor alias)
+
+(define workspace
+  (editor-scheme-workspace editor))
+(scheme-workspace-sync-editor! workspace editor)
+(define owner-snapshot
+  (scheme-workspace-snapshot-for-buffer
+    workspace owner))
+(define owner-definition
+  (find
+    (lambda (definition)
+      (string=?
+        (scheme-definition-name definition)
+        "alpha-run"))
+    (scheme-semantic-snapshot-root-definitions
+      owner-snapshot)))
+
+(unless owner-definition
+  (error
+    'scheme-rename-tests
+    "owner definition was not indexed"))
+
+(view-set-caret!
+  (editor-active-view editor)
+  (scheme-definition-start owner-definition))
+(editor-update!
+  editor
+  (make-command-message 'scheme.rename #f))
+(let* ([session (editor-active-prompt editor)]
+       [request
+         (and session
+              (prompt-session-request session))])
+  (unless
+    (and
+      request
+      (string=?
+        (prompt-request-default request)
+        "alpha-run")
+      ((prompt-request-validator request)
+       "alpha-execute")
+      (not
+        ((prompt-request-validator request)
+         "alpha execute")))
+    (error
+      'scheme-rename-tests
+      "interactive rename did not validate a Scheme identifier")))
+(editor-abort-prompt! editor)
+
+(define context
+  (make-command-context
+    editor
+    (editor-active-view editor)
+    #f
+    #f))
+(define effects
+  ((command-procedure
+     (editor-command-registry editor)
+     'scheme.rename)
+   context
+   owner-definition
+   "alpha-execute"))
+
+(define invalid-name-rejected? #f)
+(guard
+  (condition
+    [else (set! invalid-name-rejected? #t)])
+  ((command-procedure
+     (editor-command-registry editor)
+     'scheme.rename)
+   context
+   owner-definition
+   "alpha execute"))
+(unless invalid-name-rejected?
+  (error
+    'scheme-rename-tests
+    "programmatic rename accepted an invalid Scheme identifier"))
+
+(unless (null? effects)
+  (error
+    'scheme-rename-tests
+    "open rename targets produced asynchronous effects"
+    effects))
+
+(define (buffer-string buffer)
+  (let ([snapshot
+          (document-snapshot
+            (buffer-document buffer))])
+    (dynamic-wind
+      (lambda () #f)
+      (lambda ()
+        (let ([text (snapshot-text snapshot)])
+          (dynamic-wind
+            (lambda () #f)
+            (lambda ()
+              (utf8->string
+                (text->bytevector text)))
+            (lambda () (text-close! text)))))
+      (lambda () (snapshot-close! snapshot)))))
+
+(define renamed-owner (buffer-string owner))
+(define renamed-prefix (buffer-string prefix))
+(define renamed-alias (buffer-string alias))
+
+(define (string-contains value needle)
+  (let ([value-length (string-length value)]
+        [needle-length (string-length needle)])
+    (let loop ([start 0])
+      (and
+        (<= (+ start needle-length) value-length)
+        (or
+          (string=?
+            (substring
+              value start (+ start needle-length))
+            needle)
+          (loop (+ start 1)))))))
+
+(unless
+  (and
+    (not (string-contains renamed-owner "alpha-run"))
+    (string-contains renamed-owner "alpha-execute")
+    (string-contains
+      renamed-prefix
+      "(p:alpha-execute value)")
+    (not
+      (string-contains
+        renamed-prefix
+        "p:alpha-run"))
+    (string-contains
+      renamed-alias
+      "(alpha-execute run)")
+    (string-contains
+      renamed-alias
+      "(run value)")
+    (not
+      (string-contains
+        renamed-alias
+        "(alpha-run run)")))
+  (error
+    'scheme-rename-tests
+    "semantic rename did not preserve prefix and alias behavior"
+    renamed-owner
+    renamed-prefix
+    renamed-alias))
+
+(unless
+  (string=?
+    (editor-status-message editor)
+    "Renamed to alpha-execute in 4 places")
+  (error
+    'scheme-rename-tests
+    "rename status did not report the committed edit count"
+    (editor-status-message editor)))
+
+(editor-close! editor)
+
+(define conflict-buffer
+  (make-buffer
+    10
+    (make-document
+      "(let ([left 1] [right 2]) left)\n"
+      10)
+    "/project/rename-conflict.scm"
+    'scheme-mode))
+(define conflict-editor
+  (make-editor conflict-buffer))
+(define conflict-workspace
+  (editor-scheme-workspace conflict-editor))
+(define conflict-snapshot
+  (scheme-workspace-snapshot-for-buffer
+    conflict-workspace conflict-buffer))
+(define left-definition
+  (find
+    (lambda (definition)
+      (string=?
+        (scheme-definition-name definition)
+        "left"))
+    (scheme-semantic-snapshot-definitions
+      conflict-snapshot)))
+(define conflict-rejected? #f)
+(guard
+  (condition
+    [else (set! conflict-rejected? #t)])
+  (scheme-workspace-rename-edits
+    conflict-workspace
+    conflict-editor
+    left-definition
+    "right"))
+(unless conflict-rejected?
+  (error
+    'scheme-rename-tests
+    "same-scope rename conflict was accepted"))
+(editor-close! conflict-editor)
+
+(define generated-buffer
+  (make-buffer
+    20
+    (make-document
+      (string-append
+        "(define-record-type widget\n"
+        "  (fields value))\n")
+      20)
+    "/project/rename-generated.scm"
+    'scheme-mode))
+(define generated-editor
+  (make-editor generated-buffer))
+(define generated-workspace
+  (editor-scheme-workspace generated-editor))
+(define generated-snapshot
+  (scheme-workspace-snapshot-for-buffer
+    generated-workspace generated-buffer))
+(define generated-accessor
+  (find
+    (lambda (definition)
+      (string=?
+        (scheme-definition-name definition)
+        "widget-value"))
+    (scheme-semantic-snapshot-definitions
+      generated-snapshot)))
+(define generated-rejected? #f)
+(guard
+  (condition
+    [else (set! generated-rejected? #t)])
+  (scheme-workspace-rename-edits
+    generated-workspace
+    generated-editor
+    generated-accessor
+    "widget-content"))
+(unless generated-rejected?
+  (error
+    'scheme-rename-tests
+    "generated record binding without source spelling was renamed"))
+(editor-close! generated-editor)

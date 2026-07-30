@@ -11,6 +11,14 @@
           scheme-workspace-reference-resource
           scheme-workspace-reference-revision
           scheme-workspace-reference-use
+          scheme-workspace-text-edit?
+          scheme-workspace-text-edit-buffer-id
+          scheme-workspace-text-edit-resource
+          scheme-workspace-text-edit-revision
+          scheme-workspace-text-edit-start
+          scheme-workspace-text-edit-end
+          scheme-workspace-text-edit-text
+          scheme-workspace-rename-edits
           scheme-workspace-symbols
           scheme-workspace-symbol?
           scheme-workspace-symbol-key
@@ -56,6 +64,9 @@
 
   (define-record-type scheme-workspace-reference
     (fields buffer-id resource revision use))
+
+  (define-record-type scheme-workspace-text-edit
+    (fields buffer-id resource revision start end text))
 
   (define-record-type scheme-workspace-symbol
     (fields
@@ -472,8 +483,9 @@
           (scheme-definition-start candidate)
           (scheme-definition-start definition))
         (string=?
-          (scheme-definition-name candidate)
-          (scheme-definition-name definition)))))
+          (scheme-definition-id-name id)
+          (scheme-definition-id-name
+            (scheme-definition-id definition))))))
 
   (define (document-definition-equivalent?
             definition
@@ -493,7 +505,8 @@
               (scheme-definition-start definition))
             (string=?
               (scheme-definition-name candidate)
-              (scheme-definition-name definition))))
+              (scheme-definition-id-name
+                (scheme-definition-id definition)))))
         (scheme-semantic-snapshot-root-definitions
           (scheme-workspace-document-snapshot
             candidate-document)))))
@@ -529,7 +542,16 @@
                     (cons
                       (scheme-definition-id candidate)
                       result))))
-              scheme-index-definitions))))
+              (append
+                scheme-index-definitions
+                (apply
+                  append
+                  (map
+                    (lambda (candidate-document)
+                      (scheme-semantic-snapshot-visible-index-definitions
+                        (scheme-workspace-document-snapshot
+                          candidate-document)))
+                    (workspace-documents index))))))))
       (when (and (eq? source 'index) (string? resource))
         (for-each
           (lambda (document)
@@ -545,7 +567,8 @@
                               (scheme-definition-start definition))
                             (string=?
                               (scheme-definition-name candidate)
-                              (scheme-definition-name definition))))
+                              (scheme-definition-id-name
+                                (scheme-definition-id definition)))))
                         (scheme-semantic-snapshot-root-definitions
                           (scheme-workspace-document-snapshot
                             document)))])
@@ -606,6 +629,459 @@
                 id
                 '()))
             ids)))))
+
+  (define (definition-owner-document index definition)
+    (let* ([id (scheme-definition-id definition)]
+           [documents (workspace-documents index)])
+      (case (scheme-definition-id-source id)
+        [(document)
+         (or
+           (find
+             (lambda (document)
+               (and
+                 (=
+                   (scheme-workspace-document-document-id document)
+                   (scheme-definition-id-document-id id))
+                 (=
+                   (scheme-workspace-document-revision document)
+                   (scheme-definition-id-revision id))))
+             documents)
+           (let ([indexed-document
+                   (find
+                     (lambda (document)
+                       (and
+                         (=
+                           (scheme-workspace-document-document-id document)
+                           (scheme-definition-id-document-id id))
+                         (=
+                           (scheme-workspace-document-revision document)
+                           (scheme-definition-id-revision id))))
+                     (all-workspace-documents index))])
+             (and
+               indexed-document
+               (let ([resource
+                       (scheme-workspace-document-resource
+                         indexed-document)])
+                 (and
+                   (string? resource)
+                   (find
+                     (lambda (document)
+                       (and
+                         (equal?
+                           resource
+                           (scheme-workspace-document-resource document))
+                         (document-definition-equivalent?
+                           definition resource document)))
+                     documents))))))]
+        [(index)
+         (let ([resource
+                 (scheme-definition-id-document-id id)])
+           (and
+             (string? resource)
+             (find
+               (lambda (document)
+                 (and
+                   (equal?
+                     resource
+                     (scheme-workspace-document-resource document))
+                   (document-definition-equivalent?
+                     definition resource document)))
+               documents)))]
+        [else #f])))
+
+  (define (definition-in-document document definition)
+    (find
+      (lambda (candidate)
+        (and
+          (=
+            (scheme-definition-start candidate)
+            (scheme-definition-start definition))
+          (string=?
+            (scheme-definition-name candidate)
+            (scheme-definition-id-name
+              (scheme-definition-id definition)))))
+      (scheme-semantic-snapshot-definitions
+        (scheme-workspace-document-snapshot document))))
+
+  (define (definition-library-name
+            index
+            definition
+            owner)
+    (or
+      (scheme-definition-library definition)
+      (let ([resource
+              (scheme-workspace-document-resource owner)])
+        (and
+          (string? resource)
+          (let ([entry
+                  (find
+                    (lambda (entry)
+                      (and
+                        (string=?
+                          (list-ref entry 0)
+                          (scheme-definition-id-name
+                            (scheme-definition-id definition)))
+                        (equal? (list-ref entry 3) resource)
+                        (equal?
+                          (list-ref entry 4)
+                          (scheme-definition-start definition))))
+                    (scheme-workspace-index-library-index index))])
+            (and entry (list-ref entry 2)))))))
+
+  (define (document-for-reference index reference)
+    (let ([buffer-id
+            (scheme-workspace-reference-buffer-id reference)]
+          [resource
+            (scheme-workspace-reference-resource reference)]
+          [revision
+            (scheme-workspace-reference-revision reference)])
+      (find
+        (lambda (document)
+          (and
+            (=
+              revision
+              (scheme-workspace-document-revision document))
+            (if
+              buffer-id
+              (equal?
+                buffer-id
+                (scheme-workspace-document-buffer-id document))
+              (and
+                (string? resource)
+                (equal?
+                  resource
+                  (scheme-workspace-document-resource document))))))
+        (workspace-documents index))))
+
+  (define (document-text-edit
+            document
+            start
+            end
+            text)
+    (make-scheme-workspace-text-edit
+      (scheme-workspace-document-buffer-id document)
+      (scheme-workspace-document-resource document)
+      (scheme-workspace-document-revision document)
+      start
+      end
+      text))
+
+  (define (document-range-string document start end)
+    (let ([bytes
+            (scheme-workspace-document-bytes document)])
+      (unless
+        (and
+          (integer? start)
+          (exact? start)
+          (>= start 0)
+          (integer? end)
+          (exact? end)
+          (>= end 0)
+          (<= start end)
+          (<= end (bytevector-length bytes)))
+        (assertion-violation
+          'scheme-workspace-rename-edits
+          "definition source range is stale"
+          start end))
+      (let* ([size (- end start)]
+             [range (make-bytevector size)])
+        (bytevector-copy! bytes start range 0 size)
+        (utf8->string range))))
+
+  (define (replacement-text-edit document replacement)
+    (document-text-edit
+      document
+      (scheme-rename-replacement-start replacement)
+      (scheme-rename-replacement-end replacement)
+      (scheme-rename-replacement-text replacement)))
+
+  (define (mapping-ref mappings name)
+    (let loop ([remaining mappings] [result #f])
+      (if
+        (null? remaining)
+        result
+        (let ([mapping (car remaining)])
+          (if
+            (string=? (car mapping) name)
+            (if
+              (or
+                (not result)
+                (string=? result (cdr mapping)))
+              (loop (cdr remaining) (cdr mapping))
+              (assertion-violation
+                'scheme-workspace-rename-edits
+                "rename has conflicting imported names"
+                name result (cdr mapping)))
+            (loop (cdr remaining) result))))))
+
+  (define (id-in? id ids)
+    (exists
+      (lambda (candidate)
+        (scheme-definition-id=? id candidate))
+      ids))
+
+  (define (resolution-belongs-to-target? resolution ids)
+    (and
+      (pair? resolution)
+      (for-all
+        (lambda (id) (id-in? id ids))
+        resolution)))
+
+  (define (visible-name-conflict?
+            document
+            point
+            name
+            ids)
+    (exists
+      (lambda (candidate)
+        (and
+          (string=?
+            (scheme-definition-name candidate)
+            name)
+          (not
+            (id-in?
+              (scheme-definition-id candidate)
+              ids))))
+      (scheme-semantic-visible-definitions-at
+        (scheme-workspace-document-snapshot document)
+        point)))
+
+  (define (declaration-name-conflict?
+            document
+            definition
+            name
+            ids)
+    (let ([scope
+            (find
+              (lambda (scope)
+                (memq
+                  definition
+                  (scheme-scope-definitions scope)))
+              (scheme-semantic-snapshot-scopes
+                (scheme-workspace-document-snapshot document)))])
+      (and
+        scope
+        (exists
+          (lambda (candidate)
+            (and
+              (string=?
+                (scheme-definition-name candidate)
+                name)
+              (not
+                (id-in?
+                  (scheme-definition-id candidate)
+                  ids))))
+          (scheme-scope-definitions scope)))))
+
+  (define (same-text-edit? left right)
+    (and
+      (equal?
+        (scheme-workspace-text-edit-buffer-id left)
+        (scheme-workspace-text-edit-buffer-id right))
+      (equal?
+        (scheme-workspace-text-edit-resource left)
+        (scheme-workspace-text-edit-resource right))
+      (=
+        (scheme-workspace-text-edit-start left)
+        (scheme-workspace-text-edit-start right))
+      (=
+        (scheme-workspace-text-edit-end left)
+        (scheme-workspace-text-edit-end right))))
+
+  (define (deduplicate-text-edits edits)
+    (reverse
+      (fold-left
+        (lambda (result edit)
+          (let ([existing
+                  (find
+                    (lambda (candidate)
+                      (same-text-edit? edit candidate))
+                    result)])
+            (cond
+              [(not existing) (cons edit result)]
+              [(string=?
+                 (scheme-workspace-text-edit-text existing)
+                 (scheme-workspace-text-edit-text edit))
+               result]
+              [else
+               (assertion-violation
+                 'scheme-workspace-rename-edits
+                 "rename produced conflicting edits"
+                 existing edit)])))
+        '()
+        edits)))
+
+  (define (scheme-workspace-rename-edits
+            index
+            editor
+            definition
+            new-name)
+    (require-index 'scheme-workspace-rename-edits index)
+    (unless (scheme-definition? definition)
+      (assertion-violation
+        'scheme-workspace-rename-edits
+        "expected a Scheme definition"
+        definition))
+    (unless (string? new-name)
+      (assertion-violation
+        'scheme-workspace-rename-edits
+        "new name must be a string"
+        new-name))
+    (scheme-workspace-sync-editor! index editor)
+    (let* ([id (scheme-definition-id definition)]
+           [owner
+             (definition-owner-document index definition)])
+      (when
+        (eq? (scheme-definition-id-source id) 'primitive)
+        (assertion-violation
+          'scheme-workspace-rename-edits
+          "primitive metadata is immutable"
+          (scheme-definition-name definition)))
+      (unless owner
+        (assertion-violation
+          'scheme-workspace-rename-edits
+          "definition source is outside the editable workspace"
+          (scheme-definition-name definition)))
+      (let* ([owner-definition
+               (or
+                 (definition-in-document owner definition)
+                 (assertion-violation
+                   'scheme-workspace-rename-edits
+                   "definition source is stale"
+                   definition))]
+             [ids
+               (equivalent-definition-ids
+                 index owner-definition)]
+             [old-name
+               (scheme-definition-name owner-definition)]
+             [library
+               (definition-library-name
+                 index owner-definition owner)]
+             [documents (workspace-documents index)]
+             [import-plans
+               (make-eq-hashtable)]
+             [references
+               (scheme-workspace-references
+                 index editor owner-definition)])
+        (unless
+          (string=?
+            (document-range-string
+              owner
+              (scheme-definition-start owner-definition)
+              (scheme-definition-end owner-definition))
+            old-name)
+          (assertion-violation
+            'scheme-workspace-rename-edits
+            "definition has no explicit declaration spelling"
+            old-name))
+        (when
+          (declaration-name-conflict?
+            owner owner-definition new-name ids)
+          (assertion-violation
+            'scheme-workspace-rename-edits
+            "new name conflicts in the definition scope"
+            new-name))
+        (when library
+          (for-each
+            (lambda (document)
+              (hashtable-set!
+                import-plans
+                document
+                (scheme-semantic-import-rename-plan
+                  (scheme-workspace-document-snapshot document)
+                  library
+                  old-name
+                  new-name)))
+            documents))
+        (let ([edits
+                (list
+                  (document-text-edit
+                    owner
+                    (scheme-definition-start owner-definition)
+                    (scheme-definition-end owner-definition)
+                    new-name))])
+          (when library
+            (set! edits
+              (append
+                edits
+                (map
+                  (lambda (replacement)
+                    (replacement-text-edit owner replacement))
+                  (scheme-semantic-export-rename-replacements
+                    (scheme-workspace-document-snapshot owner)
+                    old-name
+                    new-name))))
+            (for-each
+              (lambda (document)
+                (set! edits
+                  (append
+                    edits
+                    (map
+                      (lambda (replacement)
+                        (replacement-text-edit
+                          document replacement))
+                      (scheme-import-rename-plan-replacements
+                        (hashtable-ref
+                          import-plans document #f))))))
+              documents))
+          (for-each
+            (lambda (reference)
+              (let* ([document
+                       (or
+                         (document-for-reference
+                           index reference)
+                         (assertion-violation
+                           'scheme-workspace-rename-edits
+                           "reference source is stale"
+                           reference))]
+                     [use
+                       (scheme-workspace-reference-use reference)]
+                     [replacement
+                       (if
+                         (or
+                           (not library)
+                           (eq? document owner))
+                         new-name
+                         (mapping-ref
+                           (scheme-import-rename-plan-mappings
+                             (hashtable-ref
+                               import-plans document #f))
+                           (scheme-use-name use)))])
+                (unless
+                  (resolution-belongs-to-target?
+                    (scheme-use-resolution use)
+                    ids)
+                  (assertion-violation
+                    'scheme-workspace-rename-edits
+                    "reference resolution is ambiguous"
+                    (scheme-use-name use)))
+                (unless replacement
+                  (assertion-violation
+                    'scheme-workspace-rename-edits
+                    "cannot map imported reference to its renamed binding"
+                    (scheme-use-name use)))
+                (unless
+                  (string=? replacement (scheme-use-name use))
+                  (when
+                    (visible-name-conflict?
+                      document
+                      (scheme-use-start use)
+                      replacement
+                      ids)
+                    (assertion-violation
+                      'scheme-workspace-rename-edits
+                      "new name conflicts at a reference"
+                      replacement))
+                  (set! edits
+                    (cons
+                      (document-text-edit
+                        document
+                        (scheme-use-start use)
+                        (scheme-use-end use)
+                        replacement)
+                      edits)))))
+            references)
+          (deduplicate-text-edits edits)))))
 
   (define (document-symbol document definition)
     (let ([buffer-id

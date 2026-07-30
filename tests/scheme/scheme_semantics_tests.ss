@@ -992,3 +992,72 @@
   (error
     'scheme-semantics-tests
     "incomplete library source lost its export surface"))
+
+(define rename-import-snapshot
+  (make-scheme-semantic-snapshot
+    90
+    0
+    (string->utf8
+      (string-append
+        "(import\n"
+        "  (prefix (sample alpha) p:)\n"
+        "  (only (prefix (rename (sample alpha) "
+        "(alpha-run run)) p:) p:run))\n"))))
+(define direct-import-rename-plan
+  (scheme-semantic-import-rename-plan
+    rename-import-snapshot
+    '(sample alpha)
+    "alpha-run"
+    "alpha-execute"))
+(unless
+  (and
+    (member
+      (cons "p:alpha-run" "p:alpha-execute")
+      (scheme-import-rename-plan-mappings
+        direct-import-rename-plan))
+    (member
+      (cons "p:run" "p:run")
+      (scheme-import-rename-plan-mappings
+        direct-import-rename-plan))
+    (= (length
+         (scheme-import-rename-plan-replacements
+           direct-import-rename-plan))
+       1)
+    (string=?
+      (scheme-rename-replacement-text
+        (car
+          (scheme-import-rename-plan-replacements
+            direct-import-rename-plan)))
+      "alpha-execute"))
+  (error
+    'scheme-semantics-tests
+    "import rename planning did not preserve alias and prefix semantics"))
+
+(define rename-export-snapshot
+  (make-scheme-semantic-snapshot
+    91
+    0
+    (string->utf8
+      (string-append
+        "(library (sample alpha)\n"
+        "  (export alpha-run (rename (alpha-run run)))\n"
+        "  (import (rnrs))\n"
+        "  (define (alpha-run) 1))\n"))))
+(let ([replacements
+        (scheme-semantic-export-rename-replacements
+          rename-export-snapshot
+          "alpha-run"
+          "alpha-execute")])
+  (unless
+    (and
+      (= (length replacements) 2)
+      (for-all
+        (lambda (replacement)
+          (string=?
+            (scheme-rename-replacement-text replacement)
+            "alpha-execute"))
+        replacements))
+    (error
+      'scheme-semantics-tests
+      "export rename planning omitted direct or aliased exports"
+      replacements)))

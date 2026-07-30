@@ -473,13 +473,28 @@ definition 结果转换为 LocationList，并由 Workbench display policy 记录
 
 references 按 DefinitionId 读取 workspace 倒排表。查询 policy 决定是否包含声明和
 别名声明；返回值仍是普通 LocationList。rename 复用同一 use 集合生成带源
-revision 的 workspace edit，并通过跨 Buffer transaction 验证后提交。
+revision 的 workspace edit。`scheme.rename`（`C-c C-r`）读取一个完整 Scheme
+identifier；未访问的 Project source 通过没有 View target 的 `file.read` 打开为
+后台 Buffer。所有目标 Buffer 就绪后重新解析 workspace edit，先统一验证 revision、
+read-only 状态、range overlap 与名称冲突，再按 Buffer transaction 提交。提交中途
+失败时，已经修改的 Buffer 回到各自提交前的 undo position。rename 只修改 Buffer，
+保存仍由普通文件工作流负责。
+
+library binding rename 同时处理 declaration、普通 use 和 R6RS surface：
+
+- definition 所在 library 的直接 export 与 export rename source 随声明更新；
+- `only`、`except` 和 import rename 的 source identifier 随 canonical name 更新；
+- `prefix` consumer 的 use 由旧 prefixed name 更新为新 prefixed name；
+- import/export alias 保持其 local 或 external name，alias use 不做文本替换。
 
 发生以下情况时 rename 拒绝生成 edit：
 
 - 任一目标 Document 没有与索引匹配的 revision；
 - definition 来自 immutable primitive metadata；
+- definition 没有可编辑的源码拼写，例如由 `define-record-type` 隐式生成的默认 binding；
 - use 的 resolution 是歧义集合；
+- 目标 Buffer 是 read-only；
+- 生成的 edit range 重叠或同一 range 产生不同 replacement；
 - rename 会在目标 scope 产生可检测的同名冲突。
 
 ## Runtime catalog
