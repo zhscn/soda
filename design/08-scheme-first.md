@@ -136,7 +136,8 @@ runtime ABI 遵循 pull-based 约束：
 - 固定版本函数在 Scheme wrapper 装载时验证 ABI 兼容性；
 - 创建 handle 后由 Scheme 注册 interest；
 - poll 只驱动 libuv 并返回可读取事件数量；
-- Scheme drain timer、fd、file-read、file-write、directory-scan 等结果；
+- Scheme drain timer、fd、file-read、file-write、directory-scan 和 path-change
+  等结果；
 - close 是显式、幂等的生命周期动作；
 - callback data 不保存 Scheme pointer；
 - status、libuv 稳定错误名与人类可读消息作为值跨 ABI 返回。
@@ -147,6 +148,9 @@ Scheme 对象；完成 callback 只把状态加入 native event queue。
 目录扫描使用 `uv_fs_scandir`，并把 entry type、UTF-8 name 编码为 caller-owned
 event data。Scheme VFS 将其解码为不可变 entry；editor adapter 只保存 native
 source 与上层 request 的关联，不允许 callback 进入 Scheme 或持有 Editor。
+路径监听使用长生命周期 `uv_fs_event` source。event data 保存相对被监听目录的
+entry name，flags 保存 rename/change 分类；取消 source 会停止 handle，并在 close
+callback 后释放 native 所有权。
 
 终端输出使用 partial-write ABI。`write-some` 返回已写 byte 数或 would-block；
 Scheme 保留未写 suffix，并在 libuv 报告 output fd writable 后继续 flush。短写、

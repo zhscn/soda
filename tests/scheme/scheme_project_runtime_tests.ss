@@ -1,6 +1,10 @@
 #!r6rs
 (import (rnrs)
-        (only (chezscheme) getenv)
+        (only (chezscheme)
+              delete-directory
+              get-process-id
+              getenv
+              mkdir)
         (soda document)
         (soda editor buffer)
         (soda editor completion-runtime)
@@ -409,5 +413,68 @@
     'scheme-project-runtime-tests
     "closing the live Buffer did not reveal the project snapshot"))
 
+(define watched-root
+  (string-append
+    "/tmp/soda-scheme-project-runtime-"
+    (number->string (get-process-id))))
+(define watched-source
+  (vfs-path-join watched-root "watched.sls"))
+(mkdir watched-root)
+(define watched-adapter
+  (install-scheme-project-runtime!
+    editor runtime watched-root))
+(let loop ()
+  (when
+    (positive?
+      (scheme-project-runtime-pending-count
+        watched-adapter))
+    (for-each
+      (lambda (event)
+        (scheme-project-runtime-handle-event
+          adapter event)
+        (scheme-project-runtime-handle-event
+          watched-adapter event))
+      (runtime-poll! runtime))
+    (loop)))
+
+(call-with-output-file
+  watched-source
+  (lambda (port)
+    (display
+      (string-append
+        "(library (fixture watched)\n"
+        "  (export watched-project-symbol)\n"
+        "  (import (rnrs))\n"
+        "  (define watched-project-symbol 1))\n")
+      port)))
+
+(let loop ()
+  (unless
+    (= (length (symbols-named "watched-project-symbol")) 1)
+    (for-each
+      (lambda (event)
+        (scheme-project-runtime-handle-event
+          adapter event)
+        (scheme-project-runtime-handle-event
+          watched-adapter event))
+      (runtime-poll! runtime))
+    (loop)))
+
+(delete-file watched-source)
+(let loop ()
+  (unless
+    (null? (symbols-named "watched-project-symbol"))
+    (for-each
+      (lambda (event)
+        (scheme-project-runtime-handle-event
+          adapter event)
+        (scheme-project-runtime-handle-event
+          watched-adapter event))
+      (runtime-poll! runtime))
+    (loop)))
+
+(scheme-project-runtime-close! watched-adapter)
+(delete-directory watched-root)
+(scheme-project-runtime-close! adapter)
 (editor-close! editor)
 (runtime-close! runtime)

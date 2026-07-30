@@ -388,7 +388,7 @@
                    (process (cdr events) continue?)]
                   [(memq
                      (event-kind (car events))
-                     '(path-stat file-read file-write))
+                     '(path-stat path-change file-read file-write))
                    (scheme-project-runtime-handle-event
                      scheme-project-adapter
                      (car events))
@@ -427,6 +427,9 @@
                   [else (process (cdr events) continue?)])))))
         (lambda ()
           (cancel-flush-timer!)
+          (when scheme-project-adapter
+            (scheme-project-runtime-close!
+              scheme-project-adapter))
           (when input-source
             (guard (condition [else #f])
               (runtime-cancel! runtime input-source)))

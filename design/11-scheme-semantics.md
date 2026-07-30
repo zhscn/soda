@@ -432,6 +432,10 @@ name` 建立这两种身份的等价集合。references 查询在每个已索引
 `jump-back`。primitive 只有 metadata、没有 source location 时返回明确的无源码
 结果。Project runtime 从工作目录开始，以 libuv directory scan 异步发现
 `.scm`、`.ss`、`.sls` 和 `.sps`，再以异步 file read 把源码交给 workspace。
+成功扫描的每个目录注册独立 path watch。文件系统事件按目录合并为重新扫描请求；
+扫描结果添加、更新或删除 Project source，并为新目录递归建立 watch。每次成功读取
+递增对应 resource revision，使异步外部修改与 Buffer revision 使用同一 freshness
+规则。
 后台 source snapshot 不创建 Buffer；引用位置以 `resource + revision + byte
 range` 保存，首次跳转时通过普通异步文件打开流程解析成 Buffer location。
 

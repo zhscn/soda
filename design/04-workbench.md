@@ -43,7 +43,10 @@ scope 中；是否保持 scope 互斥由 Scheme policy 决定。
 libuv directory scan 逐层展开目录，通过异步 file read 产生 language source
 snapshot。隐藏目录、VCS metadata、构建输出和依赖目录由枚举 policy 排除。
 enumerator 只发布 resource 与内容，不为后台索引创建 Buffer；用户访问资源时才由
-普通文件打开流程建立 Buffer identity。
+普通文件打开流程建立 Buffer identity。每个已发现目录持有一个 libuv path watch；
+变更通知使对应目录失效并触发合并后的异步重扫。重扫更新直接 source 集合、递归接入
+新增子目录，并撤销已删除目录子树的 watch 与 source snapshot。文件通知只承担失效
+职责，目录扫描结果定义 Project 当前的 resource 集合。
 
 ## Workbench 成员语义
 
