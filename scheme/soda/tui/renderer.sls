@@ -1075,11 +1075,20 @@
               (resolve-faces theme '(completion))
               background-sources)
             (let* ([start
-                     (if selected
-                         (max
-                           0
-                           (- selected (- (rect-rows rectangle) 1)))
-                         0)]
+                     (let* ([rows (rect-rows rectangle)]
+                            [maximum-start
+                              (max 0 (- (length items) rows))]
+                            [stored
+                              (min
+                                (completion-session-viewport-start
+                                  completion)
+                                maximum-start)])
+                       (cond
+                         [(not selected) 0]
+                         [(< selected stored) selected]
+                         [(>= selected (+ stored rows))
+                          (- selected (- rows 1))]
+                         [else stored]))]
                    [visible
                      (let loop ([remaining (list-tail items start)]
                                 [count (rect-rows rectangle)]
@@ -1309,11 +1318,7 @@
            [prompt-completion-rows
              (if prompt-completion
                  (min
-                   6
-                   (max
-                     1
-                     (length
-                       (completion-session-items prompt-completion)))
+                   completion-window-max-rows
                    (max 0 (- rows 2)))
                  0)]
            [view (editor-base-view editor)]
@@ -1555,11 +1560,7 @@
            [prompt-completion-rows
              (if prompt-completion
                  (min
-                   6
-                   (max
-                     1
-                     (length
-                       (completion-session-items prompt-completion)))
+                   completion-window-max-rows
                    (max 0 (- rows 2)))
                  0)]
            [root-rectangle (make-rect 0 0 rows columns)]

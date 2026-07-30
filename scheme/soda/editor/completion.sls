@@ -104,7 +104,9 @@
           completion-request-context
           completion-session-schedule-requests!
           completion-session-cancel-requests!
+          completion-window-max-rows
           completion-session-selected-index
+          completion-session-viewport-start
           completion-session-selected-item
           completion-session-refresh!
           completion-session-apply-response!
@@ -203,7 +205,10 @@
             (mutable items)
             (mutable matches)
             selection-policy
-            (mutable selected-index)))
+            (mutable selected-index)
+            (mutable viewport-start)))
+
+  (define completion-window-max-rows 6)
 
   (define-record-type completion-provider-result
     (fields provider complete? items))
@@ -964,6 +969,25 @@
         [else
          (loop (cdr remaining) (cons (car remaining) prefix))])))
 
+  (define (adjust-session-viewport! session)
+    (let* ([items (completion-session-items session)]
+           [count (length items)]
+           [selected (completion-session-selected-index session)]
+           [maximum-start
+             (max 0 (- count completion-window-max-rows))]
+           [start
+             (min
+               (completion-session-viewport-start session)
+               maximum-start)])
+      (completion-session-viewport-start-set!
+        session
+        (cond
+          [(not selected) 0]
+          [(< selected start) selected]
+          [(>= selected (+ start completion-window-max-rows))
+           (- selected (- completion-window-max-rows 1))]
+          [else start]))))
+
   (define (rebuild-session-items! session selected-item)
     (let* ([query (or (completion-session-query session) "")]
            [matched
@@ -989,7 +1013,8 @@
             (completion-selection-policy-initial
               (completion-session-selection-policy session))
             [(first) (and (pair? items) 0)]
-            [else #f])))))
+            [else #f])))
+      (adjust-session-viewport! session)))
 
   (define (default-selection-policy target)
     (if (prompt-completion-target? target)
@@ -1083,7 +1108,8 @@
          '()
          '()
          selection-policy
-         #f)]))
+         #f
+         0)]))
 
   (define (completion-session-selection-state session)
     (unless (completion-session? session)
@@ -1373,7 +1399,8 @@
              #f]
             [(completion-selection-policy-cycle? policy)
              (mod (+ index 1) count)]
-            [else (min (+ index 1) (- count 1))]))))
+            [else (min (+ index 1) (- count 1))]))
+        (adjust-session-viewport! session)))
     session)
 
   (define (completion-session-select-previous! session)
@@ -1403,5 +1430,6 @@
             [input? #f]
             [(completion-selection-policy-cycle? policy)
              (- count 1)]
-            [else 0]))))
+            [else 0]))
+        (adjust-session-viewport! session)))
     session))

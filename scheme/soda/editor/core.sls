@@ -508,7 +508,9 @@
           completion-provider-catalog-names
           make-completion-response-for-request
           install-completion-effect-handlers!
+          completion-window-max-rows
           completion-session-selected-index
+          completion-session-viewport-start
           completion-session-selected-item
           install-prompt-effect-handler!
           command-effect?

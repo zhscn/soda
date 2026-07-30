@@ -198,11 +198,7 @@
              [completion-rows
                (if completion
                    (min
-                     6
-                     (max
-                       1
-                       (length
-                         (completion-session-items completion)))
+                     completion-window-max-rows
                      (max 0 (- rows 2)))
                    0)]
              [view (editor-base-view editor)]

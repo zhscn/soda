@@ -2800,43 +2800,46 @@
        [completion-node
          (component-node-find layout 'editor.completions)])
   (unless (and node
-               (= (rect-row (component-node-rect node)) 3)
+               (= (rect-row (component-node-rect node)) 1)
                (= (rect-rows (component-node-rect node)) 1)
                completion-node
                (= (rect-row
                     (component-node-rect completion-node))
-                  4)
-               (string=? (cell-text (frame-cell-ref prompt-frame 4 0))
+                  2)
+               (= (rect-rows
+                    (component-node-rect completion-node))
+                  3)
+               (string=? (cell-text (frame-cell-ref prompt-frame 2 0))
                          "t")
-               (eq? (cell-face (frame-cell-ref prompt-frame 4 0))
+               (eq? (cell-face (frame-cell-ref prompt-frame 2 0))
                     'completion-match)
-               (string=? (cell-text (frame-cell-ref prompt-frame 3 0)) "!")
-               (string=? (cell-text (frame-cell-ref prompt-frame 3 1)) "/")
-               (string=? (cell-text (frame-cell-ref prompt-frame 3 7)) "M")
-               (string=? (cell-text (frame-cell-ref prompt-frame 3 11)) "t")
-               (eq? (cell-face (frame-cell-ref prompt-frame 3 0))
+               (string=? (cell-text (frame-cell-ref prompt-frame 1 0)) "!")
+               (string=? (cell-text (frame-cell-ref prompt-frame 1 1)) "/")
+               (string=? (cell-text (frame-cell-ref prompt-frame 1 7)) "M")
+               (string=? (cell-text (frame-cell-ref prompt-frame 1 11)) "t")
+               (eq? (cell-face (frame-cell-ref prompt-frame 1 0))
                     'minibuffer-prompt)
-               (eq? (cell-face (frame-cell-ref prompt-frame 3 11))
+               (eq? (cell-face (frame-cell-ref prompt-frame 1 11))
                     'minibuffer-input)
                (not
                  (equal?
                    (style-background
                      (cell-style
-                       (frame-cell-ref prompt-frame 3 7)))
+                       (frame-cell-ref prompt-frame 1 7)))
                    (style-background
                      (cell-style
-                       (frame-cell-ref prompt-frame 3 11)))))
+                       (frame-cell-ref prompt-frame 1 11)))))
                (= (view-viewport-rows
                     (editor-base-view prompt-editor))
-                  2)
+                  1)
                (frame-cursor-visible? prompt-frame)
-               (= (frame-cursor-row prompt-frame) 3))
+               (= (frame-cursor-row prompt-frame) 1))
     (error 'editor-tests
            "minibuffer component did not preserve body layout and focus"
            (and completion-node
                 (component-node-rect completion-node))
-           (cell-text (frame-cell-ref prompt-frame 4 0))
-           (cell-face (frame-cell-ref prompt-frame 4 0))
+           (cell-text (frame-cell-ref prompt-frame 2 0))
+           (cell-face (frame-cell-ref prompt-frame 2 0))
            (view-viewport-rows
              (editor-base-view prompt-editor))
            (frame-cursor-row prompt-frame))))
@@ -2876,6 +2879,78 @@
                   'extended-command)
                 '("test.prompt-target"))
   (error 'editor-tests "accepted input was not recorded in history"))
+
+(send! prompt-editor prompt-decoder (bytes 27 120))
+(define full-completion-height
+  (rect-rows
+    (component-node-rect
+      (component-node-find
+        (frame-layout
+          (render-editor-frame prompt-editor 10 40))
+        'editor.completions))))
+(send!
+  prompt-editor
+  prompt-decoder
+  (string->utf8 "test.prompt-target"))
+(define filtered-completion-height
+  (rect-rows
+    (component-node-rect
+      (component-node-find
+        (frame-layout
+          (render-editor-frame prompt-editor 10 40))
+        'editor.completions))))
+(unless
+  (and
+    (= full-completion-height completion-window-max-rows)
+    (= filtered-completion-height completion-window-max-rows))
+  (error 'editor-tests
+         "minibuffer completion height changed with match count"
+         full-completion-height
+         filtered-completion-height))
+(send! prompt-editor prompt-decoder (bytes 7))
+
+(send! prompt-editor prompt-decoder (bytes 27 120))
+(let ([completion
+        (editor-active-prompt-completion prompt-editor)])
+  (do ([count 0 (+ count 1)])
+      ((= count 7))
+    (editor-prompt-completion-next! prompt-editor))
+  (unless
+    (and
+      (= (completion-session-selected-index completion) 6)
+      (= (completion-session-viewport-start completion) 1))
+    (error 'editor-tests
+           "completion navigation did not scroll at the lower edge"))
+  (editor-prompt-completion-previous! prompt-editor)
+  (let* ([frame (render-editor-frame prompt-editor 10 40)]
+         [node
+           (component-node-find
+             (frame-layout frame)
+             'editor.completions)]
+         [selected-row
+           (+
+             (rect-row (component-node-rect node))
+             (-
+               (completion-session-selected-index completion)
+               (completion-session-viewport-start completion)))]
+         [selected-cell
+           (frame-cell-ref
+             frame
+             selected-row
+             (rect-column (component-node-rect node)))])
+    (unless
+      (and
+        (= (completion-session-selected-index completion) 5)
+        (= (completion-session-viewport-start completion) 1)
+        (= selected-row
+           (+ (rect-row (component-node-rect node)) 4))
+        (memq 'completion-selected (cell-faces selected-cell)))
+      (error 'editor-tests
+             "reverse completion navigation kept selection at the bottom"
+             (completion-session-selected-index completion)
+             (completion-session-viewport-start completion)
+             selected-row))))
+(send! prompt-editor prompt-decoder (bytes 7))
 
 (editor-register-command!
   prompt-editor

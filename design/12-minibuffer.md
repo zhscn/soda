@@ -187,6 +187,11 @@ minibuffer 左侧使用 `position/total` 指示当前域位置。candidate 使�
 高亮对应候选行。`RET` 接受当前项，`M-RET` 始终接受 input。`TAB` 将当前候选写入
 input 并刷新 field，刷新后的选择由新 field 的 reader 策略决定。
 
+completion list 在终端空间允许时保留 `completion-window-max-rows` 行，不随当前
+匹配数量改变布局高度；候选不足的行使用 completion background 填充。session 保存
+候选 viewport 的起始位置。选择向下越过底边时 viewport 向下滚动，随后向上移动先在
+当前 viewport 内移动高亮行，只有越过顶边时才向上滚动。
+
 minibuffer 的命令、Buffer、主题和文件 source 使用 `fzf` 风格。matcher 按字符边界、
 路径分隔符、camelCase 转换和连续匹配加权，并对间隔匹配扣分；同分候选依次按匹配
 跨度、起点和候选长度排序。匹配保留原字符串中的字符位置，使大小写不敏感的搜索也
