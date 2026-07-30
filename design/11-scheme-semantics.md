@@ -762,7 +762,8 @@ RuntimeBinding {
   name,
   kind,
   detail,
-  preview
+  preview,
+  signature_formals
 }
 ```
 
@@ -778,7 +779,10 @@ catalog 与 runtime-only catalog 分别按 generation 缓存，因此普通 Sche
 completion 不需要为初始 Chez binding 构建 metadata。一次求值或文件加载使缓存
 失效。运行时值不序列化进 semantic workspace，静态 analyzer 也不依赖 evaluator
 的执行顺序。静态 symbol inspection 没有结果时，`help.describe-symbol` 与
-signature help 使用 runtime binding metadata 作为 fallback。
+signature help 使用 runtime binding metadata 作为 fallback。procedure 的
+`signature_formals` 从 Chez arity mask 生成稳定的占位参数名，保留固定 arity、
+rest minimum 和 `case-lambda` 分支；它描述调用形状，不推测源码 parameter name
+或值类型。
 
 ## Macro 与 phase
 

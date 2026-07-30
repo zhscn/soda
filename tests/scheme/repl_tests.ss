@@ -253,7 +253,7 @@
 (dispatch!
   (make-command-message
     'scheme.eval-expression
-    "(begin (define repl-value 40) (display \"hello\") (+ repl-value 2))"))
+    "(begin (define repl-value 40) (define repl-procedure (case-lambda [() 0] [(left right . rest) left])) (display \"hello\") (+ repl-value 2))"))
 
 (define first-request
   (evaluation-result-request
@@ -279,7 +279,7 @@
            repl-buffer
            (interaction-session-last-input-start session)
            (interaction-session-last-input-end session))
-         "(begin (define repl-value 40) (display \"hello\") (+ repl-value 2))")
+         "(begin (define repl-value 40) (define repl-procedure (case-lambda [() 0] [(left right . rest) left])) (display \"hello\") (+ repl-value 2))")
        (string=?
          (buffer-string-range
            repl-buffer
@@ -309,7 +309,11 @@
        [binding
          (chez-evaluator-binding-metadata
            evaluator
-           'repl-value)])
+           'repl-value)]
+       [procedure-binding
+         (chez-evaluator-binding-metadata
+           evaluator
+           'repl-procedure)])
   (unless
     (and
       (memq 'repl-value
@@ -317,7 +321,16 @@
       (positive? (chez-evaluator-generation evaluator))
       (runtime-binding? binding)
       (eq? (runtime-binding-kind binding) 'variable)
-      (string=? (runtime-binding-preview binding) "40"))
+      (string=? (runtime-binding-preview binding) "40")
+      (runtime-binding? procedure-binding)
+      (equal?
+        (runtime-binding-signature-formals
+          procedure-binding)
+        '(() (arg1 arg2 . args)))
+      (equal?
+        (runtime-binding-signatures procedure-binding)
+        '("(repl-procedure)"
+          "(repl-procedure arg1 arg2 . args)")))
     (error 'repl-tests
            "evaluation did not update the runtime binding catalog")))
 

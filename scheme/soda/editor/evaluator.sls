@@ -17,6 +17,8 @@
           runtime-binding-kind
           runtime-binding-detail
           runtime-binding-preview
+          runtime-binding-signature-formals
+          runtime-binding-signatures
           runtime-binding-generation)
   (import (chezscheme)
           (soda editor event)
@@ -42,7 +44,13 @@
                      chez-evaluator-runtime-catalog-set!)))
 
   (define-record-type runtime-binding
-    (fields name kind detail preview generation))
+    (fields
+      name
+      kind
+      detail
+      preview
+      signature-formals
+      generation))
 
   (define (make-chez-evaluator)
     (let ([environment
@@ -83,6 +91,72 @@
             (string-append (substring text 0 157) "...")
             text))))
 
+  (define (arity-argument index)
+    (string->symbol
+      (string-append
+        "arg"
+        (number->string index))))
+
+  (define (fixed-arity-formals count)
+    (let loop ([index 1] [result '()])
+      (if (> index count)
+          (reverse result)
+          (loop
+            (+ index 1)
+            (cons
+              (arity-argument index)
+              result)))))
+
+  (define (rest-arity-formals minimum)
+    (let loop ([index minimum] [result 'args])
+      (if (zero? index)
+          result
+          (loop
+            (- index 1)
+            (cons
+              (arity-argument index)
+              result)))))
+
+  (define (procedure-signature-formals value)
+    (guard (condition [else '()])
+      (let loop
+        ([mask (procedure-arity-mask value)]
+         [arity 0]
+         [result '()])
+        (cond
+          [(zero? mask) (reverse result)]
+          [(= mask -1)
+           (reverse
+             (cons
+               (rest-arity-formals arity)
+               result))]
+          [else
+           (loop
+             (bitwise-arithmetic-shift-right mask 1)
+             (+ arity 1)
+             (if (odd? mask)
+                 (cons
+                   (fixed-arity-formals arity)
+                   result)
+                 result))]))))
+
+  (define (runtime-binding-signatures binding)
+    (unless (runtime-binding? binding)
+      (assertion-violation
+        'runtime-binding-signatures
+        "expected a runtime binding"
+        binding))
+    (map
+      (lambda (formals)
+        (call-with-string-output-port
+          (lambda (port)
+            (write
+              (cons
+                (runtime-binding-name binding)
+                formals)
+              port))))
+      (runtime-binding-signature-formals binding)))
+
   (define (make-binding-metadata evaluator name)
     (let ([environment (chez-evaluator-environment evaluator)])
       (if (top-level-bound? name environment)
@@ -98,12 +172,16 @@
                   "Runtime procedure"
                   "Runtime value")
               (bounded-write value)
+              (if (eq? kind 'procedure)
+                  (procedure-signature-formals value)
+                  '())
               (chez-evaluator-generation evaluator)))
           (make-runtime-binding
             name
             'syntax
             "Runtime syntax"
             "#<syntax>"
+            '()
             (chez-evaluator-generation evaluator)))))
 
   (define (chez-evaluator-bindings evaluator)

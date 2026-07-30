@@ -5008,6 +5008,29 @@
       (editor-active-completion scheme-completion-editor)))
   (error 'editor-tests
          "runtime completion did not expose loaded evaluator bindings"))
+(let ([procedure-item
+        (find
+          (lambda (item)
+            (and
+              (eq? (completion-item-provider item)
+                   'scheme-runtime)
+              (string=?
+                (completion-item-insert-text item)
+                "soda-test-runtime-procedure")))
+          (completion-session-items
+            (editor-active-completion
+              scheme-completion-editor)))])
+  (unless
+    (and
+      procedure-item
+      (string=?
+        (completion-item-annotation procedure-item)
+        "(soda-test-runtime-procedure arg1 . args)"))
+    (error 'editor-tests
+           "runtime procedure completion omitted its arity signature"
+           (and
+             procedure-item
+             (completion-item-annotation procedure-item)))))
 (editor-cancel-completion! scheme-completion-editor)
 (send!
   scheme-completion-editor
@@ -5026,6 +5049,25 @@
       "loaded"))
   (error 'editor-tests
          "Scheme symbol inspection did not use runtime binding metadata"))
+(send!
+  scheme-completion-editor
+  scheme-completion-decoder
+  (string->utf8
+    "\n(soda-test-runtime-procedure 1 "))
+(editor-update!
+  scheme-completion-editor
+  (make-command-message 'scheme.signature-help #f))
+(unless
+  (and
+    (string-contains?
+      (editor-status-message scheme-completion-editor)
+      "Argument 2")
+    (string-contains?
+      (editor-status-message scheme-completion-editor)
+      "(soda-test-runtime-procedure arg1 . args)"))
+  (error 'editor-tests
+         "Scheme signature help omitted runtime procedure arity"
+         (editor-status-message scheme-completion-editor)))
 (editor-close! scheme-completion-editor)
 
 (define documented-completion-source

@@ -215,12 +215,16 @@ frame-relative evaluation 都作为普通 command 执行，不接管 terminal st
 求值产生的顶层 binding 保存在 session 的 Chez environment 中。evaluator 按
 generation 分别缓存完整 environment catalog 和相对初始 environment 的 runtime
 catalog；一次求值或文件加载使旧 catalog 失效，下一次对应查询重新枚举
-environment。catalog 保存 binding kind、有限深度的 value preview 和 generation，
-不持有 transcript range。
+environment。catalog 保存 binding kind、有限深度的 value preview、generation
+和 procedure signature formals，不持有 transcript range。procedure formals 从 Chez
+arity mask 投影：有限 bit 产生固定 arity，负数高位产生 dotted rest arity，
+`case-lambda` 的离散分支保持为多个 formals。
 
 `scheme-repl` completion provider 将当前 InteractionSession 的完整 environment
 投影为通用 `CompletionItem`；它不从 transcript 文本恢复 binding。普通 Scheme
 Buffer 同时使用 `scheme-static` 与 `scheme-runtime`，后者只提供 Editor evaluator
 中相对初始 environment 新增的 binding。symbol inspection 和 signature help 在
-静态索引没有定义时查询同一 runtime catalog。静态 Scheme semantic provider 的
-职责与组合边界见 [11-scheme-semantics.md](11-scheme-semantics.md)。
+静态索引没有定义时查询同一 runtime catalog。runtime procedure completion 的
+annotation 使用首个 signature；signature help 显示全部 arity 分支和当前参数位置。
+静态 Scheme semantic provider 的职责与组合边界见
+[11-scheme-semantics.md](11-scheme-semantics.md)。

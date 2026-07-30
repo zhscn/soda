@@ -75,10 +75,16 @@
              (if (runtime-binding? metadata)
                  (runtime-binding-detail metadata)
                  "Chez interaction environment")]
-           [annotation
+           [signatures
              (if (runtime-binding? metadata)
-                 (runtime-binding-preview metadata)
-                 "REPL binding")])
+                 (runtime-binding-signatures metadata)
+                 '())]
+           [annotation
+             (cond
+               [(pair? signatures) (car signatures)]
+               [(runtime-binding? metadata)
+                (runtime-binding-preview metadata)]
+               [else "REPL binding"])])
       (make-completion-item
         symbol
         provider

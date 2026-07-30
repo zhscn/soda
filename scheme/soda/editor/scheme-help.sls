@@ -88,15 +88,46 @@
                   (string->symbol name))])
           (and
             binding
+            (let ([signatures
+                    (runtime-binding-signatures binding)])
+              (string-append
+                (if (pair? signatures)
+                    (join-strings " | " signatures)
+                    (string-append
+                      name
+                      ": "
+                      (symbol->string
+                        (runtime-binding-kind binding))))
+                " — "
+                (runtime-binding-detail binding)
+                " — "
+                (runtime-binding-preview binding))))))))
+
+  (define (runtime-signature-description
+            editor
+            name
+            argument-index)
+    (let ([evaluator (editor-evaluator editor)])
+      (and
+        name
+        (chez-evaluator? evaluator)
+        (let* ([binding
+                 (chez-evaluator-binding-metadata
+                   evaluator
+                   (string->symbol name))]
+               [signatures
+                 (if binding
+                     (runtime-binding-signatures binding)
+                     '())])
+          (and
+            (pair? signatures)
             (string-append
-              name
+              "Argument "
+              (number->string (+ argument-index 1))
               ": "
-              (symbol->string
-                (runtime-binding-kind binding))
+              (join-strings " | " signatures)
               " — "
-              (runtime-binding-detail binding)
-              " — "
-              (runtime-binding-preview binding)))))))
+              (runtime-binding-detail binding)))))))
 
   (define (describe-symbol-command context)
     (let* ([editor (command-context-editor context)]
@@ -155,9 +186,14 @@
              (and
                call
                (null? signatures)
-               (runtime-description
-                 editor
-                 (scheme-call-context-name call)))])
+               (or
+                 (runtime-signature-description
+                   editor
+                   (scheme-call-context-name call)
+                   (scheme-call-context-argument-index call))
+                 (runtime-description
+                   editor
+                   (scheme-call-context-name call))))])
       (editor-set-status-message!
         editor
         (cond
