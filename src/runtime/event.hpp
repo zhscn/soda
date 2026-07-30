@@ -20,6 +20,7 @@ enum class EventKind : std::uint8_t {
     FileWrite = 4,
     DirectoryScan = 5,
     PathStat = 6,
+    PathChange = 7,
 };
 
 enum class FdEvent : std::uint8_t {

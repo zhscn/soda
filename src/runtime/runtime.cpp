@@ -59,6 +59,14 @@ struct Runtime::Impl {
         bool closing = false;
     };
 
+    struct PathWatch {
+        Impl* owner = nullptr;
+        SourceId id;
+        uv_fs_event_t handle{};
+        std::string path;
+        bool closing = false;
+    };
+
     struct FileRead {
         enum class Phase : std::uint8_t {
             Open,
@@ -122,6 +130,10 @@ struct Runtime::Impl {
         for (auto& [id, watch] : fd_watches) {
             (void)id;
             close_watch(*watch);
+        }
+        for (auto& [id, watch] : path_watches) {
+            (void)id;
+            close_path_watch(*watch);
         }
         for (auto& [id, read] : file_reads) {
             (void)id;
@@ -340,6 +352,36 @@ struct Runtime::Impl {
         return id;
     }
 
+    SourceId watch_path(std::string path) {
+        require_owner_thread();
+        if (path.empty()) {
+            throw std::invalid_argument("path watch has no path");
+        }
+
+        auto watch = std::make_unique<PathWatch>();
+        watch->owner = this;
+        watch->id = allocate_id();
+        watch->path = std::move(path);
+        const SourceId id = watch->id;
+
+        const int init_status = uv_fs_event_init(&loop, &watch->handle);
+        if (init_status < 0) {
+            throw uv_error(init_status, "cannot initialize path watch");
+        }
+        watch->handle.data = watch.get();
+        path_watches.emplace(id.value, std::move(watch));
+
+        const int start_status =
+            uv_fs_event_start(&path_watches.at(id.value)->handle, on_path_change,
+                              path_watches.at(id.value)->path.c_str(), 0);
+        if (start_status < 0) {
+            close_path_watch(*path_watches.at(id.value));
+            (void)uv_run(&loop, UV_RUN_NOWAIT);
+            throw uv_error(start_status, "cannot start path watch");
+        }
+        return id;
+    }
+
     bool cancel(SourceId source) {
         require_owner_thread();
         if (!source.valid()) {
@@ -357,6 +399,13 @@ struct Runtime::Impl {
                 return false;
             }
             close_watch(*watch->second);
+            return true;
+        }
+        if (const auto watch = path_watches.find(source.value); watch != path_watches.end()) {
+            if (watch->second->closing) {
+                return false;
+            }
+            close_path_watch(*watch->second);
             return true;
         }
         if (const auto read = file_reads.find(source.value); read != file_reads.end()) {
@@ -413,6 +462,15 @@ struct Runtime::Impl {
         (void)uv_poll_stop(&watch.handle);
         watched_fds.erase(watch.fd);
         uv_close(reinterpret_cast<uv_handle_t*>(&watch.handle), on_watch_closed);
+    }
+
+    void close_path_watch(PathWatch& watch) {
+        if (watch.closing) {
+            return;
+        }
+        watch.closing = true;
+        (void)uv_fs_event_stop(&watch.handle);
+        uv_close(reinterpret_cast<uv_handle_t*>(&watch.handle), on_path_watch_closed);
     }
 
     void submit_file_read(FileRead& operation) {
@@ -654,6 +712,34 @@ struct Runtime::Impl {
         watch.owner->fd_watches.erase(watch.id.value);
     }
 
+    static void on_path_change(uv_fs_event_t* handle, const char* filename, int events,
+                               int status) noexcept {
+        guard_callback([&] {
+            auto& watch = *static_cast<PathWatch*>(handle->data);
+            std::vector<std::byte> data;
+            if (filename != nullptr) {
+                const std::string_view name{filename};
+                data.insert(data.end(), reinterpret_cast<const std::byte*>(name.data()),
+                            reinterpret_cast<const std::byte*>(name.data() + name.size()));
+            }
+            watch.owner->events.push_back({
+                .kind = EventKind::PathChange,
+                .source = watch.id,
+                .status = status,
+                .flags = static_cast<std::uint32_t>(events),
+                .data = std::move(data),
+            });
+            if (status < 0) {
+                watch.owner->close_path_watch(watch);
+            }
+        });
+    }
+
+    static void on_path_watch_closed(uv_handle_t* handle) noexcept {
+        const auto& watch = *static_cast<PathWatch*>(handle->data);
+        watch.owner->path_watches.erase(watch.id.value);
+    }
+
     static void on_file_read(uv_fs_t* request) noexcept {
         guard_callback([&] {
             auto& operation = *static_cast<FileRead*>(request->data);
@@ -866,6 +952,7 @@ struct Runtime::Impl {
     std::deque<Event> events;
     std::unordered_map<std::uint64_t, std::unique_ptr<Timer>> timers;
     std::unordered_map<std::uint64_t, std::unique_ptr<FdWatch>> fd_watches;
+    std::unordered_map<std::uint64_t, std::unique_ptr<PathWatch>> path_watches;
     std::unordered_map<int, SourceId> watched_fds;
     std::unordered_map<std::uint64_t, std::unique_ptr<FileRead>> file_reads;
     std::unordered_map<std::uint64_t, std::unique_ptr<FileWrite>> file_writes;
@@ -898,6 +985,10 @@ SourceId Runtime::scan_directory(std::string path) {
 
 SourceId Runtime::stat_path(std::string path, bool follow_symlinks) {
     return impl_->stat_path(std::move(path), follow_symlinks);
+}
+
+SourceId Runtime::watch_path(std::string path) {
+    return impl_->watch_path(std::move(path));
 }
 
 bool Runtime::cancel(SourceId source) {

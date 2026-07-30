@@ -10,6 +10,7 @@
           runtime-write-file!
           runtime-scan-directory!
           runtime-stat-path!
+          runtime-watch-path!
           runtime-cancel!
           runtime-status-name
           runtime-status-message
@@ -29,7 +30,9 @@
           event-flags
           event-data
           fd-readable
-          fd-writable)
+          fd-writable
+          path-rename
+          path-change)
   (import (chezscheme)
           (soda native))
 
@@ -40,7 +43,7 @@
     (foreign-procedure __atomic "soda_runtime_abi_version" () unsigned-32))
 
   (define abi-version-checked
-    (unless (= (%abi-version) 5)
+    (unless (= (%abi-version) 6)
       (error 'soda-runtime "unsupported native runtime ABI version")))
 
   (define %runtime-create
@@ -68,6 +71,10 @@
   (define %stat-path
     (foreign-procedure __atomic "soda_runtime_stat_path"
                        (void* string int)
+                       unsigned-64))
+  (define %watch-path
+    (foreign-procedure __atomic "soda_runtime_watch_path"
+                       (void* string)
                        unsigned-64))
   (define %cancel
     (foreign-procedure __atomic "soda_runtime_cancel" (void* unsigned-64) int))
@@ -133,6 +140,8 @@
 
   (define fd-readable #x1)
   (define fd-writable #x2)
+  (define path-rename #x1)
+  (define path-change #x2)
 
   (define (require-runtime who value)
     (unless (runtime? value)
@@ -244,6 +253,21 @@
          (if (zero? source)
              (native-error 'runtime-stat-path! runtime)
              source))]))
+
+  (define (runtime-watch-path! runtime path)
+    (require-runtime 'runtime-watch-path! runtime)
+    (unless (and (string? path) (positive? (string-length path)))
+      (assertion-violation
+        'runtime-watch-path!
+        "path must be a non-empty string"
+        path))
+    (let ([source
+            (%watch-path
+              (runtime-pointer runtime)
+              path)])
+      (if (zero? source)
+          (native-error 'runtime-watch-path! runtime)
+          source)))
 
   (define (runtime-cancel! runtime source)
     (require-runtime 'runtime-cancel! runtime)
@@ -382,6 +406,7 @@
       [(4) 'file-write]
       [(5) 'directory-scan]
       [(6) 'path-stat]
+      [(7) 'path-change]
       [else (error 'runtime-poll! "unknown native event kind" value)]))
 
   (define (copy-current-data pointer)

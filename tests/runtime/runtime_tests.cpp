@@ -147,6 +147,39 @@ TEST_CASE("asynchronous directory scan returns typed entries") {
     fs::remove_all(directory);
 }
 
+TEST_CASE("path watch reports directory entry changes until cancellation") {
+    namespace fs = std::filesystem;
+    const fs::path directory =
+        fs::temp_directory_path() /
+        ("soda-runtime-watch-" +
+         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    REQUIRE(fs::create_directory(directory));
+
+    Runtime runtime;
+    const SourceId watch = runtime.watch_path(directory.string());
+    {
+        std::ofstream output(directory / "source.scm", std::ios::binary);
+        output << "value";
+    }
+
+    while (runtime.pending_events() == 0) {
+        (void)runtime.poll(PollMode::Once);
+    }
+    const auto event = runtime.next_event();
+    REQUIRE(event.has_value());
+    CHECK(event->kind == EventKind::PathChange);
+    CHECK(event->source == watch);
+    CHECK(event->status == 0);
+    CHECK((event->flags & (UV_RENAME | UV_CHANGE)) != 0);
+    const std::string name(reinterpret_cast<const char*>(event->data.data()), event->data.size());
+    CHECK(name == "source.scm");
+
+    CHECK(runtime.cancel(watch));
+    CHECK_FALSE(runtime.cancel(watch));
+    (void)runtime.poll(PollMode::NoWait);
+    fs::remove_all(directory);
+}
+
 TEST_CASE("asynchronous stat and lstat report resource metadata") {
     namespace fs = std::filesystem;
     const fs::path directory =

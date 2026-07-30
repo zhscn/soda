@@ -129,6 +129,15 @@ uint64_t soda_runtime_stat_path(soda_runtime* runtime, const char* path, int fol
     });
 }
 
+uint64_t soda_runtime_watch_path(soda_runtime* runtime, const char* path) {
+    return guard(runtime, uint64_t{0}, [&] {
+        if (path == nullptr) {
+            throw std::invalid_argument("path watch path is null");
+        }
+        return runtime->runtime.watch_path(path).value;
+    });
+}
+
 int soda_runtime_cancel(soda_runtime* runtime, uint64_t source) {
     return guard(runtime, -1,
                  [&] { return runtime->runtime.cancel(soda::runtime::SourceId{source}) ? 1 : 0; });
