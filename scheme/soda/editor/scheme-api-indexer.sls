@@ -165,7 +165,10 @@
           owner+definition
           (scheme-definition-end (cdr owner+definition)))
         (entry-signatures owner+definition)
-        #f)))
+        (and
+          owner+definition
+          (scheme-definition-documentation
+            (cdr owner+definition))))))
 
   (define (same-entry? left right)
     (and

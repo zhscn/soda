@@ -26,13 +26,21 @@
     "#;(define ignored-datum 4)\n"
     "'(define ignored-quote 5)\n"
     "(quote (define ignored-long-quote 6))\n"
-    "(define (render-frame frame) frame)\n"
-    "(define render-lambda (lambda (frame options) frame))\n"
+    "(define (render-frame frame)\n"
+    "  \"Render \\\"one\\\" frame.\"\n"
+    "  frame)\n"
+    "(define render-lambda\n"
+    "  (lambda (frame options)\n"
+    "    \"Render through a lambda initializer.\"\n"
+    "    frame))\n"
     "(define render-case\n"
     "  (case-lambda\n"
     "    [() #f]\n"
     "    [(frame) frame]))\n"
     "(define current-value \"(define ignored-string 7)\")\n"
+    "(define-command (render-command context)\n"
+    "  \"Render from an editor command.\"\n"
+    "  context)\n"
     "(define-syntax with-value (syntax-rules ()))\n"
     "(define-record-type (editor-state make-editor-state editor-state?)\n"
     "  (fields value))\n"
@@ -221,15 +229,34 @@
       (scheme-definition-signatures
         (definition-by-name "render-frame"))
       '("(render-frame frame)"))
+    (string=?
+      (scheme-definition-documentation
+        (definition-by-name "render-frame"))
+      "Render \"one\" frame.")
     (equal?
       (scheme-definition-signatures
         (definition-by-name "render-lambda"))
       '("(render-lambda frame options)"))
+    (string=?
+      (scheme-definition-documentation
+        (definition-by-name "render-lambda"))
+      "Render through a lambda initializer.")
     (equal?
       (scheme-definition-signatures
         (definition-by-name "render-case"))
       '("(render-case)" "(render-case frame)"))
     (definition-by-name "current-value")
+    (not
+      (scheme-definition-documentation
+        (definition-by-name "current-value")))
+    (equal?
+      (scheme-definition-signatures
+        (definition-by-name "render-command"))
+      '("(render-command context)"))
+    (string=?
+      (scheme-definition-documentation
+        (definition-by-name "render-command"))
+      "Render from an editor command.")
     (definition-by-name "with-value")
     (eq? (scheme-definition-kind
            (definition-by-name "with-value"))
@@ -1844,7 +1871,9 @@
           "      [(value) value]))\n"
           "  (define-record-type alpha-cell\n"
           "    (fields (mutable value)))\n"
-          "  (define (alpha-run alpha-value) alpha-value)))\n")))
+          "  (define (alpha-run alpha-value)\n"
+          "    \"Run the alpha operation.\"\n"
+          "    alpha-value)))\n")))
     (cons
       "facade.sls"
       (string->utf8
@@ -1899,6 +1928,9 @@
       (string=? (list-ref renamed 3) "alpha.sls")
       (exact-non-negative-integer? (list-ref renamed 4))
       (equal? (list-ref renamed 6) '((alpha-value)))
+      (string=?
+        (list-ref renamed 7)
+        "Run the alpha operation.")
       overloaded
       (equal? (list-ref overloaded 6) '(() (value)))
       accessor

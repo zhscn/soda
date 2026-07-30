@@ -4897,6 +4897,74 @@
          (utf8->string (buffer-bytes scheme-completion-buffer))))
 (editor-close! scheme-completion-editor)
 
+(define documented-completion-source
+  (string-append
+    "(define (render-documented frame)\n"
+    "  \"Render a documented frame.\"\n"
+    "  frame)\n"
+    "(render-"))
+(define documented-completion-buffer
+  (make-buffer
+    943
+    (make-document documented-completion-source 943)
+    "documented-completion.scm"
+    'scheme-mode))
+(define documented-completion-editor
+  (make-editor documented-completion-buffer))
+(define documented-completion-decoder
+  (make-input-decoder))
+(define documented-completion-executor
+  (make-effect-executor))
+(install-completion-effect-handlers!
+  documented-completion-executor
+  (editor-completion-provider-catalog
+    documented-completion-editor))
+(view-set-caret!
+  (editor-active-view documented-completion-editor)
+  (bytevector-length
+    (string->utf8 documented-completion-source)))
+(let ([effects
+        (send!
+          documented-completion-editor
+          documented-completion-decoder
+          (bytes 27 47))])
+  (for-each
+    (lambda (message)
+      (editor-update!
+        documented-completion-editor
+        message))
+    (effect-result-messages
+      (execute-effects!
+        documented-completion-executor
+        effects))))
+(let* ([completion
+         (editor-active-completion
+           documented-completion-editor)]
+       [candidate
+         (and
+           completion
+           (find
+             (lambda (item)
+               (and
+                 (eq?
+                   (completion-item-provider item)
+                   'scheme-static)
+                 (string=?
+                   (completion-item-insert-text item)
+                   "render-documented")))
+             (completion-session-items completion)))])
+  (unless
+    (and
+      candidate
+      (string=?
+        (completion-item-documentation candidate)
+        "Render a documented frame."))
+    (error
+      'editor-tests
+      "Scheme completion did not expose source documentation"
+      candidate)))
+(editor-close! documented-completion-editor)
+
 (define stale-document
   (make-document (string->utf8 "alpha al") 941))
 (define stale-buffer

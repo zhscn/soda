@@ -52,6 +52,7 @@
           '())))
 
   (define (editor-register-command! editor definition)
+    "Register a command definition in editor."
     (require-open-editor 'editor-register-command! editor)
     (unless (command-definition? definition)
       (assertion-violation

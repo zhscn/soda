@@ -5,6 +5,7 @@
   (import (rnrs))
 
   (define (fixture-value value)
+    "Add the fixture offset to value."
     (+ value 22))
 
   (define (unused-helper ignored)

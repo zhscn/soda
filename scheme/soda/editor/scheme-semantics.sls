@@ -183,6 +183,17 @@
   (define token-datum-cache
     (make-hashtable string-hash string=?))
 
+  (define (parse-token-datum spelling)
+    (guard
+      (condition [else invalid-token-datum])
+      (let ([port
+              (open-string-input-port spelling)])
+        (let ([value (read port)])
+          (if
+            (eof-object? (read port))
+            value
+            invalid-token-datum)))))
+
   (define (read-token-datum spelling)
     (let ([cached
             (hashtable-ref
@@ -190,16 +201,7 @@
       (if
         cached
         (cdr cached)
-        (let ([datum
-                (guard
-                  (condition [else invalid-token-datum])
-                  (let ([port
-                          (open-string-input-port spelling)])
-                    (let ([value (read port)])
-                      (if
-                        (eof-object? (read port))
-                        value
-                        invalid-token-datum))))])
+        (let ([datum (parse-token-datum spelling)])
           (hashtable-set!
             token-datum-cache
             spelling
@@ -207,13 +209,13 @@
           datum))))
 
   (define (token-datum value)
-    (if
-      (and
-        value
-        (eq? (token-kind value) 'symbol))
-      (read-token-datum
-        (token-value value))
-      invalid-token-datum))
+    (cond
+      [(not value) invalid-token-datum]
+      [(eq? (token-kind value) 'symbol)
+       (read-token-datum (token-value value))]
+      [(memq (token-kind value) '(string character))
+       (parse-token-datum (token-value value))]
+      [else invalid-token-datum]))
 
   (define (exact-non-negative-integer? value)
     (and (integer? value) (exact? value) (not (negative? value))))
@@ -335,7 +337,11 @@
                    (loop
                      end
                      (cons
-                       (make-token 'string #f index end)
+                       (make-token
+                         'string
+                         (decode-range bytes index end)
+                         index
+                         end)
                        tokens)))]
                 [(and (< (+ index 1) size)
                       (= byte 35)
@@ -376,7 +382,7 @@
                      (cons
                        (make-token
                          'character
-                         #f
+                         (decode-range bytes index end)
                          index
                          end)
                        tokens)))]
@@ -566,6 +572,29 @@
       detail
       formals))
 
+  (define (documented-local-definition
+            document-id
+            revision
+            value
+            kind
+            detail
+            formals
+            documentation)
+    (make-scheme-definition
+      (make-scheme-definition-id
+        'document
+        document-id
+        revision
+        (token-start value)
+        (token-value value))
+      (token-value value)
+      kind
+      (token-start value)
+      (token-end value)
+      detail
+      formals
+      documentation))
+
   (define (procedure-head-formals tokens)
     (call-with-values
       (lambda () (partial-datum tokens))
@@ -594,6 +623,45 @@
                  (and (pair? clause) (car clause)))
                (cdr datum)))]
           [else '()]))))
+
+  (define (source-definition-documentation tokens)
+    (define (documentation-at remaining)
+      (and
+        (pair? remaining)
+        (eq? (token-kind (car remaining)) 'string)
+        (let ([datum (token-datum (car remaining))])
+          (and (string? datum) datum))))
+    (and
+      (pair? tokens)
+      (eq? (token-kind (car tokens)) 'open)
+      (pair? (cdr tokens))
+      (let ([head (cadr tokens)]
+            [tail (cddr tokens)])
+        (cond
+          [(and
+             (token-symbol=? head "define")
+             (pair? tail)
+             (eq? (token-kind (car tail)) 'open))
+           (documentation-at (skip-datum tail))]
+          [(and
+             (token-symbol=? head "define")
+             (pair? tail)
+             (symbol-token? (car tail))
+             (pair? (cdr tail)))
+           (let ([initializer (cdr tail)])
+             (and
+               (eq? (token-kind (car initializer)) 'open)
+               (pair? (cdr initializer))
+               (token-symbol=? (cadr initializer) "lambda")
+               (documentation-at
+                 (skip-datum
+                   (cddr initializer)))))]
+          [(and
+             (token-symbol=? head "define-command")
+             (pair? tail)
+             (eq? (token-kind (car tail)) 'open))
+           (documentation-at (skip-datum tail))]
+          [else #f]))))
 
   (define (symbol-append . values)
     (string->symbol
@@ -924,7 +992,7 @@
                 (let ([formals
                         (initializer-formals (cdr tail))])
                   (list
-                    (local-definition
+                    (documented-local-definition
                       document-id
                       revision
                       (car tail)
@@ -932,19 +1000,23 @@
                       (if (pair? formals)
                           "local procedure"
                           "local definition")
-                      formals)))]
+                      formals
+                      (source-definition-documentation
+                        tokens))))]
                [(and (pair? tail)
                      (eq? (token-kind (car tail)) 'open)
                      (pair? (cdr tail))
                      (symbol-token? (cadr tail)))
                 (list
-                  (local-definition
+                  (documented-local-definition
                     document-id
                     revision
                     (cadr tail)
                     'procedure
                     "local procedure"
-                    (procedure-head-formals tail)))]
+                    (procedure-head-formals tail)
+                    (source-definition-documentation
+                      tokens)))]
                [else '()])]
             [(token-symbol=? head "define-values")
              (let ([bindings
@@ -1001,13 +1073,15 @@
                  (pair? (cdr tail))
                  (symbol-token? (cadr tail)))
                (list
-                 (local-definition
+                 (documented-local-definition
                    document-id
                    revision
                    (cadr tail)
                    'procedure
                    "local command"
-                   (procedure-head-formals tail)))
+                   (procedure-head-formals tail)
+                   (source-definition-documentation
+                     tokens)))
                '())]
             [(token-symbol=? head "define-record-type")
              (record-definitions
@@ -1424,7 +1498,9 @@
   (define (partial-datum tokens)
     (cond
       [(null? tokens) (values #f '())]
-      [(eq? (token-kind (car tokens)) 'symbol)
+      [(memq
+         (token-kind (car tokens))
+         '(symbol string character))
        (let ([datum (token-datum (car tokens))])
          (values
            (if

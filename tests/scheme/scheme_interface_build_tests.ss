@@ -58,7 +58,10 @@
             (list-ref entry 3)
             (string-append
               source-root
-              "/fixture/scheme-interface-build/dependency.sls"))))
+              "/fixture/scheme-interface-build/dependency.sls"))
+          (string=?
+            (list-ref entry 7)
+            "Add the fixture offset to value.")))
       (scheme-interface-index-entries index))
     (exists
       (lambda (reference)

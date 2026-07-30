@@ -61,6 +61,9 @@
     (integer? (list-ref editor-command-entry 4))
     (integer? (list-ref editor-command-entry 5))
     (pair? (list-ref editor-command-entry 6))
+    (string=?
+      (list-ref editor-command-entry 7)
+      "Register a command definition in editor.")
     completion-item-accessor-entry
     (eq? (cadr completion-item-accessor-entry) 'accessor)
     (string?
@@ -847,7 +850,8 @@
     (editor-status-message xref-editor)
     (string-append
       "(editor-register-command! editor definition)"
-      " — Exported by (soda editor core)"))
+      " — Exported by (soda editor core)"
+      " — Register a command definition in editor."))
   (error
     'embedded-api-index-tests
     "Scheme symbol help did not expose embedded API metadata"

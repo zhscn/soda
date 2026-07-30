@@ -260,6 +260,13 @@ constructor 不推断 formals。所有生成 binding 的 source location 指向 
 实时 scanner 是 signature formals 的唯一生产者。构建索引器从
 `SchemeDefinition` 读取 raw formals，不另行解析 procedure 或 record 语法。
 
+源码 documentation 使用结构化的 body docstring。procedure definition 的参数表后、
+以 `lambda` 初始化的 definition 的参数表后，以及 `define-command` signature 后的
+首个 string datum 成为对应 `SchemeDefinition` 的 documentation。普通 variable
+initializer 中的 string 仍是值，不形成文档。scanner 解码 Scheme string escape，
+构建索引器直接把得到的 documentation 写入 interface entry；completion 与 symbol
+inspection 因而共享实时 Buffer 和编译 artifact 中的同一字段。
+
 运行时 catalog 保留每个 export 的 library identity。semantic snapshot 从容错
 reader 提取当前文档的 import library；即使外围 library form 尚未闭合，已经出现的
 import clause 仍然有效。静态 completion 只暴露当前文档 import 的 Soda library，
