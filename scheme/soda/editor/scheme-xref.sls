@@ -567,7 +567,6 @@
   (define (install-scheme-xref-commands! editor)
     (let ([workspace (make-scheme-workspace-index)])
       (hashtable-set! editor-workspaces editor workspace)
-      (scheme-workspace-sync-editor! workspace editor)
       (for-each
         (lambda (entry)
           (editor-register-command!

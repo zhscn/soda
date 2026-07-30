@@ -603,6 +603,14 @@ DefinitionId 倒排表，不读取或重新分析对应源码。打开相同 res
 和诊断；该分析不枚举目录，也不建立 workspace 索引。跨文件 catalog、引用和诊断
 属于显式 language session，并从构建 artifact 加载。
 
+Scheme workspace 在没有 source index 或 interface artifact 时处于 dormant 状态。
+completion、document highlight、help 和实时诊断直接读取 Buffer 自身按 revision
+缓存的 semantic snapshot，不向 workspace 注册文档。安装第一个 interface artifact
+或显式 source index 后，workspace 才同步打开的 Scheme Buffer，并维护跨文档
+catalog 与 reference 倒排表；移除最后一个 session artifact 时释放这些缓存。
+xref、rename 和 workspace symbol 等显式查询可以按需同步打开文档，但不会
+启动后台目录遍历、watcher 或周期性索引。
+
 显式 language workspace session 按 owner 安装 interface index。同一 owner 的新
 revision 原子替换旧 surface；移除 session 时撤销对应 surface。多个 index 按安装
 次序组成依赖层，session source 和打开的 Buffer 位于其上方。interface 变化只重新

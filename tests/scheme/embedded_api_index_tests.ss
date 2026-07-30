@@ -5,6 +5,7 @@
         (soda editor builtin-api-index)
         (soda editor core)
         (soda editor file)
+        (soda editor scheme-interface-index)
         (soda editor scheme-semantics)
         (soda editor scheme-workspace)
         (only (soda editor state) view-set-caret!))
@@ -185,13 +186,52 @@
     'scheme-mode))
 (editor-add-buffer! workspace-editor workspace-source-buffer)
 (define workspace-index (make-scheme-workspace-index))
+(when (scheme-workspace-session-active? workspace-index)
+  (error
+    'embedded-api-index-tests
+    "a new Scheme workspace started a language session"))
 (scheme-workspace-sync-editor! workspace-index workspace-editor)
+(when (scheme-workspace-session-active? workspace-index)
+  (error
+    'embedded-api-index-tests
+    "document synchronization started a language session"))
 (unless
   (zero? (scheme-workspace-generation workspace-index))
   (error
     'embedded-api-index-tests
     "unchanged Soda sources invalidated the embedded library catalog"
     (scheme-workspace-generation workspace-index)))
+(define lifecycle-workspace
+  (make-scheme-workspace-index))
+(define lifecycle-generation
+  (scheme-workspace-generation lifecycle-workspace))
+(scheme-workspace-install-interface-index!
+  lifecycle-workspace
+  (make-scheme-interface-index
+    "lifecycle-test"
+    "1"
+    '()
+    '()
+    '()
+    '()))
+(unless (scheme-workspace-session-active? lifecycle-workspace)
+  (error
+    'embedded-api-index-tests
+    "installing an interface artifact did not activate its language session"))
+(scheme-workspace-remove-interface-index!
+  lifecycle-workspace
+  "lifecycle-test")
+(unless
+  (and
+    (not
+      (scheme-workspace-session-active?
+        lifecycle-workspace))
+    (>
+      (scheme-workspace-generation lifecycle-workspace)
+      lifecycle-generation))
+  (error
+    'embedded-api-index-tests
+    "removing the final interface artifact did not deactivate its session"))
 (define workspace-source-snapshot
   (scheme-workspace-snapshot-for-buffer
     workspace-index

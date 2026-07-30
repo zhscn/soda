@@ -1,6 +1,7 @@
 (library (soda editor scheme-workspace)
   (export make-scheme-workspace-index
           scheme-workspace-index?
+          scheme-workspace-session-active?
           scheme-workspace-generation
           scheme-workspace-sync-editor!
           scheme-workspace-refresh-buffer!
@@ -118,6 +119,39 @@
   (define (scheme-workspace-generation index)
     (require-index 'scheme-workspace-generation index)
     (scheme-workspace-index-generation index))
+
+  (define (scheme-workspace-session-active? index)
+    (require-index
+      'scheme-workspace-session-active?
+      index)
+    (or
+      (pair?
+        (scheme-workspace-index-interface-indexes
+          index))
+      (positive?
+        (hashtable-size
+          (scheme-workspace-index-sources index)))))
+
+  (define (deactivate-session-cache! index)
+    (hashtable-clear!
+      (scheme-workspace-index-documents index))
+    (hashtable-clear!
+      (scheme-workspace-index-references index))
+    (scheme-workspace-index-library-index-set!
+      index
+      soda-built-in-api-index)
+    (scheme-workspace-index-library-catalog-set!
+      index
+      soda-built-in-library-index)
+    (scheme-workspace-index-generation-set!
+      index
+      (+ 1
+         (scheme-workspace-index-generation
+           index)))
+    (scheme-workspace-index-catalog-dirty?-set!
+      index #f)
+    (scheme-workspace-index-dirty?-set!
+      index #f))
 
   (define (scheme-workspace-interface-index-owners index)
     (require-index
@@ -620,7 +654,10 @@
         'scheme-workspace-remove-interface-index!
         "owner must be a non-empty string"
         owner))
-    (let* ([current
+    (let* ([was-active?
+             (scheme-workspace-session-active?
+               index)]
+           [current
              (scheme-workspace-index-interface-indexes
                index)]
            [remaining
@@ -636,7 +673,14 @@
         (scheme-workspace-index-interface-indexes-set!
           index remaining)
         (scheme-workspace-index-catalog-dirty?-set!
-          index #t)))
+          index #t))
+      (when
+        (and
+          was-active?
+          (not
+            (scheme-workspace-session-active?
+              index)))
+        (deactivate-session-cache! index)))
     index)
 
   (define (scheme-workspace-refresh-buffer! index buffer)
@@ -713,16 +757,26 @@
         'scheme-workspace-remove-source!
         "resource must be a string"
         resource))
-    (when
-      (hashtable-contains?
-        (scheme-workspace-index-sources index)
-        resource)
-      (hashtable-delete!
-        (scheme-workspace-index-sources index)
-        resource)
-      (scheme-workspace-index-catalog-dirty?-set!
-        index #t)
-      (scheme-workspace-index-dirty?-set! index #t))
+    (let ([was-active?
+            (scheme-workspace-session-active?
+              index)])
+      (when
+        (hashtable-contains?
+          (scheme-workspace-index-sources index)
+          resource)
+        (hashtable-delete!
+          (scheme-workspace-index-sources index)
+          resource)
+        (scheme-workspace-index-catalog-dirty?-set!
+          index #t)
+        (scheme-workspace-index-dirty?-set! index #t))
+      (when
+        (and
+          was-active?
+          (not
+            (scheme-workspace-session-active?
+              index)))
+        (deactivate-session-cache! index)))
     index)
 
   (define (scheme-workspace-snapshot-for-buffer

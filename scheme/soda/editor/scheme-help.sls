@@ -39,7 +39,10 @@
             (hashtable-ref
               editor-workspaces editor #f)])
       (if
-        workspace
+        (and
+          workspace
+          (scheme-workspace-session-active?
+            workspace))
         (begin
           (scheme-workspace-sync-editor!
             workspace editor)

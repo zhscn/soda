@@ -123,7 +123,11 @@
                       '()
                       #t))
                   (let ([snapshot
-                          (if workspace
+                          (if
+                            (and
+                              workspace
+                              (scheme-workspace-session-active?
+                                workspace))
                               (begin
                                 (scheme-workspace-sync-editor!
                                   workspace editor)

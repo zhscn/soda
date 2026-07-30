@@ -47,6 +47,9 @@ manifest 加载构建生成的 interface index，并按 artifact owner 标识其
 Project 的存在、root 识别和 resource 枚举本身不会创建 language session。一个
 language session 可以使用 Project 提供的 root 与设置，也可以只服务于 visitor
 Buffer。关闭 session 会撤销其 interface surface 和运行时资源。
+没有已加载 artifact 的 Scheme workspace 保持 dormant；当前 Buffer 的语义能力由
+文档 snapshot 提供，不注册跨文档 catalog。Scheme load/compile workflow 安装
+interface artifact 时激活 session，卸载最后一个 artifact 时释放 workspace cache。
 
 resource enumerator 由 Project 操作按需启动，通过 libuv directory scan 逐层展开
 目录，并通过异步 file read 产生请求方需要的 resource snapshot。隐藏目录、VCS

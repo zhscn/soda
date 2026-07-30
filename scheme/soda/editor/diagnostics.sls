@@ -63,7 +63,10 @@
             synchronize-workspace?)
     (let* ([snapshot
              (if
-               workspace
+               (and
+                 workspace
+                 (scheme-workspace-session-active?
+                   workspace))
                (if
                  synchronize-workspace?
                  (scheme-workspace-snapshot-for-buffer
@@ -115,7 +118,11 @@
             (hashtable-ref
               editor-workspaces editor #f)])
       (when
-        (and workspace synchronize-workspace?)
+        (and
+          workspace
+          (scheme-workspace-session-active?
+            workspace)
+          synchronize-workspace?)
         (scheme-workspace-sync-editor!
           workspace editor))
       (for-each
@@ -131,7 +138,11 @@
                      (annotation-set-source-revision current)
                      (buffer-revision buffer))
                    (or
-                     (not workspace)
+                     (not
+                       (and
+                         workspace
+                         (scheme-workspace-session-active?
+                           workspace)))
                      (equal?
                        (hashtable-ref
                          published-workspace-generations

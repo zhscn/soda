@@ -39,7 +39,10 @@
             workspace
             buffer)
     (if
-      workspace
+      (and
+        workspace
+        (scheme-workspace-session-active?
+          workspace))
       (scheme-workspace-refresh-buffer!
         workspace buffer)
       (buffer-scheme-semantic-snapshot
@@ -55,6 +58,8 @@
       caret
       (and
         workspace
+        (scheme-workspace-session-active?
+          workspace)
         (scheme-workspace-generation workspace))))
 
   (define (publish-highlights!

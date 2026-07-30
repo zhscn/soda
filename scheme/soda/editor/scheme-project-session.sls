@@ -880,9 +880,12 @@
       (scheme-workspace-remove-interface-index!
         workspace
         owner)
-      (scheme-workspace-sync-editor!
-        workspace
-        editor)
+      (when
+        (scheme-workspace-session-active?
+          workspace)
+        (scheme-workspace-sync-editor!
+          workspace
+          editor))
       (editor-set-status-message!
         editor
         (string-append
