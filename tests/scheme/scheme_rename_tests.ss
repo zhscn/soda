@@ -1,14 +1,20 @@
 #!r6rs
 (import (rnrs)
+        (only (chezscheme) get-process-id)
         (soda document)
         (soda editor buffer)
         (soda editor command)
         (soda editor core)
+        (soda editor effect)
+        (soda editor file)
+        (soda editor file-runtime)
         (soda editor prompt)
+        (soda editor scheme-interface-index)
         (soda editor scheme-semantics)
         (soda editor scheme-workspace)
         (soda editor scheme-xref)
-        (soda editor state))
+        (soda editor state)
+        (soda runtime))
 
 (define owner-source
   (string-append
@@ -30,6 +36,32 @@
     "  (import (rnrs) "
     "(rename (fixture rename-owner) (alpha-run run)))\n"
     "  (define (call-run value) (run value)))\n"))
+
+(define (string-prefix? prefix value)
+  (let ([length (string-length prefix)])
+    (and
+      (<= length (string-length value))
+      (string=?
+        prefix
+        (substring value 0 length)))))
+
+(define (string-contains? value needle)
+  (let ([limit
+          (-
+            (string-length value)
+            (string-length needle))])
+    (let loop ([position 0])
+      (and
+        (<= position limit)
+        (or
+          (string=?
+            needle
+            (substring
+              value
+              position
+              (+ position
+                 (string-length needle))))
+          (loop (+ position 1)))))))
 
 (define owner
   (make-buffer
@@ -283,3 +315,261 @@
     'scheme-rename-tests
     "generated record binding without source spelling was renamed"))
 (editor-close! generated-editor)
+
+(define compiled-rename-stem
+  (string-append
+    "/tmp/soda-compiled-rename-"
+    (number->string (get-process-id))))
+(define compiled-owner-path
+  (string-append compiled-rename-stem "-owner.sls"))
+(define compiled-prefix-path
+  (string-append compiled-rename-stem "-prefix.sls"))
+(define compiled-alias-path
+  (string-append compiled-rename-stem "-alias.sls"))
+
+(define (write-source! path source)
+  (when (file-exists? path)
+    (delete-file path))
+  (call-with-output-file
+    path
+    (lambda (port)
+      (display source port))))
+
+(write-source! compiled-owner-path owner-source)
+(write-source! compiled-prefix-path prefix-source)
+(write-source! compiled-alias-path alias-source)
+
+(define compiled-rename-index
+  (scheme-sources->interface-index
+    "compiled-rename"
+    "revision-1"
+    (list
+      (cons
+        compiled-owner-path
+        (string->utf8 owner-source))
+      (cons
+        compiled-prefix-path
+        (string->utf8 prefix-source))
+      (cons
+        compiled-alias-path
+        (string->utf8 alias-source)))))
+(define compiled-initiator-source
+  (string-append
+    "(import (rnrs) (fixture rename-owner))\n"
+    "(alpha-run 1)\n"))
+(define compiled-initiator
+  (make-buffer
+    30
+    (make-document compiled-initiator-source 30)
+    (string-append
+      compiled-rename-stem
+      "-initiator.scm")
+    'scheme-mode))
+(define compiled-editor
+  (make-editor compiled-initiator))
+(define compiled-workspace
+  (editor-scheme-workspace compiled-editor))
+(scheme-workspace-install-interface-index!
+  compiled-workspace
+  compiled-rename-index)
+(scheme-workspace-sync-editor!
+  compiled-workspace
+  compiled-editor)
+(define compiled-initiator-snapshot
+  (scheme-workspace-snapshot-for-buffer
+    compiled-workspace
+    compiled-initiator))
+(define compiled-alpha-use
+  (find
+    (lambda (use)
+      (string=?
+        (scheme-use-name use)
+        "alpha-run"))
+    (scheme-semantic-snapshot-uses
+      compiled-initiator-snapshot)))
+(define compiled-alpha-definition
+  (and
+    compiled-alpha-use
+    (let ([definitions
+            (scheme-semantic-definitions-at
+              compiled-initiator-snapshot
+              (scheme-use-start
+                compiled-alpha-use))])
+      (and
+        (= (length definitions) 1)
+        (car definitions)))))
+
+(unless compiled-alpha-definition
+  (error
+    'scheme-rename-tests
+    "compiled definition was not visible to the rename initiator"))
+
+(define compiled-context
+  (make-command-context
+    compiled-editor
+    (editor-active-view compiled-editor)
+    #f
+    #f))
+(define compiled-rename-effects
+  ((command-procedure
+     (editor-command-registry compiled-editor)
+     'scheme.rename)
+   compiled-context
+   compiled-alpha-definition
+   "alpha-execute"))
+
+(unless
+  (and
+    (= (length compiled-rename-effects) 3)
+    (for-all
+      (lambda (path)
+        (exists
+          (lambda (effect)
+            (and
+              (eq?
+                (command-effect-kind effect)
+                'file.read)
+              (string=?
+                (open-request-path
+                  (command-effect-payload
+                    effect))
+                path)))
+          compiled-rename-effects))
+      (list
+        compiled-owner-path
+        compiled-prefix-path
+        compiled-alias-path)))
+  (error
+    'scheme-rename-tests
+    "compiled rename did not request every unopened source"
+    compiled-rename-effects))
+
+(define compiled-runtime (make-runtime))
+(define compiled-executor
+  (make-effect-executor))
+(define compiled-file-adapter
+  (install-file-runtime!
+    compiled-executor
+    compiled-runtime))
+(execute-effects!
+  compiled-executor
+  compiled-rename-effects)
+(define compiled-timeout
+  (runtime-start-timer!
+    compiled-runtime
+    10
+    10))
+
+(let loop ([turn 0])
+  (when (= turn 100)
+    (error
+      'scheme-rename-tests
+      "compiled rename did not finish"
+      (editor-status-message compiled-editor)))
+  (let ([message
+          (editor-status-message compiled-editor)])
+    (unless
+      (and
+        message
+        (string-prefix?
+          "Renamed to alpha-execute"
+          message))
+      (for-each
+        (lambda (event)
+          (let ([message
+                  (file-runtime-handle-event
+                    compiled-file-adapter
+                    event)])
+            (when message
+              (editor-update!
+                compiled-editor
+                message))))
+        (runtime-poll! compiled-runtime))
+      (loop (+ turn 1)))))
+(runtime-cancel!
+  compiled-runtime
+  compiled-timeout)
+
+(define compiled-owner-buffer
+  (editor-buffer-for-resource
+    compiled-editor
+    compiled-owner-path))
+(define compiled-prefix-buffer
+  (editor-buffer-for-resource
+    compiled-editor
+    compiled-prefix-path))
+(define compiled-alias-buffer
+  (editor-buffer-for-resource
+    compiled-editor
+    compiled-alias-path))
+
+(unless
+  (and
+    compiled-owner-buffer
+    compiled-prefix-buffer
+    compiled-alias-buffer
+    (string-contains?
+      (buffer-string compiled-owner-buffer)
+      "(define (alpha-execute value)")
+    (string-contains?
+      (buffer-string compiled-owner-buffer)
+      "(export alpha-execute)")
+    (string-contains?
+      (buffer-string compiled-prefix-buffer)
+      "(p:alpha-execute value)")
+    (string-contains?
+      (buffer-string compiled-alias-buffer)
+      "(alpha-execute run)")
+    (string-contains?
+      (buffer-string compiled-alias-buffer)
+      "(run value)")
+    (string-contains?
+      (buffer-string compiled-initiator)
+      "(alpha-execute 1)"))
+  (error
+    'scheme-rename-tests
+    "compiled rename did not revalidate and edit opened sources"))
+
+(define stale-owner
+  (make-buffer
+    40
+    (make-document
+      (string-append
+        ";; source changed after the artifact was built\n"
+        owner-source)
+      40)
+    compiled-owner-path
+    'scheme-mode))
+(define stale-editor
+  (make-editor stale-owner))
+(define stale-workspace
+  (editor-scheme-workspace stale-editor))
+(scheme-workspace-install-interface-index!
+  stale-workspace
+  compiled-rename-index)
+(scheme-workspace-sync-editor!
+  stale-workspace
+  stale-editor)
+(define stale-compiled-rename-rejected? #f)
+(guard
+  (condition
+    [else
+     (set!
+       stale-compiled-rename-rejected?
+       #t)])
+  (scheme-workspace-rename-edits
+    stale-workspace
+    stale-editor
+    compiled-alpha-definition
+    "alpha-stale"))
+(unless stale-compiled-rename-rejected?
+  (error
+    'scheme-rename-tests
+    "compiled rename trusted a stale declaration location"))
+(editor-close! stale-editor)
+
+(editor-close! compiled-editor)
+(runtime-close! compiled-runtime)
+(delete-file compiled-owner-path)
+(delete-file compiled-prefix-path)
+(delete-file compiled-alias-path)

@@ -134,6 +134,12 @@
         "expected a Scheme workspace index"
         value)))
 
+  (define (exact-non-negative-integer? value)
+    (and
+      (integer? value)
+      (exact? value)
+      (not (negative? value))))
+
   (define (current-document? document buffer)
     (and
       document
@@ -1281,6 +1287,62 @@
         '()
         edits)))
 
+  (define (compiled-rename-discovery-edits
+            index
+            editor
+            definition
+            new-name)
+    (let* ([id (scheme-definition-id definition)]
+           [resource
+             (scheme-definition-id-document-id id)]
+           [start (scheme-definition-start definition)]
+           [end (scheme-definition-end definition)])
+      (unless
+        (and
+          (eq? (scheme-definition-id-source id) 'index)
+          (string? resource)
+          (exact-non-negative-integer? start)
+          (exact-non-negative-integer? end)
+          (<= start end))
+        (assertion-violation
+          'scheme-workspace-rename-edits
+          "definition source is outside the editable workspace"
+          (scheme-definition-name definition)))
+      (deduplicate-text-edits
+        (cons
+          (make-scheme-workspace-text-edit
+            #f
+            resource
+            0
+            start
+            end
+            new-name)
+          (filter
+            (lambda (edit) edit)
+            (map
+              (lambda (reference)
+                (and
+                  (not
+                    (document-for-reference
+                      index
+                      reference))
+                  (let ([use
+                          (scheme-workspace-reference-use
+                            reference)])
+                    (make-scheme-workspace-text-edit
+                      #f
+                      (scheme-workspace-reference-resource
+                        reference)
+                      (scheme-workspace-reference-revision
+                        reference)
+                      (scheme-use-start use)
+                      (scheme-use-end use)
+                      new-name))))
+              (scheme-workspace-references
+                index
+                editor
+                definition)))))))
+
   (define (scheme-workspace-rename-edits
             index
             editor
@@ -1307,12 +1369,27 @@
           'scheme-workspace-rename-edits
           "primitive metadata is immutable"
           (scheme-definition-name definition)))
-      (unless owner
-        (assertion-violation
-          'scheme-workspace-rename-edits
-          "definition source is outside the editable workspace"
-          (scheme-definition-name definition)))
-      (let* ([owner-definition
+      (if
+        (not owner)
+        (let ([resource
+                (scheme-definition-id-document-id id)])
+          (if
+            (and
+              (string? resource)
+              (hashtable-contains?
+                (workspace-resource-table index)
+                resource))
+            (assertion-violation
+              'scheme-workspace-rename-edits
+              "compiled definition source is stale"
+              resource
+              (scheme-definition-name definition))
+            (compiled-rename-discovery-edits
+              index
+              editor
+              definition
+              new-name)))
+        (let* ([owner-definition
                (or
                  (definition-in-document owner definition)
                  (assertion-violation
@@ -1451,7 +1528,7 @@
                         replacement)
                       edits)))))
             references)
-          (deduplicate-text-edits edits)))))
+          (deduplicate-text-edits edits))))))
 
   (define (document-symbol document definition)
     (let ([buffer-id

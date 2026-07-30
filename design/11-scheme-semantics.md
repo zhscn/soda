@@ -625,9 +625,12 @@ Buffer revision 替代；其余 catalog 条目以
 后的列表位置。
 
 编译引用使 `xref.find-references` 能返回未打开 source 的位置，并通过普通异步
-`file.read` 完成首次跳转。artifact 不保存源码文本、scope graph 或 rename plan；
-跨未打开 source 的 rename 需要 session source snapshot，打开的 Buffer 始终使用
-实时 semantic snapshot。
+`file.read` 完成首次跳转。artifact 不保存源码文本、scope graph 或 rename plan。
+rename 的发现阶段把编译 declaration 与 reference resource 转换为只用于请求文件的
+临时 edit，异步打开全部目标；提交阶段丢弃这些临时 edit，从实时 Buffer snapshot
+重新计算 declaration、import/export selector、prefix/alias use、scope conflict 和
+revision。编译 declaration 已经打开但无法在相同 resource 与 range 恢复 identity
+时，rename 以 stale artifact 失败，不应用任何临时位置。
 
 `xref.find-symbol`（`M-g i`）通过通用 completing-read 打开模糊匹配的 symbol
 候选。候选保存定义 kind 与 source resource，显示层只负责匹配和选择。接受已打开
@@ -655,11 +658,12 @@ definition 结果转换为 LocationList，并由 Workbench display policy 记录
 references 按 DefinitionId 读取 workspace 倒排表。查询 policy 决定是否包含声明和
 别名声明；返回值仍是普通 LocationList。rename 复用同一 use 集合生成带源
 revision 的 workspace edit。`scheme.rename`（`C-c C-r`）读取一个完整 Scheme
-identifier；未访问的 session source 通过没有 View target 的 `file.read` 打开为
-后台 Buffer。所有目标 Buffer 就绪后重新解析 workspace edit，先统一验证 revision、
-read-only 状态、range overlap 与名称冲突，再按 Buffer transaction 提交。提交中途
-失败时，已经修改的 Buffer 回到各自提交前的 undo position。rename 只修改 Buffer，
-保存仍由普通文件工作流负责。
+identifier；未访问的 session source 和仅存在于编译 artifact 的 source 通过没有
+View target 的 `file.read` 打开为后台 Buffer。所有目标 Buffer 就绪后重新解析
+workspace edit，先统一验证 definition identity、revision、read-only 状态、range
+overlap 与名称冲突，再按 Buffer transaction 提交。提交中途失败时，已经修改的
+Buffer 回到各自提交前的 undo position。rename 只修改 Buffer，保存仍由普通文件
+工作流负责。
 
 library binding rename 同时处理 declaration、普通 use 和 R6RS surface：
 
