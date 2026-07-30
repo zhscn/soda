@@ -6,6 +6,7 @@
         (soda editor core)
         (soda editor file)
         (soda editor scheme-semantics)
+        (soda editor scheme-workspace)
         (only (soda editor state) view-set-caret!))
 
 (define editor-command-entry
@@ -51,6 +52,101 @@
   (error
     'embedded-api-index-tests
     "embedded Scheme API catalog is missing the editor command interface"))
+
+(define (read-resource-bytes resource)
+  (call-with-port
+    (open-file-input-port resource)
+    get-bytevector-all))
+
+(define workspace-consumer-source
+  (string-append
+    "(import (soda editor core))\n"
+    "(editor-register-command!)\n"))
+(define workspace-consumer-buffer
+  (make-buffer
+    20
+    (make-document
+      workspace-consumer-source
+      20)
+    #f
+    'scheme-mode))
+(define workspace-editor
+  (make-editor workspace-consumer-buffer))
+(define workspace-source-buffer
+  (make-buffer
+    21
+    (make-document
+      (read-resource-bytes
+        (list-ref editor-command-entry 3))
+      21)
+    (list-ref editor-command-entry 3)
+    'scheme-mode))
+(editor-add-buffer! workspace-editor workspace-source-buffer)
+(define workspace-index (make-scheme-workspace-index))
+(scheme-workspace-sync-editor! workspace-index workspace-editor)
+(define workspace-source-snapshot
+  (scheme-workspace-snapshot-for-buffer
+    workspace-index
+    workspace-source-buffer))
+(define workspace-source-definition
+  (find
+    (lambda (definition)
+      (string=?
+        (scheme-definition-name definition)
+        "editor-register-command!"))
+    (scheme-semantic-snapshot-root-definitions
+      workspace-source-snapshot)))
+(define workspace-references
+  (and
+    workspace-source-definition
+    (scheme-workspace-references
+      workspace-index
+      workspace-editor
+      workspace-source-definition)))
+
+(unless (list? workspace-references)
+  (error
+    'embedded-api-index-tests
+    "workspace reference query did not return a list"
+    workspace-references))
+
+(unless
+  (and
+    workspace-source-definition
+    (exists
+      (lambda (reference)
+        (and
+          (=
+            (scheme-workspace-reference-buffer-id reference)
+            (buffer-id workspace-consumer-buffer))
+          (string=?
+            (scheme-use-name
+              (scheme-workspace-reference-use reference))
+            "editor-register-command!")))
+      workspace-references))
+  (error
+    'embedded-api-index-tests
+    "workspace references did not bridge source and embedded identities"))
+(buffer-replace-range!
+  workspace-consumer-buffer
+  0
+  (bytevector-length
+    (string->utf8 workspace-consumer-source))
+  (string->utf8 "(import (soda editor core))\n"))
+(when
+  (exists
+    (lambda (reference)
+      (=
+        (scheme-workspace-reference-buffer-id reference)
+        (buffer-id workspace-consumer-buffer)))
+    (scheme-workspace-references
+      workspace-index
+      workspace-editor
+      workspace-source-definition))
+  (error
+    'embedded-api-index-tests
+    "workspace references retained a stale buffer revision"))
+(editor-close! workspace-editor)
 
 (define missing-library-source
   "(import (soda editor library-that-does-not-exist))\n")
@@ -467,4 +563,31 @@
   (error
     'embedded-api-index-tests
     "indexed xref did not preserve jump-back history"))
+
+(editor-update!
+  xref-editor
+  (make-command-message 'xref.find-references #f))
+(define cross-buffer-reference-list
+  (editor-current-location-list xref-editor))
+
+(unless
+  (and
+    (location-list? cross-buffer-reference-list)
+    (exists
+      (lambda (item)
+        (and
+          (= (location-item-buffer-id item)
+             (buffer-id xref-buffer))
+          (= (location-item-start item)
+             xref-origin-offset)))
+      (location-list-items cross-buffer-reference-list))
+    (exists
+      (lambda (item)
+        (not
+          (= (location-item-buffer-id item)
+             (buffer-id xref-buffer))))
+      (location-list-items cross-buffer-reference-list)))
+  (error
+    'embedded-api-index-tests
+    "xref references did not include source and consumer buffers"))
 (editor-close! xref-editor)

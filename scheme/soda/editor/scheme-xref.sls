@@ -11,6 +11,7 @@
           (soda editor navigation)
           (soda editor scheme-query)
           (soda editor scheme-semantics)
+          (soda editor scheme-workspace)
           (soda editor state))
 
   (define (exact-non-negative-integer? value)
@@ -137,7 +138,7 @@
           (jump-to-item! editor (location-list-current locations))
           locations)))
 
-  (define (semantic-query context)
+  (define (semantic-query workspace context)
     (let* ([view (command-context-view context)]
            [buffer (view-buffer view)])
       (unless (scheme-buffer? buffer)
@@ -146,17 +147,19 @@
           "active buffer is not in Scheme mode"
           (buffer-major-mode-name buffer)))
       (let* ([snapshot
-               (buffer-scheme-semantic-snapshot buffer)]
+               (scheme-workspace-snapshot-for-buffer
+                 workspace
+                 buffer)]
              [definitions
                (scheme-definitions-at-point
                  snapshot
                  (view-caret view))])
         (values buffer snapshot definitions))))
 
-  (define (find-definition-command context)
+  (define (find-definition-command workspace context)
     (let ([editor (command-context-editor context)])
       (call-with-values
-        (lambda () (semantic-query context))
+        (lambda () (semantic-query workspace context))
         (lambda (buffer snapshot definitions)
           (let ([items
                   (filter
@@ -194,10 +197,10 @@
                      "No definition at point"))
                '()]))))))
 
-  (define (find-references-command context)
+  (define (find-references-command workspace context)
     (let ([editor (command-context-editor context)])
       (call-with-values
-        (lambda () (semantic-query context))
+        (lambda () (semantic-query workspace context))
         (lambda (buffer snapshot definitions)
           (if (null? definitions)
               (begin
@@ -208,20 +211,28 @@
               (let* ([definition (car definitions)]
                      [declaration
                        (definition-location editor definition)]
-                     [uses
-                       (scheme-semantic-references
-                         snapshot
-                         (scheme-definition-id definition))]
+                     [references
+                       (scheme-workspace-references
+                         workspace
+                         editor
+                         definition)]
                      [items
                        (append
                          (if declaration (list declaration) '())
                          (map
-                           (lambda (use)
-                             (use-location
-                               buffer
-                               (scheme-semantic-snapshot-revision snapshot)
-                               use))
-                           uses))])
+                           (lambda (reference)
+                             (let ([target
+                                     (editor-buffer-ref
+                                       editor
+                                       (scheme-workspace-reference-buffer-id
+                                         reference))])
+                               (use-location
+                                 target
+                                 (scheme-workspace-reference-revision
+                                   reference)
+                                 (scheme-workspace-reference-use
+                                   reference))))
+                           references))])
                 (publish-and-jump!
                   editor
                   'scheme-references
@@ -282,31 +293,35 @@
       modifiers))
 
   (define (install-scheme-xref-commands! editor)
-    (for-each
-      (lambda (entry)
-        (editor-register-command!
-          editor
-          (make-interactive-context-command
-            (car entry)
-            (cadr entry)
-            (caddr entry))))
-      (list
+    (let ([workspace (make-scheme-workspace-index)])
+      (scheme-workspace-sync-editor! workspace editor)
+      (for-each
+        (lambda (entry)
+          (editor-register-command!
+            editor
+            (make-interactive-context-command
+              (car entry)
+              (cadr entry)
+              (caddr entry))))
         (list
-          'xref.find-definition
-          find-definition-command
-          "Jump to the definition at point.")
-        (list
-          'xref.find-references
-          find-references-command
-          "Publish and visit references for the definition at point.")
-        (list
-          'xref.next-location
-          next-location-command
-          "Visit the next item in the current location list.")
-        (list
-          'xref.previous-location
-          previous-location-command
-          "Visit the previous item in the current location list.")))
+          (list
+            'xref.find-definition
+            (lambda (context)
+              (find-definition-command workspace context))
+            "Jump to the definition at point.")
+          (list
+            'xref.find-references
+            (lambda (context)
+              (find-references-command workspace context))
+            "Publish and visit references for the definition at point.")
+          (list
+            'xref.next-location
+            next-location-command
+            "Visit the next item in the current location list.")
+          (list
+            'xref.previous-location
+            previous-location-command
+            "Visit the previous item in the current location list."))))
     (for-each
       (lambda (entry)
         (editor-bind-key! editor (car entry) (cdr entry)))

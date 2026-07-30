@@ -392,12 +392,27 @@ export surface。provider catalog、completion session 和 TUI 不依赖 scanner
 内部 token 表示。
 
 自举 xref provider 把 definition 和 resolved uses 转成通用 LocationList。当前
-Document 的 declaration 与 references 可立即导航。带 source resource 的嵌入 API
-definition 通过带目标 byte offset 的异步文件读取请求打开；资源已经访问时直接在
-现有 Buffer 中跳转。异步请求发出前在 origin View 的 navigation walk 中保留当前位置，
-读取完成后的 definition location 因而参与 `jump-back`。primitive 只有 metadata、
-没有 source location 时返回明确的无源码结果。跨 library references 在 workspace
-层解析 import/export edges 后进入同一 LocationList 接口。
+Document 的 declaration 与 references 可立即导航。editor 持有一个
+`SchemeWorkspaceIndex`，按 buffer id 保存 editor 已知 Scheme Buffer 的 semantic
+snapshot。查询前同步 Buffer 集合；document id、resource 或 revision 改变时替换
+对应 snapshot，已关闭或离开 Scheme mode 的 Buffer 从索引移除。未变化的 Buffer
+直接复用已有 snapshot。source set 改变后，index 从新 snapshot 的 resolved uses
+重建 `DefinitionId -> WorkspaceReference[]` 倒排表；普通 references 查询只读取
+目标 identity 的 buckets。
+
+源码 Buffer 中的 root definition 使用 document DefinitionId，嵌入 API import
+解析到 index DefinitionId。workspace index 通过 `resource + declaration start +
+name` 建立这两种身份的等价集合。references 查询在每个已索引 snapshot 中匹配
+等价 DefinitionId，因此从 API 消费文件或已打开的 Soda 源码 declaration 发起查询，
+都会得到跨 Buffer LocationList。局部 definition 继续使用 document identity，
+不会因同名 root definition 被合并。
+
+带 source resource 的嵌入 API definition 通过带目标 byte offset 的异步文件读取
+请求打开；资源已经访问时直接在现有 Buffer 中跳转。异步请求发出前在 origin View
+的 navigation walk 中保留当前位置，读取完成后的 definition location 因而参与
+`jump-back`。primitive 只有 metadata、没有 source location 时返回明确的无源码
+结果。当前 workspace source set 是 editor 已知 Buffer；project discovery 产生的
+额外 source snapshot 使用相同的 revision-scoped document entry 接口。
 
 ## Definition、references 与 rename
 
