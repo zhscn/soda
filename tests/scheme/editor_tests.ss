@@ -10,6 +10,7 @@
         (soda editor event)
         (soda editor keymap)
         (soda editor language)
+        (soda editor minor-mode)
         (soda editor modeline)
         (soda editor motion)
         (soda editor prompt)
@@ -3158,6 +3159,34 @@
          "completing interactive reader accepted invalid decoder output"))
 
 (define test-minor-map (make-keymap))
+(unless
+  (guard
+    (condition [else #t])
+    (editor-register-minor-mode!
+      prompt-editor
+      (make-minor-mode-definition
+        'test-missing-keymap-mode
+        "Reject a missing keymap layer."
+        'buffer
+        #f
+        'test.missing-map
+        (lambda (editor buffer) #f)
+        (lambda (editor buffer) #f)))
+    #f)
+  (error 'editor-tests
+         "minor mode registration accepted an unknown keymap layer"))
+(unless
+  (and
+    (not
+      (minor-mode-catalog-find
+        (editor-minor-mode-catalog prompt-editor)
+        'test-missing-keymap-mode))
+    (not
+      (command-registered?
+        (editor-command-registry prompt-editor)
+        'test-missing-keymap-mode)))
+  (error 'editor-tests
+         "failed minor mode registration mutated editor catalogs"))
 (keymap-catalog-register!
   (editor-keymap-catalog prompt-editor)
   'test.minor-mode-map
@@ -3205,6 +3234,75 @@
         prompt-editor prompt-buffer 'test-minor-mode))
     (= minor-mode-disable-count 1))
   (error 'editor-tests "minor mode toggle did not disable the mode"))
+
+(define failed-enable-cleanups 0)
+(editor-register-minor-mode!
+  prompt-editor
+  (make-minor-mode-definition
+    'test-failed-enable-mode
+    "Exercise failed enable rollback."
+    'buffer
+    #f
+    #f
+    (lambda (editor buffer)
+      (error 'test-failed-enable-mode "enable failed"))
+    (lambda (editor buffer)
+      (set! failed-enable-cleanups (+ failed-enable-cleanups 1)))))
+(unless
+  (guard
+    (condition [else #t])
+    (editor-enable-minor-mode!
+      prompt-editor
+      prompt-buffer
+      'test-failed-enable-mode)
+    #f)
+  (error 'editor-tests "minor mode enable failure did not propagate"))
+(unless
+  (and
+    (not
+      (editor-minor-mode-active?
+        prompt-editor
+        prompt-buffer
+        'test-failed-enable-mode))
+    (= failed-enable-cleanups 1))
+  (error 'editor-tests
+         "minor mode enable failure did not restore inactive state"))
+
+(define failed-disable-enables 0)
+(editor-register-minor-mode!
+  prompt-editor
+  (make-minor-mode-definition
+    'test-failed-disable-mode
+    "Exercise failed disable rollback."
+    'buffer
+    #f
+    #f
+    (lambda (editor buffer)
+      (set! failed-disable-enables (+ failed-disable-enables 1)))
+    (lambda (editor buffer)
+      (error 'test-failed-disable-mode "disable failed"))))
+(editor-enable-minor-mode!
+  prompt-editor
+  prompt-buffer
+  'test-failed-disable-mode)
+(unless
+  (guard
+    (condition [else #t])
+    (editor-disable-minor-mode!
+      prompt-editor
+      prompt-buffer
+      'test-failed-disable-mode)
+    #f)
+  (error 'editor-tests "minor mode disable failure did not propagate"))
+(unless
+  (and
+    (editor-minor-mode-active?
+      prompt-editor
+      prompt-buffer
+      'test-failed-disable-mode)
+    (= failed-disable-enables 2))
+  (error 'editor-tests
+         "minor mode disable failure did not restore active state"))
 
 (send! prompt-editor prompt-decoder (bytes 21 27 120))
 (send!

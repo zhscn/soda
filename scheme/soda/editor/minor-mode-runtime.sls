@@ -11,6 +11,7 @@
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
+          (soda editor keymap)
           (soda editor minor-mode)
           (soda editor prefix)
           (soda editor state))
@@ -46,26 +47,45 @@
         (minor-mode-definition-name definition)
         phase)))
 
+  (define (set-mode-active! editor buffer definition active?)
+    (let ([name (minor-mode-definition-name definition)])
+      (case (minor-mode-definition-scope definition)
+        [(global)
+         (editor-set-global-minor-modes!
+           editor
+           (if active?
+               (append
+                 (remq name (editor-global-minor-modes editor))
+                 (list name))
+               (remq name (editor-global-minor-modes editor))))]
+        [(buffer)
+         (set-buffer-minor-modes!
+           buffer
+           (if active?
+               (append
+                 (remq name (buffer-minor-modes buffer))
+                 (list name))
+               (remq name (buffer-minor-modes buffer))))])))
+
   (define (editor-enable-minor-mode! editor buffer name)
     (let ([definition
             (minor-mode-catalog-ref
               (editor-minor-mode-catalog editor)
               name)])
       (unless (editor-minor-mode-active? editor buffer name)
-        (case (minor-mode-definition-scope definition)
-          [(global)
-           (editor-set-global-minor-modes!
-             editor
-             (append
-               (editor-global-minor-modes editor)
-               (list name)))]
-          [(buffer)
-           (set-buffer-minor-modes!
-             buffer
-             (append (buffer-minor-modes buffer) (list name)))])
-        ((minor-mode-definition-enable definition) editor buffer)
-        (run-mode-hooks! editor definition 'enable buffer)
-        (editor-invalidate! editor 'chrome)))
+        (set-mode-active! editor buffer definition #t)
+        (guard
+          (condition
+            [else
+             (set-mode-active! editor buffer definition #f)
+             (guard (rollback-condition [else #f])
+               ((minor-mode-definition-disable definition)
+                editor
+                buffer))
+             (raise condition)])
+          ((minor-mode-definition-enable definition) editor buffer)
+          (run-mode-hooks! editor definition 'enable buffer)
+          (editor-invalidate! editor 'chrome))))
     name)
 
   (define (editor-disable-minor-mode! editor buffer name)
@@ -74,18 +94,19 @@
               (editor-minor-mode-catalog editor)
               name)])
       (when (editor-minor-mode-active? editor buffer name)
-        (case (minor-mode-definition-scope definition)
-          [(global)
-           (editor-set-global-minor-modes!
-             editor
-             (remq name (editor-global-minor-modes editor)))]
-          [(buffer)
-           (set-buffer-minor-modes!
-             buffer
-             (remq name (buffer-minor-modes buffer)))])
-        ((minor-mode-definition-disable definition) editor buffer)
-        (run-mode-hooks! editor definition 'disable buffer)
-        (editor-invalidate! editor 'chrome)))
+        (guard
+          (condition
+            [else
+             (set-mode-active! editor buffer definition #t)
+             (guard (rollback-condition [else #f])
+               ((minor-mode-definition-enable definition)
+                editor
+                buffer))
+             (raise condition)])
+          ((minor-mode-definition-disable definition) editor buffer)
+          (set-mode-active! editor buffer definition #f)
+          (run-mode-hooks! editor definition 'disable buffer)
+          (editor-invalidate! editor 'chrome))))
     name)
 
   (define (editor-toggle-minor-mode! editor buffer name prefix)
@@ -123,6 +144,19 @@
            (minor-mode-definition-lighter definition))))
 
   (define (editor-register-minor-mode! editor definition)
+    (let ([layer
+            (minor-mode-definition-keymap-layer definition)])
+      (when
+        (and
+          layer
+          (not
+            (keymap-catalog-find
+              (editor-keymap-catalog editor)
+              layer)))
+        (assertion-violation
+          'editor-register-minor-mode!
+          "minor mode names an unknown keymap layer"
+          layer)))
     (minor-mode-catalog-register!
       (editor-minor-mode-catalog editor)
       definition)
