@@ -270,9 +270,16 @@ Soda application build 从全部内置 Scheme library 生成 API 与 library cat
 随 editor boot image 静态嵌入。运行时把该 catalog 转换为共享的 library lookup
 table；使用同一 project catalog 的 semantic snapshot 复用对应 lookup table。
 单个文档分析只处理文档 token、scope、definition、use 和 diagnostics，不重复构造
-内置 API 索引。Project 中与内置 library 同名的 source 以完整 export surface
-覆盖嵌入版本，使 Soda 能分析正在编辑的自身源码。Project source 的变更产生新的
-catalog identity，并使下一次分析建立一份新的共享 lookup table。
+内置 API 索引。打开的 Buffer 始终由当前 Document revision 建立 semantic snapshot，
+因此编辑 Soda library 时当前文件的 definition、use 与诊断来自实时文本。
+
+打开文件不建立 Scheme project session，也不遍历当前目录。跨文件索引由显式
+language workspace session 持有，session 可以接收 `load-project`、编译或其他构建
+过程产生的 source/index update。目录扫描 runtime 是可选 adapter；使用它时会跳过
+已经进入内置 catalog 的 Soda source。插件和其他 Project source 进入 workspace
+catalog，其中与内置 library 同名的 source 以完整 export surface 覆盖嵌入版本。
+Project source 的变更产生新的 catalog identity，并使下一次分析建立一份新的共享
+lookup table。
 
 ## Diagnostics
 

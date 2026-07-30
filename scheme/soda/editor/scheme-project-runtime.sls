@@ -7,6 +7,7 @@
           scheme-project-runtime-close!
           scheme-project-runtime-handle-event)
   (import (rnrs)
+          (soda editor builtin-api-index)
           (soda editor scheme-workspace)
           (soda editor scheme-xref)
           (soda runtime)
@@ -57,6 +58,31 @@
 
   (define scheme-source-suffixes
     '(".scm" ".ss" ".sls" ".sps"))
+
+  (define embedded-soda-source-resources #f)
+
+  (define (ensure-embedded-soda-source-resources!)
+    (unless embedded-soda-source-resources
+      (let ([resources
+              (make-hashtable string-hash string=?)])
+        (for-each
+          (lambda (entry)
+            (let ([resource (list-ref entry 3)])
+              (when (string? resource)
+                (hashtable-set!
+                  resources
+                  (vfs-normalize-path resource)
+                  #t))))
+          soda-built-in-api-index)
+        (set! embedded-soda-source-resources resources)))
+    embedded-soda-source-resources)
+
+  (define (embedded-soda-source? path)
+    (let ([resources
+            (ensure-embedded-soda-source-resources!)])
+      (hashtable-contains?
+        resources
+        (vfs-normalize-path path))))
 
   (define (string-suffix-ci? suffix value)
     (let ([suffix-length (string-length suffix)]
@@ -308,7 +334,8 @@
                (cons path directories))]
             [(and
                (eq? kind 'file)
-               (scheme-source-name? name))
+               (scheme-source-name? name)
+               (not (embedded-soda-source? path)))
              (loop
                (cdr entries)
                (cons path files)

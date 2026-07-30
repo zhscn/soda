@@ -13,7 +13,6 @@
           (soda editor file)
           (soda editor file-runtime)
           (soda editor repl)
-          (soda editor scheme-project-runtime)
           (soda editor vfs-runtime)
           (soda runtime)
           (soda vfs)
@@ -221,8 +220,7 @@
           [decoder (make-input-decoder)]
           [executor (make-effect-executor)]
           [file-adapter #f]
-          [vfs-adapter #f]
-          [scheme-project-adapter #f])
+          [vfs-adapter #f])
       (define (cancel-flush-timer!)
         (when flush-timer
           (guard (condition [else #f])
@@ -303,25 +301,12 @@
         (when (input-decoder-pending? decoder)
           (set! flush-timer
             (runtime-start-timer! runtime 25 0))))
-      (define (ensure-scheme-project-runtime!)
-        (unless scheme-project-adapter
-          (when
-            (exists
-              (lambda (buffer)
-                (string? (buffer-file-path buffer)))
-              (editor-buffers editor))
-            (set! scheme-project-adapter
-              (install-scheme-project-runtime!
-                editor
-                runtime
-                (current-directory))))))
       (define (handle-session-message! message)
         (let ([continue?
                 (handle-editor-message!
                   editor
                   executor
                   message)])
-          (ensure-scheme-project-runtime!)
           continue?))
       (define (handle-session-input-events! events)
         (let loop ([events events])
@@ -350,7 +335,6 @@
         (install-file-runtime! executor runtime))
       (set! vfs-adapter
         (install-vfs-runtime! editor runtime))
-      (ensure-scheme-project-runtime!)
       (install-interaction-effect-handler! executor editor)
       (install-completion-effect-handlers!
         executor
@@ -398,20 +382,9 @@
                         (eq? (event-kind (car events)) 'timer))
                    (refresh-terminal-size!)
                    (process (cdr events) continue?)]
-                  [(and
-                     scheme-project-adapter
-                     (eq? (event-kind (car events)) 'timer)
-                     (scheme-project-runtime-handle-event
-                       scheme-project-adapter
-                       (car events)))
-                   (process (cdr events) continue?)]
                   [(memq
                      (event-kind (car events))
                      '(path-stat path-change file-read file-write))
-                   (when scheme-project-adapter
-                     (scheme-project-runtime-handle-event
-                       scheme-project-adapter
-                       (car events)))
                    (let ([message
                            (file-runtime-handle-event
                              file-adapter
@@ -425,10 +398,6 @@
                            (handle-session-message!
                              message)))))]
                   [(eq? (event-kind (car events)) 'directory-scan)
-                   (when scheme-project-adapter
-                     (scheme-project-runtime-handle-event
-                       scheme-project-adapter
-                       (car events)))
                    (let ([message
                            (vfs-runtime-handle-event
                              vfs-adapter
@@ -444,9 +413,6 @@
                   [else (process (cdr events) continue?)])))))
         (lambda ()
           (cancel-flush-timer!)
-          (when scheme-project-adapter
-            (scheme-project-runtime-close!
-              scheme-project-adapter))
           (when input-source
             (guard (condition [else #f])
               (runtime-cancel! runtime input-source)))
