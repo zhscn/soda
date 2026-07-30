@@ -127,6 +127,35 @@
   (error
     'embedded-api-index-tests
     "workspace references did not bridge source and embedded identities"))
+(define workspace-command-symbols
+  (filter
+    (lambda (symbol)
+      (string=?
+        (scheme-workspace-symbol-name symbol)
+        "editor-register-command!"))
+    (scheme-workspace-symbols
+      workspace-index
+      workspace-editor)))
+
+(unless
+  (and
+    (= (length workspace-command-symbols) 1)
+    (let ([symbol (car workspace-command-symbols)])
+      (and
+        (eq? (scheme-workspace-symbol-kind symbol) 'procedure)
+        (=
+          (scheme-workspace-symbol-buffer-id symbol)
+          (buffer-id workspace-source-buffer))
+        (equal?
+          (scheme-workspace-symbol-resource symbol)
+          (buffer-resource workspace-source-buffer))
+        (equal?
+          (car (scheme-workspace-symbol-key symbol))
+          'buffer))))
+  (error
+    'embedded-api-index-tests
+    "workspace symbols did not prefer the open source definition"
+    workspace-command-symbols))
 (buffer-replace-range!
   workspace-consumer-buffer
   0
@@ -146,6 +175,33 @@
   (error
     'embedded-api-index-tests
     "workspace references retained a stale buffer revision"))
+(let ([original-start
+        (scheme-workspace-symbol-start
+          (car workspace-command-symbols))])
+  (buffer-replace-range!
+    workspace-source-buffer
+    0
+    0
+    (string->utf8 "\n"))
+  (let ([symbols
+          (filter
+            (lambda (symbol)
+              (string=?
+                (scheme-workspace-symbol-name symbol)
+                "editor-register-command!"))
+            (scheme-workspace-symbols
+              workspace-index
+              workspace-editor))])
+    (unless
+      (and
+        (= (length symbols) 1)
+        (=
+          (scheme-workspace-symbol-start (car symbols))
+          (+ original-start 1)))
+      (error
+        'embedded-api-index-tests
+        "workspace symbols retained stale embedded source offsets"
+        symbols))))
 (editor-close! workspace-editor)
 
 (define missing-library-source
@@ -590,4 +646,35 @@
   (error
     'embedded-api-index-tests
     "xref references did not include source and consumer buffers"))
+
+(editor-update!
+  xref-editor
+  (make-command-message 'xref.find-symbol #f))
+(let* ([prompt (editor-active-prompt xref-editor)]
+       [completion
+         (and
+           prompt
+           (editor-active-prompt-completion xref-editor))]
+       [candidate
+         (and
+           completion
+           (find
+             (lambda (item)
+               (string=?
+                 (completion-item-label item)
+                 "editor-register-command!"))
+             (completion-session-items completion)))])
+  (unless
+    (and
+      prompt
+      (string=?
+        (prompt-request-prompt
+          (prompt-session-request prompt))
+        "Workspace symbol: ")
+      candidate
+      (pair? (completion-item-payload candidate)))
+    (error
+      'embedded-api-index-tests
+      "workspace symbol command did not expose the embedded API catalog")))
+(editor-abort-prompt! xref-editor)
 (editor-close! xref-editor)

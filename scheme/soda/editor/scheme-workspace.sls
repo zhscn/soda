@@ -7,7 +7,18 @@
           scheme-workspace-reference?
           scheme-workspace-reference-buffer-id
           scheme-workspace-reference-revision
-          scheme-workspace-reference-use)
+          scheme-workspace-reference-use
+          scheme-workspace-symbols
+          scheme-workspace-symbol?
+          scheme-workspace-symbol-key
+          scheme-workspace-symbol-name
+          scheme-workspace-symbol-kind
+          scheme-workspace-symbol-buffer-id
+          scheme-workspace-symbol-resource
+          scheme-workspace-symbol-revision
+          scheme-workspace-symbol-start
+          scheme-workspace-symbol-end
+          scheme-workspace-symbol-definition)
   (import (rnrs)
           (soda document)
           (soda editor buffer)
@@ -36,6 +47,18 @@
 
   (define-record-type scheme-workspace-reference
     (fields buffer-id revision use))
+
+  (define-record-type scheme-workspace-symbol
+    (fields
+      key
+      name
+      kind
+      buffer-id
+      resource
+      revision
+      start
+      end
+      definition))
 
   (define (make-scheme-workspace-index)
     (%make-scheme-workspace-index
@@ -319,4 +342,140 @@
                 (scheme-workspace-index-references index)
                 id
                 '()))
-            ids))))))
+            ids)))))
+
+  (define (document-symbol document definition)
+    (let ([buffer-id
+            (scheme-workspace-document-buffer-id document)]
+          [revision
+            (scheme-workspace-document-revision document)]
+          [resource
+            (scheme-workspace-document-resource document)])
+      (make-scheme-workspace-symbol
+        (list
+          'buffer
+          buffer-id
+          revision
+          (scheme-definition-start definition)
+          (scheme-definition-name definition))
+        (scheme-definition-name definition)
+        (scheme-definition-kind definition)
+        buffer-id
+        resource
+        revision
+        (scheme-definition-start definition)
+        (scheme-definition-end definition)
+        definition)))
+
+  (define (index-symbol definition)
+    (let* ([id (scheme-definition-id definition)]
+           [resource
+             (scheme-definition-id-document-id id)])
+      (make-scheme-workspace-symbol
+        (list
+          'resource
+          resource
+          (scheme-definition-start definition)
+          (scheme-definition-name definition))
+        (scheme-definition-name definition)
+        (scheme-definition-kind definition)
+        #f
+        resource
+        #f
+        (scheme-definition-start definition)
+        (scheme-definition-end definition)
+        definition)))
+
+  (define (symbol-source-key symbol)
+    (let ([resource
+            (scheme-workspace-symbol-resource symbol)])
+      (if
+        (string? resource)
+        (list
+          resource
+          (scheme-workspace-symbol-start symbol)
+          (scheme-workspace-symbol-name symbol))
+        (scheme-workspace-symbol-key symbol))))
+
+  (define (deduplicate-symbols symbols)
+    (let ([seen (make-hashtable equal-hash equal?)])
+      (fold-left
+        (lambda (result symbol)
+          (let ([key (symbol-source-key symbol)])
+            (if
+              (hashtable-contains? seen key)
+              result
+              (begin
+                (hashtable-set! seen key #t)
+                (cons symbol result)))))
+        '()
+        symbols)))
+
+  (define (symbol-before? left right)
+    (let ([left-name
+            (scheme-workspace-symbol-name left)]
+          [right-name
+            (scheme-workspace-symbol-name right)])
+      (or
+        (string<? left-name right-name)
+        (and
+          (string=? left-name right-name)
+          (<
+            (scheme-workspace-symbol-start left)
+            (scheme-workspace-symbol-start right))))))
+
+  (define (scheme-workspace-symbols index editor)
+    (require-index 'scheme-workspace-symbols index)
+    (scheme-workspace-sync-editor! index editor)
+    (let* ([documents (workspace-documents index)]
+           [open-resources
+             (let ([resources
+                     (make-hashtable
+                       string-hash
+                       string=?)])
+               (for-each
+                 (lambda (document)
+                   (let ([resource
+                           (scheme-workspace-document-resource
+                             document)])
+                     (when (string? resource)
+                       (hashtable-set!
+                         resources
+                         resource
+                         #t))))
+                 documents)
+               resources)]
+           [document-symbols
+             (apply
+               append
+               (map
+                 (lambda (document)
+                   (map
+                     (lambda (definition)
+                       (document-symbol document definition))
+                     (scheme-semantic-snapshot-root-definitions
+                       (scheme-workspace-document-snapshot
+                         document))))
+                 documents))]
+           [index-symbols
+             (map
+               index-symbol
+               (filter
+                 (lambda (definition)
+                   (let ([resource
+                           (scheme-definition-id-document-id
+                             (scheme-definition-id
+                               definition))])
+                     (or
+                       (not (string? resource))
+                       (not
+                         (hashtable-contains?
+                           open-resources
+                           resource)))))
+                 scheme-index-definitions))])
+      (list-sort
+        symbol-before?
+        (deduplicate-symbols
+          (append
+            document-symbols
+            index-symbols))))))

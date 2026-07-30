@@ -414,6 +414,19 @@ name` 建立这两种身份的等价集合。references 查询在每个已索引
 结果。当前 workspace source set 是 editor 已知 Buffer；project discovery 产生的
 额外 source snapshot 使用相同的 revision-scoped document entry 接口。
 
+workspace symbol 查询合并已索引 Buffer 的 root definitions 与构建时嵌入的 Soda
+API definitions。局部 lexical binding 不进入该查询。相同源码声明在实时 snapshot
+中使用 document DefinitionId，在构建索引中使用 index DefinitionId。一个 source
+resource 存在实时 snapshot 时，该资源的静态 catalog 条目整体由当前 revision
+替代；其余 catalog 条目以 `resource + declaration start + name` 去重。候选 key
+使用 `buffer id + revision + declaration` 或 `resource + declaration`，不会依赖
+过滤后的列表位置。
+
+`xref.find-symbol`（`M-g i`）通过通用 completing-read 打开模糊匹配的 symbol
+候选。候选保存定义 kind 与 source resource，显示层只负责匹配和选择。接受已打开
+源码的候选时直接记录 jump edge 并移动到对应 Buffer；接受未打开的嵌入源码候选时
+产生异步文件读取请求，再按声明 byte offset 完成跳转。
+
 ## Definition、references 与 rename
 
 光标下的 symbol 先通过 semantic snapshot 解析为 DefinitionId：

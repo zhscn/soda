@@ -5,10 +5,12 @@
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
+          (soda editor completion)
           (soda editor file)
           (soda editor keymap)
           (soda editor location)
           (soda editor navigation)
+          (soda editor prompt)
           (soda editor scheme-query)
           (soda editor scheme-semantics)
           (soda editor scheme-workspace)
@@ -286,6 +288,138 @@
         "No current location list"))
     '())
 
+  (define (workspace-symbol-detail symbol)
+    (let ([resource
+            (scheme-workspace-symbol-resource symbol)])
+      (string-append
+        (symbol->string
+          (scheme-workspace-symbol-kind symbol))
+        (if
+          (string? resource)
+          (string-append "  " resource)
+          ""))))
+
+  (define (workspace-symbol-choice-source
+            workspace
+            editor)
+    (let* ([symbols
+             (scheme-workspace-symbols workspace editor)]
+           [items
+             (map
+               (lambda (symbol)
+                 (let ([name
+                         (scheme-workspace-symbol-name symbol)])
+                   (make-completion-item
+                     (scheme-workspace-symbol-key symbol)
+                     'scheme-workspace
+                     name
+                     name
+                     name
+                     (workspace-symbol-detail symbol)
+                     #f
+                     (scheme-workspace-symbol-key symbol))))
+               symbols)])
+      (make-choice-source
+        'scheme-workspace-symbol
+        '((category . symbol)
+          (styles . (fzf))
+          (ignore-case . #t)
+          (preselect . #t))
+        (lambda (input point)
+          (cons 0 (string-length input)))
+        (lambda (query) items)
+        (lambda (value)
+          (exists
+            (lambda (item)
+              (string=?
+                value
+                (completion-item-insert-text item)))
+            items))
+        (lambda (generation) #f))))
+
+  (define (workspace-symbol-reader workspace)
+    (interactive-completing-read
+      "Workspace symbol: "
+      (lambda (context)
+        (workspace-symbol-choice-source
+          workspace
+          (command-context-editor context)))
+      'must-match
+      'scheme-workspace-symbol
+      ""
+      #f
+      (lambda (context result)
+        (let ([candidate
+                (prompt-result-candidate result)])
+          (if
+            candidate
+            (list (completion-item-payload candidate))
+            (list #f))))))
+
+  (define (find-workspace-symbol symbols key)
+    (find
+      (lambda (symbol)
+        (equal?
+          (scheme-workspace-symbol-key symbol)
+          key))
+      symbols))
+
+  (define (find-symbol-command
+            workspace
+            context
+            key)
+    (let* ([editor (command-context-editor context)]
+           [symbol
+             (find-workspace-symbol
+               (scheme-workspace-symbols workspace editor)
+               key)])
+      (cond
+        [(not symbol)
+         (editor-set-status-message!
+           editor
+           "Workspace symbol is stale")
+         '()]
+        [(scheme-workspace-symbol-buffer-id symbol)
+         (let ([buffer
+                 (editor-buffer-ref
+                   editor
+                   (scheme-workspace-symbol-buffer-id symbol))])
+           (editor-jump-to-buffer!
+             editor
+             buffer
+             (scheme-workspace-symbol-start symbol))
+           (editor-set-status-message!
+             editor
+             (scheme-workspace-symbol-name symbol))
+           '())]
+        [(definition-open-effect
+           context
+           (list
+             (scheme-workspace-symbol-definition symbol))) =>
+         list]
+        [else
+         (editor-set-status-message!
+           editor
+           "Workspace symbol has no source location")
+         '()])))
+
+  (define (make-find-symbol-definition workspace)
+    (let ([implementation
+            (lambda (context key)
+              (find-symbol-command
+                workspace context key))])
+      (make-command-definition
+        'xref.find-symbol
+        implementation
+        (lambda (context arguments)
+          (apply implementation context arguments))
+        "Find a Scheme symbol in the workspace."
+        #f
+        (make-interactive-plan
+          (list
+            (workspace-symbol-reader workspace)))
+        '())))
+
   (define (stroke character modifiers)
     (make-key-stroke
       'character
@@ -321,7 +455,10 @@
           (list
             'xref.previous-location
             previous-location-command
-            "Visit the previous item in the current location list."))))
+            "Visit the previous item in the current location list.")))
+      (editor-register-command!
+        editor
+        (make-find-symbol-definition workspace)))
     (for-each
       (lambda (entry)
         (editor-bind-key! editor (car entry) (cdr entry)))
@@ -337,5 +474,8 @@
           'xref.next-location)
         (cons
           (list (stroke #\g 2) (stroke #\p 0))
-          'xref.previous-location)))
+          'xref.previous-location)
+        (cons
+          (list (stroke #\g 2) (stroke #\i 0))
+          'xref.find-symbol)))
     editor))
