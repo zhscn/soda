@@ -126,7 +126,10 @@ modified。`saved_revision` 用于标识实际写入的 snapshot；Buffer 负责
 undo、redo 后同步 language runtime。
 
 持久用户 Buffer 默认跟踪 modified。transcript 等可再生成 Buffer 通过
-`track-modified?` 设置退出保存策略，不把求值输出当作待保存的用户修改。
+`track-modified?` 关闭 modified 跟踪，不把求值输出当作待保存的用户修改。
+`confirm-on-exit?` 独立控制 modified Buffer 是否参与 Editor 退出确认。
+`*scratch*` 使用 `scheme-mode` 并设置 `confirm-on-exit? = #f`：编辑仍产生正常的
+modified 状态、undo history 和 modeline 标记，但退出 Editor 时不要求保存。
 
 文件加载边界在 Document 规范化换行前记录 `file-line-ending`。Document 和编辑
 命令统一使用 LF；保存 request 按该设置重新编码为 LF、CRLF 或 CR，使整文件写入
@@ -205,10 +208,10 @@ Buffer 集合，供后续显示策略选择。启动参数、find-file 与 save-
 因此不会进入候选集合，重名 Buffer 使用 identity 后缀区分。
 
 `buffer.kill` 使用同一候选模型选择目标。关闭前，所有显示目标的 View 切换到替代
-Buffer；关闭最后一个用户 Buffer 时创建 `*scratch*`，维持 editor 至少拥有一个
-View 和一个 Buffer 的不变量。pending save、reload、file insertion 和 interaction
-session 拥有的 Buffer 保持存活。modified Buffer 要求先保存，或通过显式的
-`buffer.force-kill-current` 放弃修改。
+Buffer；关闭最后一个用户 Buffer 时创建 Scheme `*scratch*`，维持 editor 至少
+拥有一个 View 和一个 Buffer 的不变量。pending save、reload、file insertion 和
+interaction session 拥有的 Buffer 保持存活。modified Buffer 要求先保存，或通过
+显式的 `buffer.force-kill-current` 放弃修改。
 
 ## 保存
 

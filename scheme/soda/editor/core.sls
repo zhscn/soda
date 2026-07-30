@@ -583,6 +583,7 @@
   (import (rnrs)
           (soda editor annotation)
           (soda editor auto-mode)
+          (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
           (soda editor commands basic)
@@ -684,6 +685,12 @@
           "Whether the buffer participates in modified-file tracking."
           'chrome)
         (make-setting-definition
+          'confirm-on-exit?
+          #t
+          boolean?
+          "Whether a modified buffer participates in exit confirmation."
+          'chrome)
+        (make-setting-definition
           'completion-providers
           '()
           symbol-list?
@@ -727,6 +734,15 @@
              (install-scheme-xref-commands! editor)])
       (editor-set-evaluator! editor (make-chez-evaluator))
       (install-core-settings! editor)
+      (when
+        (and
+          (string? (buffer-resource buffer))
+          (string=? (buffer-resource buffer) "*scratch*"))
+        (buffer-set-major-mode! buffer 'scheme-mode)
+        (buffer-set-local-setting!
+          buffer
+          'confirm-on-exit?
+          #f))
       (install-core-auto-modes! editor)
       (install-command-runtime-commands! editor)
       (install-prefix-commands! editor)

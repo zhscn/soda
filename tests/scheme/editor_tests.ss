@@ -1097,8 +1097,38 @@
     (string=?
       (buffer-resource
         (view-buffer (editor-active-view kill-editor)))
-      "*scratch*"))
+      "*scratch*")
+    (eq?
+      (buffer-major-mode-name
+        (view-buffer (editor-active-view kill-editor)))
+      'scheme-mode)
+    (not
+      (buffer-setting-ref
+        (view-buffer (editor-active-view kill-editor))
+        'confirm-on-exit?
+        #t)))
   (error 'editor-tests "killing the last buffer did not create scratch"))
+(editor-update!
+  kill-editor
+  (make-input-message
+    (make-text-input-event
+      'text
+      (string->utf8 "(define scratch-value 1)"))))
+(define scratch-quit-effects
+  (editor-update!
+    kill-editor
+    (make-command-message 'editor.quit #f)))
+(unless
+  (and
+    (buffer-modified?
+      (view-buffer (editor-active-view kill-editor)))
+    (not (editor-active-prompt kill-editor))
+    (= (length scratch-quit-effects) 1)
+    (eq?
+      (command-effect-kind (car scratch-quit-effects))
+      'quit))
+  (error 'editor-tests
+         "modified scratch buffer participated in exit confirmation"))
 (editor-close! kill-editor)
 
 (define region-document (make-document "alpha beta" 970))

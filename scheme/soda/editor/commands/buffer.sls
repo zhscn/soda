@@ -156,11 +156,17 @@
       (find
         (lambda (buffer) (not (eq? buffer target)))
         (editor-buffers editor))
-      (editor-create-buffer!
-        editor
-        "*scratch*"
-        'fundamental-mode
-        "")))
+      (let ([buffer
+              (editor-create-buffer!
+                editor
+                "*scratch*"
+                'scheme-mode
+                "")])
+        (buffer-set-local-setting!
+          buffer
+          'confirm-on-exit?
+          #f)
+        buffer)))
 
   (define (try-kill-buffer! editor target force?)
     (cond

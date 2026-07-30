@@ -1288,7 +1288,12 @@
                  editor
                  "Save in progress; wait before quitting")
                '()]
-              [(buffer-modified? buffer)
+              [(and
+                 (buffer-modified? buffer)
+                 (buffer-setting-ref
+                   buffer
+                   'confirm-on-exit?
+                   #t))
                (open-quit-confirmation!
                  editor
                  buffer
