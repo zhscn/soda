@@ -129,7 +129,7 @@
     "(library (fixture compiled-indexed-consumer)\n"
     "  (export call-compiled)\n"
     "  (import (rnrs) (fixture compiled-dependency))\n"
-    "  (define (call-compiled value)\n"
+    "  (define (call-compiled value ignored)\n"
     "    (compiled-call value '())))\n"))
 (define compiled-interface-index
   (scheme-interface-index-decode
@@ -223,6 +223,29 @@
                 (set! loaded? #t))))))
       (runtime-poll! runtime))
     (unless loaded? (load-loop))))
+
+(define (compiled-diagnostic-visible?)
+  (exists
+    (lambda (value)
+      (and
+        (not
+          (scheme-workspace-diagnostic-buffer-id
+            value))
+        (string=?
+          (scheme-workspace-diagnostic-resource
+            value)
+          compiled-indexed-consumer-resource)
+        (eq?
+          (scheme-diagnostic-code
+            (scheme-workspace-diagnostic-diagnostic
+              value))
+          'unused-parameter)))
+    (scheme-workspace-diagnostics workspace editor)))
+
+(unless (compiled-diagnostic-visible?)
+  (error
+    'scheme-project-session-tests
+    "compiled diagnostics did not enter the explicit Scheme session"))
 
 (define compiled-consumer-source
   (string-append
@@ -363,6 +386,10 @@
     compiled-indexed-consumer-resource
     'scheme-mode))
 (editor-add-buffer! editor compiled-reference-shadow)
+(when (compiled-diagnostic-visible?)
+  (error
+    'scheme-project-session-tests
+    "compiled diagnostics remained active behind a live Buffer revision"))
 (unless
   (not
     (exists
@@ -381,6 +408,10 @@
 (editor-remove-buffer!
   editor
   (buffer-id compiled-reference-shadow))
+(unless (compiled-diagnostic-visible?)
+  (error
+    'scheme-project-session-tests
+    "closing a live Buffer did not reveal compiled diagnostics"))
 (unless
   (exists
     (lambda (reference)
@@ -520,6 +551,11 @@
       'scheme-project-session-tests
       "replacing an interface owner retained stale compiled references"
       references)))
+
+(when (compiled-diagnostic-visible?)
+  (error
+    'scheme-project-session-tests
+    "replacing an interface owner retained stale compiled diagnostics"))
 
 (editor-update!
   editor

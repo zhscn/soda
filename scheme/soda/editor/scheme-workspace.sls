@@ -957,6 +957,44 @@
       (scheme-semantic-snapshot-diagnostics
         (scheme-workspace-document-snapshot document))))
 
+  (define (interface-datum->workspace-diagnostic datum)
+    (make-scheme-workspace-diagnostic
+      #f
+      (list-ref datum 0)
+      (list-ref datum 1)
+      (list-ref datum 7)
+      (make-scheme-diagnostic
+        (list-ref datum 2)
+        (list-ref datum 3)
+        (list-ref datum 4)
+        (list-ref datum 5)
+        (list-ref datum 6)
+        #f)))
+
+  (define (compiled-interface-diagnostics index)
+    (let ([workspace-resources
+            (workspace-resource-table index)])
+      (apply
+        append
+        (map
+          (lambda (interface-index)
+            (fold-right
+              (lambda (datum diagnostics)
+                (if
+                  (hashtable-contains?
+                    workspace-resources
+                    (list-ref datum 0))
+                  diagnostics
+                  (cons
+                    (interface-datum->workspace-diagnostic
+                      datum)
+                    diagnostics)))
+              '()
+              (scheme-interface-index-diagnostics
+                interface-index)))
+          (scheme-workspace-index-interface-indexes
+            index)))))
+
   (define (diagnostic-source-before? left right)
     (let ([left-resource
             (scheme-workspace-diagnostic-resource left)]
@@ -1002,9 +1040,11 @@
       diagnostic-source-before?
       (apply
         append
-        (map
-          workspace-document-diagnostics
-          (workspace-documents index)))))
+        (cons
+          (compiled-interface-diagnostics index)
+          (map
+            workspace-document-diagnostics
+            (workspace-documents index))))))
 
   (define (definition-owner-document index definition)
     (let* ([id (scheme-definition-id definition)]

@@ -95,7 +95,22 @@
                 (list-ref resolution 4)
                 "public-fixture-value"))
             (list-ref reference 5))))
-      (scheme-interface-index-references index)))
+      (scheme-interface-index-references index))
+    (exists
+      (lambda (diagnostic)
+        (and
+          (string=?
+            (list-ref diagnostic 0)
+            (string-append
+              source-root
+              "/fixture/scheme-interface-build/dependency.sls"))
+          (eq?
+            (list-ref diagnostic 2)
+            'unused-parameter)
+          (string=?
+            (list-ref diagnostic 7)
+            "  (define (unused-helper ignored)")))
+      (scheme-interface-index-diagnostics index)))
   (assertion-violation
     'scheme-interface-build-tests
     "compiled sources were not represented in the interface artifact"

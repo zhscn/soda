@@ -55,6 +55,7 @@
           scheme-document-highlight-end
           scheme-document-highlight-kind
           scheme-document-highlight-definition-ids
+          make-scheme-diagnostic
           scheme-diagnostic?
           scheme-diagnostic-code
           scheme-diagnostic-start

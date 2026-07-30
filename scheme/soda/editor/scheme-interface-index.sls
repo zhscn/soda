@@ -6,6 +6,7 @@
           scheme-interface-index-entries
           scheme-interface-index-libraries
           scheme-interface-index-references
+          scheme-interface-index-diagnostics
           scheme-sources->interface-index
           scheme-interface-index-encode
           scheme-interface-index-decode
@@ -15,13 +16,13 @@
           (soda editor scheme-api-indexer)
           (soda editor scheme-semantics))
 
-  (define interface-index-format-version 2)
+  (define interface-index-format-version 3)
 
   (define-record-type
     (scheme-interface-index
       %make-scheme-interface-index
       scheme-interface-index?)
-    (fields owner revision entries libraries references))
+    (fields owner revision entries libraries references diagnostics))
 
   (define (library-name? value)
     (and
@@ -98,12 +99,34 @@
         interface-definition-id?
         (list-ref reference 5))))
 
+  (define (interface-diagnostic? diagnostic)
+    (and
+      (list? diagnostic)
+      (= (length diagnostic) 8)
+      (string? (list-ref diagnostic 0))
+      (exact-non-negative-integer?
+        (list-ref diagnostic 1))
+      (symbol? (list-ref diagnostic 2))
+      (exact-non-negative-integer?
+        (list-ref diagnostic 3))
+      (exact-non-negative-integer?
+        (list-ref diagnostic 4))
+      (<=
+        (list-ref diagnostic 3)
+        (list-ref diagnostic 4))
+      (symbol? (list-ref diagnostic 5))
+      (string? (list-ref diagnostic 6))
+      (or
+        (not (list-ref diagnostic 7))
+        (string? (list-ref diagnostic 7)))))
+
   (define (make-scheme-interface-index
             owner
             revision
             entries
             libraries
-            references)
+            references
+            diagnostics)
     (unless
       (and
         (string? owner)
@@ -144,12 +167,21 @@
         'make-scheme-interface-index
         "references must contain valid Scheme interface references"
         references))
+    (unless
+      (and
+        (list? diagnostics)
+        (for-all interface-diagnostic? diagnostics))
+      (assertion-violation
+        'make-scheme-interface-index
+        "diagnostics must contain valid Scheme diagnostics"
+        diagnostics))
     (%make-scheme-interface-index
       owner
       revision
       entries
       libraries
-      references))
+      references
+      diagnostics))
 
   (define (entry-key resource start)
     (list resource start))
@@ -269,7 +301,68 @@
         '()
         values)))
 
-  (define (sources->interface-references
+  (define (line-start bytes offset)
+    (let loop ([offset (min offset (bytevector-length bytes))])
+      (if
+        (or
+          (zero? offset)
+          (= (bytevector-u8-ref bytes (- offset 1)) 10))
+        offset
+        (loop (- offset 1)))))
+
+  (define (line-end bytes offset)
+    (let ([size (bytevector-length bytes)])
+      (let loop ([offset (min offset size)])
+        (if
+          (or
+            (= offset size)
+            (= (bytevector-u8-ref bytes offset) 10))
+          offset
+          (loop (+ offset 1))))))
+
+  (define (diagnostic-excerpt bytes diagnostic)
+    (let* ([start
+             (line-start
+               bytes
+               (scheme-diagnostic-start diagnostic))]
+           [end
+             (line-end
+               bytes
+               (scheme-diagnostic-end diagnostic))]
+           [result (make-bytevector (- end start))])
+      (bytevector-copy!
+        bytes start result 0 (- end start))
+      (guard (condition [else #f])
+        (utf8->string result))))
+
+  (define (diagnostic<? left right)
+    (or
+      (string<? (car left) (car right))
+      (and
+        (string=? (car left) (car right))
+        (or
+          (< (list-ref left 3) (list-ref right 3))
+          (and
+            (= (list-ref left 3) (list-ref right 3))
+            (<
+              (list-ref left 4)
+              (list-ref right 4)))))))
+
+  (define (snapshot-diagnostics resource bytes snapshot)
+    (map
+      (lambda (diagnostic)
+        (list
+          resource
+          0
+          (scheme-diagnostic-code diagnostic)
+          (scheme-diagnostic-start diagnostic)
+          (scheme-diagnostic-end diagnostic)
+          (scheme-diagnostic-severity diagnostic)
+          (scheme-diagnostic-message diagnostic)
+          (diagnostic-excerpt bytes diagnostic)))
+      (scheme-semantic-snapshot-diagnostics snapshot)))
+
+  (define (sources->interface-analysis
             sources
             entries
             libraries)
@@ -281,55 +374,60 @@
            [document-resources
              (source-document-ids sources)]
            [entry-ids (entry-definition-ids entries)])
-      (list-sort
-        reference<?
-        (let source-loop
-          ([remaining sources]
-           [document-id 1]
-           [references '()])
-          (if
-            (null? remaining)
-            references
-            (let* ([source (car remaining)]
-                   [resource (car source)]
-                   [snapshot
-                     (make-scheme-semantic-snapshot-with-library-index
-                       document-id
-                       0
-                       (cdr source)
-                       entries
-                       libraries)])
-              (source-loop
-                (cdr remaining)
-                (+ document-id 1)
-                (fold-left
-                  (lambda (references use)
-                    (let ([resolutions
-                            (deduplicate-values
-                              (apply
-                                append
-                                (map
-                                  (lambda (id)
-                                    (definition-id->interface-ids
-                                      id
-                                      document-resources
-                                      entry-ids))
-                                  (scheme-use-resolution use))))])
-                      (if
-                        (null? resolutions)
-                        references
-                        (cons
-                          (list
-                            resource
-                            0
-                            (scheme-use-name use)
-                            (scheme-use-start use)
-                            (scheme-use-end use)
-                            resolutions)
-                          references))))
-                  references
-                  (scheme-semantic-snapshot-uses
-                    snapshot)))))))))
+      (let source-loop
+        ([remaining sources]
+         [document-id 1]
+         [references '()]
+         [diagnostics '()])
+        (if
+          (null? remaining)
+          (values
+            (list-sort reference<? references)
+            (list-sort diagnostic<? diagnostics))
+          (let* ([source (car remaining)]
+                 [resource (car source)]
+                 [bytes (cdr source)]
+                 [snapshot
+                   (make-scheme-semantic-snapshot-with-library-index
+                     document-id
+                     0
+                     bytes
+                     entries
+                     libraries)])
+            (source-loop
+              (cdr remaining)
+              (+ document-id 1)
+              (fold-left
+                (lambda (references use)
+                  (let ([resolutions
+                          (deduplicate-values
+                            (apply
+                              append
+                              (map
+                                (lambda (id)
+                                  (definition-id->interface-ids
+                                    id
+                                    document-resources
+                                    entry-ids))
+                                (scheme-use-resolution use))))])
+                    (if
+                      (null? resolutions)
+                      references
+                      (cons
+                        (list
+                          resource
+                          0
+                          (scheme-use-name use)
+                          (scheme-use-start use)
+                          (scheme-use-end use)
+                          resolutions)
+                        references))))
+                references
+                (scheme-semantic-snapshot-uses snapshot))
+              (append
+                (snapshot-diagnostics
+                  resource bytes snapshot)
+                diagnostics)))))))
 
   (define (scheme-sources->interface-index
             owner
@@ -340,15 +438,18 @@
         (scheme-sources-api+library-index
           sources))
       (lambda (entries libraries)
-        (make-scheme-interface-index
-          owner
-          revision
-          entries
-          libraries
-          (sources->interface-references
-            sources
-            entries
-            libraries)))))
+        (call-with-values
+          (lambda ()
+            (sources->interface-analysis
+              sources entries libraries))
+          (lambda (references diagnostics)
+            (make-scheme-interface-index
+              owner
+              revision
+              entries
+              libraries
+              references
+              diagnostics))))))
 
   (define (interface-index->datum index)
     (list
@@ -372,7 +473,10 @@
         (scheme-interface-index-libraries index))
       (list
         'references
-        (scheme-interface-index-references index))))
+        (scheme-interface-index-references index))
+      (list
+        'diagnostics
+        (scheme-interface-index-diagnostics index))))
 
   (define (scheme-interface-index-encode index)
     (unless (scheme-interface-index? index)
@@ -421,7 +525,8 @@
       (manifest-field datum 'revision)
       (manifest-field datum 'entries)
       (manifest-field datum 'libraries)
-      (manifest-field datum 'references)))
+      (manifest-field datum 'references)
+      (manifest-field datum 'diagnostics)))
 
   (define (scheme-interface-index-decode bytes)
     (unless (bytevector? bytes)

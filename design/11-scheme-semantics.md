@@ -533,9 +533,9 @@ name` 建立这两种身份的等价集合。references 查询在每个已索引
 结果。
 
 构建过程把本次编译解析到的 library source 投影为 `SchemeInterfaceIndex`。该产物
-保存 owner、内容 revision、library catalog、export entries 和编译引用。entry 包含
-library identity、binding kind、procedure formals、documentation 以及可用的
-declaration resource 与 byte range。编译引用使用紧凑 datum：
+保存 owner、内容 revision、library catalog、export entries、编译引用和编译诊断。
+entry 包含 library identity、binding kind、procedure formals、documentation 以及
+可用的 declaration resource 与 byte range。编译引用使用紧凑 datum：
 
 ```text
 InterfaceReference {
@@ -553,11 +553,17 @@ export identity，因此直接 export、rename 和 re-export 共享 canonical re
 关系。只持久化能够映射到 exported interface 的 resolution；lexical local binding
 保留在实时 Buffer snapshot 内。
 
+构建分析在生成引用的同一次 semantic snapshot 中提取诊断。编译诊断只保存
+resource、source revision、code、range、severity、message 和所在行 excerpt，不保存
+syntax tree 或 source text。`diagnostics.list-workspace` 合并当前 Buffer 诊断和已安装
+session 的编译诊断。相同 resource 的实时 Buffer revision 整体遮蔽编译诊断；关闭
+Buffer 后恢复 artifact 中的结果。
+
 产物以带格式版本、Chez 版本和 machine type 的 FASL datum 编码，加载时完整验证
-manifest、entry 和 reference shape。workspace 直接把 reference datum 加入
+manifest、entry、reference 和 diagnostic shape。workspace 直接把 reference datum 加入
 DefinitionId 倒排表，不读取或重新分析对应源码。打开相同 resource 的 Buffer 时，
 实时 revision 整体遮蔽 artifact 中该 resource 的引用；关闭 Buffer 后 artifact
-引用恢复可见。同一 owner 的新 artifact 同时替换 export surface 和引用集合。
+引用恢复可见。同一 owner 的新 artifact 同时替换 export surface、引用和诊断集合。
 
 `call-with-scheme-interface-build` 包住项目原有的 Chez 编译过程。它代理
 `library-search-handler`，记录编译器在声明 source root 内实际解析到的 source，
@@ -579,6 +585,10 @@ DefinitionId 倒排表，不读取或重新分析对应源码。打开相同 res
 
 `scheme-sources->interface-index-file!` 保留为底层入口，供已经掌握精确 source set
 的构建系统直接生成相同 artifact。
+
+编辑器常驻层只按 revision 分析已打开的 Scheme Buffer，用于当前文档的高亮、补全
+和诊断；该分析不枚举目录，也不建立 workspace 索引。跨文件 catalog、引用和诊断
+属于显式 language session，并从构建 artifact 加载。
 
 显式 language workspace session 按 owner 安装 interface index。同一 owner 的新
 revision 原子替换旧 surface；移除 session 时撤销对应 surface。多个 index 按安装

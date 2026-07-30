@@ -5,4 +5,7 @@
   (import (rnrs))
 
   (define (fixture-value value)
-    (+ value 22)))
+    (+ value 22))
+
+  (define (unused-helper ignored)
+    0))
