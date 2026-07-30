@@ -711,7 +711,9 @@
     editor)
 
   (define (make-editor buffer)
-    (let ([editor (make-editor-state buffer)])
+    (let* ([editor (make-editor-state buffer)]
+           [scheme-workspace
+             (install-scheme-xref-commands! editor)])
       (editor-set-evaluator! editor (make-chez-evaluator))
       (install-core-settings! editor)
       (install-core-auto-modes! editor)
@@ -727,7 +729,8 @@
       (install-completion-commands! editor)
       (editor-register-completion-provider!
         editor
-        (make-scheme-static-completion-provider editor))
+        (make-scheme-static-completion-provider
+          editor scheme-workspace))
       (editor-register-completion-provider!
         editor
         (make-scheme-repl-completion-provider editor))
@@ -737,7 +740,6 @@
       (install-search-commands! editor)
       (install-window-commands! editor)
       (install-scheme-help-commands! editor)
-      (install-scheme-xref-commands! editor)
       (install-diagnostic-commands! editor)
       (install-cpp-commands! editor)
       editor)))

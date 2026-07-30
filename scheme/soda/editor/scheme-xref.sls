@@ -172,13 +172,15 @@
               (location-list-current locations))))))
 
   (define (semantic-query workspace context)
-    (let* ([view (command-context-view context)]
+    (let* ([editor (command-context-editor context)]
+           [view (command-context-view context)]
            [buffer (view-buffer view)])
       (unless (scheme-buffer? buffer)
         (assertion-violation
           'scheme-xref
           "active buffer is not in Scheme mode"
           (buffer-major-mode-name buffer)))
+      (scheme-workspace-sync-editor! workspace editor)
       (let* ([snapshot
                (scheme-workspace-snapshot-for-buffer
                  workspace
@@ -515,24 +517,24 @@
             "Visit the previous item in the current location list.")))
       (editor-register-command!
         editor
-        (make-find-symbol-definition workspace)))
-    (for-each
-      (lambda (entry)
-        (editor-bind-key! editor (car entry) (cdr entry)))
-      (list
-        (cons
-          (list (stroke #\. 2))
-          'xref.find-definition)
-        (cons
-          (list (stroke #\? 2))
-          'xref.find-references)
-        (cons
-          (list (stroke #\g 2) (stroke #\n 0))
-          'xref.next-location)
-        (cons
-          (list (stroke #\g 2) (stroke #\p 0))
-          'xref.previous-location)
-        (cons
-          (list (stroke #\g 2) (stroke #\i 0))
-          'xref.find-symbol)))
-    editor))
+        (make-find-symbol-definition workspace))
+      (for-each
+        (lambda (entry)
+          (editor-bind-key! editor (car entry) (cdr entry)))
+        (list
+          (cons
+            (list (stroke #\. 2))
+            'xref.find-definition)
+          (cons
+            (list (stroke #\? 2))
+            'xref.find-references)
+          (cons
+            (list (stroke #\g 2) (stroke #\n 0))
+            'xref.next-location)
+          (cons
+            (list (stroke #\g 2) (stroke #\p 0))
+            'xref.previous-location)
+          (cons
+            (list (stroke #\g 2) (stroke #\i 0))
+            'xref.find-symbol)))
+      workspace)))

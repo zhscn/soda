@@ -401,6 +401,22 @@ Project snapshot 独立于 Buffer 生命周期。未变化的 snapshot 直接复
 `DefinitionId -> WorkspaceReference[]` 倒排表；普通 references 查询只读取目标
 identity 的 buckets。
 
+Workspace 从 Project source 和带 resource 的 Scheme Buffer 提取 R6RS library
+name、export surface 与源码 definition，生成与嵌入 API catalog 相同的 library
+entry。source set 或 revision 改变时先重建 project library catalog，再用合并后的
+embedded/project catalog 重建 workspace semantic snapshot，最后更新 references
+倒排表。连续异步文件读取只标记 catalog dirty，首次 completion 或 xref 查询负责
+合并这一批更新。
+
+project library entry 保留声明 resource、byte range、kind 与 procedure formals。
+consumer 的 `only`、`except`、`prefix`、`rename` 和 `for` import modifier 由通用
+import-binding pipeline 解释，因此 project export 与嵌入 Soda API 具有相同的
+可见性、补全和 DefinitionId 语义。动态 entry 与嵌入 entry 按 DefinitionId 去重，
+允许 Soda 源码项目使用构建期 catalog 自举而不产生重复候选。
+library metadata reader 使用 lexical token 的 delimiter depth 恢复未闭合的外围
+form；编辑 library body 时，已经完整出现的 name、export 和 definition 继续留在
+project catalog。
+
 源码 Buffer 中的 root definition 使用 document DefinitionId，嵌入 API import
 解析到 index DefinitionId。workspace index 通过 `resource + declaration start +
 name` 建立这两种身份的等价集合。references 查询在每个已索引 snapshot 中匹配
@@ -430,6 +446,11 @@ Buffer revision 替代；其余 catalog 条目以
 候选。候选保存定义 kind 与 source resource，显示层只负责匹配和选择。接受已打开
 源码的候选时直接记录 jump edge 并移动到对应 Buffer；接受未打开的嵌入源码候选时
 产生异步文件读取请求，再按声明 byte offset 完成跳转。
+
+Scheme static completion provider 与 xref provider 共享 editor 的
+`SchemeWorkspaceIndex`。completion request 按目标 Document revision 读取 workspace
+snapshot；项目 export、lexical binding、嵌入 API 和 primitive 在同一个
+visible-definition 查询中完成遮蔽与去重，不由 completion UI 再拼接平行目录。
 
 ## Definition、references 与 rename
 

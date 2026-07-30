@@ -3,7 +3,10 @@
         (only (chezscheme) getenv)
         (soda document)
         (soda editor buffer)
+        (soda editor completion-runtime)
         (soda editor core)
+        (soda editor effect)
+        (soda editor file)
         (soda editor scheme-project-runtime)
         (soda editor scheme-query)
         (soda editor scheme-semantics)
@@ -16,6 +19,8 @@
 (define root (getenv "SODA_SCHEME_PROJECT_TEST_ROOT"))
 (define root-resource
   (vfs-path-join root "root.sls"))
+(define consumer-resource
+  (vfs-path-join root "consumer.sls"))
 (define (string-suffix? suffix value)
   (let ([suffix-length (string-length suffix)]
         [value-length (string-length value)])
@@ -69,7 +74,7 @@
 
 (unless
   (and
-    (= (scheme-project-runtime-indexed-count adapter) 2)
+    (= (scheme-project-runtime-indexed-count adapter) 3)
     (= (length (symbols-named "project-root-symbol")) 1)
     (= (length (symbols-named "project-nested-symbol")) 1)
     (null? (symbols-named "not-a-scheme-source"))
@@ -85,6 +90,137 @@
     'scheme-project-runtime-tests
     "project discovery did not index the Scheme source set"
     symbols))
+
+(define project-consumer-source
+  (string-append
+    "(library (fixture project-consumer)\n"
+    "  (export call-project-root)\n"
+    "  (import (rnrs) (fixture project-root))\n"
+    "  (define (call-project-root value)\n"
+    "    (project-root-symbol value)))\n"))
+(define project-consumer-buffer
+  (make-buffer
+    3
+    (make-document project-consumer-source 3)
+    consumer-resource
+    'scheme-mode))
+(editor-add-buffer! editor project-consumer-buffer)
+(scheme-workspace-sync-editor! workspace editor)
+(define project-consumer-snapshot
+  (scheme-workspace-snapshot-for-buffer
+    workspace project-consumer-buffer))
+(define project-root-use
+  (find
+    (lambda (use)
+      (string=?
+        (scheme-use-name use)
+        "project-root-symbol"))
+    (scheme-semantic-snapshot-uses
+      project-consumer-snapshot)))
+(define project-root-definitions
+  (and
+    project-root-use
+    (scheme-semantic-definitions-at
+      project-consumer-snapshot
+      (scheme-use-start project-root-use))))
+
+(unless
+  (and
+    project-root-use
+    (= (length project-root-definitions) 1)
+    (let* ([definition
+             (car project-root-definitions)]
+           [id (scheme-definition-id definition)])
+      (and
+        (eq? (scheme-definition-id-source id) 'index)
+        (string=?
+          (scheme-definition-id-document-id id)
+          root-resource)
+        (member
+          "project-root-symbol"
+          (map
+            scheme-definition-name
+            (scheme-semantic-snapshot-visible-index-definitions
+              project-consumer-snapshot))))))
+  (error
+    'scheme-project-runtime-tests
+    "project library import did not resolve its exported definition"
+    (scheme-semantic-snapshot-imports
+      project-consumer-snapshot)
+    (and
+      project-root-use
+      (scheme-use-resolution project-root-use))
+    project-root-definitions
+    root-resource
+    (map
+      scheme-definition-name
+      (scheme-semantic-snapshot-visible-index-definitions
+        project-consumer-snapshot))))
+
+(editor-set-view-buffer!
+  editor
+  (view-id (editor-active-view editor))
+  (buffer-id project-consumer-buffer))
+(view-set-caret!
+  (editor-active-view editor)
+  (scheme-use-start project-root-use))
+(define completion-executor
+  (make-effect-executor))
+(install-completion-effect-handlers!
+  completion-executor
+  (editor-completion-provider-catalog editor))
+(define completion-effects
+  (editor-update!
+    editor
+    (make-command-message 'completion.at-point #f)))
+(define completion-result
+  (execute-effects!
+    completion-executor completion-effects))
+(for-each
+  (lambda (message)
+    (editor-update! editor message))
+  (effect-result-messages completion-result))
+(let ([completion
+        (editor-active-completion editor)])
+  (unless
+    (and
+      completion
+      (exists
+        (lambda (item)
+          (string=?
+            (completion-item-insert-text item)
+            "project-root-symbol"))
+        (completion-session-items completion)))
+    (error
+      'scheme-project-runtime-tests
+      "project export did not enter completion-at-point")))
+(editor-cancel-completion! editor)
+(define project-definition-effects
+  (editor-update!
+    editor
+    (make-command-message 'xref.find-definition #f)))
+(unless
+  (and
+    (= (length project-definition-effects) 1)
+    (eq?
+      (command-effect-kind
+        (car project-definition-effects))
+      'file.read)
+    (string=?
+      (open-request-path
+        (command-effect-payload
+          (car project-definition-effects)))
+      root-resource))
+  (error
+    'scheme-project-runtime-tests
+    "project definition did not produce an asynchronous source jump"))
+(editor-set-view-buffer!
+  editor
+  (view-id (editor-active-view editor))
+  (buffer-id scratch))
+(editor-remove-buffer!
+  editor
+  (buffer-id project-consumer-buffer))
 
 (define api-snapshot
   (make-scheme-semantic-snapshot

@@ -25,6 +25,7 @@
   (import (rnrs)
           (soda document)
           (soda editor buffer)
+          (soda editor scheme-api-indexer)
           (soda editor scheme-query)
           (soda editor scheme-semantics)
           (soda editor state))
@@ -35,7 +36,8 @@
       resource
       document-id
       revision
-      snapshot))
+      bytes
+      (mutable snapshot)))
 
   (define-record-type
     (scheme-workspace-index
@@ -45,6 +47,8 @@
       documents
       sources
       references
+      (mutable library-index)
+      (mutable catalog-dirty?)
       (mutable dirty?
                scheme-workspace-index-dirty?
                scheme-workspace-index-dirty?-set!)))
@@ -71,6 +75,8 @@
       (make-hashtable
         equal-hash
         scheme-definition-id=?)
+      '()
+      #t
       #t))
 
   (define (require-index who value)
@@ -137,11 +143,20 @@
         [(not (scheme-buffer? buffer))
          (when current
            (hashtable-delete! table id)
+           (scheme-workspace-index-catalog-dirty?-set!
+             index #t)
            (scheme-workspace-index-dirty?-set!
              index #t))]
         [(not (current-document? current buffer))
-         (let ([snapshot
-                 (buffer-scheme-semantic-snapshot buffer)])
+         (let* ([bytes
+                  (buffer-scheme-source-bytes buffer)]
+                [snapshot
+                  (make-scheme-semantic-snapshot-with-library-index
+                    (document-id (buffer-document buffer))
+                    (buffer-revision buffer)
+                    bytes
+                    (scheme-workspace-index-library-index
+                      index))])
            (hashtable-set!
              table
              id
@@ -150,9 +165,69 @@
                (buffer-resource buffer)
                (scheme-semantic-snapshot-document-id snapshot)
                (scheme-semantic-snapshot-revision snapshot)
+               bytes
                snapshot))
+           (scheme-workspace-index-catalog-dirty?-set!
+             index #t)
            (scheme-workspace-index-dirty?-set!
              index #t))])))
+
+  (define (buffer-scheme-source-bytes buffer)
+    (let ([snapshot
+            (document-snapshot
+              (buffer-document buffer))])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (let ([text (snapshot-text snapshot)])
+            (dynamic-wind
+              (lambda () #f)
+              (lambda () (text->bytevector text))
+              (lambda () (text-close! text)))))
+        (lambda () (snapshot-close! snapshot)))))
+
+  (define (catalog-sources index)
+    (filter
+      (lambda (source) source)
+      (map
+        (lambda (document)
+          (let ([resource
+                  (scheme-workspace-document-resource
+                    document)])
+            (and
+              (string? resource)
+              (cons
+                resource
+                (scheme-workspace-document-bytes
+                  document)))))
+        (workspace-documents index))))
+
+  (define (refresh-document-snapshot! document library-index)
+    (scheme-workspace-document-snapshot-set!
+      document
+      (make-scheme-semantic-snapshot-with-library-index
+        (scheme-workspace-document-document-id document)
+        (scheme-workspace-document-revision document)
+        (scheme-workspace-document-bytes document)
+        library-index)))
+
+  (define (ensure-library-index! index)
+    (when
+      (scheme-workspace-index-catalog-dirty? index)
+      (let ([library-index
+              (scheme-sources-api-index
+                (catalog-sources index))])
+        (scheme-workspace-index-library-index-set!
+          index library-index)
+        (for-each
+          (lambda (document)
+            (refresh-document-snapshot!
+              document library-index))
+          (workspace-documents index))
+        (scheme-workspace-index-catalog-dirty?-set!
+          index #f)
+        (scheme-workspace-index-dirty?-set!
+          index #t))))
 
   (define (add-reference! table id reference)
     (hashtable-set!
@@ -209,9 +284,12 @@
                 (hashtable-delete!
                   (scheme-workspace-index-documents index)
                   id)
+                (scheme-workspace-index-catalog-dirty?-set!
+                  index #t)
                 (scheme-workspace-index-dirty?-set!
                   index #t)))
             (loop (+ position 1))))))
+    (ensure-library-index! index)
     (when (scheme-workspace-index-dirty? index)
       (rebuild-references! index))
     index)
@@ -240,22 +318,27 @@
         document-id
         revision))
     (let* ([snapshot
-             (make-scheme-semantic-snapshot
+             (make-scheme-semantic-snapshot-with-library-index
                document-id
                revision
-               bytes)]
+               bytes
+               (scheme-workspace-index-library-index
+                 index))]
            [document
              (make-scheme-workspace-document
                #f
                resource
                document-id
                revision
+               bytes
                snapshot)])
       (hashtable-set!
         (scheme-workspace-index-sources index)
         resource
         document)
       (scheme-workspace-index-dirty?-set! index #t)
+      (scheme-workspace-index-catalog-dirty?-set!
+        index #t)
       snapshot))
 
   (define (scheme-workspace-remove-source! index resource)
@@ -272,6 +355,8 @@
       (hashtable-delete!
         (scheme-workspace-index-sources index)
         resource)
+      (scheme-workspace-index-catalog-dirty?-set!
+        index #t)
       (scheme-workspace-index-dirty?-set! index #t))
     index)
 
@@ -282,6 +367,7 @@
       'scheme-workspace-snapshot-for-buffer
       index)
     (sync-buffer! index buffer)
+    (ensure-library-index! index)
     (let ([document
             (hashtable-ref
               (scheme-workspace-index-documents index)

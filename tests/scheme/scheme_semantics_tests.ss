@@ -911,3 +911,84 @@
       (scheme-semantic-snapshot-imports partial-snapshot))
     (error 'scheme-semantics-tests
            "partial source did not preserve library imports")))
+
+(define dynamic-library-index
+  (list
+    (list
+      "project-value"
+      'procedure
+      '(sample project)
+      "/project/sample.sls"
+      12
+      25
+      '((value))
+      #f)))
+(define dynamic-import-source
+  (string-append
+    "(import (prefix (sample project) project:))\n"
+    "(project:project-value 1)\n"))
+(define dynamic-import-snapshot
+  (make-scheme-semantic-snapshot-with-library-index
+    73
+    0
+    (string->utf8 dynamic-import-source)
+    dynamic-library-index))
+(define dynamic-import-use
+  (find
+    (lambda (use)
+      (string=?
+        (scheme-use-name use)
+        "project:project-value"))
+    (scheme-semantic-snapshot-uses
+      dynamic-import-snapshot)))
+
+(unless
+  (and
+    dynamic-import-use
+    (= (length
+         (scheme-use-resolution dynamic-import-use))
+       1)
+    (let ([definition
+            (car
+              (scheme-semantic-definitions-at
+                dynamic-import-snapshot
+                (scheme-use-start dynamic-import-use)))])
+      (and
+        (string=?
+          (scheme-definition-name definition)
+          "project:project-value")
+        (equal?
+          (scheme-definition-signatures definition)
+          '("(project:project-value value)"))
+        (string=?
+          (scheme-definition-id-document-id
+            (scheme-definition-id definition))
+          "/project/sample.sls"))))
+  (error
+    'scheme-semantics-tests
+    "dynamic project library index did not preserve import transforms"))
+
+(define incomplete-library-index
+  (scheme-sources-api-index
+    (list
+      (cons
+        "/project/incomplete.sls"
+        (string->utf8
+          (string-append
+            "(library (sample editing)\n"
+            "  (export editing-value)\n"
+            "  (import (rnrs))\n"
+            "  (define editing-value 1)"))))))
+
+(unless
+  (and
+    (= (length incomplete-library-index) 1)
+    (string=?
+      (car (car incomplete-library-index))
+      "editing-value")
+    (equal?
+      (caddr (car incomplete-library-index))
+      '(sample editing)))
+  (error
+    'scheme-semantics-tests
+    "incomplete library source lost its export surface"))

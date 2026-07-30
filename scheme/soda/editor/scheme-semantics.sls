@@ -1,5 +1,6 @@
 (library (soda editor scheme-semantics)
   (export make-scheme-semantic-snapshot
+          make-scheme-semantic-snapshot-with-library-index
           scheme-semantic-snapshot?
           scheme-semantic-snapshot-document-id
           scheme-semantic-snapshot-revision
@@ -1007,9 +1008,6 @@
         (index-entry->definition entry))
       soda-built-in-api-index))
 
-  (define scheme-global-definitions
-    (append scheme-index-definitions scheme-primitive-definitions))
-
   (define (scheme-definition-library definition)
     (unless (scheme-definition? definition)
       (assertion-violation
@@ -1020,20 +1018,6 @@
       (and
         (eq? (scheme-definition-id-source id) 'index)
         (scheme-definition-id-revision id))))
-
-  (define scheme-index-library-table
-    (let ([table (make-hashtable equal-hash equal?)])
-      (for-each
-        (lambda (definition)
-          (let ([library (scheme-definition-library definition)])
-            (hashtable-set!
-              table
-              library
-              (cons
-                definition
-                (hashtable-ref table library '())))))
-        scheme-index-definitions)
-      table))
 
   (define scheme-known-library-table
     (let ([table (make-hashtable equal-hash equal?)])
@@ -1205,18 +1189,55 @@
              definitions))]
         [else definitions])))
 
-  (define (definitions-for-import binding)
+  (define (definitions-for-import binding library-table)
     (fold-left
       apply-import-transform
       (reverse
         (hashtable-ref
-          scheme-index-library-table
+          library-table
           (import-binding-library binding)
           '()))
       (import-binding-transforms binding)))
 
-  (define (visible-index-definitions bindings)
-    (apply append (map definitions-for-import bindings)))
+  (define (visible-index-definitions bindings library-table)
+    (apply
+      append
+      (map
+        (lambda (binding)
+          (definitions-for-import binding library-table))
+        bindings)))
+
+  (define (library-table-with-index entries)
+    (let ([table (make-hashtable equal-hash equal?)])
+      (for-each
+        (lambda (definition)
+          (let* ([library
+                   (scheme-definition-library definition)]
+                 [existing
+                   (hashtable-ref table library '())])
+            (unless
+              (exists
+                (lambda (candidate)
+                  (scheme-definition-id=?
+                    (scheme-definition-id candidate)
+                    (scheme-definition-id definition)))
+                existing)
+              (hashtable-set!
+                table
+                library
+                (cons definition existing)))))
+        (append
+          scheme-index-definitions
+          (map
+            (lambda (entry)
+              (unless (valid-index-entry? entry)
+                (assertion-violation
+                  'make-scheme-semantic-snapshot-with-library-index
+                  "invalid Scheme library index entry"
+                  entry))
+              (index-entry->definition entry))
+            entries)))
+      table))
 
   (define (make-definition-table definitions)
     (let ([table (make-hashtable string-hash string=?)])
@@ -1988,7 +2009,10 @@
                       (or
                         (definition-by-id definitions id)
                         (definition-by-id
-                          scheme-global-definitions
+                          (append
+                            (scheme-semantic-snapshot-visible-index-definitions
+                              snapshot)
+                            scheme-primitive-definitions)
                           id)))
                     (scheme-use-resolution use))))))))
 
@@ -2408,9 +2432,9 @@
             (scheme-scope-definitions scope)))
         scopes)))
 
-  (define (import-binding-used? binding uses)
+  (define (import-binding-used? binding uses library-table)
     (let ([definitions
-            (definitions-for-import binding)])
+            (definitions-for-import binding library-table)])
       (and
         (pair? definitions)
         (exists
@@ -2432,19 +2456,23 @@
 
   (define (unused-import-diagnostics
             import-locations
-            uses)
+            uses
+            library-table)
     (fold-left
       (lambda (result location)
         (let* ([binding (car location)]
                [form (cdr location)]
                [library (import-binding-library binding)]
                [definitions
-                 (definitions-for-import binding)])
+                 (definitions-for-import
+                   binding
+                   library-table)])
           (if
             (and
               (pair? definitions)
               (not
-                (import-binding-used? binding uses)))
+                (import-binding-used?
+                  binding uses library-table)))
             (cons
               (make-scheme-diagnostic
                 'unused-import
@@ -2501,7 +2529,8 @@
             tokens
             scopes
             import-locations
-            uses)
+            uses
+            library-table)
     (list-sort
       diagnostic-before?
       (append
@@ -2511,14 +2540,16 @@
         (unknown-soda-library-diagnostics
           import-locations)
         (unused-parameter-diagnostics scopes uses)
-        (unused-import-diagnostics import-locations uses)
+        (unused-import-diagnostics
+          import-locations uses library-table)
         (duplicate-import-diagnostics
           import-locations))))
 
-  (define (make-scheme-semantic-snapshot
+  (define (make-scheme-semantic-snapshot/internal
             document-id
             revision
-            bytes)
+            bytes
+            library-index)
     (unless (and (exact-non-negative-integer? document-id)
                  (exact-non-negative-integer? revision))
       (assertion-violation
@@ -2531,7 +2562,14 @@
         'make-scheme-semantic-snapshot
         "expected source bytes"
         bytes))
-    (let* ([tokens (tokenize bytes)]
+    (unless (list? library-index)
+      (assertion-violation
+        'make-scheme-semantic-snapshot-with-library-index
+        "library index must be a list"
+        library-index))
+    (let* ([library-table
+             (library-table-with-index library-index)]
+           [tokens (tokenize bytes)]
            [semantic (semantic-tokens tokens)]
            [import-locations
              (source-import-locations tokens)]
@@ -2540,7 +2578,9 @@
            [imports
              (map import-binding-library import-bindings)]
            [visible-index
-             (visible-index-definitions import-bindings)]
+             (visible-index-definitions
+               import-bindings
+               library-table)]
            [global-table
              (make-definition-table
                (append
@@ -2577,5 +2617,21 @@
                 tokens
                 scopes
                 import-locations
-                uses)
-              visible-index)))))))
+                uses
+                library-table)
+              visible-index))))))
+
+  (define (make-scheme-semantic-snapshot
+            document-id
+            revision
+            bytes)
+    (make-scheme-semantic-snapshot/internal
+      document-id revision bytes '()))
+
+  (define (make-scheme-semantic-snapshot-with-library-index
+            document-id
+            revision
+            bytes
+            library-index)
+    (make-scheme-semantic-snapshot/internal
+      document-id revision bytes library-index)))

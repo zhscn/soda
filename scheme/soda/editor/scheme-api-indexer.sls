@@ -7,11 +7,11 @@
   (define-record-type library-source
     (fields resource name exports definitions))
 
-  (define (library-form bytes)
+  (define (read-library-form text)
     (guard (condition [else #f])
       (let* ([port
                (open-string-input-port
-                 (utf8->string bytes))]
+                 text)]
              [datum (read port)])
         (close-port port)
         (and
@@ -20,6 +20,31 @@
           (pair? (cdr datum))
           (list? (cadr datum))
           datum))))
+
+  (define (delimiter-depth bytes)
+    (fold-left
+      (lambda (depth token)
+        (case (scheme-lexical-token-kind token)
+          [(open) (+ depth 1)]
+          [(close) (max 0 (- depth 1))]
+          [else depth]))
+      0
+      (scheme-lexical-tokenize bytes)))
+
+  (define (closing-delimiters count)
+    (make-string count #\)))
+
+  (define (library-form bytes)
+    (let ([text (utf8->string bytes)])
+      (or
+        (read-library-form text)
+        (let ([depth (delimiter-depth bytes)])
+          (and
+            (positive? depth)
+            (read-library-form
+              (string-append
+                text
+                (closing-delimiters depth))))))))
 
   (define (export-pairs clauses)
     (fold-left

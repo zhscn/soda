@@ -6,6 +6,7 @@
           (soda editor completion)
           (soda editor completion-provider)
           (soda editor scheme-semantics)
+          (soda editor scheme-workspace)
           (soda editor state))
 
   (define (buffer-for-document editor target-document-id)
@@ -87,7 +88,10 @@
         annotation
         (definition-group definition))))
 
-  (define (start-scheme-completion editor request)
+  (define (start-scheme-completion
+            editor
+            workspace
+            request)
     (let ([buffer
             (buffer-for-document
               editor
@@ -111,10 +115,16 @@
                       '()
                       #t))
                   (let ([snapshot
-                          (make-scheme-semantic-snapshot
-                            document-id
-                            revision
-                            bytes)])
+                          (if workspace
+                              (begin
+                                (scheme-workspace-sync-editor!
+                                  workspace editor)
+                                (scheme-workspace-snapshot-for-buffer
+                                  workspace buffer))
+                              (make-scheme-semantic-snapshot
+                                document-id
+                                revision
+                                bytes))])
                     (list
                       (make-completion-response-for-request
                         request
@@ -125,14 +135,28 @@
                             (completion-request-end request)))
                         #t)))))))))
 
-  (define (make-scheme-static-completion-provider editor)
-    (unless (editor? editor)
-      (assertion-violation
-        'make-scheme-static-completion-provider
-        "expected an editor"
-        editor))
-    (make-completion-provider
-      'scheme-static
-      (lambda (request)
-        (start-scheme-completion editor request))
-      (lambda (request) #f))))
+  (define make-scheme-static-completion-provider
+    (case-lambda
+      [(editor)
+       (make-scheme-static-completion-provider
+         editor #f)]
+      [(editor workspace)
+       (unless (editor? editor)
+         (assertion-violation
+           'make-scheme-static-completion-provider
+           "expected an editor"
+           editor))
+       (unless
+         (or
+           (not workspace)
+           (scheme-workspace-index? workspace))
+         (assertion-violation
+           'make-scheme-static-completion-provider
+           "expected a Scheme workspace index"
+           workspace))
+       (make-completion-provider
+         'scheme-static
+         (lambda (request)
+           (start-scheme-completion
+             editor workspace request))
+         (lambda (request) #f))])))
