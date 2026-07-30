@@ -15,11 +15,14 @@
           (soda editor window))
 
   (define (condition->string condition)
-    (call-with-values
-      open-string-output-port
-      (lambda (port extract)
-        (write condition port)
-        (extract))))
+    (if
+      (message-condition? condition)
+      (condition-message condition)
+      (call-with-values
+        open-string-output-port
+        (lambda (port extract)
+          (write condition port)
+          (extract)))))
 
   (define (run-interactive-command editor name event argument message-prefix)
     (guard (condition

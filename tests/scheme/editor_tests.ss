@@ -4941,6 +4941,12 @@
           'after-init
           'transaction.lifecycle-hook
           (lambda (editor) #f))
+        (editor-add-buffer-hook!
+          configuration-editor
+          configuration-buffer
+          'after-save
+          'transaction.buffer-hook
+          (lambda (editor buffer path revision) #f))
         (keymap-bind!
           configuration-default-map
           (list configuration-key)
@@ -5064,6 +5070,15 @@
           (editor-hook-names
             configuration-editor
             'after-init))))
+    (cons
+      'buffer-hook
+      (not
+        (memq
+          'transaction.buffer-hook
+          (editor-buffer-hook-names
+            configuration-editor
+            configuration-buffer
+            'after-save))))
     (cons
       'keymap-catalog
       (not
@@ -5193,6 +5208,91 @@
        10))
   (error 'editor-tests
          "configuration rollback hook did not observe restored state"))
+
+(define editor-lifecycle-trace '())
+(editor-add-hook!
+  configuration-editor
+  'major-mode-changed
+  'test.global-major-mode
+  (lambda (editor buffer old-mode new-mode)
+    (set! editor-lifecycle-trace
+      (append
+        editor-lifecycle-trace
+        (list (list 'global old-mode new-mode))))))
+(editor-add-buffer-hook!
+  configuration-editor
+  configuration-buffer
+  'major-mode-changed
+  'test.local-major-mode
+  (lambda (editor buffer old-mode new-mode)
+    (set! editor-lifecycle-trace
+      (append
+        editor-lifecycle-trace
+        (list (list 'local old-mode new-mode))))))
+(editor-select-buffer-major-mode!
+  configuration-editor
+  configuration-buffer
+  "/tmp/configuration.sls")
+(editor-select-buffer-major-mode!
+  configuration-editor
+  configuration-buffer
+  "/tmp/configuration.cpp")
+(unless
+  (equal?
+    editor-lifecycle-trace
+    '((global cpp-mode scheme-mode)
+      (local cpp-mode scheme-mode)
+      (global scheme-mode cpp-mode)
+      (local scheme-mode cpp-mode)))
+  (error 'editor-tests
+         "major mode hooks did not compose global and buffer-local order"
+         editor-lifecycle-trace))
+(editor-remove-hook!
+  configuration-editor
+  'major-mode-changed
+  'test.global-major-mode)
+(editor-remove-buffer-hook!
+  configuration-editor
+  configuration-buffer
+  'major-mode-changed
+  'test.local-major-mode)
+
+(define created-buffer-id #f)
+(editor-add-hook!
+  configuration-editor
+  'buffer-created
+  'test.buffer-created
+  (lambda (editor buffer)
+    (set! created-buffer-id (buffer-id buffer))))
+(define lifecycle-buffer
+  (editor-create-buffer!
+    configuration-editor
+    "*lifecycle*"
+    'fundamental-mode
+    ""))
+(unless (= created-buffer-id (buffer-id lifecycle-buffer))
+  (error 'editor-tests "buffer-created hook did not observe registration"))
+(editor-remove-hook!
+  configuration-editor
+  'buffer-created
+  'test.buffer-created)
+(editor-add-buffer-hook!
+  configuration-editor
+  lifecycle-buffer
+  'before-buffer-removed
+  'test.observe-buffer-removal
+  (lambda (editor buffer)
+    (set! editor-lifecycle-trace
+      (append editor-lifecycle-trace '(before-buffer-removed)))))
+(editor-remove-buffer!
+  configuration-editor
+  (buffer-id lifecycle-buffer))
+(unless
+  (and
+    (buffer-closed? lifecycle-buffer)
+    (memq 'before-buffer-removed editor-lifecycle-trace))
+  (error 'editor-tests
+         "buffer removal notification did not precede close"))
 
 (define theme-before-failed-hook
   (editor-theme configuration-editor))

@@ -256,6 +256,44 @@
                  "No changes need saving"))
   (error 'file-tests "clean buffer started a save"))
 
+(define save-hook-trace '())
+(editor-add-hook!
+  editor
+  'before-save
+  'test.global-before-save
+  (lambda (editor buffer path adopt-path?)
+    (set! save-hook-trace
+      (append save-hook-trace '(global-before)))))
+(editor-add-buffer-hook!
+  editor
+  buffer
+  'before-save
+  'test.local-before-save
+  (lambda (editor buffer path adopt-path?)
+    (set! save-hook-trace
+      (append save-hook-trace '(local-before)))))
+(editor-add-hook!
+  editor
+  'after-save
+  'test.global-after-save
+  (lambda (editor buffer path revision)
+    (set! save-hook-trace
+      (append save-hook-trace '(global-after)))))
+(editor-add-buffer-hook!
+  editor
+  buffer
+  'after-save
+  'test.local-after-save
+  (lambda (editor buffer path revision)
+    (set! save-hook-trace
+      (append save-hook-trace '(local-after)))))
+(editor-add-buffer-hook!
+  editor
+  buffer
+  'after-save
+  'test.reject-after-save
+  (lambda (editor buffer path revision)
+    (error 'file-tests "reject after-save notification")))
 (insert! 4 " one")
 (define first-save-revision (buffer-revision buffer))
 (dispatch! (make-command-message 'file.save #f))
@@ -283,10 +321,63 @@
          (string->utf8 "base one"))
        (string-contains?
          (editor-status-message editor)
-         "Saved"))
-  (error 'file-tests "successful save did not advance saved revision"))
+         "after-save hook failed"))
+  (error 'file-tests
+         "after-save failure changed committed save state"))
+(unless
+  (equal?
+    save-hook-trace
+    '(global-before local-before global-after local-after))
+  (error 'file-tests
+         "save hooks did not run in lifecycle order"
+         save-hook-trace))
+(editor-remove-hook!
+  editor
+  'before-save
+  'test.global-before-save)
+(editor-remove-buffer-hook!
+  editor
+  buffer
+  'before-save
+  'test.local-before-save)
+(editor-remove-hook!
+  editor
+  'after-save
+  'test.global-after-save)
+(editor-remove-buffer-hook!
+  editor
+  buffer
+  'after-save
+  'test.local-after-save)
+(editor-remove-buffer-hook!
+  editor
+  buffer
+  'after-save
+  'test.reject-after-save)
 
 (insert! 8 " two")
+(editor-add-buffer-hook!
+  editor
+  buffer
+  'before-save
+  'test.reject-save
+  (lambda (editor buffer path adopt-path?)
+    (error 'file-tests "reject save in before-save")))
+(dispatch! (make-command-message 'file.save #f))
+(unless
+  (and
+    (buffer-modified? buffer)
+    (not (buffer-save-pending? buffer))
+    (string-contains?
+      (editor-status-message editor)
+      "reject save in before-save"))
+  (error 'file-tests
+         "before-save failure did not cancel save before snapshot"))
+(editor-remove-buffer-hook!
+  editor
+  buffer
+  'before-save
+  'test.reject-save)
 (define in-flight-revision (buffer-revision buffer))
 (dispatch! (make-command-message 'file.save #f))
 (insert! 12 " newer")
@@ -743,6 +834,27 @@
 
 (define coalesced-view
   (editor-open-view! editor (buffer-id buffer)))
+(define find-file-hook-trace '())
+(editor-add-hook!
+  editor
+  'buffer-created
+  'test.install-find-file-hook
+  (lambda (editor buffer)
+    (editor-add-buffer-hook!
+      editor
+      buffer
+      'find-file
+      'test.local-find-file
+      (lambda (editor buffer path new-file?)
+        (set! find-file-hook-trace
+          (append find-file-hook-trace '(local)))))))
+(editor-add-hook!
+  editor
+  'find-file
+  'test.global-find-file
+  (lambda (editor buffer path new-file?)
+    (set! find-file-hook-trace
+      (append find-file-hook-trace '(global)))))
 (write-file-bytes external-path (read-file-bytes open-path))
 (dispatch!
   (make-internal-command-message
@@ -780,6 +892,23 @@
     (not (buffer-modified? opened-buffer))
     (string-contains? (editor-status-message editor) "Opened"))
   (error 'file-tests "asynchronous open did not create a file buffer"))
+(unless (equal? find-file-hook-trace '(global local))
+  (error 'file-tests
+         "find-file hooks did not run after buffer creation"
+         find-file-hook-trace))
+(editor-remove-hook!
+  editor
+  'buffer-created
+  'test.install-find-file-hook)
+(editor-remove-hook!
+  editor
+  'find-file
+  'test.global-find-file)
+(editor-remove-buffer-hook!
+  editor
+  opened-buffer
+  'find-file
+  'test.local-find-file)
 
 (dispatch!
   (make-internal-command-message
@@ -818,6 +947,37 @@
   (error 'file-tests
          "save overwrote an externally modified file"))
 
+(define revert-hook-trace '())
+(editor-add-hook!
+  editor
+  'before-revert
+  'test.global-before-revert
+  (lambda (editor buffer path force?)
+    (set! revert-hook-trace
+      (append revert-hook-trace '(global-before)))))
+(editor-add-buffer-hook!
+  editor
+  opened-buffer
+  'before-revert
+  'test.local-before-revert
+  (lambda (editor buffer path force?)
+    (set! revert-hook-trace
+      (append revert-hook-trace '(local-before)))))
+(editor-add-hook!
+  editor
+  'after-revert
+  'test.global-after-revert
+  (lambda (editor buffer path)
+    (set! revert-hook-trace
+      (append revert-hook-trace '(global-after)))))
+(editor-add-buffer-hook!
+  editor
+  opened-buffer
+  'after-revert
+  'test.local-after-revert
+  (lambda (editor buffer path)
+    (set! revert-hook-trace
+      (append revert-hook-trace '(local-after)))))
 (dispatch! (make-command-message 'file.reload #f))
 (unless
   (and
@@ -865,10 +1025,60 @@
       (editor-status-message editor)
       "Reloaded"))
   (error 'file-tests "forced reload did not replace the buffer"))
+(unless
+  (equal?
+    revert-hook-trace
+    '(global-before local-before global-after local-after))
+  (error 'file-tests
+         "revert hooks did not run around committed reload"
+         revert-hook-trace))
+(editor-remove-hook!
+  editor
+  'before-revert
+  'test.global-before-revert)
+(editor-remove-buffer-hook!
+  editor
+  opened-buffer
+  'before-revert
+  'test.local-before-revert)
+(editor-remove-hook!
+  editor
+  'after-revert
+  'test.global-after-revert)
+(editor-remove-buffer-hook!
+  editor
+  opened-buffer
+  'after-revert
+  'test.local-after-revert)
 
 (write-file-bytes
   external-path
   (string->utf8 "new\r\ndisk\r\n"))
+(editor-add-buffer-hook!
+  editor
+  opened-buffer
+  'before-revert
+  'test.reject-revert
+  (lambda (editor buffer path force?)
+    (error 'file-tests "reject reload in before-revert")))
+(dispatch! (make-command-message 'file.reload #f))
+(unless
+  (and
+    (not
+      (buffer-setting-ref
+        opened-buffer
+        'file-reload-pending?
+        #f))
+    (string-contains?
+      (editor-status-message editor)
+      "reject reload in before-revert"))
+  (error 'file-tests
+         "before-revert failure did not cancel reload request"))
+(editor-remove-buffer-hook!
+  editor
+  opened-buffer
+  'before-revert
+  'test.reject-revert)
 (dispatch! (make-command-message 'file.reload #f))
 (finish-file-read!)
 (unless

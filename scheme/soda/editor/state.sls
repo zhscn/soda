@@ -63,6 +63,11 @@
           editor-remove-hook!
           editor-hook-names
           editor-run-hooks!
+          editor-add-buffer-hook!
+          editor-remove-buffer-hook!
+          editor-buffer-hook-names
+          editor-run-buffer-hooks!
+          editor-notify-buffer-hooks!
           editor-minor-mode-catalog
           editor-global-minor-modes
           editor-set-global-minor-modes!
@@ -601,6 +606,107 @@
       phase
       arguments))
 
+  (define (editor-add-buffer-hook!
+            value
+            buffer
+            phase
+            name
+            procedure)
+    (require-open-editor 'editor-add-buffer-hook! value)
+    (let ([target
+            (editor-setting-buffer
+              'editor-add-buffer-hook!
+              value
+              buffer)])
+      (let ([registered
+              (hook-registry-add-buffer!
+                (editor-hook-registry value)
+                (buffer-id target)
+                phase
+                name
+                procedure)])
+        (editor-invalidate! value 'configuration)
+        registered)))
+
+  (define (editor-remove-buffer-hook!
+            value
+            buffer
+            phase
+            name)
+    (require-open-editor 'editor-remove-buffer-hook! value)
+    (let ([target
+            (editor-setting-buffer
+              'editor-remove-buffer-hook!
+              value
+              buffer)])
+      (let ([removed
+              (hook-registry-remove-buffer!
+                (editor-hook-registry value)
+                (buffer-id target)
+                phase
+                name)])
+        (editor-invalidate! value 'configuration)
+        removed)))
+
+  (define (editor-buffer-hook-names value buffer phase)
+    (require-open-editor 'editor-buffer-hook-names value)
+    (let ([target
+            (editor-setting-buffer
+              'editor-buffer-hook-names
+              value
+              buffer)])
+      (hook-registry-buffer-names
+        (editor-hook-registry value)
+        (buffer-id target)
+        phase)))
+
+  (define (editor-run-buffer-hooks!
+            value
+            phase
+            buffer
+            . arguments)
+    (require-open-editor 'editor-run-buffer-hooks! value)
+    (let ([target
+            (editor-setting-buffer
+              'editor-run-buffer-hooks!
+              value
+              buffer)])
+      (apply
+        hook-registry-run-for-buffer!
+        (editor-hook-registry value)
+        (buffer-id target)
+        phase
+        value
+        target
+        arguments)))
+
+  (define (editor-notify-buffer-hooks!
+            value
+            phase
+            buffer
+            . arguments)
+    (guard
+      (condition
+        [else
+         (editor-set-status-message!
+           value
+           (string-append
+             (symbol->string phase)
+             " hook failed"
+             (if (message-condition? condition)
+                 (string-append
+                   ": "
+                   (condition-message condition))
+                 "")))
+         #f])
+      (apply
+        editor-run-buffer-hooks!
+        value
+        phase
+        buffer
+        arguments)
+      #t))
+
   (define (editor-register-completion-provider! value provider)
     (require-open-editor
       'editor-register-completion-provider!
@@ -829,6 +935,10 @@
       (let ([document-id (document-id (buffer-document buffer))])
         (when (>= document-id (editor-next-document-id value))
           (editor-next-document-id-set! value (+ document-id 1))))
+      (editor-notify-buffer-hooks!
+        value
+        'buffer-created
+        buffer)
       buffer))
 
   (define (editor-create-buffer! value resource mode-name bytes)
@@ -887,6 +997,10 @@
           'editor-remove-buffer!
           "buffer is displayed by a view"
           id))
+      (editor-notify-buffer-hooks!
+        value
+        'before-buffer-removed
+        buffer)
       (hashtable-delete! (editor-buffer-table value) id)
       (let ([resource (buffer-resource buffer)])
         (when
@@ -933,6 +1047,9 @@
           (lambda (set)
             (not (= (annotation-set-buffer-id set) id)))
           (editor-annotation-sets value)))
+      (hook-registry-clear-buffer!
+        (editor-hook-registry value)
+        id)
       (buffer-close! buffer)))
 
   (define (editor-interactions value)
@@ -2412,7 +2529,14 @@
                buffer)]
            [mode (editor-major-mode-for-path value path)])
       (unless (eq? mode (buffer-major-mode-name target))
-        (buffer-set-major-mode! target mode)
+        (let ([old-mode (buffer-major-mode-name target)])
+          (buffer-set-major-mode! target mode)
+          (editor-notify-buffer-hooks!
+            value
+            'major-mode-changed
+            target
+            old-mode
+            mode))
         (editor-invalidate! value 'document))
       mode))
 

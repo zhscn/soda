@@ -1107,6 +1107,12 @@
             (if new-file? "New file " "Opened ")
             (open-result-path result)
             " in a background buffer")))
+      (editor-notify-buffer-hooks!
+        editor
+        'find-file
+        buffer
+        (open-result-path result)
+        new-file?)
       buffer))
 
   (define (activate-open-result-buffer! editor result buffer)
@@ -1207,6 +1213,12 @@
            "Buffer is modified; use file.force-reload to discard changes")
          '()]
         [else
+         (editor-run-buffer-hooks!
+           editor
+           'before-revert
+           buffer
+           path
+           force?)
          (let* ([document (buffer-document buffer)]
                 [request
                   (make-reload-request
@@ -1312,6 +1324,11 @@
              (string-append
                "Reloaded "
                (reload-result-path result)))
+           (editor-notify-buffer-hooks!
+             editor
+             'after-revert
+             buffer
+             (reload-result-path result))
            '()]))))
 
   (define open-save-as-prompt!
@@ -1347,6 +1364,12 @@
            'begin-save!
            "continuation must be an editor command message or #f"
            continuation))
+       (editor-run-buffer-hooks!
+         editor
+         'before-save
+         buffer
+         path
+         adopt-path?)
        (let ([request
                (snapshot-save-request
                  buffer
@@ -1577,6 +1600,13 @@
              (string-append
                "Saved "
                (save-result-path result))]))
+        (when success?
+          (editor-notify-buffer-hooks!
+            editor
+            'after-save
+            buffer
+            (save-result-path result)
+            (save-result-revision result)))
         (if
           (and success? continuation)
           (list

@@ -71,6 +71,11 @@
           editor-remove-hook!
           editor-hook-names
           editor-run-hooks!
+          editor-add-buffer-hook!
+          editor-remove-buffer-hook!
+          editor-buffer-hook-names
+          editor-run-buffer-hooks!
+          editor-notify-buffer-hooks!
           editor-active-command-invocation
           editor-minor-mode-catalog
           editor-global-minor-modes

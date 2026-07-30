@@ -113,6 +113,10 @@ Editor hook registry 按 phase 保存有序的命名过程。同 phase、同名�
 remove 按名称删除。Hook registry 属于 configuration snapshot，因此 owner reload 和
 unload 同时恢复其 hooks。
 
+Hook 可以注册为 Editor-global，也可以绑定到一个 Buffer。Buffer lifecycle 执行时先按
+注册顺序运行 global hooks，再运行该 Buffer 的 local hooks。Buffer-local hook 随
+configuration snapshot 恢复，并在 Buffer 从 Editor 移除时清理。
+
 核心 phase 为：
 
 ```text
@@ -120,6 +124,14 @@ after-init(editor)
 theme-changed(editor, old-theme, new-theme)
 configuration-committed(editor)
 configuration-rolled-back(editor, condition)
+buffer-created(editor, buffer)
+before-buffer-removed(editor, buffer)
+major-mode-changed(editor, buffer, old-mode, new-mode)
+find-file(editor, buffer, path, new-file?)
+before-save(editor, buffer, path, adopt-path?)
+after-save(editor, buffer, path, saved-revision)
+before-revert(editor, buffer, path, force?)
+after-revert(editor, buffer, path)
 ```
 
 `after-init` 在 user init 和启动文件 mode 选择完成后运行。它自身位于 configuration
@@ -131,6 +143,18 @@ Rollback hook 用于记录和诊断，hook condition 不替换原 condition。
 
 Theme setter 在 configuration transaction 中运行 `theme-changed`，因此 hook 可以
 原子更新配套 face 或 setting；hook 失败时 theme 和其他配置修改一起恢复。
+
+`before-save` 和 `before-revert` 是同步 barrier。Hook condition 会在 save snapshot
+或异步 reload request 建立之前取消操作。Hook 在 barrier 中对 Document 所做的编辑
+仍是普通 Document change。
+
+`buffer-created`、`before-buffer-removed`、`major-mode-changed`、`find-file`、
+`after-save` 和 `after-revert` 是 notification。它们不承担 kill query 或事务 veto；
+Editor 保留已提交状态、报告 hook condition，并继续 command loop。文件写入和 reload
+完成后同样无法通过 hook condition 回滚。
+`find-file` 在文件 metadata、line ending、observed state、resource identity 和 View
+激活完成后运行。`after-save` 观察实际写入的 snapshot revision，即使 Buffer 同时已有
+更新的 revision。
 
 ## 热替换契约
 
