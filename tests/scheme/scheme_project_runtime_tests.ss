@@ -120,13 +120,9 @@
   (vfs-path-join root "compiled-interface.fasl"))
 (when (file-exists? compiled-interface-path)
   (delete-file compiled-interface-path))
-(call-with-port
-  (open-file-output-port compiled-interface-path)
-  (lambda (port)
-    (put-bytevector
-      port
-      (scheme-interface-index-encode
-        compiled-interface-index))))
+(scheme-interface-index-write-file!
+  compiled-interface-index
+  compiled-interface-path)
 (define compiled-interface-executor
   (make-effect-executor))
 (define compiled-interface-adapter

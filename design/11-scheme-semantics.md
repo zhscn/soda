@@ -538,6 +538,9 @@ name` 建立这两种身份的等价集合。references 查询在每个已索引
 binding kind、procedure formals、documentation 以及可用的 declaration resource 与
 byte range。产物以带格式版本、Chez 版本和 machine type 的 FASL datum 编码，加载时
 完整验证 manifest 和 entry shape。它只接受受信任构建流程产生的内容。
+`scheme-sources->interface-index-file!` 是构建侧入口：编译脚本把本次编译实际消费的
+`resource + source bytes` 集合、owner 和内容 revision 交给它，产物经临时文件写完
+后替换目标路径。
 
 显式 language workspace session 按 owner 安装 interface index。同一 owner 的新
 revision 原子替换旧 surface；移除 session 时撤销对应 surface。多个 index 按安装

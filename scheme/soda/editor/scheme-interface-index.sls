@@ -7,7 +7,9 @@
           scheme-interface-index-libraries
           scheme-sources->interface-index
           scheme-interface-index-encode
-          scheme-interface-index-decode)
+          scheme-interface-index-decode
+          scheme-interface-index-write-file!
+          scheme-sources->interface-index-file!)
   (import (chezscheme)
           (soda editor scheme-api-indexer))
 
@@ -208,4 +210,48 @@
             (assertion-violation
               'scheme-interface-index-decode
               "Scheme interface index contains trailing objects"))
-          datum)))))
+          datum))))
+
+  (define (non-empty-string? value)
+    (and
+      (string? value)
+      (positive? (string-length value))))
+
+  (define (scheme-interface-index-write-file!
+            index
+            path)
+    (unless (scheme-interface-index? index)
+      (assertion-violation
+        'scheme-interface-index-write-file!
+        "expected a Scheme interface index"
+        index))
+    (unless (non-empty-string? path)
+      (assertion-violation
+        'scheme-interface-index-write-file!
+        "path must be a non-empty string"
+        path))
+    (let ([temporary (string-append path ".tmp")])
+      (call-with-port
+        (open-file-output-port
+          temporary
+          (file-options no-fail)
+          'block
+          #f)
+        (lambda (port)
+          (put-bytevector
+            port
+            (scheme-interface-index-encode index))))
+      (when (file-exists? path)
+        (delete-file path))
+      (rename-file temporary path))
+    path)
+
+  (define (scheme-sources->interface-index-file!
+            owner
+            revision
+            sources
+            path)
+    (scheme-interface-index-write-file!
+      (scheme-sources->interface-index
+        owner revision sources)
+      path)))
