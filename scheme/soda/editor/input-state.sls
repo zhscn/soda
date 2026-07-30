@@ -4,13 +4,19 @@
           input-state-name
           input-state-keymap-layers
           input-state-text-policy
-          input-state-text-command)
+          input-state-text-command
+          input-state-key-capture-command)
   (import (rnrs)
           (soda editor keymap))
 
   (define-record-type
     (input-state %make-input-state input-state?)
-    (fields name keymap-layers text-policy text-command))
+    (fields
+      name
+      keymap-layers
+      text-policy
+      text-command
+      key-capture-command))
 
   (define make-input-state
     (case-lambda
@@ -19,8 +25,20 @@
          name
          keymap-layers
          text-policy
-         (and (eq? text-policy 'accept) 'edit.self-insert))]
+         (and (eq? text-policy 'accept) 'edit.self-insert)
+         #f)]
       [(name keymap-layers text-policy text-command)
+       (make-input-state
+         name
+         keymap-layers
+         text-policy
+         text-command
+         #f)]
+      [(name
+         keymap-layers
+         text-policy
+         text-command
+         key-capture-command)
        (unless (symbol? name)
          (assertion-violation
            'make-input-state
@@ -48,8 +66,15 @@
            'make-input-state
            "text command is invalid for the text policy"
            text-command))
+       (unless (or (not key-capture-command)
+                   (symbol? key-capture-command))
+         (assertion-violation
+           'make-input-state
+           "key capture command must be a symbol or #f"
+           key-capture-command))
        (%make-input-state
          name
          keymap-layers
          text-policy
-         text-command)])))
+         text-command
+         key-capture-command)])))

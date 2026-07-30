@@ -67,9 +67,18 @@ bracketed paste 可以跨多个 read 增量收集，结束后产生一个 `paste
 
 ## Keymap
 
-keymap 是一等、具名 trie。节点可以包含 command、显式 undefined tombstone 或
-续键子树。完整按键序列逐层查询，最高优先级中第一个认识该完整序列的层决定结果；
-稀疏高优先级 keymap 不会遮蔽低层的其他续键。
+keymap 是一等、具名的稀疏映射。每个事件的 definition 是 command、子 keymap
+或显式 undefined；因此 prefix key 本身就是 keymap，而不是隐藏在按键序列
+trie 中的中间节点。`editor.ctl-x`、`editor.help` 等 prefix map 可以单独命名、
+扩展、继承和内省。
+
+keymap 可以引用一个 parent。当前 map 没有某个事件时继续查询 parent；显式
+undefined 会遮蔽 parent binding，移除本地 definition 后 parent binding 重新
+可见。为继承 prefix 添加局部续键时创建以继承 prefix 为 parent 的局部 prefix
+map，不修改共享的 parent。
+
+完整按键序列沿 definition 中的子 keymap 逐事件查询。最高优先级中第一个认识该
+完整序列的层决定结果；稀疏高优先级 keymap 不会遮蔽低层的其他续键。
 
 基础 command loop 实现的层次从高到低：
 
@@ -83,10 +92,11 @@ Editor default
 ```
 
 解析结果是 `none | prefix | command | undefined`。显式 undefined 在当前层终止
-查找并屏蔽低层绑定；移除本地 binding 后，低层 binding 会重新可见。同一个纯查询
-服务实际 dispatch、按键帮助和配置内省。keymap 可以枚举全部 binding 或指定前缀
-下的 binding；Editor catalog 可以枚举已注册的 keymap 名称。View 层承载持久的
-window 和 buffer policy，InputState 层承载临时输入策略。
+查找并屏蔽低层 binding；移除本地 definition 后，低层 binding 会重新可见。
+同一个纯查询服务实际 dispatch、按键帮助和配置内省。keymap 可以枚举本地全部
+binding 或指定 prefix 下的 binding；Editor catalog 可以枚举已注册的 keymap
+名称。View 层承载持久的 window 和 buffer policy，InputState 层承载临时输入
+策略。
 
 ## Input state
 
@@ -97,12 +107,19 @@ InputState {
   name,
   keymap_layers,
   text_policy: accept | ignore,
-  text_command
+  text_command,
+  key_capture_command?
 }
 ```
 
 state 回答“这个 view 以什么姿态解释输入”；major mode 回答“buffer 的内容是什么”。
 因此同一 buffer 的两个 view 可以处于不同输入状态，但共享 language mode。
+
+带 `key_capture_command` 的 transient state 读取一条完整按键序列。prefix 结果继续
+累积事件，command、undefined 或 none 结果把 status、command 和 sequence 一次
+交给 continuation。普通 keymap 解析仍是唯一的 binding 语义来源。`C-h c` 和
+`C-h k` 使用该机制显示简短 binding 或 command documentation；键盘宏、交互式
+重绑定和 which-key 可以复用同一 capture contract。
 
 每个 View 始终有一个栈底 state。push 和 pop 操作管理 transient state；切换 View
 的 buffer 会恢复栈底 state。`keyboard.quit` 清除 pending sequence 和 transient
@@ -217,6 +234,33 @@ snapshot 计算 UTF-8 byte range，再通过普通 Buffer replace transaction �
 大小写转换使用 Unicode string case mapping，替换后按转换结果的实际 byte 长度
 安置 point。
 
+## 基础编辑词汇
+
+默认 keymap 使用 Emacs 的基础编辑词汇：
+
+- `C-b`、`C-f`、`C-p`、`C-n` 按字符和行移动，`M-b`、`M-f` 按 word
+  移动，`C-a`、`C-e` 与 `M-a`、`M-e` 分别移动到行和句子的边界，
+  `M-<`、`M->` 移动到 Buffer 边界；
+- `C-v`、`M-v` 滚动 viewport，`C-l` 重定位 point，numeric prefix 为 motion、
+  scroll 和重复编辑提供 count；
+- Backspace 与 `C-d` 删除字符，`M-Backspace`、`M-d`、`C-k`、`M-k`
+  使用相应 motion 的范围执行 kill；
+- `C-SPC` 设置 mark，`C-x C-x` 交换 point 与 mark，`M-w`、`C-w`、`C-y`、
+  `M-y` 操作 region 和 kill ring；
+- `C-/`、`C-_`、`C-x u` 执行 undo，`C-g` 取消 pending sequence、prefix
+  argument、completion 或 minibuffer；
+- `C-x C-f`、`C-x C-s` 访问文件，`C-x b` 切换 Buffer，`C-x C-b` 显示
+  Buffer list，`M-x` 从 command registry 读取并调用 command；
+- `C-x 2`、`C-x 3`、`C-x 0`、`C-x 1`、`C-x o` 操作 TUI frame 内的
+  Window tree；
+- `C-s`、`C-r` 执行 incremental search；`C-h c`、`C-h k`、`C-h x`、
+  `C-h a` 和 `C-h m` 从 keymap、command registry 与 Buffer major mode
+  提供帮助。传统终端把 Control-H 编码成 Backspace 时，F1 引用同一个 help
+  prefix map。
+
+TUI session 使用一个 terminal frame；该 frame 包含可切分的 Window tree、
+modeline、minibuffer 和 overlay。
+
 ## Incremental search 与 query replace
 
 incremental search 使用 PromptSession 读取 query，并把 SearchSession 作为 request
@@ -250,8 +294,10 @@ View 持有 selection、viewport 和输入状态；Window 把 View 放入 layout
 caret 与 selection endpoint 使用 Document anchor，多个 View 显示同一 Buffer
 时会随提交、undo 和 redo 结算，不会保留失效的裸 byte offset。viewport 同时保存
 首行和首个 display column；纵向 motion 按 tab 与宽字符展开后的 display column
-维持目标列。Page Up/Page Down 以正文 viewport 高度同时推进 point 和首行，并在
-Buffer 边界夹紧；`M-v`、`C-v` 与终端的 Page Up/Page Down 键进入同一组命令。
+维持目标列。Page Up/Page Down、`M-v` 和 `C-v` 默认滚动一个保留两行上下文的
+screenful；显式 prefix argument 表示滚动行数。仍在新 viewport 内的 point 保持
+不动，滚出 viewport 时移动到最近的可见行。`C-l` 在居中、顶端和底端布局之间循环，
+数值参数直接指定 point 在 viewport 中的目标行。
 `M-g g` 通过 minibuffer 读取从 1 开始的 `line[,column]`，目标 column 使用 display
 cell 坐标，因此 tab 和宽字符仍遵循普通纵向 motion 的列语义。
 
@@ -368,7 +414,8 @@ alternate screen、cursor visibility 和 termios。
 
 ## 设计依据
 
-分层 trie 保留 Emacs keymap 的组合能力，同时用单一解析规则避免多套翻译 map。
+递归 keymap 保留 Emacs prefix map 的组合能力，同时用单一解析规则避免多套翻译
+map。
 per-view state 吸收 modal 编辑中的临时状态，而不会污染 buffer mode。Kitty
 协议在终端边界提供无歧义按键；其结果归一化为前端无关的 `InputEvent`，command
 系统不依赖具体终端编码。

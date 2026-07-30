@@ -122,6 +122,39 @@
                  (eq? command 'test.lower))
       (error 'editor-tests "keymap unbind did not reveal a lower layer"))))
 
+(define parent-map (make-keymap))
+(define child-map (make-keymap parent-map))
+(define prefix-map (make-keymap))
+(define plain-x
+  (make-key-stroke 'character (char->integer #\x) 0))
+(keymap-set! parent-map plain-q 'test.parent)
+(call-with-values
+  (lambda () (keymap-ref child-map plain-q))
+  (lambda (status definition)
+    (unless (and (eq? status 'command)
+                 (eq? definition 'test.parent))
+      (error 'editor-tests "keymap parent binding was not inherited"))))
+(keymap-set! child-map plain-q #f)
+(call-with-values
+  (lambda () (keymap-ref child-map plain-q))
+  (lambda (status definition)
+    (unless (and (eq? status 'undefined) (not definition))
+      (error 'editor-tests "undefined binding did not shadow the parent"))))
+(keymap-remove! child-map plain-q)
+(keymap-set! child-map plain-x prefix-map)
+(keymap-bind! prefix-map (list plain-q) 'test.prefix)
+(call-with-values
+  (lambda () (keymap-resolve child-map (list plain-x)))
+  (lambda (status command)
+    (unless (and (eq? status 'prefix) (not command))
+      (error 'editor-tests "first-class prefix map did not resolve"))))
+(call-with-values
+  (lambda () (keymap-resolve child-map (list plain-x plain-q)))
+  (lambda (status command)
+    (unless (and (eq? status 'command)
+                 (eq? command 'test.prefix))
+      (error 'editor-tests "prefix map command did not resolve"))))
+
 (define document (make-document "" 71))
 (define buffer (make-buffer 17 document "*editor-test*" 'fundamental-mode))
 (define editor (make-editor buffer))
@@ -255,7 +288,7 @@
 (unless (bytevector=? (buffer-bytes buffer) (string->utf8 "ab"))
   (error 'editor-tests "undefined prefix inserted its final key"))
 
-(define first-quit-effects (send! editor decoder (bytes 17)))
+(define first-quit-effects (send! editor decoder (bytes 24 3)))
 (unless
   (and
     (null? first-quit-effects)
@@ -275,7 +308,7 @@
   (error 'editor-tests
          "quit confirmation did not support cancellation"))
 
-(send! editor decoder (bytes 17))
+(send! editor decoder (bytes 24 3))
 (define quit-effects (send! editor decoder (bytes 110)))
 (unless (and (= (length quit-effects) 1)
              (command-effect? (car quit-effects))
@@ -3766,19 +3799,33 @@
   (make-command-message 'move.next-page #f))
 (unless
   (and
-    (= (view-caret nano-navigation-view) 25)
-    (= (view-first-line nano-navigation-view) 5))
+    (= (view-caret nano-navigation-view) 15)
+    (= (view-first-line nano-navigation-view) 3))
   (error 'editor-tests
-         "page-down did not move the caret and viewport together"))
+         "page-down did not preserve the screen overlap"))
 (editor-update!
   nano-navigation-editor
   (make-command-message 'move.previous-page #f))
 (unless
   (and
-    (zero? (view-caret nano-navigation-view))
+    (= (view-caret nano-navigation-view) 15)
     (zero? (view-first-line nano-navigation-view)))
   (error 'editor-tests
-         "page-up did not restore the previous viewport"))
+         "page-up did not restore the viewport while preserving visible point"))
+(editor-update!
+  nano-navigation-editor
+  (make-command-message
+    'move.next-page
+    #f
+    (prefix-argument-digit #f 2)))
+(unless (= (view-first-line nano-navigation-view) 2)
+  (error 'editor-tests
+         "page command prefix did not scroll by a line count"))
+(editor-update!
+  nano-navigation-editor
+  (make-command-message 'display.recenter #f))
+(unless (= (view-first-line nano-navigation-view) 1)
+  (error 'editor-tests "recenter did not place point in the window center"))
 (editor-update!
   nano-navigation-editor
   (make-command-message 'move.goto-line-column #f))
@@ -3818,3 +3865,104 @@
   (error 'editor-tests
          "line-number gutter did not reserve cells before document text"))
 (editor-close! nano-navigation-editor)
+
+(define sentence-document
+  (make-document "One sentence.  Two next!\nThird" 951))
+(define sentence-buffer
+  (make-buffer
+    951
+    sentence-document
+    "*sentences*"
+    'fundamental-mode))
+(define sentence-editor (make-editor sentence-buffer))
+(define sentence-view (editor-active-view sentence-editor))
+(editor-update!
+  sentence-editor
+  (make-command-message 'move.forward-sentence #f))
+(unless (= (view-caret sentence-view) 13)
+  (error 'editor-tests "forward sentence did not stop after punctuation"))
+(editor-update!
+  sentence-editor
+  (make-command-message 'move.forward-sentence #f))
+(unless (= (view-caret sentence-view) 24)
+  (error 'editor-tests "forward sentence did not find the next boundary"))
+(editor-update!
+  sentence-editor
+  (make-command-message 'move.backward-sentence #f))
+(unless (= (view-caret sentence-view) 15)
+  (error 'editor-tests "backward sentence did not find the sentence start"))
+(editor-update!
+  sentence-editor
+  (make-command-message 'edit.kill-sentence #f))
+(unless
+  (bytevector=?
+    (buffer-bytes sentence-buffer)
+    (string->utf8 "One sentence.  \nThird"))
+  (error 'editor-tests "kill sentence did not use sentence motion bounds"))
+(editor-close! sentence-editor)
+
+(define buffer-list-document (make-document "alpha" 952))
+(define buffer-list-buffer
+  (make-buffer
+    952
+    buffer-list-document
+    "*alpha*"
+    'fundamental-mode))
+(define buffer-list-editor (make-editor buffer-list-buffer))
+(editor-add-buffer!
+  buffer-list-editor
+  (make-buffer
+    953
+    (make-document "beta" 953)
+    "*beta*"
+    'fundamental-mode))
+(editor-update!
+  buffer-list-editor
+  (make-command-message 'buffer.list #f))
+(unless
+  (and
+    (string=?
+      (buffer-resource
+        (view-buffer
+          (editor-active-view buffer-list-editor)))
+      "*Buffer List*")
+    (string-contains?
+      (utf8->string
+        (buffer-bytes
+          (view-buffer
+            (editor-active-view buffer-list-editor))))
+      "*beta*"))
+  (error 'editor-tests "buffer list did not display registered buffers"))
+(editor-close! buffer-list-editor)
+
+(define help-document (make-document "help" 954))
+(define help-buffer
+  (make-buffer
+    954
+    help-document
+    "*help-test*"
+    'fundamental-mode))
+(define help-editor (make-editor help-buffer))
+(define help-decoder (make-input-decoder))
+(editor-update!
+  help-editor
+  (make-command-message 'help.describe-key-briefly #f))
+(send! help-editor help-decoder (bytes 16))
+(unless
+  (string=?
+    (editor-status-message help-editor)
+    "C-p runs move.previous-line")
+  (error 'editor-tests "brief key help did not resolve a control key"))
+(editor-update!
+  help-editor
+  (make-command-message 'help.describe-key #f))
+(send! help-editor help-decoder (bytes 24))
+(unless (pair? (editor-pending-keys help-editor))
+  (error 'editor-tests "key help did not retain a prefix key"))
+(send! help-editor help-decoder (bytes 19))
+(unless
+  (string-contains?
+    (editor-status-message help-editor)
+    "C-x C-s runs file.save:")
+  (error 'editor-tests "key help did not describe a prefix command"))
+(editor-close! help-editor)

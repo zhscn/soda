@@ -116,15 +116,12 @@ command loop. Installation copies only the executable:
 cmk install -c Release --prefix ./dist
 ```
 
-Printable input inserts text. Backspace deletes the previous UTF-8 code point,
-the arrow keys move the caret, Enter inserts a newline, `C-x =` describes the
-character and rendered faces at point, `C-Space` sets the mark, `M-w` copies
-the region, `C-w` kills it, and `C-y` yanks the latest kill. `M-f` and `M-b`
-move by words; `M-d`, `M-Backspace`, `C-Delete`, and `C-Backspace` kill words
-and merge consecutive kills in textual order. `C-k` kills through the end of
-the line, `C-o` opens a line without advancing point, `M-\` deletes horizontal
-space, and `M-<`/`M->` move to the buffer boundaries. `C-c C-z` toggles the
-Chez REPL, and `C-x C-s` saves the active buffer. `C-q` exits clean state,
+Printable input inserts text. The default keymap provides Emacs character,
+line, word, sentence, page, mark/region, kill-ring, undo, file, buffer, window,
+incremental-search, and help commands. `C-h c` and `C-h k` inspect key
+bindings, `C-h x` describes named commands, and `C-x =` describes the
+character and rendered faces at point. `C-c C-z` toggles the Chez REPL, and
+`C-x C-s` saves the active buffer. `C-x C-c` exits clean state,
 waits for an active save, and visits each modified buffer with `y` save,
 `n` discard, and `c`/`C-g` cancel choices. A pathless buffer enters the normal
 Save as workflow. Enter submits the editable input while the REPL transcript

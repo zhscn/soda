@@ -1,10 +1,12 @@
 (library (soda editor commands buffer)
   (export install-buffer-commands!)
   (import (rnrs)
+          (soda document)
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
           (soda editor completion)
+          (soda editor edit)
           (soda editor keymap)
           (soda editor prompt)
           (soda editor state))
@@ -215,6 +217,62 @@
       (view-buffer (command-context-view context))
       #t))
 
+  (define (buffer-size buffer)
+    (let ([snapshot (document-snapshot (buffer-document buffer))])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (let ([text (snapshot-text snapshot)])
+            (dynamic-wind
+              (lambda () #f)
+              (lambda () (text-size text))
+              (lambda () (text-close! text)))))
+        (lambda () (snapshot-close! snapshot)))))
+
+  (define (buffer-list-text editor)
+    (apply
+      string-append
+      "MR  Buffer                                  Mode\n"
+      "--  ------                                  ----\n"
+      (map
+        (lambda (buffer)
+          (string-append
+            (if (buffer-modified? buffer) "* " "  ")
+            "  "
+            (buffer-display-label editor buffer)
+            "\t"
+            (symbol->string (buffer-major-mode-name buffer))
+            "\n"))
+        (editor-buffers editor))))
+
+  (define (list-buffers-command context)
+    (let* ([editor (command-context-editor context)]
+           [resource "*Buffer List*"]
+           [existing (editor-buffer-for-resource editor resource)]
+           [contents (string->utf8 (buffer-list-text editor))]
+           [buffer
+             (or
+               existing
+               (editor-create-buffer!
+                 editor
+                 resource
+                 'fundamental-mode
+                 contents))])
+      (when existing
+        (buffer-replace-range-internal!
+          buffer
+          0
+          (buffer-size buffer)
+          contents))
+      (buffer-set-local-setting! buffer 'track-modified? #f)
+      (buffer-set-local-setting! buffer 'read-only? #t)
+      (editor-set-view-buffer!
+        editor
+        (view-id (command-context-view context))
+        (buffer-id buffer))
+      (editor-set-status-message! editor "Buffer list"))
+    '())
+
   (define (install-buffer-commands! editor)
     (editor-register-command!
       editor
@@ -241,12 +299,23 @@
       'buffer.force-kill-current
       force-kill-current-buffer-command
       "Close the active buffer without checking its modified state.")
+    (editor-register-command!
+      editor
+      'buffer.list
+      list-buffers-command
+      "Display the editor buffer list.")
     (editor-bind-key!
       editor
       (list
         (make-key-stroke 'character (char->integer #\x) 4)
         (make-key-stroke 'character (char->integer #\b) 0))
       'buffer.switch)
+    (editor-bind-key!
+      editor
+      (list
+        (make-key-stroke 'character (char->integer #\x) 4)
+        (make-key-stroke 'character (char->integer #\b) 4))
+      'buffer.list)
     (editor-bind-key!
       editor
       (list

@@ -105,45 +105,62 @@
         event))
     (if (eq? (key-event-type event) 'release)
         '()
-        (let* ([pending (editor-pending-keys editor)]
+        (let* ([view (editor-active-view editor)]
+               [state (view-current-input-state view)]
+               [capture
+                 (input-state-key-capture-command state)]
+               [pending (editor-pending-keys editor)]
                [sequence
                  (append pending (list (key-event->key-stroke event)))])
           (call-with-values
             (lambda ()
               (keymaps-resolve (effective-keymaps editor) sequence))
             (lambda (status command)
-              (case status
-                [(prefix)
+              (cond
+                [(and capture (eq? status 'prefix))
                  (editor-set-pending-keys! editor sequence)
                  '()]
-                [(command)
+                [capture
                  (editor-set-pending-keys! editor '())
-                 (run-interactive-command editor command event #f #f)]
-                [(undefined)
-                 (editor-set-pending-keys! editor '())
-                 (editor-clear-pending-prefix! editor)
-                 (editor-set-last-command-class! editor #f)
-                 (editor-set-status-message!
+                 (run-interactive-command
                    editor
-                   "Undefined key")
-                 '()]
+                   capture
+                   event
+                   (list status command sequence)
+                   #f)]
                 [else
-                 (editor-set-pending-keys! editor '())
-                 (if (and (null? pending)
-                          (positive?
-                            (bytevector-length (key-event-text event))))
-                     (dispatch-text!
-                       editor
-                       event
-                       (key-event-text event))
-                     (begin
-                       (editor-set-last-command-class! editor #f)
-                       (editor-clear-pending-prefix! editor)
-                       (when (pair? pending)
-                         (editor-set-status-message!
-                           editor
-                           "Undefined key sequence"))
-                       '()))]))))))
+                 (case status
+                   [(prefix)
+                    (editor-set-pending-keys! editor sequence)
+                    '()]
+                   [(command)
+                    (editor-set-pending-keys! editor '())
+                    (run-interactive-command editor command event #f #f)]
+                   [(undefined)
+                    (editor-set-pending-keys! editor '())
+                    (editor-clear-pending-prefix! editor)
+                    (editor-set-last-command-class! editor #f)
+                    (editor-set-status-message!
+                      editor
+                      "Undefined key")
+                    '()]
+                   [else
+                    (editor-set-pending-keys! editor '())
+                    (if (and (null? pending)
+                             (positive?
+                               (bytevector-length (key-event-text event))))
+                        (dispatch-text!
+                          editor
+                          event
+                          (key-event-text event))
+                        (begin
+                          (editor-set-last-command-class! editor #f)
+                          (editor-clear-pending-prefix! editor)
+                          (when (pair? pending)
+                            (editor-set-status-message!
+                              editor
+                              "Undefined key sequence"))
+                          '()))])]))))))
 
   (define (handle-input-event! editor event)
     (cond

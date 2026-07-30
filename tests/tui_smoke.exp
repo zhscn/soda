@@ -27,7 +27,11 @@ send -- "f"
 after 50
 send -- "\007"
 after 50
-send -- "\033\[113"
+send -- "\033\[120"
+after 5
+send -- ";5u"
+after 50
+send -- "\033\[99"
 after 5
 send -- ";5u"
 after 50

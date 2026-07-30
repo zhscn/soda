@@ -1,10 +1,12 @@
 (library (soda editor prompt-commands)
   (export install-prompt-commands!)
   (import (rnrs)
+          (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
           (soda editor completion)
           (soda editor event)
+          (soda editor input-state)
           (soda editor keymap)
           (soda editor prompt)
           (soda editor state))
@@ -145,6 +147,163 @@
                    (string-append "Unknown command: " value))
                  '())))])))
 
+  (define (open-command-help! context prompt history-id)
+    (let ([editor (command-context-editor context)])
+      (editor-open-prompt!
+        editor
+        (make-completing-prompt-request
+          prompt
+          ""
+          history-id
+          #f
+          'must-match
+          (command-choice-source editor)
+          'help.apply-describe-command
+          #f)))
+    '())
+
+  (define (describe-command context)
+    (open-command-help!
+      context
+      "Describe command: "
+      'describe-command))
+
+  (define (command-apropos context)
+    (open-command-help!
+      context
+      "Command apropos: "
+      'command-apropos))
+
+  (define (command-from-prompt-result result)
+    (let ([candidate
+            (and
+              (prompt-result? result)
+              (prompt-result-candidate result))])
+      (or
+        (and candidate
+             (symbol? (completion-item-payload candidate))
+             (completion-item-payload candidate))
+        (and (prompt-result? result)
+             (eq? (prompt-result-status result) 'accepted)
+             (positive? (string-length (prompt-result-value result)))
+             (string->symbol (prompt-result-value result))))))
+
+  (define (apply-describe-command context)
+    (let* ([editor (command-context-editor context)]
+           [name
+             (command-from-prompt-result
+               (command-context-argument context))])
+      (if (and name
+               (command-registered?
+                 (editor-command-registry editor)
+                 name))
+          (editor-set-status-message!
+            editor
+            (string-append
+              (symbol->string name)
+              ": "
+              (or
+                (command-documentation
+                  (editor-command-registry editor)
+                  name)
+                "No documentation.")))
+          (editor-set-status-message!
+            editor
+            "No command selected")))
+    '())
+
+  (define (help-summary-command context)
+    (editor-set-status-message!
+      (command-context-editor context)
+      "Help: C-h c describe key briefly, C-h k describe key, C-h x describe command")
+    '())
+
+  (define (describe-mode-command context)
+    (let* ([editor (command-context-editor context)]
+           [mode
+             (buffer-major-mode-name
+               (view-buffer
+                 (command-context-view context)))])
+      (editor-set-status-message!
+        editor
+        (string-append
+          "Major mode: "
+          (symbol->string mode))))
+    '())
+
+  (define (start-describe-key! context state-name prompt)
+    (let ([editor (command-context-editor context)]
+          [view (command-context-view context)])
+      (view-push-input-state!
+        view
+        (make-input-state
+          state-name
+          '()
+          'ignore
+          #f
+          'help.describe-key-result))
+      (editor-set-status-message! editor prompt))
+    '())
+
+  (define (describe-key-brief-command context)
+    (start-describe-key!
+      context
+      'help.read-key-brief
+      "Describe key briefly: "))
+
+  (define (describe-key-command context)
+    (start-describe-key!
+      context
+      'help.read-key
+      "Describe key: "))
+
+  (define (describe-key-result-command context)
+    (let* ([editor (command-context-editor context)]
+           [view (command-context-view context)]
+           [state-name
+             (input-state-name
+               (view-current-input-state view))]
+           [result (command-context-argument context)]
+           [status (and (pair? result) (car result))]
+           [command
+             (and (pair? result)
+                  (pair? (cdr result))
+                  (cadr result))]
+           [sequence
+             (and (pair? result)
+                  (pair? (cdr result))
+                  (pair? (cddr result))
+                  (caddr result))]
+           [description
+             (if (and sequence (list? sequence))
+                 (key-sequence-description sequence)
+                 "<unknown>")])
+      (view-pop-input-state! view)
+      (cond
+        [(eq? command 'keyboard.quit)
+         (editor-set-status-message! editor "Quit")]
+        [(eq? status 'command)
+         (editor-set-status-message!
+           editor
+           (string-append
+             description
+             " runs "
+             (symbol->string command)
+             (if (eq? state-name 'help.read-key)
+                 (string-append
+                   ": "
+                   (or
+                     (command-documentation
+                       (editor-command-registry editor)
+                       command)
+                     "No documentation."))
+                 "")))]
+        [else
+         (editor-set-status-message!
+           editor
+           (string-append description " is undefined"))]))
+    '())
+
   (define (stroke key codepoint modifiers)
     (make-key-stroke key codepoint modifiers))
 
@@ -196,7 +355,39 @@
         (list
           'prompt.execute-command
           execute-prompt-command
-          "Execute a command returned by the minibuffer.")))
+          "Execute a command returned by the minibuffer.")
+        (list
+          'help.describe-command
+          describe-command
+          "Read a command name and display its documentation.")
+        (list
+          'help.command-apropos
+          command-apropos
+          "Filter editor commands by name and display the selected command.")
+        (list
+          'help.apply-describe-command
+          apply-describe-command
+          "Display documentation for a command returned by the minibuffer.")
+        (list
+          'help.summary
+          help-summary-command
+          "Display the available help commands.")
+        (list
+          'help.describe-mode
+          describe-mode-command
+          "Display the active buffer's major mode.")
+        (list
+          'help.describe-key-briefly
+          describe-key-brief-command
+          "Read a key sequence and display its command name.")
+        (list
+          'help.describe-key
+          describe-key-command
+          "Read a key sequence and display its command documentation.")
+        (list
+          'help.describe-key-result
+          describe-key-result-command
+          "Display the command resolved from a captured key sequence.")))
     (let ([keymap (make-keymap)])
       (for-each
         (lambda (entry)
@@ -225,4 +416,38 @@
       editor
       (list (stroke 'character 120 2))
       'execute-extended-command)
+    (for-each
+      (lambda (entry)
+        (editor-bind-key! editor (car entry) (cdr entry)))
+      (list
+        (cons
+          (list
+            (stroke 'character 104 4)
+            (stroke 'character 120 0))
+          'help.describe-command)
+        (cons
+          (list
+            (stroke 'character 104 4)
+            (stroke 'character 97 0))
+          'help.command-apropos)
+        (cons
+          (list
+            (stroke 'character 104 4)
+            (stroke 'character 99 0))
+          'help.describe-key-briefly)
+        (cons
+          (list
+            (stroke 'character 104 4)
+            (stroke 'character 107 0))
+          'help.describe-key)
+        (cons
+          (list
+            (stroke 'character 104 4)
+            (stroke 'character 109 0))
+          'help.describe-mode)
+        (cons
+          (list
+            (stroke 'character 104 4)
+            (stroke 'character 63 0))
+          'help.summary)))
     editor))

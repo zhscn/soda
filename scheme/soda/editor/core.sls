@@ -273,6 +273,7 @@
           input-state-keymap-layers
           input-state-text-policy
           input-state-text-command
+          input-state-key-capture-command
           interaction-session?
           interaction-session-id
           interaction-session-kind

@@ -254,13 +254,15 @@
         (if (string? resource) resource "*scratch*"))
       (if (buffer-save-pending? buffer) " [saving]" "")
       "  "
+      (symbol->string (buffer-major-mode-name buffer))
+      "  "
       (number->string (+ caret-line 1))
       ":"
       (number->string (+ caret-column 1))
       (let ([message (editor-status-message editor)])
         (if message
             (string-append "  " message)
-            "  C-q quit "))))
+            "  C-x C-c quit "))))
 
   (define (render-context-gutter-width context columns)
     (if

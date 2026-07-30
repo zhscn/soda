@@ -687,13 +687,99 @@
       (command-context-count context))
     '())
 
+  (define (sentence-whitespace-byte? byte)
+    (memv byte '(9 10 11 12 13 32)))
+
+  (define (sentence-closing-byte? byte)
+    (memv byte '(34 39 41 93 125)))
+
+  (define (sentence-terminal-byte? byte)
+    (memv byte '(33 46 63)))
+
+  (define (skip-sentence-whitespace text offset)
+    (let ([size (text-size text)])
+      (let loop ([current offset])
+        (if (and (< current size)
+                 (sentence-whitespace-byte?
+                   (text-byte-at text current)))
+            (loop (+ current 1))
+            current))))
+
+  (define (forward-sentence-once text offset)
+    (let ([size (text-size text)])
+      (let scan ([current offset])
+        (cond
+          [(>= current size) size]
+          [(sentence-terminal-byte?
+             (text-byte-at text current))
+           (let skip-closing ([end (+ current 1)])
+             (if (and (< end size)
+                      (sentence-closing-byte?
+                        (text-byte-at text end)))
+                 (skip-closing (+ end 1))
+                 (if (or (= end size)
+                         (sentence-whitespace-byte?
+                           (text-byte-at text end)))
+                     end
+                     (scan (+ current 1)))))]
+          [else (scan (+ current 1))]))))
+
+  (define (backward-sentence-once text offset)
+    (if (zero? offset)
+        0
+        (let loop ([start 0])
+          (let* ([end (forward-sentence-once text start)]
+                 [next (skip-sentence-whitespace text end)])
+            (cond
+              [(or (>= next offset)
+                   (= end (text-size text)))
+               start]
+              [else (loop next)])))))
+
+  (define (sentence-motion-target text offset count)
+    (let loop ([current offset] [remaining count])
+      (cond
+        [(zero? remaining) current]
+        [(positive? remaining)
+         (loop
+           (forward-sentence-once text current)
+           (- remaining 1))]
+        [else
+         (loop
+           (backward-sentence-once text current)
+           (+ remaining 1))])))
+
+  (define (move-sentence! context count)
+    (let ([view (context-view context)])
+      (view-set-caret!
+        view
+        (with-document-text
+          (context-document context)
+          (lambda (text)
+            (sentence-motion-target
+              text
+              (view-caret view)
+              count)))))
+    '())
+
+  (define (backward-sentence-command context)
+    (move-sentence!
+      context
+      (- (command-context-count context))))
+
+  (define (forward-sentence-command context)
+    (move-sentence!
+      context
+      (command-context-count context)))
+
   (define (move-page! context direction)
     (let* ([view (context-view context)]
            [rows (max 1 (view-viewport-rows view))]
            [distance
              (* direction
-                rows
-                (command-context-count context))])
+                (if (command-context-prefix context)
+                    (command-context-count context)
+                    (max 1 (- rows 2))))])
       (with-document-text
         (context-document context)
         (lambda (text)
@@ -706,8 +792,19 @@
                      (min
                        maximum-first-line
                        (+ (view-first-line view) distance)))])
-            (view-set-first-line! view first-line))))
-      (move-vertical! view distance)
+            (let ([caret-line
+                    (car
+                      (text-position text (view-caret view)))])
+              (cond
+                [(< caret-line first-line)
+                 (move-vertical! view (- first-line caret-line))]
+                [(>= caret-line (+ first-line rows))
+                 (move-vertical!
+                   view
+                   (-
+                     (+ first-line rows -1)
+                     caret-line))])
+              (view-set-first-line! view first-line)))))
       '()))
 
   (define (previous-page-command context)
@@ -715,6 +812,37 @@
 
   (define (next-page-command context)
     (move-page! context 1))
+
+  (define (recenter-command context)
+    (let ([view (context-view context)])
+      (with-document-text
+        (context-document context)
+        (lambda (text)
+          (let* ([rows (max 1 (view-viewport-rows view))]
+                 [caret-line
+                   (car
+                     (text-position text (view-caret view)))]
+                 [maximum-first-line
+                   (max 0 (- (text-line-count text) rows))]
+                 [clamp
+                   (lambda (line)
+                     (max 0 (min maximum-first-line line)))]
+                 [center (clamp (- caret-line (div rows 2)))]
+                 [top (clamp caret-line)]
+                 [bottom (clamp (- caret-line rows -1))]
+                 [target
+                   (if (command-context-prefix context)
+                       (let ([row (command-context-count context)])
+                         (clamp
+                           (if (negative? row)
+                               (- caret-line rows row)
+                               (- caret-line row))))
+                       (cond
+                         [(= (view-first-line view) center) top]
+                         [(= (view-first-line view) top) bottom]
+                         [else center]))])
+            (view-set-first-line! view target)))))
+    '())
 
   (define (find-view-by-id editor id)
     (find
@@ -1037,6 +1165,20 @@
                             (text-line-start
                               text
                               (max 0 (+ line count 1)))]))))))])
+      (kill-range! context start end)
+      '()))
+
+  (define (kill-sentence-command context)
+    (let* ([view (context-view context)]
+           [start (view-caret view)]
+           [end
+             (with-document-text
+               (context-document context)
+               (lambda (text)
+                 (sentence-motion-target
+                   text
+                   start
+                   (command-context-count context))))])
       (kill-range! context start end)
       '()))
 
@@ -1374,6 +1516,14 @@
           forward-word-command
           "Move forward by one word.")
         (list
+          'move.backward-sentence
+          backward-sentence-command
+          "Move backward to the start of a sentence.")
+        (list
+          'move.forward-sentence
+          forward-sentence-command
+          "Move forward to the end of a sentence.")
+        (list
           'move.previous-line
           previous-line-command
           "Move to the previous line.")
@@ -1389,6 +1539,10 @@
           'move.next-page
           next-page-command
           "Move forward by one viewport.")
+        (list
+          'display.recenter
+          recenter-command
+          "Cycle point between the center, top, and bottom of the window.")
         (list
           'move.goto-line-column
           goto-line-column-command
@@ -1453,6 +1607,11 @@
           "Kill through the end of the line."
           'kill)
         (list
+          'edit.kill-sentence
+          kill-sentence-command
+          "Kill through the end of the sentence."
+          'kill)
+        (list
           'edit.yank
           yank-command
           "Insert the newest kill-ring entry."
@@ -1488,9 +1647,11 @@
       (lambda (entry)
         (editor-bind-key! editor (list (car entry)) (cdr entry)))
       (list
-        (cons (stroke 'character 113 4) 'editor.quit)
         (cons (stroke 'backspace 127 0) 'edit.backward-delete)
         (cons (stroke 'delete #f 0) 'edit.forward-delete)
+        (cons
+          (stroke 'character (char->integer #\d) 4)
+          'edit.forward-delete)
         (cons (stroke 'enter 13 0) 'edit.newline)
         (cons (stroke 'tab 9 0) 'edit.indent-or-insert-tab)
         (cons (stroke 'tab 9 1) 'edit.unindent)
@@ -1506,19 +1667,46 @@
           'edit.unindent-region)
         (cons (stroke 'left #f 0) 'move.backward-character)
         (cons (stroke 'right #f 0) 'move.forward-character)
+        (cons
+          (stroke 'character (char->integer #\b) 4)
+          'move.backward-character)
+        (cons
+          (stroke 'character (char->integer #\f) 4)
+          'move.forward-character)
         (cons (stroke 'character (char->integer #\b) 2) 'move.backward-word)
         (cons (stroke 'character (char->integer #\f) 2) 'move.forward-word)
+        (cons
+          (stroke 'character (char->integer #\a) 2)
+          'move.backward-sentence)
+        (cons
+          (stroke 'character (char->integer #\e) 2)
+          'move.forward-sentence)
         (cons (stroke 'up #f 0) 'move.previous-line)
         (cons (stroke 'down #f 0) 'move.next-line)
+        (cons
+          (stroke 'character (char->integer #\p) 4)
+          'move.previous-line)
+        (cons
+          (stroke 'character (char->integer #\n) 4)
+          'move.next-line)
         (cons (stroke 'page-up #f 0) 'move.previous-page)
         (cons (stroke 'page-down #f 0) 'move.next-page)
         (cons (stroke 'character (char->integer #\v) 2) 'move.previous-page)
         (cons (stroke 'character (char->integer #\v) 4) 'move.next-page)
         (cons
+          (stroke 'character (char->integer #\l) 4)
+          'display.recenter)
+        (cons
           (stroke 'character (char->integer #\n) 2)
           'display.toggle-line-numbers)
         (cons (stroke 'home #f 0) 'move.line-start)
         (cons (stroke 'end #f 0) 'move.line-end)
+        (cons
+          (stroke 'character (char->integer #\a) 4)
+          'move.line-start)
+        (cons
+          (stroke 'character (char->integer #\e) 4)
+          'move.line-end)
         (cons (stroke 'character (char->integer #\<) 2) 'move.buffer-start)
         (cons (stroke 'character (char->integer #\>) 2) 'move.buffer-end)
         (cons
@@ -1526,12 +1714,16 @@
           'move.matching-delimiter)
         (cons (stroke 'character (char->integer #\z) 4) 'edit.undo)
         (cons (stroke 'character (char->integer #\/) 4) 'edit.undo)
+        (cons (stroke 'character (char->integer #\_) 4) 'edit.undo)
         (cons (stroke 'character (char->integer #\z) 5) 'edit.redo)
         (cons (stroke 'character (char->integer #\space) 4) 'mark.set)
         (cons (stroke 'character (char->integer #\w) 2) 'edit.copy-region)
         (cons (stroke 'character (char->integer #\w) 4) 'edit.kill-region)
         (cons (stroke 'character (char->integer #\d) 2) 'edit.kill-word)
         (cons (stroke 'character (char->integer #\k) 4) 'edit.kill-line)
+        (cons
+          (stroke 'character (char->integer #\k) 2)
+          'edit.kill-sentence)
         (cons
           (stroke 'character (char->integer #\\) 2)
           'edit.delete-horizontal-space)
@@ -1540,6 +1732,12 @@
         (cons (stroke 'delete #f 4) 'edit.kill-word)
         (cons (stroke 'character (char->integer #\y) 4) 'edit.yank)
         (cons (stroke 'character (char->integer #\y) 2) 'edit.yank-pop)))
+    (editor-bind-key!
+      editor
+      (list
+        (stroke 'character (char->integer #\x) 4)
+        (stroke 'character (char->integer #\c) 4))
+      'editor.quit)
     (editor-bind-key!
       editor
       (list
