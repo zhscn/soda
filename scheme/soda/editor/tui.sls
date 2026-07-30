@@ -13,6 +13,7 @@
           (soda editor file)
           (soda editor file-runtime)
           (soda editor repl)
+          (soda editor scheme-interface-runtime)
           (soda editor vfs-runtime)
           (soda runtime)
           (soda vfs)
@@ -220,6 +221,7 @@
           [decoder (make-input-decoder)]
           [executor (make-effect-executor)]
           [file-adapter #f]
+          [scheme-interface-adapter #f]
           [vfs-adapter #f])
       (define (cancel-flush-timer!)
         (when flush-timer
@@ -333,6 +335,9 @@
         (lambda (payload) (make-effect-result #f '())))
       (set! file-adapter
         (install-file-runtime! executor runtime))
+      (set! scheme-interface-adapter
+        (install-scheme-interface-runtime!
+          executor runtime))
       (set! vfs-adapter
         (install-vfs-runtime! editor runtime))
       (install-interaction-effect-handler! executor editor)
@@ -385,18 +390,26 @@
                   [(memq
                      (event-kind (car events))
                      '(path-stat path-change file-read file-write))
-                   (let ([message
+                   (let ([file-message
                            (file-runtime-handle-event
                              file-adapter
+                             (car events))]
+                         [interface-message
+                           (scheme-interface-runtime-handle-event
+                             scheme-interface-adapter
                              (car events))])
                      (process
                        (cdr events)
                        (and
                          continue?
                          (or
-                           (not message)
+                           (not file-message)
                            (handle-session-message!
-                             message)))))]
+                             file-message))
+                         (or
+                           (not interface-message)
+                           (handle-session-message!
+                             interface-message)))))]
                   [(eq? (event-kind (car events)) 'directory-scan)
                    (let ([message
                            (vfs-runtime-handle-event

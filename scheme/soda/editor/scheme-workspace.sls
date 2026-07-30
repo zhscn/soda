@@ -4,6 +4,8 @@
           scheme-workspace-generation
           scheme-workspace-sync-editor!
           scheme-workspace-refresh-buffer!
+          scheme-workspace-install-interface-index!
+          scheme-workspace-remove-interface-index!
           scheme-workspace-index-source!
           scheme-workspace-remove-source!
           scheme-workspace-snapshot-for-buffer
@@ -45,6 +47,7 @@
           (soda editor buffer)
           (soda editor builtin-api-index)
           (soda editor scheme-api-indexer)
+          (soda editor scheme-interface-index)
           (soda editor scheme-query)
           (soda editor scheme-semantics)
           (soda editor state))
@@ -67,6 +70,7 @@
       documents
       sources
       references
+      (mutable interface-indexes)
       (mutable generation)
       (mutable library-index)
       (mutable library-catalog)
@@ -103,6 +107,7 @@
       (make-hashtable
         scheme-definition-id-hash
         scheme-definition-id=?)
+      '()
       0
       soda-built-in-api-index
       soda-built-in-library-index
@@ -334,6 +339,24 @@
           (not (member library baseline)))
         project)))
 
+  (define (merge-interface-indexes indexes)
+    (fold-left
+      (lambda (state index)
+        (let ([entries (car state)]
+              [libraries (cdr state)])
+          (cons
+            (merge-library-index
+              entries
+              (scheme-interface-index-entries index)
+              (scheme-interface-index-libraries index))
+            (merge-library-catalog
+              libraries
+              (scheme-interface-index-libraries index)))))
+      (cons
+        soda-built-in-api-index
+        soda-built-in-library-index)
+      (reverse indexes)))
+
   (define (document-imports-library?
             document
             libraries)
@@ -350,6 +373,10 @@
     (when
       (scheme-workspace-index-catalog-dirty? index)
       (let* ([sources (catalog-sources index)]
+             [interface-catalog
+               (merge-interface-indexes
+                 (scheme-workspace-index-interface-indexes
+                   index))]
              [project-library-index
                (scheme-sources-api-index
                  sources)]
@@ -358,12 +385,12 @@
                  sources)]
              [library-index
                (merge-library-index
-                 soda-built-in-api-index
+                 (car interface-catalog)
                  project-library-index
                  project-library-catalog)]
              [library-catalog
                (merge-library-catalog
-                 soda-built-in-library-index
+                 (cdr interface-catalog)
                  project-library-catalog)])
         (let ([changed-libraries
                 (changed-library-names
@@ -469,6 +496,70 @@
     (ensure-library-index! index)
     (when (scheme-workspace-index-dirty? index)
       (rebuild-references! index))
+    index)
+
+  (define (scheme-workspace-install-interface-index!
+            index
+            interface-index)
+    (require-index
+      'scheme-workspace-install-interface-index!
+      index)
+    (unless (scheme-interface-index? interface-index)
+      (assertion-violation
+        'scheme-workspace-install-interface-index!
+        "expected a Scheme interface index"
+        interface-index))
+    (let ([owner
+            (scheme-interface-index-owner
+              interface-index)])
+      (scheme-workspace-index-interface-indexes-set!
+        index
+        (cons
+          interface-index
+          (filter
+            (lambda (candidate)
+              (not
+                (string=?
+                  owner
+                  (scheme-interface-index-owner
+                    candidate))))
+            (scheme-workspace-index-interface-indexes
+              index)))))
+    (scheme-workspace-index-catalog-dirty?-set!
+      index #t)
+    index)
+
+  (define (scheme-workspace-remove-interface-index!
+            index
+            owner)
+    (require-index
+      'scheme-workspace-remove-interface-index!
+      index)
+    (unless
+      (and
+        (string? owner)
+        (positive? (string-length owner)))
+      (assertion-violation
+        'scheme-workspace-remove-interface-index!
+        "owner must be a non-empty string"
+        owner))
+    (let* ([current
+             (scheme-workspace-index-interface-indexes
+               index)]
+           [remaining
+             (filter
+               (lambda (candidate)
+                 (not
+                   (string=?
+                     owner
+                     (scheme-interface-index-owner
+                       candidate))))
+               current)])
+      (unless (= (length current) (length remaining))
+        (scheme-workspace-index-interface-indexes-set!
+          index remaining)
+        (scheme-workspace-index-catalog-dirty?-set!
+          index #t)))
     index)
 
   (define (scheme-workspace-refresh-buffer! index buffer)

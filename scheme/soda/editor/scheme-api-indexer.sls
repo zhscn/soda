@@ -5,7 +5,7 @@
           (soda editor scheme-semantics))
 
   (define-record-type library-source
-    (fields resource name exports definitions))
+    (fields resource name imports exports definitions))
 
   (define (read-library-form text)
     (guard (condition [else #f])
@@ -91,6 +91,7 @@
           (make-library-source
             resource
             (cadr form)
+            (scheme-semantic-snapshot-imports snapshot)
             (export-pairs (cddr form))
             (scheme-semantic-snapshot-root-definitions snapshot))))))
 
@@ -102,27 +103,42 @@
           (scheme-definition-name definition)))
       definitions))
 
+  (define (source-for-library sources library)
+    (find
+      (lambda (source)
+        (equal?
+          (library-source-name source)
+          library))
+      sources))
+
   (define (find-definition sources preferred name)
-    (let ([local
-            (find
-              (lambda (definition)
-                (string=?
-                  name
-                  (scheme-definition-name definition)))
-              (library-source-definitions preferred))])
-      (if local
-          (cons preferred local)
-          (let loop ([remaining sources])
-            (and
-              (pair? remaining)
-              (let ([matches
-                      (definitions-named
-                        name
-                        (library-source-definitions
-                          (car remaining)))])
-                (if (pair? matches)
-                    (cons (car remaining) (car matches))
-                    (loop (cdr remaining)))))))))
+    (let search ([source preferred] [visited '()])
+      (and
+        source
+        (not (member (library-source-name source) visited))
+        (let ([local
+                (find
+                  (lambda (definition)
+                    (string=?
+                      name
+                      (scheme-definition-name definition)))
+                  (library-source-definitions source))])
+          (if local
+              (cons source local)
+              (let loop
+                ([imports
+                   (library-source-imports source)])
+                (and
+                  (pair? imports)
+                  (or
+                    (search
+                      (source-for-library
+                        sources
+                        (car imports))
+                      (cons
+                        (library-source-name source)
+                        visited))
+                    (loop (cdr imports))))))))))
 
   (define (entry-signatures owner+definition)
     (if (not owner+definition)

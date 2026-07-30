@@ -15,6 +15,9 @@
         (soda editor file-runtime)
         (soda editor scheme-project-runtime)
         (soda editor scheme-query)
+        (soda editor scheme-interface-commands)
+        (soda editor scheme-interface-index)
+        (soda editor scheme-interface-runtime)
         (soda editor scheme-semantics)
         (soda editor scheme-workspace)
         (soda editor scheme-xref)
@@ -92,6 +95,199 @@
 
 (define workspace
   (editor-scheme-workspace editor))
+
+(define compiled-interface-source
+  (string-append
+    "(library (fixture compiled-dependency)\n"
+    "  (export compiled-call)\n"
+    "  (import (rnrs))\n"
+    "  (define (compiled-call value options) value))\n"))
+(define compiled-interface-resource
+  "/build/cache/compiled-dependency.sls")
+(define compiled-interface-index
+  (scheme-interface-index-decode
+    (scheme-interface-index-encode
+      (scheme-sources->interface-index
+        "fixture-build"
+        "content-revision-1"
+        (list
+          (cons
+            compiled-interface-resource
+            (string->utf8
+              compiled-interface-source)))))))
+
+(define compiled-interface-path
+  (vfs-path-join root "compiled-interface.fasl"))
+(when (file-exists? compiled-interface-path)
+  (delete-file compiled-interface-path))
+(call-with-port
+  (open-file-output-port compiled-interface-path)
+  (lambda (port)
+    (put-bytevector
+      port
+      (scheme-interface-index-encode
+        compiled-interface-index))))
+(define compiled-interface-executor
+  (make-effect-executor))
+(define compiled-interface-adapter
+  (install-scheme-interface-runtime!
+    compiled-interface-executor
+    runtime))
+(execute-effects!
+  compiled-interface-executor
+  (editor-update!
+    editor
+    (make-internal-command-message
+      'scheme.load-interface-index-path
+      compiled-interface-path)))
+(let load-loop ()
+  (let ([loaded? #f])
+    (for-each
+      (lambda (event)
+        (let ([message
+                (scheme-interface-runtime-handle-event
+                  compiled-interface-adapter
+                  event)])
+          (when message
+            (editor-update! editor message)
+            (set! loaded? #t))))
+      (runtime-poll! runtime))
+    (unless loaded? (load-loop))))
+(delete-file compiled-interface-path)
+
+(define compiled-consumer-source
+  (string-append
+    "(library (fixture compiled-consumer)\n"
+    "  (export use-compiled-call)\n"
+    "  (import (rnrs) (fixture compiled-dependency))\n"
+    "  (define (use-compiled-call value)\n"
+    "    (compiled-call value '())))\n"))
+(define compiled-consumer-buffer
+  (make-buffer
+    100
+    (make-document compiled-consumer-source 100)
+    "/plugin/compiled-consumer.sls"
+    'scheme-mode))
+(editor-add-buffer! editor compiled-consumer-buffer)
+(scheme-workspace-sync-editor! workspace editor)
+(define compiled-consumer-snapshot
+  (scheme-workspace-snapshot-for-buffer
+    workspace
+    compiled-consumer-buffer))
+(define compiled-call-use
+  (find
+    (lambda (use)
+      (string=?
+        (scheme-use-name use)
+        "compiled-call"))
+    (scheme-semantic-snapshot-uses
+      compiled-consumer-snapshot)))
+(define compiled-call-definition
+  (and
+    compiled-call-use
+    (let ([definitions
+            (scheme-semantic-definitions-at
+              compiled-consumer-snapshot
+              (scheme-use-start compiled-call-use))])
+      (and (= (length definitions) 1)
+           (car definitions)))))
+
+(unless
+  (and
+    (string=?
+      (scheme-interface-index-owner
+        compiled-interface-index)
+      "fixture-build")
+    (string=?
+      (scheme-interface-index-revision
+        compiled-interface-index)
+      "content-revision-1")
+    compiled-call-definition
+    (equal?
+      (scheme-definition-signatures
+        compiled-call-definition)
+      '("(compiled-call value options)"))
+    (string=?
+      (scheme-definition-id-document-id
+        (scheme-definition-id
+          compiled-call-definition))
+      compiled-interface-resource))
+  (error
+    'scheme-project-runtime-tests
+    "compiled interface index did not drive plugin resolution"
+    compiled-call-definition))
+
+(define compiled-interface-generation
+  (scheme-workspace-generation workspace))
+(scheme-workspace-install-interface-index!
+  workspace
+  (scheme-sources->interface-index
+    "fixture-build"
+    "content-revision-2"
+    (list
+      (cons
+        compiled-interface-resource
+        (string->utf8
+          (string-append
+            "(library (fixture compiled-dependency)\n"
+            "  (export compiled-call)\n"
+            "  (import (rnrs))\n"
+            "  (define (compiled-call value) value))\n"))))))
+(scheme-workspace-sync-editor! workspace editor)
+(let* ([snapshot
+         (scheme-workspace-snapshot-for-buffer
+           workspace
+           compiled-consumer-buffer)]
+       [use
+         (find
+           (lambda (candidate)
+             (string=?
+               (scheme-use-name candidate)
+               "compiled-call"))
+           (scheme-semantic-snapshot-uses snapshot))]
+       [definitions
+         (and
+           use
+           (scheme-semantic-definitions-at
+             snapshot
+             (scheme-use-start use)))])
+  (unless
+    (and
+      (= (scheme-workspace-generation workspace)
+         (+ compiled-interface-generation 1))
+      (= (length definitions) 1)
+      (equal?
+        (scheme-definition-signatures
+          (car definitions))
+        '("(compiled-call value)")))
+    (error
+      'scheme-project-runtime-tests
+      "reloading an interface owner did not atomically replace its surface"
+      definitions)))
+
+(scheme-workspace-remove-interface-index!
+  workspace
+  "fixture-build")
+(scheme-workspace-sync-editor! workspace editor)
+(let ([snapshot
+        (scheme-workspace-snapshot-for-buffer
+          workspace
+          compiled-consumer-buffer)])
+  (when
+    (exists
+      (lambda (definition)
+        (string=?
+          (scheme-definition-name definition)
+          "compiled-call"))
+      (scheme-semantic-snapshot-visible-index-definitions
+        snapshot))
+    (error
+      'scheme-project-runtime-tests
+      "removing an interface index retained its library surface")))
+(editor-remove-buffer!
+  editor
+  (buffer-id compiled-consumer-buffer))
+
 (define symbols
   (scheme-workspace-symbols workspace editor))
 

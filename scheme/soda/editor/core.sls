@@ -613,6 +613,7 @@
           (soda editor scheme-completion)
           (soda editor scheme-document-highlight)
           (soda editor scheme-help)
+          (soda editor scheme-interface-commands)
           (soda editor scheme-repl-completion)
           (soda editor scheme-rename)
           (soda editor scheme-xref)
@@ -735,6 +736,8 @@
         editor
         (make-scheme-repl-completion-provider editor))
       (install-file-commands! editor)
+      (install-scheme-interface-commands!
+        editor scheme-workspace)
       (install-scheme-rename-command!
         editor scheme-workspace)
       (install-interaction-commands! editor)

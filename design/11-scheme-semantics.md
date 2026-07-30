@@ -531,14 +531,30 @@ name` 建立这两种身份的等价集合。references 查询在每个已索引
 请求打开；资源已经访问时直接在现有 Buffer 中跳转。异步请求发出前在 origin View
 的 navigation walk 中保留当前位置，读取完成后的 definition location 因而参与
 `jump-back`。primitive 只有 metadata、没有 source location 时返回明确的无源码
-结果。Project runtime 从工作目录开始，以 libuv directory scan 异步发现
-`.scm`、`.ss`、`.sls` 和 `.sps`，再以异步 file read 把源码交给 workspace。
-成功扫描的每个目录注册独立 path watch。文件系统事件按目录合并为重新扫描请求；
-扫描结果添加、更新或删除 Project source，并为新目录递归建立 watch。每次成功读取
-递增对应 resource revision，使异步外部修改与 Buffer revision 使用同一 freshness
-规则。file-read completion 只更新按 resource 合并的待分析队列；一次性 runtime
-timer 每个 command-loop turn 最多提交一个 source snapshot。输入、resize 和输出
-事件因而可以在大型 Project 的初始索引期间继续推进。
+结果。
+
+构建过程可以把一组 library source 编译为 `SchemeInterfaceIndex`。该产物保存 owner、
+内容 revision、library catalog 和 export entries；entry 包含 library identity、
+binding kind、procedure formals、documentation 以及可用的 declaration resource 与
+byte range。产物以带格式版本、Chez 版本和 machine type 的 FASL datum 编码，加载时
+完整验证 manifest 和 entry shape。它只接受受信任构建流程产生的内容。
+
+显式 language workspace session 按 owner 安装 interface index。同一 owner 的新
+revision 原子替换旧 surface；移除 session 时撤销对应 surface。多个 index 按安装
+次序组成依赖层，Project source 和打开的 Buffer 位于其上方。interface 变化只重新
+分析 import 受影响 library 的 Document。插件依赖因而可以在不读取依赖源码、不建立
+目录 watcher 的情况下提供 completion、signature、hover、workspace symbol 和
+definition。`scheme.load-interface-index` 通过 minibuffer 选择产物并以 libuv
+异步读取；编译脚本在 Editor evaluator 中运行时向 command loop 投递
+`scheme.load-interface-index-path`，使成功构建的产物进入同一安装路径。
+
+可选 Project directory adapter 以 libuv directory scan 异步发现 `.scm`、`.ss`、
+`.sls` 和 `.sps`，再以异步 file read 把源码交给显式 workspace session。成功扫描
+的每个目录注册独立 path watch。文件系统事件按目录合并为重新扫描请求；扫描结果
+添加、更新或删除 Project source，并为新目录递归建立 watch。每次成功读取递增对应
+resource revision，使异步外部修改与 Buffer revision 使用同一 freshness 规则。
+file-read completion 只更新按 resource 合并的待分析队列；一次性 runtime timer
+每个 command-loop turn 最多提交一个 source snapshot。
 后台 source snapshot 不创建 Buffer；引用位置以 `resource + revision + byte
 range` 保存，首次跳转时通过普通异步文件打开流程解析成 Buffer location。
 

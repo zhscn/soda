@@ -33,22 +33,25 @@ Project 拥有：
 
 - resource 枚举与忽略规则；
 - project settings layer；
-- language service 的 root 与配置；
-- 文件 watch 和索引的作用域。
+- language service 可使用的 root 与配置；
+- 显式启动的文件 watch 和索引 session 的作用域。
 
 Project 不拥有 Buffer、Window 或 layout。同一 project 可以出现在多个 workbench
 scope 中；是否保持 scope 互斥由 Scheme policy 决定。
 
-本地 TUI session 在第一个 file-backed Buffer 出现时，以启动工作目录建立初始
-Project。只有 `*scratch*` 等非文件 Buffer 的 session 不启动 project discovery。
-resource enumerator 通过 libuv directory scan 逐层展开目录，通过异步 file read
-产生 language source snapshot。隐藏目录、VCS metadata、构建输出和依赖目录由枚举
-policy 排除。
+打开 file-backed Buffer 不创建 Project，也不启动 resource discovery 或 language
+index。显式 load/adopt project 根据 manifest、VCS root 或用户给定 root 建立
+Project；visitor Buffer 可以始终不属于任何 Project。
+
+resource enumerator 由 Project 操作按需启动，通过 libuv directory scan 逐层展开
+目录，并通过异步 file read 产生请求方需要的 resource snapshot。隐藏目录、VCS
+metadata、构建输出和依赖目录由枚举 policy 排除。
 enumerator 只发布 resource 与内容，不为后台索引创建 Buffer；用户访问资源时才由
 普通文件打开流程建立 Buffer identity。每个已发现目录持有一个 libuv path watch；
 变更通知使对应目录失效并触发合并后的异步重扫。重扫更新直接 source 集合、递归接入
 新增子目录，并撤销已删除目录子树的 watch 与 source snapshot。文件通知只承担失效
-职责，目录扫描结果定义 Project 当前的 resource 集合。
+职责，目录扫描结果定义该 enumerator session 当前的 resource 集合。关闭请求该
+enumerator 的 Project operation 或 language session 会释放全部 watch。
 
 ## Workbench 成员语义
 
@@ -106,7 +109,9 @@ workbench。
 ## Language session provenance
 
 language session 的键至少包含 project/root、language、server/provider 配置。
-session 可跨 workbench 共享。
+session 可跨 workbench 共享。Project membership 只提供可选 root 和配置，不自动
+创建 language session；`load-project`、build/compile workflow 或显式 language
+命令负责启动 session。关闭最后一个引用者会停止其后台任务。
 
 导航到不属于任何 home project 的资源时，display request 的 origin session
 成为该 buffer 的 guest provenance。后续 definition、completion 和 hover 可以

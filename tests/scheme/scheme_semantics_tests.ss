@@ -1087,6 +1087,56 @@
          "library export index lost rename or re-export metadata"
          generated-index))
 
+(define ambiguous-reexport-index
+  (scheme-sources-api-index
+    (list
+      (cons
+        "left.sls"
+        (string->utf8
+          (string-append
+            "(library (sample left)\n"
+            "  (export shared)\n"
+            "  (import (rnrs))\n"
+            "  (define (shared left) left))\n")))
+      (cons
+        "right.sls"
+        (string->utf8
+          (string-append
+            "(library (sample right)\n"
+            "  (export shared)\n"
+            "  (import (rnrs))\n"
+            "  (define (shared right options) right))\n")))
+      (cons
+        "facade.sls"
+        (string->utf8
+          (string-append
+            "(library (sample facade-right)\n"
+            "  (export shared)\n"
+            "  (import (sample right)))\n"))))))
+(define ambiguous-reexport-entry
+  (find
+    (lambda (entry)
+      (and
+        (string=? (car entry) "shared")
+        (equal?
+          (caddr entry)
+          '(sample facade-right))))
+    ambiguous-reexport-index))
+
+(unless
+  (and
+    ambiguous-reexport-entry
+    (string=?
+      (list-ref ambiguous-reexport-entry 3)
+      "right.sls")
+    (equal?
+      (list-ref ambiguous-reexport-entry 6)
+      '((right options))))
+  (error
+    'scheme-semantics-tests
+    "re-export metadata did not follow the imported library"
+    ambiguous-reexport-entry))
+
 (let* ([partial-source
          (string-append
            "(library (sample incomplete)\n"
