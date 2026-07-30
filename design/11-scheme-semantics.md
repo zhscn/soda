@@ -286,9 +286,10 @@ catalog 与 primitive。scope graph 可在同一 snapshot 和 DefinitionId 接�
 自举 xref provider 把 definition 和 resolved uses 转成通用 LocationList。当前
 Document 的 declaration 与 references 可立即导航。带 source resource 的嵌入 API
 definition 通过带目标 byte offset 的异步文件读取请求打开；资源已经访问时直接在
-现有 Buffer 中跳转。primitive 只有 metadata、没有 source location 时返回明确的
-无源码结果。跨 library references 在 workspace 层解析 import/export edges 后
-进入同一 LocationList 接口。
+现有 Buffer 中跳转。异步请求发出前在 origin View 的 navigation walk 中保留当前位置，
+读取完成后的 definition location 因而参与 `jump-back`。primitive 只有 metadata、
+没有 source location 时返回明确的无源码结果。跨 library references 在 workspace
+层解析 import/export edges 后进入同一 LocationList 接口。
 
 ## Definition、references 与 rename
 

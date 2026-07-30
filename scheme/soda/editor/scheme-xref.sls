@@ -114,13 +114,22 @@
               definitions)])
       (and
         definition
-        (make-command-effect
-          'file.read
-          (make-open-request
-            (view-id (command-context-view context))
-            (scheme-definition-id-document-id
-              (scheme-definition-id definition))
-            (scheme-definition-start definition))))))
+        (let* ([editor (command-context-editor context)]
+               [view (command-context-view context)])
+          ;; Reserve the current navigation entry before the asynchronous
+          ;; resource switch.  jump-back replaces this entry with the opened
+          ;; definition location and returns to the origin.
+          (editor-jump-to-buffer!
+            editor
+            (view-buffer view)
+            (view-caret view))
+          (make-command-effect
+            'file.read
+            (make-open-request
+              (view-id view)
+              (scheme-definition-id-document-id
+                (scheme-definition-id definition))
+              (scheme-definition-start definition)))))))
 
   (define (use-location buffer revision use)
     (make-location-item

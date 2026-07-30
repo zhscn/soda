@@ -207,4 +207,41 @@
   (error
     'embedded-api-index-tests
     "indexed xref did not request its source location"))
+
+(define xref-request
+  (command-effect-payload (car xref-effects)))
+(define xref-origin-offset (scheme-use-start xref-use))
+(define xref-source-bytes
+  (call-with-port
+    (open-file-input-port (open-request-path xref-request))
+    get-bytevector-all))
+(editor-update!
+  xref-editor
+  (make-internal-command-message
+    'file.apply-open-result
+    (make-open-result
+      xref-request
+      0
+      xref-source-bytes
+      #f)))
+
+(unless
+  (and
+    (string=?
+      (buffer-resource
+        (view-buffer (editor-active-view xref-editor)))
+      (open-request-path xref-request))
+    (=
+      (view-caret (editor-active-view xref-editor))
+      (open-request-offset xref-request))
+    (editor-jump-back! xref-editor)
+    (eq?
+      (view-buffer (editor-active-view xref-editor))
+      xref-buffer)
+    (=
+      (view-caret (editor-active-view xref-editor))
+      xref-origin-offset))
+  (error
+    'embedded-api-index-tests
+    "indexed xref did not preserve jump-back history"))
 (editor-close! xref-editor)
