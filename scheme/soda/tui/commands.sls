@@ -24,9 +24,10 @@
   (define (install-tui-commands! editor)
     (editor-register-command!
       editor
-      'help.describe-char
-      describe-char-command
-      "Describe the character, faces, style, and render sources at point.")
+      (make-interactive-context-command
+        'help.describe-char
+        describe-char-command
+        "Describe the character, faces, style, and render sources at point."))
     (editor-bind-key!
       editor
       (list

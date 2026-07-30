@@ -16,20 +16,24 @@ class、适用 mode 和 advice。
   ...)
 ```
 
-注册过程时，registry 读取关联的 definition：
+注册时必须显式构造并提交 definition。`make-interactive-context-command` 保留
+`define-command` 关联的参数计划，同时允许注册名、文档和 command class 由安装点指定：
 
 ```scheme
-(editor-register-command! editor 'goto-line goto-line)
+(editor-register-command!
+  editor
+  (make-interactive-context-command
+    'goto-line
+    goto-line
+    "Move point to LINE."))
 ```
 
 普通 Scheme 调用直接执行 `(goto-line context 42)`，不读取交互参数。keymap、M-x 和
 `editor-execute-interactive-command!` 使用 definition 的 `InteractivePlan`。
 `editor-register-internal-command!` 注册 responder 和 runtime continuation；internal
-command 不属于 M-x 的候选集合。
-
-兼容注册入口接受没有 definition 的旧式 `(lambda (context) ...)`，为它构造无参数
-interactive plan。扩展库应使用 `define-command`，使普通过程调用和交互调用具有同一
-个参数契约。
+command 使用 `make-internal-context-command` 构造，不属于 M-x 的候选集合。仅接收
+`CommandContext` 的无参数命令也通过这两个构造器显式声明是否可交互。需要普通 Scheme
+参数的命令使用 `define-command`，使过程调用和交互调用具有同一个参数契约。
 
 ## Interactive plan
 

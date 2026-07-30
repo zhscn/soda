@@ -386,12 +386,13 @@
          "evaluation consumed command-loop standard input"))
 
 (define emitted-value #f)
-(editor-register-command!
+(editor-register-internal-command!
   editor
-  'test.emitted-command
-  (lambda (context)
-    (set! emitted-value (command-context-argument context))
-    '()))
+  (make-internal-context-command
+    'test.emitted-command
+    (lambda (context)
+      (set! emitted-value (command-context-argument context))
+      '())))
 (dispatch!
   (make-command-message
     'scheme.eval-expression

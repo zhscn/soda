@@ -244,9 +244,10 @@
       (lambda (entry)
         (editor-register-command!
           editor
-          (car entry)
-          (cadr entry)
-          (caddr entry)))
+          (make-interactive-context-command
+            (car entry)
+            (cadr entry)
+            (caddr entry))))
       (list
         (list
           'interaction.history-previous

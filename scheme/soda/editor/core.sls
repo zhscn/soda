@@ -209,6 +209,8 @@
           command-context-prefix
           command-context-count
           define-command
+          make-interactive-context-command
+          make-internal-context-command
           make-interactive-plan
           make-interactive-reader
           interactive-prefix-count

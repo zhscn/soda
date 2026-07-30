@@ -269,7 +269,9 @@
   (set! invocation-count (+ invocation-count 1))
   '())
 
-(editor-register-command! editor 'test.count count-once)
+(editor-register-command!
+  editor
+  (make-interactive-context-command 'test.count count-once))
 (unless (and (memq 'test.count
                    (command-names (editor-command-registry editor)))
              (not
@@ -307,19 +309,21 @@
 
 (editor-register-command!
   editor
-  'test.count
-  (lambda (context)
-    (set! invocation-count (+ invocation-count 10))
-    '()))
+  (make-interactive-context-command
+    'test.count
+    (lambda (context)
+      (set! invocation-count (+ invocation-count 10))
+      '())))
 (send! editor decoder (bytes 24 5))
 (unless (= invocation-count 11)
   (error 'editor-tests "command replacement did not affect an existing binding"))
 
 (editor-register-command!
   editor
-  'test.fail
-  (lambda (context)
-    (error 'test.fail "expected failure")))
+  (make-interactive-context-command
+    'test.fail
+    (lambda (context)
+      (error 'test.fail "expected failure"))))
 (editor-bind-key!
   editor
   (list (make-key-stroke 'character 116 4))
@@ -949,7 +953,7 @@
   (make-command-message 'edit.self-insert (string->utf8 "dirty")))
 (editor-update!
   kill-editor
-  (make-command-message
+  (make-internal-command-message
     'buffer.apply-kill
     (make-prompt-result
       200
@@ -994,7 +998,7 @@
 
 (editor-update!
   kill-editor
-  (make-command-message
+  (make-internal-command-message
     'buffer.apply-kill
     (make-prompt-result
       201
@@ -2314,7 +2318,7 @@
   (make-command-message 'prompt.abort #f))
 (editor-update!
   highlight-editor
-  (make-command-message
+  (make-internal-command-message
     'theme.apply
     (make-prompt-result
       0
@@ -2666,34 +2670,39 @@
 (define selected-command #f)
 (editor-register-command!
   prompt-editor
-  'test.prompt-target
-  (lambda (context)
-    (set! prompt-invocations (+ prompt-invocations 1))
-    (set! prompt-prefix-count (command-context-count context))
-    '()))
+  (make-interactive-context-command
+    'test.prompt-target
+    (lambda (context)
+      (set! prompt-invocations (+ prompt-invocations 1))
+      (set! prompt-prefix-count (command-context-count context))
+      '())))
+(editor-register-internal-command!
+  prompt-editor
+  (make-internal-context-command
+    'test.capture-prompt
+    (lambda (context)
+      (set! captured-prompt-result (command-context-argument context))
+      '())))
 (editor-register-command!
   prompt-editor
-  'test.capture-prompt
-  (lambda (context)
-    (set! captured-prompt-result (command-context-argument context))
-    '()))
+  (make-interactive-context-command
+    'test.choice-alpha
+    (lambda (context)
+      (set! selected-command 'alpha)
+      '())))
 (editor-register-command!
   prompt-editor
-  'test.choice-alpha
-  (lambda (context)
-    (set! selected-command 'alpha)
-    '()))
+  (make-interactive-context-command
+    'test.choice-beta
+    (lambda (context)
+      (set! selected-command 'beta)
+      '())))
 (editor-register-command!
   prompt-editor
-  'test.choice-beta
-  (lambda (context)
-    (set! selected-command 'beta)
-    '()))
-(editor-register-command!
-  prompt-editor
-  'test.prompt-fail
-  (lambda (context)
-    (error 'test.prompt-fail "expected M-x failure")))
+  (make-interactive-context-command
+    'test.prompt-fail
+    (lambda (context)
+      (error 'test.prompt-fail "expected M-x failure"))))
 
 (editor-update! prompt-editor (make-resize-message 5 40))
 (send! prompt-editor prompt-decoder (bytes 27 120))
@@ -2827,8 +2836,9 @@
 
 (editor-register-command!
   prompt-editor
-  'test.typed-command
-  test.typed-command)
+  (make-interactive-context-command
+    'test.typed-command
+    test.typed-command))
 (unless
   (and
     (command-interactive?
@@ -2886,8 +2896,9 @@
   10)
 (editor-register-command!
   prompt-editor
-  'test.typed-command
-  test.typed-command)
+  (make-interactive-context-command
+    'test.typed-command
+    test.typed-command))
 (unless
   (equal?
     (command-advice-names

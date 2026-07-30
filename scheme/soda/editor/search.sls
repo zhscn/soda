@@ -555,9 +555,10 @@
       (lambda (entry)
         (editor-register-command!
           editor
-          (car entry)
-          (cadr entry)
-          (caddr entry)))
+          (make-interactive-context-command
+            (car entry)
+            (cadr entry)
+            (caddr entry))))
       (list
         (list
           'search.forward
@@ -567,10 +568,6 @@
           'search.backward
           backward-search-command
           "Start or repeat incremental backward search.")
-        (list
-          'search.changed
-          search-changed-command
-          "Update the active incremental search.")
         (list
           'search.accept
           search-accept-command
@@ -583,14 +580,6 @@
           'query-replace
           query-replace-start-command
           "Interactively replace occurrences following point.")
-        (list
-          'query-replace.read-replacement
-          query-replace-read-replacement-command
-          "Read the replacement for query replace.")
-        (list
-          'query-replace.begin
-          query-replace-begin-command
-          "Begin query replace decisions.")
         (list
           'query-replace.yes
           query-replace-yes-command
@@ -606,7 +595,28 @@
         (list
           'query-replace.quit
           query-replace-quit-command
-          "Stop query replace and retain completed replacements.")
+          "Stop query replace and retain completed replacements.")))
+    (for-each
+      (lambda (entry)
+        (editor-register-internal-command!
+          editor
+          (make-internal-context-command
+            (car entry)
+            (cadr entry)
+            (caddr entry))))
+      (list
+        (list
+          'search.changed
+          search-changed-command
+          "Update the active incremental search.")
+        (list
+          'query-replace.read-replacement
+          query-replace-read-replacement-command
+          "Read the replacement for query replace.")
+        (list
+          'query-replace.begin
+          query-replace-begin-command
+          "Begin query replace decisions.")
         (list
           'query-replace.finish
           query-replace-finish-command

@@ -90,12 +90,14 @@
   (define (install-theme-commands! editor)
     (editor-register-command!
       editor
-      'theme.select
-      select-theme-command
-      "Select an installed color theme.")
-    (editor-register-command!
+      (make-interactive-context-command
+        'theme.select
+        select-theme-command
+        "Select an installed color theme."))
+    (editor-register-internal-command!
       editor
-      'theme.apply
-      apply-theme-command
-      "Apply the color theme selected by the minibuffer.")
+      (make-internal-context-command
+        'theme.apply
+        apply-theme-command
+        "Apply the color theme selected by the minibuffer."))
     editor))

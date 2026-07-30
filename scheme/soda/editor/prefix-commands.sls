@@ -59,10 +59,11 @@
       (lambda (entry)
         (editor-register-command!
           editor
-          (car entry)
-          (cadr entry)
-          (caddr entry)
-          'prefix))
+          (make-interactive-context-command
+            (car entry)
+            (cadr entry)
+            (caddr entry)
+            'prefix)))
       (list
         (list
           'argument.universal

@@ -341,9 +341,10 @@
             documentation)
     (editor-register-command!
       editor
-      name
-      procedure
-      documentation))
+      (make-interactive-context-command
+        name
+        procedure
+        documentation)))
 
   (define (install-debugger-commands! editor)
     (for-each
@@ -371,10 +372,6 @@
           debug-eval-frame-command
           "Evaluate an expression in the selected debugger frame.")
         (list
-          'scheme.debug-eval-frame-accept
-          debug-eval-frame-accept-command
-          "Apply input from the debugger evaluation prompt.")
-        (list
           'scheme.debug-retry
           debug-retry-command
           "Retry the failed evaluation in the active interaction.")
@@ -382,6 +379,12 @@
           'scheme.debug-dismiss
           debug-dismiss-command
           "Dismiss the failed evaluation in the active interaction.")))
+    (editor-register-internal-command!
+      editor
+      (make-internal-context-command
+        'scheme.debug-eval-frame-accept
+        debug-eval-frame-accept-command
+        "Apply input from the debugger evaluation prompt."))
     (register-major-mode!
       (editor-language-catalog editor)
       (make-major-mode

@@ -224,14 +224,16 @@
   (define (install-cpp-commands! editor)
     (editor-register-command!
       editor
-      'cpp.newline-and-indent
-      cpp-newline-command
-      "Insert a newline using the native C++ indentation engine.")
+      (make-interactive-context-command
+        'cpp.newline-and-indent
+        cpp-newline-command
+        "Insert a newline using the native C++ indentation engine."))
     (editor-register-command!
       editor
-      'cpp.indent-line
-      cpp-indent-line-command
-      "Indent C++ source lines using the native analyzer.")
+      (make-interactive-context-command
+        'cpp.indent-line
+        cpp-indent-line-command
+        "Indent C++ source lines using the native analyzer."))
     (let ([keymap (make-keymap)])
       (keymap-bind!
         keymap

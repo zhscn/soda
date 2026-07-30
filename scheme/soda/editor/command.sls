@@ -1,8 +1,6 @@
 (library (soda editor command)
   (export make-command-registry
           command-registry?
-          register-command!
-          register-internal-command!
           register-command-definition!
           command-registered?
           command-interactive?
@@ -13,6 +11,8 @@
           command-class
           command-definition-ref
           make-command-definition
+          make-interactive-context-command
+          make-internal-context-command
           command-definition?
           command-definition-name
           command-definition-procedure
@@ -386,27 +386,6 @@
     (unless (command-registry? value)
       (assertion-violation who "expected a command registry" value)))
 
-  (define (legacy-definition
-            name
-            procedure
-            documentation
-            class
-            interactive?)
-    (make-command-definition
-      name
-      procedure
-      (lambda (context arguments)
-        (unless (null? arguments)
-          (assertion-violation
-            name
-            "legacy command does not accept interactive arguments"
-            arguments))
-        (procedure context))
-      documentation
-      class
-      (and interactive? (make-interactive-plan '()))
-      '()))
-
   (define (definition-with-registration-metadata
             definition
             name
@@ -421,6 +400,75 @@
       (or class (command-definition-class definition))
       (command-definition-interactive-plan definition)
       (command-definition-modes definition)))
+
+  (define (make-context-command
+            name
+            procedure
+            documentation
+            class
+            interactive?)
+    (unless (procedure? procedure)
+      (assertion-violation
+        'make-context-command
+        "command implementation must be a procedure"
+        procedure))
+    (let ([attached (procedure-command-definition procedure)])
+      (if attached
+          (let ([definition
+                  (definition-with-registration-metadata
+                    attached name documentation class)])
+            (if interactive?
+                definition
+                (make-command-definition
+                  name
+                  (command-definition-procedure definition)
+                  (lambda (context arguments)
+                    (unless (null? arguments)
+                      (assertion-violation
+                        name
+                        "internal context command does not accept resolved arguments"
+                        arguments))
+                    (procedure context))
+                  (command-definition-documentation definition)
+                  (command-definition-class definition)
+                  #f
+                  (command-definition-modes definition))))
+          (make-command-definition
+            name
+            procedure
+            (lambda (context arguments)
+              (unless (null? arguments)
+                (assertion-violation
+                  name
+                  "context command does not accept resolved arguments"
+                  arguments))
+              (procedure context))
+            documentation
+            class
+            (and interactive? (make-interactive-plan '()))
+            '()))))
+
+  (define make-interactive-context-command
+    (case-lambda
+      [(name procedure)
+       (make-interactive-context-command name procedure #f #f)]
+      [(name procedure documentation)
+       (make-interactive-context-command
+         name procedure documentation #f)]
+      [(name procedure documentation class)
+       (make-context-command
+         name procedure documentation class #t)]))
+
+  (define make-internal-context-command
+    (case-lambda
+      [(name procedure)
+       (make-internal-context-command name procedure #f #f)]
+      [(name procedure documentation)
+       (make-internal-context-command
+         name procedure documentation #f)]
+      [(name procedure documentation class)
+       (make-context-command
+         name procedure documentation class #f)]))
 
   (define (register-command-definition! registry definition)
     (require-registry 'register-command-definition! registry)
@@ -444,65 +492,6 @@
               (registered-command-advice existing)
               '()))))
     (command-definition-name definition))
-
-  (define (register-procedure!
-            registry
-            name
-            procedure
-            documentation
-            class
-            interactive?)
-    (require-registry 'register-command! registry)
-    (unless (symbol? name)
-      (assertion-violation
-        'register-command!
-        "command name must be a symbol"
-        name))
-    (unless (procedure? procedure)
-      (assertion-violation
-        'register-command!
-        "command implementation must be a procedure"
-        procedure))
-    (let* ([attached (procedure-command-definition procedure)]
-           [definition
-             (if attached
-                 (definition-with-registration-metadata
-                   attached name documentation class)
-                 (legacy-definition
-                   name
-                   procedure
-                   documentation
-                   class
-                   interactive?))])
-      (register-command-definition! registry definition)))
-
-  (define register-command!
-    (case-lambda
-      [(registry definition)
-       (register-command-definition! registry definition)]
-      [(registry name procedure)
-       (register-command! registry name procedure #f)]
-      [(registry name procedure documentation)
-       (register-command!
-         registry
-         name
-         procedure
-         documentation
-         #f)]
-      [(registry name procedure documentation class)
-       (register-procedure!
-         registry name procedure documentation class #t)]))
-
-  (define register-internal-command!
-    (case-lambda
-      [(registry name procedure)
-       (register-internal-command! registry name procedure #f)]
-      [(registry name procedure documentation)
-       (register-internal-command!
-         registry name procedure documentation #f)]
-      [(registry name procedure documentation class)
-       (register-procedure!
-         registry name procedure documentation class #f)]))
 
   (define (command-registered? registry name)
     (require-registry 'command-registered? registry)

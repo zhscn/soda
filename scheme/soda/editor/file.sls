@@ -1340,10 +1340,11 @@
        (unless
          (or
            (not continuation)
-           (command-message? continuation))
+           (command-message? continuation)
+           (internal-command-message? continuation))
          (assertion-violation
            'begin-save!
-           "continuation must be a command message or #f"
+           "continuation must be an editor command message or #f"
            continuation))
        (let ([request
                (snapshot-save-request
@@ -1428,7 +1429,7 @@
          (list
            (make-command-effect
              'command.invoke
-             (make-command-message
+             (make-internal-command-message
                'editor.continue-quit
                queue)))]
         [(not path)
@@ -1440,7 +1441,7 @@
            buffer
            path
            #f
-           (make-command-message
+           (make-internal-command-message
              'editor.continue-quit
              queue))])))
 
@@ -1501,7 +1502,7 @@
            #t
            (and
              quit-queue
-             (make-command-message
+             (make-internal-command-message
                'editor.continue-quit
                quit-queue)))]))))
 
@@ -1586,74 +1587,88 @@
   (define (install-file-commands! editor)
     (editor-register-command!
       editor
-      'file.find
-      find-file-command
-      "Read a file path and display the corresponding buffer.")
+      (make-interactive-context-command
+        'file.find
+        find-file-command
+        "Read a file path and display the corresponding buffer."))
+    (editor-register-internal-command!
+      editor
+      (make-internal-context-command
+        'file.open-path
+        open-path-command
+        "Start an asynchronous file open requested by the minibuffer."))
     (editor-register-command!
       editor
-      'file.open-path
-      open-path-command
-      "Start an asynchronous file open requested by the minibuffer.")
+      (make-interactive-context-command
+        'file.insert
+        insert-file-command
+        "Read a file path and insert its contents at point."))
+    (editor-register-internal-command!
+      editor
+      (make-internal-context-command
+        'file.insert-path
+        insert-file-path-command
+        "Start an asynchronous file insertion requested by the minibuffer."))
+    (editor-register-internal-command!
+      editor
+      (make-internal-context-command
+        'file.apply-insert-result
+        apply-insert-file-result-command
+        "Apply an asynchronous file insertion result."))
+    (editor-register-internal-command!
+      editor
+      (make-internal-context-command
+        'file.apply-open-result
+        apply-open-result-command
+        "Apply an asynchronous file open result."))
     (editor-register-command!
       editor
-      'file.insert
-      insert-file-command
-      "Read a file path and insert its contents at point.")
+      (make-interactive-context-command
+        'file.reload
+        reload-buffer-command
+        "Replace an unmodified buffer with the current file contents."))
     (editor-register-command!
       editor
-      'file.insert-path
-      insert-file-path-command
-      "Start an asynchronous file insertion requested by the minibuffer.")
+      (make-interactive-context-command
+        'file.force-reload
+        force-reload-buffer-command
+        "Replace a buffer with the current file contents, discarding edits."))
+    (editor-register-internal-command!
+      editor
+      (make-internal-context-command
+        'file.apply-reload-result
+        apply-reload-result-command
+        "Apply an asynchronous file reload result."))
     (editor-register-command!
       editor
-      'file.apply-insert-result
-      apply-insert-file-result-command
-      "Apply an asynchronous file insertion result.")
+      (make-interactive-context-command
+        'file.save
+        save-buffer-command
+        "Save the active buffer to its file path."))
+    (editor-register-internal-command!
+      editor
+      (make-internal-context-command
+        'file.save-for-quit
+        save-for-quit-command
+        "Save the active buffer and continue an editor quit workflow."))
     (editor-register-command!
       editor
-      'file.apply-open-result
-      apply-open-result-command
-      "Apply an asynchronous file open result.")
-    (editor-register-command!
+      (make-interactive-context-command
+        'file.save-as
+        save-as-command
+        "Write the active buffer to a path read from the minibuffer."))
+    (editor-register-internal-command!
       editor
-      'file.reload
-      reload-buffer-command
-      "Replace an unmodified buffer with the current file contents.")
-    (editor-register-command!
+      (make-internal-context-command
+        'file.save-to-path
+        save-to-path-command
+        "Start an asynchronous save-as request."))
+    (editor-register-internal-command!
       editor
-      'file.force-reload
-      force-reload-buffer-command
-      "Replace a buffer with the current file contents, discarding edits.")
-    (editor-register-command!
-      editor
-      'file.apply-reload-result
-      apply-reload-result-command
-      "Apply an asynchronous file reload result.")
-    (editor-register-command!
-      editor
-      'file.save
-      save-buffer-command
-      "Save the active buffer to its file path.")
-    (editor-register-command!
-      editor
-      'file.save-for-quit
-      save-for-quit-command
-      "Save the active buffer and continue an editor quit workflow.")
-    (editor-register-command!
-      editor
-      'file.save-as
-      save-as-command
-      "Write the active buffer to a path read from the minibuffer.")
-    (editor-register-command!
-      editor
-      'file.save-to-path
-      save-to-path-command
-      "Start an asynchronous save-as request.")
-    (editor-register-command!
-      editor
-      'file.apply-save-result
-      apply-save-result-command
-      "Apply an asynchronous file save result.")
+      (make-internal-context-command
+        'file.apply-save-result
+        apply-save-result-command
+        "Apply an asynchronous file save result."))
     (editor-bind-key!
       editor
       (list

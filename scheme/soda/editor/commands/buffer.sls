@@ -276,34 +276,40 @@
   (define (install-buffer-commands! editor)
     (editor-register-command!
       editor
-      'buffer.switch
-      switch-buffer-command
-      "Read a buffer name and display it in the active view.")
+      (make-interactive-context-command
+        'buffer.switch
+        switch-buffer-command
+        "Read a buffer name and display it in the active view."))
+    (editor-register-internal-command!
+      editor
+      (make-internal-context-command
+        'buffer.apply-switch
+        apply-switch-buffer-command
+        "Display the buffer selected by the minibuffer."))
     (editor-register-command!
       editor
-      'buffer.apply-switch
-      apply-switch-buffer-command
-      "Display the buffer selected by the minibuffer.")
+      (make-interactive-context-command
+        'buffer.kill
+        kill-buffer-command
+        "Read a buffer name and close that buffer."))
+    (editor-register-internal-command!
+      editor
+      (make-internal-context-command
+        'buffer.apply-kill
+        apply-kill-buffer-command
+        "Close the buffer selected by the minibuffer."))
     (editor-register-command!
       editor
-      'buffer.kill
-      kill-buffer-command
-      "Read a buffer name and close that buffer.")
+      (make-interactive-context-command
+        'buffer.force-kill-current
+        force-kill-current-buffer-command
+        "Close the active buffer without checking its modified state."))
     (editor-register-command!
       editor
-      'buffer.apply-kill
-      apply-kill-buffer-command
-      "Close the buffer selected by the minibuffer.")
-    (editor-register-command!
-      editor
-      'buffer.force-kill-current
-      force-kill-current-buffer-command
-      "Close the active buffer without checking its modified state.")
-    (editor-register-command!
-      editor
-      'buffer.list
-      list-buffers-command
-      "Display the editor buffer list.")
+      (make-interactive-context-command
+        'buffer.list
+        list-buffers-command
+        "Display the editor buffer list."))
     (editor-bind-key!
       editor
       (list

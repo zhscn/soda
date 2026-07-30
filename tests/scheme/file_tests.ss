@@ -367,7 +367,7 @@
 (define insert-origin-view-id
   (view-id (editor-active-view editor)))
 (dispatch!
-  (make-command-message
+  (make-internal-command-message
     'file.insert-path
     (make-prompt-result
       104
@@ -403,7 +403,7 @@
 
 (dispatch! (make-command-message 'move.buffer-end #f))
 (dispatch!
-  (make-command-message
+  (make-internal-command-message
     'file.insert-path
     (make-prompt-result
       105
@@ -432,7 +432,7 @@
 (dispatch! (make-command-message 'edit.undo #f))
 
 (dispatch!
-  (make-command-message
+  (make-internal-command-message
     'file.insert-path
     (make-prompt-result
       106
@@ -498,7 +498,7 @@
     (string (directory-separator))))
 (define save-name (path-last save-path))
 (dispatch!
-  (make-command-message
+  (make-internal-command-message
     'file.insert-path
     (make-prompt-result
       107
@@ -635,7 +635,7 @@
 
 (define find-origin-view-id (view-id (editor-active-view editor)))
 (dispatch!
-  (make-command-message
+  (make-internal-command-message
     'file.open-path
     (make-prompt-result
       98
@@ -661,7 +661,7 @@
     (string (directory-separator))
     save-name))
 (dispatch!
-  (make-command-message
+  (make-internal-command-message
     'file.open-path
     (make-prompt-result
       99
@@ -686,7 +686,7 @@
          "find-file did not normalize parent path components"))
 
 (dispatch!
-  (make-command-message
+  (make-internal-command-message
     'file.open-path
     (make-prompt-result
       100
@@ -720,7 +720,7 @@
   (error 'file-tests "save-as did not initialize from the current path"))
 (dispatch! (make-command-message 'prompt.abort #f))
 (dispatch!
-  (make-command-message
+  (make-internal-command-message
     'file.save-to-path
     (make-prompt-result
       99
@@ -745,7 +745,7 @@
   (editor-open-view! editor (buffer-id buffer)))
 (write-file-bytes external-path (read-file-bytes open-path))
 (dispatch!
-  (make-command-message
+  (make-internal-command-message
     'file.open-path
     (make-prompt-result
       100
@@ -754,7 +754,7 @@
       origin-view-id
       #f)))
 (dispatch!
-  (make-command-message
+  (make-internal-command-message
     'file.open-path
     (make-prompt-result
       100
@@ -782,7 +782,7 @@
   (error 'file-tests "asynchronous open did not create a file buffer"))
 
 (dispatch!
-  (make-command-message
+  (make-internal-command-message
     'file.open-path
     (make-prompt-result
       101
@@ -982,7 +982,7 @@
   (error 'file-tests "buffer prompt omitted an editor buffer"))
 (dispatch! (make-command-message 'prompt.abort #f))
 (dispatch!
-  (make-command-message
+  (make-internal-command-message
     'buffer.apply-switch
     (make-prompt-result
       102
@@ -1000,7 +1000,7 @@
 
 (define buffers-before-failed-open (length (editor-buffers editor)))
 (dispatch!
-  (make-command-message
+  (make-internal-command-message
     'file.apply-open-result
     (make-open-result
       origin-view-id
@@ -1020,7 +1020,7 @@
          "non-ENOENT open failure created a file buffer"))
 
 (dispatch!
-  (make-command-message
+  (make-internal-command-message
     'file.open-path
     (make-prompt-result
       103

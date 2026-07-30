@@ -44,50 +44,43 @@
                 (list
                   (make-command-effect
                     'command.invoke
-                    (make-command-message
+                    (make-internal-command-message
                       command
                       (prompt-session-id active))))
                 '()))
           '())))
 
-  (define editor-register-command!
-    (case-lambda
-      [(editor name procedure)
-       (require-open-editor 'editor-register-command! editor)
-       (register-command!
-         (editor-command-registry editor)
-         name
-         procedure)]
-      [(editor name procedure documentation)
-       (editor-register-command!
-         editor name procedure documentation #f)]
-      [(editor name procedure documentation class)
-       (require-open-editor 'editor-register-command! editor)
-       (register-command!
-         (editor-command-registry editor)
-         name
-         procedure
-         documentation
-         class)]))
+  (define (editor-register-command! editor definition)
+    (require-open-editor 'editor-register-command! editor)
+    (unless (command-definition? definition)
+      (assertion-violation
+        'editor-register-command!
+        "expected a command definition"
+        definition))
+    (unless (command-definition-interactive-plan definition)
+      (assertion-violation
+        'editor-register-command!
+        "interactive command requires an interactive plan"
+        (command-definition-name definition)))
+    (register-command-definition!
+      (editor-command-registry editor)
+      definition))
 
-  (define editor-register-internal-command!
-    (case-lambda
-      [(editor name procedure)
-       (editor-register-internal-command!
-         editor name procedure #f)]
-      [(editor name procedure documentation)
-       (editor-register-internal-command!
-         editor name procedure documentation #f)]
-      [(editor name procedure documentation class)
-       (require-open-editor
-         'editor-register-internal-command!
-         editor)
-       (register-internal-command!
-         (editor-command-registry editor)
-         name
-         procedure
-         documentation
-         class)]))
+  (define (editor-register-internal-command! editor definition)
+    (require-open-editor 'editor-register-internal-command! editor)
+    (unless (command-definition? definition)
+      (assertion-violation
+        'editor-register-internal-command!
+        "expected a command definition"
+        definition))
+    (when (command-definition-interactive-plan definition)
+      (assertion-violation
+        'editor-register-internal-command!
+        "internal command must not have an interactive plan"
+        (command-definition-name definition)))
+    (register-command-definition!
+      (editor-command-registry editor)
+      definition))
 
   (define interactive-prefix-count
     (make-interactive-reader
@@ -519,14 +512,16 @@
   (define (install-command-runtime-commands! editor)
     (editor-register-internal-command!
       editor
-      'command.resume-interactive
-      resume-interactive-command
-      "Resume an interactive command after minibuffer input.")
+      (make-internal-context-command
+        'command.resume-interactive
+        resume-interactive-command
+        "Resume an interactive command after minibuffer input."))
     (editor-register-internal-command!
       editor
-      'command.abort-interactive
-      abort-interactive-command
-      "Abort an interactive command awaiting minibuffer input.")
+      (make-internal-context-command
+        'command.abort-interactive
+        abort-interactive-command
+        "Abort an interactive command awaiting minibuffer input."))
     editor)
 
   (define (install-command-effect-handler! executor)
@@ -539,10 +534,13 @@
       executor
       'command.invoke
       (lambda (message)
-        (unless (command-message? message)
+        (unless
+          (or
+            (command-message? message)
+            (internal-command-message? message))
           (assertion-violation
             'command.invoke
-            "expected an interactive command message"
+            "expected a command message"
             message))
         (make-effect-result #t (list message))))
     executor))

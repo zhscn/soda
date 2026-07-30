@@ -1344,7 +1344,7 @@
             (list
               (make-command-effect
                 'command.invoke
-                (make-command-message
+                (make-internal-command-message
                   'file.save-for-quit
                   queue)))))))
 
@@ -1435,10 +1435,11 @@
       (lambda (entry)
         (editor-register-command!
           editor
-          (car entry)
-          (cadr entry)
-          (caddr entry)
-          (if (pair? (cdddr entry)) (cadddr entry) #f)))
+          (make-interactive-context-command
+            (car entry)
+            (cadr entry)
+            (caddr entry)
+            (if (pair? (cdddr entry)) (cadddr entry) #f))))
       (list
         (list 'editor.quit quit-command "Leave the editor.")
         (list
@@ -1453,10 +1454,6 @@
           'editor.quit-choice-cancel
           quit-choice-cancel-command
           "Cancel the active quit workflow.")
-        (list
-          'editor.continue-quit
-          continue-quit-command
-          "Continue checking buffers in an active quit workflow.")
         (list
           'keyboard.quit
           keyboard-quit-command
@@ -1548,10 +1545,6 @@
           goto-line-column-command
           "Read a one-based line and optional column to visit.")
         (list
-          'move.goto-line-column.accept
-          goto-line-column-accept-command
-          "Move to a line and column returned by the minibuffer.")
-        (list
           'display.toggle-line-numbers
           toggle-line-numbers-command
           "Toggle line numbers in the active buffer.")
@@ -1621,6 +1614,23 @@
           yank-pop-command
           "Replace the previous yank with another kill-ring entry."
           'yank)))
+    (for-each
+      (lambda (entry)
+        (editor-register-internal-command!
+          editor
+          (make-internal-context-command
+            (car entry)
+            (cadr entry)
+            (caddr entry))))
+      (list
+        (list
+          'editor.continue-quit
+          continue-quit-command
+          "Continue checking buffers in an active quit workflow.")
+        (list
+          'move.goto-line-column.accept
+          goto-line-column-accept-command
+          "Move to a line and column returned by the minibuffer.")))
     (let ([keymap (make-keymap)])
       (for-each
         (lambda (entry)

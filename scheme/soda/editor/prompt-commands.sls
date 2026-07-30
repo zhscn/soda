@@ -312,9 +312,10 @@
       (lambda (entry)
         (editor-register-command!
           editor
-          (car entry)
-          (cadr entry)
-          (caddr entry)))
+          (make-interactive-context-command
+            (car entry)
+            (cadr entry)
+            (caddr entry))))
       (list
         (list
           'prompt.accept
@@ -353,10 +354,6 @@
           execute-extended-command
           "Read and execute an editor command.")
         (list
-          'prompt.execute-command
-          execute-prompt-command
-          "Execute a command returned by the minibuffer.")
-        (list
           'help.describe-command
           describe-command
           "Read a command name and display its documentation.")
@@ -364,10 +361,6 @@
           'help.command-apropos
           command-apropos
           "Filter editor commands by name and display the selected command.")
-        (list
-          'help.apply-describe-command
-          apply-describe-command
-          "Display documentation for a command returned by the minibuffer.")
         (list
           'help.summary
           help-summary-command
@@ -388,6 +381,23 @@
           'help.describe-key-result
           describe-key-result-command
           "Display the command resolved from a captured key sequence.")))
+    (for-each
+      (lambda (entry)
+        (editor-register-internal-command!
+          editor
+          (make-internal-context-command
+            (car entry)
+            (cadr entry)
+            (caddr entry))))
+      (list
+        (list
+          'prompt.execute-command
+          execute-prompt-command
+          "Execute a command returned by the minibuffer.")
+        (list
+          'help.apply-describe-command
+          apply-describe-command
+          "Display documentation for a command returned by the minibuffer.")))
     (let ([keymap (make-keymap)])
       (for-each
         (lambda (entry)

@@ -94,9 +94,10 @@
   (define (install-diagnostic-commands! editor)
     (editor-register-command!
       editor
-      'diagnostics.list
-      list-diagnostics-command
-      "Publish current-buffer diagnostics as a location list.")
+      (make-interactive-context-command
+        'diagnostics.list
+        list-diagnostics-command
+        "Publish current-buffer diagnostics as a location list."))
     (editor-bind-key!
       editor
       (list (stroke #\g 2) (stroke #\d 0))

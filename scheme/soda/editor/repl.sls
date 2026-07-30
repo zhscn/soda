@@ -356,9 +356,10 @@
       (lambda (entry)
         (editor-register-command!
           editor
-          (car entry)
-          (cadr entry)
-          (caddr entry)))
+          (make-interactive-context-command
+            (car entry)
+            (cadr entry)
+            (caddr entry))))
       (list
         (list
           'scheme.open-repl
@@ -395,11 +396,13 @@
         (list
           'scheme.eval-last-sexp
           eval-last-sexp-command
-          "Evaluate the complete Scheme datum before point.")
-        (list
-          'scheme.apply-evaluation-result
-          apply-evaluation-result-command
-          "Apply an evaluator result to its interaction session.")))
+          "Evaluate the complete Scheme datum before point.")))
+    (editor-register-internal-command!
+      editor
+      (make-internal-context-command
+        'scheme.apply-evaluation-result
+        apply-evaluation-result-command
+        "Apply an evaluator result to its interaction session."))
     (install-debugger-commands! editor)
     (let ([keymap
             (or

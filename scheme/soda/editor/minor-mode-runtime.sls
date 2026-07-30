@@ -129,13 +129,14 @@
     (let ([name (minor-mode-definition-name definition)])
       (editor-register-command!
         editor
-        name
-        (lambda (context)
-          (editor-toggle-minor-mode!
-            (command-context-editor context)
-            (view-buffer (command-context-view context))
-            name
-            (command-context-prefix context))
-          '())
-        (minor-mode-definition-documentation definition)))
+        (make-interactive-context-command
+          name
+          (lambda (context)
+            (editor-toggle-minor-mode!
+              (command-context-editor context)
+              (view-buffer (command-context-view context))
+              name
+              (command-context-prefix context))
+            '())
+          (minor-mode-definition-documentation definition))))
     definition))

@@ -163,14 +163,16 @@
   (define (install-navigation-commands! editor)
     (editor-register-command!
       editor
-      'navigation.back
-      jump-back-command
-      "Return to the previous location in this view.")
+      (make-interactive-context-command
+        'navigation.back
+        jump-back-command
+        "Return to the previous location in this view."))
     (editor-register-command!
       editor
-      'navigation.forward
-      jump-forward-command
-      "Advance to the next location in this view.")
+      (make-interactive-context-command
+        'navigation.forward
+        jump-forward-command
+        "Advance to the next location in this view."))
     (editor-bind-key!
       editor
       (list
