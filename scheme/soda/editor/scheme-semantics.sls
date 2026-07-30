@@ -3102,7 +3102,12 @@
                      (cadr children))))
                (analyze-procedure-definition form scope)]
               [(string=? head "define")
-               (analyze-sequence (cddr children) scope)]
+               (analyze-sequence
+                 (if
+                   (pair? (cdr children))
+                   (cddr children)
+                   '())
+                 scope)]
               [(string=? head "let")
                (analyze-let form scope #f #f)]
               [(string=? head "let*")

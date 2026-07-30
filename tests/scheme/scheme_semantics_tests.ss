@@ -337,6 +337,19 @@
     ("(consume (ren" 10 13 callee)
     ("ren" 0 3 expression)))
 
+(let ([snapshot
+        (make-scheme-semantic-snapshot
+          86
+          0
+          (string->utf8 "(define"))])
+  (unless
+    (list?
+      (scheme-semantic-snapshot-diagnostics snapshot))
+    (error
+      'scheme-semantics-tests
+      "incomplete define analysis did not produce a snapshot"
+      (scheme-semantic-snapshot-diagnostics snapshot))))
+
 (unless
   (and
     (exists

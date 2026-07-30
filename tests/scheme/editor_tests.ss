@@ -4929,6 +4929,77 @@
              static-items))))
 (editor-close! ranked-scheme-editor)
 
+(define continuing-scheme-document
+  (make-document (string->utf8 "(def") 9412))
+(define continuing-scheme-buffer
+  (make-buffer
+    9412
+    continuing-scheme-document
+    "continuing.scm"
+    'scheme-mode))
+(define continuing-scheme-editor
+  (make-editor continuing-scheme-buffer))
+(define continuing-scheme-decoder
+  (make-input-decoder))
+(define continuing-scheme-executor
+  (make-effect-executor))
+(install-completion-effect-handlers!
+  continuing-scheme-executor
+  (editor-completion-provider-catalog
+    continuing-scheme-editor))
+(view-set-caret!
+  (editor-active-view continuing-scheme-editor)
+  (bytevector-length
+    (buffer-bytes continuing-scheme-buffer)))
+(define (apply-continuing-completion-effects! effects)
+  (let ([result
+          (execute-effects!
+            continuing-scheme-executor
+            effects)])
+    (for-each
+      (lambda (message)
+        (editor-update!
+          continuing-scheme-editor
+          message))
+      (effect-result-messages result))))
+(apply-continuing-completion-effects!
+  (send!
+    continuing-scheme-editor
+    continuing-scheme-decoder
+    (bytes 27 47)))
+(define continuing-scheme-typing-effects
+  (send!
+    continuing-scheme-editor
+    continuing-scheme-decoder
+    (string->utf8 "ine")))
+(apply-continuing-completion-effects!
+  continuing-scheme-typing-effects)
+(let ([completion
+        (editor-active-completion
+          continuing-scheme-editor)])
+  (unless
+    (and
+      completion
+      (string=? (completion-session-query completion)
+                "define")
+      (exists
+        (lambda (item)
+          (string=?
+            (completion-item-insert-text item)
+            "define-record-type"))
+        (completion-session-items completion)))
+    (error
+      'editor-tests
+      "typing an exact Scheme binding hid longer prefix candidates"
+      (editor-status-message continuing-scheme-editor)
+      (and completion
+           (completion-session-query completion))
+      (and completion
+           (map
+             completion-item-insert-text
+             (completion-session-items completion))))))
+(editor-close! continuing-scheme-editor)
+
 (define scheme-completion-document
   (make-document
     (string->utf8
