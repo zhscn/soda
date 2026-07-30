@@ -212,6 +212,17 @@ surface。它提供稳定的补全与 hover，不依赖当前进程是否已经 
 Chez runtime reflection 可以补充 procedure arity、值类别和文档，但不能覆盖静态
 library identity 或源码定义。
 
+Soda 的公共 library metadata 在应用构建时从 Scheme source tree 生成。索引器读取
+R6RS `library` 与 `export` form，归一化直接导出和 rename，并把 re-export 关联到
+可用的源码定义。生成结果是只含不可变 datum 的 Scheme library，随 whole-program
+editor boot 一起编译和嵌入。
+
+运行时 catalog 保留每个 export 的 library identity。semantic snapshot 从容错
+reader 提取当前文档的 import library；即使外围 library form 尚未闭合，已经出现的
+import clause 仍然有效。静态 completion 只暴露当前文档 import 的 Soda library，
+本地定义按名称遮蔽 catalog，primitive metadata 位于最后。索引内部保留跨 library
+同名 export，呈现层对相同名称去重。
+
 ## Completion
 
 Scheme completion provider 的请求包含 document、revision、position 和 query
@@ -244,8 +255,8 @@ completion item 的 text edit、generation、resolve 和 apply 继续遵循通�
 ## 自举静态 Provider
 
 `scheme-mode` 通过 `completion-providers` setting 启用 `scheme-static`。provider
-从请求绑定的 Document revision 建立轻量 semantic snapshot，并把本文件定义与
-R6RS/Chez primitive metadata 转换为通用 CompletionItem。
+从请求绑定的 Document revision 建立轻量 semantic snapshot，并把本文件定义、
+已 import 的 Soda API 与 R6RS/Chez primitive metadata 转换为通用 CompletionItem。
 
 自举 scanner 直接读取 UTF-8 snapshot，识别 Scheme identifier 中的标点，并容错
 跳过字符串、行注释、嵌套 block comment、datum comment 以及 quoted datum。它提取
@@ -261,9 +272,11 @@ cursor query 在 declaration range 上直接返回自身 DefinitionId，在 use 
 读取 resolution。references 只比较结构化 DefinitionId，不以文本同名作为引用。
 
 文档定义的 DefinitionId 由 document id、revision、声明 byte offset 和 name
-组成；primitive DefinitionId 使用静态 metadata identity。文档定义按名字遮蔽
-primitive。scope graph 可在同一 snapshot 和 DefinitionId 接口之后增加，provider
-catalog、completion session 和 TUI 不依赖 scanner 的内部 token 表示。
+组成；Soda API DefinitionId 使用 library、resource、声明 byte offset 和 name；
+primitive DefinitionId 使用静态 metadata identity。文档定义按名字遮蔽 library
+catalog 与 primitive。scope graph 可在同一 snapshot 和 DefinitionId 接口之后
+增加，provider catalog、completion session 和 TUI 不依赖 scanner 的内部 token
+表示。
 
 自举 xref provider 把 definition 和 resolved uses 转成通用 LocationList。当前
 Document 的 declaration 与 references 可立即导航；primitive 只有 metadata、

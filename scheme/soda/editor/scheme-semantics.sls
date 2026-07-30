@@ -6,6 +6,7 @@
           scheme-semantic-snapshot-definitions
           scheme-semantic-snapshot-uses
           scheme-semantic-snapshot-tokens
+          scheme-semantic-snapshot-imports
           scheme-definition-id?
           scheme-definition-id-source
           scheme-definition-id-document-id
@@ -33,8 +34,11 @@
           scheme-definition-id=?
           scheme-semantic-definitions-at
           scheme-semantic-references
-          scheme-primitive-definitions)
-  (import (rnrs))
+          scheme-primitive-definitions
+          scheme-index-definitions
+          scheme-definition-library)
+  (import (rnrs)
+          (soda editor builtin-api-index))
 
   (define-record-type
     (scheme-definition-identifier
@@ -57,7 +61,7 @@
     (scheme-semantic-snapshot
       %make-scheme-semantic-snapshot
       scheme-semantic-snapshot?)
-    (fields document-id revision definitions uses tokens))
+    (fields document-id revision definitions uses tokens imports))
 
   (define-record-type token
     (fields kind value start end))
@@ -578,6 +582,207 @@
             "R6RS/Chez")))
       primitive-specifications))
 
+  (define (library-name->string name)
+    (string-append
+      "("
+      (let loop ([remaining name] [result ""])
+        (if (null? remaining)
+            result
+            (loop
+              (cdr remaining)
+              (string-append
+                result
+                (if (zero? (string-length result)) "" " ")
+                (if (symbol? (car remaining))
+                    (symbol->string (car remaining))
+                    (number->string (car remaining)))))))
+      ")"))
+
+  (define (valid-index-entry? entry)
+    (and
+      (list? entry)
+      (= (length entry) 6)
+      (string? (list-ref entry 0))
+      (symbol? (list-ref entry 1))
+      (list? (list-ref entry 2))
+      (for-all
+        (lambda (part)
+          (or
+            (symbol? part)
+            (and (integer? part) (exact? part))))
+        (list-ref entry 2))
+      (or (not (list-ref entry 3))
+          (string? (list-ref entry 3)))
+      (or (not (list-ref entry 4))
+          (exact-non-negative-integer? (list-ref entry 4)))
+      (or (not (list-ref entry 5))
+          (exact-non-negative-integer? (list-ref entry 5)))))
+
+  (define (index-entry->definition entry)
+    (let ([name (list-ref entry 0)]
+          [kind (list-ref entry 1)]
+          [library (list-ref entry 2)]
+          [resource (list-ref entry 3)]
+          [start (list-ref entry 4)]
+          [end (list-ref entry 5)])
+      (make-scheme-definition
+        (make-scheme-definition-id
+          'index
+          resource
+          library
+          start
+          name)
+        name
+        kind
+        start
+        end
+        (string-append
+          "Exported by "
+          (library-name->string library)))))
+
+  (define scheme-index-definitions
+    (map
+      (lambda (entry)
+        (unless (valid-index-entry? entry)
+          (assertion-violation
+            'scheme-index-definitions
+            "invalid embedded Scheme API index entry"
+            entry))
+        (index-entry->definition entry))
+      soda-built-in-api-index))
+
+  (define scheme-global-definitions
+    (append
+      scheme-index-definitions
+      scheme-primitive-definitions))
+
+  (define scheme-global-definition-table
+    (let ([table (make-hashtable string-hash string=?)])
+      (for-each
+        (lambda (definition)
+          (let ([name (scheme-definition-name definition)])
+            (hashtable-set!
+              table
+              name
+              (cons
+                definition
+                (hashtable-ref table name '())))))
+        scheme-global-definitions)
+      table))
+
+  (define (scheme-definition-library definition)
+    (unless (scheme-definition? definition)
+      (assertion-violation
+        'scheme-definition-library
+        "expected a Scheme definition"
+        definition))
+    (let ([id (scheme-definition-id definition)])
+      (and
+        (eq? (scheme-definition-id-source id) 'index)
+        (scheme-definition-id-revision id))))
+
+  (define import-modifiers
+    '(only except prefix rename for))
+
+  (define (library-name? value)
+    (and
+      (list? value)
+      (pair? value)
+      (for-all
+        (lambda (part)
+          (or (symbol? part)
+              (and (integer? part) (exact? part))))
+        value)))
+
+  (define (import-spec-library specification)
+    (and
+      (pair? specification)
+      (if (memq (car specification) import-modifiers)
+          (and
+            (pair? (cdr specification))
+            (import-spec-library (cadr specification)))
+          (and
+            (library-name? specification)
+            specification))))
+
+  (define (import-clause-libraries clause)
+    (if (and (pair? clause) (eq? (car clause) 'import))
+        (filter
+          (lambda (value) value)
+          (map import-spec-library (cdr clause)))
+        '()))
+
+  (define (datum-imports datum)
+    (cond
+      [(and
+         (pair? datum)
+         (eq? (car datum) 'library)
+         (pair? (cdr datum)))
+       (apply
+         append
+         (map import-clause-libraries (cddr datum)))]
+      [(and (pair? datum) (eq? (car datum) 'import))
+       (import-clause-libraries datum)]
+      [else '()]))
+
+  (define (partial-datum tokens)
+    (cond
+      [(null? tokens) (values #f '())]
+      [(eq? (token-kind (car tokens)) 'symbol)
+       (values
+         (string->symbol (token-value (car tokens)))
+         (cdr tokens))]
+      [(eq? (token-kind (car tokens)) 'open)
+       (let loop ([remaining (cdr tokens)] [result '()])
+         (cond
+           [(null? remaining)
+            (values (reverse result) '())]
+           [(eq? (token-kind (car remaining)) 'close)
+            (values (reverse result) (cdr remaining))]
+           [else
+            (call-with-values
+              (lambda () (partial-datum remaining))
+              (lambda (datum tail)
+                (loop
+                  tail
+                  (if datum (cons datum result) result))))]))]
+      [else (values #f (cdr tokens))]))
+
+  (define (partial-data tokens)
+    (let loop ([remaining tokens] [result '()])
+      (if (null? remaining)
+          (reverse result)
+          (call-with-values
+            (lambda () (partial-datum remaining))
+            (lambda (datum tail)
+              (loop
+                tail
+                (if datum (cons datum result) result)))))))
+
+  (define (source-imports bytes)
+    (apply
+      append
+      (map
+        datum-imports
+        (partial-data
+          (remove-ignored-data
+            (semantic-tokens (tokenize bytes)))))))
+
+  (define (definition-visible-from? definition imports)
+    (let ([library (scheme-definition-library definition)])
+      (or
+        (not library)
+        (member library imports))))
+
+  (define (visible-global-definitions-named name imports)
+    (filter
+      (lambda (definition)
+        (definition-visible-from? definition imports))
+      (hashtable-ref
+        scheme-global-definition-table
+        name
+        '())))
+
   (define (scheme-definition-id=? left right)
     (and (scheme-definition-id? left)
          (scheme-definition-id? right)
@@ -607,7 +812,7 @@
                 (scheme-definition-end definition))))
       definitions))
 
-  (define (scan-uses tokens definitions)
+  (define (scan-uses tokens definitions imports)
     (let loop ([tokens (remove-ignored-data tokens)]
                [uses '()])
       (cond
@@ -622,9 +827,9 @@
                 [resolved
                   (if (pair? local)
                       local
-                      (definitions-named
+                      (visible-global-definitions-named
                         name
-                        scheme-primitive-definitions))])
+                        imports))])
            (loop
              (cdr tokens)
              (cons
@@ -690,7 +895,7 @@
                       (or
                         (definition-by-id definitions id)
                         (definition-by-id
-                          scheme-primitive-definitions
+                          scheme-global-definitions
                           id)))
                     (scheme-use-resolution use))))))))
 
@@ -731,11 +936,13 @@
         bytes))
     (let* ([tokens (tokenize bytes)]
            [semantic (semantic-tokens tokens)]
+           [imports (source-imports bytes)]
            [definitions
              (scan-definitions document-id revision semantic)])
       (%make-scheme-semantic-snapshot
         document-id
         revision
         definitions
-        (scan-uses semantic definitions)
-        tokens))))
+        (scan-uses semantic definitions imports)
+        tokens
+        imports))))

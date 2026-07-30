@@ -1,6 +1,7 @@
 #!r6rs
 (import (rnrs)
         (soda editor language)
+        (soda editor scheme-api-indexer)
         (soda editor scheme-semantics))
 
 (unless
@@ -187,3 +188,69 @@
       uses))
   (error 'scheme-semantics-tests
          "use scanner included quoted data or missed primitive resolution"))
+
+(define indexed-sources
+  (list
+    (cons
+      "alpha.sls"
+      (string->utf8
+        (string-append
+          "(library (sample alpha)\n"
+          "  (export alpha-value (rename (alpha-run run)))\n"
+          "  (import (rnrs))\n"
+          "  (define alpha-value 1)\n"
+          "  (define (alpha-run) alpha-value)))\n")))
+    (cons
+      "facade.sls"
+      (string->utf8
+        (string-append
+          "(library (sample facade)\n"
+          "  (export alpha-value run)\n"
+          "  (import (sample alpha))))\n")))))
+
+(define generated-index
+  (scheme-sources-api-index indexed-sources))
+
+(define (index-entry name library)
+  (find
+    (lambda (entry)
+      (and
+        (string=? (car entry) name)
+        (equal? (caddr entry) library)))
+    generated-index))
+
+(unless
+  (let ([renamed
+          (index-entry "run" '(sample alpha))]
+        [reexported
+          (index-entry "alpha-value" '(sample facade))])
+    (and
+      (= (length generated-index) 4)
+      renamed
+      (eq? (cadr renamed) 'procedure)
+      (string=? (list-ref renamed 3) "alpha.sls")
+      (exact-non-negative-integer? (list-ref renamed 4))
+      reexported
+      (eq? (cadr reexported) 'variable)
+      (string=? (list-ref reexported 3) "alpha.sls")))
+  (error 'scheme-semantics-tests
+         "library export index lost rename or re-export metadata"
+         generated-index))
+
+(let* ([partial-source
+         (string-append
+           "(library (sample incomplete)\n"
+           "  (export)\n"
+           "  (import (rnrs) (soda editor core))\n"
+           "  (editor-register-command!")]
+       [partial-snapshot
+         (make-scheme-semantic-snapshot
+           72
+           0
+           (string->utf8 partial-source))])
+  (unless
+    (member
+      '(soda editor core)
+      (scheme-semantic-snapshot-imports partial-snapshot))
+    (error 'scheme-semantics-tests
+           "partial source did not preserve library imports")))

@@ -36,31 +36,33 @@
               (lambda () (text-close! text)))))
         (lambda () (snapshot-close! snapshot)))))
 
-  (define (definition-name-member? name definitions)
-    (exists
-      (lambda (definition)
-        (string=? name (scheme-definition-name definition)))
-      definitions))
-
   (define (visible-definitions snapshot)
-    (let ([local
-            (scheme-semantic-snapshot-definitions snapshot)])
-      (append
-        local
-        (filter
-          (lambda (definition)
-            (not
-              (definition-name-member?
-                (scheme-definition-name definition)
-                local)))
-          scheme-primitive-definitions))))
+    (let ([seen (make-hashtable string-hash string=?)]
+          [result '()])
+      (for-each
+        (lambda (definition)
+          (let ([name (scheme-definition-name definition)])
+            (unless (hashtable-contains? seen name)
+              (hashtable-set! seen name #t)
+              (set! result (cons definition result)))))
+        (append
+          (scheme-semantic-snapshot-definitions snapshot)
+          (filter
+            (lambda (definition)
+              (member
+                (scheme-definition-library definition)
+                (scheme-semantic-snapshot-imports snapshot)))
+            scheme-index-definitions)
+          scheme-primitive-definitions))
+      (reverse result)))
 
   (define (definition-group definition)
-    (if (eq? (scheme-definition-id-source
-               (scheme-definition-id definition))
-             'document)
-        "Current document"
-        "R6RS/Chez"))
+    (case
+      (scheme-definition-id-source
+        (scheme-definition-id definition))
+      [(document) "Current document"]
+      [(index) "Soda API"]
+      [else "R6RS/Chez"]))
 
   (define (definition->completion-item definition)
     (let ([name (scheme-definition-name definition)])

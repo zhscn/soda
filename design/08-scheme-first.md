@@ -33,6 +33,11 @@ libraries。libuv 由 CMake FetchContent 获取并链接其 static target。Chez
 top-level program 经过 whole-program compilation 后生成以该 runtime 为基底的
 editor boot。两个 boot image 由 `xxd` 转换为 C arrays 并链接进 `soda`。
 
+editor boot 的 staging tree 包含由 Soda Scheme sources 生成的公共 API catalog。
+生成器读取每个 R6RS library 的 export surface，并记录 binding 名称、种类、library
+identity 与源码 byte range。catalog 作为普通 Scheme library 参与 whole-program
+编译，因此数据随 editor boot 静态嵌入，不需要启动时查找源码树或装载独立索引文件。
+
 进程启动顺序固定为：
 
 ```text

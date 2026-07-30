@@ -146,6 +146,19 @@ soda_embed_chez_application(soda
 )
 
 if(BUILD_TESTING)
+  add_test(
+    NAME scheme_embedded_api_index_tests
+    CONFIGURATIONS Debug Release
+    COMMAND
+      "${SODA_CHEZ_SCHEME_EXECUTABLE}"
+      --libdirs
+      "${CMAKE_CURRENT_BINARY_DIR}/generated/chez/scheme"
+      --program
+      "${PROJECT_SOURCE_DIR}/tests/scheme/embedded_api_index_tests.ss"
+  )
+endif()
+
+if(BUILD_TESTING)
   add_library(soda_scheme_native_test SHARED
     document/c_api.cpp
     document/document.cpp
