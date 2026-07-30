@@ -71,7 +71,32 @@
              "R6RS/Chez"))]
         [else "R6RS/Chez"])))
 
-  (define (definition->completion-item definition)
+  (define callable-definition-kinds
+    '(procedure
+      syntax
+      constructor
+      predicate
+      accessor
+      mutator))
+
+  (define (definition-priority definition role)
+    (case role
+      [(callee)
+       (if
+         (memq
+           (scheme-definition-kind definition)
+           callable-definition-kinds)
+         20
+         0)]
+      [else
+       (if
+         (eq?
+           (scheme-definition-kind definition)
+           'syntax)
+         -20
+         0)]))
+
+  (define (definition->completion-item definition role)
     (let* ([name (scheme-definition-name definition)]
            [signatures
              (scheme-definition-signatures definition)]
@@ -94,7 +119,8 @@
         (scheme-definition-documentation definition)
         definition
         annotation
-        (definition-group definition))))
+        (definition-group definition)
+        (definition-priority definition role))))
 
   (define (start-scheme-completion
             editor
@@ -122,26 +148,33 @@
                       request
                       '()
                       #t))
-                  (let ([snapshot
-                          (if
-                            (and
-                              workspace
-                              (scheme-workspace-session-active?
-                                workspace))
-                              (begin
-                                (scheme-workspace-sync-editor!
-                                  workspace editor)
-                                (scheme-workspace-snapshot-for-buffer
-                                  workspace buffer))
-                              (make-scheme-semantic-snapshot
-                                document-id
-                                revision
-                                bytes))])
+                  (let* ([snapshot
+                           (if
+                             (and
+                               workspace
+                               (scheme-workspace-session-active?
+                                 workspace))
+                               (begin
+                                 (scheme-workspace-sync-editor!
+                                   workspace editor)
+                                 (scheme-workspace-snapshot-for-buffer
+                                   workspace buffer))
+                               (make-scheme-semantic-snapshot
+                                 document-id
+                                 revision
+                                 bytes))]
+                         [role
+                           (scheme-semantic-completion-role
+                             snapshot
+                             (completion-request-start request)
+                             (completion-request-end request))])
                     (list
                       (make-completion-response-for-request
                         request
                         (map
-                          definition->completion-item
+                          (lambda (definition)
+                            (definition->completion-item
+                              definition role))
                           (visible-definitions
                             snapshot
                             (completion-request-end request)))

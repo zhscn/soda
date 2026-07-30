@@ -87,6 +87,7 @@ CompletionItem {
   detail,
   edit: CompletionEdit?,
   sort_text,
+  priority,
   annotation?,
   group?,
   is_snippet,
@@ -110,7 +111,8 @@ CompletionEdit {
 
 `id` 在一个 generation 内稳定，UI、resolve 和 apply 都按 id 寻址，不用 label
 反查。菜单需要的轻字段随初始响应归一化；documentation 和其他重字段只对选中项
-及可视范围懒 resolve。
+及可视范围懒 resolve。`priority` 是 provider 提供的 exact integer，只表达同一
+文本匹配质量下的语义相关度；普通候选使用零。
 
 范围绑定请求 snapshot。provider 未指定 edit 时使用 session 的通用 insert/replace
 范围；LSP 的 insert/replace 双范围原样保留到 apply policy。additional edit 与主
@@ -167,9 +169,11 @@ completion request identity 绑定；generation 更新或 session 关闭时取�
 供 presenter 高亮命中片段。
 
 所有 provider 进入同一个排序：style 层级、exact、匹配紧凑度、起始位置、
-`sort_text` 和 label。provider priority 只作为明确的 tie-break policy，不用短路
-方式隐藏较晚来源。异步合并和 refilter 通过 `(provider, item-id)` 恢复选择，不把
-旧的列表索引解释成候选身份。
+item semantic priority、候选长度、`sort_text` 和 label。文本匹配质量始终先于
+语义 priority；priority 让 language provider 在同等匹配下表达 callee、value 或
+类型兼容度，不把语言知识写进 matcher。provider priority 只作为明确的 tie-break
+policy，不用短路方式隐藏较晚来源。异步合并和 refilter 通过
+`(provider, item-id)` 恢复选择，不把旧的列表索引解释成候选身份。
 
 语义重复可按最终 `new_text`、range 和 kind 去重；原 item identity 仍保留在
 provider side table 中供 resolve。

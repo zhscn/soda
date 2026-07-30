@@ -487,6 +487,7 @@
           completion-item-detail
           completion-item-edit
           completion-item-sort-text
+          completion-item-priority
           completion-item-annotation
           completion-item-group
           completion-item-snippet?

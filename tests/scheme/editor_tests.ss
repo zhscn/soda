@@ -4835,6 +4835,96 @@
          "multi-edit completion did not undo atomically"))
 (editor-close! edit-completion-editor)
 
+(define ranked-scheme-document
+  (make-document
+    (string->utf8
+      (string-append
+        "(define render-var 1)\n"
+        "(define (render-fun) 1)\n"
+        "(ren"))
+    9411))
+(define ranked-scheme-buffer
+  (make-buffer
+    9411
+    ranked-scheme-document
+    "ranked.scm"
+    'scheme-mode))
+(define ranked-scheme-editor
+  (make-editor ranked-scheme-buffer))
+(define ranked-scheme-decoder
+  (make-input-decoder))
+(define ranked-scheme-executor
+  (make-effect-executor))
+(install-completion-effect-handlers!
+  ranked-scheme-executor
+  (editor-completion-provider-catalog
+    ranked-scheme-editor))
+(view-set-caret!
+  (editor-active-view ranked-scheme-editor)
+  (bytevector-length
+    (buffer-bytes ranked-scheme-buffer)))
+(define ranked-scheme-effects
+  (send!
+    ranked-scheme-editor
+    ranked-scheme-decoder
+    (bytes 27 47)))
+(define ranked-scheme-result
+  (execute-effects!
+    ranked-scheme-executor
+    ranked-scheme-effects))
+(for-each
+  (lambda (message)
+    (editor-update! ranked-scheme-editor message))
+  (effect-result-messages ranked-scheme-result))
+(let ([static-items
+        (filter
+          (lambda (item)
+            (and
+              (eq? (completion-item-provider item)
+                   'scheme-static)
+              (or
+                (string=?
+                  (completion-item-insert-text item)
+                  "render-fun")
+                (string=?
+                  (completion-item-insert-text item)
+                  "render-var"))))
+          (completion-session-items
+            (editor-active-completion
+              ranked-scheme-editor)))])
+  (unless
+    (and
+      (= (length static-items) 2)
+      (string=?
+        (completion-item-insert-text
+          (car static-items))
+        "render-fun")
+      (= (completion-item-priority
+           (car static-items))
+         20)
+      (= (completion-item-priority
+           (cadr static-items))
+         0))
+    (error 'editor-tests
+           "Scheme callee completion did not prioritize callable bindings"
+           (map
+             (lambda (effect)
+               (let ([request
+                       (command-effect-payload effect)])
+                 (list
+                   (completion-request-provider request)
+                   (completion-request-start request)
+                   (completion-request-end request))))
+             ranked-scheme-effects)
+           (map
+             (lambda (item)
+               (list
+                 (completion-item-insert-text item)
+                 (completion-item-kind item)
+                 (completion-item-priority item)))
+             static-items))))
+(editor-close! ranked-scheme-editor)
+
 (define scheme-completion-document
   (make-document
     (string->utf8

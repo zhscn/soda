@@ -11,6 +11,7 @@
           completion-item-detail
           completion-item-edit
           completion-item-sort-text
+          completion-item-priority
           completion-item-annotation
           completion-item-group
           completion-item-snippet?
@@ -134,7 +135,8 @@
             snippet?
             resolved?
             documentation
-            provider-data))
+            provider-data
+            priority))
 
   (define-record-type
     (completion-text-edit %make-completion-text-edit completion-text-edit?)
@@ -468,7 +470,8 @@
          annotation
          provider-data
          annotation
-         group)]
+         group
+         0)]
       [(id
          provider
          filter-text
@@ -484,6 +487,39 @@
          provider-data
          annotation
          group)
+       (make-completion-item
+         id
+         provider
+         filter-text
+         label
+         insert-text
+         kind
+         detail
+         edit
+         sort-text
+         snippet?
+         resolved?
+         documentation
+         provider-data
+         annotation
+         group
+         0)]
+      [(id
+         provider
+         filter-text
+         label
+         insert-text
+         kind
+         detail
+         edit
+         sort-text
+         snippet?
+         resolved?
+         documentation
+         provider-data
+         annotation
+         group
+         priority)
        (unless (symbol? provider)
          (assertion-violation
            'make-completion-item
@@ -531,6 +567,11 @@
            "snippet and resolved flags must be booleans"
            snippet?
            resolved?))
+       (unless (and (integer? priority) (exact? priority))
+         (assertion-violation
+           'make-completion-item
+           "priority must be an exact integer"
+           priority))
        (%make-completion-item
          id
          provider
@@ -546,7 +587,8 @@
          snippet?
          resolved?
          documentation
-         provider-data)]))
+         provider-data
+         priority)]))
 
   (define completion-item-source completion-item-provider)
   (define completion-item-payload completion-item-provider-data)
@@ -838,6 +880,13 @@
                  (match-start right-match)))
          (< (match-start left-match)
             (match-start right-match))]
+        [(not
+           (=
+             (completion-item-priority left-item)
+             (completion-item-priority right-item)))
+         (>
+           (completion-item-priority left-item)
+           (completion-item-priority right-item))]
         [(not
            (=
              (string-length

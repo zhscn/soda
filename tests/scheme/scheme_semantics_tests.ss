@@ -313,6 +313,30 @@
            "incomplete calls produced premature arity diagnostics"
            (map scheme-diagnostic-message arity-errors))))
 
+(for-each
+  (lambda (specification)
+    (let* ([source (car specification)]
+           [start (cadr specification)]
+           [end (caddr specification)]
+           [expected (cadddr specification)]
+           [snapshot
+             (make-scheme-semantic-snapshot
+               85
+               0
+               (string->utf8 source))]
+           [actual
+             (scheme-semantic-completion-role
+               snapshot start end)])
+      (unless (eq? actual expected)
+        (error 'scheme-semantics-tests
+               "Scheme completion role did not follow list position"
+               source start end expected actual))))
+  '(("(" 1 1 callee)
+    ("(ren" 1 4 callee)
+    ("(consume ren" 9 12 expression)
+    ("(consume (ren" 10 13 callee)
+    ("ren" 0 3 expression)))
+
 (unless
   (and
     (exists

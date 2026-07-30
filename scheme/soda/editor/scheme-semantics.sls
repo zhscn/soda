@@ -73,6 +73,7 @@
           scheme-definition-id-hash
           scheme-semantic-definitions-at
           scheme-semantic-call-context-at
+          scheme-semantic-completion-role
           scheme-semantic-references
           scheme-semantic-document-highlights-at
           scheme-primitive-definitions
@@ -3657,6 +3658,47 @@
               0
               (- (list-item-count-before tail offset) 1))
             definitions)))))
+
+  (define (scheme-semantic-completion-role
+            snapshot
+            start
+            end)
+    (unless (scheme-semantic-snapshot? snapshot)
+      (assertion-violation
+        'scheme-semantic-completion-role
+        "expected a Scheme semantic snapshot"
+        snapshot))
+    (unless
+      (and
+        (exact-non-negative-integer? start)
+        (exact-non-negative-integer? end)
+        (<= start end))
+      (assertion-violation
+        'scheme-semantic-completion-role
+        "completion range must be valid"
+        start
+        end))
+    (let* ([tokens (call-context-tokens snapshot)]
+           [open (innermost-open-token tokens end)]
+           [tail (and open (tokens-after open tokens))]
+           [callee
+             (and
+               (pair? tail)
+               (< (token-start (car tail)) end)
+               (symbol-token? (car tail))
+               (car tail))])
+      (if
+        (and
+          open
+          (or
+            (and
+              callee
+              (<= (token-start callee) start)
+              (<= start (token-end callee)))
+            (zero?
+              (list-item-count-before tail end))))
+        'callee
+        'expression)))
 
   (define (scheme-semantic-references snapshot definition-id)
     (unless (scheme-semantic-snapshot? snapshot)

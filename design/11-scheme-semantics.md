@@ -421,6 +421,13 @@ buffer-local policy 选择 provider 组合；组合时遵循：
 completion item 的 text edit、generation、resolve 和 apply 继续遵循通用补全
 管线；Scheme provider 不直接修改 Buffer。
 
+静态 provider 还从 query range 判断 completion role。range 位于当前 list 的首个
+datum，或 list 尚未输入首个 datum时，role 为 `callee`；其他位置为
+`expression`。callee role 提升 procedure、syntax、constructor、predicate、
+accessor 和 mutator，普通 expression role 降低不能作为值使用的 syntax binding。
+该结果写入 `CompletionItem.priority`，只在文本匹配质量相同时参与排序。role 查询
+只读取 revision-scoped token stream，不执行宏，也不根据名字猜测类型。
+
 ## Symbol inspection 与调用签名
 
 symbol inspection 与调用签名通过 editor 的 `SchemeWorkspaceIndex` 读取和
