@@ -2248,7 +2248,92 @@
     (error
       'editor-tests
       "catalog generation did not refresh unchanged-buffer diagnostics")))
+(view-set-caret!
+  (editor-active-view project-diagnostic-editor)
+  (substring-position
+    (utf8->string
+      (buffer-bytes project-diagnostic-buffer))
+    "project-value"))
+(editor-update!
+  project-diagnostic-editor
+  (make-command-message 'help.describe-symbol #f))
+(unless
+  (string=?
+    (editor-status-message project-diagnostic-editor)
+    (string-append
+      "(project-value value)"
+      " — Exported by (sample diagnostics)"))
+  (error
+    'editor-tests
+    "Scheme symbol help did not use the project workspace snapshot"
+    (editor-status-message project-diagnostic-editor)))
+(view-set-caret!
+  (editor-active-view project-diagnostic-editor)
+  (- (bytevector-length
+       (buffer-bytes project-diagnostic-buffer))
+     2))
+(editor-update!
+  project-diagnostic-editor
+  (make-command-message 'scheme.signature-help #f))
+(unless
+  (string=?
+    (editor-status-message project-diagnostic-editor)
+    "Argument 2: (project-value value)")
+  (error
+    'editor-tests
+    "Scheme signature help did not use the project workspace snapshot"
+    (editor-status-message project-diagnostic-editor)))
 (editor-close! project-diagnostic-editor)
+
+(define document-symbol-source
+  (string-append
+    "(import (rnrs))\n"
+    "(define first-value 1)\n"
+    "(define (second-value input) input)\n"))
+(define document-symbol-buffer
+  (make-buffer
+    1987
+    (make-document document-symbol-source 1987)
+    "*document-symbols*"
+    'scheme-mode))
+(define document-symbol-editor
+  (make-editor document-symbol-buffer))
+(editor-update!
+  document-symbol-editor
+  (make-command-message
+    'xref.find-document-symbol
+    #f))
+(let* ([prompt
+         (editor-active-prompt
+           document-symbol-editor)]
+       [completion
+         (and
+           prompt
+           (editor-active-prompt-completion
+             document-symbol-editor))]
+       [labels
+         (if
+           completion
+           (map
+             completion-item-label
+             (completion-session-items completion))
+           '())])
+  (unless
+    (and
+      prompt
+      (string=?
+        (prompt-request-prompt
+          (prompt-session-request prompt))
+        "Document symbol: ")
+      (member "first-value" labels)
+      (member "second-value" labels)
+      (not (member "map" labels)))
+    (error
+      'editor-tests
+      "document symbol picker did not expose only current-buffer definitions"
+      labels)))
+(editor-abort-prompt! document-symbol-editor)
+(editor-close! document-symbol-editor)
 
 (define highlight-document
   (make-document

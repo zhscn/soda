@@ -258,6 +258,29 @@
     'embedded-api-index-tests
     "workspace symbols did not prefer the open source definition"
     workspace-command-symbols))
+(let ([symbols
+        (scheme-workspace-document-symbols
+          workspace-index
+          workspace-editor
+          workspace-source-buffer)])
+  (unless
+    (and
+      (pair? symbols)
+      (for-all
+        (lambda (symbol)
+          (=
+            (scheme-workspace-symbol-buffer-id symbol)
+            (buffer-id workspace-source-buffer)))
+        symbols)
+      (exists
+        (lambda (symbol)
+          (string=?
+            (scheme-workspace-symbol-name symbol)
+            "editor-register-command!"))
+        symbols))
+    (error
+      'embedded-api-index-tests
+      "document symbols did not stay within the requested source buffer")))
 (buffer-replace-range!
   workspace-consumer-buffer
   0

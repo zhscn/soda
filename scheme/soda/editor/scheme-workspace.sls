@@ -20,6 +20,7 @@
           scheme-workspace-text-edit-end
           scheme-workspace-text-edit-text
           scheme-workspace-rename-edits
+          scheme-workspace-document-symbols
           scheme-workspace-symbols
           scheme-workspace-symbol?
           scheme-workspace-symbol-key
@@ -1215,6 +1216,49 @@
           (<
             (scheme-workspace-symbol-start left)
             (scheme-workspace-symbol-start right))))))
+
+  (define (document-symbol-before? left right)
+    (or
+      (<
+        (scheme-workspace-symbol-start left)
+        (scheme-workspace-symbol-start right))
+      (and
+        (=
+          (scheme-workspace-symbol-start left)
+          (scheme-workspace-symbol-start right))
+        (string<?
+          (scheme-workspace-symbol-name left)
+          (scheme-workspace-symbol-name right)))))
+
+  (define (scheme-workspace-document-symbols
+            index
+            editor
+            buffer)
+    (require-index
+      'scheme-workspace-document-symbols
+      index)
+    (unless (buffer? buffer)
+      (assertion-violation
+        'scheme-workspace-document-symbols
+        "expected a buffer"
+        buffer))
+    (scheme-workspace-sync-editor! index editor)
+    (let ([document
+            (hashtable-ref
+              (scheme-workspace-index-documents index)
+              (buffer-id buffer)
+              #f)])
+      (if
+        (not document)
+        '()
+        (list-sort
+          document-symbol-before?
+          (map
+            (lambda (definition)
+              (document-symbol document definition))
+            (scheme-semantic-snapshot-root-definitions
+              (scheme-workspace-document-snapshot
+                document)))))))
 
   (define (scheme-workspace-symbols index editor)
     (require-index 'scheme-workspace-symbols index)

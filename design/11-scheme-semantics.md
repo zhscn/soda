@@ -364,10 +364,12 @@ completion item 的 text edit、generation、resolve 和 apply 继续遵循通�
 
 ## Symbol inspection 与调用签名
 
-symbol inspection 与调用签名读取和 completion、xref 相同 revision 的 semantic
+symbol inspection 与调用签名通过 editor 的 `SchemeWorkspaceIndex` 读取和
+completion、xref 相同 revision 与 library catalog generation 的 semantic
 snapshot。光标落在 definition 或 resolved use 上时，查询返回 canonical
 `SchemeDefinition`，呈现层可读取 kind、signature、library detail、documentation
-和 source location。`help.describe-symbol` 通过 `C-h o` 把这些字段组合成简短描述。
+和 source location。`help.describe-symbol` 通过 `C-h o` 把这些字段组合成简短描述；
+project library 的 definition 与嵌入 API 使用相同呈现路径。
 
 调用现场使用独立的数据模型：
 
@@ -389,6 +391,14 @@ import modifier 和嵌入 Soda API 具有相同的查询行为。
 `scheme.signature-help` 通过 `C-c C-s` 显示当前参数位置以及所有已解析签名。
 `SchemeCallContext` 不包含 TUI 状态，后续 inline overlay、详情窗口和自动触发策略
 直接消费同一查询结果。
+
+document symbol 查询投影当前 Buffer snapshot 的 root definitions，不包含 import
+surface、primitive、其他 Buffer 或局部 lexical binding。每个结果复用
+`SchemeWorkspaceSymbol` 的 DefinitionId、kind、buffer、revision 与 declaration
+range，并按源码位置排序。`xref.find-document-symbol`（`M-g i`）使用通用
+completing-read 与 fzf matching 打开当前文档候选，接受后通过普通 jump graph
+移动到声明。`xref.find-symbol`（`M-g I`）仍独立合并整个 Project、打开的 Buffer
+和带源码的嵌入 API。
 
 ## 自举静态 Provider
 

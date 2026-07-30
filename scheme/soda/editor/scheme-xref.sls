@@ -346,9 +346,23 @@
   (define (workspace-symbol-choice-source
             workspace
             editor)
-    (let* ([symbols
-             (scheme-workspace-symbols workspace editor)]
-           [items
+    (symbol-choice-source
+      'scheme-workspace-symbol
+      (scheme-workspace-symbols workspace editor)))
+
+  (define (document-symbol-choice-source
+            workspace
+            context)
+    (symbol-choice-source
+      'scheme-document-symbol
+      (scheme-workspace-document-symbols
+        workspace
+        (command-context-editor context)
+        (view-buffer
+          (command-context-view context)))))
+
+  (define (symbol-choice-source source-id symbols)
+    (let ([items
              (map
                (lambda (symbol)
                  (let ([name
@@ -364,7 +378,7 @@
                      (scheme-workspace-symbol-key symbol))))
                symbols)])
       (make-choice-source
-        'scheme-workspace-symbol
+        source-id
         '((category . symbol)
           (styles . (fzf))
           (ignore-case . #t)
@@ -390,6 +404,24 @@
           (command-context-editor context)))
       'must-match
       'scheme-workspace-symbol
+      ""
+      #f
+      (lambda (context result)
+        (let ([candidate
+                (prompt-result-candidate result)])
+          (if
+            candidate
+            (list (completion-item-payload candidate))
+            (list #f))))))
+
+  (define (document-symbol-reader workspace)
+    (interactive-completing-read
+      "Document symbol: "
+      (lambda (context)
+        (document-symbol-choice-source
+          workspace context))
+      'must-match
+      'scheme-document-symbol
       ""
       #f
       (lambda (context result)
@@ -478,6 +510,54 @@
             (workspace-symbol-reader workspace)))
         '())))
 
+  (define (find-document-symbol-command
+            workspace
+            context
+            key)
+    (let* ([editor (command-context-editor context)]
+           [buffer
+             (view-buffer
+               (command-context-view context))]
+           [symbol
+             (find-workspace-symbol
+               (scheme-workspace-document-symbols
+                 workspace editor buffer)
+               key)])
+      (if
+        (not symbol)
+        (begin
+          (editor-set-status-message!
+            editor
+            "Document symbol is stale")
+          '())
+        (begin
+          (editor-jump-to-buffer!
+            editor
+            buffer
+            (scheme-workspace-symbol-start symbol))
+          (editor-set-status-message!
+            editor
+            (scheme-workspace-symbol-name symbol))
+          '()))))
+
+  (define (make-find-document-symbol-definition
+            workspace)
+    (let ([implementation
+            (lambda (context key)
+              (find-document-symbol-command
+                workspace context key))])
+      (make-command-definition
+        'xref.find-document-symbol
+        implementation
+        (lambda (context arguments)
+          (apply implementation context arguments))
+        "Find a Scheme symbol in the current document."
+        #f
+        (make-interactive-plan
+          (list
+            (document-symbol-reader workspace)))
+        '())))
+
   (define (stroke character modifiers)
     (make-key-stroke
       'character
@@ -518,6 +598,10 @@
       (editor-register-command!
         editor
         (make-find-symbol-definition workspace))
+      (editor-register-command!
+        editor
+        (make-find-document-symbol-definition
+          workspace))
       (for-each
         (lambda (entry)
           (editor-bind-key! editor (car entry) (cdr entry)))
@@ -536,5 +620,8 @@
             'xref.previous-location)
           (cons
             (list (stroke #\g 2) (stroke #\i 0))
+            'xref.find-document-symbol)
+          (cons
+            (list (stroke #\g 2) (stroke #\I 0))
             'xref.find-symbol)))
       workspace)))

@@ -1,13 +1,18 @@
 (library (soda editor scheme-help)
   (export install-scheme-help-commands!)
   (import (rnrs)
+          (only (chezscheme) make-weak-eq-hashtable)
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
           (soda editor keymap)
           (soda editor scheme-query)
           (soda editor scheme-semantics)
+          (soda editor scheme-workspace)
           (soda editor state))
+
+  (define editor-workspaces
+    (make-weak-eq-hashtable))
 
   (define (require-scheme-buffer who context)
     (let ([buffer
@@ -28,6 +33,20 @@
             (string-append result separator value))
           (car values)
           (cdr values))))
+
+  (define (semantic-snapshot editor buffer)
+    (let ([workspace
+            (hashtable-ref
+              editor-workspaces editor #f)])
+      (if
+        workspace
+        (begin
+          (scheme-workspace-sync-editor!
+            workspace editor)
+          (scheme-workspace-snapshot-for-buffer
+            workspace buffer))
+        (buffer-scheme-semantic-snapshot
+          buffer))))
 
   (define (definition-description definition)
     (let* ([signatures
@@ -62,7 +81,7 @@
                'help.describe-symbol
                context)]
            [snapshot
-             (buffer-scheme-semantic-snapshot buffer)]
+             (semantic-snapshot editor buffer)]
            [definitions
              (scheme-definitions-at-point
                snapshot
@@ -84,7 +103,7 @@
                'scheme.signature-help
                context)]
            [snapshot
-             (buffer-scheme-semantic-snapshot buffer)]
+             (semantic-snapshot editor buffer)]
            [call
              (scheme-semantic-call-context-at
                snapshot
@@ -120,7 +139,22 @@
       (char->integer character)
       modifiers))
 
-  (define (install-scheme-help-commands! editor)
+  (define (install-scheme-help-commands/internal!
+            editor
+            workspace)
+    (unless
+      (or
+        (not workspace)
+        (scheme-workspace-index? workspace))
+      (assertion-violation
+        'install-scheme-help-commands!
+        "expected a Scheme workspace index"
+        workspace))
+    (if workspace
+        (hashtable-set!
+          editor-workspaces editor workspace)
+        (hashtable-delete!
+          editor-workspaces editor))
     (for-each
       (lambda (entry)
         (editor-register-command!
@@ -146,4 +180,13 @@
       editor
       (list (stroke #\c 4) (stroke #\s 4))
       'scheme.signature-help)
-    editor))
+    editor)
+
+  (define install-scheme-help-commands!
+    (case-lambda
+      [(editor)
+       (install-scheme-help-commands/internal!
+         editor #f)]
+      [(editor workspace)
+       (install-scheme-help-commands/internal!
+         editor workspace)])))
