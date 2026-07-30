@@ -2,6 +2,7 @@
   (export install-diagnostic-commands!
           editor-refresh-scheme-diagnostics!)
   (import (rnrs)
+          (only (chezscheme) make-weak-eq-hashtable)
           (soda editor annotation)
           (soda editor buffer)
           (soda editor command)
@@ -11,10 +12,17 @@
           (soda editor navigation)
           (soda editor scheme-query)
           (soda editor scheme-semantics)
+          (soda editor scheme-workspace)
           (soda editor state))
 
   (define scheme-diagnostic-namespace
     'scheme-semantic-diagnostics)
+
+  (define editor-workspaces
+    (make-weak-eq-hashtable))
+
+  (define published-workspace-generations
+    (make-weak-eq-hashtable))
 
   (define (scheme-annotation-id diagnostic)
     (list
@@ -49,23 +57,36 @@
   (define (publish-scheme-diagnostics!
             editor
             buffer
-            current)
+            current
+            workspace)
     (let* ([snapshot
-             (buffer-scheme-semantic-snapshot buffer)]
+             (if
+               workspace
+               (scheme-workspace-snapshot-for-buffer
+                 workspace buffer)
+               (buffer-scheme-semantic-snapshot buffer))]
            [revision
              (scheme-semantic-snapshot-revision snapshot)]
            [annotations
              (map
                scheme-diagnostic->annotation
                (scheme-semantic-snapshot-diagnostics snapshot))])
-      (editor-publish-annotation-set!
-        editor
-        (make-buffer-annotation-set
-          buffer
-          scheme-diagnostic-namespace
-          revision
-          (next-generation current)
-          annotations))))
+      (let ([set
+              (make-buffer-annotation-set
+                buffer
+                scheme-diagnostic-namespace
+                revision
+                (next-generation current)
+                annotations)])
+        (when
+          (editor-publish-annotation-set!
+            editor set)
+          (when workspace
+            (hashtable-set!
+              published-workspace-generations
+              set
+              (scheme-workspace-generation workspace))))
+        set)))
 
   (define (clear-scheme-diagnostics!
             editor
@@ -82,25 +103,43 @@
           '()))))
 
   (define (editor-refresh-scheme-diagnostics! editor)
-    (for-each
-      (lambda (buffer)
-        (let ([current
-                (scheme-annotation-set editor buffer)])
-          (cond
-            [(scheme-buffer? buffer)
-             (unless
-               (and
-                 current
-                 (=
-                   (annotation-set-source-revision current)
-                   (buffer-revision buffer)))
-               (publish-scheme-diagnostics!
-                 editor buffer current))]
-            [current
-             (clear-scheme-diagnostics!
-               editor buffer current)])))
-      (editor-buffers editor))
-    editor)
+    (let ([workspace
+            (hashtable-ref
+              editor-workspaces editor #f)])
+      (when workspace
+        (scheme-workspace-sync-editor!
+          workspace editor))
+      (for-each
+        (lambda (buffer)
+          (let ([current
+                  (scheme-annotation-set editor buffer)])
+            (cond
+              [(scheme-buffer? buffer)
+               (unless
+                 (and
+                   current
+                   (=
+                     (annotation-set-source-revision current)
+                     (buffer-revision buffer))
+                   (or
+                     (not workspace)
+                     (equal?
+                       (hashtable-ref
+                         published-workspace-generations
+                         current
+                         #f)
+                       (scheme-workspace-generation
+                         workspace))))
+                 (publish-scheme-diagnostics!
+                   editor
+                   buffer
+                   current
+                   workspace))]
+              [current
+               (clear-scheme-diagnostics!
+                 editor buffer current)])))
+        (editor-buffers editor))
+      editor))
 
   (define (refresh-after-buffer-event
             editor
@@ -199,7 +238,22 @@
       (char->integer character)
       modifiers))
 
-  (define (install-diagnostic-commands! editor)
+  (define (install-diagnostic-commands/internal!
+            editor
+            workspace)
+    (unless
+      (or
+        (not workspace)
+        (scheme-workspace-index? workspace))
+      (assertion-violation
+        'install-diagnostic-commands!
+        "expected a Scheme workspace index"
+        workspace))
+    (if workspace
+        (hashtable-set!
+          editor-workspaces editor workspace)
+        (hashtable-delete!
+          editor-workspaces editor))
     (editor-register-command!
       editor
       (make-interactive-context-command
@@ -226,4 +280,13 @@
       'scheme-semantic-diagnostics
       refresh-after-command)
     (editor-refresh-scheme-diagnostics! editor)
-    editor))
+    editor)
+
+  (define install-diagnostic-commands!
+    (case-lambda
+      [(editor)
+       (install-diagnostic-commands/internal!
+         editor #f)]
+      [(editor workspace)
+       (install-diagnostic-commands/internal!
+         editor workspace)])))

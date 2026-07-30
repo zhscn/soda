@@ -743,6 +743,7 @@
       (install-search-commands! editor)
       (install-window-commands! editor)
       (install-scheme-help-commands! editor)
-      (install-diagnostic-commands! editor)
+      (install-diagnostic-commands!
+        editor scheme-workspace)
       (install-cpp-commands! editor)
       editor)))

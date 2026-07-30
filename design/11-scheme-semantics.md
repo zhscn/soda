@@ -324,9 +324,12 @@ snapshot 的 import surface 就被视为不完整，不发布推测性的 undefi
 诊断。
 
 publisher 在 buffer 创建、major mode 变化和 revert 后同步诊断，并在顶层交互命令
-结束后检查所有 Scheme buffer。source revision 未变化时不重新分析；revision
-变化时用更高 generation 原子替换同 namespace 的 annotation set。空诊断集仍记录
-已分析 revision，使光标移动和只读命令只执行 freshness 检查。
+结束后检查所有 Scheme buffer。诊断、completion 和 xref 从 editor 的同一个
+`SchemeWorkspaceIndex` 取得 snapshot。freshness 同时比较 Document revision 与
+workspace library catalog generation；项目 export surface 变化时，即使 consumer
+Buffer 没有修改，也会重新分析其 import 和诊断。新结果用更高 annotation
+generation 原子替换同 namespace 的 annotation set。空诊断集仍记录已分析
+revision 和 catalog generation，使普通光标移动只执行 freshness 检查。
 
 ## Completion
 

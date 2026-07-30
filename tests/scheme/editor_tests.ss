@@ -7,6 +7,7 @@
         (soda editor command)
         (soda editor core)
         (soda editor cpp-language)
+        (soda editor diagnostics)
         (soda editor effect)
         (soda editor event)
         (only (soda editor interaction)
@@ -19,6 +20,8 @@
         (soda editor prompt)
         (soda editor repl)
         (soda editor scheme-semantics)
+        (soda editor scheme-workspace)
+        (soda editor scheme-xref)
         (only (soda editor state)
               view-clear-mark!
               view-set-caret!
@@ -2142,6 +2145,110 @@
     (error 'editor-tests
            "post-command diagnostics did not replace the stale revision")))
 (editor-close! semantic-diagnostic-editor)
+
+(define project-diagnostic-document
+  (make-document
+    (string-append
+      "(import (sample diagnostics))\n"
+      "(project-value missing-value)\n")
+    1985))
+(define project-diagnostic-buffer
+  (make-buffer
+    1985
+    project-diagnostic-document
+    "*project-diagnostics*"
+    'scheme-mode))
+(define project-diagnostic-editor
+  (make-editor project-diagnostic-buffer))
+(define project-diagnostic-workspace
+  (editor-scheme-workspace
+    project-diagnostic-editor))
+(define (project-diagnostic-set)
+  (find
+    (lambda (set)
+      (eq?
+        (annotation-set-namespace set)
+        'scheme-semantic-diagnostics))
+    (editor-annotation-sets-for-buffer
+      project-diagnostic-editor
+      (buffer-id project-diagnostic-buffer))))
+(define (project-library-source exports definitions)
+  (string->utf8
+    (string-append
+      "(library (sample diagnostics)\n"
+      "  (export "
+      exports
+      ")\n"
+      "  (import (rnrs))\n"
+      definitions
+      ")\n")))
+
+(scheme-workspace-index-source!
+  project-diagnostic-workspace
+  "/project/diagnostics.sls"
+  1986
+  0
+  (project-library-source
+    "project-value"
+    "  (define (project-value value) value)\n"))
+(editor-refresh-scheme-diagnostics!
+  project-diagnostic-editor)
+(define unresolved-project-diagnostic-set
+  (project-diagnostic-set))
+(unless
+  (and
+    unresolved-project-diagnostic-set
+    (exists
+      (lambda (annotation)
+        (and
+          (eq?
+            (scheme-diagnostic-code
+              (annotation-payload annotation))
+            'undefined-identifier)
+          (equal?
+            (scheme-diagnostic-payload
+              (annotation-payload annotation))
+            "missing-value")))
+      (annotation-set-annotations
+        unresolved-project-diagnostic-set)))
+  (error
+    'editor-tests
+    "project catalog did not participate in published Scheme diagnostics"))
+
+(scheme-workspace-index-source!
+  project-diagnostic-workspace
+  "/project/diagnostics.sls"
+  1986
+  1
+  (project-library-source
+    "project-value missing-value"
+    (string-append
+      "  (define (project-value value) value)\n"
+      "  (define missing-value 1)\n")))
+(editor-refresh-scheme-diagnostics!
+  project-diagnostic-editor)
+(let ([resolved (project-diagnostic-set)])
+  (unless
+    (and
+      resolved
+      (not
+        (eq?
+          resolved
+          unresolved-project-diagnostic-set))
+      (annotation-set-closed?
+        unresolved-project-diagnostic-set)
+      (not
+        (exists
+          (lambda (annotation)
+            (eq?
+              (scheme-diagnostic-code
+                (annotation-payload annotation))
+              'undefined-identifier))
+          (annotation-set-annotations resolved))))
+    (error
+      'editor-tests
+      "catalog generation did not refresh unchanged-buffer diagnostics")))
+(editor-close! project-diagnostic-editor)
 
 (define highlight-document
   (make-document

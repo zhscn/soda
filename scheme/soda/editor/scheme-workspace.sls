@@ -1,6 +1,7 @@
 (library (soda editor scheme-workspace)
   (export make-scheme-workspace-index
           scheme-workspace-index?
+          scheme-workspace-generation
           scheme-workspace-sync-editor!
           scheme-workspace-index-source!
           scheme-workspace-remove-source!
@@ -56,6 +57,7 @@
       documents
       sources
       references
+      (mutable generation)
       (mutable library-index)
       (mutable library-catalog)
       (mutable catalog-dirty?)
@@ -88,10 +90,15 @@
       (make-hashtable
         equal-hash
         scheme-definition-id=?)
+      0
       '()
       '()
       #t
       #t))
+
+  (define (scheme-workspace-generation index)
+    (require-index 'scheme-workspace-generation index)
+    (scheme-workspace-index-generation index))
 
   (define (require-index who value)
     (unless (scheme-workspace-index? value)
@@ -326,6 +333,12 @@
             index library-index)
           (scheme-workspace-index-library-catalog-set!
             index library-catalog)
+          (when (pair? changed-libraries)
+            (scheme-workspace-index-generation-set!
+              index
+              (+ 1
+                (scheme-workspace-index-generation
+                  index))))
           (for-each
             (lambda (document)
               (when
