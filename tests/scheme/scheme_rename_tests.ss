@@ -552,6 +552,162 @@
     renamed-local-syntax))
 (editor-close! local-syntax-editor)
 
+(define identifier-syntax-buffer
+  (make-buffer
+    24
+    (make-document
+      (string-append
+        "(define-syntax assignable\n"
+        "  (identifier-syntax\n"
+        "    [target #'target]\n"
+        "    [(set! target value)\n"
+        "     #'(store! target value)]))\n")
+      24)
+    "/project/rename-identifier-syntax.scm"
+    'scheme-mode))
+(define identifier-syntax-editor
+  (make-editor identifier-syntax-buffer))
+(define identifier-syntax-workspace
+  (editor-scheme-workspace
+    identifier-syntax-editor))
+(define identifier-syntax-snapshot
+  (scheme-workspace-snapshot-for-buffer
+    identifier-syntax-workspace
+    identifier-syntax-buffer))
+(define identifier-syntax-value
+  (find
+    (lambda (definition)
+      (and
+        (string=?
+          (scheme-definition-name definition)
+          "value")
+        (eq?
+          (scheme-definition-kind definition)
+          'syntax-parameter)))
+    (scheme-semantic-snapshot-definitions
+      identifier-syntax-snapshot)))
+(unless identifier-syntax-value
+  (error
+    'scheme-rename-tests
+    "identifier-syntax setter pattern was not indexed"))
+(define identifier-syntax-context
+  (make-command-context
+    identifier-syntax-editor
+    (editor-active-view identifier-syntax-editor)
+    #f
+    #f))
+(define identifier-syntax-effects
+  ((command-procedure
+     (editor-command-registry
+       identifier-syntax-editor)
+     'scheme.rename)
+   identifier-syntax-context
+   identifier-syntax-value
+   "new-value"))
+(define renamed-identifier-syntax
+  (buffer-string identifier-syntax-buffer))
+(unless
+  (and
+    (null? identifier-syntax-effects)
+    (string-contains
+      renamed-identifier-syntax
+      "(set! target new-value)")
+    (string-contains
+      renamed-identifier-syntax
+      "(store! target new-value)")
+    (string=?
+      (editor-status-message
+        identifier-syntax-editor)
+      "Renamed to new-value in 2 places"))
+  (error
+    'scheme-rename-tests
+    "identifier-syntax setter rename lost its pattern identity"
+    renamed-identifier-syntax))
+(editor-close! identifier-syntax-editor)
+
+(define fluid-let-syntax-buffer
+  (make-buffer
+    25
+    (make-document
+      (string-append
+        "(let-syntax\n"
+        "    ([keyword\n"
+        "       (syntax-rules ()\n"
+        "         [(_ value) value])])\n"
+        "  (fluid-let-syntax\n"
+        "      ([keyword\n"
+        "         (syntax-rules ()\n"
+        "           [(_ value) (keyword value)])])\n"
+        "    (keyword 1)))\n")
+      25)
+    "/project/rename-fluid-let-syntax.scm"
+    'scheme-mode))
+(define fluid-let-syntax-editor
+  (make-editor fluid-let-syntax-buffer))
+(define fluid-let-syntax-workspace
+  (editor-scheme-workspace
+    fluid-let-syntax-editor))
+(define fluid-let-syntax-snapshot
+  (scheme-workspace-snapshot-for-buffer
+    fluid-let-syntax-workspace
+    fluid-let-syntax-buffer))
+(define fluid-let-syntax-keyword
+  (find
+    (lambda (definition)
+      (and
+        (string=?
+          (scheme-definition-name definition)
+          "keyword")
+        (eq?
+          (scheme-definition-kind definition)
+          'syntax)))
+    (scheme-semantic-snapshot-definitions
+      fluid-let-syntax-snapshot)))
+(unless fluid-let-syntax-keyword
+  (error
+    'scheme-rename-tests
+    "fluid-let-syntax outer binding was not indexed"))
+(define fluid-let-syntax-context
+  (make-command-context
+    fluid-let-syntax-editor
+    (editor-active-view fluid-let-syntax-editor)
+    #f
+    #f))
+(define fluid-let-syntax-effects
+  ((command-procedure
+     (editor-command-registry
+       fluid-let-syntax-editor)
+     'scheme.rename)
+   fluid-let-syntax-context
+   fluid-let-syntax-keyword
+   "dynamic-keyword"))
+(define renamed-fluid-let-syntax
+  (buffer-string fluid-let-syntax-buffer))
+(unless
+  (and
+    (null? fluid-let-syntax-effects)
+    (string-contains
+      renamed-fluid-let-syntax
+      "[dynamic-keyword")
+    (string-contains
+      renamed-fluid-let-syntax
+      "([dynamic-keyword")
+    (string-contains
+      renamed-fluid-let-syntax
+      "(dynamic-keyword value)")
+    (string-contains
+      renamed-fluid-let-syntax
+      "(dynamic-keyword 1)")
+    (string=?
+      (editor-status-message
+        fluid-let-syntax-editor)
+      "Renamed to dynamic-keyword in 4 places"))
+  (error
+    'scheme-rename-tests
+    "fluid-let-syntax rename did not preserve the outer syntax identity"
+    renamed-fluid-let-syntax))
+(editor-close! fluid-let-syntax-editor)
+
 (define compiled-rename-stem
   (string-append
     "/tmp/soda-compiled-rename-"

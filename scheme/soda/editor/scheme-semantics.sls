@@ -930,7 +930,9 @@
       (exists
         (lambda (name)
           (token-symbol=? (cadr tokens) name))
-        '("syntax-rules" "syntax-case"))))
+        '("syntax-rules"
+          "syntax-case"
+          "identifier-syntax"))))
 
   (define (scan-definitions document-id revision tokens)
     (let loop ([tokens (remove-ignored-data tokens)]
@@ -964,6 +966,7 @@
       (letrec syntax)
       (let-syntax syntax)
       (letrec-syntax syntax)
+      (fluid-let-syntax syntax)
       (let-values syntax)
       (let*-values syntax)
       (if syntax)
@@ -2607,6 +2610,71 @@
                     "with-syntax pattern variable"))
                 bindings)
               (analyze-sequence body body-scope)))))
+      (define (analyze-identifier-syntax
+                form
+                scope)
+        (let* ([children
+                 (syntax-form-children form)]
+               [getter
+                 (and
+                   (pair? (cdr children))
+                   (cadr children))]
+               [setter
+                 (and
+                   (pair? (cddr children))
+                   (caddr children))])
+          (when
+            (and
+              (syntax-list? getter)
+              (pair?
+                (syntax-form-children getter))
+              (syntax-symbol?
+                (car
+                  (syntax-form-children getter))))
+            (let ([getter-scope
+                    (new-scope
+                      scope
+                      (syntax-form-start getter)
+                      (syntax-form-end getter))])
+              (add-binding!
+                getter-scope
+                (car
+                  (syntax-form-children getter))
+                'syntax-parameter
+                "identifier-syntax getter pattern")))
+          (when
+            (and
+              (syntax-list? setter)
+              (pair?
+                (syntax-form-children setter))
+              (syntax-list?
+                (car
+                  (syntax-form-children setter)))
+              (string=?
+                (or
+                  (syntax-head-symbol
+                    (car
+                      (syntax-form-children setter)))
+                  "")
+                "set!"))
+            (let* ([pattern
+                     (car
+                       (syntax-form-children setter))]
+                   [pattern-children
+                     (syntax-form-children pattern)]
+                   [setter-scope
+                     (new-scope
+                       scope
+                       (syntax-form-start setter)
+                       (syntax-form-end setter))])
+              (for-each
+                (lambda (node)
+                  (add-binding!
+                    setter-scope
+                    node
+                    'syntax-parameter
+                    "identifier-syntax setter pattern"))
+                (cdr pattern-children))))))
       (define (analyze-local-syntax
                 form
                 scope
@@ -2654,6 +2722,29 @@
                         scope)))
                 bindings)
               (analyze-sequence body body-scope)))))
+      (define (analyze-fluid-let-syntax
+                form
+                scope)
+        (let* ([children
+                 (syntax-form-children form)]
+               [bindings-node
+                 (and
+                   (pair? (cdr children))
+                   (cadr children))]
+               [bindings
+                 (binding-forms bindings-node)]
+               [body
+                 (if bindings-node
+                     (cddr children)
+                     '())])
+          (for-each
+            (lambda (binding)
+              (analyze-sequence
+                (cdr
+                  (syntax-form-children binding))
+                scope))
+            bindings)
+          (analyze-sequence body scope)))
       (define (analyze-form form scope)
         (when (syntax-list? form)
           (let ([head (syntax-head-symbol form)]
@@ -2693,6 +2784,8 @@
                (analyze-local-syntax form scope #f)]
               [(string=? head "letrec-syntax")
                (analyze-local-syntax form scope #t)]
+              [(string=? head "fluid-let-syntax")
+               (analyze-fluid-let-syntax form scope)]
               [(string=? head "do")
                (analyze-do form scope)]
               [(string=? head "guard")
@@ -2703,6 +2796,8 @@
                (analyze-syntax-case form scope)]
               [(string=? head "with-syntax")
                (analyze-with-syntax form scope)]
+              [(string=? head "identifier-syntax")
+               (analyze-identifier-syntax form scope)]
               [(string=? head "define-record-type") #f]
               [else
                (analyze-sequence children scope)]))))
@@ -3825,6 +3920,7 @@
       "letrec*"
       "let-syntax"
       "letrec-syntax"
+      "fluid-let-syntax"
       "or"
       "parameterize"
       "set!"

@@ -185,7 +185,8 @@ BindingRuleResult {
 - `define-record-type` 生成的 constructor、predicate、accessor 和 mutator；
 - `library`、`import`、`export`；
 - `only`、`except`、`prefix`、`rename`、`for`；
-- `define-syntax`、`let-syntax`、`letrec-syntax`；
+- `define-syntax`、`let-syntax`、`letrec-syntax`、`identifier-syntax` 与
+  `fluid-let-syntax`；
 - quote、quasiquote、syntax 与 quasisyntax 的 phase 边界。
 
 规则 registry 按 language profile 和 library 扩展。项目宏可以注册专用 binding
@@ -480,6 +481,13 @@ rule、clause 或 body scope，并参与补全、definition、references、docum
 binding 只在 body 可见；`letrec-syntax` 先建立同组的全部 syntax binding，使其在
 每个 transformer initializer 与 body 中递归可见。局部 syntax binding 参与补全、
 definition、references 和 rename，重复名称使用普通 scope duplicate diagnostic。
+扩展形式的 `identifier-syntax` 分别为 getter identifier 和 setter target/value
+建立互相隔离的 `syntax-parameter` scope；模板中的引用解析到对应 pattern binding，
+模板里的生成声明不进入 source scope。单模板形式不声明 pattern binding。
+`fluid-let-syntax` 的 binding identifier 是对现有外层 syntax binding 的引用；
+transformer initializer 在外层 scope 分析，body 继续使用同一 DefinitionId，从而
+表达 Chez 临时替换 transformer 而不创建新 lexical identity 的语义。无法解析到
+外层 binding 的 identifier 保持 unresolved。
 未闭合 form 的 scope range 延伸到 Document 末尾，使编辑中的参数和局部 binding
 仍可参与补全。
 

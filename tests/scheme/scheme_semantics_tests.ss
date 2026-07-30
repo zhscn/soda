@@ -883,6 +883,149 @@
     'scheme-semantics-tests
     "duplicate local transformer bindings were not diagnosed"))
 
+(define identifier-syntax-source
+  (string-append
+    "(define constant-value 1)\n"
+    "(define-syntax constant\n"
+    "  (identifier-syntax constant-value))\n"
+    "(define-syntax property\n"
+    "  (identifier-syntax\n"
+    "    [slot #'(define generated slot)]\n"
+    "    [(set! slot value)\n"
+    "     #'(set-box! slot value)]))\n"))
+(define identifier-syntax-snapshot
+  (make-scheme-semantic-snapshot
+    720
+    0
+    (string->utf8 identifier-syntax-source)))
+(define identifier-slot-definitions
+  (list-sort
+    (lambda (left right)
+      (<
+        (scheme-definition-start left)
+        (scheme-definition-start right)))
+    (snapshot-definitions-named
+      identifier-syntax-snapshot
+      "slot")))
+(define identifier-value-definition
+  (car
+    (snapshot-definitions-named
+      identifier-syntax-snapshot
+      "value")))
+(unless
+  (and
+    (= (length identifier-slot-definitions) 2)
+    (not
+      (scheme-definition-id=?
+        (scheme-definition-id
+          (car identifier-slot-definitions))
+        (scheme-definition-id
+          (cadr identifier-slot-definitions))))
+    (for-all
+      (lambda (definition)
+        (and
+          (eq?
+            (scheme-definition-kind definition)
+            'syntax-parameter)
+          (=
+            (length
+              (scheme-semantic-references
+                identifier-syntax-snapshot
+                (scheme-definition-id definition)))
+            1)))
+      identifier-slot-definitions)
+    (eq?
+      (scheme-definition-kind
+        identifier-value-definition)
+      'syntax-parameter)
+    (=
+      (length
+        (scheme-semantic-references
+          identifier-syntax-snapshot
+          (scheme-definition-id
+            identifier-value-definition)))
+      1)
+    (null?
+      (snapshot-definitions-named
+        identifier-syntax-snapshot
+        "generated"))
+    (null?
+      (filter
+        (lambda (definition)
+          (eq?
+            (scheme-definition-kind definition)
+            'syntax-parameter))
+        (snapshot-definitions-named
+          identifier-syntax-snapshot
+          "constant-value"))))
+  (error
+    'scheme-semantics-tests
+    "identifier-syntax pattern scopes were not isolated"))
+
+(define fluid-let-syntax-source
+  (string-append
+    "(let-syntax\n"
+    "    ([keyword\n"
+    "       (syntax-rules ()\n"
+    "         [(_ value) value])])\n"
+    "  (fluid-let-syntax\n"
+    "      ([keyword\n"
+    "         (syntax-rules ()\n"
+    "           [(_ value) (keyword value)])])\n"
+    "    (keyword 1)))\n"
+    "(fluid-let-syntax\n"
+    "    ([unbound\n"
+    "       (syntax-rules ()\n"
+    "         [(_ value) value])])\n"
+    "  (unbound 1))\n"))
+(define fluid-let-syntax-snapshot
+  (make-scheme-semantic-snapshot
+    721
+    0
+    (string->utf8 fluid-let-syntax-source)))
+(define fluid-let-keyword-definition
+  (car
+    (snapshot-definitions-named
+      fluid-let-syntax-snapshot
+      "keyword")))
+(define fluid-let-keyword-uses
+  (snapshot-uses-named
+    fluid-let-syntax-snapshot
+    "keyword"))
+(unless
+  (and
+    (eq?
+      (scheme-definition-kind
+        fluid-let-keyword-definition)
+      'syntax)
+    (= (length fluid-let-keyword-uses) 3)
+    (for-all
+      (lambda (use)
+        (and
+          (= (length
+               (scheme-use-resolution use))
+             1)
+          (scheme-definition-id=?
+            (car
+              (scheme-use-resolution use))
+            (scheme-definition-id
+              fluid-let-keyword-definition))))
+      fluid-let-keyword-uses)
+    (null?
+      (snapshot-definitions-named
+        fluid-let-syntax-snapshot
+        "unbound"))
+    (for-all
+      (lambda (use)
+        (null?
+          (scheme-use-resolution use)))
+      (snapshot-uses-named
+        fluid-let-syntax-snapshot
+        "unbound")))
+  (error
+    'scheme-semantics-tests
+    "fluid-let-syntax did not preserve the outer syntax identity"))
+
 (let* ([shadow-definitions
          (snapshot-definitions-named
            lexical-snapshot
