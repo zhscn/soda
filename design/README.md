@@ -21,6 +21,7 @@
 | 11 | [11-scheme-semantics.md](11-scheme-semantics.md) | Scheme scope graph、语义索引、补全与 xref |
 | 12 | [12-minibuffer.md](12-minibuffer.md) | minibuffer session、读取协议、history 与补全目标 |
 | 13 | [13-rendering-theme.md](13-rendering-theme.md) | 增量高亮、display mapping、theme 与终端渲染管线 |
+| 14 | [14-command-extensibility.md](14-command-extensibility.md) | interactive command、hook、advice 与 minor mode |
 
 依赖关系：
 

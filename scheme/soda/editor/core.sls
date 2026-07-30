@@ -64,6 +64,9 @@
           editor-interaction-ref
           editor-interaction-for-buffer
           editor-command-registry
+          editor-active-command-invocation
+          editor-minor-mode-catalog
+          editor-global-minor-modes
           editor-keymap-catalog
           editor-language-catalog
           editor-register-language-profile!
@@ -205,11 +208,53 @@
           prefix-argument->string
           command-context-prefix
           command-context-count
+          define-command
+          make-interactive-plan
+          make-interactive-reader
+          interactive-prefix-count
+          interactive-prefix-raw
+          interactive-event
+          interactive-message-argument
+          interactive-point
+          interactive-region
+          interactive-string
+          interactive-number
+          interactive-file-name
+          command-interactive?
+          interactive-command-names
+          command-add-advice!
+          command-remove-advice!
+          command-advice-names
+          add-command-hook!
+          remove-command-hook!
+          command-hooks
+          editor-current-command
+          editor-last-command
+          editor-command-history
           editor-register-command!
+          editor-register-internal-command!
           editor-bind-key!
           editor-execute-interactive-command!
           editor-execute-command!
           install-command-effect-handler!
+          make-minor-mode-definition
+          minor-mode-definition?
+          minor-mode-definition-name
+          minor-mode-definition-documentation
+          minor-mode-definition-scope
+          minor-mode-definition-lighter
+          minor-mode-definition-keymap-layer
+          define-minor-mode
+          editor-register-minor-mode!
+          editor-minor-mode-active?
+          editor-enable-minor-mode!
+          editor-disable-minor-mode!
+          editor-toggle-minor-mode!
+          editor-active-minor-modes
+          editor-minor-mode-keymap-layers
+          editor-minor-mode-lighter
+          minor-mode-add-hook!
+          minor-mode-remove-hook!
           editor-update!
           make-key-message
           key-message?
@@ -492,6 +537,8 @@
           (soda editor interaction)
           (soda editor kill)
           (soda editor location)
+          (soda editor minor-mode)
+          (soda editor minor-mode-runtime)
           (soda editor navigation)
           (soda editor prompt)
           (soda editor prompt-commands)
@@ -512,6 +559,7 @@
 
   (define (make-editor buffer)
     (let ([editor (make-editor-state buffer)])
+      (install-command-runtime-commands! editor)
       (install-prefix-commands! editor)
       (install-basic-commands! editor)
       (install-transform-commands! editor)

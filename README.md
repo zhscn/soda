@@ -43,7 +43,12 @@ that shadow lower-priority bindings. Each View owns a stack of input states
 whose keymap layers and text policy describe transient editing behavior.
 Replacing a command procedure in the registry immediately affects existing
 bindings, which provides the indirection needed for interactive Scheme
-development. Key, text, paste, and resize events enter the same update
+development. Command definitions associate ordinary Scheme procedures with
+typed interactive readers. Readers may suspend in the minibuffer and resume
+the same logical invocation without entering a recursive command loop.
+Named command hooks and advice compose around the resolved procedure call.
+Minor mode definitions contribute lifecycle callbacks, keymap layers, hooks,
+and modeline lighters from a shared catalog. Key, text, paste, and resize events enter the same update
 function; terminal frame rendering only reads the resulting editor state. The
 renderer reads visible document lines and uses terminal cells for tab
 expansion, wide-character clipping, and cursor placement. Each cell retains

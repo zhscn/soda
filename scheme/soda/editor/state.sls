@@ -56,6 +56,9 @@
           editor-interaction-for-buffer
           editor-register-interaction!
           editor-command-registry
+          editor-minor-mode-catalog
+          editor-global-minor-modes
+          editor-set-global-minor-modes!
           editor-keymap-catalog
           editor-language-catalog
           editor-register-language-profile!
@@ -89,6 +92,15 @@
           editor-take-pending-prefix!
           editor-last-command-class
           editor-set-last-command-class!
+          editor-active-command-invocation
+          editor-set-active-command-invocation!
+          editor-allocate-command-invocation-id!
+          editor-current-command
+          editor-last-command
+          editor-command-history
+          editor-begin-command!
+          editor-finish-command!
+          editor-record-command!
           view?
           view-id
           view-buffer
@@ -133,6 +145,7 @@
           (soda editor keymap)
           (soda editor language)
           (soda editor location)
+          (soda editor minor-mode)
           (soda editor prefix)
           (soda editor prompt)
           (soda editor theme)
@@ -228,6 +241,25 @@
       (mutable last-command-class
                editor-last-command-class
                editor-last-command-class-set!)
+      (mutable active-command-invocation
+               editor-active-command-invocation
+               editor-active-command-invocation-set!)
+      (mutable next-command-invocation-id
+               editor-next-command-invocation-id
+               editor-next-command-invocation-id-set!)
+      (mutable current-command
+               editor-current-command
+               editor-current-command-set!)
+      (mutable last-command
+               editor-last-command
+               editor-last-command-set!)
+      (mutable command-history
+               editor-command-history
+               editor-command-history-set!)
+      (immutable minor-modes editor-minor-mode-catalog)
+      (mutable global-minor-modes
+               editor-global-minor-modes
+               editor-global-minor-modes-set!)
       (immutable theme-catalog editor-theme-catalog)
       (mutable theme editor-theme editor-theme-set!)
       (mutable render-generation
@@ -259,6 +291,67 @@
   (define (editor-set-last-yank! editor state)
     (require-open-editor 'editor-set-last-yank! editor)
     (editor-last-yank-set! editor state))
+
+  (define (editor-set-active-command-invocation! editor invocation)
+    (require-open-editor
+      'editor-set-active-command-invocation!
+      editor)
+    (unless (or (not invocation) (command-invocation? invocation))
+      (assertion-violation
+        'editor-set-active-command-invocation!
+        "expected a command invocation or #f"
+        invocation))
+    (editor-active-command-invocation-set! editor invocation))
+
+  (define (editor-allocate-command-invocation-id! editor)
+    (require-open-editor
+      'editor-allocate-command-invocation-id!
+      editor)
+    (let ([id (editor-next-command-invocation-id editor)])
+      (editor-next-command-invocation-id-set! editor (+ id 1))
+      id))
+
+  (define (editor-record-command! editor name arguments)
+    (require-open-editor 'editor-record-command! editor)
+    (unless (and (symbol? name) (list? arguments))
+      (assertion-violation
+        'editor-record-command!
+        "invalid command history entry"
+        name
+        arguments))
+    (editor-command-history-set!
+      editor
+      (cons
+        (cons name arguments)
+        (editor-command-history editor))))
+
+  (define (editor-begin-command! editor name)
+    (require-open-editor 'editor-begin-command! editor)
+    (unless (symbol? name)
+      (assertion-violation
+        'editor-begin-command!
+        "command name must be a symbol"
+        name))
+    (editor-current-command-set! editor name))
+
+  (define (editor-set-global-minor-modes! editor modes)
+    (require-open-editor 'editor-set-global-minor-modes! editor)
+    (unless (and (list? modes) (for-all symbol? modes))
+      (assertion-violation
+        'editor-set-global-minor-modes!
+        "minor modes must be a list of symbols"
+        modes))
+    (editor-global-minor-modes-set! editor modes))
+
+  (define (editor-finish-command! editor name)
+    (require-open-editor 'editor-finish-command! editor)
+    (unless (symbol? name)
+      (assertion-violation
+        'editor-finish-command!
+        "command name must be a symbol"
+        name))
+    (editor-last-command-set! editor name)
+    (editor-current-command-set! editor #f))
 
   (define (editor-set-current-location-list! editor locations)
     (require-open-editor 'editor-set-current-location-list! editor)
@@ -2572,6 +2665,13 @@
                '()
                #f
                #f
+               #f
+               1
+               #f
+               #f
+               '()
+               (make-minor-mode-catalog)
+               '()
                (make-default-theme-catalog)
                default-theme
                0
@@ -2634,6 +2734,14 @@
         (editor-prompts value))
       (editor-prompt-ids-set! value '())
       (hashtable-clear! (editor-prompt-table value))
+      (when (editor-active-command-invocation value)
+        (command-invocation-set-state!
+          (editor-active-command-invocation value)
+          'aborted)
+        (command-invocation-set-suspension!
+          (editor-active-command-invocation value)
+          #f)
+        (editor-active-command-invocation-set! value #f))
       (for-each
         interaction-session-close!
         (table-values

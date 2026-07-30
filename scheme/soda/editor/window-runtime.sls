@@ -170,10 +170,12 @@
       'horizontal)
     '())
 
-  (define (other-window-command context)
+  (define-command (other-window-command context count)
+    "Select another editor window."
+    (interactive interactive-prefix-count)
     (editor-other-window!
       (command-context-editor context)
-      (command-context-count context))
+      count)
     '())
 
   (define (delete-window-command context)

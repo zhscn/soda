@@ -100,6 +100,36 @@
             (lambda () (text-close! text)))))
       (lambda () (snapshot-close! snapshot)))))
 
+(define typed-command-result #f)
+(define typed-command-trace '())
+
+(define-command (test.typed-command context count text)
+  "Exercise typed interactive command arguments."
+  (interactive
+    interactive-prefix-count
+    (interactive-string "Value: " 'test-typed-command))
+  (set! typed-command-result (list count text))
+  (set! typed-command-trace
+    (append typed-command-trace '(body)))
+  '())
+
+(define minor-mode-enable-count 0)
+(define minor-mode-disable-count 0)
+
+(define-minor-mode test-minor-mode
+  "Exercise buffer-local minor mode lifecycle."
+  (scope buffer)
+  (lighter "Test")
+  (keymap 'test.minor-mode-map)
+  (enable
+    (lambda (editor buffer)
+      (set! minor-mode-enable-count
+        (+ minor-mode-enable-count 1))))
+  (disable
+    (lambda (editor buffer)
+      (set! minor-mode-disable-count
+        (+ minor-mode-disable-count 1)))))
+
 (define lower-map (make-keymap))
 (define upper-map (make-keymap))
 (define split-rectangles
@@ -2794,6 +2824,178 @@
                   'extended-command)
                 '("test.prompt-target"))
   (error 'editor-tests "accepted input was not recorded in history"))
+
+(editor-register-command!
+  prompt-editor
+  'test.typed-command
+  test.typed-command)
+(unless
+  (and
+    (command-interactive?
+      (editor-command-registry prompt-editor)
+      'test.typed-command)
+    (not
+      (memq
+        'command.resume-interactive
+        (interactive-command-names
+          (editor-command-registry prompt-editor)))))
+  (error 'editor-tests
+         "command registry did not distinguish interactive commands"))
+(add-command-hook!
+  (editor-command-registry prompt-editor)
+  'pre-command
+  'test.pre-command
+  (lambda (context definition arguments)
+    (when (eq?
+            (command-definition-name definition)
+            'test.typed-command)
+      (set! typed-command-trace
+        (append typed-command-trace '(pre))))))
+(add-command-hook!
+  (editor-command-registry prompt-editor)
+  'post-command
+  'test.post-command
+  (lambda (context definition arguments effects condition)
+    (when (eq?
+            (command-definition-name definition)
+            'test.typed-command)
+      (set! typed-command-trace
+        (append typed-command-trace '(post))))))
+(command-add-advice!
+  (editor-command-registry prompt-editor)
+  'test.typed-command
+  'test.filter-count
+  'filter-args
+  (lambda (context arguments)
+    (set! typed-command-trace
+      (append typed-command-trace '(filter)))
+    (cons (+ (car arguments) 1) (cdr arguments)))
+  0)
+(command-add-advice!
+  (editor-command-registry prompt-editor)
+  'test.typed-command
+  'test.around
+  'around
+  (lambda (next context arguments)
+    (set! typed-command-trace
+      (append typed-command-trace '(around-before)))
+    (let ([effects (next context arguments)])
+      (set! typed-command-trace
+        (append typed-command-trace '(around-after)))
+      effects))
+  10)
+(editor-register-command!
+  prompt-editor
+  'test.typed-command
+  test.typed-command)
+(unless
+  (equal?
+    (command-advice-names
+      (editor-command-registry prompt-editor)
+      'test.typed-command)
+    '(test.filter-count test.around))
+  (error 'editor-tests
+         "command redefinition discarded installed advice"))
+(set! typed-command-result #f)
+(set! typed-command-trace '())
+(unless
+  (null?
+    (editor-update!
+      prompt-editor
+      (make-command-message
+        'test.typed-command
+        #f
+        (prefix-argument-universal #f))))
+  (error 'editor-tests
+         "interactive command did not suspend for its reader"))
+(unless
+  (and
+    (editor-active-command-invocation prompt-editor)
+    (editor-active-prompt prompt-editor)
+    (not typed-command-result))
+  (error 'editor-tests
+         "interactive invocation was not retained across minibuffer input"))
+(send! prompt-editor prompt-decoder (string->utf8 "hello"))
+(dispatch-prompt-effects!
+  (send! prompt-editor prompt-decoder (bytes 13)))
+(unless
+  (and
+    (equal? typed-command-result '(5 "hello"))
+    (equal?
+      typed-command-trace
+      '(pre filter around-before body around-after post))
+    (not (editor-active-command-invocation prompt-editor))
+    (eq? (editor-last-command prompt-editor) 'test.typed-command)
+    (equal?
+      (car (editor-command-history prompt-editor))
+      '(test.typed-command 4 "hello")))
+  (error 'editor-tests
+         "interactive command invocation, hook, or advice pipeline failed"
+         typed-command-result
+         typed-command-trace
+         (editor-command-history prompt-editor)))
+(let ([history (editor-command-history prompt-editor)])
+  (editor-update!
+    prompt-editor
+    (make-command-message 'test.typed-command #f))
+  (dispatch-prompt-effects!
+    (send! prompt-editor prompt-decoder (bytes 7)))
+  (unless
+    (and
+      (not (editor-active-command-invocation prompt-editor))
+      (not (editor-active-prompt prompt-editor))
+      (eq? history (editor-command-history prompt-editor)))
+    (error 'editor-tests
+           "aborting an interactive reader retained its invocation")))
+
+(define test-minor-map (make-keymap))
+(keymap-catalog-register!
+  (editor-keymap-catalog prompt-editor)
+  'test.minor-mode-map
+  test-minor-map)
+(editor-register-minor-mode! prompt-editor test-minor-mode)
+(minor-mode-add-hook!
+  (editor-minor-mode-catalog prompt-editor)
+  'test-minor-mode
+  'enable
+  'test.enable-hook
+  (lambda (editor buffer)
+    (set! typed-command-trace
+      (append typed-command-trace '(minor-enabled)))))
+(editor-update!
+  prompt-editor
+  (make-command-message 'test-minor-mode #f))
+(buffer-set-local-setting!
+  prompt-buffer
+  'modeline-prominent-minor-modes
+  '(test-minor-mode))
+(let ([modeline
+        (frame-row-text
+          (render-editor-frame prompt-editor 3 80)
+          2)])
+  (unless
+    (and
+      (editor-minor-mode-active?
+        prompt-editor prompt-buffer 'test-minor-mode)
+      (= minor-mode-enable-count 1)
+      (memq
+        'test.minor-mode-map
+        (editor-minor-mode-keymap-layers
+          prompt-editor prompt-buffer))
+      (string-contains? modeline "(Fundamental Test)"))
+    (error 'editor-tests
+           "minor mode lifecycle, keymap, or lighter was not applied"
+           modeline)))
+(editor-update!
+  prompt-editor
+  (make-command-message 'test-minor-mode #f))
+(unless
+  (and
+    (not
+      (editor-minor-mode-active?
+        prompt-editor prompt-buffer 'test-minor-mode))
+    (= minor-mode-disable-count 1))
+  (error 'editor-tests "minor mode toggle did not disable the mode"))
 
 (send! prompt-editor prompt-decoder (bytes 21 27 120))
 (send!

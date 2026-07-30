@@ -8,6 +8,7 @@
           (soda editor decoration)
           (soda editor display)
           (soda editor modeline)
+          (soda editor minor-mode-runtime)
           (soda editor window)
           (soda tui component)
           (soda tui frame)
@@ -319,12 +320,8 @@
           (editor-render-context-caret-column context))
         ")")))
 
-  (define (minor-mode-names buffer)
-    (let ([value
-            (buffer-setting-ref buffer 'minor-modes '())])
-      (if (and (list? value) (for-all symbol? value))
-          value
-          '())))
+  (define (minor-mode-names editor buffer)
+    (editor-active-minor-modes editor buffer))
 
   (define (prominent-minor-mode-names buffer minor-modes)
     (let ([value
@@ -338,7 +335,7 @@
             value)
           '())))
 
-  (define (join-mode-names names)
+  (define (join-mode-names editor names)
     (let loop ([remaining names] [result ""])
       (if (null? remaining)
           result
@@ -347,7 +344,11 @@
             (string-append
               result
               " "
-              (mode-display-name (car remaining)))))))
+              (or
+                (editor-minor-mode-lighter
+                  editor
+                  (car remaining))
+                (mode-display-name (car remaining))))))))
 
   (define (modeline-state-text buffer)
     (string-append
@@ -436,7 +437,7 @@
   (define (modeline-segments context)
     (let* ([editor (editor-render-context-editor context)]
            [buffer (editor-render-context-buffer context)]
-           [minor-modes (minor-mode-names buffer)]
+           [minor-modes (minor-mode-names editor buffer)]
            [prominent
              (prominent-minor-mode-names
                buffer
@@ -488,7 +489,7 @@
                      "  ("
                      (mode-display-name
                        (buffer-major-mode-name buffer))
-                     (join-mode-names prominent))
+                     (join-mode-names editor prominent))
                    'modeline.mode
                    60
                    0

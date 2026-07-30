@@ -1,5 +1,6 @@
 (library (soda editor file)
   (export install-file-commands!
+          interactive-file-name
           detect-file-line-ending
           file-major-mode-for-path
           make-open-request
@@ -469,6 +470,54 @@
       (lambda (query) '())
       (lambda (value) #t)
       (lambda (generation) #f)))
+
+  (define interactive-file-name
+    (case-lambda
+      [(prompt)
+       (interactive-file-name prompt #f)]
+      [(prompt initial)
+       (unless (string? prompt)
+         (assertion-violation
+           'interactive-file-name
+           "prompt must be a string"
+           prompt))
+       (unless (or (not initial) (string? initial))
+         (assertion-violation
+           'interactive-file-name
+           "initial value must be a string or #f"
+           initial))
+       (make-interactive-reader
+         'file-name
+         (lambda (context)
+           (let* ([buffer
+                    (view-buffer
+                      (command-context-view context))]
+                  [base-directory
+                    (buffer-default-directory buffer)])
+             (make-interactive-suspend
+               (make-completing-prompt-request
+                 prompt
+                 (or initial base-directory)
+                 'file-name
+                 #f
+                 'free
+                 (make-file-choice-source base-directory)
+                 'command.resume-interactive
+                 'command.abort-interactive)
+               (lambda (result)
+                 (unless (and
+                           (prompt-result? result)
+                           (eq?
+                             (prompt-result-status result)
+                             'accepted))
+                   (assertion-violation
+                     'interactive-file-name
+                     "expected an accepted prompt result"
+                     result))
+                 (list
+                   (vfs-resolve-path
+                     base-directory
+                     (prompt-result-value result))))))))]))
 
   (define (file-major-mode-for-path path)
     (unless (or (not path) (string? path))

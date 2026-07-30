@@ -9,6 +9,7 @@
           (soda editor input-state)
           (soda editor keymap)
           (soda editor language)
+          (soda editor minor-mode-runtime)
           (soda editor prompt)
           (soda editor state)
           (soda editor window))
@@ -77,6 +78,7 @@
                    input-state-keymap-layers
                    (view-input-states view)))
                (view-keymap-layers view)
+               (editor-minor-mode-keymap-layers editor buffer)
                (major-mode-keymaps
                  (editor-language-catalog editor)
                  (buffer-major-mode-name buffer))

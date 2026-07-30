@@ -84,7 +84,7 @@
               (string<?
                 (symbol->string left)
                 (symbol->string right)))
-            (command-names
+            (interactive-command-names
               (editor-command-registry editor)))))
       (lambda (value)
         (command-registered?
