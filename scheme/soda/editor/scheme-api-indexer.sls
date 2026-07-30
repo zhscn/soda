@@ -4,7 +4,7 @@
           (soda editor scheme-semantics))
 
   (define-record-type library-source
-    (fields resource name exports definitions signatures))
+    (fields resource name exports definitions))
 
   (define (library-form bytes)
     (guard (condition [else #f])
@@ -54,51 +54,6 @@
       '()
       clauses))
 
-  (define (definition-signature datum)
-    (and
-      (pair? datum)
-      (eq? (car datum) 'define)
-      (pair? (cdr datum))
-      (let ([head (cadr datum)]
-            [tail (cddr datum)])
-        (cond
-          [(and (pair? head) (symbol? (car head)))
-           (cons (car head) (list (cdr head)))]
-          [(and
-             (symbol? head)
-             (pair? tail)
-             (pair? (car tail))
-             (eq? (caar tail) 'lambda)
-             (pair? (cdar tail)))
-           (cons head (list (cadar tail)))]
-          [(and
-             (symbol? head)
-             (pair? tail)
-             (pair? (car tail))
-             (eq? (caar tail) 'case-lambda))
-           (cons
-             head
-             (filter
-               (lambda (value) value)
-               (map
-                 (lambda (clause)
-                   (and (pair? clause) (car clause)))
-                 (cdar tail))))]
-          [else #f]))))
-
-  (define (definition-signatures clauses)
-    (fold-left
-      (lambda (result clause)
-        (cond
-          [(and (pair? clause) (eq? (car clause) 'begin))
-           (append result (definition-signatures (cdr clause)))]
-          [(definition-signature clause) =>
-           (lambda (signature)
-             (cons signature result))]
-          [else result]))
-      '()
-      clauses))
-
   (define (source-metadata source)
     (let* ([resource (car source)]
            [bytes (cdr source)]
@@ -111,8 +66,7 @@
             resource
             (cadr form)
             (export-pairs (cddr form))
-            (scheme-semantic-snapshot-definitions snapshot)
-            (definition-signatures (cddr form)))))))
+            (scheme-semantic-snapshot-definitions snapshot))))))
 
   (define (definitions-named name definitions)
     (filter
@@ -144,18 +98,11 @@
                     (cons (car remaining) (car matches))
                     (loop (cdr remaining)))))))))
 
-  (define (entry-signatures export owner+definition)
+  (define (entry-signatures owner+definition)
     (if (not owner+definition)
         '()
-        (let* ([owner (car owner+definition)]
-               [internal (car export)]
-               [signature
-                 (assq
-                   internal
-                   (library-source-signatures owner))])
-          (if signature
-              (cdr signature)
-              '()))))
+        (scheme-definition-signature-formals
+          (cdr owner+definition))))
 
   (define (entry source export owner+definition)
     (let ([external-name (symbol->string (cdr export))])
@@ -174,7 +121,7 @@
         (and
           owner+definition
           (scheme-definition-end (cdr owner+definition)))
-        (entry-signatures export owner+definition)
+        (entry-signatures owner+definition)
         #f)))
 
   (define (same-entry? left right)

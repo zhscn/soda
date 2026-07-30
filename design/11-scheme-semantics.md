@@ -223,6 +223,16 @@ formals。索引保存不带过程名的原始 formals datum；呈现签名时�
 中的同类定义使用相同的签名表示，未闭合 form 的容错扫描仍可保留已经完整出现的
 参数表。
 
+`define-record-type` 生成 record type、constructor、predicate、accessor 和 mutator
+definition。省略 binding 名称时按 R6RS 命名规则派生名称；显式名称直接成为
+DefinitionId。默认 constructor 使用 fields 作为 formals，predicate 接受一个
+value，accessor 接受对应 record，mutator 接受 record 与新值。带 `protocol` 的
+constructor 不推断 formals。所有生成 binding 的 source location 指向 record
+声明，使 completion、symbol inspection 和 xref 使用同一份 metadata。
+
+实时 scanner 是 signature formals 的唯一生产者。构建索引器从
+`SchemeDefinition` 读取 raw formals，不另行解析 procedure 或 record 语法。
+
 运行时 catalog 保留每个 export 的 library identity。semantic snapshot 从容错
 reader 提取当前文档的 import library；即使外围 library form 尚未闭合，已经出现的
 import clause 仍然有效。静态 completion 只暴露当前文档 import 的 Soda library，
@@ -302,8 +312,8 @@ import modifier 和嵌入 Soda API 具有相同的查询行为。
 自举 scanner 直接读取 UTF-8 snapshot，识别 Scheme identifier 中的标点，并容错
 跳过字符串、行注释、嵌套 block comment、datum comment 以及 quoted datum。它提取
 `define`、procedure definition、`define-syntax` 和 `define-record-type`；record
-名称、constructor 与 predicate 分别形成稳定定义。未闭合的外围 form 不妨碍已经
-出现的定义进入 snapshot。
+名称、constructor、predicate、accessor 与 mutator 分别形成稳定定义。未闭合的
+外围 form 不妨碍已经出现的定义进入 snapshot。
 
 同一次扫描也产生 `SchemeUse { name, start, end, resolution }`。声明 token 不重复
 记录为 use，quote、quasiquote、syntax 及 datum comment 内的 symbol 不进入 use

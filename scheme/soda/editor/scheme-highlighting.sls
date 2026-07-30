@@ -51,7 +51,8 @@
         [else
          (case (hashtable-ref kinds-by-name value #f)
            [(syntax) 'syntax-keyword]
-           [(procedure) 'syntax-builtin]
+           [(procedure constructor predicate accessor mutator)
+            'syntax-builtin]
            [(record) 'syntax-type]
            [else #f])])))
 

@@ -34,6 +34,9 @@
     "(define-syntax with-value (syntax-rules ()))\n"
     "(define-record-type (editor-state make-editor-state editor-state?)\n"
     "  (fields value))\n"
+    "(define-record-type mutable-state\n"
+    "  (fields\n"
+    "    (mutable value mutable-state-value mutable-state-value-set!)))\n"
     "(define λ-value 6)\n"
     "(define unfinished\n"
     "(render-frame current-value)\n"))
@@ -105,6 +108,27 @@
     (definition-by-name "editor-state")
     (definition-by-name "make-editor-state")
     (definition-by-name "editor-state?")
+    (definition-by-name "editor-state-value")
+    (equal?
+      (scheme-definition-signatures
+        (definition-by-name "make-editor-state"))
+      '("(make-editor-state value)"))
+    (equal?
+      (scheme-definition-signatures
+        (definition-by-name "editor-state?"))
+      '("(editor-state? value)"))
+    (equal?
+      (scheme-definition-signatures
+        (definition-by-name "editor-state-value"))
+      '("(editor-state-value editor-state)"))
+    (eq?
+      (scheme-definition-kind
+        (definition-by-name "mutable-state-value-set!"))
+      'mutator)
+    (equal?
+      (scheme-definition-signatures
+        (definition-by-name "mutable-state-value-set!"))
+      '("(mutable-state-value-set! mutable-state value)"))
     (definition-by-name "λ-value")
     (definition-by-name "unfinished"))
   (error 'scheme-semantics-tests
@@ -217,6 +241,18 @@
       (string=? (scheme-use-name use) name))
     uses))
 
+(for-each
+  (lambda (name)
+    (when (pair? (uses-by-name name))
+      (error 'scheme-semantics-tests
+             "record binding declaration was recorded as a use"
+             name)))
+  '("editor-state"
+    "make-editor-state"
+    "editor-state?"
+    "mutable-state-value"
+    "mutable-state-value-set!"))
+
 (let* ([definition (definition-by-name "render-frame")]
        [matching-uses (uses-by-name "render-frame")]
        [references
@@ -264,13 +300,18 @@
       (string->utf8
         (string-append
           "(library (sample alpha)\n"
-          "  (export alpha-value alpha-case (rename (alpha-run run)))\n"
+          "  (export alpha-value alpha-case\n"
+          "          alpha-cell make-alpha-cell alpha-cell?\n"
+          "          alpha-cell-value alpha-cell-value-set!\n"
+          "          (rename (alpha-run run)))\n"
           "  (import (rnrs))\n"
           "  (define alpha-value 1)\n"
           "  (define alpha-case\n"
           "    (case-lambda\n"
           "      [() alpha-value]\n"
           "      [(value) value]))\n"
+          "  (define-record-type alpha-cell\n"
+          "    (fields (mutable value)))\n"
           "  (define (alpha-run) alpha-value)))\n")))
     (cons
       "facade.sls"
@@ -296,10 +337,14 @@
           (index-entry "run" '(sample alpha))]
         [overloaded
           (index-entry "alpha-case" '(sample alpha))]
+        [accessor
+          (index-entry "alpha-cell-value" '(sample alpha))]
+        [mutator
+          (index-entry "alpha-cell-value-set!" '(sample alpha))]
         [reexported
           (index-entry "alpha-value" '(sample facade))])
     (and
-      (= (length generated-index) 5)
+      (= (length generated-index) 10)
       renamed
       (eq? (cadr renamed) 'procedure)
       (string=? (list-ref renamed 3) "alpha.sls")
@@ -307,6 +352,14 @@
       (equal? (list-ref renamed 6) '(()))
       overloaded
       (equal? (list-ref overloaded 6) '(() (value)))
+      accessor
+      (eq? (cadr accessor) 'accessor)
+      (equal? (list-ref accessor 6) '((alpha-cell)))
+      mutator
+      (eq? (cadr mutator) 'mutator)
+      (equal?
+        (list-ref mutator 6)
+        '((alpha-cell value)))
       reexported
       (eq? (cadr reexported) 'variable)
       (string=? (list-ref reexported 3) "alpha.sls")))

@@ -21,6 +21,7 @@
           scheme-definition-start
           scheme-definition-end
           scheme-definition-detail
+          scheme-definition-signature-formals
           scheme-definition-signatures
           scheme-definition-documentation
           scheme-call-context?
@@ -65,6 +66,14 @@
 
   (define-record-type scheme-definition
     (fields id name kind start end detail formals documentation))
+
+  (define (scheme-definition-signature-formals definition)
+    (unless (scheme-definition? definition)
+      (assertion-violation
+        'scheme-definition-signature-formals
+        "expected a Scheme definition"
+        definition))
+    (scheme-definition-formals definition))
 
   (define-record-type scheme-call-context
     (fields
@@ -360,10 +369,11 @@
     (and (symbol-token? value)
          (string=? (token-value value) name)))
 
-  (define (local-definition
+  (define (named-local-definition
             document-id
             revision
             value
+            name
             kind
             detail
             formals)
@@ -373,14 +383,30 @@
         document-id
         revision
         (token-start value)
-        (token-value value))
-      (token-value value)
+        name)
+      name
       kind
       (token-start value)
       (token-end value)
       detail
       formals
       #f))
+
+  (define (local-definition
+            document-id
+            revision
+            value
+            kind
+            detail
+            formals)
+    (named-local-definition
+      document-id
+      revision
+      value
+      (token-value value)
+      kind
+      detail
+      formals))
 
   (define (procedure-head-formals tokens)
     (call-with-values
@@ -411,48 +437,250 @@
                (cdr datum)))]
           [else '()]))))
 
-  (define (record-name-definitions
+  (define (symbol-append . values)
+    (string->symbol
+      (apply
+        string-append
+        (map
+          (lambda (value)
+            (if (symbol? value)
+                (symbol->string value)
+                value))
+          values))))
+
+  (define (record-name-token tail)
+    (cond
+      [(and (pair? tail) (symbol-token? (car tail)))
+       (car tail)]
+      [(and
+         (pair? tail)
+         (eq? (token-kind (car tail)) 'open)
+         (pair? (cdr tail))
+         (symbol-token? (cadr tail)))
+       (cadr tail)]
+      [else #f]))
+
+  (define (record-name-parts specification)
+    (cond
+      [(symbol? specification)
+       (list
+         specification
+         (symbol-append "make-" specification)
+         (symbol-append specification "?"))]
+      [(and
+         (pair? specification)
+         (symbol? (car specification)))
+       (let ([name (car specification)])
+         (list
+           name
+           (if (and
+                 (pair? (cdr specification))
+                 (symbol? (cadr specification)))
+               (cadr specification)
+               (symbol-append "make-" name))
+           (if (and
+                 (pair? (cddr specification))
+                 (symbol? (caddr specification)))
+               (caddr specification)
+               (symbol-append name "?"))))]
+      [else #f]))
+
+  (define (record-field-bindings name clauses)
+    (let ([fields
+            (find
+              (lambda (clause)
+                (and
+                  (pair? clause)
+                  (eq? (car clause) 'fields)))
+              clauses)])
+      (if
+        (not fields)
+        '()
+        (map
+          (lambda (specification)
+            (cond
+              [(symbol? specification)
+               (list
+                 specification
+                 (symbol-append name "-" specification)
+                 #f)]
+              [(and
+                 (pair? specification)
+                 (memq (car specification) '(immutable mutable))
+                 (pair? (cdr specification))
+                 (symbol? (cadr specification)))
+               (let* ([mutable?
+                        (eq? (car specification) 'mutable)]
+                      [field (cadr specification)]
+                      [accessor
+                        (if (and
+                              (pair? (cddr specification))
+                              (symbol? (caddr specification)))
+                            (caddr specification)
+                            (symbol-append name "-" field))]
+                      [mutator
+                        (and
+                          mutable?
+                          (if (and
+                                (pair? (cddr specification))
+                                (pair? (cdddr specification))
+                                (symbol? (cadddr specification)))
+                              (cadddr specification)
+                              (symbol-append
+                                name
+                                "-"
+                                field
+                                "-set!")))])
+                 (list field accessor mutator))]
+              [else (list #f #f #f)]))
+          (cdr fields)))))
+
+  (define (tokens-before-tail tokens tail)
+    (if
+      (null? tail)
+      tokens
+      (let loop ([remaining tokens] [result '()])
+        (cond
+          [(null? remaining) (reverse result)]
+          [(eq? (car remaining) (car tail))
+           (reverse result)]
+          [else
+           (loop
+             (cdr remaining)
+             (cons (car remaining) result))]))))
+
+  (define (record-binding-token tokens fallback name)
+    (or
+      (find
+        (lambda (value)
+          (and
+            (symbol-token? value)
+            (string=?
+              (token-value value)
+              (symbol->string name))))
+        tokens)
+      fallback))
+
+  (define (record-definitions
+            tokens
             tail
             document-id
             revision)
-    (cond
-      [(and (pair? tail) (symbol-token? (car tail)))
-       (list
-         (local-definition
-           document-id
-           revision
-           (car tail)
-           'record
-           "local record type"
-           '()))]
-      [(and (pair? tail)
-            (eq? (token-kind (car tail)) 'open))
-       (let take ([remaining (cdr tail)]
-                  [index 0]
-                  [definitions '()])
-         (cond
-           [(or (null? remaining)
-                (= index 3)
-                (eq? (token-kind (car remaining)) 'close))
-            (reverse definitions)]
-           [(symbol-token? (car remaining))
-            (take
-              (cdr remaining)
-              (+ index 1)
-              (cons
-                (local-definition
-                  document-id
-                  revision
-                  (car remaining)
-                  (if (zero? index) 'record 'procedure)
-                  (if (zero? index)
-                      "local record type"
-                      "record binding")
-                  '())
-                definitions))]
-           [else
-            (take (cdr remaining) index definitions)]))]
-      [else '()]))
+    (let ([anchor (record-name-token tail)])
+      (if
+        (not anchor)
+        '()
+        (call-with-values
+          (lambda () (partial-datum tokens))
+          (lambda (datum remaining)
+            (if
+              (not
+                (and
+                  (pair? datum)
+                  (eq? (car datum) 'define-record-type)
+                  (pair? (cdr datum))))
+              '()
+              (let* ([parts (record-name-parts (cadr datum))]
+                     [clauses (cddr datum)]
+                     [form-tokens
+                       (tokens-before-tail tokens remaining)]
+                     [fields
+                       (and
+                         parts
+                         (record-field-bindings
+                           (car parts)
+                           clauses))])
+                (if
+                  (not parts)
+                  '()
+                  (let* ([name (car parts)]
+                         [constructor (cadr parts)]
+                         [predicate (caddr parts)]
+                         [field-names
+                           (filter
+                             symbol?
+                             (map car fields))]
+                         [base
+                           (list
+                             (named-local-definition
+                               document-id
+                               revision
+                               (record-binding-token
+                                 form-tokens
+                                 anchor
+                                 name)
+                               (symbol->string name)
+                               'record
+                               "local record type"
+                               '())
+                             (named-local-definition
+                               document-id
+                               revision
+                               (record-binding-token
+                                 form-tokens
+                                 anchor
+                                 constructor)
+                               (symbol->string constructor)
+                               'constructor
+                               "record constructor"
+                               (if
+                                 (exists
+                                   (lambda (clause)
+                                     (and
+                                       (pair? clause)
+                                       (eq? (car clause) 'protocol)))
+                                   clauses)
+                                 '()
+                                 (list field-names)))
+                             (named-local-definition
+                               document-id
+                               revision
+                               (record-binding-token
+                                 form-tokens
+                                 anchor
+                                 predicate)
+                               (symbol->string predicate)
+                               'predicate
+                               "record predicate"
+                               '((value))))]
+                         [field-definitions
+                           (apply
+                             append
+                             (map
+                               (lambda (field)
+                                 (let ([accessor (cadr field)]
+                                       [mutator (caddr field)])
+                                   (append
+                                     (if accessor
+                                         (list
+                                           (named-local-definition
+                                             document-id
+                                             revision
+                                             (record-binding-token
+                                               form-tokens
+                                               anchor
+                                               accessor)
+                                             (symbol->string accessor)
+                                             'accessor
+                                             "record accessor"
+                                             (list (list name))))
+                                         '())
+                                     (if mutator
+                                         (list
+                                           (named-local-definition
+                                             document-id
+                                             revision
+                                             (record-binding-token
+                                               form-tokens
+                                               anchor
+                                               mutator)
+                                             (symbol->string mutator)
+                                             'mutator
+                                             "record mutator"
+                                             (list (list name 'value))))
+                                         '()))))
+                               fields))])
+                    (append base field-definitions))))))))))
 
   (define (definitions-at tokens document-id revision)
     (if
@@ -505,7 +733,11 @@
                  '()))
              '())]
           [(token-symbol=? head "define-record-type")
-           (record-name-definitions tail document-id revision)]
+           (record-definitions
+             tokens
+             tail
+             document-id
+             revision)]
           [else '()]))
       '()))
 

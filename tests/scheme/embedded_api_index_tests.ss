@@ -16,6 +16,16 @@
         (equal? (caddr entry) '(soda editor core))))
     soda-built-in-api-index))
 
+(define completion-item-accessor-entry
+  (find
+    (lambda (entry)
+      (and
+        (string=? (car entry) "completion-item-id")
+        (equal?
+          (caddr entry)
+          '(soda editor completion))))
+    soda-built-in-api-index))
+
 (unless
   (and
     (> (length soda-built-in-api-index) 100)
@@ -24,7 +34,16 @@
     (string? (list-ref editor-command-entry 3))
     (integer? (list-ref editor-command-entry 4))
     (integer? (list-ref editor-command-entry 5))
-    (pair? (list-ref editor-command-entry 6)))
+    (pair? (list-ref editor-command-entry 6))
+    completion-item-accessor-entry
+    (eq? (cadr completion-item-accessor-entry) 'accessor)
+    (string?
+      (list-ref completion-item-accessor-entry 3))
+    (integer?
+      (list-ref completion-item-accessor-entry 4))
+    (equal?
+      (list-ref completion-item-accessor-entry 6)
+      '((completion-item))))
   (error
     'embedded-api-index-tests
     "embedded Scheme API catalog is missing the editor command interface"))
@@ -169,6 +188,38 @@
   (error
     'embedded-api-index-tests
     "rename import did not preserve canonical API identity"))
+
+(define record-api-snapshot
+  (snapshot-for-import
+    "(soda editor completion)"
+    "(completion-item-id"))
+(define record-api-use
+  (use-named record-api-snapshot "completion-item-id"))
+(define record-api-definitions
+  (and
+    record-api-use
+    (scheme-semantic-definitions-at
+      record-api-snapshot
+      (scheme-use-start record-api-use))))
+
+(unless
+  (and
+    record-api-use
+    (= (length record-api-definitions) 1)
+    (let ([definition (car record-api-definitions)])
+      (and
+        (eq? (scheme-definition-kind definition) 'accessor)
+        (eq?
+          (scheme-definition-id-source
+            (scheme-definition-id definition))
+          'index)
+        (integer? (scheme-definition-start definition))
+        (equal?
+          (scheme-definition-signatures definition)
+          '("(completion-item-id completion-item)")))))
+  (error
+    'embedded-api-index-tests
+    "record accessor did not resolve to embedded source metadata"))
 
 (define xref-source
   (string-append
