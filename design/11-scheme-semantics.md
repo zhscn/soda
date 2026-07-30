@@ -210,8 +210,8 @@ PrimitiveDefinition {
 
 metadata 作为没有源码 Document 的 SchemeDefinition 加入 library export
 surface。它提供稳定的补全与 hover，不依赖当前进程是否已经 import 对应 library。
-Chez runtime reflection 可以补充 procedure arity、值类别和文档，但不能覆盖静态
-library identity 或源码定义。
+library identity 来自 catalog，procedure arity 和值类别可以由对应 Scheme
+implementation 的构建期反射补充；源码定义仍拥有更具体的 resource 与 range。
 
 Soda 的公共 library metadata 在应用构建时从 Scheme source tree 生成。索引器读取
 R6RS `library` 与 `export` form，归一化直接导出和 rename，并把 re-export 关联到
@@ -219,6 +219,19 @@ R6RS `library` 与 `export` form，归一化直接导出和 rename，并把 re-e
 catalog。library catalog 保存没有 export 的 library，因此 import 解析不需要从
 补全符号反推 library 是否存在。两个 catalog 都是只含不可变 datum 的 Scheme
 library，随 whole-program editor boot 一起编译和嵌入。
+
+构建同时从当前 Chez runtime 的 `(rnrs)` 与 `(chezscheme)` library 生成独立的
+top-environment catalog。`library-exports` 提供稳定的 library surface；每个 binding
+在对应 library environment 中分类为 syntax、procedure 或 variable。procedure 的
+固定和可变 arity 由 `procedure-arity-mask` 转换为通用 formals，未知参数名使用
+`arg1`、`arg2` 和 `args`。生成结果只包含不可变 datum，运行中的 Editor 不执行
+environment reflection。
+
+top-environment definition 没有 source resource 和 declaration range，参与 import
+变换、completion、hover、signature、use resolution 与 selector diagnostics，但不
+进入 workspace-symbol 和源码跳转结果。显式 import 的同名 definition 优先于全局
+primitive fallback，使 DefinitionId 保持唯一；fallback 只覆盖 source-tree 单库测试
+和没有静态 library metadata 的最小编辑场景。
 
 procedure metadata 从过程定义、以 `lambda` 初始化的定义和 `case-lambda` 分支提取
 formals。索引保存不带过程名的原始 formals datum；呈现签名时使用当前可见 binding

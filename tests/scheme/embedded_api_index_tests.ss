@@ -27,6 +27,26 @@
           '(soda editor completion))))
     soda-built-in-api-index))
 
+(define rnrs-map-entry
+  (find
+    (lambda (entry)
+      (and
+        (string=? (car entry) "map")
+        (equal? (caddr entry) '(rnrs))))
+    scheme-built-in-api-index))
+
+(define chez-arity-entry
+  (find
+    (lambda (entry)
+      (and
+        (string=?
+          (car entry)
+          "procedure-arity-mask")
+        (equal?
+          (caddr entry)
+          '(chezscheme))))
+    scheme-built-in-api-index))
+
 (unless
   (and
     (> (length soda-built-in-api-index) 100)
@@ -48,10 +68,92 @@
       (list-ref completion-item-accessor-entry 4))
     (equal?
       (list-ref completion-item-accessor-entry 6)
-      '((completion-item))))
+      '((completion-item)))
+    (> (length scheme-built-in-api-index) 2000)
+    (equal?
+      scheme-built-in-library-index
+      '((rnrs) (chezscheme)))
+    rnrs-map-entry
+    (eq? (cadr rnrs-map-entry) 'procedure)
+    (equal?
+      (list-ref rnrs-map-entry 6)
+      '((arg1 arg2 . args)))
+    chez-arity-entry
+    (eq? (cadr chez-arity-entry) 'procedure))
   (error
     'embedded-api-index-tests
-    "embedded Scheme API catalog is missing the editor command interface"))
+    "embedded Scheme API catalog is missing editor or top-environment metadata"))
+
+(define top-environment-source
+  (string-append
+    "(import\n"
+    "  (only (rnrs) map vector-ref lambda))\n"
+    "(map vector-ref '())\n"))
+(define top-environment-snapshot
+  (make-scheme-semantic-snapshot
+    19
+    0
+    (string->utf8 top-environment-source)))
+
+(for-each
+  (lambda (name)
+    (let ([use
+            (find
+              (lambda (candidate)
+                (string=?
+                  (scheme-use-name candidate)
+                  name))
+              (scheme-semantic-snapshot-uses
+                top-environment-snapshot))])
+      (unless
+        (and
+          use
+          (= (length
+               (scheme-use-resolution use))
+             1)
+          (let ([id
+                  (car
+                    (scheme-use-resolution use))])
+            (and
+              (eq?
+                (scheme-definition-id-source id)
+                'index)
+              (equal?
+                (scheme-definition-id-revision id)
+                '(rnrs)))))
+        (error
+          'embedded-api-index-tests
+          "R6RS use did not resolve to one reflected binding"
+          name
+          (and use
+               (scheme-use-resolution use))))))
+  '("map" "vector-ref"))
+
+(define invalid-rnrs-import
+  (make-scheme-semantic-snapshot
+    18
+    0
+    (string->utf8
+      (string-append
+        "(import\n"
+        "  (only (rnrs) no-such-r6rs-binding))\n"))))
+(unless
+  (exists
+    (lambda (diagnostic)
+      (and
+        (eq?
+          (scheme-diagnostic-code diagnostic)
+          'identifier-not-exported)
+        (string=?
+          (scheme-diagnostic-message diagnostic)
+          (string-append
+            "Identifier no-such-r6rs-binding "
+            "is not exported by (rnrs)"))))
+    (scheme-semantic-snapshot-diagnostics
+      invalid-rnrs-import))
+  (error
+    'embedded-api-index-tests
+    "reflected R6RS surface did not drive import diagnostics"))
 
 (define (read-resource-bytes resource)
   (call-with-port
@@ -461,7 +563,17 @@
 (when
   (exists
     (lambda (snapshot)
-      (diagnostic-code? snapshot 'unused-import))
+      (exists
+        (lambda (diagnostic)
+          (and
+            (eq?
+              (scheme-diagnostic-code diagnostic)
+              'unused-import)
+            (equal?
+              (scheme-diagnostic-payload diagnostic)
+              '(soda editor core))))
+        (scheme-semantic-snapshot-diagnostics
+          snapshot)))
     (list only-snapshot prefix-snapshot rename-snapshot))
   (error
     'embedded-api-index-tests

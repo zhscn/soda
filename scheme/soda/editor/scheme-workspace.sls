@@ -1258,16 +1258,21 @@
                index-symbol
                (filter
                  (lambda (definition)
-                   (let ([resource
-                           (scheme-definition-id-document-id
-                             (scheme-definition-id
-                               definition))])
-                     (or
-                       (not (string? resource))
-                       (not
-                         (hashtable-contains?
-                           open-resources
-                           resource)))))
+                   (let* ([id
+                            (scheme-definition-id definition)]
+                          [resource
+                            (scheme-definition-id-document-id id)])
+                     (and
+                       (integer?
+                         (scheme-definition-start definition))
+                       (integer?
+                         (scheme-definition-end definition))
+                       (or
+                         (not (string? resource))
+                         (not
+                           (hashtable-contains?
+                             open-resources
+                             resource))))))
                  scheme-index-definitions))])
       (list-sort
         symbol-before?

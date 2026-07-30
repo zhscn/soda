@@ -1021,7 +1021,9 @@
             "invalid embedded Scheme API index entry"
             entry))
         (index-entry->definition entry))
-      soda-built-in-api-index))
+      (append
+        soda-built-in-api-index
+        scheme-built-in-api-index)))
 
   (define (scheme-definition-library definition)
     (unless (scheme-definition? definition)
@@ -1039,7 +1041,9 @@
       (for-each
         (lambda (library)
           (hashtable-set! table library #t))
-        soda-built-in-library-index)
+        (append
+          soda-built-in-library-index
+          scheme-built-in-library-index))
       table))
 
   (define-record-type import-binding
@@ -1267,6 +1271,18 @@
                 (hashtable-ref table name '())))))
         definitions)
       table))
+
+  (define (primitive-fallback-definitions definitions)
+    (filter
+      (lambda (primitive)
+        (not
+          (exists
+            (lambda (definition)
+              (string=?
+                (scheme-definition-name definition)
+                (scheme-definition-name primitive)))
+            definitions)))
+      scheme-primitive-definitions))
 
   (define (scheme-definition-id=? left right)
     (and (scheme-definition-id? left)
@@ -3112,7 +3128,8 @@
              (make-definition-table
                (append
                  visible-index
-                 scheme-primitive-definitions))]
+                 (primitive-fallback-definitions
+                   visible-index)))]
            [definitions
              (scan-definitions document-id revision semantic)])
       (call-with-values

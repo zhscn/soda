@@ -56,12 +56,20 @@
       (reverse result)))
 
   (define (definition-group definition)
-    (case
-      (scheme-definition-id-source
-        (scheme-definition-id definition))
-      [(document) "Current document"]
-      [(index) "Soda API"]
-      [else "R6RS/Chez"]))
+    (let ([id (scheme-definition-id definition)])
+      (case
+        (scheme-definition-id-source id)
+        [(document) "Current document"]
+        [(index)
+         (let ([library
+                 (scheme-definition-id-revision id)])
+           (if
+             (and
+               (pair? library)
+               (eq? (car library) 'soda))
+             "Soda API"
+             "R6RS/Chez"))]
+        [else "R6RS/Chez"])))
 
   (define (definition->completion-item definition)
     (let* ([name (scheme-definition-name definition)]
