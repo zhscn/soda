@@ -102,6 +102,29 @@
 
 (define typed-command-result #f)
 (define typed-command-trace '())
+(define completing-command-result #f)
+(define completing-command-context #f)
+
+(define completing-command-source
+  (make-choice-source
+    'test-value
+    '((category . test-value)
+      (preselect . #t))
+    (lambda (input point)
+      (cons 0 (string-length input)))
+    (lambda (query)
+      (list
+        (make-completion-item
+          'alpha
+          'test
+          "alpha"
+          "Alpha"
+          "alpha"
+          "value"
+          #f
+          'alpha-value)))
+    (lambda (value) (string=? value "alpha"))
+    (lambda (generation) #f)))
 
 (define-command (test.typed-command context count text)
   "Exercise typed interactive command arguments."
@@ -111,6 +134,26 @@
   (set! typed-command-result (list count text))
   (set! typed-command-trace
     (append typed-command-trace '(body)))
+  '())
+
+(define-command (test.completing-command context value input)
+  "Exercise completing interactive command input."
+  (interactive
+    (interactive-completing-read
+      "Choose: "
+      (lambda (context)
+        (set! completing-command-context context)
+        completing-command-source)
+      'must-match
+      'test-completing-command
+      ""
+      #f
+      (lambda (context result)
+        (list
+          (completion-item-payload
+            (prompt-result-candidate result))
+          (prompt-result-value result)))))
+  (set! completing-command-result (list value input))
   '())
 
 (define minor-mode-enable-count 0)
@@ -2958,6 +3001,86 @@
       (eq? history (editor-command-history prompt-editor)))
     (error 'editor-tests
            "aborting an interactive reader retained its invocation")))
+
+(editor-register-command!
+  prompt-editor
+  (make-interactive-context-command
+    'test.completing-command
+    test.completing-command))
+(editor-update!
+  prompt-editor
+  (make-command-message 'test.completing-command #f))
+(let* ([session (editor-active-prompt prompt-editor)]
+       [request (and session (prompt-session-request session))]
+       [completion (editor-active-prompt-completion prompt-editor)])
+  (unless
+    (and
+      session
+      (string=? (prompt-request-prompt request) "Choose: ")
+      (eq? (prompt-request-accept-policy request) 'must-match)
+      (eq? (prompt-request-history-id request)
+           'test-completing-command)
+      (eq? (prompt-request-completion-source request)
+           completing-command-source)
+      (eq? (command-context-editor completing-command-context)
+           prompt-editor)
+      completion
+      (eq? (completion-session-selected-item completion)
+           (car (completion-session-items completion))))
+    (error 'editor-tests
+           "completing interactive reader did not create its prompt")))
+(dispatch-prompt-effects!
+  (send! prompt-editor prompt-decoder (bytes 13)))
+(unless
+  (and
+    (equal?
+      completing-command-result
+      '(alpha-value "alpha"))
+    (equal?
+      (editor-history-entries
+        prompt-editor
+        'test-completing-command)
+      '("alpha"))
+    (not (editor-active-command-invocation prompt-editor)))
+  (error 'editor-tests
+         "completing interactive reader did not decode its result"
+         completing-command-result))
+(define completing-source-rejected? #f)
+(guard (condition
+         [else (set! completing-source-rejected? #t)])
+  ((interactive-reader-resolver
+     (interactive-completing-read
+       "Invalid: "
+       (lambda (context) #f)))
+   completing-command-context))
+(unless completing-source-rejected?
+  (error 'editor-tests
+         "completing interactive reader accepted an invalid dynamic source"))
+(define completing-decoder-rejected? #f)
+(let* ([reader
+         (interactive-completing-read
+           "Invalid: "
+           completing-command-source
+           'must-match
+           #f
+           ""
+           #f
+           (lambda (context result) 'invalid))]
+       [suspension
+         ((interactive-reader-resolver reader)
+          completing-command-context)])
+  (guard (condition
+           [else (set! completing-decoder-rejected? #t)])
+    ((interactive-suspend-decoder suspension)
+     (make-prompt-result
+       1
+       'accepted
+       "alpha"
+       (view-id (command-context-view completing-command-context))
+       #f))))
+(unless completing-decoder-rejected?
+  (error 'editor-tests
+         "completing interactive reader accepted invalid decoder output"))
 
 (define test-minor-map (make-keymap))
 (keymap-catalog-register!

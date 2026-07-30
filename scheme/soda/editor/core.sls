@@ -221,6 +221,7 @@
           interactive-region
           interactive-string
           interactive-number
+          interactive-completing-read
           interactive-file-name
           command-interactive?
           interactive-command-names

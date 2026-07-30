@@ -13,10 +13,12 @@
           interactive-region
           interactive-string
           interactive-number
+          interactive-completing-read
           install-command-effect-handler!)
   (import (rnrs)
           (soda editor buffer)
           (soda editor command)
+          (soda editor completion)
           (soda editor effect)
           (soda editor event)
           (soda editor keymap)
@@ -221,6 +223,113 @@
                      "expected a numeric prompt result"
                      result))
                  (list number))))))]))
+
+  (define (default-completing-read-decoder context result)
+    (list (prompt-result-value result)))
+
+  (define interactive-completing-read
+    (case-lambda
+      [(prompt source)
+       (interactive-completing-read
+         prompt source 'must-match #f "" #f
+         default-completing-read-decoder)]
+      [(prompt source accept-policy)
+       (interactive-completing-read
+         prompt source accept-policy #f "" #f
+         default-completing-read-decoder)]
+      [(prompt source accept-policy history-id)
+       (interactive-completing-read
+         prompt source accept-policy history-id "" #f
+         default-completing-read-decoder)]
+      [(prompt source accept-policy history-id initial)
+       (interactive-completing-read
+         prompt source accept-policy history-id initial #f
+         default-completing-read-decoder)]
+      [(prompt source accept-policy history-id initial default)
+       (interactive-completing-read
+         prompt source accept-policy history-id initial default
+         default-completing-read-decoder)]
+      [(prompt
+         source
+         accept-policy
+         history-id
+         initial
+         default
+         result-decoder)
+       (unless (string? prompt)
+         (assertion-violation
+           'interactive-completing-read
+           "prompt must be a string"
+           prompt))
+       (unless (or (choice-source? source) (procedure? source))
+         (assertion-violation
+           'interactive-completing-read
+           "source must be a choice source or context procedure"
+           source))
+       (unless (memq accept-policy '(free must-match))
+         (assertion-violation
+           'interactive-completing-read
+           "accept policy must be free or must-match"
+           accept-policy))
+       (unless (or (not history-id) (symbol? history-id))
+         (assertion-violation
+           'interactive-completing-read
+           "history id must be a symbol or #f"
+           history-id))
+       (unless (string? initial)
+         (assertion-violation
+           'interactive-completing-read
+           "initial value must be a string"
+           initial))
+       (unless (or (not default) (string? default))
+         (assertion-violation
+           'interactive-completing-read
+           "default must be a string or #f"
+           default))
+       (unless (procedure? result-decoder)
+         (assertion-violation
+           'interactive-completing-read
+           "result decoder must be a procedure"
+           result-decoder))
+       (make-interactive-reader
+         'completing-read
+         (lambda (context)
+           (let ([resolved-source
+                   (if (choice-source? source)
+                       source
+                       (source context))])
+             (unless (choice-source? resolved-source)
+               (assertion-violation
+                 'interactive-completing-read
+                 "source procedure must return a choice source"
+                 resolved-source))
+             (make-interactive-suspend
+               (make-completing-prompt-request
+                 prompt
+                 initial
+                 history-id
+                 default
+                 accept-policy
+                 resolved-source
+                 'command.resume-interactive
+                 'command.abort-interactive)
+               (lambda (result)
+                 (unless (and
+                           (prompt-result? result)
+                           (eq?
+                             (prompt-result-status result)
+                             'accepted))
+                   (assertion-violation
+                     'interactive-completing-read
+                     "expected an accepted prompt result"
+                     result))
+                 (let ([values (result-decoder context result)])
+                   (unless (list? values)
+                     (assertion-violation
+                       'interactive-completing-read
+                       "result decoder must return a list"
+                       values))
+                   values))))))]))
 
   (define (editor-bind-key! editor sequence command)
     (require-open-editor 'editor-bind-key! editor)

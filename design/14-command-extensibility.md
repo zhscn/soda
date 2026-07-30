@@ -60,8 +60,17 @@ interactive-point
 interactive-region
 (interactive-string prompt history-id default)
 (interactive-number prompt history-id default)
+(interactive-completing-read
+  prompt source accept-policy history-id initial default result-decoder)
 (interactive-file-name prompt initial)
 ```
+
+`interactive-completing-read` 接受 `ChoiceSource`，或接收 `CommandContext` 并返回
+`ChoiceSource` 的过程。后者用于构造依赖当前 editor、buffer 或 mode 的候选集合。
+`accept-policy` 为 `free` 或 `must-match`。result decoder 接收原始
+`CommandContext` 和已接受的 `PromptResult`，返回追加到命令参数中的列表；省略
+decoder 时传入 `prompt-result-value`。因此 decoder 可以读取调用上下文和 candidate
+payload，并为一个 reader 产生一个或多个类型化参数。
 
 `make-interactive-reader` 是自定义 reader 的扩展点。同步 reader 返回
 `make-interactive-ready`；需要 minibuffer 的 reader 返回
