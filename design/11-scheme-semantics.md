@@ -275,6 +275,8 @@ namespace 为 `scheme-semantic-diagnostics`，source revision 与 semantic snaps
 - 未被 resolved use 引用的 parameter；
 - 重复的 import library；
 - 没有任何可见 binding 被引用的 Soda library import；
+- 具有静态 export surface 的 Soda 或 Project library，其 `only`、`except`、
+  `rename` selector 引用了 import set 未导出的 identifier；
 - 嵌入 Soda library catalog 中不存在的 `(soda ...)` import。
 
 重复 binding 按 scope graph 判断。`let*` 和 `let*-values` 的逐级 scope 允许后续
@@ -287,6 +289,9 @@ import 按该 specification 经 `only`、`except`、`prefix` 和 `rename` 变换
 definitions 判断；use 的显示名称与 canonical DefinitionId 必须同时匹配。这样
 import form 中出现的 identifier 不会把自身计为使用，不同 modifier 也能分别判断。
 没有静态 export surface 的 library 保留其初始化语义，不产生 unused-import。
+selector 校验按相同的嵌套 import-set 顺序执行，因此经过 `prefix` 产生的名称和经过
+内层 `only`、`except` 过滤后的 surface 都在外层 modifier 处准确生效。诊断 range
+只覆盖无效的 source identifier，而不是整个 import specification。
 
 publisher 在 buffer 创建、major mode 变化和 revert 后同步诊断，并在顶层交互命令
 结束后检查所有 Scheme buffer。source revision 未变化时不重新分析；revision

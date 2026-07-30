@@ -968,6 +968,67 @@
     'scheme-semantics-tests
     "dynamic project library index did not preserve import transforms"))
 
+(define invalid-import-source
+  (string-append
+    "(import\n"
+    "  (only (sample project)\n"
+    "        project-value missing-only)\n"
+    "  (except (sample project) missing-except)\n"
+    "  (rename (sample project)\n"
+    "          (missing-source local-name))\n"
+    "  (only (prefix (sample project) p:)\n"
+    "        p:project-value p:missing))\n"))
+(define invalid-import-bytes
+  (string->utf8 invalid-import-source))
+(define invalid-import-snapshot
+  (make-scheme-semantic-snapshot-with-library-index
+    74
+    0
+    invalid-import-bytes
+    dynamic-library-index))
+(define invalid-import-diagnostics
+  (filter
+    (lambda (diagnostic)
+      (eq?
+        (scheme-diagnostic-code diagnostic)
+        'identifier-not-exported))
+    (scheme-semantic-snapshot-diagnostics
+      invalid-import-snapshot)))
+(define (diagnostic-source-text diagnostic)
+  (let* ([start (scheme-diagnostic-start diagnostic)]
+         [end (scheme-diagnostic-end diagnostic)]
+         [size (- end start)]
+         [bytes (make-bytevector size)])
+    (bytevector-copy!
+      invalid-import-bytes start bytes 0 size)
+    (utf8->string bytes)))
+
+(unless
+  (and
+    (= (length invalid-import-diagnostics) 4)
+    (for-all
+      (lambda (name)
+        (exists
+          (lambda (diagnostic)
+            (and
+              (string=?
+                (diagnostic-source-text diagnostic)
+                name)
+              (eq?
+                (scheme-diagnostic-severity diagnostic)
+                'warning)))
+          invalid-import-diagnostics))
+      '("missing-only"
+        "missing-except"
+        "missing-source"
+        "p:missing")))
+  (error
+    'scheme-semantics-tests
+    "import selector diagnostics lost nested import-set semantics"
+    (map
+      diagnostic-source-text
+      invalid-import-diagnostics)))
+
 (define incomplete-library-index
   (scheme-sources-api-index
     (list

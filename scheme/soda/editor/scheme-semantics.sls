@@ -2691,6 +2691,214 @@
       '()
       import-locations))
 
+  (define (definition-list-has-name? definitions name)
+    (exists
+      (lambda (definition)
+        (string=?
+          (scheme-definition-name definition)
+          name))
+      definitions))
+
+  (define (identifier-not-exported-diagnostic
+            identifier
+            library)
+    (let ([name
+            (token-value
+              (syntax-form-token identifier))])
+      (make-scheme-diagnostic
+        'identifier-not-exported
+        (syntax-form-start identifier)
+        (syntax-form-end identifier)
+        'warning
+        (string-append
+          "Identifier "
+          name
+          " is not exported by "
+          (library-name->string library))
+        (cons library name))))
+
+  (define (selector-diagnostics
+            identifiers
+            definitions
+            library)
+    (fold-left
+      (lambda (result identifier)
+        (if
+          (definition-list-has-name?
+            definitions
+            (token-value
+              (syntax-form-token identifier)))
+          result
+          (cons
+            (identifier-not-exported-diagnostic
+              identifier library)
+            result)))
+      '()
+      identifiers))
+
+  (define (import-specification-diagnostics
+            form
+            library-table)
+    (let ([datum (syntax-form->datum form)])
+      (cond
+        [(library-name? datum)
+         (let ([known?
+                 (or
+                   (hashtable-contains?
+                     library-table datum)
+                   (hashtable-contains?
+                     scheme-known-library-table datum))])
+           (values
+             known?
+             (if
+               known?
+               (reverse
+                 (hashtable-ref
+                   library-table datum '()))
+               '())
+             '()
+             datum))]
+        [(not
+           (and
+             (syntax-list? form)
+             (pair? (syntax-form-children form))
+             (pair?
+               (cdr
+                 (syntax-form-children form)))))
+         (values #f '() '() #f)]
+        [else
+         (let* ([children (syntax-form-children form)]
+                [head (syntax-head-symbol form)])
+           (call-with-values
+             (lambda ()
+               (import-specification-diagnostics
+                 (cadr children)
+                 library-table))
+             (lambda
+               (known?
+                 definitions
+                 nested-diagnostics
+                 library)
+               (if
+                 (not known?)
+                 (values
+                   #f '() nested-diagnostics library)
+                 (cond
+                   [(or
+                      (string=? (or head "") "only")
+                      (string=? (or head "") "except"))
+                    (let* ([identifiers
+                             (filter
+                               syntax-symbol?
+                               (cddr children))]
+                           [symbols
+                             (map
+                               (lambda (identifier)
+                                 (string->symbol
+                                   (token-value
+                                     (syntax-form-token
+                                       identifier))))
+                               identifiers)])
+                      (values
+                        #t
+                        (apply-import-transform
+                          definitions
+                          (cons
+                            (string->symbol head)
+                            symbols))
+                        (append
+                          nested-diagnostics
+                          (selector-diagnostics
+                            identifiers
+                            definitions
+                            library))
+                        library))]
+                   [(and
+                      (string=? (or head "") "prefix")
+                      (pair? (cddr children))
+                      (syntax-symbol? (caddr children)))
+                    (values
+                      #t
+                      (apply-import-transform
+                        definitions
+                        (list
+                          'prefix
+                          (string->symbol
+                            (token-value
+                              (syntax-form-token
+                                (caddr children))))))
+                      nested-diagnostics
+                      library)]
+                   [(string=? (or head "") "rename")
+                    (let* ([pairs
+                             (filter
+                               (lambda (pair)
+                                 (and
+                                   (syntax-list? pair)
+                                   (=
+                                     (length
+                                       (syntax-form-children pair))
+                                     2)
+                                   (for-all
+                                     syntax-symbol?
+                                     (syntax-form-children pair))))
+                               (cddr children))]
+                           [identifiers
+                             (map
+                               (lambda (pair)
+                                 (car
+                                   (syntax-form-children pair)))
+                               pairs)]
+                           [renames
+                             (map
+                               (lambda (pair)
+                                 (map
+                                   (lambda (identifier)
+                                     (string->symbol
+                                       (token-value
+                                         (syntax-form-token
+                                           identifier))))
+                                   (syntax-form-children pair)))
+                               pairs)])
+                      (values
+                        #t
+                        (apply-import-transform
+                          definitions
+                          (cons 'rename renames))
+                        (append
+                          nested-diagnostics
+                          (selector-diagnostics
+                            identifiers
+                            definitions
+                            library))
+                        library))]
+                   [(string=? (or head "") "for")
+                    (values
+                      #t
+                      definitions
+                      nested-diagnostics
+                      library)]
+                   [else
+                    (values
+                      #f '() nested-diagnostics library)])))))])))
+
+  (define (identifier-not-exported-diagnostics
+            import-locations
+            library-table)
+    (apply
+      append
+      (map
+        (lambda (location)
+          (call-with-values
+            (lambda ()
+              (import-specification-diagnostics
+                (cdr location)
+                library-table))
+            (lambda
+              (known? definitions diagnostics library)
+              diagnostics)))
+        import-locations)))
+
   (define (definition-used? definition uses)
     (exists
       (lambda (use)
@@ -2839,6 +3047,8 @@
         (duplicate-definition-diagnostics scopes)
         (unknown-soda-library-diagnostics
           import-locations)
+        (identifier-not-exported-diagnostics
+          import-locations library-table)
         (unused-parameter-diagnostics scopes uses)
         (unused-import-diagnostics
           import-locations uses library-table)
