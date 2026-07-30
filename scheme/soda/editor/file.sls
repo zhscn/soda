@@ -8,6 +8,10 @@
           open-request-view-id
           open-request-path
           open-request-offset
+          make-file-source-position
+          file-source-position?
+          file-source-position-line
+          file-source-position-character
           make-open-result
           open-result?
           open-result-view-id
@@ -97,6 +101,12 @@
   (define-record-type
     (open-request %make-open-request open-request?)
     (fields view-id path offset))
+
+  (define-record-type
+    (file-source-position
+      %make-file-source-position
+      file-source-position?)
+    (fields line character))
 
   (define-record-type
     (open-result %make-open-result open-result?)
@@ -192,6 +202,24 @@
   (define (non-empty-string? value)
     (and (string? value) (positive? (string-length value))))
 
+  (define (valid-open-position? value)
+    (or
+      (not value)
+      (exact-non-negative-integer? value)
+      (file-source-position? value)))
+
+  (define (make-file-source-position line character)
+    (unless
+      (and
+        (exact-non-negative-integer? line)
+        (exact-non-negative-integer? character))
+      (assertion-violation
+        'make-file-source-position
+        "line and character must be non-negative exact integers"
+        line
+        character))
+    (%make-file-source-position line character))
+
   (define make-open-request
     (case-lambda
       [(view-id path)
@@ -211,10 +239,10 @@
            "path must be a non-empty string"
            path))
        (unless
-         (or (not offset) (exact-non-negative-integer? offset))
+         (valid-open-position? offset)
          (assertion-violation
            'make-open-request
-           "offset must be a non-negative exact integer or #f"
+           "offset must be a byte offset, source position, or #f"
            offset))
        (%make-open-request view-id path offset)]))
 
@@ -423,9 +451,7 @@
            (= (length offsets) (length view-ids))
            (for-all
              (lambda (offset)
-               (or
-                 (not offset)
-                 (exact-non-negative-integer? offset)))
+               (valid-open-position? offset))
              offsets))
          (assertion-violation
            'make-open-result
@@ -870,6 +896,48 @@
         (lambda (view) (= (view-id view) id))
         (editor-views editor))))
 
+  (define (source-position-offset buffer position)
+    (let ([snapshot
+            (document-snapshot
+              (buffer-document buffer))])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (let ([text (snapshot-text snapshot)])
+            (dynamic-wind
+              (lambda () #f)
+              (lambda ()
+                (let* ([line
+                         (min
+                           (file-source-position-line position)
+                           (- (text-line-count text) 1))]
+                       [start (text-line-start text line)]
+                       [end (text-line-content-end text line)]
+                       [line-text
+                         (utf8->string
+                           (text-subbytevector
+                             text start end))]
+                       [character
+                         (min
+                           (file-source-position-character position)
+                           (string-length line-text))])
+                  (+ start
+                     (bytevector-length
+                       (string->utf8
+                         (substring
+                           line-text
+                           0
+                           character))))))
+              (lambda () (text-close! text)))))
+        (lambda () (snapshot-close! snapshot)))))
+
+  (define (open-target-offset buffer target)
+    (cond
+      [(file-source-position? target)
+       (source-position-offset buffer target)]
+      [(integer? target) target]
+      [else #f]))
+
   (define (activate-buffer! editor view-id buffer)
     (if (find-view-by-id editor view-id)
         (begin
@@ -885,7 +953,9 @@
       (activate-buffer! editor view-id buffer)
       (begin
         (let ([offset
-                (open-result-offset-for-view result view-id)]
+                (open-target-offset
+                  buffer
+                  (open-result-offset-for-view result view-id))]
               [view (find-view-by-id editor view-id)])
           (when (and offset view)
             (view-set-caret!

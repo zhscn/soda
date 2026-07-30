@@ -1319,6 +1319,28 @@
   (error 'file-tests
          "positioned open did not restore the requested byte offset"))
 
+(let ([result
+        (execute-effects!
+          executor
+          (list
+            (make-command-effect
+              'file.read
+              (make-open-request
+                origin-view-id
+                offset-path
+                (make-file-source-position 1 2)))))])
+  (unless
+    (and
+      (effect-result-continue? result)
+      (null? (effect-result-messages result)))
+    (error 'file-tests
+           "source-positioned open did not start asynchronously")))
+(finish-file-read!)
+(unless
+  (= (view-caret (editor-active-view editor)) 7)
+  (error 'file-tests
+         "source-positioned open did not resolve its line and character"))
+
 (write-file-bytes
   background-path
   (string->utf8 "(define background-value 1)\n"))

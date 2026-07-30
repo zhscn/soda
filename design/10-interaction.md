@@ -195,6 +195,8 @@ interaction 的失败状态可以同时保留。
   prefix count；
 - `scheme.debug-eval-frame` 通过 minibuffer 读取一个 datum，并使用选中 frame 的
   inspector environment 求值；
+- `scheme.debug-visit-source` 通过异步 VFS open request 打开选中 frame 的 source
+  path，并按行与字符位置定位 caret；
 - `scheme.debug-retry` 关闭当前 debugger，使用新的 generation 重放原始 source
   和 origin；
 - `scheme.debug-exit` 关闭 debugger Buffer 并返回触发异常的 Buffer，同时保留
@@ -202,11 +204,13 @@ interaction 的失败状态可以同时保留。
 - `scheme.debug-discard` 释放 debugger Buffer、condition 与 continuation；对
   interaction failure 同时退出 `failed` 状态。
 
-debugger Buffer 的 `n`、`p`、`e`、`r`、`x`、`q` 分别映射到导航、求值、重试、
-保留退出与丢弃操作。重试和丢弃会先把所有显示 debugger Buffer 的 View 切回来源
-Buffer。Editor 关闭时释放 Editor 与 interaction 持有的所有 debugger continuation。
-frame inspection 和 frame-relative evaluation 都作为普通 command 执行，不接管
-terminal stdin，也不进入递归 command loop。
+debugger Buffer 的 `n`、`p`、`e`、`v`、`r`、`x`、`q` 分别映射到导航、求值、
+源码访问、重试、保留退出与丢弃操作。源码访问复用普通 `file.read` effect，文件
+读取期间 command loop 保持可用；打开完成后 debugger 状态仍可重新激活。重试和
+丢弃会先把所有显示 debugger Buffer 的 View 切回来源 Buffer。Editor 关闭时释放
+Editor 与 interaction 持有的所有 debugger continuation。frame inspection 和
+frame-relative evaluation 都作为普通 command 执行，不接管 terminal stdin，也
+不进入递归 command loop。
 
 成功求值产生的顶层 binding 保存在 session 的 Chez environment 中。
 `scheme-repl` completion provider 将 environment symbol 投影为通用

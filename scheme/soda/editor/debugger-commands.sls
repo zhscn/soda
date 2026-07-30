@@ -9,8 +9,10 @@
           (soda editor command)
           (soda editor command-runtime)
           (soda editor comint)
+          (soda editor condition)
           (soda editor debugger)
           (soda editor edit)
+          (soda editor file)
           (soda editor interaction)
           (soda editor keymap)
           (soda editor language)
@@ -143,7 +145,7 @@
         (debugger-session-selected-frame-byte-offset debugger))
       (editor-set-status-message!
         editor
-        "Debugger: n/p frame, e evaluate, x exit, q discard")
+        "Debugger: n/p frame, e evaluate, v source, x exit, q discard")
       buffer))
 
   (define (editor-capture-condition! editor label condition)
@@ -280,6 +282,42 @@
 
   (define (debug-previous-frame-command context)
     (move-debug-frame-command context -1))
+
+  (define (debug-visit-source-command context)
+    (let* ([editor (command-context-editor context)]
+           [target
+             (require-debug-target
+               'scheme.debug-visit-source
+               context)]
+           [frame
+             (debugger-session-selected-frame
+               (cadr target))])
+      (unless
+        (and
+          frame
+          (string? (debugger-frame-source-path frame))
+          (integer? (debugger-frame-source-line frame))
+          (exact? (debugger-frame-source-line frame))
+          (not (negative? (debugger-frame-source-line frame))))
+        (editor-user-error
+          'scheme.debug-visit-source
+          "selected frame has no source location"))
+      (editor-set-status-message!
+        editor
+        (string-append
+          "Reading "
+          (debugger-frame-source-path frame)))
+      (list
+        (make-command-effect
+          'file.read
+          (make-open-request
+            (view-id (command-context-view context))
+            (debugger-frame-source-path frame)
+            (make-file-source-position
+              (debugger-frame-source-line frame)
+              (or
+                (debugger-frame-source-character frame)
+                0)))))))
 
   (define (values->string values)
     (call-with-string-output-port
@@ -484,6 +522,10 @@
           debug-eval-frame-command
           "Evaluate an expression in the selected debugger frame.")
         (list
+          'scheme.debug-visit-source
+          debug-visit-source-command
+          "Visit the source location of the selected debugger frame.")
+        (list
           'scheme.debug-retry
           debug-retry-command
           "Retry the failed evaluation in the active interaction.")
@@ -525,6 +567,7 @@
         '((#\n . scheme.debug-next-frame)
           (#\p . scheme.debug-previous-frame)
           (#\e . scheme.debug-eval-frame)
+          (#\v . scheme.debug-visit-source)
           (#\r . scheme.debug-retry)
           (#\x . scheme.debug-exit)
           (#\q . scheme.debug-discard)))
