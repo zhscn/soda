@@ -212,7 +212,15 @@ Editor 与 interaction 持有的所有 debugger continuation。frame inspection 
 frame-relative evaluation 都作为普通 command 执行，不接管 terminal stdin，也
 不进入递归 command loop。
 
-成功求值产生的顶层 binding 保存在 session 的 Chez environment 中。
-`scheme-repl` completion provider 将 environment symbol 投影为通用
-`CompletionItem`；它不从 transcript 文本恢复 binding。静态 Scheme semantic
-provider 的职责与组合边界见 [11-scheme-semantics.md](11-scheme-semantics.md)。
+求值产生的顶层 binding 保存在 session 的 Chez environment 中。evaluator 按
+generation 分别缓存完整 environment catalog 和相对初始 environment 的 runtime
+catalog；一次求值或文件加载使旧 catalog 失效，下一次对应查询重新枚举
+environment。catalog 保存 binding kind、有限深度的 value preview 和 generation，
+不持有 transcript range。
+
+`scheme-repl` completion provider 将当前 InteractionSession 的完整 environment
+投影为通用 `CompletionItem`；它不从 transcript 文本恢复 binding。普通 Scheme
+Buffer 同时使用 `scheme-static` 与 `scheme-runtime`，后者只提供 Editor evaluator
+中相对初始 environment 新增的 binding。symbol inspection 和 signature help 在
+静态索引没有定义时查询同一 runtime catalog。静态 Scheme semantic provider 的
+职责与组合边界见 [11-scheme-semantics.md](11-scheme-semantics.md)。

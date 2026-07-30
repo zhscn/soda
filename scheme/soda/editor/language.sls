@@ -672,7 +672,9 @@
       'editing
       #f
       (list
-        (cons 'completion-providers '(scheme-static))
+        (cons
+          'completion-providers
+          '(scheme-static scheme-runtime))
         (cons
           'completion-boundaries
           scheme-completion-boundaries)))))

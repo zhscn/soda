@@ -1,7 +1,8 @@
 (library (soda editor scheme-query)
   (export scheme-buffer?
           buffer-scheme-semantic-snapshot
-          scheme-definitions-at-point)
+          scheme-definitions-at-point
+          scheme-symbol-name-at-point)
   (import (rnrs)
           (soda document)
           (soda editor buffer)
@@ -58,4 +59,45 @@
             (scheme-semantic-definitions-at snapshot point)])
       (if (or (pair? direct) (zero? point))
           direct
-          (scheme-semantic-definitions-at snapshot (- point 1))))))
+          (scheme-semantic-definitions-at snapshot (- point 1)))))
+
+  (define (scheme-symbol-name-at-point snapshot point)
+    (define (contains-point? start end)
+      (or
+        (and (<= start point) (< point end))
+        (and
+          (positive? point)
+          (<= start (- point 1))
+          (< (- point 1) end))))
+    (unless (scheme-semantic-snapshot? snapshot)
+      (assertion-violation
+        'scheme-symbol-name-at-point
+        "expected a Scheme semantic snapshot"
+        snapshot))
+    (unless
+      (and
+        (integer? point)
+        (exact? point)
+        (not (negative? point)))
+      (assertion-violation
+        'scheme-symbol-name-at-point
+        "point must be an exact non-negative integer"
+        point))
+    (cond
+      [(find
+         (lambda (definition)
+           (contains-point?
+             (scheme-definition-start definition)
+             (scheme-definition-end definition)))
+         (scheme-semantic-snapshot-definitions snapshot))
+       =>
+       scheme-definition-name]
+      [(find
+         (lambda (use)
+           (contains-point?
+             (scheme-use-start use)
+             (scheme-use-end use)))
+         (scheme-semantic-snapshot-uses snapshot))
+       =>
+       scheme-use-name]
+      [else #f])))

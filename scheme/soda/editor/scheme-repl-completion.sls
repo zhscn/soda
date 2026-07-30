@@ -1,5 +1,6 @@
 (library (soda editor scheme-repl-completion)
-  (export make-scheme-repl-completion-provider)
+  (export make-scheme-repl-completion-provider
+          make-scheme-runtime-completion-provider)
   (import (rnrs)
           (soda document)
           (soda editor buffer)
@@ -7,6 +8,7 @@
           (soda editor completion-provider)
           (soda editor evaluator)
           (soda editor interaction)
+          (soda editor scheme-semantics)
           (soda editor state))
 
   (define (buffer-for-document editor target-document-id)
@@ -47,27 +49,54 @@
               (string->list name))
             (write-char #\| port))))))
 
-  (define (symbol->completion-item symbol)
-    (let ([name (symbol->string symbol)]
-          [source (symbol-source-name symbol)])
+  (define static-binding-names
+    (let ([names (make-hashtable string-hash string=?)])
+      (for-each
+        (lambda (definition)
+          (hashtable-set!
+            names
+            (scheme-definition-name definition)
+            #t))
+        scheme-primitive-definitions)
+      names))
+
+  (define (symbol->completion-item
+            provider
+            group
+            symbol
+            metadata)
+    (let* ([name (symbol->string symbol)]
+           [source (symbol-source-name symbol)]
+           [kind
+             (if (runtime-binding? metadata)
+                 (runtime-binding-kind metadata)
+                 'binding)]
+           [detail
+             (if (runtime-binding? metadata)
+                 (runtime-binding-detail metadata)
+                 "Chez interaction environment")]
+           [annotation
+             (if (runtime-binding? metadata)
+                 (runtime-binding-preview metadata)
+                 "REPL binding")])
       (make-completion-item
         symbol
-        'scheme-repl
+        provider
         source
         name
         source
-        'binding
-        "Chez interaction environment"
+        kind
+        detail
         #f
         source
         #f
         #t
         #f
-        symbol
-        "REPL binding"
-        "Chez REPL")))
+        (or metadata symbol)
+        annotation
+        group)))
 
-  (define (request-symbols editor request)
+  (define (request-bindings editor request)
     (let ([buffer
             (buffer-for-document
               editor
@@ -85,7 +114,7 @@
                 (not (interaction-session-closed? session))
                 (chez-evaluator?
                   (interaction-session-evaluator session)))
-              (chez-evaluator-symbols
+              (chez-evaluator-bindings
                 (interaction-session-evaluator session))
               '())))))
 
@@ -101,7 +130,46 @@
         (list
           (make-completion-response-for-request
             request
-            (map symbol->completion-item
-                 (request-symbols editor request))
+            (map
+              (lambda (binding)
+                (symbol->completion-item
+                  'scheme-repl
+                  "Chez REPL"
+                  (runtime-binding-name binding)
+                  binding))
+              (request-bindings editor request))
             #t)))
+      (lambda (request) #f)))
+
+  (define (make-scheme-runtime-completion-provider editor)
+    (unless (editor? editor)
+      (assertion-violation
+        'make-scheme-runtime-completion-provider
+        "expected an editor"
+        editor))
+    (make-completion-provider
+      'scheme-runtime
+      (lambda (request)
+        (let ([evaluator (editor-evaluator editor)])
+          (list
+            (make-completion-response-for-request
+              request
+              (if (chez-evaluator? evaluator)
+                  (map
+                    (lambda (binding)
+                      (symbol->completion-item
+                        'scheme-runtime
+                        "Runtime"
+                        (runtime-binding-name binding)
+                        binding))
+                    (filter
+                      (lambda (binding)
+                        (not
+                          (hashtable-contains?
+                            static-binding-names
+                            (symbol->string
+                              (runtime-binding-name binding)))))
+                      (chez-evaluator-runtime-bindings evaluator)))
+                  '())
+              #t))))
       (lambda (request) #f))))

@@ -305,6 +305,22 @@
          (evaluation-origin-buffer-id first-origin)
          (evaluation-origin-revision first-origin)))
 
+(let* ([evaluator (interaction-session-evaluator session)]
+       [binding
+         (chez-evaluator-binding-metadata
+           evaluator
+           'repl-value)])
+  (unless
+    (and
+      (memq 'repl-value
+            (chez-evaluator-runtime-symbols evaluator))
+      (positive? (chez-evaluator-generation evaluator))
+      (runtime-binding? binding)
+      (eq? (runtime-binding-kind binding) 'variable)
+      (string=? (runtime-binding-preview binding) "40"))
+    (error 'repl-tests
+           "evaluation did not update the runtime binding catalog")))
+
 (press-key! 'character (char->integer #\c) 4)
 (press-key! 'character (char->integer #\u) 4)
 (unless

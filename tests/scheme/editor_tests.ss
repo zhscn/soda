@@ -9,6 +9,7 @@
         (soda editor cpp-language)
         (soda editor diagnostics)
         (soda editor effect)
+        (soda editor evaluator)
         (soda editor event)
         (soda editor file)
         (only (soda editor interaction)
@@ -4857,6 +4858,10 @@
   scheme-completion-executor
   (editor-completion-provider-catalog
     scheme-completion-editor))
+(chez-evaluator-evaluate-file!
+  (editor-evaluator scheme-completion-editor)
+  (getenv "SODA_TEST_INIT_FILE")
+  scheme-completion-editor)
 (send!
   scheme-completion-editor
   scheme-completion-decoder
@@ -4877,13 +4882,22 @@
         scheme-completion-buffer
         'completion-providers
         '())
-      '(scheme-static))
-    (= (length scheme-start-effects) 1)
-    (eq? (completion-request-provider
-           (command-effect-payload (car scheme-start-effects)))
-         'scheme-static))
+      '(scheme-static scheme-runtime))
+    (= (length scheme-start-effects) 2)
+    (equal?
+      (list-sort
+        (lambda (left right)
+          (string<?
+            (symbol->string left)
+            (symbol->string right)))
+        (map
+          (lambda (effect)
+            (completion-request-provider
+              (command-effect-payload effect)))
+          scheme-start-effects))
+      '(scheme-runtime scheme-static)))
   (error 'editor-tests
-         "scheme mode did not select its static completion provider"))
+         "scheme mode did not select its completion providers"))
 (define scheme-start-result
   (execute-effects!
     scheme-completion-executor
@@ -4962,6 +4976,56 @@
   (error 'editor-tests
          "scheme semantic completion did not apply its definition"
          (utf8->string (buffer-bytes scheme-completion-buffer))))
+(send!
+  scheme-completion-editor
+  scheme-completion-decoder
+  (string->utf8 "\nsoda-test"))
+(define runtime-start-effects
+  (send!
+    scheme-completion-editor
+    scheme-completion-decoder
+    (bytes 27 47)))
+(define runtime-start-result
+  (execute-effects!
+    scheme-completion-executor
+    runtime-start-effects))
+(for-each
+  (lambda (message)
+    (editor-update! scheme-completion-editor message))
+  (effect-result-messages runtime-start-result))
+(unless
+  (exists
+    (lambda (item)
+      (and
+        (eq? (completion-item-provider item)
+             'scheme-runtime)
+        (string=?
+          (completion-item-insert-text item)
+          "soda-test-init-marker")
+        (runtime-binding?
+          (completion-item-provider-data item))))
+    (completion-session-items
+      (editor-active-completion scheme-completion-editor)))
+  (error 'editor-tests
+         "runtime completion did not expose loaded evaluator bindings"))
+(editor-cancel-completion! scheme-completion-editor)
+(send!
+  scheme-completion-editor
+  scheme-completion-decoder
+  (string->utf8 "-init-marker"))
+(editor-update!
+  scheme-completion-editor
+  (make-command-message 'help.describe-symbol #f))
+(unless
+  (and
+    (string-contains?
+      (editor-status-message scheme-completion-editor)
+      "Runtime value")
+    (string-contains?
+      (editor-status-message scheme-completion-editor)
+      "loaded"))
+  (error 'editor-tests
+         "Scheme symbol inspection did not use runtime binding metadata"))
 (editor-close! scheme-completion-editor)
 
 (define documented-completion-source

@@ -462,9 +462,11 @@ annotation 的生命周期不受光标高亮替换影响。光标刷新只同步
 
 ## 自举静态 Provider
 
-`scheme-mode` 通过 `completion-providers` setting 启用 `scheme-static`。provider
-从请求绑定的 Document revision 建立轻量 semantic snapshot，并把本文件定义、
-已 import 的 Soda API 与 R6RS/Chez primitive metadata 转换为通用 CompletionItem。
+`scheme-mode` 通过 `completion-providers` setting 组合 `scheme-static` 和
+`scheme-runtime`。静态 provider 从请求绑定的 Document revision 建立轻量
+semantic snapshot，并把本文件定义、已 import 的 Soda API 与 R6RS/Chez primitive
+metadata 转换为通用 CompletionItem。运行时 provider 查询 Editor evaluator，并
+过滤静态 primitive metadata 已覆盖的名字。
 
 自举 scanner 直接读取 UTF-8 snapshot，识别 Scheme identifier 中的标点，并容错
 跳过字符串、行注释、嵌套 block comment、datum comment 以及 quoted datum。它提取
@@ -740,30 +742,32 @@ library binding rename 同时处理 declaration、普通 use 和 R6RS surface：
 
 ## Runtime catalog
 
-[10-interaction.md](10-interaction.md) 的 evaluator 在成功求值后更新 session 的
-runtime symbol catalog：
+[10-interaction.md](10-interaction.md) 的 evaluator 按求值 generation 提供
+runtime binding catalog：
 
 ```text
 RuntimeBinding {
-  session_id,
   generation,
   name,
   kind,
-  value_metadata,
-  origin?,
-  static_definition_id?
+  detail,
+  preview
 }
 ```
 
-runtime symbol view 从 InteractionSession 的 Chez environment 投影，不从
-transcript 文本反向解析。顶层 `define`、`define-syntax` 和 library load 可以携带
-EvaluationOrigin；当 origin 对应的 static definition 仍匹配时，runtime binding
-关联其 DefinitionId。重新定义同名 binding 后，environment 中的可见版本用于后续
-查询。
+runtime symbol view 从 Chez environment 投影，不从 transcript 文本反向解析。
+REPL provider 查询目标 Buffer 所属 InteractionSession 的完整 environment；
+普通 `scheme-mode` 的 runtime provider 查询 Editor evaluator，并只保留相对初始
+environment 新增的 binding。重新定义同名 binding 后，environment 中的可见版本
+用于后续查询。
 
 任意 Scheme 值保留在 Chez environment 内。completion、hover 和 debugger 读取
-经过限制的 metadata，不把值序列化进 semantic workspace，也不让静态 analyzer
-依赖 evaluator 的执行顺序。
+经过限制的 metadata；preview 使用有限打印深度、长度和字符数。完整 environment
+catalog 与 runtime-only catalog 分别按 generation 缓存，因此普通 Scheme
+completion 不需要为初始 Chez binding 构建 metadata。一次求值或文件加载使缓存
+失效。运行时值不序列化进 semantic workspace，静态 analyzer 也不依赖 evaluator
+的执行顺序。静态 symbol inspection 没有结果时，`help.describe-symbol` 与
+signature help 使用 runtime binding metadata 作为 fallback。
 
 ## Macro 与 phase
 

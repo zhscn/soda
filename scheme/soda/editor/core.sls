@@ -67,7 +67,18 @@
           editor-debugger
           editor-set-debugger!
           chez-evaluator-symbols
+          chez-evaluator-bindings
+          chez-evaluator-runtime-symbols
+          chez-evaluator-runtime-bindings
+          chez-evaluator-generation
+          chez-evaluator-binding-metadata
           chez-evaluator-ref
+          runtime-binding?
+          runtime-binding-name
+          runtime-binding-kind
+          runtime-binding-detail
+          runtime-binding-preview
+          runtime-binding-generation
           editor-command-registry
           editor-add-hook!
           editor-remove-hook!
@@ -761,6 +772,9 @@
       (editor-register-completion-provider!
         editor
         (make-scheme-repl-completion-provider editor))
+      (editor-register-completion-provider!
+        editor
+        (make-scheme-runtime-completion-provider editor))
       (install-file-commands! editor)
       (install-scheme-interface-commands!
         editor scheme-workspace)

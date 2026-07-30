@@ -14,7 +14,7 @@
         'scheme-mode
         'completion-providers
         '())
-      '(scheme-static)))
+      '(scheme-static scheme-runtime)))
   (error 'scheme-semantics-tests
          "scheme mode did not expose its completion policy"))
 

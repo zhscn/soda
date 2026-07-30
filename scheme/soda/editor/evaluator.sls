@@ -2,21 +2,64 @@
   (export make-chez-evaluator
           chez-evaluator?
           chez-evaluator-symbols
+          chez-evaluator-bindings
+          chez-evaluator-runtime-symbols
+          chez-evaluator-runtime-bindings
+          chez-evaluator-generation
+          chez-evaluator-binding-metadata
           chez-evaluator-ref
           chez-evaluator-evaluate
           chez-evaluator-evaluate-file!
           evaluation-result-continuation
-          evaluation-result->transcript)
+          evaluation-result->transcript
+          runtime-binding?
+          runtime-binding-name
+          runtime-binding-kind
+          runtime-binding-detail
+          runtime-binding-preview
+          runtime-binding-generation)
   (import (chezscheme)
           (soda editor event)
           (soda editor interaction))
 
   (define-record-type (chez-evaluator %make-chez-evaluator chez-evaluator?)
-    (fields environment))
+    (fields environment
+            baseline-symbols
+            (mutable generation
+                     chez-evaluator-generation
+                     chez-evaluator-generation-set!)
+            (mutable catalog-generation
+                     chez-evaluator-catalog-generation
+                     chez-evaluator-catalog-generation-set!)
+            (mutable catalog
+                     chez-evaluator-catalog
+                     chez-evaluator-catalog-set!)
+            (mutable runtime-catalog-generation
+                     chez-evaluator-runtime-catalog-generation
+                     chez-evaluator-runtime-catalog-generation-set!)
+            (mutable runtime-catalog
+                     chez-evaluator-runtime-catalog
+                     chez-evaluator-runtime-catalog-set!)))
+
+  (define-record-type runtime-binding
+    (fields name kind detail preview generation))
 
   (define (make-chez-evaluator)
-    (%make-chez-evaluator
-      (copy-environment (scheme-environment))))
+    (let ([environment
+            (copy-environment (scheme-environment))])
+      (let ([baseline-symbols (make-eq-hashtable)])
+        (for-each
+          (lambda (name)
+            (hashtable-set! baseline-symbols name #t))
+          (environment-symbols environment))
+        (%make-chez-evaluator
+          environment
+          baseline-symbols
+          0
+          -1
+          '()
+          -1
+          '()))))
 
   (define (chez-evaluator-symbols evaluator)
     (unless (chez-evaluator? evaluator)
@@ -26,6 +69,118 @@
         evaluator))
     (environment-symbols
       (chez-evaluator-environment evaluator)))
+
+  (define (bounded-write value)
+    (guard (condition [else "#<unavailable>"])
+      (let ([text
+              (call-with-string-output-port
+                (lambda (port)
+                  (parameterize
+                    ([print-level 4]
+                     [print-length 8])
+                    (write value port))))])
+        (if (> (string-length text) 160)
+            (string-append (substring text 0 157) "...")
+            text))))
+
+  (define (make-binding-metadata evaluator name)
+    (let ([environment (chez-evaluator-environment evaluator)])
+      (if (top-level-bound? name environment)
+          (let* ([value (top-level-value name environment)]
+                 [kind
+                   (if (procedure? value)
+                       'procedure
+                       'variable)])
+            (make-runtime-binding
+              name
+              kind
+              (if (eq? kind 'procedure)
+                  "Runtime procedure"
+                  "Runtime value")
+              (bounded-write value)
+              (chez-evaluator-generation evaluator)))
+          (make-runtime-binding
+            name
+            'syntax
+            "Runtime syntax"
+            "#<syntax>"
+            (chez-evaluator-generation evaluator)))))
+
+  (define (chez-evaluator-bindings evaluator)
+    (unless (chez-evaluator? evaluator)
+      (assertion-violation
+        'chez-evaluator-bindings
+        "expected a Chez evaluator"
+        evaluator))
+    (unless
+      (= (chez-evaluator-catalog-generation evaluator)
+         (chez-evaluator-generation evaluator))
+      (chez-evaluator-catalog-set!
+        evaluator
+        (map
+          (lambda (name)
+            (make-binding-metadata evaluator name))
+          (chez-evaluator-symbols evaluator)))
+      (chez-evaluator-catalog-generation-set!
+        evaluator
+        (chez-evaluator-generation evaluator)))
+    (chez-evaluator-catalog evaluator))
+
+  (define (chez-evaluator-runtime-bindings evaluator)
+    (unless (chez-evaluator? evaluator)
+      (assertion-violation
+        'chez-evaluator-runtime-bindings
+        "expected a Chez evaluator"
+        evaluator))
+    (unless
+      (= (chez-evaluator-runtime-catalog-generation evaluator)
+         (chez-evaluator-generation evaluator))
+      (chez-evaluator-runtime-catalog-set!
+        evaluator
+        (map
+          (lambda (name)
+            (make-binding-metadata evaluator name))
+          (filter
+            (lambda (name)
+              (not
+                (hashtable-contains?
+                  (chez-evaluator-baseline-symbols evaluator)
+                  name)))
+            (chez-evaluator-symbols evaluator))))
+      (chez-evaluator-runtime-catalog-generation-set!
+        evaluator
+        (chez-evaluator-generation evaluator)))
+    (chez-evaluator-runtime-catalog evaluator))
+
+  (define (chez-evaluator-runtime-symbols evaluator)
+    (map
+      runtime-binding-name
+      (chez-evaluator-runtime-bindings evaluator)))
+
+  (define (chez-evaluator-binding-metadata evaluator name)
+    (unless (chez-evaluator? evaluator)
+      (assertion-violation
+        'chez-evaluator-binding-metadata
+        "expected a Chez evaluator"
+        evaluator))
+    (unless (symbol? name)
+      (assertion-violation
+        'chez-evaluator-binding-metadata
+        "name must be a symbol"
+        name))
+    (or
+      (find
+        (lambda (binding)
+          (eq? name (runtime-binding-name binding)))
+        (chez-evaluator-runtime-bindings evaluator))
+      (and
+        (hashtable-contains?
+          (chez-evaluator-baseline-symbols evaluator)
+          name)
+        (find
+          (lambda (binding)
+            (eq? name (runtime-binding-name binding)))
+          (chez-evaluator-bindings evaluator)))))
 
   (define chez-evaluator-ref
     (case-lambda
@@ -75,10 +230,15 @@
     (let ([environment (chez-evaluator-environment evaluator)])
       (set-top-level-value! '*editor* editor environment)
       (set-top-level-value! '*interaction-session* #f environment)
-      (call-with-input-file
-        path
-        (lambda (port)
-          (evaluate-port environment port)))))
+      (let ([values
+              (call-with-input-file
+                path
+                (lambda (port)
+                  (evaluate-port environment port)))])
+        (chez-evaluator-generation-set!
+          evaluator
+          (+ 1 (chez-evaluator-generation evaluator)))
+        values)))
 
   (define (chez-evaluator-evaluate
             evaluator
@@ -147,6 +307,9 @@
                       environment
                       (evaluation-request-source request)))))
               (close-port input-port)
+              (chez-evaluator-generation-set!
+                evaluator
+                (+ 1 (chez-evaluator-generation evaluator)))
               (make-evaluation-result
                 request
                 (if failure 'condition 'value)

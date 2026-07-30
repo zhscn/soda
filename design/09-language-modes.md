@@ -92,9 +92,12 @@ cursor。renderer 不调用 parser 或 lexer，只消费
 [13-rendering-theme.md](13-rendering-theme.md) 定义的 `StyledChunk`。
 
 内建 `scheme-mode` 覆盖 `.scm`、`.ss`、`.sls` 与 `.sps` 资源，并通过 mode
-setting 选择 `scheme-static` completion provider。Scheme identifier policy 把
-reader delimiter 之外的字符视为 symbol 组成部分，因此 `-`、`?`、`!` 等标点参与
-补全 query 和 replacement range。completion boundary policy 识别竖线引用的
+setting 组合 `scheme-static` 与 `scheme-runtime` completion provider。静态
+provider 提供当前源码的 lexical binding、library export 和 primitive metadata；
+运行时 provider 提供 Editor evaluator 中由初始化文件、求值和 load 引入的动态
+binding，并排除已有静态 primitive metadata 的名字。Scheme identifier policy
+把 reader delimiter 之外的字符视为 symbol 组成部分，因此 `-`、`?`、`!` 等标点
+参与补全 query 和 replacement range。completion boundary policy 识别竖线引用的
 identifier，使空白和转义字符保留在同一个 query range 中。
 
 Scheme REPL Buffer 复用 `scheme-mode` 的 reader boundary policy，但以 buffer-local

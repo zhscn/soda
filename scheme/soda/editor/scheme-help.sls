@@ -5,6 +5,7 @@
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
+          (soda editor evaluator)
           (soda editor keymap)
           (soda editor scheme-query)
           (soda editor scheme-semantics)
@@ -76,6 +77,27 @@
             (string-append " — " documentation)
             ""))))
 
+  (define (runtime-description editor name)
+    (let ([evaluator (editor-evaluator editor)])
+      (and
+        name
+        (chez-evaluator? evaluator)
+        (let ([binding
+                (chez-evaluator-binding-metadata
+                  evaluator
+                  (string->symbol name))])
+          (and
+            binding
+            (string-append
+              name
+              ": "
+              (symbol->string
+                (runtime-binding-kind binding))
+              " — "
+              (runtime-binding-detail binding)
+              " — "
+              (runtime-binding-preview binding)))))))
+
   (define (describe-symbol-command context)
     (let* ([editor (command-context-editor context)]
            [view (command-context-view context)]
@@ -88,14 +110,24 @@
            [definitions
              (scheme-definitions-at-point
                snapshot
-               (view-caret view))])
+               (view-caret view))]
+           [runtime
+             (and
+               (null? definitions)
+               (runtime-description
+                 editor
+                 (scheme-symbol-name-at-point
+                   snapshot
+                   (view-caret view))))])
       (editor-set-status-message!
         editor
-        (if (pair? definitions)
-            (join-strings
-              " / "
-              (map definition-description definitions))
-            "No Scheme definition at point"))
+        (cond
+          [(pair? definitions)
+           (join-strings
+             " / "
+             (map definition-description definitions))]
+          [runtime runtime]
+          [else "No Scheme definition at point"]))
       '()))
 
   (define (signature-help-command context)
@@ -117,16 +149,25 @@
                    append
                    (map
                      scheme-definition-signatures
-                     (scheme-call-context-definitions call)))
-                 '())])
+                   (scheme-call-context-definitions call)))
+                 '())]
+           [runtime
+             (and
+               call
+               (null? signatures)
+               (runtime-description
+                 editor
+                 (scheme-call-context-name call)))])
       (editor-set-status-message!
         editor
         (cond
           [(not call) "No Scheme call at point"]
           [(null? signatures)
-           (string-append
-             "No signature metadata for "
-             (scheme-call-context-name call))]
+           (or
+             runtime
+             (string-append
+               "No signature metadata for "
+               (scheme-call-context-name call)))]
           [else
            (string-append
              "Argument "
