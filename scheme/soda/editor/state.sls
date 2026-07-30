@@ -57,6 +57,8 @@
           editor-register-interaction!
           editor-evaluator
           editor-set-evaluator!
+          editor-debugger
+          editor-set-debugger!
           editor-command-registry
           editor-hook-registry
           editor-add-hook!
@@ -176,6 +178,7 @@
           (soda editor command)
           (soda editor completion)
           (soda editor completion-provider)
+          (soda editor debugger)
           (soda editor display)
           (soda editor event)
           (soda editor hook)
@@ -257,6 +260,7 @@
                editor-next-interaction-id
                editor-next-interaction-id-set!)
       (mutable evaluator editor-evaluator editor-evaluator-set!)
+      (mutable debugger editor-debugger editor-debugger-set!)
       (immutable commands editor-command-registry)
       (immutable hooks editor-hook-registry)
       (immutable keymaps editor-keymap-catalog)
@@ -387,6 +391,18 @@
         "expected a command invocation or #f"
         invocation))
     (editor-active-command-invocation-set! editor invocation))
+
+  (define (editor-set-debugger! editor debugger)
+    (require-open-editor 'editor-set-debugger! editor)
+    (unless
+      (or (not debugger) (debugger-session? debugger))
+      (assertion-violation
+        'editor-set-debugger!
+        "expected a debugger session or #f"
+        debugger))
+    (editor-debugger-set! editor debugger)
+    (editor-invalidate! editor 'document)
+    debugger)
 
   (define (editor-allocate-command-invocation-id! editor)
     (require-open-editor
@@ -3746,6 +3762,7 @@
                '()
                1
                #f
+               #f
                (make-command-registry)
                (make-hook-registry)
                keymaps
@@ -3859,6 +3876,18 @@
           (editor-active-command-invocation value)
           #f)
         (editor-active-command-invocation-set! value #f))
+      (when (editor-debugger value)
+        (debugger-session-close! (editor-debugger value))
+        (editor-debugger-set! value #f))
+      (for-each
+        (lambda (session)
+          (when (interaction-session-debugger session)
+            (debugger-session-close!
+              (interaction-session-debugger session))
+            (interaction-session-set-debugger! session #f)))
+        (table-values
+          (editor-interaction-table value)
+          (editor-interaction-ids value)))
       (for-each
         interaction-session-close!
         (table-values

@@ -1,8 +1,13 @@
 (library (soda editor debugger)
   (export make-debugger-session
+          make-condition-debugger-session
           debugger-session?
           debugger-session-interaction-id
           debugger-session-generation
+          debugger-session-origin
+          debugger-session-label
+          debugger-session-return-buffer-id
+          debugger-session-return-caret
           debugger-session-condition
           debugger-session-continuation
           debugger-session-frames
@@ -14,6 +19,7 @@
           debugger-session-previous-frame!
           debugger-session-evaluate
           debugger-session->string
+          debugger-session-selected-frame-byte-offset
           debugger-session-close!
           debugger-session-closed?
           debugger-frame?
@@ -50,6 +56,10 @@
     (debugger-session %make-debugger-session debugger-session?)
     (fields interaction-id
             generation
+            origin
+            label
+            return-buffer-id
+            return-caret
             (mutable condition
                      debugger-session-condition
                      debugger-session-condition-set!)
@@ -161,6 +171,87 @@
         (frame-variables inspector)
         inspector)))
 
+  (define (condition-continuation/safe condition)
+    (safe-call #f (lambda () (condition-continuation condition))))
+
+  (define (condition-frames condition)
+    (let ([continuation (condition-continuation/safe condition)])
+      (if (not (procedure? continuation))
+          (values #f '())
+          (let* ([root (inspect/object continuation)]
+                 [depth
+                   (safe-call 0 (lambda () (root 'depth)))]
+                 [frames
+                   (let loop ([index 0] [result '()])
+                     (if (>= index depth)
+                         (reverse result)
+                         (loop
+                           (+ index 1)
+                           (cons
+                             (make-frame root index)
+                             result))))])
+            (values continuation frames)))))
+
+  (define (make-condition-debugger-session
+            origin
+            label
+            return-buffer-id
+            return-caret
+            condition)
+    (unless (symbol? origin)
+      (assertion-violation
+        'make-condition-debugger-session
+        "origin must be a symbol"
+        origin))
+    (unless (string? label)
+      (assertion-violation
+        'make-condition-debugger-session
+        "label must be a string"
+        label))
+    (unless
+      (or
+        (not return-buffer-id)
+        (and
+          (integer? return-buffer-id)
+          (exact? return-buffer-id)
+          (not (negative? return-buffer-id))))
+      (assertion-violation
+        'make-condition-debugger-session
+        "return buffer id must be a non-negative exact integer or #f"
+        return-buffer-id))
+    (unless
+      (or
+        (not return-caret)
+        (and
+          (integer? return-caret)
+          (exact? return-caret)
+          (not (negative? return-caret))))
+      (assertion-violation
+        'make-condition-debugger-session
+        "return caret must be a non-negative exact integer or #f"
+        return-caret))
+    (unless (condition? condition)
+      (assertion-violation
+        'make-condition-debugger-session
+        "expected a condition"
+        condition))
+    (call-with-values
+      (lambda () (condition-frames condition))
+      (lambda (continuation frames)
+        (%make-debugger-session
+          #f
+          0
+          origin
+          label
+          return-buffer-id
+          return-caret
+          condition
+          continuation
+          frames
+          (and (pair? frames) 0)
+          #f
+          #f))))
+
   (define (make-debugger-session interaction result)
     (unless (interaction-session? interaction)
       (assertion-violation
@@ -175,28 +266,19 @@
         'make-debugger-session
         "expected a failed evaluation result"
         result))
-    (let ([continuation
-            (evaluation-result-continuation result)])
-      (unless (procedure? continuation)
-        (assertion-violation
-          'make-debugger-session
-          "condition has no inspectable continuation"))
-      (let* ([root (inspect/object continuation)]
-             [depth
-               (safe-call 0 (lambda () (root 'depth)))]
-             [frames
-               (let loop ([index 0] [result '()])
-                 (if (>= index depth)
-                     (reverse result)
-                     (loop
-                       (+ index 1)
-                       (cons
-                         (make-frame root index)
-                         result))))])
+    (call-with-values
+      (lambda ()
+        (condition-frames
+          (evaluation-result-condition result)))
+      (lambda (continuation frames)
         (%make-debugger-session
           (interaction-session-id interaction)
           (evaluation-request-generation
             (evaluation-result-request result))
+          'evaluation
+          (interaction-session-name interaction)
+          (interaction-session-buffer-id interaction)
+          #f
           (evaluation-result-condition result)
           continuation
           frames
@@ -304,6 +386,20 @@
       (lambda (port)
         (display-condition condition port))))
 
+  (define (write-condition-details condition port)
+    (when (who-condition? condition)
+      (display "Who: " port)
+      (write (condition-who condition) port)
+      (newline port))
+    (when (message-condition? condition)
+      (display "Message: " port)
+      (display (condition-message condition) port)
+      (newline port))
+    (when (irritants-condition? condition)
+      (display "Irritants: " port)
+      (write (condition-irritants condition) port)
+      (newline port)))
+
   (define (source->string frame)
     (let ([path (debugger-frame-source-path frame)]
           [line (debugger-frame-source-line frame)]
@@ -331,35 +427,48 @@
     (call-with-string-output-port
       (lambda (port)
         (display "Soda Scheme Debugger\n\n" port)
+        (display "Origin: " port)
+        (display
+          (symbol->string
+            (debugger-session-origin debugger))
+          port)
+        (display " — " port)
+        (display (debugger-session-label debugger) port)
+        (newline port)
         (display "Condition: " port)
         (display
           (condition->string
             (debugger-session-condition debugger))
           port)
         (newline port)
+        (write-condition-details
+          (debugger-session-condition debugger)
+          port)
         (newline port)
         (display "Frames:\n" port)
-        (for-each
-          (lambda (frame)
-            (display
-              (if (= (debugger-frame-index frame)
-                     (or
-                       (debugger-session-selected-index
-                         debugger)
-                       -1))
-                  "> "
-                  "  ")
-              port)
-            (display
-              (number->string
-                (debugger-frame-index frame))
-              port)
-            (display "  " port)
-            (display (debugger-frame-name frame) port)
-            (display "  " port)
-            (display (source->string frame) port)
-            (newline port))
-          (debugger-session-frames debugger))
+        (if (null? (debugger-session-frames debugger))
+            (display "  <continuation unavailable>\n" port)
+            (for-each
+              (lambda (frame)
+                (display
+                  (if (= (debugger-frame-index frame)
+                         (or
+                           (debugger-session-selected-index
+                             debugger)
+                           -1))
+                      "> "
+                      "  ")
+                  port)
+                (display
+                  (number->string
+                    (debugger-frame-index frame))
+                  port)
+                (display "  " port)
+                (display (debugger-frame-name frame) port)
+                (display "  " port)
+                (display (source->string frame) port)
+                (newline port))
+              (debugger-session-frames debugger)))
         (let ([frame
                 (debugger-session-selected-frame debugger)])
           (when frame
@@ -383,6 +492,35 @@
                   port)
                 (newline port))
               (debugger-frame-variables frame)))))))
+
+  (define (string-find-from value needle start)
+    (let ([limit (- (string-length value) (string-length needle))])
+      (let loop ([index start])
+        (cond
+          [(> index limit) #f]
+          [(string=?
+             (substring
+               value
+               index
+               (+ index (string-length needle)))
+             needle)
+           index]
+          [else (loop (+ index 1))]))))
+
+  (define (debugger-session-selected-frame-byte-offset debugger)
+    (require-open-debugger
+      'debugger-session-selected-frame-byte-offset
+      debugger)
+    (let* ([text (debugger-session->string debugger)]
+           [frames-start
+             (or (string-find-from text "Frames:\n" 0) 0)]
+           [selected
+             (string-find-from text "> " frames-start)])
+      (if selected
+          (bytevector-length
+            (string->utf8
+              (substring text 0 selected)))
+          0)))
 
   (define (debugger-session-close! debugger)
     (when

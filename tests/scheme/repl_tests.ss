@@ -587,7 +587,8 @@
                   previous-frame
                   evaluate
                   retry
-                  dismiss))
+                  exit
+                  discard))
        (string-contains? (buffer-string repl-buffer) "Exception:"))
   (error 'repl-tests
          "failed evaluation did not create debugger state"))
@@ -685,7 +686,24 @@
 (dispatch!
   (make-command-message 'scheme.debug-open #f))
 (dispatch!
-  (make-command-message 'scheme.debug-dismiss #f))
+  (make-command-message 'scheme.debug-exit #f))
+(unless
+  (and (eq? (interaction-session-state session) 'failed)
+       (interaction-session-debugger session)
+       (= (buffer-id (view-buffer (editor-active-view editor)))
+          (buffer-id repl-buffer))
+       (not
+         (find
+           (lambda (buffer)
+             (eq? (buffer-major-mode-name buffer)
+                  'debugger-mode))
+           (editor-buffers editor))))
+  (error 'repl-tests
+         "debug exit did not retain the saved failure"))
+(dispatch!
+  (make-command-message 'scheme.debug-open #f))
+(dispatch!
+  (make-command-message 'scheme.debug-discard #f))
 (unless
   (and (eq? (interaction-session-state session) 'ready)
        (not (interaction-session-debugger session))
@@ -693,7 +711,7 @@
        (= (buffer-id (view-buffer (editor-active-view editor)))
           (buffer-id repl-buffer)))
   (error 'repl-tests
-         "debug dismiss did not leave the failed state"))
+         "debug discard did not leave the failed state"))
 
 (editor-close! editor)
 (unless (and (editor-closed? editor)

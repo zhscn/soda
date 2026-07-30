@@ -342,8 +342,8 @@
     (require-open-session 'interaction-session-debug-actions session)
     (if (eq? (interaction-session-state session) 'failed)
         (if (interaction-session-debugger session)
-            '(open next-frame previous-frame evaluate retry dismiss)
-            '(retry dismiss))
+            '(open next-frame previous-frame evaluate retry exit discard)
+            '(retry discard))
         '()))
 
   (define (interaction-session-close! session)

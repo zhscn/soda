@@ -5,6 +5,8 @@
           (soda editor command)
           (soda editor command-runtime)
           (soda editor completion)
+          (soda editor condition)
+          (soda editor debugger-commands)
           (soda editor event)
           (soda editor input-state)
           (soda editor keymap)
@@ -25,27 +27,19 @@
           (extract)))))
 
   (define (run-interactive-command editor name event argument message-prefix)
-    (guard (condition
-             [else
-              (editor-clear-pending-prefix! editor)
-              (editor-set-last-command-class! editor #f)
-              (editor-set-status-message!
-                editor
-                (condition->string condition))
-              '()])
-      (editor-set-status-message! editor #f)
-      (if (eq?
-            (command-class (editor-command-registry editor) name)
-            'prefix)
-          (editor-execute-command! editor name event argument #f)
-          (let ([pending-prefix
-                  (editor-take-pending-prefix! editor)])
-            (editor-execute-interactive-command!
-              editor
-              name
-              event
-              argument
-              (or message-prefix pending-prefix))))))
+    (editor-set-status-message! editor #f)
+    (if (eq?
+          (command-class (editor-command-registry editor) name)
+          'prefix)
+        (editor-execute-command! editor name event argument #f)
+        (let ([pending-prefix
+                (editor-take-pending-prefix! editor)])
+          (editor-execute-interactive-command!
+            editor
+            name
+            event
+            argument
+            (or message-prefix pending-prefix)))))
 
   (define (run-internal-command editor name argument)
     (editor-execute-command! editor name #f argument))
@@ -281,35 +275,61 @@
   (define (editor-update! editor message)
     (require-open-editor 'editor-update! editor)
     (let ([result
-            (cond
-              [(input-message? message)
-               (handle-input-event!
-                 editor
-                 (input-message-event message))]
-              [(key-message? message)
-               (handle-key-event! editor (key-message-event message))]
-              [(resize-message? message)
-               (handle-resize-message! editor message)]
-              [(command-message? message)
-               (run-interactive-command
-                 editor
-                 (command-message-name message)
-                 #f
-                 (command-message-argument message)
-                 (command-message-prefix message))]
-              [(internal-command-message? message)
-               (run-internal-command
-                 editor
-                 (internal-command-message-name message)
-                 (internal-command-message-argument message))]
-              [(completion-response-message? message)
-               (editor-apply-completion-response! editor message)
-               '()]
-              [else
-               (assertion-violation
-                 'editor-update!
-                 "expected an editor message"
-                 message)])])
+            (guard
+              (condition
+                [(editor-user-error-condition? condition)
+                 (editor-clear-pending-prefix! editor)
+                 (editor-set-pending-keys! editor '())
+                 (editor-set-last-command-class! editor #f)
+                 (editor-set-active-command-invocation! editor #f)
+                 (editor-set-status-message!
+                   editor
+                   (condition->string condition))
+                 '()]
+                [else
+                 (editor-clear-pending-prefix! editor)
+                 (editor-set-pending-keys! editor '())
+                 (editor-set-last-command-class! editor #f)
+                 (editor-set-active-command-invocation! editor #f)
+                 (editor-capture-condition!
+                   editor
+                   (cond
+                     [(command-message? message)
+                      (command-message-name message)]
+                     [(internal-command-message? message)
+                      (internal-command-message-name message)]
+                     [else 'editor-update])
+                   condition)
+                 '()])
+              (cond
+                [(input-message? message)
+                 (handle-input-event!
+                   editor
+                   (input-message-event message))]
+                [(key-message? message)
+                 (handle-key-event! editor (key-message-event message))]
+                [(resize-message? message)
+                 (handle-resize-message! editor message)]
+                [(command-message? message)
+                 (run-interactive-command
+                   editor
+                   (command-message-name message)
+                   #f
+                   (command-message-argument message)
+                   (command-message-prefix message))]
+                [(internal-command-message? message)
+                 (run-internal-command
+                   editor
+                   (internal-command-message-name message)
+                   (internal-command-message-argument message))]
+                [(completion-response-message? message)
+                 (editor-apply-completion-response! editor message)
+                 '()]
+                [else
+                 (assertion-violation
+                   'editor-update!
+                   "expected an editor message"
+                   message)]))])
       (editor-invalidate!
         editor
         (cond

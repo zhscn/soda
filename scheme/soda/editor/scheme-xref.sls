@@ -7,6 +7,7 @@
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
+          (soda editor condition)
           (soda editor completion)
           (soda editor file)
           (soda editor keymap)
@@ -134,7 +135,7 @@
                 (editor-buffer-ref editor buffer-id)])
           (unless (= (buffer-revision buffer)
                      (location-item-revision item))
-            (assertion-violation
+            (editor-user-error
               'xref.jump
               "xref location is stale"
               (location-item-revision item)

@@ -908,6 +908,68 @@
                                fields))])
                     (append base field-definitions))))))))))
 
+  (define (condition-type-definitions
+            tokens
+            tail
+            document-id
+            revision)
+    (let ([anchor
+            (and
+              (pair? tail)
+              (symbol-token? (car tail))
+              (car tail))])
+      (if
+        (not anchor)
+        '()
+        (call-with-values
+          (lambda () (partial-datum tokens))
+          (lambda (datum remaining)
+            (if
+              (not
+                (and
+                  (pair? datum)
+                  (eq? (car datum) 'define-condition-type)
+                  (>= (length datum) 5)
+                  (symbol? (cadr datum))
+                  (symbol? (cadddr datum))
+                  (symbol? (car (cddddr datum)))))
+              '()
+              (let* ([form-tokens
+                       (tokens-before-tail tokens remaining)]
+                     [type-name (cadr datum)]
+                     [constructor (cadddr datum)]
+                     [predicate (car (cddddr datum))]
+                     [field-accessors
+                       (filter
+                         symbol?
+                         (map
+                           (lambda (field)
+                             (and
+                               (pair? field)
+                               (pair? (cdr field))
+                               (cadr field)))
+                           (cdr (cddddr datum))))])
+                (map
+                  (lambda (binding)
+                    (named-local-definition
+                      document-id
+                      revision
+                      (record-binding-token
+                        form-tokens
+                        anchor
+                        binding)
+                      (symbol->string binding)
+                      (cond
+                        [(eq? binding type-name) 'condition]
+                        [(eq? binding predicate) 'predicate]
+                        [(memq binding field-accessors) 'accessor]
+                        [else 'constructor])
+                      "condition type binding"
+                      '()))
+                  (append
+                    (list type-name constructor predicate)
+                    field-accessors)))))))))
+
   (define (quoted-symbol-token tokens)
     (cond
       [(and
@@ -1089,6 +1151,12 @@
                tail
                document-id
                revision)]
+            [(token-symbol=? head "define-condition-type")
+             (condition-type-definitions
+               tokens
+               tail
+               document-id
+               revision)]
             [else '()])))
       '()))
 
@@ -1220,6 +1288,7 @@
       (with-syntax syntax)
       (identifier-syntax syntax)
       (define-record-type syntax)
+      (define-condition-type syntax)
       (cons procedure)
       (car procedure)
       (cdr procedure)
@@ -3044,6 +3113,7 @@
               [(string=? head "identifier-syntax")
                (analyze-identifier-syntax form scope)]
               [(string=? head "define-record-type") #f]
+              [(string=? head "define-condition-type") #f]
               [else
                (analyze-sequence children scope)]))))
       (analyze-sequence

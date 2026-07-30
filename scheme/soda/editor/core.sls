@@ -64,6 +64,8 @@
           editor-interaction-ref
           editor-interaction-for-buffer
           editor-evaluator
+          editor-debugger
+          editor-set-debugger!
           chez-evaluator-symbols
           chez-evaluator-ref
           editor-command-registry
@@ -134,6 +136,8 @@
           editor-pending-prefix
           editor-status-message
           editor-set-status-message!
+          editor-user-error
+          editor-user-error-condition?
           editor-theme-catalog
           editor-register-theme!
           editor-theme
@@ -408,6 +412,10 @@
           debugger-session?
           debugger-session-interaction-id
           debugger-session-generation
+          debugger-session-origin
+          debugger-session-label
+          debugger-session-return-buffer-id
+          debugger-session-return-caret
           debugger-session-condition
           debugger-session-frames
           debugger-session-selected-index
@@ -587,6 +595,7 @@
           (soda editor completion-commands)
           (soda editor completion-provider)
           (soda editor completion-runtime)
+          (soda editor condition)
           (soda editor configuration)
           (soda editor cpp-commands)
           (soda editor debugger)

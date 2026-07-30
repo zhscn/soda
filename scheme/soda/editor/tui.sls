@@ -8,6 +8,7 @@
           (soda editor core)
           (soda editor completion-runtime)
           (soda editor configuration)
+          (soda editor debugger-commands)
           (soda editor effect)
           (soda editor event)
           (soda editor file)
@@ -32,14 +33,22 @@
     (let loop ([messages (list message)])
       (if (null? messages)
           #t
-          (let* ([effects (editor-update! editor (car messages))]
-                 [result (execute-effects! executor effects)])
-            (and
-              (effect-result-continue? result)
-              (loop
-                (append
-                  (effect-result-messages result)
-                  (cdr messages))))))))
+          (guard
+            (condition
+              [else
+               (editor-capture-condition!
+                 editor
+                 'effect-handler
+                 condition)
+               (loop (cdr messages))])
+            (let* ([effects (editor-update! editor (car messages))]
+                   [result (execute-effects! executor effects)])
+              (and
+                (effect-result-continue? result)
+                (loop
+                  (append
+                    (effect-result-messages result)
+                    (cdr messages)))))))))
 
   (define (load-bytes runtime path)
     (if (not path)

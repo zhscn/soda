@@ -4,7 +4,8 @@
           buffer-delete-range!)
   (import (rnrs)
           (soda document)
-          (soda editor buffer))
+          (soda editor buffer)
+          (soda editor condition))
 
   (define (replace-buffer-range! who buffer start end bytes)
     (unless (bytevector? bytes)
@@ -12,6 +13,15 @@
         who
         "replacement must be a bytevector"
         bytes))
+    (let ([editable-start
+            (document-editable-start
+              (buffer-document buffer))])
+      (when (and editable-start (< start editable-start))
+        (editor-user-error
+          who
+          "text before the editable boundary is read-only"
+          start
+          editable-start)))
     (let ([change #f])
       (dynamic-wind
         (lambda () #f)
@@ -35,7 +45,7 @@
 
   (define (buffer-replace-range! buffer start end bytes)
     (when (buffer-setting-ref buffer 'read-only? #f)
-      (assertion-violation
+      (editor-user-error
         'buffer-replace-range!
         "buffer is read-only"
         (buffer-id buffer)))

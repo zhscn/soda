@@ -65,6 +65,18 @@ session 持有的可变 Chez environment，因此顶层定义在后续 request �
 不会推进。交互命令应保持有界；需要跨 turn 推进的工作通过显式 effect 和带
 revision 的后续 message 表达。
 
+每个 editor message 构成一个顶层异常边界。正常 command result 继续进入 effect
+executor；未处理的 Scheme condition 被保存为 Editor 所有的 `DebuggerSession`，
+当前 update 返回空 effect 列表，下一轮 command loop 继续处理输入和绘制。TUI
+host 对 effect handler 使用同样的边界，因此异步回调或 adapter 中的异常也不会
+越过 libuv poll loop。
+
+`editor-user-error` 表示可预期且可恢复的交互失败，例如修改只读区域或使用已经
+过期的 xref 位置。这类 condition 只更新 status message。普通 `error`、
+assertion violation 和未分类的 condition 视为实现异常，立即打开 debugger
+Buffer。异常边界清理尚未完成的 interactive invocation、prefix argument 和
+pending key sequence，但不关闭 Editor、Buffer 或 runtime。
+
 ## Transcript 与输入
 
 transcript Buffer 由不可编辑的历史前缀和一个可编辑的当前输入区组成。
@@ -158,16 +170,23 @@ string 猜测位置。使用 origin 前必须确认 Buffer 仍存在；需要对
 
 求值失败产生 `condition` result。session 进入 `failed` 状态并保留原始 request、
 Chez condition 和可用的 continuation；transcript 只显示 condition 的文本投影。
-evaluator 在编译和执行 request 时保留 Chez inspector information。失败结果的
-condition continuation 由 `DebuggerSession` 投影为有序 frame；每个 frame 保存
-procedure name、可用的源码位置和 variable inspector。局部值只在显示时生成有界
-preview，原始 Scheme 对象留在 Chez heap 中。
+Editor command 或 effect handler 失败则创建 Editor 所有的 debugger，并立即把
+触发异常的 View 切换到 debugger Buffer。两类 debugger 使用相同的数据模型和
+命令，不创建递归 REPL 或第二个事件循环。
+
+evaluator 在编译和执行 request 时保留 Chez inspector information。condition
+continuation 由 `DebuggerSession` 投影为有序 frame；每个 frame 保存 procedure
+name、可用的源码位置和 variable inspector。局部值只在显示时生成有界 preview，
+原始 Scheme 对象留在 Chez heap 中。没有 raise continuation 的 condition 仍可
+进入 debugger 并显示结构化 condition 信息，其 frame 列表标记为不可用。
 
 debugger 分为数据模型和 editor adapter。数据模型只负责 continuation inspection、
 frame selection 与 frame-relative evaluation；adapter 管理 command、major mode、
-generated Buffer、prompt 和 transcript 切换。`debugger-mode` 是 interface mode，
-其 Buffer 是 session 状态的只读文本投影。选择 frame 后会重新生成 frame 列表与
-该 frame 的 locals。
+generated Buffer、prompt 和返回 Buffer 切换。`debugger-mode` 是 interface mode，
+其 Buffer 是 session 状态的只读文本投影。投影包含异常来源、`who`、message、
+irritants、frame 列表和选中 frame 的 locals。选择 frame 后重新生成投影，caret
+跟随选中的 frame 行。每个 debugger 使用独立的 generated resource，因此不同
+interaction 的失败状态可以同时保留。
 
 失败状态提供以下动作：
 
@@ -178,12 +197,16 @@ generated Buffer、prompt 和 transcript 切换。`debugger-mode` 是 interface 
   inspector environment 求值；
 - `scheme.debug-retry` 关闭当前 debugger，使用新的 generation 重放原始 source
   和 origin；
-- `scheme.debug-dismiss` 关闭 debugger 并退出失败状态。
+- `scheme.debug-exit` 关闭 debugger Buffer 并返回触发异常的 Buffer，同时保留
+  condition、continuation 和 frame inspector；
+- `scheme.debug-discard` 释放 debugger Buffer、condition 与 continuation；对
+  interaction failure 同时退出 `failed` 状态。
 
-debugger Buffer 的 `n`、`p`、`e`、`r`、`q` 分别映射到上述导航、求值、重试与
-关闭操作。重试和关闭会先把所有显示 debugger Buffer 的 View 切回 transcript，
-再释放 Buffer 与 continuation 引用。frame inspection 和 frame-relative evaluation
-都作为普通 command 执行，不接管 terminal stdin，也不进入递归 command loop。
+debugger Buffer 的 `n`、`p`、`e`、`r`、`x`、`q` 分别映射到导航、求值、重试、
+保留退出与丢弃操作。重试和丢弃会先把所有显示 debugger Buffer 的 View 切回来源
+Buffer。Editor 关闭时释放 Editor 与 interaction 持有的所有 debugger continuation。
+frame inspection 和 frame-relative evaluation 都作为普通 command 执行，不接管
+terminal stdin，也不进入递归 command loop。
 
 成功求值产生的顶层 binding 保存在 session 的 Chez environment 中。
 `scheme-repl` completion provider 将 environment symbol 投影为通用

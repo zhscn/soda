@@ -383,17 +383,47 @@
   (list (make-key-stroke 'character 116 4))
   'test.fail)
 (send! editor decoder (bytes 20))
-(unless (string? (editor-status-message editor))
+(unless
+  (and
+    (debugger-session? (editor-debugger editor))
+    (pair?
+      (debugger-session-frames
+        (editor-debugger editor)))
+    (eq?
+      (debugger-session-origin
+        (editor-debugger editor))
+      'command)
+    (eq?
+      (buffer-major-mode-name
+        (view-buffer (editor-active-view editor)))
+      'debugger-mode))
   (error 'editor-tests
-         "interactive command failure did not become a status message"))
-(define internal-failure-propagated? #f)
-(guard (condition
-         [else (set! internal-failure-propagated? #t)])
-  (editor-update!
-    editor
-    (make-internal-command-message 'test.fail #f)))
-(unless internal-failure-propagated?
-  (error 'editor-tests "internal command failure was hidden"))
+         "interactive command failure did not open the debugger"))
+(editor-update!
+  editor
+  (make-command-message 'scheme.debug-discard #f))
+(unless
+  (and
+    (not (editor-debugger editor))
+    (eq? (view-buffer (editor-active-view editor)) buffer)
+    (= (view-caret (editor-active-view editor)) 2))
+  (error 'editor-tests
+         "discarding a command debugger did not restore its view"))
+(editor-update!
+  editor
+  (make-internal-command-message 'test.fail #f))
+(unless
+  (and
+    (debugger-session? (editor-debugger editor))
+    (eq?
+      (buffer-major-mode-name
+        (view-buffer (editor-active-view editor)))
+      'debugger-mode))
+  (error 'editor-tests
+         "internal command failure escaped the editor boundary"))
+(editor-update!
+  editor
+  (make-command-message 'scheme.debug-discard #f))
 
 (send! editor decoder (bytes 24))
 (send! editor decoder (string->utf8 "z"))
@@ -4238,10 +4268,17 @@
   (and
     (not (editor-closed? prompt-editor))
     (not (editor-active-prompt prompt-editor))
-    (string? (editor-status-message prompt-editor)))
+    (debugger-session? (editor-debugger prompt-editor))
+    (eq?
+      (buffer-major-mode-name
+        (view-buffer (editor-active-view prompt-editor)))
+      'debugger-mode))
   (error
     'editor-tests
     "M-x command failure escaped interactive dispatch"))
+(editor-update!
+  prompt-editor
+  (make-command-message 'scheme.debug-discard #f))
 
 (editor-close! prompt-editor)
 (unless (and (editor-closed? prompt-editor)

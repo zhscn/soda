@@ -86,6 +86,7 @@
           (soda editor command)
           (soda editor command-runtime)
           (soda editor completion)
+          (soda editor condition)
           (soda editor edit)
           (soda editor event)
           (soda editor keymap)
@@ -1296,6 +1297,30 @@
               (lambda () (text-close! text)))))
         (lambda () (snapshot-close! snapshot)))))
 
+  (define (run-before-file-hook!
+            editor
+            phase
+            buffer
+            path
+            argument)
+    (guard
+      (condition
+        [else
+         (editor-user-error
+           phase
+           (if (message-condition? condition)
+               (condition-message condition)
+               (string-append
+                 (symbol->string phase)
+                 " hook failed"))
+           condition)])
+      (editor-run-buffer-hooks!
+        editor
+        phase
+        buffer
+        path
+        argument)))
+
   (define (begin-reload! editor view buffer force?)
     (let ([path (buffer-file-path buffer)])
       (cond
@@ -1320,7 +1345,7 @@
            "Buffer is modified; use file.force-reload to discard changes")
          '()]
         [else
-         (editor-run-buffer-hooks!
+         (run-before-file-hook!
            editor
            'before-revert
            buffer
@@ -1471,7 +1496,7 @@
            'begin-save!
            "continuation must be an editor command message or #f"
            continuation))
-       (editor-run-buffer-hooks!
+       (run-before-file-hook!
          editor
          'before-save
          buffer
