@@ -665,6 +665,138 @@
     (error 'scheme-semantics-tests
            "case-lambda clauses did not receive independent scopes")))
 
+(define do-scope-source
+  (string-append
+    "(define index 10)\n"
+    "(do ([index index (+ index 1)])\n"
+    "    ((= index 3) index)\n"
+    "  index)\n"))
+(define do-scope-snapshot
+  (make-scheme-semantic-snapshot
+    82
+    0
+    (string->utf8 do-scope-source)))
+(let* ([uses
+         (snapshot-uses-named
+           do-scope-snapshot "index")]
+       [definitions
+         (map
+           (lambda (use)
+             (definition-at-use
+               do-scope-snapshot use))
+           uses)])
+  (unless
+    (and
+      (= (length definitions) 5)
+      (car definitions)
+      (cadr definitions)
+      (not
+        (scheme-definition-id=?
+          (scheme-definition-id
+            (car definitions))
+          (scheme-definition-id
+            (cadr definitions))))
+      (for-all
+        (lambda (definition)
+          (and
+            definition
+            (scheme-definition-id=?
+              (scheme-definition-id definition)
+              (scheme-definition-id
+                (cadr definitions)))))
+        (cdr definitions)))
+    (error
+      'scheme-semantics-tests
+      "do binding visibility did not distinguish initializer, step, test, and body")))
+
+(define guard-scope-source
+  (string-append
+    "(define condition 'outer)\n"
+    "(guard (condition [else condition])\n"
+    "  condition)\n"))
+(define guard-scope-snapshot
+  (make-scheme-semantic-snapshot
+    83
+    0
+    (string->utf8 guard-scope-source)))
+(let* ([uses
+         (snapshot-uses-named
+           guard-scope-snapshot
+           "condition")]
+       [handler
+         (and
+           (= (length uses) 2)
+           (definition-at-use
+             guard-scope-snapshot
+             (car uses)))]
+       [body
+         (and
+           (= (length uses) 2)
+           (definition-at-use
+             guard-scope-snapshot
+             (cadr uses)))])
+  (unless
+    (and
+      handler
+      body
+      (not
+        (scheme-definition-id=?
+          (scheme-definition-id handler)
+          (scheme-definition-id body))))
+    (error
+      'scheme-semantics-tests
+      "guard condition binding leaked into its body")))
+
+(let ([literal-uses
+        (scheme-semantic-snapshot-uses
+          (make-scheme-semantic-snapshot
+            84
+            0
+            (string->utf8
+              "(list 1 -2 #x10 #t #f '#(translation-unit none))\n")))])
+  (when
+    (exists
+      (lambda (use)
+        (member
+          (scheme-use-name use)
+          '("1"
+            "-2"
+            "#x10"
+            "#t"
+            "#f"
+            "translation-unit"
+            "none")))
+      literal-uses)
+    (error
+      'scheme-semantics-tests
+      "literal atoms entered the identifier use set")))
+
+(define quoted-do-source
+  (string-append
+    "(do ([index 0 (+ index 1)]\n"
+    "     [items '() (cons index items)])\n"
+    "    ((= index 3) items))\n"))
+(define quoted-do-snapshot
+  (make-scheme-semantic-snapshot
+    85
+    0
+    (string->utf8 quoted-do-source)))
+
+(when
+  (exists
+    (lambda (use)
+      (and
+        (member
+          (scheme-use-name use)
+          '("index" "items"))
+        (null?
+          (scheme-use-resolution use))))
+    (scheme-semantic-snapshot-uses
+      quoted-do-snapshot))
+  (error
+    'scheme-semantics-tests
+    "quoted do initializer changed binding and step positions"))
+
 (define highlight-scope-source
   (string-append
     "(map values)\n"

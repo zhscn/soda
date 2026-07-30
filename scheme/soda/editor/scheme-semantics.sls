@@ -163,6 +163,44 @@
   (define scheme-lexical-token-start token-start)
   (define scheme-lexical-token-end token-end)
 
+  (define invalid-token-datum
+    (list 'invalid-token-datum))
+
+  (define token-datum-cache
+    (make-hashtable string-hash string=?))
+
+  (define (read-token-datum spelling)
+    (let ([cached
+            (hashtable-ref
+              token-datum-cache spelling #f)])
+      (if
+        cached
+        (cdr cached)
+        (let ([datum
+                (guard
+                  (condition [else invalid-token-datum])
+                  (let ([port
+                          (open-string-input-port spelling)])
+                    (let ([value (read port)])
+                      (if
+                        (eof-object? (read port))
+                        value
+                        invalid-token-datum))))])
+          (hashtable-set!
+            token-datum-cache
+            spelling
+            (cons #t datum))
+          datum))))
+
+  (define (token-datum value)
+    (if
+      (and
+        value
+        (eq? (token-kind value) 'symbol))
+      (read-token-datum
+        (token-value value))
+      invalid-token-datum))
+
   (define (exact-non-negative-integer? value)
     (and (integer? value) (exact? value) (not (negative? value))))
 
@@ -386,6 +424,16 @@
       [(null? tokens) '()]
       [(eq? (token-kind (car tokens)) 'prefix)
        (skip-datum (cdr tokens))]
+      [(and
+         (pair? (cdr tokens))
+         (eq? (token-kind (car tokens)) 'symbol)
+         (eq? (token-kind (cadr tokens)) 'open)
+         (= (token-end (car tokens))
+            (token-start (cadr tokens)))
+         (eq?
+           (token-datum (car tokens))
+           invalid-token-datum))
+       (skip-datum (cdr tokens))]
       [(eq? (token-kind (car tokens)) 'open)
        (let loop ([remaining (cdr tokens)] [depth 1])
          (cond
@@ -416,7 +464,7 @@
          (loop (cdr remaining) (cons (car remaining) result))])))
 
   (define (symbol-token? value)
-    (and value (eq? (token-kind value) 'symbol)))
+    (symbol? (token-datum value)))
 
   (define (token-symbol=? value name)
     (and (symbol-token? value)
@@ -785,6 +833,22 @@
                  "local syntax"
                  '()))
              '())]
+          [(token-symbol=? head "define-command")
+           (if
+             (and
+               (pair? tail)
+               (eq? (token-kind (car tail)) 'open)
+               (pair? (cdr tail))
+               (symbol-token? (cadr tail)))
+             (list
+               (local-definition
+                 document-id
+                 revision
+                 (cadr tail)
+                 'procedure
+                 "local command"
+                 (procedure-head-formals tail)))
+             '())]
           [(token-symbol=? head "define-record-type")
            (record-definitions
              tokens
@@ -1119,9 +1183,13 @@
     (cond
       [(null? tokens) (values #f '())]
       [(eq? (token-kind (car tokens)) 'symbol)
-       (values
-         (string->symbol (token-value (car tokens)))
-         (cdr tokens))]
+       (let ([datum (token-datum (car tokens))])
+         (values
+           (if
+             (eq? datum invalid-token-datum)
+             #f
+             datum)
+           (cdr tokens)))]
       [(eq? (token-kind (car tokens)) 'open)
        (let loop ([remaining (cdr tokens)] [result '()])
          (cond
@@ -1399,9 +1467,16 @@
 
   (define (syntax-form->datum form)
     (cond
-      [(syntax-symbol? form)
-       (string->symbol
-         (token-value (syntax-form-token form)))]
+      [(and
+         (syntax-form? form)
+         (eq? (syntax-form-kind form) 'atom))
+       (let ([datum
+               (token-datum
+                 (syntax-form-token form))])
+         (if
+           (eq? datum invalid-token-datum)
+           #f
+           datum))]
       [(syntax-list? form)
        (map
          syntax-form->datum
@@ -1833,6 +1908,12 @@
           (scope-builder-add-definition!
             scope
             (make-binding node kind detail))))
+      (define (add-definitions! scope definitions)
+        (for-each
+          (lambda (definition)
+            (scope-builder-add-definition!
+              scope definition))
+          definitions))
       (define (add-parameters! scope form)
         (for-each
           (lambda (node)
@@ -2092,6 +2173,98 @@
                    (add-let-binding! body-scope binding))
                  bindings)
                (analyze-sequence body body-scope))])))
+      (define (analyze-do form scope)
+        (let* ([children (syntax-form-children form)]
+               [bindings-node
+                 (and
+                   (pair? (cdr children))
+                   (cadr children))]
+               [termination
+                 (and
+                   (pair? (cddr children))
+                   (caddr children))]
+               [body
+                 (if termination
+                     (cdddr children)
+                     '())]
+               [bindings
+                 (binding-forms bindings-node)]
+               [definitions
+                 (map
+                   (lambda (binding)
+                     (make-binding
+                       (car
+                         (syntax-form-children binding))
+                       'variable
+                       "do binding"))
+                   bindings)]
+               [body-scope
+                 (and
+                   bindings-node
+                   (new-scope
+                     scope
+                     (syntax-form-end bindings-node)
+                     (syntax-form-end form)))])
+          (when body-scope
+            (add-definitions!
+              body-scope definitions))
+          (for-each
+            (lambda (binding)
+              (let ([parts
+                      (syntax-form-children binding)])
+                (when (pair? (cdr parts))
+                  (analyze-form
+                    (cadr parts)
+                    scope))
+                (for-each
+                  (lambda (step)
+                    (let ([step-scope
+                            (new-scope
+                              body-scope
+                              (syntax-form-start step)
+                              (+ 1
+                                (syntax-form-end step)))])
+                      (analyze-form step step-scope)))
+                  (cddr parts))))
+            bindings)
+          (when body-scope
+            (when termination
+              (analyze-form
+                termination body-scope))
+            (analyze-sequence
+              body body-scope))))
+      (define (analyze-guard form scope)
+        (let* ([children (syntax-form-children form)]
+               [handler
+                 (and
+                   (pair? (cdr children))
+                   (cadr children))])
+          (when
+            (and
+              (syntax-list? handler)
+              (pair?
+                (syntax-form-children handler)))
+            (let* ([handler-children
+                     (syntax-form-children handler)]
+                   [condition-node
+                     (car handler-children)]
+                   [handler-scope
+                     (new-scope
+                       scope
+                       (syntax-form-start handler)
+                       (+ 1
+                         (syntax-form-end handler)))])
+              (add-binding!
+                handler-scope
+                condition-node
+                'variable
+                "guard condition")
+              (analyze-sequence
+                (cdr handler-children)
+                handler-scope)))
+          (analyze-sequence
+            (if handler (cddr children) (cdr children))
+            scope)))
       (define (analyze-form form scope)
         (when (syntax-list? form)
           (let ([head (syntax-head-symbol form)]
@@ -2104,7 +2277,9 @@
               [(string=? head "case-lambda")
                (analyze-case-lambda form scope)]
               [(and
-                 (string=? head "define")
+                 (or
+                   (string=? head "define")
+                   (string=? head "define-command"))
                  (pair? (cdr children))
                  (syntax-list? (cadr children))
                  (pair?
@@ -2125,6 +2300,10 @@
                  (string=? head "letrec")
                  (string=? head "letrec*"))
                (analyze-let form scope #t #f)]
+              [(string=? head "do")
+               (analyze-do form scope)]
+              [(string=? head "guard")
+               (analyze-guard form scope)]
               [(string=? head "define-record-type") #f]
               [else
                (analyze-sequence children scope)]))))
@@ -2377,18 +2556,45 @@
       (reverse result)))
 
   (define (call-context-tokens-from tokens)
+    (define (masked-datum remaining)
+      (let ([tail (skip-datum remaining)])
+        (values
+          (make-token
+            'datum
+            #f
+            (token-start (car remaining))
+            (if
+              (pair? tail)
+              (token-start (car tail))
+              (token-end
+                (car
+                  (reverse remaining)))))
+          tail)))
     (let loop
       ([remaining
-         (remove-ignored-data
-           (filter
-             (lambda (value)
-               (not (eq? (token-kind value) 'comment)))
-             tokens))]
+         (filter
+           (lambda (value)
+             (not (eq? (token-kind value) 'comment)))
+           tokens)]
        [result '()])
       (cond
         [(null? remaining) (reverse result)]
+        [(eq?
+           (token-kind (car remaining))
+           'datum-comment)
+         (loop
+           (skip-datum (cdr remaining))
+           result)]
+        [(ignored-prefix? (car remaining))
+         (call-with-values
+           (lambda () (masked-datum remaining))
+           (lambda (placeholder tail)
+             (loop tail (cons placeholder result))))]
         [(quoted-form? remaining)
-         (loop (skip-datum remaining) result)]
+         (call-with-values
+           (lambda () (masked-datum remaining))
+           (lambda (placeholder tail)
+             (loop tail (cons placeholder result))))]
         [else
          (loop
            (cdr remaining)
