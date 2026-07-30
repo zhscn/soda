@@ -151,7 +151,6 @@
           theme-resolve-faces
           make-theme-catalog
           theme-catalog?
-          theme-catalog-register!
           theme-catalog-ref
           theme-catalog-names
           theme-catalog-themes
@@ -554,7 +553,6 @@
           completion-provider-start
           completion-provider-cancel
           completion-provider-catalog?
-          completion-provider-catalog-register!
           completion-provider-catalog-find
           completion-provider-catalog-ref
           completion-provider-catalog-names
