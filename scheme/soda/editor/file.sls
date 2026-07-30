@@ -1060,7 +1060,8 @@
             (editor-create-buffer!
               editor
               (open-result-path result)
-              (file-major-mode-for-path
+              (editor-major-mode-for-path
+                editor
                 (open-result-path result))
               (if
                 new-file?

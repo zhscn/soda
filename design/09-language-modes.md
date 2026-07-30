@@ -35,9 +35,28 @@ Editor 刷新已注册 Buffer 的 runtime；Buffer 在查询 setting、profile �
 keymap 时按名称解析 catalog，因此不会持有过期 mode 描述值。默认 catalog 只作为
 独立使用 Buffer API 时的便利入口。
 
-文件名、shebang、modeline 或用户命令选择 major mode。切换 mode 是 Buffer
-transaction 之外的编辑器状态变化：关闭旧 language runtime，建立新 runtime，
-再通知所有 View 重建派生状态。
+Editor 的 auto-mode catalog 保存具名规则：
+
+```text
+AutoModeRule {
+  name,
+  priority,
+  matcher(path),
+  major_mode
+}
+```
+
+规则按 priority 从高到低匹配；同名注册替换旧规则。内建规则覆盖 Scheme 与 C/C++
+扩展名，比较时不区分大小写。扩展可以使用 suffix helper，或提供任意 Scheme matcher
+实现文件名、目录或 project policy。未匹配资源使用
+`fundamental-mode`。
+
+新文件 Buffer 通过 Editor auto-mode catalog 选择 mode。启动 init 加载后会重新选择
+首个文件的 mode，使用户规则可以覆盖内建规则。extension rebuild 也会重新选择所有
+具有 file path 的 Buffer；移除规则或 major mode 后相应文件回到下一条匹配规则。
+
+切换 mode 是 Buffer transaction 之外的编辑器状态变化：关闭旧 language runtime，
+建立新 runtime，再通知所有 View 重建派生状态。
 
 ## Language profile
 

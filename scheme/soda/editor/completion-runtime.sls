@@ -37,9 +37,7 @@
           (make-effect-result
             #t
             (completion-provider-start
-              (completion-provider-catalog-ref
-                catalog
-                (completion-request-provider request))
+              (completion-provider-for-request catalog request)
               request)))))
     (register-effect-handler!
       executor
@@ -52,9 +50,7 @@
             request))
         (guard (condition [else #f])
           (completion-provider-cancel
-            (completion-provider-catalog-ref
-              catalog
-              (completion-request-provider request))
+            (completion-provider-for-request catalog request)
             request))
         (make-effect-result #t '())))
     executor))

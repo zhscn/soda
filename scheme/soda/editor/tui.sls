@@ -183,6 +183,28 @@
                        (condition-message condition)
                        "configuration was restored")))])
             (load-default-editor-init! editor))
+          (when file-path
+            (editor-select-buffer-major-mode!
+              editor
+              buffer
+              file-path))
+          (guard
+            (condition
+              [else
+               (editor-set-status-message!
+                 editor
+                 (string-append
+                   "after-init error: "
+                   (if (message-condition? condition)
+                       (condition-message condition)
+                       "configuration was restored")))])
+            (call-with-editor-configuration-transaction
+              editor
+              (lambda ()
+                (editor-run-hooks!
+                  editor
+                  'after-init
+                  editor))))
           (procedure editor))
         (lambda ()
           (cond

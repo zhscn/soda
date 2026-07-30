@@ -67,11 +67,28 @@
           chez-evaluator-symbols
           chez-evaluator-ref
           editor-command-registry
+          editor-add-hook!
+          editor-remove-hook!
+          editor-hook-names
+          editor-run-hooks!
           editor-active-command-invocation
           editor-minor-mode-catalog
           editor-global-minor-modes
           editor-keymap-catalog
           editor-language-catalog
+          make-auto-mode-rule
+          make-file-suffix-auto-mode-rule
+          auto-mode-rule?
+          auto-mode-rule-name
+          auto-mode-rule-priority
+          auto-mode-rule-major-mode
+          auto-mode-catalog-generation
+          auto-mode-catalog-find
+          auto-mode-catalog-rules
+          editor-auto-mode-catalog
+          editor-register-auto-mode-rule!
+          editor-major-mode-for-path
+          editor-select-buffer-major-mode!
           make-setting-definition
           setting-definition?
           setting-definition-name
@@ -553,6 +570,7 @@
           command-effect-payload)
   (import (rnrs)
           (soda editor annotation)
+          (soda editor auto-mode)
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
@@ -669,10 +687,29 @@
           'cursor)))
     editor)
 
+  (define (install-core-auto-modes! editor)
+    (editor-register-auto-mode-rule!
+      editor
+      (make-file-suffix-auto-mode-rule
+        'scheme-files
+        0
+        '(".scm" ".ss" ".sls" ".sps")
+        'scheme-mode))
+    (editor-register-auto-mode-rule!
+      editor
+      (make-file-suffix-auto-mode-rule
+        'cpp-files
+        0
+        '(".c" ".cc" ".cpp" ".cxx"
+          ".h" ".hh" ".hpp" ".hxx")
+        'cpp-mode))
+    editor)
+
   (define (make-editor buffer)
     (let ([editor (make-editor-state buffer)])
       (editor-set-evaluator! editor (make-chez-evaluator))
       (install-core-settings! editor)
+      (install-core-auto-modes! editor)
       (install-command-runtime-commands! editor)
       (install-prefix-commands! editor)
       (install-basic-commands! editor)

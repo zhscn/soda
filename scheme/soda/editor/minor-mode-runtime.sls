@@ -143,7 +143,12 @@
       (and definition
            (minor-mode-definition-lighter definition))))
 
-  (define (editor-register-minor-mode! editor definition)
+  (define (validate-minor-mode-keymap! editor definition)
+    (unless (minor-mode-definition? definition)
+      (assertion-violation
+        'editor-register-minor-mode!
+        "expected a minor mode definition"
+        definition))
     (let ([layer
             (minor-mode-definition-keymap-layer definition)])
       (when
@@ -157,9 +162,9 @@
           'editor-register-minor-mode!
           "minor mode names an unknown keymap layer"
           layer)))
-    (minor-mode-catalog-register!
-      (editor-minor-mode-catalog editor)
-      definition)
+    definition)
+
+  (define (register-minor-mode-command! editor definition)
     (let ([name (minor-mode-definition-name definition)])
       (editor-register-command!
         editor
@@ -173,4 +178,72 @@
               (command-context-prefix context))
             '())
           (minor-mode-definition-documentation definition))))
+    definition)
+
+  (define (active-definition-targets editor definition)
+    (let ([name (minor-mode-definition-name definition)])
+      (case (minor-mode-definition-scope definition)
+        [(global)
+         (if (memq name (editor-global-minor-modes editor))
+             (list (view-buffer (editor-active-view editor)))
+             '())]
+        [(buffer)
+         (filter
+           (lambda (buffer)
+             (memq name (buffer-minor-modes buffer)))
+           (editor-buffers editor))])))
+
+  (define (replacement-targets definition targets)
+    (if
+      (and
+        (eq? (minor-mode-definition-scope definition) 'global)
+        (pair? targets))
+      (list (car targets))
+      targets))
+
+  (define (editor-register-minor-mode! editor definition)
+    (validate-minor-mode-keymap! editor definition)
+    (call-with-editor-configuration-transaction
+      editor
+      (lambda ()
+        (let* ([catalog (editor-minor-mode-catalog editor)]
+               [name (minor-mode-definition-name definition)]
+               [old (minor-mode-catalog-find catalog name)]
+               [old-targets
+                 (if old
+                     (active-definition-targets editor old)
+                     '())]
+               [new-targets
+                 (replacement-targets definition old-targets)]
+               [old-disabled '()]
+               [new-enabled '()])
+          (guard
+            (condition
+              [else
+               (guard (rollback-condition [else #f])
+                 (for-each
+                   (lambda (buffer)
+                     (editor-disable-minor-mode! editor buffer name))
+                   new-enabled)
+                 (when old
+                   (minor-mode-catalog-register! catalog old)
+                   (for-each
+                     (lambda (buffer)
+                       (editor-enable-minor-mode! editor buffer name))
+                     (reverse old-disabled))))
+               (raise condition)])
+            (unless (or (not old) (eq? old definition))
+              (for-each
+                (lambda (buffer)
+                  (editor-disable-minor-mode! editor buffer name)
+                  (set! old-disabled (cons buffer old-disabled)))
+                old-targets))
+            (minor-mode-catalog-register! catalog definition)
+            (register-minor-mode-command! editor definition)
+            (unless (or (not old) (eq? old definition))
+              (for-each
+                (lambda (buffer)
+                  (editor-enable-minor-mode! editor buffer name)
+                  (set! new-enabled (cons buffer new-enabled)))
+                new-targets))))))
     definition))

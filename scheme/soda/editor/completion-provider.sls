@@ -11,6 +11,8 @@
           completion-provider-catalog-register!
           completion-provider-catalog-find
           completion-provider-catalog-ref
+          completion-provider-for-request
+          completion-provider-catalog-bind-request!
           completion-provider-catalog-names
           make-completion-response-for-request)
   (import (rnrs)
@@ -174,6 +176,27 @@
         'completion-provider-catalog-ref
         "unknown completion provider"
         name)))
+
+  (define (completion-provider-for-request catalog request)
+    (unless (completion-request? request)
+      (assertion-violation
+        'completion-provider-for-request
+        "expected a completion request"
+        request))
+    (or
+      (completion-request-provider-instance request)
+      (completion-provider-catalog-ref
+        catalog
+        (completion-request-provider request))))
+
+  (define (completion-provider-catalog-bind-request! catalog request)
+    (let ([provider
+            (completion-provider-for-request catalog request)])
+      (unless (completion-request-provider-instance request)
+        (completion-request-provider-instance-set!
+          request
+          provider))
+      provider))
 
   (define (completion-provider-catalog-names catalog)
     (unless (completion-provider-catalog? catalog)

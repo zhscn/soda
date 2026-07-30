@@ -58,11 +58,20 @@
           editor-evaluator
           editor-set-evaluator!
           editor-command-registry
+          editor-hook-registry
+          editor-add-hook!
+          editor-remove-hook!
+          editor-hook-names
+          editor-run-hooks!
           editor-minor-mode-catalog
           editor-global-minor-modes
           editor-set-global-minor-modes!
           editor-keymap-catalog
           editor-language-catalog
+          editor-auto-mode-catalog
+          editor-register-auto-mode-rule!
+          editor-major-mode-for-path
+          editor-select-buffer-major-mode!
           editor-setting-store
           editor-setting-names
           editor-setting-definition
@@ -156,12 +165,14 @@
   (import (rnrs)
           (soda document)
           (soda editor annotation)
+          (soda editor auto-mode)
           (soda editor buffer)
           (soda editor command)
           (soda editor completion)
           (soda editor completion-provider)
           (soda editor display)
           (soda editor event)
+          (soda editor hook)
           (soda editor input-state)
           (soda editor interaction)
           (soda editor keymap)
@@ -241,8 +252,10 @@
                editor-next-interaction-id-set!)
       (mutable evaluator editor-evaluator editor-evaluator-set!)
       (immutable commands editor-command-registry)
+      (immutable hooks editor-hook-registry)
       (immutable keymaps editor-keymap-catalog)
       (immutable languages editor-language-catalog)
+      (immutable auto-modes editor-auto-mode-catalog)
       (immutable settings editor-setting-store)
       (immutable completion-providers
                  editor-completion-provider-catalog)
@@ -322,8 +335,10 @@
     (fields settings
             buffers
             commands
+            hooks
             keymaps
             languages
+            auto-modes
             completion-providers
             minor-modes
             global-minor-modes
@@ -553,6 +568,39 @@
   (define (table-values table ids)
     (map (lambda (id) (hashtable-ref table id #f)) ids))
 
+  (define (editor-add-hook! value phase name procedure)
+    (require-open-editor 'editor-add-hook! value)
+    (let ([registered
+            (hook-registry-add!
+              (editor-hook-registry value)
+              phase
+              name
+              procedure)])
+      (editor-invalidate! value 'configuration)
+      registered))
+
+  (define (editor-remove-hook! value phase name)
+    (require-open-editor 'editor-remove-hook! value)
+    (let ([removed
+            (hook-registry-remove!
+              (editor-hook-registry value)
+              phase
+              name)])
+      (editor-invalidate! value 'configuration)
+      removed))
+
+  (define (editor-hook-names value phase)
+    (require-open-editor 'editor-hook-names value)
+    (hook-registry-names (editor-hook-registry value) phase))
+
+  (define (editor-run-hooks! value phase . arguments)
+    (require-open-editor 'editor-run-hooks! value)
+    (apply
+      hook-registry-run!
+      (editor-hook-registry value)
+      phase
+      arguments))
+
   (define (editor-register-completion-provider! value provider)
     (require-open-editor
       'editor-register-completion-provider!
@@ -562,6 +610,9 @@
       provider))
 
   (define (enqueue-completion-effect! value kind request)
+    (completion-provider-catalog-bind-request!
+      (editor-completion-provider-catalog value)
+      request)
     (editor-completion-effects-set!
       value
       (cons
@@ -610,9 +661,9 @@
       (lambda (request)
         (guard (condition [else #f])
           (completion-provider-cancel
-            (completion-provider-catalog-ref
+            (completion-provider-for-request
               (editor-completion-provider-catalog value)
-              (completion-request-provider request))
+              request)
             request)))
       (completion-session-cancel-requests! completion)))
 
@@ -624,9 +675,9 @@
           (let ([request (command-effect-payload effect)])
             (guard (condition [else #f])
               (completion-provider-cancel
-                (completion-provider-catalog-ref
+                (completion-provider-for-request
                   (editor-completion-provider-catalog value)
-                  (completion-request-provider request))
+                  request)
                 request)))))
       (reverse (editor-completion-effects value)))
     (editor-completion-effects-set! value '()))
@@ -2298,6 +2349,44 @@
     (require-open-editor 'editor-keymap value)
     (keymap-catalog-ref (editor-keymap-catalog value) 'editor.default))
 
+  (define (editor-register-auto-mode-rule! value rule)
+    (require-open-editor 'editor-register-auto-mode-rule! value)
+    (unless (auto-mode-rule? rule)
+      (assertion-violation
+        'editor-register-auto-mode-rule!
+        "expected an auto mode rule"
+        rule))
+    (unless
+      (find-major-mode
+        (editor-language-catalog value)
+        (auto-mode-rule-major-mode rule))
+      (assertion-violation
+        'editor-register-auto-mode-rule!
+        "auto mode rule names an unknown major mode"
+        (auto-mode-rule-major-mode rule)))
+    (let ([registered
+            (auto-mode-catalog-register!
+              (editor-auto-mode-catalog value)
+              rule)])
+      (editor-invalidate! value 'configuration)
+      registered))
+
+  (define (editor-major-mode-for-path value path)
+    (require-open-editor 'editor-major-mode-for-path value)
+    (let ([mode
+            (auto-mode-catalog-resolve
+              (editor-auto-mode-catalog value)
+              path
+              'fundamental-mode)])
+      (unless
+        (find-major-mode (editor-language-catalog value) mode)
+        (assertion-violation
+          'editor-major-mode-for-path
+          "auto mode rule names an unknown major mode"
+          mode
+          path))
+      mode))
+
   (define (editor-setting-buffer who editor buffer)
     (unless (buffer? buffer)
       (assertion-violation who "expected a buffer" buffer))
@@ -2313,6 +2402,19 @@
         "buffer is not registered with this editor"
         buffer))
     buffer)
+
+  (define (editor-select-buffer-major-mode! value buffer path)
+    (require-open-editor 'editor-select-buffer-major-mode! value)
+    (let* ([target
+             (editor-setting-buffer
+               'editor-select-buffer-major-mode!
+               value
+               buffer)]
+           [mode (editor-major-mode-for-path value path)])
+      (unless (eq? mode (buffer-major-mode-name target))
+        (buffer-set-major-mode! target mode)
+        (editor-invalidate! value 'document))
+      mode))
 
   (define (require-editor-setting-definition who editor name)
     (unless (symbol? name)
@@ -2507,8 +2609,10 @@
           (editor-buffer-table value)
           (editor-buffer-ids value)))
       (command-registry-snapshot (editor-command-registry value))
+      (hook-registry-snapshot (editor-hook-registry value))
       (keymap-catalog-snapshot (editor-keymap-catalog value))
       (language-catalog-snapshot (editor-language-catalog value))
+      (auto-mode-catalog-snapshot (editor-auto-mode-catalog value))
       (completion-provider-catalog-snapshot
         (editor-completion-provider-catalog value))
       (minor-mode-catalog-snapshot
@@ -2546,6 +2650,9 @@
       (command-registry-restore!
         (editor-command-registry value)
         (editor-configuration-state-commands snapshot))
+      (hook-registry-restore!
+        (editor-hook-registry value)
+        (editor-configuration-state-hooks snapshot))
       (keymap-catalog-restore!
         (editor-keymap-catalog value)
         (editor-configuration-state-keymaps snapshot))
@@ -2561,6 +2668,9 @@
       (language-catalog-restore!
         (editor-language-catalog value)
         (editor-configuration-state-languages snapshot))
+      (auto-mode-catalog-restore!
+        (editor-auto-mode-catalog value)
+        (editor-configuration-state-auto-modes snapshot))
       (editor-global-minor-modes-set!
         value
         (editor-configuration-state-global-minor-modes snapshot))
@@ -2617,6 +2727,13 @@
         (condition
           [else
            (editor-restore-configuration! value snapshot)
+           (when (zero? depth)
+             (guard (hook-condition [else #f])
+               (editor-run-hooks!
+                 value
+                 'configuration-rolled-back
+                 value
+                 condition)))
            (raise condition)])
         (dynamic-wind
           (lambda ()
@@ -2634,6 +2751,11 @@
                   (assertion-violation
                     'call-with-editor-configuration-transaction
                     "configuration transaction changed buffer topology"))
+                (when (zero? depth)
+                  (editor-run-hooks!
+                    value
+                    'configuration-committed
+                    value))
                 (apply values results))))
           (lambda ()
             (editor-configuration-transaction-depth-set!
@@ -2682,7 +2804,15 @@
             (for-each
               (lambda (extension)
                 (invoke-extension-loader! value extension))
-              extensions))))
+              extensions)
+            (for-each
+              (lambda (buffer)
+                (when (buffer-file-path buffer)
+                  (editor-select-buffer-major-mode!
+                    value
+                    buffer
+                    (buffer-file-path buffer))))
+              (editor-buffers value)))))
       (lambda ()
         (editor-rebuilding-extensions?-set! value #f))))
 
@@ -2789,21 +2919,33 @@
 
   (define (editor-register-language-profile! value profile)
     (require-open-editor 'editor-register-language-profile! value)
-    (let ([registered
-            (register-language-profile!
-              (editor-language-catalog value)
-              profile)])
-      (refresh-buffers! value)
-      registered))
+    (let ([register!
+            (lambda ()
+              (let ([registered
+                      (register-language-profile!
+                        (editor-language-catalog value)
+                        profile)])
+                (refresh-buffers! value)
+                registered))])
+      (if
+        (positive? (editor-configuration-transaction-depth value))
+        (register!)
+        (call-with-editor-configuration-transaction value register!))))
 
   (define (editor-register-major-mode! value mode)
     (require-open-editor 'editor-register-major-mode! value)
-    (let ([registered
-            (register-major-mode!
-              (editor-language-catalog value)
-              mode)])
-      (refresh-buffers! value)
-      registered))
+    (let ([register!
+            (lambda ()
+              (let ([registered
+                      (register-major-mode!
+                        (editor-language-catalog value)
+                        mode)])
+                (refresh-buffers! value)
+                registered))])
+      (if
+        (positive? (editor-configuration-transaction-depth value))
+        (register!)
+        (call-with-editor-configuration-transaction value register!))))
 
   (define (editor-pending-keys value)
     (view-pending-keys (editor-active-view value)))
@@ -2850,14 +2992,39 @@
         'editor-set-theme!
         "expected a theme"
         theme))
-    (unless (eq? theme (editor-theme value))
-      (editor-theme-set! value theme)
-      (editor-invalidate! value 'theme))
-    theme)
+    (let ([set-theme!
+            (lambda ()
+              (unless (eq? theme (editor-theme value))
+                (let ([old (editor-theme value)])
+                  (editor-theme-set! value theme)
+                  (editor-run-hooks!
+                    value
+                    'theme-changed
+                    value
+                    old
+                    theme)
+                  (editor-invalidate! value 'theme)))
+              theme)])
+      (if
+        (positive? (editor-configuration-transaction-depth value))
+        (set-theme!)
+        (call-with-editor-configuration-transaction value set-theme!))))
 
   (define (editor-register-theme! value theme)
     (require-open-editor 'editor-register-theme! value)
-    (theme-catalog-register! (editor-theme-catalog value) theme))
+    (let ([register!
+            (lambda ()
+              (let ([active-name (theme-name (editor-theme value))])
+                (theme-catalog-register!
+                  (editor-theme-catalog value)
+                  theme)
+                (when (eq? active-name (theme-name theme))
+                  (editor-set-theme! value theme))
+                theme))])
+      (if
+        (positive? (editor-configuration-transaction-depth value))
+        (register!)
+        (call-with-editor-configuration-transaction value register!))))
 
   (define (view-caret value)
     (unless (view? value)
@@ -3228,8 +3395,10 @@
                1
                #f
                (make-command-registry)
+               (make-hook-registry)
                keymaps
                (buffer-language-catalog buffer)
+               (make-auto-mode-catalog)
                (buffer-setting-store buffer)
                (make-completion-provider-catalog)
                '()

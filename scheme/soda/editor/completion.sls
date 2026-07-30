@@ -95,6 +95,8 @@
           completion-request-session-id
           completion-request-generation
           completion-request-provider
+          completion-request-provider-instance
+          completion-request-provider-instance-set!
           completion-request-target-kind
           completion-request-target-id
           completion-request-target-revision
@@ -217,6 +219,7 @@
     (fields session-id
             generation
             provider
+            (mutable provider-instance)
             target-kind
             target-id
             target-revision
@@ -1189,6 +1192,7 @@
            (completion-session-id session)
            (completion-session-generation session)
            provider
+           #f
            'document
            (document-completion-target-document-id target)
            (document-completion-target-revision target)
@@ -1201,6 +1205,7 @@
            (completion-session-id session)
            (completion-session-generation session)
            provider
+           #f
            'prompt
            (prompt-completion-target-prompt-id target)
            #f

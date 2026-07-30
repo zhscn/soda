@@ -35,7 +35,7 @@ Editor configuration snapshot 捕获以下状态：
 - setting definitions、显式全局值和 Buffer-local 值；
 - command definitions、advice 和 command hooks；
 - keymap catalog、父级关系、prefix map 和 bindings；
-- language profiles 与 major modes；
+- language profiles、major modes 与 auto-mode rules；
 - completion providers；
 - minor-mode definitions、hooks 和 global active modes；
 - theme catalog 与当前 theme；
@@ -106,3 +106,46 @@ Editor API。只有求值和扩展重建全部成功后，新 evaluator 才成�
 Editor 内的 Scheme REPL 使用同一个 evaluator。成功 reload 后，已有 REPL session
 切换到新环境；失败 reload 继续使用旧环境。`configuration.reload-init` 从 M-x
 重新执行当前 user-init loader；尚未加载 init 时重新执行默认路径发现。
+
+## Lifecycle hooks
+
+Editor hook registry 按 phase 保存有序的命名过程。同 phase、同名称的注册替换旧过程；
+remove 按名称删除。Hook registry 属于 configuration snapshot，因此 owner reload 和
+unload 同时恢复其 hooks。
+
+核心 phase 为：
+
+```text
+after-init(editor)
+theme-changed(editor, old-theme, new-theme)
+configuration-committed(editor)
+configuration-rolled-back(editor, condition)
+```
+
+`after-init` 在 user init 和启动文件 mode 选择完成后运行。它自身位于 configuration
+transaction 中，hook condition 会恢复 hook 产生的配置修改并显示启动状态。
+
+外层 configuration transaction 正常提交后运行 `configuration-committed`。Commit
+hook 的 condition 仍会回滚该事务；恢复完成后运行 `configuration-rolled-back`。
+Rollback hook 用于记录和诊断，hook condition 不替换原 condition。
+
+Theme setter 在 configuration transaction 中运行 `theme-changed`，因此 hook 可以
+原子更新配套 face 或 setting；hook 失败时 theme 和其他配置修改一起恢复。
+
+## 热替换契约
+
+注册同名对象表示替换现有定义。需要刷新派生运行时的注册 API 自身使用 configuration
+transaction：
+
+- language profile 与 major mode 替换会刷新全部 Buffer；任一 runtime 无法建立时，
+  catalog 和所有 Buffer runtime 恢复到替换前的版本；
+- 当前 theme 被同名 theme 替换时，新对象立即成为当前 theme，并运行
+  `theme-changed`；
+- 活动 minor mode 被同名 definition 替换时，旧 definition 的 disable lifecycle
+  先运行，新 definition 注册后再运行 enable lifecycle。失败会恢复旧 definition、
+  command、活动状态和 lifecycle；
+- completion request 在进入 effect queue 时绑定 provider 实例。替换同名 provider
+  只影响之后创建的 request，已排队的 request 与 cancel 始终发送给原实例。
+
+扩展 loader 位于外层 configuration transaction 中，因此这些 API 的内层事务合并为
+一次提交。直接从 REPL 调用同样具有原子替换语义。

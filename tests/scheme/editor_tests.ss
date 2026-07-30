@@ -3239,6 +3239,79 @@
     (= minor-mode-disable-count 1))
   (error 'editor-tests "minor mode toggle did not disable the mode"))
 
+(editor-enable-minor-mode!
+  prompt-editor
+  prompt-buffer
+  'test-minor-mode)
+(define replacement-mode-enables 0)
+(define replacement-mode-disables 0)
+(define replacement-minor-mode
+  (make-minor-mode-definition
+    'test-minor-mode
+    "Replacement minor mode definition."
+    'buffer
+    " Replacement"
+    'test.minor-mode-map
+    (lambda (editor buffer)
+      (set! replacement-mode-enables
+        (+ replacement-mode-enables 1)))
+    (lambda (editor buffer)
+      (set! replacement-mode-disables
+        (+ replacement-mode-disables 1)))))
+(editor-register-minor-mode!
+  prompt-editor
+  replacement-minor-mode)
+(unless
+  (and
+    (= minor-mode-disable-count 2)
+    (= replacement-mode-enables 1)
+    (editor-minor-mode-active?
+      prompt-editor prompt-buffer 'test-minor-mode)
+    (eq?
+      (minor-mode-catalog-ref
+        (editor-minor-mode-catalog prompt-editor)
+        'test-minor-mode)
+      replacement-minor-mode))
+  (error 'editor-tests
+         "active minor mode replacement did not reconcile its lifecycle"))
+(define failed-replacement-cleanups 0)
+(unless
+  (guard
+    (condition [else #t])
+    (editor-register-minor-mode!
+      prompt-editor
+      (make-minor-mode-definition
+        'test-minor-mode
+        "Rejected minor mode replacement."
+        'buffer
+        #f
+        #f
+        (lambda (editor buffer)
+          (error 'test-minor-mode "replacement enable failed"))
+        (lambda (editor buffer)
+          (set! failed-replacement-cleanups
+            (+ failed-replacement-cleanups 1)))))
+    #f)
+  (error 'editor-tests "minor mode replacement failure did not propagate"))
+(unless
+  (and
+    (= replacement-mode-disables 1)
+    (= replacement-mode-enables 2)
+    (= failed-replacement-cleanups 1)
+    (editor-minor-mode-active?
+      prompt-editor prompt-buffer 'test-minor-mode)
+    (eq?
+      (minor-mode-catalog-ref
+        (editor-minor-mode-catalog prompt-editor)
+        'test-minor-mode)
+      replacement-minor-mode))
+  (error 'editor-tests
+         "failed minor mode replacement did not restore lifecycle state"))
+(editor-disable-minor-mode!
+  prompt-editor
+  prompt-buffer
+  'test-minor-mode)
+
 (define failed-enable-cleanups 0)
 (editor-register-minor-mode!
   prompt-editor
@@ -3726,10 +3799,32 @@
          'completion.request))
   (error 'editor-tests
          "starting completion did not emit provider request work"))
+(define replacement-semantic-start-count 0)
+(define replacement-semantic-cancel-count 0)
+(editor-register-completion-provider!
+  completion-editor
+  (make-completion-provider
+    'semantic
+    (lambda (request)
+      (set! replacement-semantic-start-count
+        (+ replacement-semantic-start-count 1))
+      '())
+    (lambda (request)
+      (set! replacement-semantic-cancel-count
+        (+ replacement-semantic-cancel-count 1)))))
 (define completion-start-result
   (execute-effects!
     completion-executor
     completion-start-effects))
+(unless
+  (and
+    (= semantic-start-count 1)
+    (= replacement-semantic-start-count 0))
+  (error 'editor-tests
+         "queued completion request did not retain its provider instance"))
+(editor-register-completion-provider!
+  completion-editor
+  semantic-provider)
 (for-each
   (lambda (message)
     (editor-update! completion-editor message))
@@ -4841,6 +4936,11 @@
           'pre-command
           'transaction.hook
           (lambda (context definition arguments) #f))
+        (editor-add-hook!
+          configuration-editor
+          'after-init
+          'transaction.lifecycle-hook
+          (lambda (editor) #f))
         (keymap-bind!
           configuration-default-map
           (list configuration-key)
@@ -4890,6 +4990,13 @@
             'transaction-major-mode
             'fundamental-mode
             #f))
+        (editor-register-auto-mode-rule!
+          configuration-editor
+          (make-file-suffix-auto-mode-rule
+            'transaction-auto-mode
+            100
+            '(".transaction")
+            'transaction-major-mode))
         (buffer-set-major-mode!
           configuration-buffer
           'transaction-major-mode)
@@ -4947,8 +5054,16 @@
       (= (length
            (command-hooks
              (editor-command-registry configuration-editor)
-             'pre-command))
+           'pre-command))
          configuration-pre-hooks))
+    (cons
+      'lifecycle-hook
+      (not
+        (memq
+          'transaction.lifecycle-hook
+          (editor-hook-names
+            configuration-editor
+            'after-init))))
     (cons
       'keymap-catalog
       (not
@@ -4974,6 +5089,12 @@
         (find-major-mode
           (editor-language-catalog configuration-editor)
           'transaction-major-mode)))
+    (cons
+      'auto-mode
+      (not
+        (auto-mode-catalog-find
+          (editor-auto-mode-catalog configuration-editor)
+          'transaction-auto-mode)))
     (cons
       'buffer-major-mode
       (eq? (buffer-major-mode-name configuration-buffer) 'cpp-mode))
@@ -5015,6 +5136,204 @@
       "*illegal-configuration-buffer*"))
   (error 'editor-tests
          "rejected configuration buffer mutation leaked a buffer"))
+
+(define configuration-commit-hooks 0)
+(define configuration-rollback-hooks 0)
+(editor-add-hook!
+  configuration-editor
+  'configuration-committed
+  'test.configuration-committed
+  (lambda (editor)
+    (set! configuration-commit-hooks
+      (+ configuration-commit-hooks 1))))
+(editor-add-hook!
+  configuration-editor
+  'configuration-rolled-back
+  'test.configuration-rolled-back
+  (lambda (editor condition)
+    (set! configuration-rollback-hooks
+      (+ configuration-rollback-hooks 1))))
+(call-with-editor-configuration-transaction
+  configuration-editor
+  (lambda ()
+    (editor-set-global-setting!
+      configuration-editor
+      'indent-width
+      10)))
+(unless
+  (and
+    (= configuration-commit-hooks 1)
+    (= configuration-rollback-hooks 0)
+    (= (editor-global-setting-ref
+         configuration-editor
+         'indent-width)
+       10))
+  (error 'editor-tests
+         "configuration commit hook did not observe a committed transaction"))
+(unless
+  (guard
+    (condition [else #t])
+    (call-with-editor-configuration-transaction
+      configuration-editor
+      (lambda ()
+        (editor-set-global-setting!
+          configuration-editor
+          'indent-width
+          12)
+        (error 'editor-tests "abort hook transaction")))
+    #f)
+  (error 'editor-tests "configuration hook rollback did not raise"))
+(unless
+  (and
+    (= configuration-commit-hooks 1)
+    (= configuration-rollback-hooks 1)
+    (= (editor-global-setting-ref
+         configuration-editor
+         'indent-width)
+       10))
+  (error 'editor-tests
+         "configuration rollback hook did not observe restored state"))
+
+(define theme-before-failed-hook
+  (editor-theme configuration-editor))
+(editor-add-hook!
+  configuration-editor
+  'theme-changed
+  'test.reject-theme
+  (lambda (editor old-theme new-theme)
+    (error 'editor-tests "reject theme change")))
+(unless
+  (guard
+    (condition [else #t])
+    (editor-set-theme! configuration-editor catppuccin-latte)
+    #f)
+  (error 'editor-tests "theme hook failure did not propagate"))
+(unless
+  (and
+    (eq? (editor-theme configuration-editor)
+         theme-before-failed-hook)
+    (= configuration-rollback-hooks 2))
+  (error 'editor-tests
+         "theme hook failure did not restore configuration"))
+(editor-remove-hook!
+  configuration-editor
+  'theme-changed
+  'test.reject-theme)
+
+(define active-theme-before-replacement
+  (editor-theme configuration-editor))
+(define active-theme-replacement
+  (make-theme
+    (theme-name active-theme-before-replacement)
+    (theme-appearance active-theme-before-replacement)
+    (+ (theme-generation active-theme-before-replacement) 1)
+    (list
+      (cons
+        'default
+        (make-face-spec 'default 'default '() '())))))
+(editor-register-theme!
+  configuration-editor
+  active-theme-replacement)
+(unless
+  (and
+    (eq? (editor-theme configuration-editor)
+         active-theme-replacement)
+    (eq?
+      (theme-catalog-ref
+        (editor-theme-catalog configuration-editor)
+        (theme-name active-theme-replacement))
+      active-theme-replacement))
+  (error 'editor-tests
+         "re-registering the active theme did not activate its replacement"))
+(editor-add-hook!
+  configuration-editor
+  'theme-changed
+  'test.reject-theme-replacement
+  (lambda (editor old-theme new-theme)
+    (error 'editor-tests "reject active theme replacement")))
+(define rejected-theme-replacement
+  (make-theme
+    (theme-name active-theme-replacement)
+    (theme-appearance active-theme-replacement)
+    (+ (theme-generation active-theme-replacement) 1)
+    (list
+      (cons
+        'default
+        (make-face-spec 'default 'default '() '())))))
+(unless
+  (guard
+    (condition [else #t])
+    (editor-register-theme!
+      configuration-editor
+      rejected-theme-replacement)
+    #f)
+  (error 'editor-tests "active theme replacement hook failure did not raise"))
+(unless
+  (and
+    (eq? (editor-theme configuration-editor)
+         active-theme-replacement)
+    (eq?
+      (theme-catalog-ref
+        (editor-theme-catalog configuration-editor)
+        (theme-name active-theme-replacement))
+      active-theme-replacement))
+  (error 'editor-tests
+         "failed active theme replacement was not rolled back atomically"))
+(editor-remove-hook!
+  configuration-editor
+  'theme-changed
+  'test.reject-theme-replacement)
+
+(define language-before-failed-replacement
+  (language-profile-ref
+    (editor-language-catalog configuration-editor)
+    'cpp))
+(define language-rollback-buffer
+  (editor-create-buffer!
+    configuration-editor
+    "*language-rollback*"
+    'cpp-mode
+    ""))
+(define failing-language-open-count 0)
+(define failing-language-profile
+  (make-language-profile
+    'cpp
+    (make-syntax-provider
+      '()
+      (lambda (snapshot)
+        (set! failing-language-open-count
+          (+ failing-language-open-count 1))
+        (when (= failing-language-open-count 2)
+          (error 'editor-tests "reject second language runtime"))
+        (list 'replacement-language-session))
+      (lambda (session change snapshot) session)
+      (lambda (session) #f))))
+(unless
+  (guard
+    (condition [else #t])
+    (editor-register-language-profile!
+      configuration-editor
+      failing-language-profile)
+    #f)
+  (error 'editor-tests "language profile refresh failure did not propagate"))
+(unless
+  (and
+    (eq?
+      (language-profile-ref
+        (editor-language-catalog configuration-editor)
+        'cpp)
+      language-before-failed-replacement)
+    (eq?
+      (buffer-language-profile configuration-buffer)
+      language-before-failed-replacement)
+    (eq?
+      (buffer-language-profile language-rollback-buffer)
+      language-before-failed-replacement))
+  (error 'editor-tests
+         "failed language profile replacement left mixed runtimes"))
+(editor-remove-buffer!
+  configuration-editor
+  (buffer-id language-rollback-buffer))
 
 (define extension-a-loads 0)
 (define extension-b-loads 0)
@@ -5288,5 +5607,56 @@
       'reloaded))
   (error 'editor-tests
          "successful init reload did not replace the shared environment"))
+
+(buffer-set-file-path!
+  extension-late-buffer
+  "/tmp/example.soda-test")
+(editor-load-extension!
+  configuration-editor
+  'test-auto-mode-extension
+  (lambda (editor)
+    (editor-register-major-mode!
+      editor
+      (make-major-mode
+        'test-auto-mode
+        'fundamental-mode
+        #f))
+    (editor-register-auto-mode-rule!
+      editor
+      (make-file-suffix-auto-mode-rule
+        'test-auto-mode-files
+        100
+        '(".soda-test")
+        'test-auto-mode))))
+(unless
+  (and
+    (eq?
+      (editor-major-mode-for-path
+        configuration-editor
+        "/tmp/EXAMPLE.SODA-TEST")
+      'test-auto-mode)
+    (eq?
+      (buffer-major-mode-name extension-late-buffer)
+      'test-auto-mode))
+  (error 'editor-tests
+         "extension auto-mode rule did not select its major mode"))
+(editor-unload-extension!
+  configuration-editor
+  'test-auto-mode-extension)
+(unless
+  (and
+    (not
+      (find-major-mode
+        (editor-language-catalog configuration-editor)
+        'test-auto-mode))
+    (not
+      (auto-mode-catalog-find
+        (editor-auto-mode-catalog configuration-editor)
+        'test-auto-mode-files))
+    (eq?
+      (buffer-major-mode-name extension-late-buffer)
+      'fundamental-mode))
+  (error 'editor-tests
+         "unloading auto-mode extension did not reselect file mode"))
 
 (editor-close! configuration-editor)
