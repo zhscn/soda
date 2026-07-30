@@ -1,10 +1,6 @@
 #!r6rs
 (import (rnrs)
-        (only (chezscheme)
-              delete-directory
-              get-process-id
-              getenv
-              mkdir)
+        (only (chezscheme) getenv)
         (soda document)
         (soda editor buffer)
         (soda editor command)
@@ -13,7 +9,6 @@
         (soda editor effect)
         (soda editor file)
         (soda editor file-runtime)
-        (soda editor scheme-project-runtime)
         (soda editor scheme-query)
         (soda editor scheme-interface-commands)
         (soda editor scheme-interface-index)
@@ -97,38 +92,27 @@
     'scheme-mode))
 (define editor (make-editor scratch))
 (define runtime (make-runtime))
-(define adapter
-  (install-scheme-project-runtime!
-    editor runtime root))
-
-(define observed-deferred-source-analysis? #f)
-(let loop ()
-  (when
-    (positive?
-      (scheme-project-runtime-pending-count adapter))
-    (for-each
-      (lambda (event)
-        (let ([before
-                (scheme-project-runtime-indexed-count
-                  adapter)])
-          (scheme-project-runtime-handle-event
-            adapter event)
-          (when
-            (and
-              (eq? (event-kind event) 'file-read)
-              (zero? (event-status event))
-              (=
-                before
-                (scheme-project-runtime-indexed-count
-                  adapter)))
-            (set!
-              observed-deferred-source-analysis?
-              #t))))
-      (runtime-poll! runtime))
-    (loop)))
-
 (define workspace
   (editor-scheme-workspace editor))
+
+(for-each
+  (lambda (entry)
+    (let ([path (vfs-path-join root (car entry))])
+      (scheme-workspace-index-source!
+        workspace
+        path
+        (cdr entry)
+        0
+        (call-with-input-file
+          path
+          (lambda (port)
+            (string->utf8
+              (get-string-all port)))))))
+  '(("root.sls" . 1001)
+    ("consumer.sls" . 1002)
+    ("nested/private.ss" . 1003)
+    ("empty.sls" . 1004)))
+(scheme-workspace-sync-editor! workspace editor)
 
 (define compiled-interface-source
   (string-append
@@ -289,7 +273,7 @@
         workspace)
       '("fixture-build")))
   (error
-    'scheme-project-runtime-tests
+    'scheme-project-session-tests
     "compiled interface index did not drive plugin resolution"
     compiled-call-definition))
 
@@ -355,7 +339,7 @@
         (buffer-string build-buffer)
         "Scheme build finished"))
     (error
-      'scheme-project-runtime-tests
+      'scheme-project-session-tests
       "Scheme build transcript did not retain process output")))
 (delete-file compiled-project-path)
 (delete-file compiled-interface-path)
@@ -387,7 +371,7 @@
           (car definitions))
         '("(compiled-call value)")))
     (error
-      'scheme-project-runtime-tests
+      'scheme-project-session-tests
       "reloading an interface owner did not atomically replace its surface"
       definitions)))
 
@@ -409,14 +393,14 @@
       (scheme-semantic-snapshot-visible-index-definitions
         snapshot))
     (error
-      'scheme-project-runtime-tests
+      'scheme-project-session-tests
       "removing an interface index retained its library surface")))
 (unless
   (null?
     (scheme-workspace-interface-index-owners
       workspace))
   (error
-    'scheme-project-runtime-tests
+    'scheme-project-session-tests
     "unloading the Scheme project retained its session owner"))
 (editor-remove-buffer!
   editor
@@ -435,8 +419,6 @@
 
 (unless
   (and
-    observed-deferred-source-analysis?
-    (= (scheme-project-runtime-indexed-count adapter) 4)
     (= (length (symbols-named "project-root-symbol")) 1)
     (= (length (symbols-named "project-nested-symbol")) 1)
     (null? (symbols-named "not-a-scheme-source"))
@@ -449,8 +431,8 @@
           (scheme-workspace-symbol-resource symbol)
           root-resource))))
   (error
-    'scheme-project-runtime-tests
-    "project discovery did not index the Scheme source set"
+    'scheme-project-session-tests
+    "explicit source set did not enter the Scheme workspace"
     symbols))
 
 (define empty-import-buffer
@@ -482,7 +464,7 @@
     (scheme-semantic-snapshot-diagnostics
       empty-import-snapshot))
   (error
-    'scheme-project-runtime-tests
+    'scheme-project-session-tests
     "empty project library was absent from the semantic catalog"))
 (scheme-workspace-remove-source!
   workspace empty-resource)
@@ -505,7 +487,7 @@
         (scheme-semantic-snapshot-diagnostics
           empty-import-without-library))))
   (error
-    'scheme-project-runtime-tests
+    'scheme-project-session-tests
     "library catalog removal did not invalidate its consumer"))
 (scheme-workspace-index-source!
   workspace
@@ -528,7 +510,7 @@
       (scheme-workspace-snapshot-for-buffer
         workspace empty-import-buffer)))
   (error
-    'scheme-project-runtime-tests
+    'scheme-project-session-tests
     "library catalog restoration did not reanalyze its consumer"))
 (editor-remove-buffer!
   editor
@@ -586,7 +568,7 @@
             (scheme-semantic-snapshot-visible-index-definitions
               project-consumer-snapshot))))))
   (error
-    'scheme-project-runtime-tests
+    'scheme-project-session-tests
     "project library import did not resolve its exported definition"
     (scheme-semantic-snapshot-imports
       project-consumer-snapshot)
@@ -632,7 +614,7 @@
             "project-root-renamed")))
       project-rename-edits))
   (error
-    'scheme-project-runtime-tests
+    'scheme-project-session-tests
     "workspace rename did not cover the project declaration, export, and consumer"
     project-rename-edits))
 
@@ -671,7 +653,7 @@
             "project-root-symbol"))
         (completion-session-items completion)))
     (error
-      'scheme-project-runtime-tests
+      'scheme-project-session-tests
       "project export did not enter completion-at-point")))
 (editor-cancel-completion! editor)
 (define project-definition-effects
@@ -691,7 +673,7 @@
           (car project-definition-effects)))
       root-resource))
   (error
-    'scheme-project-runtime-tests
+    'scheme-project-session-tests
     "project definition did not produce an asynchronous source jump"))
 
 (define unrelated-buffer
@@ -752,7 +734,7 @@
         use
         (= (length (scheme-use-resolution use)) 1))))
   (error
-    'scheme-project-runtime-tests
+    'scheme-project-session-tests
     "library surface change did not invalidate only dependent snapshots"))
 (editor-remove-buffer!
   editor
@@ -812,8 +794,8 @@
               reference))))
       project-references))
   (error
-    'scheme-project-runtime-tests
-    "project source uses did not enter the workspace reference index"
+    'scheme-project-session-tests
+    "session source uses did not enter the workspace reference index"
     api-use
     api-definition
     project-references))
@@ -852,7 +834,7 @@
             (car reference-effects))
           'file.read))))
   (error
-    'scheme-project-runtime-tests
+    'scheme-project-session-tests
     "xref did not publish navigable project references"))
 
 (define live-source
@@ -878,78 +860,15 @@
         (car (symbols-named "open-buffer-symbol")))
       (buffer-id live-buffer)))
   (error
-    'scheme-project-runtime-tests
+    'scheme-project-session-tests
     "open Buffer did not replace the project snapshot for its resource"))
 
 (editor-remove-buffer! editor (buffer-id live-buffer))
 (unless
   (= (length (symbols-named "project-root-symbol")) 1)
   (error
-    'scheme-project-runtime-tests
+    'scheme-project-session-tests
     "closing the live Buffer did not reveal the project snapshot"))
-
-(define watched-root
-  (string-append
-    "/tmp/soda-scheme-project-runtime-"
-    (number->string (get-process-id))))
-(define watched-source
-  (vfs-path-join watched-root "watched.sls"))
-(mkdir watched-root)
-(define watched-adapter
-  (install-scheme-project-runtime!
-    editor runtime watched-root))
-(let loop ()
-  (when
-    (positive?
-      (scheme-project-runtime-pending-count
-        watched-adapter))
-    (for-each
-      (lambda (event)
-        (scheme-project-runtime-handle-event
-          adapter event)
-        (scheme-project-runtime-handle-event
-          watched-adapter event))
-      (runtime-poll! runtime))
-    (loop)))
-
-(call-with-output-file
-  watched-source
-  (lambda (port)
-    (display
-      (string-append
-        "(library (fixture watched)\n"
-        "  (export watched-project-symbol)\n"
-        "  (import (rnrs))\n"
-        "  (define watched-project-symbol 1))\n")
-      port)))
-
-(let loop ()
-  (unless
-    (= (length (symbols-named "watched-project-symbol")) 1)
-    (for-each
-      (lambda (event)
-        (scheme-project-runtime-handle-event
-          adapter event)
-        (scheme-project-runtime-handle-event
-          watched-adapter event))
-      (runtime-poll! runtime))
-    (loop)))
-
-(delete-file watched-source)
-(let loop ()
-  (unless
-    (null? (symbols-named "watched-project-symbol"))
-    (for-each
-      (lambda (event)
-        (scheme-project-runtime-handle-event
-          adapter event)
-        (scheme-project-runtime-handle-event
-          watched-adapter event))
-      (runtime-poll! runtime))
-    (loop)))
-
-(scheme-project-runtime-close! watched-adapter)
-(delete-directory watched-root)
 
 (scheme-workspace-index-source!
   workspace
@@ -1005,7 +924,7 @@
           root-resource))
       final-rename-effects))
   (error
-    'scheme-project-runtime-tests
+    'scheme-project-session-tests
     "rename did not request an unopened target as a background read"
     final-rename-effects))
 
@@ -1017,7 +936,7 @@
 (let loop ([turn 0])
   (when (= turn 100)
     (error
-      'scheme-project-runtime-tests
+      'scheme-project-session-tests
       "background rename did not finish"
       (editor-status-message editor)
       (map buffer-resource (editor-buffers editor))))
@@ -1033,8 +952,6 @@
             message))))
     (for-each
       (lambda (event)
-        (scheme-project-runtime-handle-event
-          adapter event)
         (let ([message
                 (file-runtime-handle-event
                   final-file-adapter event)])
@@ -1054,9 +971,8 @@
     (null? (symbols-named "project-root-symbol"))
     (= (length (symbols-named "project-root-final")) 1))
   (error
-    'scheme-project-runtime-tests
+    'scheme-project-session-tests
     "background rename did not update the workspace without activating its source"))
 
-(scheme-project-runtime-close! adapter)
 (editor-close! editor)
 (runtime-close! runtime)

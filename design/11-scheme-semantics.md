@@ -268,18 +268,17 @@ definition 与 references 查询沿原始 identity 工作。
 
 Soda application build 从全部内置 Scheme library 生成 API 与 library catalog，
 随 editor boot image 静态嵌入。运行时把该 catalog 转换为共享的 library lookup
-table；使用同一 project catalog 的 semantic snapshot 复用对应 lookup table。
+table；使用同一 session catalog 的 semantic snapshot 复用对应 lookup table。
 单个文档分析只处理文档 token、scope、definition、use 和 diagnostics，不重复构造
 内置 API 索引。打开的 Buffer 始终由当前 Document revision 建立 semantic snapshot，
 因此编辑 Soda library 时当前文件的 definition、use 与诊断来自实时文本。
 
 打开文件不建立 Scheme project session，也不遍历当前目录。跨文件索引由显式
-language workspace session 持有，session 可以接收 `load-project`、编译或其他构建
-过程产生的 source/index update。目录扫描 runtime 是可选 adapter；使用它时会跳过
-已经进入内置 catalog 的 Soda source。插件和其他 Project source 进入 workspace
-catalog，其中与内置 library 同名的 source 以完整 export surface 覆盖嵌入版本。
-Project source 的变更产生新的 catalog identity，并使下一次分析建立一份新的共享
-lookup table。
+language workspace session 持有，session 安装编译过程产生的 interface artifact。
+Project 只提供资源、工作目录和构建入口语义，不拥有 Scheme 索引生命周期。插件和
+其他编译单元的 interface 进入 workspace catalog，其中与内置 library 同名的
+surface 以显式 session 安装的版本为准。interface revision 变化时建立新的 catalog
+identity，并使下一次分析使用新的共享 lookup table。
 
 ## Diagnostics
 
@@ -301,7 +300,7 @@ namespace 为 `scheme-semantic-diagnostics`，source revision 与 semantic snaps
 一致。annotation payload 保留原始 `SchemeDiagnostic`，describe-char、LocationList
 和后续 quick-fix 可以共享同一个诊断身份。
 
-显式的 workspace diagnostics 查询同步 editor Buffer 与后台 project source
+显式的 workspace diagnostics 查询同步 editor Buffer 与 session 提交的 source
 snapshot，并产生按 resource、range 排序的 `SchemeWorkspaceDiagnostic`：
 
 ```text
@@ -314,7 +313,7 @@ SchemeWorkspaceDiagnostic {
 }
 ```
 
-同一 resource 已经打开时，Buffer snapshot 取代后台 project source snapshot。
+同一 resource 已经打开时，Buffer snapshot 取代 session source snapshot。
 `diagnostics.list-workspace` 将查询结果发布为普通 LocationList，使
 `xref.next-location` 和 `xref.previous-location` 可以复用统一的导航协议。
 Buffer-backed item 直接切换 view；后台 resource item 通过异步 `file.read`
@@ -361,12 +360,12 @@ snapshot 的 import surface 就被视为不完整，不发布推测性的 undefi
 publisher 在 buffer 创建、major mode 变化和 revert 后同步诊断，并在顶层交互命令
 结束后检查所有 Scheme buffer。诊断、completion 和 xref 从 editor 的同一个
 `SchemeWorkspaceIndex` 取得 snapshot。freshness 同时比较 Document revision 与
-workspace library catalog generation；项目 export surface 变化时，即使 consumer
+workspace library catalog generation；session export surface 变化时，即使 consumer
 Buffer 没有修改，也会重新分析其 import 和诊断。新结果用更高 annotation
 generation 原子替换同 namespace 的 annotation set。空诊断集仍记录已分析
 revision 和 catalog generation，使普通光标移动只执行 freshness 检查。post-command
 刷新只同步发生变化的 Buffer，并复用最近一次已提交的 library catalog；显式
-workspace 查询负责合并待处理的 Project catalog，避免输入路径触发全项目重建。
+workspace 查询负责合并待处理的 session catalog，避免输入路径触发跨文件重建。
 
 ## Completion
 
@@ -447,7 +446,7 @@ generation 刷新当前 Scheme Buffer 的结果。结果发布到独立的
 `scheme-document-highlight` annotation namespace，使用 `symbol-highlight` face 和
 search decoration layer。selection layer 保持更高优先级，diagnostic 与 semantic
 annotation 的生命周期不受光标高亮替换影响。光标刷新只同步当前 Buffer，并使用
-最近一次已提交的 Project catalog。
+最近一次已提交的 session catalog。
 
 ## 自举静态 Provider
 
@@ -495,30 +494,30 @@ Document 的 declaration 与 references 可立即导航。editor 持有一个
 `SchemeWorkspaceIndex`，保存 editor 已知 Scheme Buffer 和 Project resource 的
 semantic snapshot。查询前同步 Buffer 集合；document id、resource 或 revision
 改变时替换对应 snapshot，已关闭或离开 Scheme mode 的 Buffer 从实时集合移除。
-Project snapshot 独立于 Buffer 生命周期。未变化的 snapshot 直接复用。source set
+session snapshot 独立于 Buffer 生命周期。未变化的 snapshot 直接复用。source set
 改变后，index 从新 snapshot 的 resolved uses 重建
 `DefinitionId -> WorkspaceReference[]` 倒排表；普通 references 查询只读取目标
 identity 的 buckets。
 
-Workspace 从 Project source 和带 resource 的 Scheme Buffer 提取 R6RS library
+Workspace 从显式 session source 和带 resource 的 Scheme Buffer 提取 R6RS library
 name、export surface 与源码 definition，生成与嵌入 API catalog 相同的 library
-entry。Project catalog 分别保存 library name 集合和 export symbol 集合，没有
+entry。session catalog 分别保存 library name 集合和 export symbol 集合，没有
 export 的 library 仍具有独立 identity。source set 或 revision 改变时先重建两个
 catalog，并按 library 比较存在性与新旧 export surface。发生变化的 source snapshot
 与直接 import 对应 library 的 consumer snapshot 使用合并后的 embedded/project
-catalog 重新分析；不受影响的 snapshot 保持对象 identity。暂不参与查询的 Project
+catalog 重新分析；不受影响的 snapshot 保持对象 identity。暂不参与查询的 session
 snapshot 标记为待分析，在重新进入实时集合时按需刷新。snapshot 更新后重建
 references 倒排表。连续异步文件读取只标记 catalog dirty，首次 completion 或 xref
 查询负责合并这一批更新。
 
-project library entry 保留声明 resource、byte range、kind 与 procedure formals。
+session library entry 保留声明 resource、byte range、kind 与 procedure formals。
 consumer 的 `only`、`except`、`prefix`、`rename` 和 `for` import modifier 由通用
-import-binding pipeline 解释，因此 project export 与嵌入 Soda API 具有相同的
+import-binding pipeline 解释，因此 session export 与嵌入 Soda API 具有相同的
 可见性、补全和 DefinitionId 语义。动态 entry 与嵌入 entry 按 DefinitionId 去重，
 允许 Soda 源码项目使用构建期 catalog 自举而不产生重复候选。
 library metadata reader 使用 lexical token 的 delimiter depth 恢复未闭合的外围
 form；编辑 library body 时，已经完整出现的 name、export 和 definition 继续留在
-project catalog。
+session catalog。
 
 源码 Buffer 中的 root definition 使用 document DefinitionId，嵌入 API import
 解析到 index DefinitionId。workspace index 通过 `resource + declaration start +
@@ -533,18 +532,36 @@ name` 建立这两种身份的等价集合。references 查询在每个已索引
 `jump-back`。primitive 只有 metadata、没有 source location 时返回明确的无源码
 结果。
 
-构建过程可以把一组 library source 编译为 `SchemeInterfaceIndex`。该产物保存 owner、
-内容 revision、library catalog 和 export entries；entry 包含 library identity、
-binding kind、procedure formals、documentation 以及可用的 declaration resource 与
-byte range。产物以带格式版本、Chez 版本和 machine type 的 FASL datum 编码，加载时
-完整验证 manifest 和 entry shape。它只接受受信任构建流程产生的内容。
-`scheme-sources->interface-index-file!` 是构建侧入口：编译脚本把本次编译实际消费的
-`resource + source bytes` 集合、owner 和内容 revision 交给它，产物经临时文件写完
-后替换目标路径。
+构建过程把本次编译解析到的 library source 投影为 `SchemeInterfaceIndex`。该产物
+保存 owner、内容 revision、library catalog 和 export entries；entry 包含 library
+identity、binding kind、procedure formals、documentation 以及可用的 declaration
+resource 与 byte range。产物以带格式版本、Chez 版本和 machine type 的 FASL datum
+编码，加载时完整验证 manifest 和 entry shape。它只接受受信任构建流程产生的内容。
+
+`call-with-scheme-interface-build` 包住项目原有的 Chez 编译过程。它代理
+`library-search-handler`，记录编译器在声明 source root 内实际解析到的 source，
+并在编译过程正常返回后生成 artifact。entry program 等不经过 library resolution
+的输入由 build specification 的 `entry-sources` 明确声明。revision 可以由构建系统
+提供；省略时根据排序后的 source path 与内容生成稳定 revision。
+`compile-scheme-program-with-interface!` 为普通 program build 同时设置
+`library-directories`、启用 imported library compilation 并执行上述协议：
+
+```scheme
+(compile-scheme-program-with-interface!
+  "example-plugin"
+  #f
+  "src/main.ss"
+  "build/main.so"
+  "build/scheme-interfaces.fasl"
+  (list (cons "src" "build")))
+```
+
+`scheme-sources->interface-index-file!` 保留为底层入口，供已经掌握精确 source set
+的构建系统直接生成相同 artifact。
 
 显式 language workspace session 按 owner 安装 interface index。同一 owner 的新
 revision 原子替换旧 surface；移除 session 时撤销对应 surface。多个 index 按安装
-次序组成依赖层，Project source 和打开的 Buffer 位于其上方。interface 变化只重新
+次序组成依赖层，session source 和打开的 Buffer 位于其上方。interface 变化只重新
 分析 import 受影响 library 的 Document。插件依赖因而可以在不读取依赖源码、不建立
 目录 watcher 的情况下提供 completion、signature、hover、workspace symbol 和
 definition。`scheme.load-interface-index` 通过 minibuffer 选择产物并以 libuv
@@ -571,25 +588,16 @@ vector，`working-directory` 相对 manifest 所在目录解析；两者省略�
 
 `scheme.build-project` 只列出已经显式加载且声明 build command 的 manifest。构建
 stdout/stderr 增量写入 `*scheme-build*` Buffer，不阻塞 command loop；同一 manifest
-同时只运行一个 build，`scheme.cancel-project-build` 终止活动 process。构建过程调用
-`scheme-sources->interface-index-file!`，将本次实际参与编译的 source 集合、owner
-和内容 revision 写入 manifest 指向的产物。process 成功退出后 Editor 异步读取该
-artifact，并按 owner 原子替换 language surface；构建失败保留原 interface index。
+同时只运行一个 build，`scheme.cancel-project-build` 终止活动 process。build
+command 使用 Scheme interface build 协议，使编译与 interface 生成共享同一次
+library resolution。process 成功退出后 Editor 异步读取 artifact，并按 owner 原子
+替换 language surface；构建失败保留原 interface index。session 关闭后 Editor
+撤销该 owner 的 surface，不保留目录 watcher、后台扫描或持续索引任务。
 
-目录扫描 runtime 是显式启用的 source adapter。它以 libuv directory scan 发现
-`.scm`、`.ss`、`.sls` 和 `.sps`，再以异步 file read 把源码交给 workspace，并为
-扫描目录建立 path watch。该 adapter 适用于没有构建产物的临时分析操作，不随
-Project 或 Editor 生命周期自动启动。文件系统事件按目录合并为重新扫描请求；扫描
-结果添加、更新或删除 source snapshot。file-read completion 只更新按 resource
-合并的待分析队列；一次性 runtime timer 每个 command-loop turn 最多提交一个 source
-snapshot。后台 source snapshot 不创建 Buffer；引用位置以
-`resource + revision + byte range` 保存，首次跳转时通过普通异步文件打开流程解析
-成 Buffer location。
-
-workspace symbol 查询合并已索引 Buffer、Project source 和构建时嵌入的 Soda API
+workspace symbol 查询合并已索引 Buffer、session source 和构建时嵌入的 Soda API
 definitions。局部 lexical binding 不进入该查询。相同源码声明在实时 snapshot 中
 使用 document DefinitionId，在构建索引中使用 index DefinitionId。一个 source
-resource 存在已打开 Buffer 时，Project snapshot 与静态 catalog 条目整体由当前
+resource 存在已打开 Buffer 时，session snapshot 与静态 catalog 条目整体由当前
 Buffer revision 替代；其余 catalog 条目以
 `resource + declaration start + name` 去重。候选 key 使用
 `buffer id + revision + declaration` 或 `resource + declaration`，不会依赖过滤
@@ -621,7 +629,7 @@ definition 结果转换为 LocationList，并由 Workbench display policy 记录
 references 按 DefinitionId 读取 workspace 倒排表。查询 policy 决定是否包含声明和
 别名声明；返回值仍是普通 LocationList。rename 复用同一 use 集合生成带源
 revision 的 workspace edit。`scheme.rename`（`C-c C-r`）读取一个完整 Scheme
-identifier；未访问的 Project source 通过没有 View target 的 `file.read` 打开为
+identifier；未访问的 session source 通过没有 View target 的 `file.read` 打开为
 后台 Buffer。所有目标 Buffer 就绪后重新解析 workspace edit，先统一验证 revision、
 read-only 状态、range overlap 与名称冲突，再按 Buffer transaction 提交。提交中途
 失败时，已经修改的 Buffer 回到各自提交前的 undo position。rename 只修改 Buffer，

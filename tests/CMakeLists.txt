@@ -177,7 +177,7 @@ if(CHEZ_SCHEME_EXECUTABLE)
   )
 
   add_test(
-    NAME scheme_project_runtime_tests
+    NAME scheme_project_session_tests
     CONFIGURATIONS Debug Release
     COMMAND
       ${CMAKE_COMMAND} -E env
@@ -188,7 +188,25 @@ if(CHEZ_SCHEME_EXECUTABLE)
       SODA_SCHEME_PROJECT_TEST_ROOT=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/scheme_project
       ${CHEZ_SCHEME_EXECUTABLE}
       --libdirs ${PROJECT_SOURCE_DIR}/scheme
-      --program ${CMAKE_CURRENT_SOURCE_DIR}/scheme/scheme_project_runtime_tests.ss
+      --program ${CMAKE_CURRENT_SOURCE_DIR}/scheme/scheme_project_session_tests.ss
+  )
+
+  set(SODA_SCHEME_INTERFACE_BUILD_OBJECT
+    "${CMAKE_CURRENT_BINARY_DIR}/scheme_interface_build"
+  )
+  file(MAKE_DIRECTORY
+    "${SODA_SCHEME_INTERFACE_BUILD_OBJECT}/fixture/scheme-interface-build"
+  )
+  add_test(
+    NAME scheme_interface_build_tests
+    CONFIGURATIONS Debug Release
+    COMMAND
+      ${CMAKE_COMMAND} -E env
+      SODA_SCHEME_INTERFACE_BUILD_SOURCE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/scheme_interface_build
+      SODA_SCHEME_INTERFACE_BUILD_OBJECT=${SODA_SCHEME_INTERFACE_BUILD_OBJECT}
+      ${CHEZ_SCHEME_EXECUTABLE}
+      --libdirs ${PROJECT_SOURCE_DIR}/scheme
+      --program ${CMAKE_CURRENT_SOURCE_DIR}/scheme/scheme_interface_build_tests.ss
   )
 
   add_test(

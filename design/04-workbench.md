@@ -3,7 +3,7 @@
 ## 三个正交概念
 
 - **Buffer** 是全局文本对象，可同时显示在多个 view。
-- **Project** 是资源发现、配置、索引和 language service 的边界。
+- **Project** 是资源发现、配置和构建入口的边界。
 - **Window layout** 是屏幕上的 view 排布，不属于某个 project。
 
 Workbench 把 project scope、window layout 和一次工作会话的 recency 组合起来，
@@ -33,7 +33,7 @@ Project 拥有：
 
 - resource 枚举与忽略规则；
 - project settings layer；
-- language service 可使用的 root 与配置。
+- build 与 language session 可使用的 root 和配置。
 
 Project 不拥有 Buffer、Window 或 layout。同一 project 可以出现在多个 workbench
 scope 中；是否保持 scope 互斥由 Scheme policy 决定。
@@ -53,10 +53,10 @@ resource enumerator 由 Project 操作按需启动，通过 libuv directory scan
 metadata、构建输出和依赖目录由枚举 policy 排除。
 enumerator 只发布 resource 与内容，不为后台索引创建 Buffer；用户访问资源时才由
 普通文件打开流程建立 Buffer identity。每个已发现目录持有一个 libuv path watch；
-变更通知使对应目录失效并触发合并后的异步重扫。重扫更新直接 source 集合、递归接入
-新增子目录，并撤销已删除目录子树的 watch 与 source snapshot。文件通知只承担失效
-职责，目录扫描结果定义该 enumerator session 当前的 resource 集合。关闭请求该
-enumerator 的 Project operation 或 language session 会释放全部 watch。
+变更通知使对应目录失效并触发合并后的异步重扫。重扫更新 resource 集合、递归接入
+新增子目录，并撤销已删除目录子树的 watch。文件通知只承担失效职责，目录扫描结果
+定义该 enumerator session 当前的 resource 集合。关闭请求该 enumerator 的 Project
+operation 会释放全部 watch。
 
 ## Workbench 成员语义
 
