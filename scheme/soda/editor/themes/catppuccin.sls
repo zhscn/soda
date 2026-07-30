@@ -47,7 +47,16 @@
       0
       (list
         (cons 'default (pface 'text 'base '()))
-        (cons 'modeline (pface 'text 'surface0 '(bold)))
+        (cons 'modeline (pface 'text 'surface0 '()))
+        (cons 'modeline.active (pface 'inherit 'inherit '(bold)))
+        (cons 'modeline.inactive (pface 'overlay0 'base '()))
+        (cons 'modeline.buffer-id (pface 'blue 'inherit '(bold)))
+        (cons 'modeline.status (pface 'overlay1 'inherit '()))
+        (cons 'modeline.position (pface 'overlay2 'inherit '()))
+        (cons 'modeline.mode (pface 'text 'inherit '()))
+        (cons 'modeline.minor-modes (pface 'mauve 'inherit '(bold)))
+        (cons 'modeline.process (pface 'green 'inherit '()))
+        (cons 'modeline.message (pface 'text 'inherit '()))
         (cons 'minibuffer-input (pface 'text 'surface0 '()))
         (cons 'minibuffer-prompt (pface 'base 'mauve '(bold)))
         (cons 'completion-selected (pface 'text 'surface1 '(bold)))

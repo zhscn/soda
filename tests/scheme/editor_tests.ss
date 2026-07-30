@@ -10,6 +10,7 @@
         (soda editor event)
         (soda editor keymap)
         (soda editor language)
+        (soda editor modeline)
         (soda editor motion)
         (soda editor prompt)
         (soda editor scheme-semantics)
@@ -49,6 +50,17 @@
                    (+ index (string-length needle)))
                  needle)
                (loop (+ index 1)))))))
+
+(define (frame-row-text frame row)
+  (let loop ([column 0] [result ""])
+    (if (= column (frame-columns frame))
+        result
+        (loop
+          (+ column 1)
+          (string-append
+            result
+            (cell-text
+              (frame-cell-ref frame row column)))))))
 
 (define (send! editor decoder bytes)
   (let loop ([events (decode decoder bytes)] [effects '()])
@@ -542,7 +554,8 @@
                         (eq? (cell-source-owner source)
                              'editor.text)))
                  (cell-sources text-cell))
-               (eq? (cell-face modeline-cell) 'modeline)
+               (memq 'modeline (cell-faces modeline-cell))
+               (memq 'modeline.active (cell-faces modeline-cell))
                (equal?
                  (style-background (cell-style modeline-cell))
                  (vector #x31 #x32 #x44))
@@ -564,7 +577,13 @@
                (equal? (map component-node-id modeline-path)
                        '(editor.root editor.modeline)))
     (error 'editor-tests
-           "structured frame did not retain component semantics")))
+           "structured frame did not retain component semantics"
+           (cell-text modeline-cell)
+           (cell-face modeline-cell)
+           (style-background (cell-style modeline-cell))
+           (style-attributes (cell-style modeline-cell))
+           (and modeline-node
+                (component-node-rect modeline-node)))))
 (define wide-frame
   (frame->ansi structured-frame))
 (unless
@@ -1816,8 +1835,8 @@
     (and
       (string=? (cell-text (frame-cell-ref multi-window-frame 0 0))
                 "o")
-      (eq? (cell-face top-modeline) 'modeline)
-      (eq? (cell-face bottom-modeline) 'modeline)
+      (memq 'modeline.inactive (cell-faces top-modeline))
+      (memq 'modeline.active (cell-faces bottom-modeline))
       (= (length
            (filter
              (lambda (node)
@@ -3966,3 +3985,75 @@
     "C-x C-s runs file.save:")
   (error 'editor-tests "key help did not describe a prefix command"))
 (editor-close! help-editor)
+
+(define modeline-document (make-document "modeline" 955))
+(define modeline-buffer
+  (make-buffer
+    955
+    modeline-document
+    "/tmp/a-very-long-buffer-name.scm"
+    'fundamental-mode))
+(buffer-set-local-setting!
+  modeline-buffer
+  'minor-modes
+  '(auto-fill-mode completion-preview-mode))
+(buffer-set-local-setting!
+  modeline-buffer
+  'modeline-prominent-minor-modes
+  '(auto-fill-mode))
+(define modeline-editor (make-editor modeline-buffer))
+(editor-update! modeline-editor (make-resize-message 3 80))
+(define full-modeline-frame
+  (render-editor-frame modeline-editor 3 80))
+(define full-modeline-text
+  (frame-row-text full-modeline-frame 2))
+(unless
+  (and
+    (string-contains? full-modeline-text "-U:---")
+    (string-contains?
+      full-modeline-text
+      "a-very-long-buffer-name.scm")
+    (string-contains? full-modeline-text "All (1,0)")
+    (string-contains?
+      full-modeline-text
+      "(Fundamental Auto Fill ≡)")
+    (string-contains? full-modeline-text "-%-")
+    (eq?
+      (cell-face
+        (frame-cell-ref full-modeline-frame 2 7))
+      'modeline.buffer-id))
+  (error 'editor-tests
+         "full modeline did not use Emacs-compatible segments"
+         full-modeline-text))
+(define narrow-modeline-frame
+  (render-editor-frame modeline-editor 3 12))
+(define narrow-modeline-text
+  (frame-row-text narrow-modeline-frame 2))
+(unless
+  (and
+    (string-contains? narrow-modeline-text "-U:---")
+    (string-contains? narrow-modeline-text "…")
+    (not (string-contains? narrow-modeline-text "Fundamental"))
+    (not (string-contains? narrow-modeline-text "Auto Fill")))
+  (error 'editor-tests
+         "narrow modeline did not preserve state and truncate by priority"
+         narrow-modeline-text))
+(buffer-set-local-setting!
+  modeline-buffer
+  'modeline-format
+  '(buffer right-align position))
+(define custom-modeline-text
+  (frame-row-text
+    (render-editor-frame modeline-editor 3 40)
+    2))
+(unless
+  (and
+    (not (string-contains? custom-modeline-text "-U:---"))
+    (string-contains?
+      custom-modeline-text
+      "a-very-long-buffer-name.scm")
+    (string-contains? custom-modeline-text "All (1,0)"))
+  (error 'editor-tests
+         "buffer-local modeline format was not applied"
+         custom-modeline-text))
+(editor-close! modeline-editor)

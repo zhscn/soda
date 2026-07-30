@@ -7,6 +7,7 @@
           (soda editor core)
           (soda editor decoration)
           (soda editor display)
+          (soda editor modeline)
           (soda editor window)
           (soda tui component)
           (soda tui frame)
@@ -246,23 +247,290 @@
                  sources))
              (loop (+ index 1) (+ column width) column)])))))
 
-  (define (modeline-text editor buffer caret-line caret-column)
+  (define (string-last-index value character)
+    (let loop ([index (- (string-length value) 1)])
+      (cond
+        [(negative? index) #f]
+        [(char=? (string-ref value index) character) index]
+        [else (loop (- index 1))])))
+
+  (define (modeline-buffer-name buffer)
+    (let ([resource (buffer-resource buffer)])
+      (if (not (string? resource))
+          "*scratch*"
+          (let ([slash (string-last-index resource #\/)])
+            (if (and slash
+                     (< (+ slash 1) (string-length resource)))
+                (substring
+                  resource
+                  (+ slash 1)
+                  (string-length resource))
+                resource)))))
+
+  (define (mode-display-name name)
+    (let* ([value (symbol->string name)]
+           [length (string-length value)]
+           [without-suffix
+             (if (and (> length 5)
+                      (string=?
+                        (substring value (- length 5) length)
+                        "-mode"))
+                 (substring value 0 (- length 5))
+                 value)]
+           [words
+             (list->string
+               (map
+                 (lambda (character)
+                   (if (char=? character #\-)
+                       #\space
+                       character))
+                 (string->list without-suffix)))])
+      (string-titlecase words)))
+
+  (define (modeline-position context)
+    (let* ([line-count (editor-render-context-line-count context)]
+           [view (editor-render-context-view context)]
+           [rows (max 1 (view-viewport-rows view))]
+           [first-line (editor-render-context-first-line context)]
+           [last-line (min line-count (+ first-line rows))]
+           [position
+             (cond
+               [(<= line-count rows) "All"]
+               [(zero? first-line) "Top"]
+               [(>= last-line line-count) "Bot"]
+               [else
+                (string-append
+                  (number->string
+                    (round
+                      (*
+                        100
+                        (/
+                          (editor-render-context-caret-line context)
+                          (max 1 (- line-count 1))))))
+                  "%")])])
+      (string-append
+        "  "
+        position
+        " ("
+        (number->string
+          (+ (editor-render-context-caret-line context) 1))
+        ","
+        (number->string
+          (editor-render-context-caret-column context))
+        ")")))
+
+  (define (minor-mode-names buffer)
+    (let ([value
+            (buffer-setting-ref buffer 'minor-modes '())])
+      (if (and (list? value) (for-all symbol? value))
+          value
+          '())))
+
+  (define (prominent-minor-mode-names buffer minor-modes)
+    (let ([value
+            (buffer-setting-ref
+              buffer
+              'modeline-prominent-minor-modes
+              '())])
+      (if (and (list? value) (for-all symbol? value))
+          (filter
+            (lambda (mode) (memq mode minor-modes))
+            value)
+          '())))
+
+  (define (join-mode-names names)
+    (let loop ([remaining names] [result ""])
+      (if (null? remaining)
+          result
+          (loop
+            (cdr remaining)
+            (string-append
+              result
+              " "
+              (mode-display-name (car remaining)))))))
+
+  (define (modeline-state-text buffer)
     (string-append
-      " "
+      "-U:"
       (if (buffer-modified? buffer) "*" "-")
-      (let ([resource (buffer-resource buffer)])
-        (if (string? resource) resource "*scratch*"))
-      (if (buffer-save-pending? buffer) " [saving]" "")
-      "  "
-      (symbol->string (buffer-major-mode-name buffer))
-      "  "
-      (number->string (+ caret-line 1))
-      ":"
-      (number->string (+ caret-column 1))
-      (let ([message (editor-status-message editor)])
-        (if message
-            (string-append "  " message)
-            "  C-x C-c quit "))))
+      (if (buffer-setting-ref buffer 'read-only? #f) "%" "-")
+      (if (buffer-save-pending? buffer) "S" "-")))
+
+  (define (modeline-segment
+            id
+            text
+            face
+            priority
+            minimum-width
+            truncation)
+    (make-modeline-segment
+      id
+      text
+      (if face (list face) '())
+      priority
+      minimum-width
+      truncation))
+
+  (define default-modeline-format
+    '(state
+      buffer
+      position
+      major-mode
+      minor-modes
+      process
+      right-align
+      message
+      end))
+
+  (define (modeline-format buffer segments)
+    (let* ([known
+             (append
+               '(right-align)
+               (map car segments))]
+           [configured
+             (buffer-setting-ref
+               buffer
+               'modeline-format
+               default-modeline-format)])
+      (if (and (list? configured)
+               (for-all
+                 (lambda (id) (memq id known))
+                 configured)
+               (<=
+                 (length
+                   (filter
+                     (lambda (id) (eq? id 'right-align))
+                     configured))
+                 1))
+          configured
+          default-modeline-format)))
+
+  (define (arrange-modeline-segments format segments)
+    (let loop
+      ([remaining format]
+       [right? #f]
+       [left '()]
+       [right '()])
+      (cond
+        [(null? remaining)
+         (values (reverse left) (reverse right))]
+        [(eq? (car remaining) 'right-align)
+         (loop (cdr remaining) #t left right)]
+        [else
+         (let ([entry (assq (car remaining) segments)])
+           (if (not entry)
+               (loop (cdr remaining) right? left right)
+               (if right?
+                   (loop
+                     (cdr remaining)
+                     right?
+                     left
+                     (cons (cdr entry) right))
+                   (loop
+                     (cdr remaining)
+                     right?
+                     (cons (cdr entry) left)
+                     right))))])))
+
+  (define (modeline-segments context)
+    (let* ([editor (editor-render-context-editor context)]
+           [buffer (editor-render-context-buffer context)]
+           [minor-modes (minor-mode-names buffer)]
+           [prominent
+             (prominent-minor-mode-names
+               buffer
+               minor-modes)]
+           [hidden
+             (filter
+               (lambda (mode) (not (memq mode prominent)))
+               minor-modes)]
+           [interaction
+             (editor-interaction-for-buffer
+               editor
+               (buffer-id buffer))]
+           [message
+             (and (editor-render-context-focused? context)
+                  (editor-status-message editor))]
+           [segments
+             (map
+               (lambda (segment)
+                 (cons
+                   (modeline-segment-id segment)
+                   segment))
+               (list
+                 (modeline-segment
+                   'state
+                   (modeline-state-text buffer)
+                   'modeline.status
+                   100
+                   6
+                   'end)
+                 (modeline-segment
+                   'buffer
+                   (string-append
+                     " "
+                     (modeline-buffer-name buffer))
+                   'modeline.buffer-id
+                   90
+                   4
+                   'middle)
+                 (modeline-segment
+                   'position
+                   (modeline-position context)
+                   'modeline.position
+                   70
+                   0
+                   'end)
+                 (modeline-segment
+                   'major-mode
+                   (string-append
+                     "  ("
+                     (mode-display-name
+                       (buffer-major-mode-name buffer))
+                     (join-mode-names prominent))
+                   'modeline.mode
+                   60
+                   0
+                   'end)
+                 (modeline-segment
+                   'minor-modes
+                   (if (null? hidden) ")" " ≡)")
+                   'modeline.minor-modes
+                   50
+                   0
+                   'end)
+                 (modeline-segment
+                   'process
+                   (if interaction
+                       (string-append
+                         " ["
+                         (symbol->string
+                           (interaction-session-state interaction))
+                         "]")
+                       "")
+                   'modeline.process
+                   40
+                   0
+                   'end)
+                 (modeline-segment
+                   'message
+                   (if message
+                       (string-append " " message)
+                       "")
+                   'modeline.message
+                   20
+                   0
+                   'end)
+                 (modeline-segment
+                   'end
+                   " -%-"
+                   'modeline.status
+                   10
+                   0
+                   'end)))])
+      (arrange-modeline-segments
+        (modeline-format buffer segments)
+        segments)))
 
   (define (render-context-gutter-width context columns)
     (if
@@ -458,7 +726,11 @@
     (let* ([theme
              (editor-theme
                (editor-render-context-editor context))]
-           [style (resolve-faces theme '(modeline))]
+           [base-faces
+             (if (editor-render-context-focused? context)
+                 '(modeline modeline.active)
+                 '(modeline modeline.inactive))]
+           [style (resolve-faces theme base-faces)]
            [source (make-cell-source 'chrome 'modeline #f)]
            [sources
              (list
@@ -468,25 +740,44 @@
              (make-cell
                " "
                1
-               '(modeline)
+               base-faces
                style
                #f
                sources)])
       (frame-fill-rect! frame rectangle fill)
       (when (positive? (rect-rows rectangle))
-        (draw-string!
-          frame
-          (rect-row rectangle)
-          (rect-column rectangle)
-          (rect-columns rectangle)
-          (modeline-text
-            (editor-render-context-editor context)
-            (editor-render-context-buffer context)
-            (editor-render-context-caret-line context)
-            (editor-render-context-caret-column context))
-          '(modeline)
-          style
-          sources))))
+        (call-with-values
+          (lambda () (modeline-segments context))
+          (lambda (left right)
+            (for-each
+              (lambda (span)
+                (let* ([faces
+                         (append
+                           base-faces
+                           (modeline-span-faces span))]
+                       [span-sources
+                         (cons
+                           (make-cell-source
+                             'chrome
+                             (modeline-span-id span)
+                             #f)
+                           sources)])
+                  (draw-string!
+                    frame
+                    (rect-row rectangle)
+                    (+ (rect-column rectangle)
+                       (modeline-span-column span))
+                    (-
+                      (rect-columns rectangle)
+                      (modeline-span-column span))
+                    (modeline-span-text span)
+                    faces
+                    (resolve-faces theme faces)
+                    span-sources)))
+              (layout-modeline-segments
+                (rect-columns rectangle)
+                left
+                right)))))))
 
   (define (render-minibuffer-component! context frame rectangle)
     (let* ([editor (editor-render-context-editor context)]

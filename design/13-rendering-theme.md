@@ -172,6 +172,77 @@ query_capture_index -> FaceId
 cache，并使所有可见 View 失效。Document、syntax tree、capture mapping、
 AnnotationSet 和 DisplayMap 的结构状态保持有效。
 
+## Modeline
+
+每个 Window leaf 拥有一行 modeline。modeline 从 Buffer、View、interaction
+session 和 Editor chrome 状态构造语义 segment，再由纯布局器投影为 cell span：
+
+```text
+ModelineSegment {
+  id,
+  text,
+  faces,
+  priority,
+  minimum_width,
+  truncation: end | middle
+}
+
+ModelineSpan {
+  id,
+  column,
+  text,
+  faces
+}
+```
+
+默认格式沿用 Emacs 的信息层次，并以 `right-align` 分隔左右区域：
+
+```scheme
+(state
+ buffer
+ position
+ major-mode
+ minor-modes
+ process
+ right-align
+ message
+ end)
+```
+
+Buffer local `modeline-format` 可以重排、隐藏这些 segment 或移动
+`right-align`。`state` 显示字符编码、modified、read-only 和 pending-save
+状态；`buffer` 使用 buffer identification 而不是完整资源路径；`position`
+显示 Top、Bot、All 或百分比以及一基行号、零基列号；mode 区域显示 major mode、
+minor modes 和 interaction process；focused View 的 Editor message 位于右侧。
+
+布局器按 display cell width 计算 Unicode 文本。宽度不足时依次收缩低优先级
+segment；buffer identification 保留最小宽度并从中间省略，使同名文件的前后信息
+都可辨认。状态字段和 buffer identification 的优先级高于 position、mode、message
+与终止标记。左右区域在同一约束求解中分配，不会相互覆盖。
+
+Minor mode 使用 Minions 风格的默认呈现。Buffer local `minor-modes` 保存有序的
+active mode 名称，`modeline-prominent-minor-modes` 指定仍在 mode 区域直接显示的
+子集；其余 active minor modes 折叠为 `≡`。segment 的 chrome source 保留
+`minor-modes` identity，供 TUI picker、鼠标前端和 describe 工具解析，而无需从
+绘制文本反推状态。
+
+modeline 使用分层 chrome face：
+
+```text
+modeline.active
+modeline.inactive
+modeline.buffer-id
+modeline.status
+modeline.position
+modeline.mode
+modeline.minor-modes
+modeline.process
+modeline.message
+```
+
+具体 role 找不到时按 `modeline.* -> modeline -> default` 回退。active 与 inactive
+Window 使用不同 base face，segment face 只覆盖自身需要强调的属性。
+
 ## Highlight 与 annotation sweep
 
 每种输入通道为 viewport range 提供有序 cursor。`StyledChunkIterator` 保存所有
