@@ -305,8 +305,8 @@ namespace 为 `scheme-semantic-diagnostics`，source revision 与 semantic snaps
 一致。annotation payload 保留原始 `SchemeDiagnostic`，describe-char、LocationList
 和后续 quick-fix 可以共享同一个诊断身份。
 
-显式的 workspace diagnostics 查询同步 editor Buffer 与 session 提交的 source
-snapshot，并产生按 resource、range 排序的 `SchemeWorkspaceDiagnostic`：
+显式的 workspace diagnostics 查询同步 editor Buffer 与 session 安装的编译诊断，
+并产生按 resource、range 排序的 `SchemeWorkspaceDiagnostic`：
 
 ```text
 SchemeWorkspaceDiagnostic {
@@ -318,7 +318,7 @@ SchemeWorkspaceDiagnostic {
 }
 ```
 
-同一 resource 已经打开时，Buffer snapshot 取代 session source snapshot。
+同一 resource 已经打开时，Buffer snapshot 取代 artifact 中该 resource 的诊断。
 `diagnostics.list-workspace` 将查询结果发布为普通 LocationList，使
 `xref.next-location` 和 `xref.previous-location` 可以复用统一的导航协议。
 Buffer-backed item 直接切换 view；后台 resource item 通过异步 `file.read`
@@ -523,30 +523,26 @@ export surface。provider catalog、completion session 和 TUI 不依赖 scanner
 
 自举 xref provider 把 definition 和 resolved uses 转成通用 LocationList。当前
 Document 的 declaration 与 references 可立即导航。editor 持有一个
-`SchemeWorkspaceIndex`，保存 editor 已知 Scheme Buffer 和显式 session source 的
-semantic snapshot。查询前同步 Buffer 集合；document id、resource 或 revision
+`SchemeWorkspaceIndex` 保存 editor 已知 Scheme Buffer 和显式 session 安装的
+interface artifact。查询前同步 Buffer 集合；document id、resource 或 revision
 改变时替换对应 snapshot，已关闭或离开 Scheme mode 的 Buffer 从实时集合移除。
-session snapshot 独立于 Buffer 生命周期。未变化的 snapshot 直接复用。source set
-改变后，index 从新 snapshot 的 resolved uses 重建
-`DefinitionId -> WorkspaceReference[]` 倒排表；普通 references 查询只读取目标
-identity 的 buckets。
+未变化的 snapshot 直接复用。Workspace 从当前 Buffer 的 resolved uses 和 artifact
+中的编译引用建立 `DefinitionId -> WorkspaceReference[]` 倒排表；普通 references
+查询只读取目标 identity 的 buckets。
 
-Workspace 从显式 session source 和带 resource 的 Scheme Buffer 提取 R6RS library
-name、export surface 与源码 definition，生成与嵌入 API catalog 相同的 library
-entry。session catalog 分别保存 library name 集合和 export symbol 集合，没有
-export 的 library 仍具有独立 identity。source set 或 revision 改变时先重建两个
-catalog，并按 library 比较存在性与新旧 export surface。发生变化的 source snapshot
-与直接 import 对应 library 的 consumer snapshot 使用合并后的 built-in/session
-catalog 重新分析；不受影响的 snapshot 保持对象 identity。暂不参与查询的 session
-snapshot 标记为待分析，在重新进入实时集合时按需刷新。snapshot 更新后重建
-references 倒排表。连续异步文件读取只标记 catalog dirty，首次 completion 或 xref
-查询负责合并这一批更新。
+Workspace 从带 resource 的 Scheme Buffer 提取 R6RS library name、export surface
+与源码 definition，并与 artifact library catalog 和嵌入 API catalog 合并。catalog
+分别保存 library name 集合和 export symbol 集合，没有 export 的 library 仍具有
+独立 identity。Buffer revision 或 artifact revision 改变时按 library 比较存在性与
+新旧 export surface。发生变化的 Buffer snapshot 与直接 import 对应 library 的
+consumer snapshot 使用合并后的 catalog 重新分析；不受影响的 snapshot 保持对象
+identity。snapshot 更新后重建 references 倒排表。
 
-session library entry 保留声明 resource、byte range、kind 与 procedure formals。
+artifact library entry 保留声明 resource、byte range、kind 与 procedure formals。
 consumer 的 `only`、`except`、`prefix`、`rename` 和 `for` import modifier 由通用
-import-binding pipeline 解释，因此 session export 与嵌入 Soda API 具有相同的
-可见性、补全和 DefinitionId 语义。动态 entry 与嵌入 entry 按 DefinitionId 去重，
-允许 Soda 源码项目使用构建期 catalog 自举而不产生重复候选。
+import-binding pipeline 解释，因此 artifact export 与嵌入 Soda API 具有相同的
+可见性、补全和 DefinitionId 语义。实时 Buffer entry 与 artifact entry 按 resource
+遮蔽，允许编辑已编译源码而不产生重复候选。
 library metadata reader 使用 lexical token 的 delimiter depth 恢复未闭合的外围
 form；编辑 library body 时，已经完整出现的 name、export 和 definition 继续留在
 session catalog。
@@ -622,11 +618,11 @@ DefinitionId 倒排表，不读取或重新分析对应源码。打开相同 res
 和诊断；该分析不枚举目录，也不建立 workspace 索引。跨文件 catalog、引用和诊断
 属于显式 language session，并从构建 artifact 加载。
 
-Scheme workspace 在没有 source index 或 interface artifact 时处于 dormant 状态。
+Scheme workspace 在没有 interface artifact 时处于 dormant 状态。
 completion、document highlight、help 和实时诊断直接读取 Buffer 自身按 revision
 缓存的 semantic snapshot，不向 workspace 注册文档。安装第一个 interface artifact
-或显式 source index 后，workspace 才同步打开的 Scheme Buffer，并维护跨文档
-catalog 与 reference 倒排表；移除最后一个 session artifact 时释放这些缓存。
+后，workspace 才同步打开的 Scheme Buffer，并维护跨文档 catalog 与 reference
+倒排表；移除最后一个 session artifact 时释放这些缓存。
 xref、rename 和 workspace symbol 等显式查询可以按需同步打开文档，但不会
 启动后台目录遍历、watcher 或周期性索引。
 Scheme `load`、`load-program` 和 `load-library` 是 evaluator 的运行时操作，不向
@@ -635,7 +631,7 @@ workspace 注入 source definitions。跨文件静态 surface 只由显式 langu
 
 显式 language workspace session 按 owner 安装 interface index。同一 owner 的新
 revision 原子替换旧 surface；移除 session 时撤销对应 surface。多个 index 按安装
-次序组成依赖层，session source 和打开的 Buffer 位于其上方。interface 变化只重新
+次序组成依赖层，打开的 Buffer 位于 artifact surface 之上。interface 变化只重新
 分析 import 受影响 library 的 Document。插件依赖因而可以在不读取依赖源码、不建立
 目录 watcher 的情况下提供 completion、signature、hover、workspace symbol 和
 definition。`scheme.load-interface-index` 通过 minibuffer 选择产物并以 libuv
@@ -668,11 +664,11 @@ library resolution。process 成功退出后 Editor 异步读取 artifact，并�
 替换 language surface；构建失败保留原 interface index。session 关闭后 Editor
 撤销该 owner 的 surface，不保留目录 watcher、后台扫描或持续索引任务。
 
-workspace symbol 查询合并已索引 Buffer、session source 和构建时嵌入的 Soda API
+workspace symbol 查询合并当前 Buffer、session artifact 和构建时嵌入的 Soda API
 definitions。局部 lexical binding 不进入该查询。相同源码声明在实时 snapshot 中
 使用 document DefinitionId，在构建索引中使用 index DefinitionId。一个 source
-resource 存在已打开 Buffer 时，session snapshot 与静态 catalog 条目整体由当前
-Buffer revision 替代；其余 catalog 条目以
+resource 存在已打开 Buffer 时，artifact 中对应的静态 catalog 条目整体由当前
+Buffer revision 替代；其余 artifact 条目以
 `resource + declaration start + name` 去重。候选 key 使用
 `buffer id + revision + declaration` 或 `resource + declaration`，不会依赖过滤
 后的列表位置。
@@ -711,8 +707,8 @@ definition 结果转换为 LocationList，并由 Workbench display policy 记录
 references 按 DefinitionId 读取 workspace 倒排表。查询 policy 决定是否包含声明和
 别名声明；返回值仍是普通 LocationList。rename 复用同一 use 集合生成带源
 revision 的 workspace edit。`scheme.rename`（`C-c C-r`）读取一个完整 Scheme
-identifier；未访问的 session source 和仅存在于编译 artifact 的 source 通过没有
-View target 的 `file.read` 打开为后台 Buffer。所有目标 Buffer 就绪后重新解析
+identifier；仅存在于编译 artifact 的 source 通过没有 View target 的 `file.read`
+打开为后台 Buffer。所有目标 Buffer 就绪后重新解析
 workspace edit，先统一验证 definition identity、revision、read-only 状态、range
 overlap 与名称冲突，再按 Buffer transaction 提交。提交中途失败时，已经修改的
 Buffer 回到各自提交前的 undo position。rename 只修改 Buffer，保存仍由普通文件

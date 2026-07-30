@@ -95,14 +95,46 @@
 (define workspace
   (editor-scheme-workspace editor))
 
+(define project-interface-owner "fixture-project")
+(define project-interface-revision 0)
+(define project-interface-sources
+  (make-hashtable string-hash string=?))
+(define (install-project-interface!)
+  (set! project-interface-revision
+    (+ project-interface-revision 1))
+  (let-values
+    ([(resources sources)
+      (hashtable-entries project-interface-sources)])
+    (scheme-workspace-install-interface-index!
+      workspace
+      (scheme-sources->interface-index
+        project-interface-owner
+        (number->string project-interface-revision)
+        (let loop ([index 0] [result '()])
+          (if
+            (= index (vector-length resources))
+            result
+            (loop
+              (+ index 1)
+              (cons
+                (cons
+                  (vector-ref resources index)
+                  (vector-ref sources index))
+                result))))))))
+(define (install-project-source! resource bytes)
+  (hashtable-set!
+    project-interface-sources resource bytes)
+  (install-project-interface!))
+(define (remove-project-source! resource)
+  (hashtable-delete!
+    project-interface-sources resource)
+  (install-project-interface!))
+
 (for-each
   (lambda (entry)
     (let ([path (vfs-path-join root (car entry))])
-      (scheme-workspace-index-source!
-        workspace
+      (install-project-source!
         path
-        (cdr entry)
-        0
         (call-with-input-file
           path
           (lambda (port)
@@ -307,7 +339,7 @@
     (equal?
       (scheme-workspace-interface-index-owners
         workspace)
-      '("fixture-build")))
+      '("fixture-build" "fixture-project")))
   (error
     'scheme-project-session-tests
     "compiled interface index did not drive plugin resolution"
@@ -578,9 +610,10 @@
       'scheme-project-session-tests
       "removing an interface index retained its library surface")))
 (unless
-  (null?
+  (equal?
     (scheme-workspace-interface-index-owners
-      workspace))
+      workspace)
+    '("fixture-project"))
   (error
     'scheme-project-session-tests
     "unloading the Scheme project retained its session owner"))
@@ -602,7 +635,7 @@
 (unless
   (and
     (= (length (symbols-named "project-root-symbol")) 1)
-    (= (length (symbols-named "project-nested-symbol")) 1)
+    (null? (symbols-named "project-nested-symbol"))
     (null? (symbols-named "not-a-scheme-source"))
     (let ([symbol
             (car
@@ -614,7 +647,7 @@
           root-resource))))
   (error
     'scheme-project-session-tests
-    "explicit source set did not enter the Scheme workspace"
+    "compiled project exports did not enter the Scheme workspace"
     symbols))
 
 (define empty-import-buffer
@@ -648,8 +681,7 @@
   (error
     'scheme-project-session-tests
     "empty project library was absent from the semantic catalog"))
-(scheme-workspace-remove-source!
-  workspace empty-resource)
+(remove-project-source! empty-resource)
 (scheme-workspace-sync-editor! workspace editor)
 (define empty-import-without-library
   (scheme-workspace-snapshot-for-buffer
@@ -671,11 +703,8 @@
   (error
     'scheme-project-session-tests
     "library catalog removal did not invalidate its consumer"))
-(scheme-workspace-index-source!
-  workspace
+(install-project-source!
   empty-resource
-  1004
-  0
   (call-with-input-file
     empty-resource
     (lambda (port)
@@ -772,7 +801,7 @@
     "project-root-renamed"))
 (unless
   (and
-    (>= (length project-rename-edits) 3)
+    (>= (length project-rename-edits) 2)
     (exists
       (lambda (edit)
         (and
@@ -784,20 +813,10 @@
           (string=?
             (scheme-workspace-text-edit-text edit)
             "project-root-renamed")))
-      project-rename-edits)
-    (exists
-      (lambda (edit)
-        (and
-          (equal?
-            (scheme-workspace-text-edit-buffer-id edit)
-            (buffer-id project-consumer-buffer))
-          (string=?
-            (scheme-workspace-text-edit-text edit)
-            "project-root-renamed")))
       project-rename-edits))
   (error
     'scheme-project-session-tests
-    "workspace rename did not cover the project declaration, export, and consumer"
+    "compiled rename discovery did not cover the declaration and export"
     project-rename-edits))
 
 (editor-set-view-buffer!
@@ -874,11 +893,8 @@
 (define unrelated-snapshot-before-library-change
   (scheme-workspace-snapshot-for-buffer
     workspace unrelated-buffer))
-(scheme-workspace-index-source!
-  workspace
+(install-project-source!
   root-resource
-  1001
-  1
   (string->utf8
     (string-append
       "(library (fixture project-root)\n"
@@ -966,18 +982,14 @@
     project-references
     (exists
       (lambda (reference)
-        (and
-          (not
-            (scheme-workspace-reference-buffer-id
-              reference))
-          (string-suffix?
-            "nested/private.ss"
-            (scheme-workspace-reference-resource
-              reference))))
+        (equal?
+          (scheme-workspace-reference-buffer-id
+            reference)
+          (buffer-id scratch)))
       project-references))
   (error
     'scheme-project-session-tests
-    "session source uses did not enter the workspace reference index"
+    "open Buffer uses did not enter the workspace reference index"
     api-use
     api-definition
     project-references))
@@ -1001,23 +1013,14 @@
     (location-list? reference-list)
     (exists
       (lambda (item)
-        (and
-          (not (location-item-buffer-id item))
-          (string-suffix?
-            "nested/private.ss"
-            (location-item-resource item))))
+        (equal?
+          (location-item-buffer-id item)
+          (buffer-id scratch)))
       (location-list-items reference-list))
-    (or
-      (null? reference-effects)
-      (and
-        (= (length reference-effects) 1)
-        (eq?
-          (command-effect-kind
-            (car reference-effects))
-          'file.read))))
+    (null? reference-effects))
   (error
     'scheme-project-session-tests
-    "xref did not publish navigable project references"))
+    "xref did not publish navigable Buffer references"))
 
 (define live-source
   (string-append
@@ -1043,20 +1046,17 @@
       (buffer-id live-buffer)))
   (error
     'scheme-project-session-tests
-    "open Buffer did not replace the project snapshot for its resource"))
+    "open Buffer did not replace the project artifact for its resource"))
 
 (editor-remove-buffer! editor (buffer-id live-buffer))
 (unless
   (= (length (symbols-named "project-root-symbol")) 1)
   (error
     'scheme-project-session-tests
-    "closing the live Buffer did not reveal the project snapshot"))
+    "closing the live Buffer did not reveal the project artifact"))
 
-(scheme-workspace-index-source!
-  workspace
+(install-project-source!
   root-resource
-  1001
-  2
   (call-with-input-file
     root-resource
     (lambda (port)

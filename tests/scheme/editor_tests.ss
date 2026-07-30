@@ -20,6 +20,7 @@
         (soda editor motion)
         (soda editor prompt)
         (soda editor repl)
+        (soda editor scheme-interface-index)
         (soda editor scheme-semantics)
         (soda editor scheme-document-highlight)
         (soda editor scheme-workspace)
@@ -2185,11 +2186,47 @@
       definitions
       ")\n")))
 
-(scheme-workspace-index-source!
-  project-diagnostic-workspace
+(define project-diagnostic-interface-revision 0)
+(define project-diagnostic-interface-sources
+  (make-hashtable string-hash string=?))
+(define (install-project-diagnostic-interface!)
+  (set! project-diagnostic-interface-revision
+    (+ project-diagnostic-interface-revision 1))
+  (let-values
+    ([(resources sources)
+      (hashtable-entries
+        project-diagnostic-interface-sources)])
+    (scheme-workspace-install-interface-index!
+      project-diagnostic-workspace
+      (scheme-sources->interface-index
+        "project-diagnostics"
+        (number->string
+          project-diagnostic-interface-revision)
+        (let loop ([index 0] [result '()])
+          (if
+            (= index (vector-length resources))
+            result
+            (loop
+              (+ index 1)
+              (cons
+                (cons
+                  (vector-ref resources index)
+                  (vector-ref sources index))
+                result))))))))
+(define (install-project-diagnostic-source! resource bytes)
+  (hashtable-set!
+    project-diagnostic-interface-sources
+    resource
+    bytes)
+  (install-project-diagnostic-interface!))
+(define (remove-project-diagnostic-source! resource)
+  (hashtable-delete!
+    project-diagnostic-interface-sources
+    resource)
+  (install-project-diagnostic-interface!))
+
+(install-project-diagnostic-source!
   "/project/diagnostics.sls"
-  1986
-  0
   (project-library-source
     "project-value"
     "  (define (project-value value) value)\n"))
@@ -2249,11 +2286,8 @@
 
 (define background-diagnostic-resource
   "!/project/background-diagnostic.sls")
-(scheme-workspace-index-source!
-  project-diagnostic-workspace
+(install-project-diagnostic-source!
   background-diagnostic-resource
-  1987
-  0
   (string->utf8
     (string-append
       "(import (rnrs))\n"
@@ -2315,18 +2349,14 @@
       "workspace diagnostics did not include navigable background sources"
       locations
       workspace-diagnostic-effects)))
-(scheme-workspace-remove-source!
-  project-diagnostic-workspace
+(remove-project-diagnostic-source!
   background-diagnostic-resource)
 (editor-set-current-location-list!
   project-diagnostic-editor
   #f)
 
-(scheme-workspace-index-source!
-  project-diagnostic-workspace
+(install-project-diagnostic-source!
   "/project/diagnostics.sls"
-  1986
-  1
   (project-library-source
     "project-value missing-value"
     (string-append

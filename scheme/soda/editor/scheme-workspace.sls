@@ -8,8 +8,6 @@
           scheme-workspace-interface-index-owners
           scheme-workspace-install-interface-index!
           scheme-workspace-remove-interface-index!
-          scheme-workspace-index-source!
-          scheme-workspace-remove-source!
           scheme-workspace-snapshot-for-buffer
           scheme-workspace-references
           scheme-workspace-reference?
@@ -70,7 +68,6 @@
       scheme-workspace-index?)
     (fields
       documents
-      sources
       references
       (mutable interface-indexes)
       (mutable generation)
@@ -105,7 +102,6 @@
   (define (make-scheme-workspace-index)
     (%make-scheme-workspace-index
       (make-eqv-hashtable)
-      (make-hashtable string-hash string=?)
       (make-hashtable
         scheme-definition-id-hash
         scheme-definition-id=?)
@@ -124,13 +120,9 @@
     (require-index
       'scheme-workspace-session-active?
       index)
-    (or
-      (pair?
-        (scheme-workspace-index-interface-indexes
-          index))
-      (positive?
-        (hashtable-size
-          (scheme-workspace-index-sources index)))))
+    (pair?
+      (scheme-workspace-index-interface-indexes
+        index)))
 
   (define (deactivate-session-cache! index)
     (hashtable-clear!
@@ -189,50 +181,12 @@
 
   (define (all-workspace-documents index)
     (let-values
-      ([(ids buffer-documents)
+      ([(ids documents)
         (hashtable-entries
-          (scheme-workspace-index-documents index))]
-       [(resources source-documents)
-        (hashtable-entries
-          (scheme-workspace-index-sources index))])
-      (append
-        (vector->list buffer-documents)
-        (vector->list source-documents))))
+          (scheme-workspace-index-documents index))])
+      (vector->list documents)))
 
-  (define (workspace-documents index)
-    (let-values
-      ([(ids buffer-documents)
-        (hashtable-entries
-          (scheme-workspace-index-documents index))]
-       [(resources source-documents)
-        (hashtable-entries
-          (scheme-workspace-index-sources index))])
-      (let* ([buffers (vector->list buffer-documents)]
-             [open-resources
-               (make-hashtable string-hash string=?)])
-        (for-each
-          (lambda (document)
-            (let ([resource
-                    (scheme-workspace-document-resource
-                      document)])
-              (when (string? resource)
-                (hashtable-set!
-                  open-resources resource #t))))
-          buffers)
-        (append
-          buffers
-          (filter
-            (lambda (document)
-              (let ([resource
-                      (scheme-workspace-document-resource
-                        document)])
-                (or
-                  (not (string? resource))
-                  (not
-                    (hashtable-contains?
-                      open-resources
-                      resource)))))
-            (vector->list source-documents))))))
+  (define workspace-documents all-workspace-documents)
 
   (define (sync-buffer! index buffer)
     (let* ([table
@@ -699,85 +653,6 @@
       (and
         document
         (scheme-workspace-document-snapshot document))))
-
-  (define (scheme-workspace-index-source!
-            index
-            resource
-            document-id
-            revision
-            bytes)
-    (require-index 'scheme-workspace-index-source! index)
-    (unless
-      (and
-        (string? resource)
-        (integer? document-id)
-        (exact? document-id)
-        (not (negative? document-id))
-        (integer? revision)
-        (exact? revision)
-        (not (negative? revision))
-        (bytevector? bytes))
-      (assertion-violation
-        'scheme-workspace-index-source!
-        "invalid Scheme project source"
-        resource
-        document-id
-        revision))
-    (let* ([snapshot
-             (make-scheme-semantic-snapshot-with-library-index
-               document-id
-               revision
-               bytes
-               (scheme-workspace-index-library-index
-                 index)
-               (scheme-workspace-index-library-catalog
-                 index))]
-           [document
-             (make-scheme-workspace-document
-               #f
-               resource
-               document-id
-               revision
-               bytes
-               snapshot
-               #f)])
-      (hashtable-set!
-        (scheme-workspace-index-sources index)
-        resource
-        document)
-      (scheme-workspace-index-dirty?-set! index #t)
-      (scheme-workspace-index-catalog-dirty?-set!
-        index #t)
-      snapshot))
-
-  (define (scheme-workspace-remove-source! index resource)
-    (require-index 'scheme-workspace-remove-source! index)
-    (unless (string? resource)
-      (assertion-violation
-        'scheme-workspace-remove-source!
-        "resource must be a string"
-        resource))
-    (let ([was-active?
-            (scheme-workspace-session-active?
-              index)])
-      (when
-        (hashtable-contains?
-          (scheme-workspace-index-sources index)
-          resource)
-        (hashtable-delete!
-          (scheme-workspace-index-sources index)
-          resource)
-        (scheme-workspace-index-catalog-dirty?-set!
-          index #t)
-        (scheme-workspace-index-dirty?-set! index #t))
-      (when
-        (and
-          was-active?
-          (not
-            (scheme-workspace-session-active?
-              index)))
-        (deactivate-session-cache! index)))
-    index)
 
   (define (scheme-workspace-snapshot-for-buffer
             index
@@ -1825,7 +1700,15 @@
                            (hashtable-contains?
                              open-resources
                              resource))))))
-                 scheme-index-definitions))])
+                 (append
+                   scheme-index-definitions
+                   (scheme-library-index-definitions
+                     (apply
+                       append
+                       (map
+                         scheme-interface-index-entries
+                         (scheme-workspace-index-interface-indexes
+                           index)))))))])
       (list-sort
         symbol-before?
         (deduplicate-symbols

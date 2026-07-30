@@ -76,6 +76,7 @@
           scheme-semantic-references
           scheme-semantic-document-highlights-at
           scheme-primitive-definitions
+          scheme-library-index-definitions
           scheme-index-definitions
           scheme-definition-library
           scheme-rename-replacement?
@@ -1308,15 +1309,24 @@
             formals)))
       (scheme-definition-formals definition)))
 
-  (define scheme-index-definitions
+  (define (scheme-library-index-definitions entries)
+    (unless (list? entries)
+      (assertion-violation
+        'scheme-library-index-definitions
+        "expected a Scheme library index"
+        entries))
     (map
       (lambda (entry)
         (unless (valid-index-entry? entry)
           (assertion-violation
-            'scheme-index-definitions
-            "invalid embedded Scheme API index entry"
+            'scheme-library-index-definitions
+            "invalid Scheme library index entry"
             entry))
         (index-entry->definition entry))
+      entries))
+
+  (define scheme-index-definitions
+    (scheme-library-index-definitions
       (append
         soda-built-in-api-index
         scheme-built-in-api-index)))
@@ -1607,14 +1617,7 @@
                (make-library-table
                  (append
                    scheme-index-definitions
-                   (map
-                     (lambda (entry)
-                       (unless (valid-index-entry? entry)
-                         (assertion-violation
-                           'make-scheme-semantic-snapshot-with-library-index
-                           "invalid Scheme library index entry"
-                           entry))
-                       (index-entry->definition entry))
+                   (scheme-library-index-definitions
                      entries)))])
          (set! cached-library-index entries)
          (set! cached-library-table table)
