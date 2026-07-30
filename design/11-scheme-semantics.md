@@ -78,9 +78,12 @@ scope 仍可用于补全。
 
 atom token 通过 Scheme reader 分类。只有 reader datum 为 symbol 的 atom 才进入
 binding 与 use 分析；number、boolean、character 和其他 self-evaluating datum
-保持原始 range，但不生成 identifier。quote、quasiquote、syntax 和 quasisyntax
-包围的 datum 在结构分析中折叠为一个保留 range 的 opaque datum，因此 literal
-不会产生 use，同时仍占据 `do` binding、调用参数等 form 中的一个语法位置。
+保持原始 range，但不生成 identifier。quote 与 quasiquote 包围的 datum 在结构分析
+中折叠为一个保留 range 的 opaque datum。syntax 与 quasisyntax datum 通常使用相同
+表示；当 datum 位于 `syntax-case` 或 `with-syntax` pattern scope 内时，分析器只让
+可见的 pattern variable 形成引用。`#'`、`#``、`#,` 和 `#,@` 保留为独立 prefix
+token，与对应的长形式共享 range 和引用规则。literal 不产生普通 use，同时仍占据
+`do` binding、调用参数等 form 中的一个语法位置。
 
 syntax provider contract 允许按整个文件重建 SchemeSyntaxView，也允许维护增量
 reader。Document change 与 provider session 的生命周期遵循通用 syntax provider
@@ -469,8 +472,11 @@ binding 建立依次嵌套的 scope，`letrec` 与 `letrec*` 在 initializer 和
 loop binding；`guard` condition binding 只在 handler clauses 中可见。named let
 的过程名和参数位于 body scope。每个 `syntax-rules` rule 为 pattern variable 建立
 独立的 `syntax-parameter` scope，排除 rule keyword、literal identifier、`_` 和
-默认或自定义 ellipsis identifier；嵌套 pattern 中的变量使用同一 rule scope，并在
-template 中参与补全、definition、references、document highlight 和 rename。
+默认或自定义 ellipsis identifier。每个 `syntax-case` clause 同样建立 pattern
+scope，并让变量在 fender 与 output expression 中可见；`with-syntax` 并行分析
+initializer，再把所有 pattern binding 暴露给 body。嵌套 pattern 中的变量使用所属
+rule、clause 或 body scope，并参与补全、definition、references、document highlight
+和 rename。
 未闭合 form 的 scope range 延伸到 Document 末尾，使编辑中的参数和局部 binding
 仍可参与补全。
 

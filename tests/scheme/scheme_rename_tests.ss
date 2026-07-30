@@ -389,6 +389,84 @@
     renamed-syntax-pattern))
 (editor-close! syntax-pattern-editor)
 
+(define syntax-case-buffer
+  (make-buffer
+    22
+    (make-document
+      (string-append
+        "(define-syntax wrap\n"
+        "  (lambda (stx)\n"
+        "    (syntax-case stx ()\n"
+        "      [(_ value)\n"
+        "       (with-syntax ([temporary #'value])\n"
+        "         #'(list temporary value))])))\n")
+      22)
+    "/project/rename-syntax-case.scm"
+    'scheme-mode))
+(define syntax-case-editor
+  (make-editor syntax-case-buffer))
+(define syntax-case-workspace
+  (editor-scheme-workspace syntax-case-editor))
+(define syntax-case-snapshot
+  (scheme-workspace-snapshot-for-buffer
+    syntax-case-workspace
+    syntax-case-buffer))
+(define syntax-case-definition
+  (find
+    (lambda (definition)
+      (and
+        (string=?
+          (scheme-definition-name definition)
+          "value")
+        (eq?
+          (scheme-definition-kind definition)
+          'syntax-parameter)))
+    (scheme-semantic-snapshot-definitions
+      syntax-case-snapshot)))
+(unless syntax-case-definition
+  (error
+    'scheme-rename-tests
+    "syntax-case pattern variable was not indexed"))
+(define syntax-case-context
+  (make-command-context
+    syntax-case-editor
+    (editor-active-view syntax-case-editor)
+    #f
+    #f))
+(define syntax-case-effects
+  ((command-procedure
+     (editor-command-registry syntax-case-editor)
+     'scheme.rename)
+   syntax-case-context
+   syntax-case-definition
+   "expression"))
+(define renamed-syntax-case
+  (buffer-string syntax-case-buffer))
+(unless
+  (and
+    (null? syntax-case-effects)
+    (string-contains
+      renamed-syntax-case
+      "[(_ expression)")
+    (string-contains
+      renamed-syntax-case
+      "#'expression")
+    (string-contains
+      renamed-syntax-case
+      "temporary expression")
+    (not
+      (string-contains
+        renamed-syntax-case
+        "temporary value"))
+    (string=?
+      (editor-status-message syntax-case-editor)
+      "Renamed to expression in 3 places"))
+  (error
+    'scheme-rename-tests
+    "syntax-case rename did not cross syntax abbreviations and with-syntax"
+    renamed-syntax-case))
+(editor-close! syntax-case-editor)
+
 (define compiled-rename-stem
   (string-append
     "/tmp/soda-compiled-rename-"

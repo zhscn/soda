@@ -535,6 +535,228 @@
       "syntax-rules template leaked generated declarations into source scope"
       name-definitions)))
 
+(define syntax-abbreviation-tokens
+  (filter
+    (lambda (token)
+      (eq?
+        (scheme-lexical-token-kind token)
+        'syntax-prefix))
+    (scheme-lexical-tokenize
+      (string->utf8
+        "#'value #`(value) #,value #,@values"))))
+(unless
+  (equal?
+    (map
+      scheme-lexical-token-value
+      syntax-abbreviation-tokens)
+    '(syntax
+      quasisyntax
+      unsyntax
+      unsyntax-splicing))
+  (error
+    'scheme-semantics-tests
+    "Scheme syntax abbreviations were not preserved as lexical prefixes"
+    syntax-abbreviation-tokens))
+(let* ([bytes
+         (string->utf8 "#'value")]
+       [runs
+         (scheme-highlight-runs
+           715
+           0
+           bytes
+           0
+           (bytevector-length bytes))]
+       [prefix
+         (find
+           (lambda (run)
+             (zero?
+               (decoration-run-start run)))
+           runs)])
+  (unless
+    (and
+      prefix
+      (= (decoration-run-end prefix) 2)
+      (eq?
+        (decoration-run-face prefix)
+        'syntax-delimiter))
+    (error
+      'scheme-semantics-tests
+      "syntax abbreviation did not retain delimiter highlighting"
+      runs)))
+
+(define syntax-case-source
+  (string-append
+    "(define-syntax transform\n"
+    "  (lambda (stx)\n"
+    "    (syntax-case stx (literal)\n"
+    "      [(_ target ((item literal) ...))\n"
+    "       #`(list #,target item ...)]\n"
+    "      [(_ replacement)\n"
+    "       (identifier? #'replacement)\n"
+    "       #'(define generated replacement)]\n"
+    "      [whole #'whole])))\n"))
+(define syntax-case-snapshot
+  (make-scheme-semantic-snapshot
+    713
+    0
+    (string->utf8 syntax-case-source)))
+(define syntax-case-target
+  (car
+    (snapshot-definitions-named
+      syntax-case-snapshot
+      "target")))
+(define syntax-case-item
+  (car
+    (snapshot-definitions-named
+      syntax-case-snapshot
+      "item")))
+(define syntax-case-replacement
+  (car
+    (snapshot-definitions-named
+      syntax-case-snapshot
+      "replacement")))
+(define syntax-case-whole
+  (car
+    (snapshot-definitions-named
+      syntax-case-snapshot
+      "whole")))
+(unless
+  (and
+    (for-all
+      (lambda (definition)
+        (eq?
+          (scheme-definition-kind definition)
+          'syntax-parameter))
+      (list
+        syntax-case-target
+        syntax-case-item
+        syntax-case-replacement
+        syntax-case-whole))
+    (= (length
+         (scheme-semantic-references
+           syntax-case-snapshot
+           (scheme-definition-id
+             syntax-case-target)))
+       1)
+    (= (length
+         (scheme-semantic-references
+           syntax-case-snapshot
+           (scheme-definition-id
+             syntax-case-item)))
+       1)
+    (= (length
+         (scheme-semantic-references
+           syntax-case-snapshot
+           (scheme-definition-id
+             syntax-case-replacement)))
+       2)
+    (= (length
+         (scheme-semantic-references
+           syntax-case-snapshot
+           (scheme-definition-id
+             syntax-case-whole)))
+       1)
+    (null?
+      (snapshot-definitions-named
+        syntax-case-snapshot
+        "literal"))
+    (null?
+      (snapshot-definitions-named
+        syntax-case-snapshot
+        "generated"))
+    (= (length
+         (snapshot-definitions-named
+           syntax-case-snapshot
+           "transform"))
+       1))
+  (error
+    'scheme-semantics-tests
+    "syntax-case pattern scope did not resolve syntax templates"))
+
+(define with-syntax-source
+  (string-append
+    "(define-syntax wrap\n"
+    "  (lambda (stx)\n"
+    "    (syntax-case stx ()\n"
+    "      [(_ value)\n"
+    "       (with-syntax ([(temporary) #'(value)])\n"
+    "         #'(list temporary value))])))\n"))
+(define with-syntax-snapshot
+  (make-scheme-semantic-snapshot
+    714
+    0
+    (string->utf8 with-syntax-source)))
+(define temporary-definition
+  (car
+    (snapshot-definitions-named
+      with-syntax-snapshot
+      "temporary")))
+(define value-definition
+  (car
+    (snapshot-definitions-named
+      with-syntax-snapshot
+      "value")))
+(unless
+  (and
+    (eq?
+      (scheme-definition-kind temporary-definition)
+      'syntax-parameter)
+    (= (length
+         (scheme-semantic-references
+           with-syntax-snapshot
+           (scheme-definition-id
+             temporary-definition)))
+       1)
+    (= (length
+         (scheme-semantic-references
+           with-syntax-snapshot
+           (scheme-definition-id
+             value-definition)))
+       2)
+    (exists
+      (lambda (definition)
+        (scheme-definition-id=?
+          (scheme-definition-id definition)
+          (scheme-definition-id
+            temporary-definition)))
+      (scheme-semantic-visible-definitions-at
+        with-syntax-snapshot
+        (scheme-use-start
+          (car
+            (snapshot-uses-named
+              with-syntax-snapshot
+              "temporary"))))))
+  (error
+    'scheme-semantics-tests
+    "with-syntax pattern variables did not compose with syntax-case scope"))
+
+(define duplicate-syntax-binding-snapshot
+  (make-scheme-semantic-snapshot
+    716
+    0
+    (string->utf8
+      (string-append
+        "(define-syntax duplicate-pattern\n"
+        "  (lambda (stx)\n"
+        "    (syntax-case stx ()\n"
+        "      [(_ value value) #'value])))\n"
+        "(with-syntax ([item #'left]\n"
+        "              [item #'right])\n"
+        "  #'item)\n"))))
+(unless
+  (= (length
+       (filter
+         (lambda (diagnostic)
+           (eq?
+             (scheme-diagnostic-code diagnostic)
+             'duplicate-binding))
+         (scheme-semantic-snapshot-diagnostics
+           duplicate-syntax-binding-snapshot)))
+     2)
+  (error
+    'scheme-semantics-tests
+    "duplicate macro pattern bindings were not diagnosed"))
+
 (let* ([shadow-definitions
          (snapshot-definitions-named
            lexical-snapshot

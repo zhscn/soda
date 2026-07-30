@@ -98,7 +98,8 @@
       [(comment) 'syntax-comment]
       [(string) 'syntax-string]
       [(character) 'syntax-constant]
-      [(open close prefix datum-comment) 'syntax-delimiter]
+      [(open close prefix syntax-prefix datum-comment)
+       'syntax-delimiter]
       [(symbol) (symbol-face definition-starts kinds-by-start token)]
       [else #f]))
 

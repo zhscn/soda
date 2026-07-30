@@ -379,6 +379,43 @@
                          index
                          end)
                        tokens)))]
+                [(and
+                   (< (+ index 1) size)
+                   (= byte 35)
+                   (memv
+                     (bytevector-u8-ref bytes (+ index 1))
+                     '(39 44 96)))
+                 (let* ([next
+                          (bytevector-u8-ref
+                            bytes
+                            (+ index 1))]
+                        [splicing?
+                          (and
+                            (= next 44)
+                            (< (+ index 2) size)
+                            (=
+                              (bytevector-u8-ref
+                                bytes
+                                (+ index 2))
+                              64))]
+                        [end
+                          (+ index
+                             (if splicing? 3 2))]
+                        [value
+                          (cond
+                            [(= next 39) 'syntax]
+                            [(= next 96) 'quasisyntax]
+                            [splicing? 'unsyntax-splicing]
+                            [else 'unsyntax])])
+                   (loop
+                     end
+                     (cons
+                       (make-token
+                         'syntax-prefix
+                         value
+                         index
+                         end)
+                       tokens)))]
                 [(open-byte? byte)
                  (loop
                    (+ index 1)
@@ -435,7 +472,9 @@
   (define (skip-datum tokens)
     (cond
       [(null? tokens) '()]
-      [(eq? (token-kind (car tokens)) 'prefix)
+      [(memq
+         (token-kind (car tokens))
+         '(prefix syntax-prefix))
        (skip-datum (cdr tokens))]
       [(and
          (pair? (cdr tokens))
@@ -464,6 +503,9 @@
     (and
       (eq? (token-kind value) 'prefix)
       (memv (token-value value) '(39 96))))
+
+  (define (syntax-prefix? value)
+    (eq? (token-kind value) 'syntax-prefix))
 
   (define (remove-ignored-data tokens)
     (let loop ([remaining tokens] [result '()])
@@ -880,12 +922,15 @@
         (lambda (name) (token-symbol=? (cadr tokens) name))
         '("quote" "quasiquote" "syntax" "quasisyntax"))))
 
-  (define (syntax-rules-form? tokens)
+  (define (opaque-transformer-form? tokens)
     (and
       (pair? tokens)
       (eq? (token-kind (car tokens)) 'open)
       (pair? (cdr tokens))
-      (token-symbol=? (cadr tokens) "syntax-rules")))
+      (exists
+        (lambda (name)
+          (token-symbol=? (cadr tokens) name))
+        '("syntax-rules" "syntax-case"))))
 
   (define (scan-definitions document-id revision tokens)
     (let loop ([tokens (remove-ignored-data tokens)]
@@ -895,7 +940,8 @@
           (if
             (or
               (quoted-form? tokens)
-              (syntax-rules-form? tokens))
+              (syntax-prefix? (car tokens))
+              (opaque-transformer-form? tokens))
               (loop (skip-datum tokens) definitions)
               (let ([candidates
                       (definitions-at tokens document-id revision)])
@@ -934,6 +980,11 @@
       (export syntax)
       (syntax-rules syntax)
       (syntax-case syntax)
+      (syntax syntax)
+      (quasisyntax syntax)
+      (unsyntax syntax)
+      (unsyntax-splicing syntax)
+      (with-syntax syntax)
       (identifier-syntax syntax)
       (define-record-type syntax)
       (cons procedure)
@@ -2361,7 +2412,8 @@
       (define (syntax-pattern-variables
                 pattern
                 ellipsis
-                literals)
+                literals
+                skip-head?)
         (let ([literal-names
                 (fold-right
                   (lambda (literal names)
@@ -2394,17 +2446,24 @@
                  (map walk
                    (syntax-form-children node)))]
               [else '()]))
-          (if
-            (and
-              (syntax-list? pattern)
-              (pair?
-                (syntax-form-children pattern)))
-            (apply
-              append
-              (map walk
-                (cdr
-                  (syntax-form-children pattern))))
-            '())))
+          (cond
+            [(and
+               (syntax-list? pattern)
+               (pair?
+                 (syntax-form-children pattern)))
+             (apply
+               append
+               (map walk
+                 (let ([children
+                         (syntax-form-children pattern)])
+                   (if skip-head?
+                       (cdr children)
+                       children))))]
+            [(and
+               (not skip-head?)
+               (pattern-variable? pattern))
+             (list pattern)]
+            [else '()])))
       (define (analyze-syntax-rule
                 rule
                 scope
@@ -2429,7 +2488,7 @@
                   'syntax-parameter
                   "syntax-rules pattern variable"))
               (syntax-pattern-variables
-                pattern ellipsis literals)))))
+                pattern ellipsis literals #t)))))
       (define (analyze-syntax-rules form scope)
         (call-with-values
           (lambda ()
@@ -2440,6 +2499,112 @@
                 (analyze-syntax-rule
                   rule scope ellipsis literals))
               rules))))
+      (define (add-syntax-pattern-bindings!
+                target-scope
+                pattern
+                literals
+                detail)
+        (for-each
+          (lambda (node)
+            (add-binding!
+              target-scope
+              node
+              'syntax-parameter
+              detail))
+          (syntax-pattern-variables
+            pattern "..." literals #f)))
+      (define (analyze-syntax-case form scope)
+        (let* ([children (syntax-form-children form)]
+               [expression
+                 (and
+                   (pair? (cdr children))
+                   (cadr children))]
+               [literals-node
+                 (and
+                   (pair? (cddr children))
+                   (caddr children))]
+               [literals
+                 (if
+                   (syntax-list? literals-node)
+                   (syntax-form-children literals-node)
+                   '())]
+               [clauses
+                 (if literals-node
+                     (cdddr children)
+                     '())])
+          (when expression
+            (analyze-form expression scope))
+          (for-each
+            (lambda (clause)
+              (when
+                (and
+                  (syntax-list? clause)
+                  (pair?
+                    (syntax-form-children clause)))
+                (let* ([parts
+                         (syntax-form-children clause)]
+                       [pattern (car parts)]
+                       [clause-scope
+                         (new-scope
+                           scope
+                           (syntax-form-start pattern)
+                           (syntax-form-end clause))])
+                  (add-syntax-pattern-bindings!
+                    clause-scope
+                    pattern
+                    literals
+                    "syntax-case pattern variable")
+                  (analyze-sequence
+                    (cdr parts)
+                    clause-scope))))
+            clauses)))
+      (define (with-syntax-binding-forms node)
+        (if
+          (syntax-list? node)
+          (filter
+            (lambda (binding)
+              (and
+                (syntax-list? binding)
+                (pair?
+                  (syntax-form-children binding))))
+            (syntax-form-children node))
+          '()))
+      (define (analyze-with-syntax form scope)
+        (let* ([children (syntax-form-children form)]
+               [bindings-node
+                 (and
+                   (pair? (cdr children))
+                   (cadr children))]
+               [bindings
+                 (with-syntax-binding-forms
+                   bindings-node)]
+               [body
+                 (if bindings-node
+                     (cddr children)
+                     '())])
+          (for-each
+            (lambda (binding)
+              (analyze-sequence
+                (cdr
+                  (syntax-form-children binding))
+                scope))
+            bindings)
+          (when bindings-node
+            (let ([body-scope
+                    (new-scope
+                      scope
+                      (syntax-form-end bindings-node)
+                      (syntax-form-end form))])
+              (for-each
+                (lambda (binding)
+                  (add-syntax-pattern-bindings!
+                    body-scope
+                    (car
+                      (syntax-form-children binding))
+                    '()
+                    "with-syntax pattern variable"))
+                bindings)
+              (analyze-sequence body body-scope)))))
       (define (analyze-form form scope)
         (when (syntax-list? form)
           (let ([head (syntax-head-symbol form)]
@@ -2481,6 +2646,10 @@
                (analyze-guard form scope)]
               [(string=? head "syntax-rules")
                (analyze-syntax-rules form scope)]
+              [(string=? head "syntax-case")
+               (analyze-syntax-case form scope)]
+              [(string=? head "with-syntax")
+               (analyze-with-syntax form scope)]
               [(string=? head "define-record-type") #f]
               [else
                (analyze-sequence children scope)]))))
@@ -2571,6 +2740,35 @@
                   scopes
                   (scheme-scope-parent-id scope)))))))))
 
+  (define (scope-has-definition-kind?
+            scopes
+            offset
+            kind)
+    (let loop ([scope (scope-at scopes offset)])
+      (and
+        scope
+        (or
+          (exists
+            (lambda (definition)
+              (eq?
+                (scheme-definition-kind definition)
+                kind))
+            (scheme-scope-definitions scope))
+          (loop
+            (and
+              (scheme-scope-parent-id scope)
+              (scope-ref
+                scopes
+                (scheme-scope-parent-id scope))))))))
+
+  (define (syntax-quoted-form? tokens)
+    (and
+      (quoted-form? tokens)
+      (exists
+        (lambda (name)
+          (token-symbol=? (cadr tokens) name))
+        '("syntax" "quasisyntax"))))
+
   (define (token-in-import-specification?
             token
             import-locations)
@@ -2595,7 +2793,23 @@
       (cond
         [(null? tokens) (reverse uses)]
         [(quoted-form? tokens)
-         (loop (skip-datum tokens) uses)]
+         (if
+           (and
+             (syntax-quoted-form? tokens)
+             (scope-has-definition-kind?
+               scopes
+               (token-start (car tokens))
+               'syntax-parameter))
+           (loop (cdr tokens) uses)
+           (loop (skip-datum tokens) uses))]
+        [(syntax-prefix? (car tokens))
+         (if
+           (scope-has-definition-kind?
+             scopes
+             (token-start (car tokens))
+             'syntax-parameter)
+           (loop (cdr tokens) uses)
+           (loop (skip-datum tokens) uses))]
         [(token-in-import-specification?
            (car tokens)
            import-locations)
@@ -2763,6 +2977,11 @@
            (skip-datum (cdr remaining))
            result)]
         [(ignored-prefix? (car remaining))
+         (call-with-values
+           (lambda () (masked-datum remaining))
+           (lambda (placeholder tail)
+             (loop tail (cons placeholder result))))]
+        [(syntax-prefix? (car remaining))
          (call-with-values
            (lambda () (masked-datum remaining))
            (lambda (placeholder tail)
