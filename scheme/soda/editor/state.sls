@@ -55,6 +55,8 @@
           editor-interaction-ref
           editor-interaction-for-buffer
           editor-register-interaction!
+          editor-evaluator
+          editor-set-evaluator!
           editor-command-registry
           editor-minor-mode-catalog
           editor-global-minor-modes
@@ -237,6 +239,7 @@
       (mutable next-interaction-id
                editor-next-interaction-id
                editor-next-interaction-id-set!)
+      (mutable evaluator editor-evaluator editor-evaluator-set!)
       (immutable commands editor-command-registry)
       (immutable keymaps editor-keymap-catalog)
       (immutable languages editor-language-catalog)
@@ -325,7 +328,8 @@
             minor-modes
             global-minor-modes
             themes
-            theme))
+            theme
+            evaluator))
 
   (define (require-open-editor who value)
     (unless (editor? value)
@@ -911,6 +915,20 @@
       (lambda (session)
         (= (interaction-session-buffer-id session) buffer-id))
       (editor-interactions value)))
+
+  (define (editor-set-evaluator! value evaluator)
+    (require-open-editor 'editor-set-evaluator! value)
+    (unless evaluator
+      (assertion-violation
+        'editor-set-evaluator!
+        "evaluator must not be #f"))
+    (editor-evaluator-set! value evaluator)
+    (for-each
+      (lambda (session)
+        (when (eq? (interaction-session-kind session) 'repl)
+          (interaction-session-set-evaluator! session evaluator)))
+      (editor-interactions value))
+    evaluator)
 
   (define (editor-register-interaction!
             value
@@ -2497,7 +2515,8 @@
         (editor-minor-mode-catalog value))
       (editor-global-minor-modes value)
       (theme-catalog-snapshot (editor-theme-catalog value))
-      (editor-theme value)))
+      (editor-theme value)
+      (editor-evaluator value)))
 
   (define (same-configuration-buffers? value states)
     (let ([current
@@ -2548,6 +2567,9 @@
       (editor-theme-set!
         value
         (editor-configuration-state-theme snapshot))
+      (editor-set-evaluator!
+        value
+        (editor-configuration-state-evaluator snapshot))
       (for-each
         (lambda (buffer)
           (let ([state
@@ -3204,6 +3226,7 @@
                interactions
                '()
                1
+               #f
                (make-command-registry)
                keymaps
                (buffer-language-catalog buffer)

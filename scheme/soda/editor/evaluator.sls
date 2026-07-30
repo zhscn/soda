@@ -2,7 +2,9 @@
   (export make-chez-evaluator
           chez-evaluator?
           chez-evaluator-symbols
+          chez-evaluator-ref
           chez-evaluator-evaluate
+          chez-evaluator-evaluate-file!
           evaluation-result-continuation
           evaluation-result->transcript)
   (import (chezscheme)
@@ -25,17 +27,58 @@
     (environment-symbols
       (chez-evaluator-environment evaluator)))
 
+  (define chez-evaluator-ref
+    (case-lambda
+      [(evaluator name)
+       (chez-evaluator-ref evaluator name #f)]
+      [(evaluator name fallback)
+       (unless (chez-evaluator? evaluator)
+         (assertion-violation
+           'chez-evaluator-ref
+           "expected a Chez evaluator"
+           evaluator))
+       (unless (symbol? name)
+         (assertion-violation
+           'chez-evaluator-ref
+           "name must be a symbol"
+           name))
+       (let ([environment (chez-evaluator-environment evaluator)])
+         (if (top-level-bound? name environment)
+             (top-level-value name environment)
+             fallback))]))
+
+  (define (evaluate-port environment port)
+    (let loop ([last-values '()] [evaluated? #f])
+      (let ([form (read port)])
+        (if (eof-object? form)
+            (if evaluated? last-values '())
+            (loop
+              (call-with-values
+                (lambda () (eval form environment))
+                list)
+              #t)))))
+
   (define (evaluate-source environment source)
-    (let ([port (open-string-input-port source)])
-      (let loop ([last-values '()] [evaluated? #f])
-        (let ([form (read port)])
-          (if (eof-object? form)
-              (if evaluated? last-values '())
-              (loop
-                (call-with-values
-                  (lambda () (eval form environment))
-                  list)
-                #t))))))
+    (evaluate-port environment (open-string-input-port source)))
+
+  (define (chez-evaluator-evaluate-file! evaluator path editor)
+    (unless (chez-evaluator? evaluator)
+      (assertion-violation
+        'chez-evaluator-evaluate-file!
+        "expected a Chez evaluator"
+        evaluator))
+    (unless (and (string? path) (positive? (string-length path)))
+      (assertion-violation
+        'chez-evaluator-evaluate-file!
+        "path must be a non-empty string"
+        path))
+    (let ([environment (chez-evaluator-environment evaluator)])
+      (set-top-level-value! '*editor* editor environment)
+      (set-top-level-value! '*interaction-session* #f environment)
+      (call-with-input-file
+        path
+        (lambda (port)
+          (evaluate-port environment port)))))
 
   (define (chez-evaluator-evaluate
             evaluator

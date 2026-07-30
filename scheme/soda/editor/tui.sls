@@ -7,6 +7,7 @@
           (soda editor command-runtime)
           (soda editor core)
           (soda editor completion-runtime)
+          (soda editor configuration)
           (soda editor effect)
           (soda editor event)
           (soda editor file)
@@ -171,6 +172,17 @@
               #t))
           (set! editor (make-editor buffer))
           (install-tui-commands! editor)
+          (guard
+            (condition
+              [else
+               (editor-set-status-message!
+                 editor
+                 (string-append
+                   "Init error: "
+                   (if (message-condition? condition)
+                       (condition-message condition)
+                       "configuration was restored")))])
+            (load-default-editor-init! editor))
           (procedure editor))
         (lambda ()
           (cond

@@ -1,5 +1,6 @@
 #!r6rs
 (import (rnrs)
+        (only (chezscheme) getenv)
         (soda cpp-analysis)
         (soda document)
         (soda editor buffer)
@@ -8,12 +9,15 @@
         (soda editor cpp-language)
         (soda editor effect)
         (soda editor event)
+        (only (soda editor interaction)
+              interaction-session-evaluator)
         (soda editor keymap)
         (soda editor language)
         (soda editor minor-mode)
         (soda editor modeline)
         (soda editor motion)
         (soda editor prompt)
+        (soda editor repl)
         (soda editor scheme-semantics)
         (only (soda editor state)
               view-clear-mark!
@@ -5191,5 +5195,98 @@
       extension-late-buffer))
   (error 'editor-tests
          "unloading the final extension did not restore the baseline"))
+
+(define editor-init-file (getenv "SODA_TEST_INIT_FILE"))
+(define editor-init-v2-file (getenv "SODA_TEST_INIT_V2_FILE"))
+(define editor-init-failing-file
+  (getenv "SODA_TEST_INIT_FAILING_FILE"))
+(unless
+  (and
+    editor-init-file
+    editor-init-v2-file
+    editor-init-failing-file)
+  (error 'editor-tests "editor init fixture paths are not configured"))
+
+(define editor-before-init-evaluator
+  (editor-evaluator configuration-editor))
+(load-editor-init! configuration-editor editor-init-file)
+(define editor-initialized-evaluator
+  (editor-evaluator configuration-editor))
+(unless
+  (and
+    (editor-init-loaded? configuration-editor)
+    (not
+      (eq? editor-initialized-evaluator
+           editor-before-init-evaluator))
+    (= (editor-global-setting-ref
+         configuration-editor
+         'indent-width)
+       7)
+    (eq?
+      (chez-evaluator-ref
+        editor-initialized-evaluator
+        'soda-test-init-marker)
+      'loaded))
+  (error 'editor-tests
+         "editor init did not publish configuration and Scheme bindings"))
+
+(define initialized-repl
+  (editor-open-repl! configuration-editor))
+(unless
+  (eq?
+    (interaction-session-evaluator initialized-repl)
+    editor-initialized-evaluator)
+  (error 'editor-tests
+         "REPL did not use the editor configuration environment"))
+
+(unless
+  (guard
+    (condition [else #t])
+    (load-editor-init!
+      configuration-editor
+      editor-init-failing-file)
+    #f)
+  (error 'editor-tests "failing init reload did not raise"))
+(unless
+  (and
+    (= (editor-global-setting-ref
+         configuration-editor
+         'indent-width)
+       7)
+    (eq? (editor-evaluator configuration-editor)
+         editor-initialized-evaluator)
+    (eq?
+      (interaction-session-evaluator initialized-repl)
+      editor-initialized-evaluator)
+    (eq?
+      (chez-evaluator-ref
+        editor-initialized-evaluator
+        'soda-test-init-marker)
+      'loaded))
+  (error 'editor-tests
+         "failing init reload did not preserve the active environment"))
+
+(load-editor-init! configuration-editor editor-init-v2-file)
+(define editor-reloaded-evaluator
+  (editor-evaluator configuration-editor))
+(unless
+  (and
+    (= (editor-global-setting-ref
+         configuration-editor
+         'indent-width)
+       9)
+    (not
+      (eq? editor-reloaded-evaluator
+           editor-initialized-evaluator))
+    (eq?
+      (interaction-session-evaluator initialized-repl)
+      editor-reloaded-evaluator)
+    (eq?
+      (chez-evaluator-ref
+        editor-reloaded-evaluator
+        'soda-test-init-marker)
+      'reloaded))
+  (error 'editor-tests
+         "successful init reload did not replace the shared environment"))
 
 (editor-close! configuration-editor)

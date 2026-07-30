@@ -63,6 +63,9 @@
           editor-interactions
           editor-interaction-ref
           editor-interaction-for-buffer
+          editor-evaluator
+          chez-evaluator-symbols
+          chez-evaluator-ref
           editor-command-registry
           editor-active-command-invocation
           editor-minor-mode-catalog
@@ -96,6 +99,11 @@
           editor-unload-extension!
           editor-reload-extension!
           editor-reload-extensions!
+          default-editor-init-path
+          editor-init-loaded?
+          load-editor-init!
+          load-default-editor-init!
+          reload-editor-init!
           editor-register-language-profile!
           editor-register-major-mode!
           editor-keymap
@@ -550,6 +558,7 @@
           (soda editor command-runtime)
           (soda editor commands basic)
           (soda editor commands buffer)
+          (soda editor commands configuration)
           (soda editor commands theme)
           (soda editor commands transform)
           (soda editor comint)
@@ -557,6 +566,7 @@
           (soda editor completion-commands)
           (soda editor completion-provider)
           (soda editor completion-runtime)
+          (soda editor configuration)
           (soda editor cpp-commands)
           (soda editor cpp-language)
           (soda editor debugger)
@@ -564,6 +574,7 @@
           (soda editor diagnostics)
           (soda editor edit)
           (soda editor event)
+          (soda editor evaluator)
           (soda editor file)
           (soda editor input-state)
           (soda editor interaction)
@@ -660,6 +671,7 @@
 
   (define (make-editor buffer)
     (let ([editor (make-editor-state buffer)])
+      (editor-set-evaluator! editor (make-chez-evaluator))
       (install-core-settings! editor)
       (install-command-runtime-commands! editor)
       (install-prefix-commands! editor)
@@ -667,6 +679,7 @@
       (install-transform-commands! editor)
       (install-navigation-commands! editor)
       (install-buffer-commands! editor)
+      (install-configuration-commands! editor)
       (install-theme-commands! editor)
       (install-comint-commands! editor)
       (install-completion-commands! editor)

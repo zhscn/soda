@@ -85,3 +85,24 @@ Loader 接收 Editor，并通过配置 API 注册其贡献。Loader 应具有可
 Baseline 建立后创建的 Buffer 不属于旧 snapshot 的局部状态。扩展重建保留这些 Buffer；
 恢复 language catalog 时，仍存在的 major mode 会重新创建 runtime，已经移除的
 extension mode 回退到 `fundamental-mode`。
+
+## User init 与 Scheme 环境
+
+启动时按以下顺序查找 init：
+
+```text
+SODA_INIT_FILE
+→ $XDG_CONFIG_HOME/soda/init.ss
+→ $HOME/.config/soda/init.ss
+```
+
+`SODA_INIT_FILE` 设为空字符串时禁用自动加载。不存在默认文件时直接进入 Editor。
+
+User init 作为 `user-init` extension owner 加载。文件在一个新的 Chez evaluator 中
+完整求值，环境预先提供 `*editor*`；配置文件可以导入 `(soda editor core)` 并调用
+Editor API。只有求值和扩展重建全部成功后，新 evaluator 才成为 Editor 环境。失败时
+保留原 init 贡献和原 evaluator。
+
+Editor 内的 Scheme REPL 使用同一个 evaluator。成功 reload 后，已有 REPL session
+切换到新环境；失败 reload 继续使用旧环境。`configuration.reload-init` 从 M-x
+重新执行当前 user-init loader；尚未加载 init 时重新执行默认路径发现。

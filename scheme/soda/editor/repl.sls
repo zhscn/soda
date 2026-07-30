@@ -104,7 +104,7 @@
                      'repl
                      "Chez Scheme"
                      (buffer-id buffer)
-                     (make-chez-evaluator)
+                     (editor-evaluator editor)
                      repl-prompt
                      input-start)])
             (buffer-set-local-setting!

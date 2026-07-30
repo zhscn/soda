@@ -4,6 +4,7 @@
           interaction-session-id
           interaction-session-kind
           interaction-session-name
+          interaction-session-set-evaluator!
           interaction-session-transcript
           interaction-session-buffer-id
           interaction-session-evaluator
@@ -68,7 +69,9 @@
       (immutable kind interaction-session-kind)
       (immutable name interaction-session-name)
       (immutable transcript interaction-session-transcript)
-      (immutable evaluator interaction-session-evaluator)
+      (mutable evaluator
+               interaction-session-evaluator
+               interaction-session-evaluator-set!)
       (mutable state
                interaction-session-state
                interaction-session-state-set!)
@@ -227,6 +230,11 @@
       (assertion-violation who "expected an interaction session" session))
     (when (interaction-session-closed? session)
       (assertion-violation who "interaction session is closed" session)))
+
+  (define (interaction-session-set-evaluator! session evaluator)
+    (require-open-session 'interaction-session-set-evaluator! session)
+    (interaction-session-evaluator-set! session evaluator)
+    evaluator)
 
   (define interaction-session-begin!
     (case-lambda
