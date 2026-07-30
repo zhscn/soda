@@ -37,7 +37,8 @@
       document-id
       revision
       bytes
-      (mutable snapshot)))
+      (mutable snapshot)
+      (mutable needs-analysis?)))
 
   (define-record-type
     (scheme-workspace-index
@@ -98,6 +99,18 @@
       (equal?
         (scheme-workspace-document-resource document)
         (buffer-resource buffer))))
+
+  (define (all-workspace-documents index)
+    (let-values
+      ([(ids buffer-documents)
+        (hashtable-entries
+          (scheme-workspace-index-documents index))]
+       [(resources source-documents)
+        (hashtable-entries
+          (scheme-workspace-index-sources index))])
+      (append
+        (vector->list buffer-documents)
+        (vector->list source-documents))))
 
   (define (workspace-documents index)
     (let-values
@@ -166,7 +179,8 @@
                (scheme-semantic-snapshot-document-id snapshot)
                (scheme-semantic-snapshot-revision snapshot)
                bytes
-               snapshot))
+               snapshot
+               #t))
            (scheme-workspace-index-catalog-dirty?-set!
              index #t)
            (scheme-workspace-index-dirty?-set!
@@ -209,7 +223,55 @@
         (scheme-workspace-document-document-id document)
         (scheme-workspace-document-revision document)
         (scheme-workspace-document-bytes document)
-        library-index)))
+        library-index))
+    (scheme-workspace-document-needs-analysis?-set!
+      document #f))
+
+  (define (library-index-table index-entries)
+    (let ([table (make-hashtable equal-hash equal?)])
+      (for-each
+        (lambda (entry)
+          (let ([library (caddr entry)])
+            (hashtable-set!
+              table library
+              (append
+                (hashtable-ref table library '())
+                (list entry)))))
+        index-entries)
+      table))
+
+  (define (changed-library-names old-index new-index)
+    (let ([old-table (library-index-table old-index)]
+          [new-table (library-index-table new-index)]
+          [names (make-hashtable equal-hash equal?)]
+          [result '()])
+      (for-each
+        (lambda (entry)
+          (hashtable-set! names (caddr entry) #t))
+        (append old-index new-index))
+      (let-values ([(keys values) (hashtable-entries names)])
+        (let loop ([position 0])
+          (when (< position (vector-length keys))
+            (let ([library (vector-ref keys position)])
+              (unless
+                (equal?
+                  (hashtable-ref old-table library '())
+                  (hashtable-ref new-table library '()))
+                (set! result (cons library result))))
+            (loop (+ position 1)))))
+      result))
+
+  (define (document-imports-library?
+            document
+            libraries)
+    (exists
+      (lambda (library)
+        (member
+          library
+          (scheme-semantic-snapshot-imports
+            (scheme-workspace-document-snapshot
+              document))))
+      libraries))
 
   (define (ensure-library-index! index)
     (when
@@ -217,17 +279,34 @@
       (let ([library-index
               (scheme-sources-api-index
                 (catalog-sources index))])
-        (scheme-workspace-index-library-index-set!
-          index library-index)
-        (for-each
-          (lambda (document)
-            (refresh-document-snapshot!
-              document library-index))
-          (workspace-documents index))
-        (scheme-workspace-index-catalog-dirty?-set!
-          index #f)
-        (scheme-workspace-index-dirty?-set!
-          index #t))))
+        (let ([changed-libraries
+                (changed-library-names
+                  (scheme-workspace-index-library-index index)
+                  library-index)]
+              [active-documents
+                (workspace-documents index)])
+          (scheme-workspace-index-library-index-set!
+            index library-index)
+          (for-each
+            (lambda (document)
+              (when
+                (or
+                  (scheme-workspace-document-needs-analysis?
+                    document)
+                  (document-imports-library?
+                    document
+                    changed-libraries))
+                (if
+                  (memq document active-documents)
+                  (refresh-document-snapshot!
+                    document library-index)
+                  (scheme-workspace-document-needs-analysis?-set!
+                    document #t))))
+            (all-workspace-documents index))
+          (scheme-workspace-index-catalog-dirty?-set!
+            index #f)
+          (scheme-workspace-index-dirty?-set!
+            index #t)))))
 
   (define (add-reference! table id reference)
     (hashtable-set!
@@ -331,7 +410,8 @@
                document-id
                revision
                bytes
-               snapshot)])
+               snapshot
+               #t)])
       (hashtable-set!
         (scheme-workspace-index-sources index)
         resource

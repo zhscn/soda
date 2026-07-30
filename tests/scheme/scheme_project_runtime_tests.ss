@@ -214,6 +214,70 @@
   (error
     'scheme-project-runtime-tests
     "project definition did not produce an asynchronous source jump"))
+
+(define unrelated-buffer
+  (make-buffer
+    4
+    (make-document
+      "(import (rnrs))\n(define unrelated-value 1)\n"
+      4)
+    (vfs-path-join root "unrelated.sls")
+    'scheme-mode))
+(editor-add-buffer! editor unrelated-buffer)
+(scheme-workspace-sync-editor! workspace editor)
+(define consumer-snapshot-before-library-change
+  (scheme-workspace-snapshot-for-buffer
+    workspace project-consumer-buffer))
+(define unrelated-snapshot-before-library-change
+  (scheme-workspace-snapshot-for-buffer
+    workspace unrelated-buffer))
+(scheme-workspace-index-source!
+  workspace
+  root-resource
+  1001
+  1
+  (string->utf8
+    (string-append
+      "(library (fixture project-root)\n"
+      "  (export project-root-symbol)\n"
+      "  (import (rnrs))\n"
+      "  ;; shift the exported declaration\n"
+      "  (define (project-root-symbol value)\n"
+      "    value))\n")))
+(scheme-workspace-sync-editor! workspace editor)
+(define consumer-snapshot-after-library-change
+  (scheme-workspace-snapshot-for-buffer
+    workspace project-consumer-buffer))
+(define unrelated-snapshot-after-library-change
+  (scheme-workspace-snapshot-for-buffer
+    workspace unrelated-buffer))
+
+(unless
+  (and
+    (not
+      (eq?
+        consumer-snapshot-before-library-change
+        consumer-snapshot-after-library-change))
+    (eq?
+      unrelated-snapshot-before-library-change
+      unrelated-snapshot-after-library-change)
+    (let ([use
+            (find
+              (lambda (candidate)
+                (string=?
+                  (scheme-use-name candidate)
+                  "project-root-symbol"))
+              (scheme-semantic-snapshot-uses
+                consumer-snapshot-after-library-change))])
+      (and
+        use
+        (= (length (scheme-use-resolution use)) 1))))
+  (error
+    'scheme-project-runtime-tests
+    "library surface change did not invalidate only dependent snapshots"))
+(editor-remove-buffer!
+  editor
+  (buffer-id unrelated-buffer))
 (editor-set-view-buffer!
   editor
   (view-id (editor-active-view editor))
