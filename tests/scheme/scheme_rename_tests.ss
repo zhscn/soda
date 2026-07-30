@@ -467,6 +467,91 @@
     renamed-syntax-case))
 (editor-close! syntax-case-editor)
 
+(define local-syntax-buffer
+  (make-buffer
+    23
+    (make-document
+      (string-append
+        "(letrec-syntax\n"
+        "    ([repeat\n"
+        "       (syntax-rules ()\n"
+        "         [(_ value) (repeat value)])])\n"
+        "  (repeat 1))\n")
+      23)
+    "/project/rename-local-syntax.scm"
+    'scheme-mode))
+(define local-syntax-editor
+  (make-editor local-syntax-buffer))
+(define local-syntax-workspace
+  (editor-scheme-workspace local-syntax-editor))
+(define local-syntax-snapshot
+  (scheme-workspace-snapshot-for-buffer
+    local-syntax-workspace
+    local-syntax-buffer))
+(define local-syntax-definition
+  (find
+    (lambda (definition)
+      (and
+        (string=?
+          (scheme-definition-name definition)
+          "repeat")
+        (eq?
+          (scheme-definition-kind definition)
+          'syntax)))
+    (scheme-semantic-snapshot-definitions
+      local-syntax-snapshot)))
+(unless local-syntax-definition
+  (error
+    'scheme-rename-tests
+    "letrec-syntax binding was not indexed"))
+(define local-syntax-context
+  (make-command-context
+    local-syntax-editor
+    (editor-active-view local-syntax-editor)
+    #f
+    #f))
+(define local-syntax-effects
+  ((command-procedure
+     (editor-command-registry local-syntax-editor)
+     'scheme.rename)
+   local-syntax-context
+   local-syntax-definition
+   "repeat-form"))
+(define renamed-local-syntax
+  (buffer-string local-syntax-buffer))
+(unless
+  (and
+    (null? local-syntax-effects)
+    (not
+      (string-contains
+        renamed-local-syntax
+        "[repeat\n"))
+    (not
+      (string-contains
+        renamed-local-syntax
+        "(repeat value)"))
+    (not
+      (string-contains
+        renamed-local-syntax
+        "(repeat 1)"))
+    (string-contains
+      renamed-local-syntax
+      "[repeat-form")
+    (string-contains
+      renamed-local-syntax
+      "(repeat-form value)")
+    (string-contains
+      renamed-local-syntax
+      "(repeat-form 1)")
+    (string=?
+      (editor-status-message local-syntax-editor)
+      "Renamed to repeat-form in 3 places"))
+  (error
+    'scheme-rename-tests
+    "letrec-syntax rename lost recursive transformer references"
+    renamed-local-syntax))
+(editor-close! local-syntax-editor)
+
 (define compiled-rename-stem
   (string-append
     "/tmp/soda-compiled-rename-"

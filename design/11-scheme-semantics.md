@@ -476,7 +476,10 @@ loop binding；`guard` condition binding 只在 handler clauses 中可见。name
 scope，并让变量在 fender 与 output expression 中可见；`with-syntax` 并行分析
 initializer，再把所有 pattern binding 暴露给 body。嵌套 pattern 中的变量使用所属
 rule、clause 或 body scope，并参与补全、definition、references、document highlight
-和 rename。
+和 rename。`let-syntax` 的 transformer initializer 使用外层 scope，局部 syntax
+binding 只在 body 可见；`letrec-syntax` 先建立同组的全部 syntax binding，使其在
+每个 transformer initializer 与 body 中递归可见。局部 syntax binding 参与补全、
+definition、references 和 rename，重复名称使用普通 scope duplicate diagnostic。
 未闭合 form 的 scope range 延伸到 Document 末尾，使编辑中的参数和局部 binding
 仍可参与补全。
 

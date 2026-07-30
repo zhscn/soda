@@ -757,6 +757,132 @@
     'scheme-semantics-tests
     "duplicate macro pattern bindings were not diagnosed"))
 
+(define let-syntax-source
+  (string-append
+    "(let-syntax\n"
+    "    ([local-macro\n"
+    "       (syntax-rules ()\n"
+    "         [(_ value) (local-macro value)])])\n"
+    "  (local-macro 1))\n"))
+(define let-syntax-snapshot
+  (make-scheme-semantic-snapshot
+    717
+    0
+    (string->utf8 let-syntax-source)))
+(define let-syntax-definition
+  (car
+    (snapshot-definitions-named
+      let-syntax-snapshot
+      "local-macro")))
+(define let-syntax-uses
+  (snapshot-uses-named
+    let-syntax-snapshot
+    "local-macro"))
+(unless
+  (and
+    (eq?
+      (scheme-definition-kind
+        let-syntax-definition)
+      'syntax)
+    (= (length let-syntax-uses) 2)
+    (= (length
+         (filter
+           (lambda (use)
+             (null?
+               (scheme-use-resolution use)))
+           let-syntax-uses))
+       1)
+    (= (length
+         (scheme-semantic-references
+           let-syntax-snapshot
+           (scheme-definition-id
+             let-syntax-definition)))
+       1))
+  (error
+    'scheme-semantics-tests
+    "let-syntax binding leaked into its transformer initializer"))
+
+(define letrec-syntax-source
+  (string-append
+    "(letrec-syntax\n"
+    "    ([local-macro\n"
+    "       (syntax-rules ()\n"
+    "         [(_ value) (local-macro value)])])\n"
+    "  (local-macro 1))\n"))
+(define letrec-syntax-snapshot
+  (make-scheme-semantic-snapshot
+    718
+    0
+    (string->utf8 letrec-syntax-source)))
+(define letrec-syntax-definition
+  (car
+    (snapshot-definitions-named
+      letrec-syntax-snapshot
+      "local-macro")))
+(define letrec-syntax-uses
+  (snapshot-uses-named
+    letrec-syntax-snapshot
+    "local-macro"))
+(unless
+  (and
+    (= (length letrec-syntax-uses) 2)
+    (for-all
+      (lambda (use)
+        (scheme-definition-id=?
+          (scheme-definition-id
+            (definition-at-use
+              letrec-syntax-snapshot
+              use))
+          (scheme-definition-id
+            letrec-syntax-definition)))
+      letrec-syntax-uses)
+    (= (length
+         (scheme-semantic-references
+           letrec-syntax-snapshot
+           (scheme-definition-id
+             letrec-syntax-definition)))
+       2)
+    (exists
+      (lambda (definition)
+        (scheme-definition-id=?
+          (scheme-definition-id definition)
+          (scheme-definition-id
+            letrec-syntax-definition)))
+      (scheme-semantic-visible-definitions-at
+        letrec-syntax-snapshot
+        (scheme-use-start
+          (car
+            (reverse letrec-syntax-uses))))))
+  (error
+    'scheme-semantics-tests
+    "letrec-syntax binding was not visible in initializer and body"))
+
+(define duplicate-local-syntax-snapshot
+  (make-scheme-semantic-snapshot
+    719
+    0
+    (string->utf8
+      (string-append
+        "(letrec-syntax\n"
+        "    ([duplicate (syntax-rules () [(_ value) value])]\n"
+        "     [duplicate (syntax-rules () [(_ value) value])])\n"
+        "  (duplicate 1))\n"))))
+(unless
+  (exists
+    (lambda (diagnostic)
+      (and
+        (eq?
+          (scheme-diagnostic-code diagnostic)
+          'duplicate-binding)
+        (string=?
+          (scheme-diagnostic-message diagnostic)
+          "Duplicate binding duplicate")))
+    (scheme-semantic-snapshot-diagnostics
+      duplicate-local-syntax-snapshot))
+  (error
+    'scheme-semantics-tests
+    "duplicate local transformer bindings were not diagnosed"))
+
 (let* ([shadow-definitions
          (snapshot-definitions-named
            lexical-snapshot

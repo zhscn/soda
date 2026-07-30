@@ -962,6 +962,8 @@
       (let syntax)
       (let* syntax)
       (letrec syntax)
+      (let-syntax syntax)
+      (letrec-syntax syntax)
       (let-values syntax)
       (let*-values syntax)
       (if syntax)
@@ -2605,6 +2607,53 @@
                     "with-syntax pattern variable"))
                 bindings)
               (analyze-sequence body body-scope)))))
+      (define (analyze-local-syntax
+                form
+                scope
+                recursive?)
+        (let* ([children (syntax-form-children form)]
+               [bindings-node
+                 (and
+                   (pair? (cdr children))
+                   (cadr children))]
+               [bindings (binding-forms bindings-node)]
+               [body
+                 (if bindings-node
+                     (cddr children)
+                     '())])
+          (if
+            (not bindings-node)
+            (analyze-sequence
+              (cdr children)
+              scope)
+            (let ([body-scope
+                    (new-scope
+                      scope
+                      (if recursive?
+                          (syntax-form-start bindings-node)
+                          (syntax-form-end bindings-node))
+                      (syntax-form-end form))])
+              (for-each
+                (lambda (binding)
+                  (add-binding!
+                    body-scope
+                    (car
+                      (syntax-form-children binding))
+                    'syntax
+                    (if recursive?
+                        "local recursive syntax binding"
+                        "local syntax binding")))
+                bindings)
+              (for-each
+                (lambda (binding)
+                  (analyze-sequence
+                    (cdr
+                      (syntax-form-children binding))
+                    (if recursive?
+                        body-scope
+                        scope)))
+                bindings)
+              (analyze-sequence body body-scope)))))
       (define (analyze-form form scope)
         (when (syntax-list? form)
           (let ([head (syntax-head-symbol form)]
@@ -2640,6 +2689,10 @@
                  (string=? head "letrec")
                  (string=? head "letrec*"))
                (analyze-let form scope #t #f)]
+              [(string=? head "let-syntax")
+               (analyze-local-syntax form scope #f)]
+              [(string=? head "letrec-syntax")
+               (analyze-local-syntax form scope #t)]
               [(string=? head "do")
                (analyze-do form scope)]
               [(string=? head "guard")
@@ -3770,6 +3823,8 @@
       "let-values"
       "letrec"
       "letrec*"
+      "let-syntax"
+      "letrec-syntax"
       "or"
       "parameterize"
       "set!"
