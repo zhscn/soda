@@ -13,11 +13,15 @@
           debugger-session-frames
           debugger-session-selected-index
           debugger-session-selected-frame
+          debugger-session-evaluations
+          debugger-session-inspection-active?
           debugger-session-buffer-id
           debugger-session-set-buffer-id!
           debugger-session-next-frame!
           debugger-session-previous-frame!
           debugger-session-evaluate
+          debugger-session-inspection-down!
+          debugger-session-inspection-up!
           debugger-session->string
           debugger-session-selected-frame-byte-offset
           debugger-session-close!
@@ -52,6 +56,9 @@
             variables
             inspector))
 
+  (define-record-type debugger-evaluation
+    (fields source status output))
+
   (define-record-type
     (debugger-session %make-debugger-session debugger-session?)
     (fields interaction-id
@@ -72,6 +79,12 @@
             (mutable selected-index
                      debugger-session-selected-index
                      debugger-session-selected-index-set!)
+            (mutable evaluations
+                     debugger-session-evaluations
+                     debugger-session-evaluations-set!)
+            (mutable inspection-stack
+                     debugger-session-inspection-stack
+                     debugger-session-inspection-stack-set!)
             (mutable buffer-id
                      debugger-session-buffer-id
                      debugger-session-buffer-id-set!)
@@ -87,15 +100,17 @@
     (safe-call
       "#<unavailable>"
       (lambda ()
-        (let ([value
-                (call-with-string-output-port
-                  (lambda (port)
-                    (inspector 'write port)))])
-          (if (> (string-length value) 120)
-              (string-append
-                (substring value 0 117)
-                "...")
-              value)))))
+        (parameterize ([print-level 6]
+                       [print-length 12])
+          (let ([value
+                  (call-with-string-output-port
+                    (lambda (port)
+                      (inspector 'write port)))])
+            (if (> (string-length value) 120)
+                (string-append
+                  (substring value 0 117)
+                  "...")
+                value))))))
 
   (define (debugger-variable-preview variable)
     (unless (debugger-variable? variable)
@@ -249,6 +264,8 @@
           continuation
           frames
           (and (pair? frames) 0)
+          '()
+          '()
           #f
           #f))))
 
@@ -283,6 +300,8 @@
           continuation
           frames
           (and (pair? frames) 0)
+          '()
+          '()
           #f
           #f))))
 
@@ -374,17 +393,189 @@
         (assertion-violation
           'debugger-session-evaluate
           "debugger has no selected frame"))
-      (call-with-values
-        (lambda ()
-          ((debugger-frame-inspector frame)
-           'eval
-           (read-one source)))
-        list)))
+      (guard
+        (condition
+          [else
+           (record-evaluation!
+             debugger
+             (make-debugger-evaluation
+               source
+               'condition
+               (condition->string condition)))
+           (raise condition)])
+        (let ([values
+                (call-with-values
+                  (lambda ()
+                    ((debugger-frame-inspector frame)
+                     'eval
+                     (read-one source)))
+                  list)])
+          (record-evaluation!
+            debugger
+            (make-debugger-evaluation
+              source
+              'values
+              (values->preview values)))
+          (debugger-session-inspection-stack-set!
+            debugger
+            (if (null? values)
+                '()
+                (list
+                  (cons
+                    "result[0]"
+                    (inspect/object (car values))))))
+          values))))
+
+  (define (record-evaluation! debugger evaluation)
+    (let loop ([remaining
+                 (cons
+                   evaluation
+                   (debugger-session-evaluations debugger))]
+               [count 0]
+               [result '()])
+      (if (or (null? remaining) (= count 20))
+          (debugger-session-evaluations-set!
+            debugger
+            (reverse result))
+          (loop
+            (cdr remaining)
+            (+ count 1)
+            (cons (car remaining) result)))))
+
+  (define (debugger-session-inspection-active? debugger)
+    (require-open-debugger
+      'debugger-session-inspection-active?
+      debugger)
+    (pair? (debugger-session-inspection-stack debugger)))
+
+  (define (inspection-object inspector)
+    (if (eq? (safe-call #f (lambda () (inspector 'type)))
+             'variable)
+        (safe-call inspector (lambda () (inspector 'ref)))
+        inspector))
+
+  (define (inspection-children inspector)
+    (let* ([inspector (inspection-object inspector)]
+           [type (safe-call #f (lambda () (inspector 'type)))])
+      (cond
+        [(eq? type 'pair)
+         (list
+           (cons "car"
+                 (safe-call #f (lambda () (inspector 'car))))
+           (cons "cdr"
+                 (safe-call #f (lambda () (inspector 'cdr)))))]
+        [else
+         (let ([length
+                 (min
+                   32
+                   (safe-call
+                     0
+                     (lambda () (inspector 'length))))])
+           (let loop ([index 0] [children '()])
+             (if (>= index length)
+                 (reverse children)
+                 (let* ([child
+                          (safe-call
+                            #f
+                            (lambda () (inspector 'ref index)))]
+                        [name
+                          (and
+                            child
+                            (safe-call
+                              #f
+                              (lambda () (child 'name))))])
+                   (loop
+                     (+ index 1)
+                     (cons
+                       (cons
+                         (if name
+                             (string-append
+                               (number->string index)
+                               " "
+                               (if (symbol? name)
+                                   (symbol->string name)
+                                   (format "~s" name)))
+                             (number->string index))
+                         child)
+                       children))))))])))
+
+  (define (debugger-session-inspection-down! debugger index)
+    (require-open-debugger
+      'debugger-session-inspection-down!
+      debugger)
+    (unless
+      (and (integer? index)
+           (exact? index)
+           (not (negative? index)))
+      (assertion-violation
+        'debugger-session-inspection-down!
+        "child index must be a non-negative exact integer"
+        index))
+    (let ([stack (debugger-session-inspection-stack debugger)])
+      (unless (pair? stack)
+        (assertion-violation
+          'debugger-session-inspection-down!
+          "debugger has no inspected value"))
+      (let ([children
+              (inspection-children (cdar stack))])
+        (unless (< index (length children))
+          (assertion-violation
+            'debugger-session-inspection-down!
+            "inspection child index is out of range"
+            index))
+        (let ([child (list-ref children index)])
+          (unless (cdr child)
+            (assertion-violation
+              'debugger-session-inspection-down!
+              "inspection child is unavailable"
+              index))
+          (debugger-session-inspection-stack-set!
+            debugger
+            (cons child stack))))))
+
+  (define (debugger-session-inspection-up! debugger)
+    (require-open-debugger
+      'debugger-session-inspection-up!
+      debugger)
+    (let ([stack (debugger-session-inspection-stack debugger)])
+      (when (and (pair? stack) (pair? (cdr stack)))
+        (debugger-session-inspection-stack-set!
+          debugger
+          (cdr stack)))))
 
   (define (condition->string condition)
     (call-with-string-output-port
       (lambda (port)
         (display-condition condition port))))
+
+  (define (value->preview value)
+    (safe-call
+      "#<unavailable>"
+      (lambda ()
+        (parameterize ([print-level 6]
+                       [print-length 12])
+          (let ([text
+                  (call-with-string-output-port
+                    (lambda (port) (write value port)))])
+            (if (> (string-length text) 240)
+                (string-append (substring text 0 237) "...")
+                text))))))
+
+  (define (values->preview values)
+    (if (null? values)
+        "#<void>"
+        (let loop ([remaining values] [parts '()])
+          (if (null? remaining)
+              (apply string-append (reverse parts))
+              (loop
+                (cdr remaining)
+                (cons
+                  (if (null? (cdr remaining))
+                      (value->preview (car remaining))
+                      (string-append
+                        (value->preview (car remaining))
+                        "\n"))
+                  parts))))))
 
   (define (write-condition-details condition port)
     (when (who-condition? condition)
@@ -399,6 +590,43 @@
       (display "Irritants: " port)
       (write (condition-irritants condition) port)
       (newline port)))
+
+  (define (write-inspection debugger port)
+    (let ([stack (debugger-session-inspection-stack debugger)])
+      (when (pair? stack)
+        (let* ([inspector (inspection-object (cdar stack))]
+               [children (inspection-children inspector)])
+          (newline port)
+          (display "Inspector path: " port)
+          (let loop ([parts (reverse stack)] [first? #t])
+            (unless (null? parts)
+              (unless first? (display " / " port))
+              (display (caar parts) port)
+              (loop (cdr parts) #f)))
+          (newline port)
+          (display "Object: " port)
+          (display (inspector-preview inspector) port)
+          (newline port)
+          (display "Type: " port)
+          (write
+            (safe-call #f (lambda () (inspector 'type)))
+            port)
+          (newline port)
+          (unless (null? children)
+            (display "Children:\n" port)
+            (for-each
+              (lambda (child)
+                (display "  " port)
+                (display (car child) port)
+                (display " = " port)
+                (display
+                  (if (cdr child)
+                      (inspector-preview
+                        (inspection-object (cdr child)))
+                      "#<unavailable>")
+                  port)
+                (newline port))
+              children))))))
 
   (define (source->string frame)
     (let ([path (debugger-frame-source-path frame)]
@@ -491,7 +719,31 @@
                   (debugger-variable-preview variable)
                   port)
                 (newline port))
-              (debugger-frame-variables frame)))))))
+              (debugger-frame-variables frame))))
+        (unless (null? (debugger-session-evaluations debugger))
+          (newline port)
+          (display "Frame evaluations:\n" port)
+          (for-each
+            (lambda (evaluation)
+              (display "  " port)
+              (display
+                (if (eq? (debugger-evaluation-status evaluation)
+                         'values)
+                    "=> "
+                    "!  ")
+                port)
+              (display
+                (debugger-evaluation-source evaluation)
+                port)
+              (newline port)
+              (display "     " port)
+              (display
+                (debugger-evaluation-output evaluation)
+                port)
+              (newline port))
+            (reverse
+              (debugger-session-evaluations debugger))))
+        (write-inspection debugger port))))
 
   (define (string-find-from value needle start)
     (let ([limit (- (string-length value) (string-length needle))])
@@ -530,6 +782,8 @@
       (debugger-session-buffer-id-set! debugger #f)
       (debugger-session-selected-index-set! debugger #f)
       (debugger-session-frames-set! debugger '())
+      (debugger-session-evaluations-set! debugger '())
+      (debugger-session-inspection-stack-set! debugger '())
       (debugger-session-continuation-set! debugger #f)
       (debugger-session-condition-set! debugger #f)
       (debugger-session-closed?-set! debugger #t))))

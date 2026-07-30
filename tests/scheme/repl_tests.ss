@@ -615,6 +615,8 @@
                   next-frame
                   previous-frame
                   evaluate
+                  inspect-ref
+                  inspect-up
                   retry
                   exit
                   discard))
@@ -684,11 +686,62 @@
     'scheme.debug-eval-frame
     "42"))
 (unless
-  (string-contains?
-    (editor-status-message editor)
-    "=> 42")
+  (and
+    (string-contains?
+      (editor-status-message editor)
+      "=> 42")
+    (string-contains?
+      (buffer-string debugger-buffer)
+      "Frame evaluations:")
+    (string-contains?
+      (buffer-string debugger-buffer)
+      "=> 42"))
   (error 'repl-tests
-         "debug frame evaluation did not expose its value"))
+         "debug frame evaluation did not persist its value"))
+(dispatch!
+  (make-command-message
+    'scheme.debug-eval-frame
+    "(car 42)"))
+(unless
+  (and
+    (string-contains?
+      (editor-status-message editor)
+      "Debugger evaluation failed:")
+    (string-contains?
+      (buffer-string debugger-buffer)
+      "!  (car 42)"))
+  (error 'repl-tests
+         "debug frame evaluation did not persist its condition"))
+(dispatch!
+  (make-command-message
+    'scheme.debug-eval-frame
+    "(list 'alpha 'beta)"))
+(unless
+  (and
+    (string-contains?
+      (buffer-string debugger-buffer)
+      "Inspector path: result[0]")
+    (string-contains?
+      (buffer-string debugger-buffer)
+      "car = alpha"))
+  (error 'repl-tests
+         "debug frame evaluation did not expose an inspectable result"))
+(dispatch!
+  (make-command-message 'scheme.debug-inspect-ref 0))
+(unless
+  (string-contains?
+    (buffer-string debugger-buffer)
+    "Inspector path: result[0] / car")
+  (error 'repl-tests
+         "debug inspector did not descend into a child"))
+(dispatch!
+  (make-command-message 'scheme.debug-inspect-up #f))
+(unless
+  (string-contains?
+    (buffer-string debugger-buffer)
+    "Inspector path: result[0]\n")
+  (error 'repl-tests
+         "debug inspector did not return to its parent"))
 (dispatch!
   (make-command-message 'scheme.debug-retry #f))
 (unless

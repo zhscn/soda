@@ -342,7 +342,15 @@
     (require-open-session 'interaction-session-debug-actions session)
     (if (eq? (interaction-session-state session) 'failed)
         (if (interaction-session-debugger session)
-            '(open next-frame previous-frame evaluate retry exit discard)
+            '(open
+              next-frame
+              previous-frame
+              evaluate
+              inspect-ref
+              inspect-up
+              retry
+              exit
+              discard)
             '(retry discard))
         '()))
 

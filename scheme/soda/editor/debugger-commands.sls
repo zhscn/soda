@@ -145,7 +145,7 @@
         (debugger-session-selected-frame-byte-offset debugger))
       (editor-set-status-message!
         editor
-        "Debugger: n/p frame, e evaluate, v source, x exit, q discard")
+        "Debugger: n/p frame, e eval, d/u inspect, v source, x exit, q discard")
       buffer))
 
   (define (editor-capture-condition! editor label condition)
@@ -350,20 +350,23 @@
          (guard
            (condition
              [else
+              (refresh-debugger-buffer! editor debugger)
               (editor-set-status-message!
                 editor
                 (string-append
                   "Debugger evaluation failed: "
                   (condition->string condition)))])
-           (editor-set-status-message!
-             editor
-             (string-append
-               argument
-               " => "
-               (values->string
-                 (debugger-session-evaluate
-                   debugger
-                   argument)))))]
+           (let ([values
+                   (debugger-session-evaluate
+                     debugger
+                     argument)])
+             (refresh-debugger-buffer! editor debugger)
+             (editor-set-status-message!
+               editor
+               (string-append
+                 argument
+                 " => "
+                 (values->string values)))))]
         [(not argument)
          (editor-open-prompt!
            editor
@@ -414,20 +417,116 @@
                 (guard
                   (condition
                     [else
+                     (refresh-debugger-buffer! editor debugger)
                      (editor-set-status-message!
                        editor
                        (string-append
                          "Debugger evaluation failed: "
                          (condition->string condition)))])
-                  (editor-set-status-message!
-                    editor
-                    (string-append
-                      source
-                      " => "
-                      (values->string
-                        (debugger-session-evaluate
-                          debugger
-                          source))))))))))
+                  (let ([values
+                          (debugger-session-evaluate
+                            debugger
+                            source)])
+                    (refresh-debugger-buffer! editor debugger)
+                    (editor-set-status-message!
+                      editor
+                      (string-append
+                        source
+                        " => "
+                        (values->string values))))))))))
+      '()))
+
+  (define (debug-inspect-ref-command context)
+    (let* ([editor (command-context-editor context)]
+           [target
+             (require-debug-target
+               'scheme.debug-inspect-ref
+               context)]
+           [debugger (cadr target)]
+           [argument (command-context-argument context)])
+      (cond
+        [(and (integer? argument)
+              (exact? argument)
+              (not (negative? argument)))
+         (debugger-session-inspection-down! debugger argument)
+         (refresh-debugger-buffer! editor debugger)]
+        [(not argument)
+         (unless (debugger-session-inspection-active? debugger)
+           (editor-user-error
+             'scheme.debug-inspect-ref
+             "evaluate an expression before inspecting a child"))
+         (editor-open-prompt!
+           editor
+           (make-prompt-request
+             "Inspect child index: "
+             ""
+             'scheme-debug-inspect-ref
+             #f
+             'free
+             #f
+             'scheme.debug-inspect-ref-accept
+             #f
+             (cons
+               (debugger-session-origin debugger)
+               (debugger-session-generation debugger))))]
+        [else
+         (assertion-violation
+           'scheme.debug-inspect-ref
+           "child index must be a non-negative exact integer or #f"
+           argument)])
+      '()))
+
+  (define (debug-inspect-ref-accept-command context)
+    (let* ([editor (command-context-editor context)]
+           [result (command-context-argument context)]
+           [identity
+             (and
+               (prompt-result? result)
+               (prompt-result-data result))]
+           [source
+             (and
+               (prompt-result? result)
+               (prompt-result-value result))]
+           [target
+             (active-debug-target
+               editor
+               (command-context-view context))])
+      (when
+        (and target
+             source
+             (positive? (string-length source)))
+        (let ([debugger (cadr target)])
+          (when
+            (and
+              (pair? identity)
+              (eq? (car identity)
+                   (debugger-session-origin debugger))
+              (= (cdr identity)
+                 (debugger-session-generation debugger)))
+            (let ([index (string->number source)])
+              (unless
+                (and index
+                     (integer? index)
+                     (exact? index)
+                     (not (negative? index)))
+                (editor-user-error
+                  'scheme.debug-inspect-ref
+                  "child index must be a non-negative integer"))
+              (debugger-session-inspection-down!
+                debugger
+                index)
+              (refresh-debugger-buffer! editor debugger)))))
+      '()))
+
+  (define (debug-inspect-up-command context)
+    (let* ([editor (command-context-editor context)]
+           [target
+             (require-debug-target
+               'scheme.debug-inspect-up
+               context)]
+           [debugger (cadr target)])
+      (debugger-session-inspection-up! debugger)
+      (refresh-debugger-buffer! editor debugger)
       '()))
 
   (define (debug-retry-command context)
@@ -522,6 +621,14 @@
           debug-eval-frame-command
           "Evaluate an expression in the selected debugger frame.")
         (list
+          'scheme.debug-inspect-ref
+          debug-inspect-ref-command
+          "Inspect a child of the last debugger evaluation result.")
+        (list
+          'scheme.debug-inspect-up
+          debug-inspect-up-command
+          "Return to the parent debugger inspection object.")
+        (list
           'scheme.debug-visit-source
           debug-visit-source-command
           "Visit the source location of the selected debugger frame.")
@@ -543,6 +650,12 @@
         'scheme.debug-eval-frame-accept
         debug-eval-frame-accept-command
         "Apply input from the debugger evaluation prompt."))
+    (editor-register-internal-command!
+      editor
+      (make-internal-context-command
+        'scheme.debug-inspect-ref-accept
+        debug-inspect-ref-accept-command
+        "Apply a child index from the debugger inspector prompt."))
     (register-major-mode!
       (editor-language-catalog editor)
       (make-major-mode
@@ -567,6 +680,8 @@
         '((#\n . scheme.debug-next-frame)
           (#\p . scheme.debug-previous-frame)
           (#\e . scheme.debug-eval-frame)
+          (#\d . scheme.debug-inspect-ref)
+          (#\u . scheme.debug-inspect-up)
           (#\v . scheme.debug-visit-source)
           (#\r . scheme.debug-retry)
           (#\x . scheme.debug-exit)
