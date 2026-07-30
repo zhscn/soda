@@ -14,6 +14,8 @@
           theme-resolve-faces
           make-theme-catalog
           theme-catalog?
+          theme-catalog-snapshot
+          theme-catalog-restore!
           theme-catalog-register!
           theme-catalog-ref
           theme-catalog-names
@@ -33,6 +35,10 @@
     (fields
       (immutable table theme-catalog-table)
       (mutable names theme-catalog-names theme-catalog-names-set!)))
+
+  (define-record-type
+    (theme-catalog-state %make-theme-catalog-state theme-catalog-state?)
+    (fields table names))
 
   (define valid-attributes
     '(bold dim italic underline blink reverse hidden strike))
@@ -226,6 +232,43 @@
              (theme-catalog-register! catalog theme))
            themes)
          catalog)]))
+
+  (define (theme-catalog-snapshot catalog)
+    (unless (theme-catalog? catalog)
+      (assertion-violation
+        'theme-catalog-snapshot
+        "expected a theme catalog"
+        catalog))
+    (%make-theme-catalog-state
+      (hashtable-copy (theme-catalog-table catalog) #t)
+      (theme-catalog-names catalog)))
+
+  (define (theme-catalog-restore! catalog snapshot)
+    (unless (theme-catalog? catalog)
+      (assertion-violation
+        'theme-catalog-restore!
+        "expected a theme catalog"
+        catalog))
+    (unless (theme-catalog-state? snapshot)
+      (assertion-violation
+        'theme-catalog-restore!
+        "expected a theme catalog snapshot"
+        snapshot))
+    (hashtable-clear! (theme-catalog-table catalog))
+    (let-values
+      ([(names themes)
+        (hashtable-entries (theme-catalog-state-table snapshot))])
+      (let loop ([index 0])
+        (unless (= index (vector-length names))
+          (hashtable-set!
+            (theme-catalog-table catalog)
+            (vector-ref names index)
+            (vector-ref themes index))
+          (loop (+ index 1)))))
+    (theme-catalog-names-set!
+      catalog
+      (theme-catalog-state-names snapshot))
+    catalog)
 
   (define (theme-catalog-register! catalog value)
     (unless (theme-catalog? catalog)

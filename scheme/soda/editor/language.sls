@@ -21,6 +21,8 @@
           language-profile-enter
           make-language-catalog
           language-catalog?
+          language-catalog-snapshot
+          language-catalog-restore!
           default-language-catalog
           register-language-profile!
           find-language-profile
@@ -241,6 +243,52 @@
   (define-record-type
     (language-catalog %make-language-catalog language-catalog?)
     (fields profiles modes))
+
+  (define-record-type
+    (language-catalog-state
+      %make-language-catalog-state
+      language-catalog-state?)
+    (fields profiles modes))
+
+  (define (replace-language-table! target source)
+    (hashtable-clear! target)
+    (let-values ([(keys values) (hashtable-entries source)])
+      (let loop ([index 0])
+        (unless (= index (vector-length keys))
+          (hashtable-set!
+            target
+            (vector-ref keys index)
+            (vector-ref values index))
+          (loop (+ index 1))))))
+
+  (define (language-catalog-snapshot catalog)
+    (unless (language-catalog? catalog)
+      (assertion-violation
+        'language-catalog-snapshot
+        "expected a language catalog"
+        catalog))
+    (%make-language-catalog-state
+      (hashtable-copy (language-catalog-profiles catalog) #t)
+      (hashtable-copy (language-catalog-modes catalog) #t)))
+
+  (define (language-catalog-restore! catalog snapshot)
+    (unless (language-catalog? catalog)
+      (assertion-violation
+        'language-catalog-restore!
+        "expected a language catalog"
+        catalog))
+    (unless (language-catalog-state? snapshot)
+      (assertion-violation
+        'language-catalog-restore!
+        "expected a language catalog snapshot"
+        snapshot))
+    (replace-language-table!
+      (language-catalog-profiles catalog)
+      (language-catalog-state-profiles snapshot))
+    (replace-language-table!
+      (language-catalog-modes catalog)
+      (language-catalog-state-modes snapshot))
+    catalog)
 
   (define (make-language-catalog)
     (let ([catalog

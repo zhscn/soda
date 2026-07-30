@@ -4777,4 +4777,239 @@
        'indent-width)
      6)
   (error 'editor-tests "clearing a buffer setting did not reveal global value"))
+
+(define configuration-original-theme
+  (editor-theme configuration-editor))
+(define configuration-original-provider
+  (completion-provider-catalog-ref
+    (editor-completion-provider-catalog configuration-editor)
+    'scheme-static))
+(define configuration-default-map
+  (keymap-catalog-ref
+    (editor-keymap-catalog configuration-editor)
+    'editor.default))
+(define configuration-key
+  (make-key-stroke 'character (char->integer #\~) 0))
+(define configuration-key-status #f)
+(define configuration-key-command #f)
+(call-with-values
+  (lambda ()
+    (keymap-resolve configuration-default-map (list configuration-key)))
+  (lambda (status command)
+    (set! configuration-key-status status)
+    (set! configuration-key-command command)))
+(define configuration-pre-hooks
+  (length
+    (command-hooks
+      (editor-command-registry configuration-editor)
+      'pre-command)))
+
+(unless
+  (guard
+    (condition [else #t])
+    (call-with-editor-configuration-transaction
+      configuration-editor
+      (lambda ()
+        (editor-set-global-setting!
+          configuration-editor
+          'indent-width
+          9)
+        (editor-set-buffer-setting!
+          configuration-editor
+          configuration-buffer
+          'tab-width
+          3)
+        (editor-register-command!
+          configuration-editor
+          (make-interactive-context-command
+            'transaction.command
+            (lambda (context) '())
+            "Temporary transaction command."))
+        (command-add-advice!
+          (editor-command-registry configuration-editor)
+          'edit.undo
+          'transaction.advice
+          'before
+          (lambda (context arguments) #f)
+          0)
+        (add-command-hook!
+          (editor-command-registry configuration-editor)
+          'pre-command
+          'transaction.hook
+          (lambda (context definition arguments) #f))
+        (keymap-bind!
+          configuration-default-map
+          (list configuration-key)
+          'transaction.command)
+        (keymap-catalog-register!
+          (editor-keymap-catalog configuration-editor)
+          'transaction.map
+          (make-keymap))
+        (editor-register-completion-provider!
+          configuration-editor
+          (make-completion-provider
+            'scheme-static
+            (lambda (request) '())
+            (lambda (request) #f)))
+        (editor-register-minor-mode!
+          configuration-editor
+          (make-minor-mode-definition
+            'transaction-mode
+            "Temporary transaction mode."
+            'buffer
+            " Tx"
+            #f
+            (lambda (editor buffer) #f)
+            (lambda (editor buffer) #f)))
+        (editor-register-theme!
+          configuration-editor
+          (make-theme
+            'transaction-theme
+            'dark
+            1
+            (list
+              (cons
+                'default
+                (make-face-spec
+                  'default
+                  'default
+                  '()
+                  '())))))
+        (editor-set-theme!
+          configuration-editor
+          (theme-catalog-ref
+            (editor-theme-catalog configuration-editor)
+            'transaction-theme))
+        (editor-register-major-mode!
+          configuration-editor
+          (make-major-mode
+            'transaction-major-mode
+            'fundamental-mode
+            #f))
+        (buffer-set-major-mode!
+          configuration-buffer
+          'transaction-major-mode)
+        (error 'editor-tests "abort configuration transaction")))
+    #f)
+  (error 'editor-tests
+         "failed editor configuration transaction did not raise"))
+
+(call-with-values
+  (lambda ()
+    (keymap-resolve configuration-default-map (list configuration-key)))
+  (lambda (status command)
+    (unless
+      (and
+        (eq? status configuration-key-status)
+        (eq? command configuration-key-command))
+      (error 'editor-tests
+             "configuration rollback did not restore keymap contents"))))
+(for-each
+  (lambda (check)
+    (unless (cdr check)
+      (error 'editor-tests
+             "failed configuration transaction left a mutation"
+             (car check))))
+  (list
+    (cons
+      'global-setting
+      (= (editor-global-setting-ref
+           configuration-editor
+           'indent-width)
+         6))
+    (cons
+      'buffer-setting
+      (= (editor-setting-ref
+           configuration-editor
+           configuration-buffer
+           'tab-width)
+         8))
+    (cons
+      'command
+      (not
+        (command-registered?
+          (editor-command-registry configuration-editor)
+          'transaction.command)))
+    (cons
+      'advice
+      (not
+        (memq
+          'transaction.advice
+          (command-advice-names
+            (editor-command-registry configuration-editor)
+            'edit.undo))))
+    (cons
+      'command-hook
+      (= (length
+           (command-hooks
+             (editor-command-registry configuration-editor)
+             'pre-command))
+         configuration-pre-hooks))
+    (cons
+      'keymap-catalog
+      (not
+        (keymap-catalog-find
+          (editor-keymap-catalog configuration-editor)
+          'transaction.map)))
+    (cons
+      'completion-provider
+      (eq?
+        (completion-provider-catalog-ref
+          (editor-completion-provider-catalog configuration-editor)
+          'scheme-static)
+        configuration-original-provider))
+    (cons
+      'minor-mode
+      (not
+        (minor-mode-catalog-find
+          (editor-minor-mode-catalog configuration-editor)
+          'transaction-mode)))
+    (cons
+      'major-mode
+      (not
+        (find-major-mode
+          (editor-language-catalog configuration-editor)
+          'transaction-major-mode)))
+    (cons
+      'buffer-major-mode
+      (eq? (buffer-major-mode-name configuration-buffer) 'cpp-mode))
+    (cons
+      'language-runtime
+      (eq?
+        (language-profile-name
+          (buffer-language-profile configuration-buffer))
+        'cpp))
+    (cons
+      'active-theme
+      (eq? (editor-theme configuration-editor)
+           configuration-original-theme))
+    (cons
+      'theme-catalog
+      (not
+        (theme-catalog-ref
+          (editor-theme-catalog configuration-editor)
+          'transaction-theme)))))
+
+(unless
+  (guard
+    (condition [else #t])
+    (call-with-editor-configuration-transaction
+      configuration-editor
+      (lambda ()
+        (editor-create-buffer!
+          configuration-editor
+          "*illegal-configuration-buffer*"
+          'fundamental-mode
+          "")))
+    #f)
+  (error 'editor-tests
+         "configuration transaction allowed buffer topology mutation"))
+(unless
+  (not
+    (editor-buffer-for-resource
+      configuration-editor
+      "*illegal-configuration-buffer*"))
+  (error 'editor-tests
+         "rejected configuration buffer mutation leaked a buffer"))
+
 (editor-close! configuration-editor)

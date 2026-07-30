@@ -11,6 +11,8 @@
           define-minor-mode
           make-minor-mode-catalog
           minor-mode-catalog?
+          minor-mode-catalog-snapshot
+          minor-mode-catalog-restore!
           minor-mode-catalog-register!
           minor-mode-catalog-find
           minor-mode-catalog-ref
@@ -34,6 +36,12 @@
 
   (define-record-type
     (minor-mode-catalog %make-minor-mode-catalog minor-mode-catalog?)
+    (fields definitions hooks))
+
+  (define-record-type
+    (minor-mode-catalog-state
+      %make-minor-mode-catalog-state
+      minor-mode-catalog-state?)
     (fields definitions hooks))
 
   (define (make-minor-mode-definition
@@ -106,6 +114,40 @@
     (%make-minor-mode-catalog
       (make-eq-hashtable)
       (make-eq-hashtable)))
+
+  (define (replace-minor-mode-table! target source)
+    (hashtable-clear! target)
+    (let-values ([(keys values) (hashtable-entries source)])
+      (let loop ([index 0])
+        (unless (= index (vector-length keys))
+          (hashtable-set!
+            target
+            (vector-ref keys index)
+            (vector-ref values index))
+          (loop (+ index 1))))))
+
+  (define (minor-mode-catalog-snapshot catalog)
+    (require-catalog 'minor-mode-catalog-snapshot catalog)
+    (%make-minor-mode-catalog-state
+      (hashtable-copy
+        (minor-mode-catalog-definitions catalog)
+        #t)
+      (hashtable-copy (minor-mode-catalog-hooks catalog) #t)))
+
+  (define (minor-mode-catalog-restore! catalog snapshot)
+    (require-catalog 'minor-mode-catalog-restore! catalog)
+    (unless (minor-mode-catalog-state? snapshot)
+      (assertion-violation
+        'minor-mode-catalog-restore!
+        "expected a minor mode catalog snapshot"
+        snapshot))
+    (replace-minor-mode-table!
+      (minor-mode-catalog-definitions catalog)
+      (minor-mode-catalog-state-definitions snapshot))
+    (replace-minor-mode-table!
+      (minor-mode-catalog-hooks catalog)
+      (minor-mode-catalog-state-hooks snapshot))
+    catalog)
 
   (define (require-catalog who catalog)
     (unless (minor-mode-catalog? catalog)

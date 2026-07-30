@@ -27,6 +27,8 @@
           key-binding-command
           make-keymap-catalog
           keymap-catalog?
+          keymap-catalog-snapshot
+          keymap-catalog-restore!
           keymap-catalog-register!
           keymap-catalog-find
           keymap-catalog-ref
@@ -45,6 +47,14 @@
   (define-record-type
     (keymap-catalog %make-keymap-catalog keymap-catalog?)
     (fields entries))
+
+  (define-record-type
+    (keymap-state %make-keymap-state keymap-state?)
+    (fields keymap entries parent))
+
+  (define-record-type
+    (keymap-catalog-state %make-keymap-catalog-state keymap-catalog-state?)
+    (fields entries keymaps))
 
   (define-record-type key-binding
     (fields sequence status command))
@@ -129,6 +139,91 @@
 
   (define (make-keymap-catalog)
     (%make-keymap-catalog (make-eq-hashtable)))
+
+  (define (copy-keymap-entries entries)
+    (map
+      (lambda (entry) (cons (car entry) (cdr entry)))
+      entries))
+
+  (define (collect-keymap-states roots)
+    (let ([seen (make-eq-hashtable)])
+      (let visit-list ([remaining roots] [states '()])
+        (if (null? remaining)
+            states
+            (let visit ([keymap (car remaining)] [states states])
+              (cond
+                [(or (not keymap)
+                     (hashtable-contains? seen keymap))
+                 (visit-list (cdr remaining) states)]
+                [else
+                 (hashtable-set! seen keymap #t)
+                 (let* ([entries (keymap-entries keymap)]
+                        [next
+                          (cons
+                            (keymap-parent keymap)
+                            (filter
+                              keymap?
+                              (map cdr entries)))]
+                        [captured
+                          (cons
+                            (%make-keymap-state
+                              keymap
+                              (copy-keymap-entries entries)
+                              (keymap-parent keymap))
+                            states)])
+                   (visit-list
+                     (append next (cdr remaining))
+                     captured))]))))))
+
+  (define (replace-catalog-entries! target source)
+    (hashtable-clear! target)
+    (let-values ([(names keymaps) (hashtable-entries source)])
+      (let loop ([index 0])
+        (unless (= index (vector-length names))
+          (hashtable-set!
+            target
+            (vector-ref names index)
+            (vector-ref keymaps index))
+          (loop (+ index 1))))))
+
+  (define (keymap-catalog-snapshot catalog)
+    (unless (keymap-catalog? catalog)
+      (assertion-violation
+        'keymap-catalog-snapshot
+        "expected a keymap catalog"
+        catalog))
+    (let ([entries
+            (hashtable-copy (keymap-catalog-entries catalog) #t)])
+      (let-values ([(names keymaps) (hashtable-entries entries)])
+        (%make-keymap-catalog-state
+          entries
+          (collect-keymap-states
+            (vector->list keymaps))))))
+
+  (define (keymap-catalog-restore! catalog snapshot)
+    (unless (keymap-catalog? catalog)
+      (assertion-violation
+        'keymap-catalog-restore!
+        "expected a keymap catalog"
+        catalog))
+    (unless (keymap-catalog-state? snapshot)
+      (assertion-violation
+        'keymap-catalog-restore!
+        "expected a keymap catalog snapshot"
+        snapshot))
+    (for-each
+      (lambda (state)
+        (keymap-entries-set!
+          (keymap-state-keymap state)
+          (copy-keymap-entries (keymap-state-entries state)))
+        (keymap-parent-set!
+          (keymap-state-keymap state)
+          (keymap-state-parent state)))
+      (keymap-catalog-state-keymaps snapshot))
+    (replace-catalog-entries!
+      (keymap-catalog-entries catalog)
+      (keymap-catalog-state-entries snapshot))
+    catalog)
 
   (define (keymap-catalog-register! catalog name keymap)
     (unless (keymap-catalog? catalog)

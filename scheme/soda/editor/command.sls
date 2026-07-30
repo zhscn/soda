@@ -1,6 +1,8 @@
 (library (soda editor command)
   (export make-command-registry
           command-registry?
+          command-registry-snapshot
+          command-registry-restore!
           register-command-definition!
           command-registered?
           command-interactive?
@@ -77,6 +79,10 @@
     (fields entries hooks))
 
   (define-record-type
+    (command-registry-state %make-command-registry-state command-registry-state?)
+    (fields entries hooks))
+
+  (define-record-type
     (command-context %make-command-context command-context?)
     (fields editor view event argument prefix))
 
@@ -146,6 +152,62 @@
   (define-record-type
     (registered-command %make-registered-command registered-command?)
     (fields definition (mutable advice)))
+
+  (define (clone-command-entries entries)
+    (let ([copy (make-eq-hashtable)])
+      (let-values ([(names commands) (hashtable-entries entries)])
+        (let loop ([index 0])
+          (unless (= index (vector-length names))
+            (let ([command (vector-ref commands index)])
+              (hashtable-set!
+                copy
+                (vector-ref names index)
+                (%make-registered-command
+                  (registered-command-definition command)
+                  (registered-command-advice command))))
+            (loop (+ index 1)))))
+      copy))
+
+  (define (replace-hashtable! target source)
+    (hashtable-clear! target)
+    (let-values ([(keys values) (hashtable-entries source)])
+      (let loop ([index 0])
+        (unless (= index (vector-length keys))
+          (hashtable-set!
+            target
+            (vector-ref keys index)
+            (vector-ref values index))
+          (loop (+ index 1))))))
+
+  (define (command-registry-snapshot registry)
+    (unless (command-registry? registry)
+      (assertion-violation
+        'command-registry-snapshot
+        "expected a command registry"
+        registry))
+    (%make-command-registry-state
+      (clone-command-entries (command-registry-entries registry))
+      (hashtable-copy (command-registry-hooks registry) #t)))
+
+  (define (command-registry-restore! registry snapshot)
+    (unless (command-registry? registry)
+      (assertion-violation
+        'command-registry-restore!
+        "expected a command registry"
+        registry))
+    (unless (command-registry-state? snapshot)
+      (assertion-violation
+        'command-registry-restore!
+        "expected a command registry snapshot"
+        snapshot))
+    (replace-hashtable!
+      (command-registry-entries registry)
+      (clone-command-entries
+        (command-registry-state-entries snapshot)))
+    (replace-hashtable!
+      (command-registry-hooks registry)
+      (command-registry-state-hooks snapshot))
+    registry)
 
   (define procedure-definitions (make-eq-hashtable))
 

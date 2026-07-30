@@ -87,6 +87,9 @@
           editor-set-buffer-setting!
           editor-clear-buffer-setting!
           call-with-editor-setting-transaction
+          editor-configuration-snapshot
+          editor-restore-configuration!
+          call-with-editor-configuration-transaction
           editor-register-language-profile!
           editor-register-major-mode!
           editor-keymap

@@ -6,6 +6,8 @@
           completion-provider-cancel
           make-completion-provider-catalog
           completion-provider-catalog?
+          completion-provider-catalog-snapshot
+          completion-provider-catalog-restore!
           completion-provider-catalog-register!
           completion-provider-catalog-find
           completion-provider-catalog-ref
@@ -23,6 +25,12 @@
     (completion-provider-catalog
       %make-completion-provider-catalog
       completion-provider-catalog?)
+    (fields entries))
+
+  (define-record-type
+    (completion-provider-catalog-state
+      %make-completion-provider-catalog-state
+      completion-provider-catalog-state?)
     (fields entries))
 
   (define (make-completion-provider name start cancel)
@@ -89,6 +97,42 @@
 
   (define (make-completion-provider-catalog)
     (%make-completion-provider-catalog (make-eq-hashtable)))
+
+  (define (completion-provider-catalog-snapshot catalog)
+    (unless (completion-provider-catalog? catalog)
+      (assertion-violation
+        'completion-provider-catalog-snapshot
+        "expected a completion provider catalog"
+        catalog))
+    (%make-completion-provider-catalog-state
+      (hashtable-copy
+        (completion-provider-catalog-entries catalog)
+        #t)))
+
+  (define (completion-provider-catalog-restore! catalog snapshot)
+    (unless (completion-provider-catalog? catalog)
+      (assertion-violation
+        'completion-provider-catalog-restore!
+        "expected a completion provider catalog"
+        catalog))
+    (unless (completion-provider-catalog-state? snapshot)
+      (assertion-violation
+        'completion-provider-catalog-restore!
+        "expected a completion provider catalog snapshot"
+        snapshot))
+    (hashtable-clear! (completion-provider-catalog-entries catalog))
+    (let-values
+      ([(names providers)
+        (hashtable-entries
+          (completion-provider-catalog-state-entries snapshot))])
+      (let loop ([index 0])
+        (unless (= index (vector-length names))
+          (hashtable-set!
+            (completion-provider-catalog-entries catalog)
+            (vector-ref names index)
+            (vector-ref providers index))
+          (loop (+ index 1)))))
+    catalog)
 
   (define (completion-provider-catalog-register! catalog provider)
     (unless (completion-provider-catalog? catalog)

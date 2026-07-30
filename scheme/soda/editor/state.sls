@@ -72,6 +72,9 @@
           editor-set-buffer-setting!
           editor-clear-buffer-setting!
           call-with-editor-setting-transaction
+          editor-configuration-snapshot
+          editor-restore-configuration!
+          call-with-editor-configuration-transaction
           editor-register-language-profile!
           editor-register-major-mode!
           editor-keymap
@@ -281,7 +284,31 @@
       (mutable dirty-reasons
                editor-dirty-reasons
                editor-dirty-reasons-set!)
+      (mutable configuration-transaction-depth
+               editor-configuration-transaction-depth
+               editor-configuration-transaction-depth-set!)
       (mutable closed? editor-closed? editor-closed?-set!)))
+
+  (define-record-type
+    (editor-buffer-configuration-state
+      %make-editor-buffer-configuration-state
+      editor-buffer-configuration-state?)
+    (fields buffer mode settings))
+
+  (define-record-type
+    (editor-configuration-state
+      %make-editor-configuration-state
+      editor-configuration-state?)
+    (fields settings
+            buffers
+            commands
+            keymaps
+            languages
+            completion-providers
+            minor-modes
+            global-minor-modes
+            themes
+            theme))
 
   (define (require-open-editor who value)
     (unless (editor? value)
@@ -629,6 +656,13 @@
             resource
             buffer)))))
 
+  (define (require-buffer-topology-mutable who value)
+    (when
+      (positive? (editor-configuration-transaction-depth value))
+      (assertion-violation
+        who
+        "buffer topology cannot change in a configuration transaction")))
+
   (define (editor-set-buffer-resource! value buffer resource)
     (require-open-editor 'editor-set-buffer-resource! value)
     (unless (buffer? buffer)
@@ -685,6 +719,7 @@
 
   (define (editor-add-buffer! value buffer)
     (require-open-editor 'editor-add-buffer! value)
+    (require-buffer-topology-mutable 'editor-add-buffer! value)
     (unless (buffer? buffer)
       (assertion-violation
         'editor-add-buffer!
@@ -726,6 +761,7 @@
 
   (define (editor-create-buffer! value resource mode-name bytes)
     (require-open-editor 'editor-create-buffer! value)
+    (require-buffer-topology-mutable 'editor-create-buffer! value)
     (unless (or (not resource) (string? resource))
       (assertion-violation
         'editor-create-buffer!
@@ -756,6 +792,7 @@
 
   (define (editor-remove-buffer! value id)
     (require-open-editor 'editor-remove-buffer! value)
+    (require-buffer-topology-mutable 'editor-remove-buffer! value)
     (let ([buffer (editor-buffer-ref value id)])
       (when
         (exists
@@ -2421,6 +2458,135 @@
            (raise condition)])
         (procedure))))
 
+  (define (editor-configuration-snapshot value)
+    (require-open-editor 'editor-configuration-snapshot value)
+    (%make-editor-configuration-state
+      (setting-store-snapshot (editor-setting-store value))
+      (map
+        (lambda (buffer)
+          (%make-editor-buffer-configuration-state
+            buffer
+            (buffer-major-mode-name buffer)
+            (buffer-settings-snapshot buffer)))
+        (table-values
+          (editor-buffer-table value)
+          (editor-buffer-ids value)))
+      (command-registry-snapshot (editor-command-registry value))
+      (keymap-catalog-snapshot (editor-keymap-catalog value))
+      (language-catalog-snapshot (editor-language-catalog value))
+      (completion-provider-catalog-snapshot
+        (editor-completion-provider-catalog value))
+      (minor-mode-catalog-snapshot
+        (editor-minor-mode-catalog value))
+      (editor-global-minor-modes value)
+      (theme-catalog-snapshot (editor-theme-catalog value))
+      (editor-theme value)))
+
+  (define (same-configuration-buffers? value states)
+    (let ([current
+            (table-values
+              (editor-buffer-table value)
+              (editor-buffer-ids value))]
+          [captured
+            (map editor-buffer-configuration-state-buffer states)])
+      (and
+        (= (length current) (length captured))
+        (for-all
+          (lambda (buffer) (memq buffer captured))
+          current))))
+
+  (define (editor-restore-configuration! value snapshot)
+    (require-open-editor 'editor-restore-configuration! value)
+    (unless (editor-configuration-state? snapshot)
+      (assertion-violation
+        'editor-restore-configuration!
+        "expected an editor configuration snapshot"
+        snapshot))
+    (let ([buffer-states
+            (editor-configuration-state-buffers snapshot)])
+      (unless (same-configuration-buffers? value buffer-states)
+        (assertion-violation
+          'editor-restore-configuration!
+          "buffer topology changed after the configuration snapshot"))
+      (setting-store-restore!
+        (editor-setting-store value)
+        (editor-configuration-state-settings snapshot))
+      (command-registry-restore!
+        (editor-command-registry value)
+        (editor-configuration-state-commands snapshot))
+      (keymap-catalog-restore!
+        (editor-keymap-catalog value)
+        (editor-configuration-state-keymaps snapshot))
+      (completion-provider-catalog-restore!
+        (editor-completion-provider-catalog value)
+        (editor-configuration-state-completion-providers snapshot))
+      (minor-mode-catalog-restore!
+        (editor-minor-mode-catalog value)
+        (editor-configuration-state-minor-modes snapshot))
+      (theme-catalog-restore!
+        (editor-theme-catalog value)
+        (editor-configuration-state-themes snapshot))
+      (language-catalog-restore!
+        (editor-language-catalog value)
+        (editor-configuration-state-languages snapshot))
+      (editor-global-minor-modes-set!
+        value
+        (editor-configuration-state-global-minor-modes snapshot))
+      (editor-theme-set!
+        value
+        (editor-configuration-state-theme snapshot))
+      (for-each
+        (lambda (state)
+          (let ([buffer
+                  (editor-buffer-configuration-state-buffer state)])
+            (buffer-restore-settings!
+              buffer
+              (editor-buffer-configuration-state-settings state))
+            (buffer-set-major-mode!
+              buffer
+              (editor-buffer-configuration-state-mode state))))
+        buffer-states)
+      (editor-invalidate! value 'configuration)
+      value))
+
+  (define (call-with-editor-configuration-transaction value procedure)
+    (require-open-editor
+      'call-with-editor-configuration-transaction
+      value)
+    (unless (procedure? procedure)
+      (assertion-violation
+        'call-with-editor-configuration-transaction
+        "expected a procedure"
+        procedure))
+    (let ([snapshot (editor-configuration-snapshot value)]
+          [depth (editor-configuration-transaction-depth value)])
+      (guard
+        (condition
+          [else
+           (editor-restore-configuration! value snapshot)
+           (raise condition)])
+        (dynamic-wind
+          (lambda ()
+            (editor-configuration-transaction-depth-set!
+              value
+              (+ depth 1)))
+          (lambda ()
+            (call-with-values
+              procedure
+              (lambda results
+                (unless
+                  (same-configuration-buffers?
+                    value
+                    (editor-configuration-state-buffers snapshot))
+                  (assertion-violation
+                    'call-with-editor-configuration-transaction
+                    "configuration transaction changed buffer topology"))
+                (apply values results))))
+          (lambda ()
+            (editor-configuration-transaction-depth-set!
+              value
+              depth))))))
+
   (define (refresh-buffers! value)
     (for-each
       buffer-refresh-language!
@@ -2891,6 +3057,7 @@
                default-theme
                0
                '(initial)
+               0
                #f)])
       (hashtable-set! buffers (buffer-id buffer) buffer)
       (register-buffer-resource! value buffer)
@@ -2933,6 +3100,11 @@
 
   (define (editor-close! value)
     (when (and (editor? value) (not (editor-closed? value)))
+      (when
+        (positive? (editor-configuration-transaction-depth value))
+        (assertion-violation
+          'editor-close!
+          "editor cannot close in a configuration transaction"))
       (cancel-queued-completion-effects-now! value)
       (for-each
         (lambda (session)
