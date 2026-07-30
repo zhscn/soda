@@ -149,7 +149,7 @@
                 (filter
                   (lambda (target)
                     (not
-                      (=
+                      (equal?
                         (car target)
                         (open-request-view-id request))))
                   (open-operation-targets existing))

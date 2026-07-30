@@ -160,7 +160,7 @@
                [offsets (open-result-offsets result)])
       (and
         (pair? view-ids)
-        (if (= (car view-ids) view-id)
+        (if (equal? (car view-ids) view-id)
             (car offsets)
             (loop (cdr view-ids) (cdr offsets))))))
 
@@ -196,10 +196,13 @@
       [(view-id path)
        (make-open-request view-id path #f)]
       [(view-id path offset)
-       (unless (exact-non-negative-integer? view-id)
+       (unless
+         (or
+           (not view-id)
+           (exact-non-negative-integer? view-id))
          (assertion-violation
            'make-open-request
-           "view id must be a non-negative exact integer"
+           "view id must be a non-negative exact integer or #f"
            view-id))
        (unless (non-empty-string? path)
          (assertion-violation
@@ -401,11 +404,17 @@
       [(views offsets path status data error-name detail kind stat)
        (let ([view-ids (if (list? views) views (list views))])
        (unless
-         (and (pair? view-ids)
-              (for-all exact-non-negative-integer? view-ids))
+         (and
+           (pair? view-ids)
+           (for-all
+             (lambda (view-id)
+               (or
+                 (not view-id)
+                 (exact-non-negative-integer? view-id)))
+             view-ids))
          (assertion-violation
            'make-open-result
-           "view ids must be a non-empty list of non-negative exact integers"
+           "view ids must be a non-empty list of optional non-negative exact integers"
            views))
        (unless
          (and
@@ -854,9 +863,11 @@
         path)))
 
   (define (find-view-by-id editor id)
-    (find
-      (lambda (view) (= (view-id view) id))
-      (editor-views editor)))
+    (and
+      id
+      (find
+        (lambda (view) (= (view-id view) id))
+        (editor-views editor))))
 
   (define (activate-buffer! editor view-id buffer)
     (if (find-view-by-id editor view-id)
@@ -1201,13 +1212,16 @@
       buffer))
 
   (define (activate-open-result-buffer! editor result buffer)
-    (for-each
-      (lambda (view-id)
-        (activate-open-target!
-          editor
-          result
-          buffer
-          view-id))
+    (fold-left
+      (lambda (activated? view-id)
+        (or
+          (activate-open-target!
+            editor
+            result
+            buffer
+            view-id)
+          activated?))
+      #f
       (open-result-view-ids result)))
 
   (define (apply-open-result-command context)
@@ -1238,12 +1252,16 @@
          '()]
         [(find-buffer-by-path editor (open-result-path result)) =>
          (lambda (buffer)
-           (activate-open-result-buffer! editor result buffer)
+           (let ([activated?
+                   (activate-open-result-buffer!
+                     editor result buffer)])
            (editor-set-status-message!
              editor
              (string-append
-               "Switched to "
-               (open-result-path result)))
+                 (if activated?
+                     "Switched to "
+                     "Already open in a background buffer: ")
+                 (open-result-path result))))
            '())]
         [(open-result-not-found? result)
          (create-open-result-buffer! editor result #t)

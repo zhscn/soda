@@ -48,6 +48,8 @@
 (define external-path (string-append save-as-path ".external.sls"))
 (define insert-path (string-append save-as-path ".insert"))
 (define offset-path (string-append save-as-path ".offset.sls"))
+(define background-path
+  (string-append save-as-path ".background.sls"))
 (when (file-exists? save-path)
   (delete-file save-path))
 (when (file-exists? save-as-path)
@@ -60,6 +62,8 @@
   (delete-file insert-path))
 (when (file-exists? offset-path)
   (delete-file offset-path))
+(when (file-exists? background-path)
+  (delete-file background-path))
 
 (define document (make-document "base" 801))
 (define buffer
@@ -1315,6 +1319,38 @@
   (error 'file-tests
          "positioned open did not restore the requested byte offset"))
 
+(write-file-bytes
+  background-path
+  (string->utf8 "(define background-value 1)\n"))
+(define foreground-buffer
+  (view-buffer (editor-active-view editor)))
+(let ([result
+        (execute-effects!
+          executor
+          (list
+            (make-command-effect
+              'file.read
+              (make-open-request
+                #f
+                background-path))))])
+  (unless
+    (and
+      (effect-result-continue? result)
+      (null? (effect-result-messages result)))
+    (error 'file-tests
+           "background open did not start asynchronously")))
+(finish-file-read!)
+(unless
+  (and
+    (eq? (view-buffer (editor-active-view editor))
+         foreground-buffer)
+    (editor-buffer-for-resource editor background-path)
+    (string-contains?
+      (editor-status-message editor)
+      "background buffer"))
+  (error 'file-tests
+         "background open changed the active view"))
+
 (editor-close! editor)
 (runtime-close! runtime)
 (when (file-exists? save-path)
@@ -1329,3 +1365,5 @@
   (delete-file insert-path))
 (when (file-exists? offset-path)
   (delete-file offset-path))
+(when (file-exists? background-path)
+  (delete-file background-path))
