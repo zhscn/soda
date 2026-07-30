@@ -1104,6 +1104,109 @@
     'scheme-semantics-tests
     "fluid-let did not preserve the outer variable identity"))
 
+(define dynamic-top-level-source
+  (string-append
+    "(import (chezscheme))\n"
+    "(lambda ()\n"
+    "  (define-top-level-value 'runtime-value \"value\"))\n"
+    "(define-top-level-syntax 'runtime-keyword\n"
+    "  (syntax-rules ()\n"
+    "    [(_ value) value]))\n"
+    "runtime-value\n"
+    "(runtime-keyword 1)\n"
+    "(top-level-value 'runtime-value)\n"
+    "(set-top-level-value! (quote runtime-value) \"next\")\n"
+    "(top-level-syntax 'runtime-keyword)\n"
+    "(let ([runtime-value 99])\n"
+    "  (top-level-value 'runtime-value))\n"
+    "(define ordinary-value 0)\n"
+    "(top-level-value 'ordinary-value)\n"
+    "(let ([name 'computed-name])\n"
+    "  (define-top-level-value name 3))\n"
+    "(define-top-level-value 'foreign-value 4\n"
+    "  (interaction-environment))\n"
+    "(library (fixture dynamic-environment)\n"
+    "  (export library-hidden-value)\n"
+    "  (import (chezscheme))\n"
+    "  (define-top-level-value\n"
+    "    'library-hidden-value 5))\n"))
+(define dynamic-top-level-snapshot
+  (make-scheme-semantic-snapshot
+    724
+    0
+    (string->utf8 dynamic-top-level-source)))
+(define runtime-value-definition
+  (find
+    (lambda (definition)
+      (string=?
+        (scheme-definition-name definition)
+        "runtime-value"))
+    (scheme-semantic-snapshot-root-definitions
+      dynamic-top-level-snapshot)))
+(define runtime-keyword-definition
+  (car
+    (snapshot-definitions-named
+      dynamic-top-level-snapshot
+      "runtime-keyword")))
+(unless
+  (and
+    (eq?
+      (scheme-definition-kind
+        runtime-value-definition)
+      'variable)
+    (eq?
+      (scheme-definition-kind
+        runtime-keyword-definition)
+      'syntax)
+    (exists
+      (lambda (definition)
+        (scheme-definition-id=?
+          (scheme-definition-id definition)
+          (scheme-definition-id
+            runtime-value-definition)))
+      (scheme-semantic-snapshot-root-definitions
+        dynamic-top-level-snapshot))
+    (=
+      (length
+        (scheme-semantic-references
+          dynamic-top-level-snapshot
+          (scheme-definition-id
+            runtime-value-definition)))
+      4)
+    (=
+      (length
+        (scheme-semantic-references
+          dynamic-top-level-snapshot
+          (scheme-definition-id
+            runtime-keyword-definition)))
+      2)
+    (null?
+      (snapshot-definitions-named
+        dynamic-top-level-snapshot
+        "computed-name"))
+    (null?
+      (snapshot-definitions-named
+        dynamic-top-level-snapshot
+        "foreign-value"))
+    (null?
+      (snapshot-definitions-named
+        dynamic-top-level-snapshot
+        "library-hidden-value"))
+    (let ([ordinary
+            (car
+              (snapshot-definitions-named
+                dynamic-top-level-snapshot
+                "ordinary-value"))])
+      (=
+        (length
+          (scheme-semantic-references
+            dynamic-top-level-snapshot
+            (scheme-definition-id ordinary)))
+        1)))
+  (error
+    'scheme-semantics-tests
+    "literal Chez top-level bindings did not retain stable identities"))
+
 (let* ([shadow-definitions
          (snapshot-definitions-named
            lexical-snapshot

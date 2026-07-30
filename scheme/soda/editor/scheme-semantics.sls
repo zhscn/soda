@@ -464,9 +464,10 @@
   (define (semantic-tokens tokens)
     (filter
       (lambda (value)
-        (not (memq
-               (token-kind value)
-               '(comment string character))))
+        (not
+          (eq?
+            (token-kind value)
+            'comment)))
       tokens))
 
   (define (skip-datum tokens)
@@ -838,6 +839,71 @@
                                fields))])
                     (append base field-definitions))))))))))
 
+  (define (quoted-symbol-token tokens)
+    (cond
+      [(and
+         (pair? tokens)
+         (eq? (token-kind (car tokens)) 'prefix)
+         (= (token-value (car tokens)) 39)
+         (pair? (cdr tokens))
+         (symbol-token? (cadr tokens)))
+       (cadr tokens)]
+      [(and
+         (pair? tokens)
+         (eq? (token-kind (car tokens)) 'open)
+         (pair? (cdr tokens))
+         (token-symbol=? (cadr tokens) "quote")
+         (pair? (cddr tokens))
+         (symbol-token? (caddr tokens))
+         (pair? (cdddr tokens))
+         (eq? (token-kind (cadddr tokens)) 'close))
+       (caddr tokens)]
+      [else #f]))
+
+  (define (call-has-arity? arguments arity)
+    (let loop ([remaining arguments]
+               [count 0])
+      (cond
+        [(null? remaining) #f]
+        [(eq? (token-kind (car remaining)) 'close)
+         (= count arity)]
+        [(> count arity) #f]
+        [else
+         (loop
+           (skip-datum remaining)
+           (+ count 1))])))
+
+  (define (dynamic-top-level-definition
+            head
+            tail
+            document-id
+            revision)
+    (and
+      (call-has-arity? tail 2)
+      (let ([name (quoted-symbol-token tail)])
+        (and
+          name
+          (cond
+            [(token-symbol=? head
+               "define-top-level-value")
+             (local-definition
+               document-id
+               revision
+               name
+               'variable
+               "dynamic top-level value"
+               '())]
+            [(token-symbol=? head
+               "define-top-level-syntax")
+             (local-definition
+               document-id
+               revision
+               name
+               'syntax
+               "dynamic top-level syntax"
+               '())]
+            [else #f])))))
+
   (define (definitions-at tokens document-id revision)
     (if
       (and
@@ -846,105 +912,109 @@
         (pair? (cdr tokens)))
       (let ([head (cadr tokens)]
             [tail (cddr tokens)])
-        (cond
-          [(token-symbol=? head "define")
-           (cond
-             [(and (pair? tail) (symbol-token? (car tail)))
-              (let ([formals
-                      (initializer-formals (cdr tail))])
+        (let ([dynamic
+                (dynamic-top-level-definition
+                  head tail document-id revision)])
+          (cond
+            [dynamic (list dynamic)]
+            [(token-symbol=? head "define")
+             (cond
+               [(and (pair? tail) (symbol-token? (car tail)))
+                (let ([formals
+                        (initializer-formals (cdr tail))])
+                  (list
+                    (local-definition
+                      document-id
+                      revision
+                      (car tail)
+                      (if (pair? formals) 'procedure 'variable)
+                      (if (pair? formals)
+                          "local procedure"
+                          "local definition")
+                      formals)))]
+               [(and (pair? tail)
+                     (eq? (token-kind (car tail)) 'open)
+                     (pair? (cdr tail))
+                     (symbol-token? (cadr tail)))
                 (list
                   (local-definition
                     document-id
                     revision
-                    (car tail)
-                    (if (pair? formals) 'procedure 'variable)
-                    (if (pair? formals)
-                        "local procedure"
-                        "local definition")
-                    formals)))]
-             [(and (pair? tail)
-                   (eq? (token-kind (car tail)) 'open)
-                   (pair? (cdr tail))
-                   (symbol-token? (cadr tail)))
-              (list
-                (local-definition
-                  document-id
-                  revision
-                  (cadr tail)
-                  'procedure
-                  "local procedure"
-                  (procedure-head-formals tail)))]
-             [else '()])]
-          [(token-symbol=? head "define-values")
-           (let ([bindings
-                   (cond
-                     [(and
-                        (pair? tail)
-                        (symbol-token? (car tail))
-                        (not
-                          (token-symbol=? (car tail) ".")))
-                      (list (car tail))]
-                     [(and
-                        (pair? tail)
-                        (eq?
-                          (token-kind (car tail))
-                          'open))
-                      (filter
-                        (lambda (token)
-                          (and
-                            (symbol-token? token)
-                            (not
-                              (token-symbol=? token "."))))
-                        (tokens-before-tail
-                          tail
-                          (skip-datum tail)))]
-                     [else '()])])
-             (map
-               (lambda (binding)
+                    (cadr tail)
+                    'procedure
+                    "local procedure"
+                    (procedure-head-formals tail)))]
+               [else '()])]
+            [(token-symbol=? head "define-values")
+             (let ([bindings
+                     (cond
+                       [(and
+                          (pair? tail)
+                          (symbol-token? (car tail))
+                          (not
+                            (token-symbol=? (car tail) ".")))
+                        (list (car tail))]
+                       [(and
+                          (pair? tail)
+                          (eq?
+                            (token-kind (car tail))
+                            'open))
+                        (filter
+                          (lambda (token)
+                            (and
+                              (symbol-token? token)
+                              (not
+                                (token-symbol=? token "."))))
+                          (tokens-before-tail
+                            tail
+                            (skip-datum tail)))]
+                       [else '()])])
+               (map
+                 (lambda (binding)
+                   (local-definition
+                     document-id
+                     revision
+                     binding
+                     'variable
+                     "local values definition"
+                     '()))
+                 bindings))]
+            [(or (token-symbol=? head "define-syntax")
+                 (token-symbol=? head "define-syntax-rule"))
+             (if
+               (and (pair? tail) (symbol-token? (car tail)))
+               (list
                  (local-definition
                    document-id
                    revision
-                   binding
-                   'variable
-                   "local values definition"
+                   (car tail)
+                   'syntax
+                   "local syntax"
                    '()))
-               bindings))]
-          [(or (token-symbol=? head "define-syntax")
-               (token-symbol=? head "define-syntax-rule"))
-           (if
-             (and (pair? tail) (symbol-token? (car tail)))
-             (list
-               (local-definition
-                 document-id
-                 revision
-                 (car tail)
-                 'syntax
-                 "local syntax"
-                 '()))
-             '())]
-          [(token-symbol=? head "define-command")
-           (if
-             (and
-               (pair? tail)
-               (eq? (token-kind (car tail)) 'open)
-               (pair? (cdr tail))
-               (symbol-token? (cadr tail)))
-             (list
-               (local-definition
-                 document-id
-                 revision
-                 (cadr tail)
-                 'procedure
-                 "local command"
-                 (procedure-head-formals tail)))
-             '())]
-          [(token-symbol=? head "define-record-type")
-           (record-definitions
-             tokens
-             tail
-             document-id
-             revision)]
-          [else '()]))
+               '())]
+            [(token-symbol=? head "define-command")
+             (if
+               (and
+                 (pair? tail)
+                 (eq? (token-kind (car tail)) 'open)
+                 (pair? (cdr tail))
+                 (symbol-token? (cadr tail)))
+               (list
+                 (local-definition
+                   document-id
+                   revision
+                   (cadr tail)
+                   'procedure
+                   "local command"
+                   (procedure-head-formals tail)))
+               '())]
+            [(token-symbol=? head "define-record-type")
+             (record-definitions
+               tokens
+               tail
+               document-id
+               revision)]
+            [else '()])))
       '()))
 
   (define (quoted-form? tokens)
@@ -968,26 +1038,74 @@
           "syntax-case"
           "identifier-syntax"))))
 
-  (define (scan-definitions document-id revision tokens)
-    (let loop ([tokens (remove-ignored-data tokens)]
+  (define (source-library-ranges tokens)
+    (map
+      (lambda (form)
+        (cons
+          (syntax-form-start form)
+          (syntax-form-end form)))
+      (filter
+        (lambda (form)
+          (and
+            (syntax-list? form)
+            (string=?
+              (or (syntax-head-symbol form) "")
+              "library")))
+        (parse-syntax-forms tokens))))
+
+  (define (offset-in-source-ranges?
+            offset
+            ranges)
+    (exists
+      (lambda (range)
+        (and
+          (<= (car range) offset)
+          (< offset (cdr range))))
+      ranges))
+
+  (define (scan-definitions
+            document-id
+            revision
+            tokens
+            library-ranges)
+    (let loop ([tokens tokens]
                [definitions '()])
-      (if (null? tokens)
-          (reverse definitions)
-          (if
-            (or
-              (quoted-form? tokens)
-              (syntax-prefix? (car tokens))
-              (opaque-transformer-form? tokens))
-              (loop (skip-datum tokens) definitions)
-              (let ([candidates
-                      (definitions-at tokens document-id revision)])
-                (loop
-                  (cdr tokens)
-                  (fold-left
-                    (lambda (result definition)
-                      (cons definition result))
-                    definitions
-                    candidates)))))))
+      (cond
+        [(null? tokens)
+         (reverse definitions)]
+        [(eq?
+           (token-kind (car tokens))
+           'datum-comment)
+         (loop
+           (skip-datum (cdr tokens))
+           definitions)]
+        [(or
+           (ignored-prefix? (car tokens))
+           (quoted-form? tokens)
+           (syntax-prefix? (car tokens))
+           (opaque-transformer-form? tokens))
+         (loop (skip-datum tokens) definitions)]
+        [else
+         (let ([candidates
+                 (filter
+                   (lambda (definition)
+                     (not
+                       (and
+                         (dynamic-top-level-definition?
+                           definition)
+                         (offset-in-source-ranges?
+                           (scheme-definition-start
+                             definition)
+                           library-ranges))))
+                   (definitions-at
+                     tokens document-id revision))])
+           (loop
+             (cdr tokens)
+             (fold-left
+               (lambda (result definition)
+                 (cons definition result))
+               definitions
+               candidates)))])))
 
   (define primitive-specifications
     '((lambda syntax)
@@ -2016,6 +2134,17 @@
       (<= (scope-builder-start builder) offset)
       (< offset (scope-builder-end builder))))
 
+  (define (dynamic-top-level-definition? definition)
+    (let ([detail
+            (scheme-definition-detail definition)])
+      (and
+        (string? detail)
+        (or
+          (string=? detail
+            "dynamic top-level value")
+          (string=? detail
+            "dynamic top-level syntax")))))
+
   (define (innermost-scope-builder builders offset)
     (fold-left
       (lambda (selected candidate)
@@ -2844,11 +2973,15 @@
       (for-each
         (lambda (definition)
           (let ([scope
-                  (or
-                    (innermost-scope-builder
-                      builders
-                      (scheme-definition-start definition))
-                    root)])
+                  (if
+                    (dynamic-top-level-definition?
+                      definition)
+                    root
+                    (or
+                      (innermost-scope-builder
+                        builders
+                        (scheme-definition-start definition))
+                      root))])
             (scope-builder-add-definition!
               scope
               definition)))
@@ -2967,16 +3100,126 @@
                 (syntax-form-end form)))))
       import-locations))
 
+  (define (dynamic-top-level-use-token tokens)
+    (and
+      (pair? tokens)
+      (eq? (token-kind (car tokens)) 'open)
+      (pair? (cdr tokens))
+      (let ([head (cadr tokens)]
+            [arguments (cddr tokens)])
+        (cond
+          [(and
+             (exists
+               (lambda (name)
+                 (token-symbol=? head name))
+               '("top-level-value"
+                 "top-level-mutable?"))
+             (call-has-arity? arguments 1))
+           (let ([token
+                   (quoted-symbol-token arguments)])
+             (and token (cons 'variable token)))]
+          [(and
+             (exists
+               (lambda (name)
+                 (token-symbol=? head name))
+               '("top-level-syntax"
+                 "top-level-syntax?"))
+             (call-has-arity? arguments 1))
+           (let ([token
+                   (quoted-symbol-token arguments)])
+             (and token (cons 'syntax token)))]
+          [(and
+             (token-symbol=? head
+               "top-level-bound?")
+             (call-has-arity? arguments 1))
+           (let ([token
+                   (quoted-symbol-token arguments)])
+             (and token (cons #f token)))]
+          [(and
+             (token-symbol=? head
+               "set-top-level-value!")
+             (call-has-arity? arguments 2))
+           (let ([token
+                   (quoted-symbol-token arguments)])
+             (and token (cons 'variable token)))]
+          [else #f]))))
+
   (define (scan-uses
             tokens
             definitions
             global-table
             scopes
-            import-locations)
-    (let loop ([tokens (remove-ignored-data tokens)]
+            import-locations
+            library-ranges)
+    (define (resolved-use token)
+      (let* ([name (token-value token)]
+             [local
+               (resolve-in-scopes
+                 scopes
+                 (token-start token)
+                 name)]
+             [resolved
+               (if (pair? local)
+                   local
+                   (hashtable-ref
+                     global-table
+                     name
+                     '()))])
+        (make-scheme-use
+          name
+          (token-start token)
+          (token-end token)
+          (map scheme-definition-id resolved))))
+    (define root-scope
+      (scope-ref scopes 0))
+    (define (resolved-top-level-use
+              kind
+              token)
+      (let ([name (token-value token)])
+        (make-scheme-use
+          name
+          (token-start token)
+          (token-end token)
+          (map
+            scheme-definition-id
+            (filter
+              (lambda (definition)
+                (and
+                  (string=?
+                    (scheme-definition-name definition)
+                    name)
+                  (or
+                    (not kind)
+                    (eq?
+                      (scheme-definition-kind definition)
+                      kind))
+                  (not
+                    (offset-in-source-ranges?
+                      (scheme-definition-start definition)
+                      library-ranges))))
+              (if
+                root-scope
+                (scheme-scope-definitions root-scope)
+                '()))))))
+    (let loop ([tokens tokens]
                [uses '()])
       (cond
         [(null? tokens) (reverse uses)]
+        [(eq?
+           (token-kind (car tokens))
+           'datum-comment)
+         (loop
+           (skip-datum (cdr tokens))
+           uses)]
+        [(dynamic-top-level-use-token tokens) =>
+         (lambda (binding)
+           (loop
+             (cdr tokens)
+             (cons
+               (resolved-top-level-use
+                 (car binding)
+                 (cdr binding))
+               uses)))]
         [(quoted-form? tokens)
          (if
            (and
@@ -2987,6 +3230,8 @@
                'syntax-parameter))
            (loop (cdr tokens) uses)
            (loop (skip-datum tokens) uses))]
+        [(ignored-prefix? (car tokens))
+         (loop (skip-datum tokens) uses)]
         [(syntax-prefix? (car tokens))
          (if
            (scope-has-definition-kind?
@@ -3001,29 +3246,11 @@
          (loop (cdr tokens) uses)]
         [(and (symbol-token? (car tokens))
               (not (definition-token? (car tokens) definitions)))
-         (let* ([token (car tokens)]
-                [name (token-value token)]
-               [local
-                 (resolve-in-scopes
-                   scopes
-                   (token-start token)
-                   name)]
-                [resolved
-                  (if (pair? local)
-                      local
-                      (hashtable-ref
-                        global-table
-                        name
-                        '()))])
-           (loop
-             (cdr tokens)
-             (cons
-               (make-scheme-use
-                 name
-                 (token-start token)
-                 (token-end token)
-                 (map scheme-definition-id resolved))
-               uses)))]
+         (loop
+           (cdr tokens)
+           (cons
+             (resolved-use (car tokens))
+             uses))]
         [else (loop (cdr tokens) uses)])))
 
   (define (offset-in-range? offset start end)
@@ -4270,6 +4497,8 @@
              (library-table-with-index library-index)]
            [tokens (tokenize bytes)]
            [semantic (semantic-tokens tokens)]
+           [library-ranges
+             (source-library-ranges semantic)]
            [import-locations
              (source-import-locations tokens)]
            [import-bindings
@@ -4284,7 +4513,11 @@
              (make-definition-table-with-primitives
                visible-index)]
            [definitions
-             (scan-definitions document-id revision semantic)])
+             (scan-definitions
+               document-id
+               revision
+               semantic
+               library-ranges)])
       (call-with-values
         (lambda ()
           (collect-lexical-scopes
@@ -4300,7 +4533,8 @@
                     scoped-definitions
                     global-table
                     scopes
-                    import-locations)])
+                    import-locations
+                    library-ranges)])
             (%make-scheme-semantic-snapshot
               document-id
               revision

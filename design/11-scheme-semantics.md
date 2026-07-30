@@ -187,6 +187,7 @@ BindingRuleResult {
 - `only`、`except`、`prefix`、`rename`、`for`；
 - `define-syntax`、`let-syntax`、`letrec-syntax`、`identifier-syntax` 与
   `fluid-let-syntax`；
+- Chez interaction top-level 的 literal binding 与 lookup；
 - quote、quasiquote、syntax 与 quasisyntax 的 phase 边界。
 
 规则 registry 按 language profile 和 library 扩展。项目宏可以注册专用 binding
@@ -466,6 +467,14 @@ annotation 的生命周期不受光标高亮替换影响。光标刷新只同步
 名称、constructor、predicate、accessor 与 mutator 分别形成稳定定义。未闭合的
 外围 form 不妨碍已经出现的定义进入 snapshot。
 
+省略 environment 参数的
+`define-top-level-value` 和 `define-top-level-syntax` 在首参数为 quoted symbol 时，
+为 interaction top level 建立 root DefinitionId。对应的 `top-level-value`、
+`set-top-level-value!`、`top-level-syntax` 及 top-level predicate 在同样使用 quoted
+symbol 和默认 environment 时产生结构化 use，因此 quoted 名称参与 definition、
+references、highlight 和 rename。运行时计算的 symbol 与显式 environment 没有稳定
+的静态 identity，保持普通 procedure call 语义。
+
 scanner 同时从容错 syntax form 建立 lexical scope tree。procedure definition、
 `lambda` 和每个 `case-lambda` clause 为 parameters 建立独立 scope；rest parameter
 使用同一 binding 模型。`let` 的 binding 只在 body scope 可见，`let*` 为每个
@@ -620,6 +629,9 @@ completion、document highlight、help 和实时诊断直接读取 Buffer 自身
 catalog 与 reference 倒排表；移除最后一个 session artifact 时释放这些缓存。
 xref、rename 和 workspace symbol 等显式查询可以按需同步打开文档，但不会
 启动后台目录遍历、watcher 或周期性索引。
+Scheme `load`、`load-program` 和 `load-library` 是 evaluator 的运行时操作，不向
+workspace 注入 source definitions。跨文件静态 surface 只由显式 language session
+安装的编译 artifact 提供。
 
 显式 language workspace session 按 owner 安装 interface index。同一 owner 的新
 revision 原子替换旧 surface；移除 session 时撤销对应 surface。多个 index 按安装

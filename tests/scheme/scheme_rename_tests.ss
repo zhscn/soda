@@ -844,6 +844,82 @@
     renamed-fluid-let))
 (editor-close! fluid-let-editor)
 
+(define dynamic-top-level-buffer
+  (make-buffer
+    28
+    (make-document
+      (string-append
+        "(import (chezscheme))\n"
+        "(define-top-level-value 'runtime-value \"value\")\n"
+        "(list runtime-value\n"
+        "      (top-level-value 'runtime-value))\n"
+        "(set-top-level-value! 'runtime-value \"next\")\n")
+      28)
+    "/project/rename-dynamic-top-level.scm"
+    'scheme-mode))
+(define dynamic-top-level-editor
+  (make-editor dynamic-top-level-buffer))
+(define dynamic-top-level-workspace
+  (editor-scheme-workspace
+    dynamic-top-level-editor))
+(define dynamic-top-level-snapshot
+  (scheme-workspace-snapshot-for-buffer
+    dynamic-top-level-workspace
+    dynamic-top-level-buffer))
+(define dynamic-top-level-definition
+  (find
+    (lambda (definition)
+      (string=?
+        (scheme-definition-name definition)
+        "runtime-value"))
+    (scheme-semantic-snapshot-definitions
+      dynamic-top-level-snapshot)))
+(unless dynamic-top-level-definition
+  (error
+    'scheme-rename-tests
+    "literal dynamic top-level binding was not indexed"))
+(define dynamic-top-level-context
+  (make-command-context
+    dynamic-top-level-editor
+    (editor-active-view
+      dynamic-top-level-editor)
+    #f
+    #f))
+(define dynamic-top-level-effects
+  ((command-procedure
+     (editor-command-registry
+       dynamic-top-level-editor)
+     'scheme.rename)
+   dynamic-top-level-context
+   dynamic-top-level-definition
+   "session-value"))
+(define renamed-dynamic-top-level
+  (buffer-string dynamic-top-level-buffer))
+(unless
+  (and
+    (null? dynamic-top-level-effects)
+    (string-contains
+      renamed-dynamic-top-level
+      "(define-top-level-value 'session-value \"value\")")
+    (string-contains
+      renamed-dynamic-top-level
+      "(list session-value")
+    (string-contains
+      renamed-dynamic-top-level
+      "(top-level-value 'session-value)")
+    (string-contains
+      renamed-dynamic-top-level
+      "(set-top-level-value! 'session-value \"next\")")
+    (string=?
+      (editor-status-message
+        dynamic-top-level-editor)
+      "Renamed to session-value in 4 places"))
+  (error
+    'scheme-rename-tests
+    "dynamic top-level rename lost literal symbol references"
+    renamed-dynamic-top-level))
+(editor-close! dynamic-top-level-editor)
+
 (define compiled-rename-stem
   (string-append
     "/tmp/soda-compiled-rename-"
