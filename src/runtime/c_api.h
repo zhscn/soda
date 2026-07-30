@@ -30,13 +30,17 @@ typedef struct soda_terminal soda_terminal;
 #define SODA_EVENT_DIRECTORY_SCAN 5U
 #define SODA_EVENT_PATH_STAT 6U
 #define SODA_EVENT_PATH_CHANGE 7U
+#define SODA_EVENT_PROCESS_OUTPUT 8U
+#define SODA_EVENT_PROCESS_EXIT 9U
 
-#define SODA_RUNTIME_ABI_VERSION 6U
+#define SODA_RUNTIME_ABI_VERSION 7U
 
 #define SODA_FD_READABLE (1U << 0U)
 #define SODA_FD_WRITABLE (1U << 1U)
 #define SODA_PATH_RENAME (1U << 0U)
 #define SODA_PATH_CHANGE (1U << 1U)
+#define SODA_PROCESS_STDOUT (1U << 0U)
+#define SODA_PROCESS_STDERR (1U << 1U)
 #define SODA_TERMINAL_WOULD_BLOCK (-2)
 
 SODA_RUNTIME_API soda_runtime* soda_runtime_create(void);
@@ -53,6 +57,13 @@ SODA_RUNTIME_API uint64_t soda_runtime_scan_directory(soda_runtime* runtime, con
 SODA_RUNTIME_API uint64_t soda_runtime_stat_path(soda_runtime* runtime, const char* path,
                                                  int follow_symlinks);
 SODA_RUNTIME_API uint64_t soda_runtime_watch_path(soda_runtime* runtime, const char* path);
+// Arguments are encoded as repeated uint32_t little-endian byte length followed
+// by that many UTF-8 bytes. The first argument names the executable and is also
+// used as argv[0]. An empty working_directory inherits the current directory.
+SODA_RUNTIME_API uint64_t soda_runtime_spawn_process(soda_runtime* runtime,
+                                                     const char* working_directory,
+                                                     const uint8_t* arguments,
+                                                     size_t arguments_size);
 SODA_RUNTIME_API int soda_runtime_cancel(soda_runtime* runtime, uint64_t source);
 
 SODA_RUNTIME_API int soda_runtime_poll(soda_runtime* runtime, int mode);
@@ -76,6 +87,10 @@ SODA_RUNTIME_API size_t soda_runtime_event_data_size(soda_runtime* runtime);
 // Its event flags contain the libuv directory-entry type of the resource.
 // Path-change data contains the changed entry name relative to the watched
 // directory. Its event flags contain SODA_PATH_RENAME and SODA_PATH_CHANGE.
+// Process-output data contains an arbitrary byte chunk. Its flags contain
+// SODA_PROCESS_STDOUT or SODA_PROCESS_STDERR. A process-exit status is the
+// non-negative exit status, or a negative libuv spawn error; its flags contain
+// the termination signal.
 // Borrowed view of the current event payload. The pointer remains valid until
 // the next operation that advances the current event or destroys the runtime.
 SODA_RUNTIME_API const uint8_t* soda_runtime_event_data(soda_runtime* runtime);

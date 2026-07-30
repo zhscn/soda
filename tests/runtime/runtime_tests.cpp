@@ -99,6 +99,86 @@ TEST_CASE("file read failures are completion events") {
     CHECK(event->data.empty());
 }
 
+#if !defined(_WIN32)
+TEST_CASE("process output streams precede its exit event") {
+    Runtime runtime;
+    const SourceId process = runtime.spawn_process({"/bin/sh", "-c",
+                                                    "printf 'standard output'; "
+                                                    "printf 'standard error' >&2; exit 7"});
+
+    std::string standard_output;
+    std::string standard_error;
+    bool exited = false;
+    while (!exited) {
+        if (runtime.pending_events() == 0) {
+            (void)runtime.poll(PollMode::Once);
+        }
+        while (const auto event = runtime.next_event()) {
+            REQUIRE(event->source == process);
+            if (event->kind == EventKind::ProcessOutput) {
+                REQUIRE(event->status == 0);
+                const std::string chunk(reinterpret_cast<const char*>(event->data.data()),
+                                        event->data.size());
+                if (event->flags == SODA_PROCESS_STDOUT) {
+                    standard_output += chunk;
+                } else if (event->flags == SODA_PROCESS_STDERR) {
+                    standard_error += chunk;
+                } else {
+                    FAIL("unknown process output stream");
+                }
+            } else {
+                REQUIRE(event->kind == EventKind::ProcessExit);
+                CHECK(event->status == 7);
+                CHECK(event->flags == 0);
+                exited = true;
+            }
+        }
+    }
+
+    CHECK(standard_output == "standard output");
+    CHECK(standard_error == "standard error");
+    CHECK_FALSE(runtime.alive());
+}
+
+TEST_CASE("process spawn failures are asynchronous exit events") {
+    Runtime runtime;
+    const SourceId process = runtime.spawn_process({"/soda/program/that/does/not/exist"});
+
+    while (runtime.pending_events() == 0) {
+        (void)runtime.poll(PollMode::Once);
+    }
+    const auto event = runtime.next_event();
+    REQUIRE(event.has_value());
+    CHECK(event->kind == EventKind::ProcessExit);
+    CHECK(event->source == process);
+    CHECK(event->status == UV_ENOENT);
+    CHECK(event->data.empty());
+    CHECK_FALSE(runtime.alive());
+}
+
+TEST_CASE("process cancellation terminates the child asynchronously") {
+    Runtime runtime;
+    const SourceId process = runtime.spawn_process({"/bin/sleep", "30"});
+    CHECK(runtime.cancel(process));
+
+    bool exited = false;
+    while (!exited) {
+        if (runtime.pending_events() == 0) {
+            (void)runtime.poll(PollMode::Once);
+        }
+        while (const auto event = runtime.next_event()) {
+            REQUIRE(event->source == process);
+            if (event->kind == EventKind::ProcessExit) {
+                CHECK(event->flags == SIGTERM);
+                exited = true;
+            }
+        }
+    }
+    CHECK_FALSE(runtime.cancel(process));
+    CHECK_FALSE(runtime.alive());
+}
+#endif
+
 TEST_CASE("asynchronous directory scan returns typed entries") {
     namespace fs = std::filesystem;
     const fs::path directory =

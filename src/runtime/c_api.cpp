@@ -11,6 +11,7 @@
 #include <exception>
 #include <optional>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 #include <utility>
 #include <vector>
@@ -51,6 +52,41 @@ const soda::runtime::Event* current_event(soda_runtime* runtime) noexcept {
         return nullptr;
     }
     return &*runtime->current_event;
+}
+
+std::uint32_t read_u32(const std::uint8_t* data, std::size_t offset) {
+    return static_cast<std::uint32_t>(data[offset]) |
+           (static_cast<std::uint32_t>(data[offset + 1]) << 8U) |
+           (static_cast<std::uint32_t>(data[offset + 2]) << 16U) |
+           (static_cast<std::uint32_t>(data[offset + 3]) << 24U);
+}
+
+std::vector<std::string> decode_process_arguments(const std::uint8_t* data, std::size_t size) {
+    if (data == nullptr && size != 0) {
+        throw std::invalid_argument("process arguments are null");
+    }
+    std::vector<std::string> arguments;
+    std::size_t offset = 0;
+    while (offset < size) {
+        if (size - offset < sizeof(std::uint32_t)) {
+            throw std::invalid_argument("truncated process argument length");
+        }
+        const std::size_t length = read_u32(data, offset);
+        offset += sizeof(std::uint32_t);
+        if (length > size - offset) {
+            throw std::invalid_argument("truncated process argument");
+        }
+        std::string argument(reinterpret_cast<const char*>(data + offset), length);
+        if (argument.find('\0') != std::string::npos) {
+            throw std::invalid_argument("process argument contains a null byte");
+        }
+        arguments.push_back(std::move(argument));
+        offset += length;
+    }
+    if (arguments.empty() || arguments.front().empty()) {
+        throw std::invalid_argument("process executable is empty");
+    }
+    return arguments;
 }
 
 } // namespace
@@ -135,6 +171,17 @@ uint64_t soda_runtime_watch_path(soda_runtime* runtime, const char* path) {
             throw std::invalid_argument("path watch path is null");
         }
         return runtime->runtime.watch_path(path).value;
+    });
+}
+
+uint64_t soda_runtime_spawn_process(soda_runtime* runtime, const char* working_directory,
+                                    const uint8_t* arguments, size_t arguments_size) {
+    return guard(runtime, uint64_t{0}, [&] {
+        const std::string directory =
+            working_directory == nullptr ? std::string{} : std::string{working_directory};
+        return runtime->runtime
+            .spawn_process(decode_process_arguments(arguments, arguments_size), directory)
+            .value;
     });
 }
 

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <csignal>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
@@ -110,6 +111,33 @@ struct Runtime::Impl {
         std::string path;
     };
 
+    struct Process {
+        struct Output {
+            Process* process = nullptr;
+            uv_pipe_t handle{};
+            std::array<char, 64UZ * 1024UZ> chunk{};
+            std::uint32_t flag = 0;
+            bool closing = false;
+            bool closed = false;
+        };
+
+        Impl* owner = nullptr;
+        SourceId id;
+        uv_process_t handle{};
+        Output standard_output;
+        Output standard_error;
+        std::vector<std::string> arguments;
+        std::vector<char*> argument_pointers;
+        std::string working_directory;
+        std::int64_t exit_status = 0;
+        int termination_signal = 0;
+        int spawn_status = 0;
+        bool spawned = false;
+        bool exited = false;
+        bool process_closing = false;
+        bool process_closed = false;
+    };
+
     Impl() : owner_thread(std::this_thread::get_id()) {
         const int status = uv_loop_init(&loop);
         if (status < 0) {
@@ -150,6 +178,12 @@ struct Runtime::Impl {
         for (auto& [id, stat] : path_stats) {
             (void)id;
             (void)uv_cancel(reinterpret_cast<uv_req_t*>(&stat->request));
+        }
+        for (auto& [id, process] : processes) {
+            (void)id;
+            if (process->spawned && !process->exited) {
+                (void)uv_process_kill(&process->handle, SIGKILL);
+            }
         }
 
         while (uv_loop_alive(&loop) != 0) {
@@ -382,6 +416,98 @@ struct Runtime::Impl {
         return id;
     }
 
+    SourceId spawn_process(std::vector<std::string> arguments, std::string working_directory) {
+        require_owner_thread();
+        if (arguments.empty() || arguments.front().empty()) {
+            throw std::invalid_argument("process executable is empty");
+        }
+        if (std::ranges::any_of(arguments,
+                                [](const std::string& argument) {
+                                    return argument.find('\0') != std::string::npos;
+                                }) ||
+            working_directory.find('\0') != std::string::npos) {
+            throw std::invalid_argument("process path or argument contains a null byte");
+        }
+
+        auto process = std::make_unique<Process>();
+        process->owner = this;
+        process->id = allocate_id();
+        process->arguments = std::move(arguments);
+        process->working_directory = std::move(working_directory);
+        process->standard_output.process = process.get();
+        process->standard_output.flag = 1U;
+        process->standard_error.process = process.get();
+        process->standard_error.flag = 2U;
+        process->handle.data = process.get();
+        const SourceId id = process->id;
+
+        process->argument_pointers.reserve(process->arguments.size() + 1);
+        for (std::string& argument : process->arguments) {
+            process->argument_pointers.push_back(argument.data());
+        }
+        process->argument_pointers.push_back(nullptr);
+
+        processes.emplace(id.value, std::move(process));
+        Process& operation = *processes.at(id.value);
+        const int stdout_status = uv_pipe_init(&loop, &operation.standard_output.handle, 0);
+        if (stdout_status < 0) {
+            operation.spawn_status = stdout_status;
+            operation.exited = true;
+            operation.process_closed = true;
+            operation.standard_output.closed = true;
+            operation.standard_error.closed = true;
+            finish_process_if_closed(operation);
+            return id;
+        }
+        operation.standard_output.handle.data = &operation.standard_output;
+
+        const int stderr_status = uv_pipe_init(&loop, &operation.standard_error.handle, 0);
+        if (stderr_status < 0) {
+            operation.spawn_status = stderr_status;
+            operation.exited = true;
+            operation.process_closed = true;
+            operation.standard_error.closed = true;
+            close_process_output(operation.standard_output);
+            return id;
+        }
+        operation.standard_error.handle.data = &operation.standard_error;
+
+        std::array<uv_stdio_container_t, 3> stdio{};
+        stdio[0].flags = UV_IGNORE;
+        stdio[1].flags =
+            static_cast<uv_stdio_flags>( // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange)
+                UV_CREATE_PIPE | UV_WRITABLE_PIPE);
+        stdio[1].data.stream = reinterpret_cast<uv_stream_t*>(&operation.standard_output.handle);
+        stdio[2].flags =
+            static_cast<uv_stdio_flags>( // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange)
+                UV_CREATE_PIPE | UV_WRITABLE_PIPE);
+        stdio[2].data.stream = reinterpret_cast<uv_stream_t*>(&operation.standard_error.handle);
+
+        uv_process_options_t options{};
+        options.exit_cb = on_process_exit;
+        options.file = operation.arguments.front().c_str();
+        options.args = operation.argument_pointers.data();
+        options.cwd =
+            operation.working_directory.empty() ? nullptr : operation.working_directory.c_str();
+        options.stdio_count = static_cast<int>(stdio.size());
+        options.stdio = stdio.data();
+
+        const int status = uv_spawn(&loop, &operation.handle, &options);
+        if (status < 0) {
+            operation.spawn_status = status;
+            operation.exited = true;
+            close_process_handle(operation);
+            close_process_output(operation.standard_output);
+            close_process_output(operation.standard_error);
+            return id;
+        }
+
+        operation.spawned = true;
+        start_process_output(operation.standard_output);
+        start_process_output(operation.standard_error);
+        return id;
+    }
+
     bool cancel(SourceId source) {
         require_owner_thread();
         if (!source.valid()) {
@@ -419,6 +545,12 @@ struct Runtime::Impl {
         }
         if (const auto stat = path_stats.find(source.value); stat != path_stats.end()) {
             return uv_cancel(reinterpret_cast<uv_req_t*>(&stat->second->request)) == 0;
+        }
+        if (const auto process = processes.find(source.value); process != processes.end()) {
+            if (!process->second->spawned || process->second->exited) {
+                return false;
+            }
+            return uv_process_kill(&process->second->handle, SIGTERM) == 0;
         }
         return false;
     }
@@ -471,6 +603,62 @@ struct Runtime::Impl {
         watch.closing = true;
         (void)uv_fs_event_stop(&watch.handle);
         uv_close(reinterpret_cast<uv_handle_t*>(&watch.handle), on_path_watch_closed);
+    }
+
+    void start_process_output(Process::Output& output) {
+        const int status = uv_read_start(reinterpret_cast<uv_stream_t*>(&output.handle),
+                                         on_process_allocate, on_process_output);
+        if (status < 0) {
+            if (!shutting_down) {
+                events.push_back({
+                    .kind = EventKind::ProcessOutput,
+                    .source = output.process->id,
+                    .status = status,
+                    .flags = output.flag,
+                    .data = {},
+                });
+            }
+            close_process_output(output);
+        }
+    }
+
+    void close_process_output(Process::Output& output) {
+        if (output.closing || output.closed) {
+            return;
+        }
+        output.closing = true;
+        (void)uv_read_stop(reinterpret_cast<uv_stream_t*>(&output.handle));
+        uv_close(reinterpret_cast<uv_handle_t*>(&output.handle), on_process_output_closed);
+    }
+
+    void close_process_handle(Process& process) {
+        if (process.process_closing || process.process_closed) {
+            return;
+        }
+        process.process_closing = true;
+        uv_close(reinterpret_cast<uv_handle_t*>(&process.handle), on_process_handle_closed);
+    }
+
+    void finish_process_if_closed(Process& process) {
+        if (!process.exited || !process.process_closed || !process.standard_output.closed ||
+            !process.standard_error.closed) {
+            return;
+        }
+        const auto id = process.id.value;
+        if (!shutting_down) {
+            const int status = process.spawn_status < 0
+                                   ? process.spawn_status
+                                   : static_cast<int>(std::clamp<std::int64_t>(
+                                         process.exit_status, 0, std::numeric_limits<int>::max()));
+            events.push_back({
+                .kind = EventKind::ProcessExit,
+                .source = process.id,
+                .status = status,
+                .flags = static_cast<std::uint32_t>(std::max(process.termination_signal, 0)),
+                .data = {},
+            });
+        }
+        processes.erase(id);
     }
 
     void submit_file_read(FileRead& operation) {
@@ -740,6 +928,74 @@ struct Runtime::Impl {
         watch.owner->path_watches.erase(watch.id.value);
     }
 
+    static void on_process_allocate(uv_handle_t* handle, std::size_t suggested_size,
+                                    uv_buf_t* buffer) noexcept {
+        (void)suggested_size;
+        auto& output = *static_cast<Process::Output*>(handle->data);
+        *buffer = uv_buf_init(output.chunk.data(), static_cast<unsigned int>(output.chunk.size()));
+    }
+
+    static void on_process_output(uv_stream_t* stream, ssize_t size,
+                                  const uv_buf_t* buffer) noexcept {
+        guard_callback([&] {
+            auto& output = *static_cast<Process::Output*>(stream->data);
+            Process& process = *output.process;
+            Impl& owner = *process.owner;
+            if (size > 0 && !owner.shutting_down) {
+                const auto byte_count = static_cast<std::size_t>(size);
+                std::vector<std::byte> data(byte_count);
+                std::ranges::copy_n(reinterpret_cast<const std::byte*>(buffer->base),
+                                    static_cast<std::ptrdiff_t>(byte_count), data.begin());
+                owner.events.push_back({
+                    .kind = EventKind::ProcessOutput,
+                    .source = process.id,
+                    .status = 0,
+                    .flags = output.flag,
+                    .data = std::move(data),
+                });
+            } else if (size < 0) {
+                if (size != UV_EOF && !owner.shutting_down) {
+                    owner.events.push_back({
+                        .kind = EventKind::ProcessOutput,
+                        .source = process.id,
+                        .status = static_cast<int>(size),
+                        .flags = output.flag,
+                        .data = {},
+                    });
+                }
+                owner.close_process_output(output);
+            }
+        });
+    }
+
+    static void on_process_output_closed(uv_handle_t* handle) noexcept {
+        guard_callback([&] {
+            auto& output = *static_cast<Process::Output*>(handle->data);
+            Process& process = *output.process;
+            output.closed = true;
+            process.owner->finish_process_if_closed(process);
+        });
+    }
+
+    static void on_process_exit(uv_process_t* handle, std::int64_t exit_status,
+                                int termination_signal) noexcept {
+        guard_callback([&] {
+            auto& process = *static_cast<Process*>(handle->data);
+            process.exited = true;
+            process.exit_status = exit_status;
+            process.termination_signal = termination_signal;
+            process.owner->close_process_handle(process);
+        });
+    }
+
+    static void on_process_handle_closed(uv_handle_t* handle) noexcept {
+        guard_callback([&] {
+            auto& process = *static_cast<Process*>(handle->data);
+            process.process_closed = true;
+            process.owner->finish_process_if_closed(process);
+        });
+    }
+
     static void on_file_read(uv_fs_t* request) noexcept {
         guard_callback([&] {
             auto& operation = *static_cast<FileRead*>(request->data);
@@ -958,6 +1214,7 @@ struct Runtime::Impl {
     std::unordered_map<std::uint64_t, std::unique_ptr<FileWrite>> file_writes;
     std::unordered_map<std::uint64_t, std::unique_ptr<DirectoryScan>> directory_scans;
     std::unordered_map<std::uint64_t, std::unique_ptr<PathStat>> path_stats;
+    std::unordered_map<std::uint64_t, std::unique_ptr<Process>> processes;
 };
 
 Runtime::Runtime() : impl_(std::make_unique<Impl>()) {}
@@ -989,6 +1246,10 @@ SourceId Runtime::stat_path(std::string path, bool follow_symlinks) {
 
 SourceId Runtime::watch_path(std::string path) {
     return impl_->watch_path(std::move(path));
+}
+
+SourceId Runtime::spawn_process(std::vector<std::string> arguments, std::string working_directory) {
+    return impl_->spawn_process(std::move(arguments), std::move(working_directory));
 }
 
 bool Runtime::cancel(SourceId source) {

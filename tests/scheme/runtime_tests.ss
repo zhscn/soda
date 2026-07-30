@@ -139,5 +139,66 @@
            "runtime did not classify a missing file"
            events)))
 
+(define process
+  (runtime-spawn-process!
+    runtime
+    '("/bin/sh"
+      "-c"
+      "printf 'scheme stdout'; printf 'scheme stderr' >&2; exit 9")))
+(define standard-output "")
+(define standard-error "")
+(let loop ()
+  (let ([exited? #f])
+    (for-each
+      (lambda (event)
+        (unless (= (event-source event) process)
+          (error 'runtime-tests
+                 "process event has the wrong source"
+                 event))
+        (case (event-kind event)
+          [(process-output)
+           (unless (zero? (event-status event))
+             (error 'runtime-tests
+                    "process output failed"
+                    event))
+           (cond
+             [(= (event-flags event) process-stdout)
+              (set! standard-output
+                (string-append
+                  standard-output
+                  (utf8->string (event-data event))))]
+             [(= (event-flags event) process-stderr)
+              (set! standard-error
+                (string-append
+                  standard-error
+                  (utf8->string (event-data event))))]
+             [else
+              (error 'runtime-tests
+                     "unknown process output stream"
+                     event)])]
+          [(process-exit)
+           (unless
+             (and
+               (= (event-status event) 9)
+               (zero? (event-flags event)))
+             (error 'runtime-tests
+                    "process exit metadata differs"
+                    event))
+           (set! exited? #t)]
+          [else
+           (error 'runtime-tests
+                  "unexpected process event"
+                  event)]))
+      (runtime-poll! runtime))
+    (unless exited? (loop))))
+(unless
+  (and
+    (string=? standard-output "scheme stdout")
+    (string=? standard-error "scheme stderr"))
+  (error 'runtime-tests
+         "process output differs"
+         standard-output
+         standard-error))
+
 (runtime-close! runtime)
 (runtime-close! runtime)

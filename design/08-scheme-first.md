@@ -136,8 +136,8 @@ runtime ABI 遵循 pull-based 约束：
 - 固定版本函数在 Scheme wrapper 装载时验证 ABI 兼容性；
 - 创建 handle 后由 Scheme 注册 interest；
 - poll 只驱动 libuv 并返回可读取事件数量；
-- Scheme drain timer、fd、file-read、file-write、directory-scan 和 path-change
-  等结果；
+- Scheme drain timer、fd、file-read、file-write、directory-scan、path-change、
+  process-output 和 process-exit 等结果；
 - close 是显式、幂等的生命周期动作；
 - callback data 不保存 Scheme pointer；
 - status、libuv 稳定错误名与人类可读消息作为值跨 ABI 返回。
@@ -151,6 +151,13 @@ source 与上层 request 的关联，不允许 callback 进入 Scheme 或持有 
 路径监听使用长生命周期 `uv_fs_event` source。event data 保存相对被监听目录的
 entry name，flags 保存 rename/change 分类；取消 source 会停止 handle，并在 close
 callback 后释放 native 所有权。
+
+子进程使用 `uv_spawn`，参数以长度前缀的 UTF-8 argument vector 跨 ABI 传递，不经
+shell 重新解释。工作目录是每个 spawn request 的显式字段，环境继承 Editor 进程。
+stdout 和 stderr 分别连接到 libuv pipe，并以带 stream flag 的增量
+`process-output` event 返回；pipe 完成关闭后才发布 `process-exit`，因此 exit event
+之前的输出不会丢失。取消 process source 发送终止信号，最终生命周期仍由 exit 和
+handle close callback 收束。Editor 关闭时 native runtime 终止并回收仍存活的子进程。
 
 终端输出使用 partial-write ABI。`write-some` 返回已写 byte 数或 would-block；
 Scheme 保留未写 suffix，并在 libuv 报告 output fd writable 后继续 flush。短写、

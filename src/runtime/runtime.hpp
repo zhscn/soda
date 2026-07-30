@@ -33,6 +33,8 @@ public:
     [[nodiscard]] SourceId scan_directory(std::string path);
     [[nodiscard]] SourceId stat_path(std::string path, bool follow_symlinks);
     [[nodiscard]] SourceId watch_path(std::string path);
+    [[nodiscard]] SourceId spawn_process(std::vector<std::string> arguments,
+                                         std::string working_directory = {});
     bool cancel(SourceId source);
 
     std::size_t poll(PollMode mode);

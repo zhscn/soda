@@ -11,6 +11,7 @@
           runtime-scan-directory!
           runtime-stat-path!
           runtime-watch-path!
+          runtime-spawn-process!
           runtime-cancel!
           runtime-status-name
           runtime-status-message
@@ -32,7 +33,9 @@
           fd-readable
           fd-writable
           path-rename
-          path-change)
+          path-change
+          process-stdout
+          process-stderr)
   (import (chezscheme)
           (soda native))
 
@@ -43,7 +46,7 @@
     (foreign-procedure __atomic "soda_runtime_abi_version" () unsigned-32))
 
   (define abi-version-checked
-    (unless (= (%abi-version) 6)
+    (unless (= (%abi-version) 7)
       (error 'soda-runtime "unsupported native runtime ABI version")))
 
   (define %runtime-create
@@ -75,6 +78,10 @@
   (define %watch-path
     (foreign-procedure __atomic "soda_runtime_watch_path"
                        (void* string)
+                       unsigned-64))
+  (define %spawn-process
+    (foreign-procedure __atomic "soda_runtime_spawn_process"
+                       (void* string u8* size_t)
                        unsigned-64))
   (define %cancel
     (foreign-procedure __atomic "soda_runtime_cancel" (void* unsigned-64) int))
@@ -142,6 +149,8 @@
   (define fd-writable #x2)
   (define path-rename #x1)
   (define path-change #x2)
+  (define process-stdout #x1)
+  (define process-stderr #x2)
 
   (define (require-runtime who value)
     (unless (runtime? value)
@@ -268,6 +277,71 @@
       (if (zero? source)
           (native-error 'runtime-watch-path! runtime)
           source)))
+
+  (define (encode-process-arguments arguments)
+    (unless
+      (and
+        (pair? arguments)
+        (list? arguments)
+        (for-all
+          (lambda (argument)
+            (and
+              (string? argument)
+              (not
+                (exists
+                  (lambda (character)
+                    (char=? character #\nul))
+                  (string->list argument)))))
+          arguments)
+        (positive?
+          (string-length (car arguments))))
+      (assertion-violation
+        'runtime-spawn-process!
+        "arguments must be a non-empty list of strings with a non-empty executable"
+        arguments))
+    (let* ([encoded (map string->utf8 arguments)]
+           [size
+             (fold-left
+               (lambda (total argument)
+                 (+ total 4 (bytevector-length argument)))
+               0
+               encoded)]
+           [result (make-bytevector size)])
+      (let loop ([remaining encoded] [offset 0])
+        (if
+          (null? remaining)
+          result
+          (let* ([argument (car remaining)]
+                 [length (bytevector-length argument)]
+                 [start (+ offset 4)])
+            (bytevector-u32-set!
+              result offset length (endianness little))
+            (bytevector-copy!
+              argument 0 result start length)
+            (loop (cdr remaining) (+ start length)))))))
+
+  (define runtime-spawn-process!
+    (case-lambda
+      [(runtime arguments)
+       (runtime-spawn-process! runtime arguments "")]
+      [(runtime arguments working-directory)
+       (require-runtime 'runtime-spawn-process! runtime)
+       (unless (string? working-directory)
+         (assertion-violation
+           'runtime-spawn-process!
+           "working directory must be a string"
+           working-directory))
+       (let* ([encoded
+                (encode-process-arguments arguments)]
+              [source
+                (%spawn-process
+                  (runtime-pointer runtime)
+                  working-directory
+                  encoded
+                  (bytevector-length encoded))])
+         (if (zero? source)
+             (native-error 'runtime-spawn-process! runtime)
+             source))]))
 
   (define (runtime-cancel! runtime source)
     (require-runtime 'runtime-cancel! runtime)
@@ -407,6 +481,8 @@
       [(5) 'directory-scan]
       [(6) 'path-stat]
       [(7) 'path-change]
+      [(8) 'process-output]
+      [(9) 'process-exit]
       [else (error 'runtime-poll! "unknown native event kind" value)]))
 
   (define (copy-current-data pointer)

@@ -21,6 +21,8 @@ enum class EventKind : std::uint8_t {
     DirectoryScan = 5,
     PathStat = 6,
     PathChange = 7,
+    ProcessOutput = 8,
+    ProcessExit = 9,
 };
 
 enum class FdEvent : std::uint8_t {
