@@ -4,6 +4,7 @@
           scheme-workspace-generation
           scheme-workspace-sync-editor!
           scheme-workspace-refresh-buffer!
+          scheme-workspace-interface-index-owners
           scheme-workspace-install-interface-index!
           scheme-workspace-remove-interface-index!
           scheme-workspace-index-source!
@@ -117,6 +118,14 @@
   (define (scheme-workspace-generation index)
     (require-index 'scheme-workspace-generation index)
     (scheme-workspace-index-generation index))
+
+  (define (scheme-workspace-interface-index-owners index)
+    (require-index
+      'scheme-workspace-interface-index-owners
+      index)
+    (map
+      scheme-interface-index-owner
+      (scheme-workspace-index-interface-indexes index)))
 
   (define (require-index who value)
     (unless (scheme-workspace-index? value)

@@ -614,6 +614,7 @@
           (soda editor scheme-document-highlight)
           (soda editor scheme-help)
           (soda editor scheme-interface-commands)
+          (soda editor scheme-project-session)
           (soda editor scheme-repl-completion)
           (soda editor scheme-rename)
           (soda editor scheme-xref)
@@ -737,6 +738,8 @@
         (make-scheme-repl-completion-provider editor))
       (install-file-commands! editor)
       (install-scheme-interface-commands!
+        editor scheme-workspace)
+      (install-scheme-project-session-commands!
         editor scheme-workspace)
       (install-scheme-rename-command!
         editor scheme-workspace)

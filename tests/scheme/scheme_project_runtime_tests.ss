@@ -18,6 +18,7 @@
         (soda editor scheme-interface-commands)
         (soda editor scheme-interface-index)
         (soda editor scheme-interface-runtime)
+        (soda editor scheme-project-session)
         (soda editor scheme-semantics)
         (soda editor scheme-workspace)
         (soda editor scheme-xref)
@@ -123,6 +124,19 @@
 (scheme-interface-index-write-file!
   compiled-interface-index
   compiled-interface-path)
+(define compiled-project-path
+  (vfs-path-join root "soda-project.scm"))
+(when (file-exists? compiled-project-path)
+  (delete-file compiled-project-path))
+(call-with-output-file
+  compiled-project-path
+  (lambda (port)
+    (write
+      '(soda-scheme-project
+         (format-version 1)
+         (interface-index
+           "compiled-interface.fasl"))
+      port)))
 (define compiled-interface-executor
   (make-effect-executor))
 (define compiled-interface-adapter
@@ -134,8 +148,8 @@
   (editor-update!
     editor
     (make-internal-command-message
-      'scheme.load-interface-index-path
-      compiled-interface-path)))
+      'scheme.load-project-path
+      compiled-project-path)))
 (let load-loop ()
   (let ([loaded? #f])
     (for-each
@@ -145,10 +159,20 @@
                   compiled-interface-adapter
                   event)])
           (when message
-            (editor-update! editor message)
-            (set! loaded? #t))))
+            (execute-effects!
+              compiled-interface-executor
+              (editor-update! editor message))
+            (let ([status (editor-status-message editor)])
+              (when
+                (and
+                  status
+                  (string-prefix?
+                    "Loaded Scheme interfaces "
+                    status))
+                (set! loaded? #t))))))
       (runtime-poll! runtime))
     (unless loaded? (load-loop))))
+(delete-file compiled-project-path)
 (delete-file compiled-interface-path)
 
 (define compiled-consumer-source
@@ -207,7 +231,11 @@
       (scheme-definition-id-document-id
         (scheme-definition-id
           compiled-call-definition))
-      compiled-interface-resource))
+      compiled-interface-resource)
+    (equal?
+      (scheme-workspace-interface-index-owners
+        workspace)
+      '("fixture-build")))
   (error
     'scheme-project-runtime-tests
     "compiled interface index did not drive plugin resolution"
@@ -261,10 +289,11 @@
       "reloading an interface owner did not atomically replace its surface"
       definitions)))
 
-(scheme-workspace-remove-interface-index!
-  workspace
-  "fixture-build")
-(scheme-workspace-sync-editor! workspace editor)
+(editor-update!
+  editor
+  (make-internal-command-message
+    'scheme.unload-project-owner
+    "fixture-build"))
 (let ([snapshot
         (scheme-workspace-snapshot-for-buffer
           workspace
@@ -280,6 +309,13 @@
     (error
       'scheme-project-runtime-tests
       "removing an interface index retained its library surface")))
+(unless
+  (null?
+    (scheme-workspace-interface-index-owners
+      workspace))
+  (error
+    'scheme-project-runtime-tests
+    "unloading the Scheme project retained its session owner"))
 (editor-remove-buffer!
   editor
   (buffer-id compiled-consumer-buffer))

@@ -33,8 +33,7 @@ Project 拥有：
 
 - resource 枚举与忽略规则；
 - project settings layer；
-- language service 可使用的 root 与配置；
-- 显式启动的文件 watch 和索引 session 的作用域。
+- language service 可使用的 root 与配置。
 
 Project 不拥有 Buffer、Window 或 layout。同一 project 可以出现在多个 workbench
 scope 中；是否保持 scope 互斥由 Scheme policy 决定。
@@ -42,6 +41,12 @@ scope 中；是否保持 scope 互斥由 Scheme policy 决定。
 打开 file-backed Buffer 不创建 Project，也不启动 resource discovery 或 language
 index。显式 load/adopt project 根据 manifest、VCS root 或用户给定 root 建立
 Project；visitor Buffer 可以始终不属于任何 Project。
+
+Language session 是独立于 Project 的显式运行对象。Scheme session 从 project
+manifest 加载构建生成的 interface index，并按 artifact owner 标识其生命周期；
+Project 的存在、root 识别和 resource 枚举本身不会创建 language session。一个
+language session 可以使用 Project 提供的 root 与设置，也可以只服务于 visitor
+Buffer。关闭 session 会撤销其 interface surface 和运行时资源。
 
 resource enumerator 由 Project 操作按需启动，通过 libuv directory scan 逐层展开
 目录，并通过异步 file read 产生请求方需要的 resource snapshot。隐藏目录、VCS

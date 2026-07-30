@@ -551,15 +551,30 @@ definition。`scheme.load-interface-index` 通过 minibuffer 选择产物并以 
 异步读取；编译脚本在 Editor evaluator 中运行时向 command loop 投递
 `scheme.load-interface-index-path`，使成功构建的产物进入同一安装路径。
 
-可选 Project directory adapter 以 libuv directory scan 异步发现 `.scm`、`.ss`、
-`.sls` 和 `.sps`，再以异步 file read 把源码交给显式 workspace session。成功扫描
-的每个目录注册独立 path watch。文件系统事件按目录合并为重新扫描请求；扫描结果
-添加、更新或删除 Project source，并为新目录递归建立 watch。每次成功读取递增对应
-resource revision，使异步外部修改与 Buffer revision 使用同一 freshness 规则。
-file-read completion 只更新按 resource 合并的待分析队列；一次性 runtime timer
-每个 command-loop turn 最多提交一个 source snapshot。
-后台 source snapshot 不创建 Buffer；引用位置以 `resource + revision + byte
-range` 保存，首次跳转时通过普通异步文件打开流程解析成 Buffer location。
+Scheme project manifest 把一次显式 language session 连接到构建产物：
+
+```scheme
+(soda-scheme-project
+  (format-version 1)
+  (interface-index "build/scheme-interfaces.fasl"))
+```
+
+`interface-index` 相对 manifest 所在目录解析。`scheme.load-project` 异步读取并验证
+manifest，再安装对应 interface index；`scheme.unload-project` 从当前已安装的 owner
+中选择并撤销 session。加载普通文件、识别 Project root 和枚举 Project resource
+不会启动 Scheme 索引。构建过程调用 `scheme-sources->interface-index-file!`，将本次
+实际参与编译的 source 集合写入 manifest 指向的产物；成功构建后重新加载同一
+manifest 即可按 owner 替换 language surface。
+
+目录扫描 runtime 是显式启用的 source adapter。它以 libuv directory scan 发现
+`.scm`、`.ss`、`.sls` 和 `.sps`，再以异步 file read 把源码交给 workspace，并为
+扫描目录建立 path watch。该 adapter 适用于没有构建产物的临时分析操作，不随
+Project 或 Editor 生命周期自动启动。文件系统事件按目录合并为重新扫描请求；扫描
+结果添加、更新或删除 source snapshot。file-read completion 只更新按 resource
+合并的待分析队列；一次性 runtime timer 每个 command-loop turn 最多提交一个 source
+snapshot。后台 source snapshot 不创建 Buffer；引用位置以
+`resource + revision + byte range` 保存，首次跳转时通过普通异步文件打开流程解析
+成 Buffer location。
 
 workspace symbol 查询合并已索引 Buffer、Project source 和构建时嵌入的 Soda API
 definitions。局部 lexical binding 不进入该查询。相同源码声明在实时 snapshot 中

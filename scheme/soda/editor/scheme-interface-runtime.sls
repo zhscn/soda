@@ -7,6 +7,7 @@
           (soda editor effect)
           (soda editor event)
           (soda editor scheme-interface-commands)
+          (soda editor scheme-project-session)
           (soda runtime))
 
   (define-record-type
@@ -46,6 +47,32 @@
           request)
         (make-effect-result #t '()))))
 
+  (define (start-project-load! adapter request)
+    (guard
+      (condition
+        [else
+         (make-effect-result
+           #t
+           (list
+             (make-internal-command-message
+               'scheme.apply-project
+               (make-scheme-project-load-result
+                 (scheme-project-load-request-path
+                   request)
+                 -1
+                 (make-bytevector 0)
+                 (condition->string condition)))))])
+      (let ([source
+              (runtime-read-file!
+                (scheme-interface-runtime-runtime adapter)
+                (scheme-project-load-request-path
+                  request))])
+        (hashtable-set!
+          (scheme-interface-runtime-pending adapter)
+          source
+          request)
+        (make-effect-result #t '()))))
+
   (define (install-scheme-interface-runtime!
             executor
             runtime)
@@ -74,6 +101,17 @@
               "expected a Scheme interface load request"
               request))
           (start-load! adapter request)))
+      (register-effect-handler!
+        executor
+        'scheme.project-read
+        (lambda (request)
+          (unless
+            (scheme-project-load-request? request)
+            (assertion-violation
+              'scheme.project-read
+              "expected a Scheme project load request"
+              request))
+          (start-project-load! adapter request)))
       adapter))
 
   (define (scheme-interface-runtime-handle-event
@@ -105,14 +143,32 @@
               (hashtable-delete!
                 pending
                 (event-source event))
-              (make-internal-command-message
-                'scheme.apply-interface-index
-                (make-scheme-interface-load-result
-                  (scheme-interface-load-request-path
-                    request)
-                  (event-status event)
-                  (event-data event)
-                  (and
-                    (negative? (event-status event))
-                    (runtime-status-message
-                      (event-status event)))))))))))
+              (let ([detail
+                      (and
+                        (negative? (event-status event))
+                        (runtime-status-message
+                          (event-status event)))])
+                (cond
+                  [(scheme-interface-load-request? request)
+                   (make-internal-command-message
+                     'scheme.apply-interface-index
+                     (make-scheme-interface-load-result
+                       (scheme-interface-load-request-path
+                         request)
+                       (event-status event)
+                       (event-data event)
+                       detail))]
+                  [(scheme-project-load-request? request)
+                   (make-internal-command-message
+                     'scheme.apply-project
+                     (make-scheme-project-load-result
+                       (scheme-project-load-request-path
+                         request)
+                       (event-status event)
+                       (event-data event)
+                       detail))]
+                  [else
+                   (assertion-violation
+                     'scheme-interface-runtime-handle-event
+                     "unknown pending Scheme read operation"
+                     request)]))))))))
