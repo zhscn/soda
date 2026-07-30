@@ -4496,3 +4496,187 @@
          "buffer-local modeline format was not applied"
          custom-modeline-text))
 (editor-close! modeline-editor)
+
+(define configuration-document (make-document "configuration" 956))
+(define configuration-buffer
+  (make-buffer
+    956
+    configuration-document
+    "*configuration*"
+    'cpp-mode))
+(define configuration-editor (make-editor configuration-buffer))
+
+(unless (= (editor-setting-ref configuration-editor 'indent-width) 4)
+  (error 'editor-tests
+         "major-mode setting did not precede the registered default"))
+(editor-take-dirty-reasons! configuration-editor)
+(editor-set-global-setting!
+  configuration-editor
+  'indent-width
+  6)
+(unless
+  (and
+    (= (editor-setting-ref configuration-editor 'indent-width) 6)
+    (memq 'document
+          (editor-dirty-reasons configuration-editor)))
+  (error 'editor-tests
+         "global setting did not override the major-mode default"))
+
+(editor-set-buffer-setting!
+  configuration-editor
+  configuration-buffer
+  'indent-width
+  3)
+(define configuration-second-buffer
+  (editor-create-buffer!
+    configuration-editor
+    "*configuration-second*"
+    'fundamental-mode
+    ""))
+(unless
+  (and
+    (= (editor-setting-ref
+         configuration-editor
+         configuration-buffer
+         'indent-width)
+       3)
+    (= (editor-setting-ref
+         configuration-editor
+         configuration-second-buffer
+         'indent-width)
+       6)
+    (eq?
+      (buffer-setting-store configuration-buffer)
+      (buffer-setting-store configuration-second-buffer)))
+  (error 'editor-tests
+         "buffer-local and editor-global setting scopes were not isolated"))
+
+(unless
+  (guard
+    (condition [else #t])
+    (editor-set-global-setting!
+      configuration-editor
+      'indent-width
+      0)
+    #f)
+  (error 'editor-tests "invalid setting value was accepted"))
+
+(unless
+  (guard
+    (condition [else #t])
+    (editor-register-setting!
+      configuration-editor
+      (make-setting-definition
+        'indent-width
+        2
+        (lambda (value)
+          (and (integer? value) (exact? value) (even? value)))
+        "Rejected replacement."
+        'document))
+    #f)
+  (error 'editor-tests
+         "setting replacement ignored an incompatible buffer-local value"))
+(unless
+  (and
+    (= (editor-setting-ref
+         configuration-editor
+         configuration-buffer
+         'indent-width)
+       3)
+    (string=?
+      (setting-definition-documentation
+        (editor-setting-definition
+          configuration-editor
+          'indent-width))
+      "Number of columns in one indentation step."))
+  (error 'editor-tests
+         "failed setting definition replacement was not atomic"))
+
+(editor-register-setting!
+  configuration-editor
+  (make-setting-definition
+    'configuration-level
+    1
+    (lambda (value)
+      (and (integer? value) (exact? value) (not (negative? value))))
+    "Test configuration level."
+    'configuration))
+(editor-set-global-setting!
+  configuration-editor
+  'configuration-level
+  1)
+(editor-register-setting!
+  configuration-editor
+  (make-setting-definition
+    'configuration-level
+    2
+    (lambda (value)
+      (and (integer? value) (exact? value) (not (negative? value))))
+    "Replacement test configuration level."
+    'configuration))
+(unless
+  (= (editor-global-setting-ref
+       configuration-editor
+       'configuration-level)
+     1)
+  (error 'editor-tests
+         "an explicit setting did not survive definition replacement"))
+
+(unless
+  (guard
+    (condition [else #t])
+    (call-with-editor-setting-transaction
+      configuration-editor
+      (lambda ()
+        (editor-set-global-setting!
+          configuration-editor
+          'configuration-level
+          9)
+        (editor-set-buffer-setting!
+          configuration-editor
+          configuration-buffer
+          'indent-width
+          5)
+        (editor-register-setting!
+          configuration-editor
+          (make-setting-definition
+            'temporary-configuration
+            #f
+            boolean?
+            "Transaction rollback sentinel."
+            'configuration))
+        (error 'editor-tests "abort setting transaction")))
+    #f)
+  (error 'editor-tests "failed setting transaction did not raise"))
+(unless
+  (and
+    (= (editor-global-setting-ref
+         configuration-editor
+         'configuration-level)
+       1)
+    (= (editor-setting-ref
+         configuration-editor
+         configuration-buffer
+         'indent-width)
+       3)
+    (guard
+      (condition [else #t])
+      (editor-global-setting-ref
+        configuration-editor
+        'temporary-configuration)
+      #f))
+  (error 'editor-tests
+         "failed setting transaction did not restore editor state"))
+
+(editor-clear-buffer-setting!
+  configuration-editor
+  configuration-buffer
+  'indent-width)
+(unless
+  (= (editor-setting-ref
+       configuration-editor
+       configuration-buffer
+       'indent-width)
+     6)
+  (error 'editor-tests "clearing a buffer setting did not reveal global value"))
+(editor-close! configuration-editor)

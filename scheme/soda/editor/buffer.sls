@@ -8,6 +8,8 @@
           buffer-closed?
           buffer-close!
           buffer-language-catalog
+          buffer-setting-store
+          buffer-adopt-setting-store!
           buffer-revision
           buffer-file-path
           buffer-set-file-path!
@@ -29,6 +31,8 @@
           buffer-setting-ref
           buffer-set-local-setting!
           buffer-clear-local-setting!
+          buffer-settings-snapshot
+          buffer-restore-settings!
           call-with-buffer-syntax-view
           call-with-buffer-transaction
           buffer-adopt-change!
@@ -37,7 +41,8 @@
           buffer-undo-to!)
   (import (rnrs)
           (soda document)
-          (soda editor language))
+          (soda editor language)
+          (soda editor setting))
 
   (define-record-type
     (language-runtime %make-language-runtime language-runtime?)
@@ -54,6 +59,9 @@
       (mutable resource buffer-resource buffer-resource-set!)
       (immutable local-settings buffer-local-settings)
       (immutable language-catalog buffer-language-catalog)
+      (mutable setting-store
+               buffer-setting-store
+               buffer-setting-store-set!)
       (mutable revision buffer-revision buffer-revision-set!)
       (mutable file-path buffer-file-path buffer-file-path-set!)
       (mutable saved-revision
@@ -136,8 +144,17 @@
          document
          resource
          mode-name
-         default-language-catalog)]
+         default-language-catalog
+         (make-setting-store))]
       [(id document resource mode-name catalog)
+       (make-buffer
+         id
+         document
+         resource
+         mode-name
+         catalog
+         (make-setting-store))]
+      [(id document resource mode-name catalog setting-store)
        (unless (and (integer? id) (exact? id) (not (negative? id)))
          (assertion-violation
            'make-buffer
@@ -153,6 +170,11 @@
            'make-buffer
            "expected a language catalog"
            catalog))
+       (unless (setting-store? setting-store)
+         (assertion-violation
+           'make-buffer
+           "expected a setting store"
+           setting-store))
        ;; A successfully constructed buffer owns the document handle and closes
        ;; it with the language runtime.
        (let ([value
@@ -162,6 +184,7 @@
                  resource
                  (make-eq-hashtable)
                  catalog
+                 setting-store
                  (document-revision document)
                  #f
                  (document-revision document)
@@ -195,6 +218,26 @@
         resource))
     (buffer-resource-set! value resource)
     resource)
+
+  (define (buffer-adopt-setting-store! value store)
+    (require-open-buffer 'buffer-adopt-setting-store! value)
+    (unless (setting-store? store)
+      (assertion-violation
+        'buffer-adopt-setting-store!
+        "expected a setting store"
+        store))
+    (let-values
+      ([(keys settings)
+        (hashtable-entries (buffer-local-settings value))])
+      (let loop ([index 0])
+        (unless (= index (vector-length keys))
+          (setting-store-validate
+            store
+            (vector-ref keys index)
+            (vector-ref settings index))
+          (loop (+ index 1)))))
+    (buffer-setting-store-set! value store)
+    value)
 
   (define (buffer-modified? value)
     (require-open-buffer 'buffer-modified? value)
@@ -359,11 +402,28 @@
          (let ([local
                  (hashtable-ref (buffer-local-settings value) key missing)])
            (if (eq? local missing)
-               (major-mode-setting-ref
-                 (buffer-language-catalog value)
-                 (buffer-mode-name value)
-                 key
-                 default)
+               (let ([global
+                       (setting-store-explicit-ref
+                         (buffer-setting-store value)
+                         key
+                         missing)])
+                 (if (eq? global missing)
+                     (let ([mode
+                             (major-mode-setting-ref
+                               (buffer-language-catalog value)
+                               (buffer-mode-name value)
+                               key
+                               missing)])
+                       (if (eq? mode missing)
+                           (let ([definition
+                                   (setting-store-find
+                                     (buffer-setting-store value)
+                                     key)])
+                             (if definition
+                                 (setting-definition-default definition)
+                                 default))
+                           mode))
+                     global))
                local)))]))
 
   (define (buffer-set-local-setting! value key setting)
@@ -373,6 +433,10 @@
         'buffer-set-local-setting!
         "key must be a symbol"
         key))
+    (setting-store-validate
+      (buffer-setting-store value)
+      key
+      setting)
     (hashtable-set! (buffer-local-settings value) key setting))
 
   (define (buffer-clear-local-setting! value key)
@@ -383,6 +447,28 @@
         "key must be a symbol"
         key))
     (hashtable-delete! (buffer-local-settings value) key))
+
+  (define (buffer-settings-snapshot value)
+    (require-open-buffer 'buffer-settings-snapshot value)
+    (hashtable-copy (buffer-local-settings value) #t))
+
+  (define (buffer-restore-settings! value snapshot)
+    (require-open-buffer 'buffer-restore-settings! value)
+    (unless (hashtable? snapshot)
+      (assertion-violation
+        'buffer-restore-settings!
+        "expected a setting snapshot"
+        snapshot))
+    (hashtable-clear! (buffer-local-settings value))
+    (let-values ([(keys settings) (hashtable-entries snapshot)])
+      (let loop ([index 0])
+        (unless (= index (vector-length keys))
+          (hashtable-set!
+            (buffer-local-settings value)
+            (vector-ref keys index)
+            (vector-ref settings index))
+          (loop (+ index 1)))))
+    value)
 
   (define (recover-runtime! runtime snapshot condition)
     ;; Text commits remain authoritative when a derived syntax session fails.

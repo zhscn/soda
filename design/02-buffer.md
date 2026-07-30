@@ -109,6 +109,7 @@ Buffer {
   pending_save_undo_node?,
   file_observed_state?,
   language_catalog,
+  setting_store,
   major_mode_name,
   local_settings,
   language_runtime
@@ -135,6 +136,22 @@ undo、redo 后同步 language runtime。
 Buffer 的 `revision` 是已经被 Buffer 及其 language runtime 接受的 Document
 revision。Scheme 编辑命令通过 `call-with-buffer-transaction` 修改文本；该边界提交
 transaction、推进 Buffer revision，并同步派生语言状态。
+
+Editor 拥有一个 `SettingStore`，加入 Editor 的 Buffer 共享该 store。设置按以下顺序
+解析：
+
+```text
+buffer-local value
+→ editor-global explicit value
+→ major-mode default
+→ registered setting default
+```
+
+`SettingDefinition` 声明名称、默认值、验证器、文档和渲染影响。用户级 setter 只接受
+已注册设置，并在值变化后按影响类型使渲染失效；Buffer 内部仍可保存文件请求状态等
+未注册的局部属性。替换 definition 前会验证已有全局值及所有 Buffer 的解析结果。
+设置事务保存 definition、全局值和各 Buffer 的局部值；事务中的 condition 会恢复
+快照并发布一次 configuration invalidation。
 
 直接操作 Document 的 native 机制必须返回 normalized change。调用方随后用
 `buffer-adopt-change!` 把 change 交给所属 Buffer。change 的 old revision 必须等于

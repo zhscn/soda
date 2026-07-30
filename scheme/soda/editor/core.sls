@@ -69,6 +69,24 @@
           editor-global-minor-modes
           editor-keymap-catalog
           editor-language-catalog
+          make-setting-definition
+          setting-definition?
+          setting-definition-name
+          setting-definition-default
+          setting-definition-validator
+          setting-definition-documentation
+          setting-definition-impact
+          editor-setting-store
+          editor-setting-names
+          editor-setting-definition
+          editor-register-setting!
+          editor-setting-ref
+          editor-global-setting-ref
+          editor-set-global-setting!
+          editor-clear-global-setting!
+          editor-set-buffer-setting!
+          editor-clear-buffer-setting!
+          call-with-editor-setting-transaction
           editor-register-language-profile!
           editor-register-major-mode!
           editor-keymap
@@ -544,6 +562,7 @@
           (soda editor location)
           (soda editor minor-mode)
           (soda editor minor-mode-runtime)
+          (soda editor motion-protocol)
           (soda editor navigation)
           (soda editor prompt)
           (soda editor prompt-commands)
@@ -555,6 +574,7 @@
           (soda editor scheme-repl-completion)
           (soda editor scheme-xref)
           (soda editor search)
+          (soda editor setting)
           (soda editor state)
           (soda editor theme)
           (soda editor themes catppuccin)
@@ -562,8 +582,76 @@
           (soda editor window)
           (soda editor window-runtime))
 
+  (define (positive-exact-integer? value)
+    (and (integer? value) (exact? value) (positive? value)))
+
+  (define (symbol-list? value)
+    (and (list? value) (for-all symbol? value)))
+
+  (define (install-core-settings! editor)
+    (for-each
+      (lambda (definition)
+        (editor-register-setting! editor definition))
+      (list
+        (make-setting-definition
+          'tab-width
+          8
+          positive-exact-integer?
+          "Display width of a tab character."
+          'document)
+        (make-setting-definition
+          'indent-width
+          2
+          positive-exact-integer?
+          "Number of columns in one indentation step."
+          'document)
+        (make-setting-definition
+          'continuation-indent
+          2
+          positive-exact-integer?
+          "Additional columns used for continuation lines."
+          'document)
+        (make-setting-definition
+          'use-tabs?
+          #f
+          boolean?
+          "Whether indentation commands may insert tab characters."
+          'document)
+        (make-setting-definition
+          'read-only?
+          #f
+          boolean?
+          "Whether editing commands may modify the buffer."
+          'chrome)
+        (make-setting-definition
+          'track-modified?
+          #t
+          boolean?
+          "Whether the buffer participates in modified-file tracking."
+          'chrome)
+        (make-setting-definition
+          'completion-providers
+          '()
+          symbol-list?
+          "Ordered completion providers used by the buffer."
+          'overlay)
+        (make-setting-definition
+          'completion-boundaries
+          #f
+          (lambda (value) (or (not value) (procedure? value)))
+          "Procedure that computes the completion range at point."
+          'overlay)
+        (make-setting-definition
+          'word-motion
+          #f
+          (lambda (value) (or (not value) (word-motion? value)))
+          "Mode-specific word motion protocol."
+          'cursor)))
+    editor)
+
   (define (make-editor buffer)
     (let ([editor (make-editor-state buffer)])
+      (install-core-settings! editor)
       (install-command-runtime-commands! editor)
       (install-prefix-commands! editor)
       (install-basic-commands! editor)

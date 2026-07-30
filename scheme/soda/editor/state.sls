@@ -61,6 +61,17 @@
           editor-set-global-minor-modes!
           editor-keymap-catalog
           editor-language-catalog
+          editor-setting-store
+          editor-setting-names
+          editor-setting-definition
+          editor-register-setting!
+          editor-setting-ref
+          editor-global-setting-ref
+          editor-set-global-setting!
+          editor-clear-global-setting!
+          editor-set-buffer-setting!
+          editor-clear-buffer-setting!
+          call-with-editor-setting-transaction
           editor-register-language-profile!
           editor-register-major-mode!
           editor-keymap
@@ -148,6 +159,7 @@
           (soda editor minor-mode)
           (soda editor prefix)
           (soda editor prompt)
+          (soda editor setting)
           (soda editor theme)
           (soda editor themes catppuccin)
           (soda editor window))
@@ -219,6 +231,7 @@
       (immutable commands editor-command-registry)
       (immutable keymaps editor-keymap-catalog)
       (immutable languages editor-language-catalog)
+      (immutable settings editor-setting-store)
       (immutable completion-providers
                  editor-completion-provider-catalog)
       (mutable completion-effects
@@ -688,6 +701,11 @@
         'editor-add-buffer!
         "buffer belongs to another language catalog"
         buffer))
+    (unless (eq? (buffer-setting-store buffer)
+                 (editor-setting-store value))
+      (buffer-adopt-setting-store!
+        buffer
+        (editor-setting-store value)))
     (let ([id (buffer-id buffer)])
       (when (hashtable-contains? (editor-buffer-table value) id)
         (assertion-violation
@@ -732,7 +750,8 @@
                document
                resource
                mode-name
-               (editor-language-catalog value))])
+               (editor-language-catalog value)
+               (editor-setting-store value))])
       (editor-add-buffer! value buffer)))
 
   (define (editor-remove-buffer! value id)
@@ -2207,6 +2226,201 @@
     (require-open-editor 'editor-keymap value)
     (keymap-catalog-ref (editor-keymap-catalog value) 'editor.default))
 
+  (define (editor-setting-buffer who editor buffer)
+    (unless (buffer? buffer)
+      (assertion-violation who "expected a buffer" buffer))
+    (unless
+      (eq?
+        (hashtable-ref
+          (editor-buffer-table editor)
+          (buffer-id buffer)
+          #f)
+        buffer)
+      (assertion-violation
+        who
+        "buffer is not registered with this editor"
+        buffer))
+    buffer)
+
+  (define (require-editor-setting-definition who editor name)
+    (unless (symbol? name)
+      (assertion-violation who "setting name must be a symbol" name))
+    (let ([definition
+            (setting-store-find (editor-setting-store editor) name)])
+      (unless definition
+        (assertion-violation who "unknown setting" name))
+      definition))
+
+  (define (editor-setting-names value)
+    (require-open-editor 'editor-setting-names value)
+    (setting-store-names (editor-setting-store value)))
+
+  (define (editor-setting-definition value name)
+    (require-open-editor 'editor-setting-definition value)
+    (require-editor-setting-definition
+      'editor-setting-definition
+      value
+      name))
+
+  (define (editor-register-setting! value definition)
+    (require-open-editor 'editor-register-setting! value)
+    (unless (setting-definition? definition)
+      (assertion-violation
+        'editor-register-setting!
+        "expected a setting definition"
+        definition))
+    (let* ([store (editor-setting-store value)]
+           [snapshot (setting-store-snapshot store)])
+      (guard
+        (condition
+          [else
+           (setting-store-restore! store snapshot)
+           (raise condition)])
+        (let ([registered
+                (setting-store-register! store definition)])
+          (for-each
+            (lambda (buffer)
+              (setting-store-validate
+                store
+                (setting-definition-name definition)
+                (buffer-setting-ref
+                  buffer
+                  (setting-definition-name definition))))
+            (table-values
+              (editor-buffer-table value)
+              (editor-buffer-ids value)))
+          (editor-invalidate!
+            value
+            (setting-definition-impact definition))
+          registered))))
+
+  (define editor-setting-ref
+    (case-lambda
+      [(value name)
+       (editor-setting-ref value (view-buffer (editor-active-view value)) name)]
+      [(value buffer name)
+       (require-open-editor 'editor-setting-ref value)
+       (require-editor-setting-definition 'editor-setting-ref value name)
+       (buffer-setting-ref
+         (editor-setting-buffer
+           'editor-setting-ref
+           value
+           buffer)
+         name)]))
+
+  (define (editor-global-setting-ref value name)
+    (require-open-editor 'editor-global-setting-ref value)
+    (require-editor-setting-definition 'editor-global-setting-ref value name)
+    (setting-store-ref (editor-setting-store value) name))
+
+  (define (editor-set-global-setting! value name setting)
+    (require-open-editor 'editor-set-global-setting! value)
+    (let* ([definition
+             (require-editor-setting-definition
+               'editor-set-global-setting!
+               value
+               name)]
+           [store (editor-setting-store value)]
+           [generation (setting-store-generation store)])
+      (setting-store-set! store name setting)
+      (unless (= generation (setting-store-generation store))
+        (editor-invalidate!
+          value
+          (setting-definition-impact definition)))
+      setting))
+
+  (define (editor-clear-global-setting! value name)
+    (require-open-editor 'editor-clear-global-setting! value)
+    (let* ([definition
+             (require-editor-setting-definition
+               'editor-clear-global-setting!
+               value
+               name)]
+           [store (editor-setting-store value)]
+           [generation (setting-store-generation store)])
+      (setting-store-clear! store name)
+      (unless (= generation (setting-store-generation store))
+        (editor-invalidate!
+          value
+          (setting-definition-impact definition)))
+      (setting-store-ref store name)))
+
+  (define (editor-set-buffer-setting! value buffer name setting)
+    (require-open-editor 'editor-set-buffer-setting! value)
+    (let* ([target
+             (editor-setting-buffer
+               'editor-set-buffer-setting!
+               value
+               buffer)]
+           [definition
+             (require-editor-setting-definition
+               'editor-set-buffer-setting!
+               value
+               name)]
+           [old (buffer-setting-ref target name)])
+      (buffer-set-local-setting! target name setting)
+      (unless (equal? old (buffer-setting-ref target name))
+        (editor-invalidate!
+          value
+          (setting-definition-impact definition)))
+      setting))
+
+  (define (editor-clear-buffer-setting! value buffer name)
+    (require-open-editor 'editor-clear-buffer-setting! value)
+    (let* ([target
+             (editor-setting-buffer
+               'editor-clear-buffer-setting!
+               value
+               buffer)]
+           [definition
+             (require-editor-setting-definition
+               'editor-clear-buffer-setting!
+               value
+               name)]
+           [old (buffer-setting-ref target name)])
+      (buffer-clear-local-setting! target name)
+      (let ([resolved (buffer-setting-ref target name)])
+        (unless (equal? old resolved)
+          (editor-invalidate!
+            value
+            (setting-definition-impact definition)))
+        resolved)))
+
+  (define (call-with-editor-setting-transaction value procedure)
+    (require-open-editor
+      'call-with-editor-setting-transaction
+      value)
+    (unless (procedure? procedure)
+      (assertion-violation
+        'call-with-editor-setting-transaction
+        "expected a procedure"
+        procedure))
+    (let ([store-snapshot
+            (setting-store-snapshot (editor-setting-store value))]
+          [buffer-snapshots
+            (map
+              (lambda (buffer)
+                (cons buffer (buffer-settings-snapshot buffer)))
+              (table-values
+                (editor-buffer-table value)
+                (editor-buffer-ids value)))])
+      (guard
+        (condition
+          [else
+           (setting-store-restore!
+             (editor-setting-store value)
+             store-snapshot)
+           (for-each
+             (lambda (entry)
+               (unless (buffer-closed? (car entry))
+                 (buffer-restore-settings!
+                   (car entry)
+                   (cdr entry))))
+             buffer-snapshots)
+           (editor-invalidate! value 'configuration)
+           (raise condition)])
+        (procedure))))
+
   (define (refresh-buffers! value)
     (for-each
       buffer-refresh-language!
@@ -2656,6 +2870,7 @@
                (make-command-registry)
                keymaps
                (buffer-language-catalog buffer)
+               (buffer-setting-store buffer)
                (make-completion-provider-catalog)
                '()
                #f
