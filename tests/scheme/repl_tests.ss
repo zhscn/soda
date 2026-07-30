@@ -615,6 +615,7 @@
                   next-frame
                   previous-frame
                   evaluate
+                  inspect-condition
                   inspect-local
                   inspect-ref
                   inspect-up
@@ -663,6 +664,16 @@
          "debugger buffer accepted an editing command"))
 (define selected-frame-before
   (debugger-session-selected-index debugger))
+(dispatch!
+  (make-command-message
+    'scheme.debug-inspect-condition
+    #f))
+(unless
+  (string-contains?
+    (buffer-string debugger-buffer)
+    "Inspector path: condition")
+  (error 'repl-tests
+         "debug inspector did not expose the original condition"))
 (press-key!
   'character
   (char->integer #\n)

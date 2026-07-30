@@ -346,6 +346,7 @@
               next-frame
               previous-frame
               evaluate
+              inspect-condition
               inspect-local
               inspect-ref
               inspect-up

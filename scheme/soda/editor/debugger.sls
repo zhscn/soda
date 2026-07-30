@@ -20,6 +20,7 @@
           debugger-session-next-frame!
           debugger-session-previous-frame!
           debugger-session-evaluate
+          debugger-session-inspect-condition!
           debugger-session-inspect-local!
           debugger-session-inspection-down!
           debugger-session-inspection-up!
@@ -479,6 +480,18 @@
                       (number->string index))
                   "]")
                 inspector)))))))
+
+  (define (debugger-session-inspect-condition! debugger)
+    (require-open-debugger
+      'debugger-session-inspect-condition!
+      debugger)
+    (debugger-session-inspection-stack-set!
+      debugger
+      (list
+        (cons
+          "condition"
+          (inspect/object
+            (debugger-session-condition debugger))))))
 
   (define (record-evaluation! debugger evaluation)
     (let loop ([remaining

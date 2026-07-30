@@ -145,7 +145,7 @@
         (debugger-session-selected-frame-byte-offset debugger))
       (editor-set-status-message!
         editor
-        "Debugger: n/p frame, e eval, l local, d/u inspect, v source, x/q exit")
+        "Debugger: n/p frame, e eval, c condition, l local, d/u inspect")
       buffer))
 
   (define (editor-capture-condition! editor label condition)
@@ -512,6 +512,17 @@
            argument)])
       '()))
 
+  (define (debug-inspect-condition-command context)
+    (let* ([editor (command-context-editor context)]
+           [target
+             (require-debug-target
+               'scheme.debug-inspect-condition
+               context)]
+           [debugger (cadr target)])
+      (debugger-session-inspect-condition! debugger)
+      (refresh-debugger-buffer! editor debugger)
+      '()))
+
   (define (apply-inspect-local-result! editor view result)
     (let* ([identity
              (and
@@ -704,6 +715,10 @@
           debug-inspect-local-command
           "Inspect a local value in the selected debugger frame.")
         (list
+          'scheme.debug-inspect-condition
+          debug-inspect-condition-command
+          "Inspect the original Scheme condition object.")
+        (list
           'scheme.debug-inspect-up
           debug-inspect-up-command
           "Return to the parent debugger inspection object.")
@@ -765,6 +780,7 @@
         '((#\n . scheme.debug-next-frame)
           (#\p . scheme.debug-previous-frame)
           (#\e . scheme.debug-eval-frame)
+          (#\c . scheme.debug-inspect-condition)
           (#\l . scheme.debug-inspect-local)
           (#\d . scheme.debug-inspect-ref)
           (#\u . scheme.debug-inspect-up)
