@@ -483,6 +483,136 @@
       (eq? (scheme-diagnostic-code diagnostic) code))
     (scheme-semantic-snapshot-diagnostics snapshot)))
 
+(define (diagnostic-payloads snapshot code)
+  (map
+    scheme-diagnostic-payload
+    (filter
+      (lambda (diagnostic)
+        (eq? (scheme-diagnostic-code diagnostic) code))
+      (scheme-semantic-snapshot-diagnostics snapshot))))
+
+(define undefined-source
+  (string-append
+    "(import (rnrs))\n"
+    "(map missing-value '())\n"
+    "(missing-call missing-argument)\n"
+    "(case missing-key\n"
+    "  [(label) missing-body])\n"))
+(define undefined-snapshot
+  (make-scheme-semantic-snapshot
+    90
+    0
+    (string->utf8 undefined-source)))
+(define undefined-payloads
+  (diagnostic-payloads
+    undefined-snapshot
+    'undefined-identifier))
+
+(unless
+  (equal?
+    undefined-payloads
+    '("missing-value"
+      "missing-call"
+      "missing-key"
+      "missing-body"))
+  (error
+    'embedded-api-index-tests
+    "undefined diagnostics lost expression context or suppressed syntax data"
+    undefined-payloads))
+
+(define declarative-syntax-snapshot
+  (make-scheme-semantic-snapshot
+    91
+    0
+    (string->utf8
+      (string-append
+        "(import (rnrs))\n"
+        "(define-syntax consume\n"
+        "  (syntax-rules ()\n"
+        "    [(_ name) 'ok]))\n"
+        "(consume declarative-name)\n"))))
+
+(when
+  (diagnostic-code?
+    declarative-syntax-snapshot
+    'undefined-identifier)
+  (error
+    'embedded-api-index-tests
+    "macro grammar was interpreted as ordinary Scheme expressions"
+    (diagnostic-payloads
+      declarative-syntax-snapshot
+      'undefined-identifier)))
+
+(define foreign-dsl-snapshot
+  (make-scheme-semantic-snapshot
+    92
+    0
+    (string->utf8
+      (string-append
+        "(import (chezscheme))\n"
+        "(foreign-procedure \"__atomic\" (void*) void)\n"))))
+
+(when
+  (diagnostic-code?
+    foreign-dsl-snapshot
+    'undefined-identifier)
+  (error
+    'embedded-api-index-tests
+    "foreign declaration grammar produced identifier diagnostics"
+    (diagnostic-payloads
+      foreign-dsl-snapshot
+      'undefined-identifier)))
+
+(define unknown-import-snapshot
+  (make-scheme-semantic-snapshot
+    93
+    0
+    (string->utf8
+      (string-append
+        "(import (external unavailable))\n"
+        "(external-procedure external-value)\n"))))
+
+(when
+  (diagnostic-code?
+    unknown-import-snapshot
+    'undefined-identifier)
+  (error
+    'embedded-api-index-tests
+    "incomplete import metadata produced speculative diagnostics"))
+
+(define soda-source-resources
+  (fold-left
+    (lambda (resources entry)
+      (let ([resource (list-ref entry 3)])
+        (if
+          (or
+            (not (string? resource))
+            (member resource resources))
+          resources
+          (cons resource resources))))
+    '()
+    soda-built-in-api-index))
+
+(for-each
+  (lambda (resource)
+    (let* ([snapshot
+             (make-scheme-semantic-snapshot
+               94
+               0
+               (read-resource-bytes resource))]
+           [undefined
+             (diagnostic-payloads
+               snapshot
+               'undefined-identifier)])
+      (unless
+        (null? undefined)
+        (error
+          'embedded-api-index-tests
+          "embedded Soda source produced undefined identifier diagnostics"
+          resource
+          undefined))))
+  soda-source-resources)
+
 (define only-snapshot
   (snapshot-for-import
     "(only (soda editor core) editor-register-command!)"

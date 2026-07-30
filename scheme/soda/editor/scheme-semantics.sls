@@ -3249,6 +3249,253 @@
         '()
         import-locations)))
 
+  (define analyzable-syntax-heads
+    '("and"
+      "assert"
+      "begin"
+      "case-lambda"
+      "cond"
+      "define"
+      "define-command"
+      "do"
+      "guard"
+      "if"
+      "lambda"
+      "let"
+      "let*"
+      "let*-values"
+      "let-values"
+      "letrec"
+      "letrec*"
+      "or"
+      "parameterize"
+      "set!"
+      "unless"
+      "when"))
+
+  (define (known-import-environment?
+            import-locations
+            library-table
+            library-catalog)
+    (and
+      (pair? import-locations)
+      (for-all
+        (lambda (location)
+          (let ([library
+                  (import-binding-library
+                    (car location))])
+            (or
+              (hashtable-contains?
+                library-table library)
+              (hashtable-contains?
+                scheme-known-library-table library)
+              (member library library-catalog))))
+        import-locations)))
+
+  (define (definition-with-id definitions id)
+    (find
+      (lambda (definition)
+        (scheme-definition-id=?
+          (scheme-definition-id definition)
+          id))
+      definitions))
+
+  (define (use-at-form uses form)
+    (find
+      (lambda (use)
+        (and
+          (= (scheme-use-start use)
+             (syntax-form-start form))
+          (= (scheme-use-end use)
+             (syntax-form-end form))))
+      uses))
+
+  (define (syntax-headed-form?
+            form
+            uses
+            definitions)
+    (let* ([children
+             (syntax-form-children form)]
+           [head
+             (and
+               (pair? children)
+               (car children))]
+           [use
+             (and
+               (syntax-symbol? head)
+               (use-at-form uses head))])
+      (and
+        use
+        (pair? (scheme-use-resolution use))
+        (for-all
+          (lambda (id)
+            (let ([definition
+                    (definition-with-id
+                      definitions id)])
+              (and
+                definition
+                (eq?
+                  (scheme-definition-kind definition)
+                  'syntax))))
+          (scheme-use-resolution use)))))
+
+  (define (undefined-suppression-ranges
+            tokens
+            uses
+            definitions)
+    (let ([ranges '()])
+      (define (suppress! form)
+        (when form
+          (set! ranges
+            (cons
+              (cons
+                (syntax-form-start form)
+                (syntax-form-end form))
+              ranges))))
+      (define (walk-sequence forms)
+        (for-each walk forms))
+      (define (walk-case children)
+        (when (pair? (cdr children))
+          (walk (cadr children)))
+        (for-each
+          (lambda (clause)
+            (if
+              (and
+                (syntax-list? clause)
+                (pair?
+                  (syntax-form-children clause)))
+              (begin
+                (suppress!
+                  (car
+                    (syntax-form-children clause)))
+                (walk-sequence
+                  (cdr
+                    (syntax-form-children clause))))
+              (walk clause)))
+          (cddr children)))
+      (define (walk-command children)
+        (for-each
+          (lambda (child)
+            (if
+              (and
+                (syntax-list? child)
+                (string=?
+                  (or
+                    (syntax-head-symbol child)
+                    "")
+                  "interactive"))
+              (suppress! child)
+              (walk child)))
+          (cdr children)))
+      (define (walk form)
+        (when (syntax-list? form)
+          (let* ([children
+                   (syntax-form-children form)]
+                 [head
+                   (syntax-head-symbol form)])
+            (cond
+              [(not head)
+               (walk-sequence children)]
+              [(string=? head "library")
+               (when (pair? (cdr children))
+                 (suppress! (cadr children)))
+               (walk-sequence
+                 (if
+                   (pair? (cdr children))
+                   (cddr children)
+                   '()))]
+              [(or
+                 (string=? head "import")
+                 (string=? head "export"))
+               (for-each suppress! (cdr children))]
+              [(string=? head "case")
+               (walk-case children)]
+              [(string=? head "define-command")
+               (walk-command children)]
+              [(and
+                 (syntax-headed-form?
+                   form uses definitions)
+                 (not
+                   (member
+                     head
+                     analyzable-syntax-heads)))
+               (for-each suppress! (cdr children))]
+              [else
+               (let ([head-use
+                       (and
+                         (pair? children)
+                         (syntax-symbol?
+                           (car children))
+                         (use-at-form
+                           uses
+                           (car children)))])
+                 (if
+                   (and
+                     head-use
+                     (null?
+                       (scheme-use-resolution
+                         head-use)))
+                   (for-each
+                     suppress!
+                     (cdr children))
+                   (walk-sequence children)))]))))
+      (walk-sequence
+        (parse-syntax-forms
+          (call-context-tokens-from tokens)))
+      ranges))
+
+  (define (undefined-identifier-diagnostics
+            tokens
+            definitions
+            visible-index
+            import-locations
+            uses
+            library-table
+            library-catalog)
+    (if
+      (not
+        (known-import-environment?
+          import-locations
+          library-table
+          library-catalog))
+      '()
+      (let* ([all-definitions
+               (append
+                 definitions
+                 visible-index
+                 scheme-primitive-definitions)]
+             [suppressed
+               (undefined-suppression-ranges
+                 tokens uses all-definitions)])
+        (fold-left
+          (lambda (result use)
+            (if
+              (or
+                (pair?
+                  (scheme-use-resolution use))
+                (exists
+                  (lambda (range)
+                    (and
+                      (<= (car range)
+                          (scheme-use-start use))
+                      (<= (scheme-use-end use)
+                          (cdr range))))
+                  suppressed))
+              result
+              (cons
+                (make-scheme-diagnostic
+                  'undefined-identifier
+                  (scheme-use-start use)
+                  (scheme-use-end use)
+                  'error
+                  (string-append
+                    "Undefined identifier "
+                    (scheme-use-name use))
+                  (scheme-use-name use))
+                result)))
+          '()
+          uses))))
+
   (define (diagnostic-before? left right)
     (or
       (< (scheme-diagnostic-start left)
@@ -3262,11 +3509,13 @@
   (define (semantic-diagnostics
             bytes
             tokens
+            definitions
             scopes
             import-locations
             uses
             library-table
-            library-catalog)
+            library-catalog
+            visible-index)
     (list-sort
       diagnostic-before?
       (append
@@ -3277,6 +3526,14 @@
           import-locations)
         (identifier-not-exported-diagnostics
           import-locations
+          library-table
+          library-catalog)
+        (undefined-identifier-diagnostics
+          tokens
+          definitions
+          visible-index
+          import-locations
+          uses
           library-table
           library-catalog)
         (unused-parameter-diagnostics scopes uses)
@@ -3365,11 +3622,13 @@
               (semantic-diagnostics
                 bytes
                 tokens
+                scoped-definitions
                 scopes
                 import-locations
                 uses
                 library-table
-                library-catalog)
+                library-catalog
+                visible-index)
               visible-index))))))
 
   (define (make-scheme-semantic-snapshot

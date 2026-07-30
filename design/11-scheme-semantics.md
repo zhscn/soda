@@ -76,6 +76,12 @@ reader 允许在不完整的 list、string 和 datum 周围产生可查询节点
 不能改变原文长度与位置映射。无法恢复的区域作为 opaque syntax node 存在，外围
 scope 仍可用于补全。
 
+atom token 通过 Scheme reader 分类。只有 reader datum 为 symbol 的 atom 才进入
+binding 与 use 分析；number、boolean、character 和其他 self-evaluating datum
+保持原始 range，但不生成 identifier。quote、quasiquote、syntax 和 quasisyntax
+包围的 datum 在结构分析中折叠为一个保留 range 的 opaque datum，因此 literal
+不会产生 use，同时仍占据 `do` binding、调用参数等 form 中的一个语法位置。
+
 syntax provider contract 允许按整个文件重建 SchemeSyntaxView，也允许维护增量
 reader。Document change 与 provider session 的生命周期遵循通用 syntax provider
 contract，两种实现向语义索引暴露相同的 revision-scoped view。
@@ -290,7 +296,9 @@ namespace 为 `scheme-semantic-diagnostics`，source revision 与 semantic snaps
 - 没有任何可见 binding 被引用的 Soda library import；
 - 具有静态 export surface 的 Soda 或 Project library，其 `only`、`except`、
   `rename` selector 引用了 import set 未导出的 identifier；
-- 嵌入 Soda library catalog 中不存在的 `(soda ...)` import。
+- 嵌入 Soda library catalog 中不存在的 `(soda ...)` import；
+- 静态 import environment 完整时，expression position 中没有 lexical、library
+  或 primitive definition 的 identifier。
 
 重复 binding 按 scope graph 判断。`let*` 和 `let*-values` 的逐级 scope 允许后续
 binding 遮蔽前一层，`lambda`、并行 let 和同一 `case-lambda` clause 中的重复名字
@@ -305,6 +313,15 @@ import form 中出现的 identifier 不会把自身计为使用，不同 modifie
 selector 校验按相同的嵌套 import-set 顺序执行，因此经过 `prefix` 产生的名称和经过
 内层 `only`、`except` 过滤后的 surface 都在外层 modifier 处准确生效。诊断 range
 只覆盖无效的 source identifier，而不是整个 import specification。
+
+undefined identifier 诊断以 binding resolution 为空为基础，并由 syntax context
+限制发布范围。`case` datum、import/export declaration、quoted datum 和已知宏的
+声明式参数不作为 expression；未知 operator 只诊断 operator 本身，其参数保持
+opaque，避免从未知宏 grammar 产生级联误报。`define-command` 的 procedure
+signature 建立普通 parameter scope，`interactive` clause 作为命令声明数据处理，
+command body 继续按 expression 分析。只要文档存在未知 library import，当前
+snapshot 的 import surface 就被视为不完整，不发布推测性的 undefined identifier
+诊断。
 
 publisher 在 buffer 创建、major mode 变化和 revert 后同步诊断，并在顶层交互命令
 结束后检查所有 Scheme buffer。source revision 未变化时不重新分析；revision
@@ -387,8 +404,10 @@ scanner 同时从容错 syntax form 建立 lexical scope tree。procedure defini
 使用同一 binding 模型。`let` 的 binding 只在 body scope 可见，`let*` 为每个
 binding 建立依次嵌套的 scope，`letrec` 与 `letrec*` 在 initializer 和 body 中都
 暴露全部 binding。`let-values` 与 `let*-values` 对每组 formals 应用对应的并行或
-顺序可见性。named let 的过程名和参数位于 body scope。未闭合 form 的 scope range
-延伸到 Document 末尾，使编辑中的参数和局部 binding 仍可参与补全。
+顺序可见性。`do` initializer 在外层 scope 求值，step、termination 和 body 共享
+loop binding；`guard` condition binding 只在 handler clauses 中可见。named let
+的过程名和参数位于 body scope。未闭合 form 的 scope range 延伸到 Document
+末尾，使编辑中的参数和局部 binding 仍可参与补全。
 
 同一次扫描也产生 `SchemeUse { name, start, end, resolution }`。声明 token 不重复
 记录为 use，quote、quasiquote、syntax 及 datum comment 内的 symbol 不进入 use
