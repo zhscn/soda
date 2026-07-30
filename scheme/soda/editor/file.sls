@@ -7,10 +7,13 @@
           open-request?
           open-request-view-id
           open-request-path
+          open-request-offset
           make-open-result
           open-result?
           open-result-view-id
           open-result-view-ids
+          open-result-offsets
+          open-result-offset-for-view
           open-result-path
           open-result-status
           open-result-data
@@ -92,11 +95,20 @@
 
   (define-record-type
     (open-request %make-open-request open-request?)
-    (fields view-id path))
+    (fields view-id path offset))
 
   (define-record-type
     (open-result %make-open-result open-result?)
-    (fields view-ids path status data error-name detail kind stat))
+    (fields
+      view-ids
+      offsets
+      path
+      status
+      data
+      error-name
+      detail
+      kind
+      stat))
 
   (define-record-type
     (reload-request %make-reload-request reload-request?)
@@ -143,6 +155,15 @@
   (define (open-result-view-id result)
     (car (open-result-view-ids result)))
 
+  (define (open-result-offset-for-view result view-id)
+    (let loop ([view-ids (open-result-view-ids result)]
+               [offsets (open-result-offsets result)])
+      (and
+        (pair? view-ids)
+        (if (= (car view-ids) view-id)
+            (car offsets)
+            (loop (cdr view-ids) (cdr offsets))))))
+
   (define-record-type
     (save-request %make-save-request save-request?)
     (fields buffer-id
@@ -170,18 +191,28 @@
   (define (non-empty-string? value)
     (and (string? value) (positive? (string-length value))))
 
-  (define (make-open-request view-id path)
-    (unless (exact-non-negative-integer? view-id)
-      (assertion-violation
-        'make-open-request
-        "view id must be a non-negative exact integer"
-        view-id))
-    (unless (non-empty-string? path)
-      (assertion-violation
-        'make-open-request
-        "path must be a non-empty string"
-        path))
-    (%make-open-request view-id path))
+  (define make-open-request
+    (case-lambda
+      [(view-id path)
+       (make-open-request view-id path #f)]
+      [(view-id path offset)
+       (unless (exact-non-negative-integer? view-id)
+         (assertion-violation
+           'make-open-request
+           "view id must be a non-negative exact integer"
+           view-id))
+       (unless (non-empty-string? path)
+         (assertion-violation
+           'make-open-request
+           "path must be a non-empty string"
+           path))
+       (unless
+         (or (not offset) (exact-non-negative-integer? offset))
+         (assertion-violation
+           'make-open-request
+           "offset must be a non-negative exact integer or #f"
+           offset))
+       (%make-open-request view-id path offset)]))
 
   (define (make-reload-request
             view-id
@@ -338,12 +369,15 @@
        (if
          (open-request? first)
          (make-open-result
-           (open-request-view-id first)
+           (list (open-request-view-id first))
+           (list (open-request-offset first))
            (open-request-path first)
            second
            third
            fourth
-           fifth)
+           fifth
+           #f
+           #f)
          (make-open-result
            first second third fourth #f fifth))]
       [(view-id path status data error-name detail)
@@ -354,6 +388,18 @@
          views path status data error-name detail kind #f)]
       [(views path status data error-name detail kind stat)
        (let ([view-ids (if (list? views) views (list views))])
+         (make-open-result
+           view-ids
+           (map (lambda (view-id) #f) view-ids)
+           path
+           status
+           data
+           error-name
+           detail
+           kind
+           stat))]
+      [(views offsets path status data error-name detail kind stat)
+       (let ([view-ids (if (list? views) views (list views))])
        (unless
          (and (pair? view-ids)
               (for-all exact-non-negative-integer? view-ids))
@@ -361,6 +407,20 @@
            'make-open-result
            "view ids must be a non-empty list of non-negative exact integers"
            views))
+       (unless
+         (and
+           (list? offsets)
+           (= (length offsets) (length view-ids))
+           (for-all
+             (lambda (offset)
+               (or
+                 (not offset)
+                 (exact-non-negative-integer? offset)))
+             offsets))
+         (assertion-violation
+           'make-open-result
+           "offsets must align with view ids"
+           offsets))
        (unless (non-empty-string? path)
          (assertion-violation
            'make-open-result
@@ -397,7 +457,15 @@
            "stat must be a VFS stat value or #f"
            stat))
        (%make-open-result
-         view-ids path status data error-name detail kind stat))]))
+         view-ids
+         offsets
+         path
+         status
+         data
+         error-name
+         detail
+         kind
+         stat))]))
 
   (define (detect-file-line-ending bytes)
     (unless (bytevector? bytes)
@@ -800,6 +868,19 @@
           #t)
         #f))
 
+  (define (activate-open-target! editor result buffer view-id)
+    (and
+      (activate-buffer! editor view-id buffer)
+      (begin
+        (let ([offset
+                (open-result-offset-for-view result view-id)]
+              [view (find-view-by-id editor view-id)])
+          (when (and offset view)
+            (view-set-caret!
+              view
+              (min offset (buffer-byte-length buffer)))))
+        #t)))
+
   (define (view-default-directory editor view-id)
     (let ([view (find-view-by-id editor view-id)])
       (if view
@@ -1092,7 +1173,11 @@
         (fold-left
           (lambda (activated? view-id)
             (or
-              (activate-buffer! editor view-id buffer)
+              (activate-open-target!
+                editor
+                result
+                buffer
+                view-id)
               activated?))
           #f
           (open-result-view-ids result))
@@ -1118,7 +1203,11 @@
   (define (activate-open-result-buffer! editor result buffer)
     (for-each
       (lambda (view-id)
-        (activate-buffer! editor view-id buffer))
+        (activate-open-target!
+          editor
+          result
+          buffer
+          view-id))
       (open-result-view-ids result)))
 
   (define (apply-open-result-command context)

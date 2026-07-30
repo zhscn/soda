@@ -16,7 +16,7 @@
   (define-record-type
     (open-operation %make-open-operation open-operation?)
     (fields path
-            (mutable view-ids)
+            (mutable targets)
             (mutable phase)
             (mutable stat)))
 
@@ -76,7 +76,8 @@
     (make-internal-command-message
       'file.apply-open-result
       (make-open-result
-        (open-operation-view-ids operation)
+        (map car (open-operation-targets operation))
+        (map cdr (open-operation-targets operation))
         (open-operation-path operation)
         status
         data
@@ -142,15 +143,20 @@
                #f)])
       (if existing
           (begin
-            (unless
-              (memv
-                (open-request-view-id request)
-                (open-operation-view-ids existing))
-              (open-operation-view-ids-set!
-                existing
-                (append
-                  (open-operation-view-ids existing)
-                  (list (open-request-view-id request)))))
+            (open-operation-targets-set!
+              existing
+              (append
+                (filter
+                  (lambda (target)
+                    (not
+                      (=
+                        (car target)
+                        (open-request-view-id request))))
+                  (open-operation-targets existing))
+                (list
+                  (cons
+                    (open-request-view-id request)
+                    (open-request-offset request)))))
             (make-effect-result #t '()))
           (guard (condition
                    [else
@@ -167,7 +173,10 @@
             (let* ([operation
                      (%make-open-operation
                        path
-                       (list (open-request-view-id request))
+                       (list
+                         (cons
+                           (open-request-view-id request)
+                           (open-request-offset request)))
                        'stat
                        #f)]
                    [source

@@ -47,12 +47,8 @@
               (set! result (cons definition result)))))
         (append
           (scheme-semantic-snapshot-definitions snapshot)
-          (filter
-            (lambda (definition)
-              (member
-                (scheme-definition-library definition)
-                (scheme-semantic-snapshot-imports snapshot)))
-            scheme-index-definitions)
+          (scheme-semantic-snapshot-visible-index-definitions
+            snapshot)
           scheme-primitive-definitions))
       (reverse result)))
 

@@ -150,11 +150,13 @@ if(BUILD_TESTING)
     NAME scheme_embedded_api_index_tests
     CONFIGURATIONS Debug Release
     COMMAND
+      "${CMAKE_COMMAND}" -E env
+      SODA_DOCUMENT_LIBRARY=$<TARGET_FILE:soda_scheme_native_test>
       "${SODA_CHEZ_SCHEME_EXECUTABLE}"
-      --libdirs
-      "${CMAKE_CURRENT_BINARY_DIR}/generated/chez/scheme"
-      --program
-      "${PROJECT_SOURCE_DIR}/tests/scheme/embedded_api_index_tests.ss"
+        --libdirs
+        "${CMAKE_CURRENT_BINARY_DIR}/generated/chez/scheme"
+        --program
+        "${PROJECT_SOURCE_DIR}/tests/scheme/embedded_api_index_tests.ss"
   )
 endif()
 

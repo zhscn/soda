@@ -9,6 +9,7 @@
         (soda editor buffer)
         (soda editor core)
         (soda editor completion-runtime)
+        (only (soda editor command) make-command-effect)
         (soda editor effect)
         (soda editor event)
         (soda editor file)
@@ -46,6 +47,7 @@
 (define new-path (string-append save-as-path ".new"))
 (define external-path (string-append save-as-path ".external.sls"))
 (define insert-path (string-append save-as-path ".insert"))
+(define offset-path (string-append save-as-path ".offset.sls"))
 (when (file-exists? save-path)
   (delete-file save-path))
 (when (file-exists? save-as-path)
@@ -56,6 +58,8 @@
   (delete-file external-path))
 (when (file-exists? insert-path)
   (delete-file insert-path))
+(when (file-exists? offset-path)
+  (delete-file offset-path))
 
 (define document (make-document "base" 801))
 (define buffer
@@ -1283,6 +1287,34 @@
   (error 'file-tests
          "new empty file did not complete its first save"))
 
+(write-file-bytes
+  offset-path
+  (string->utf8 "zero\none\ntwo\n"))
+(let ([result
+        (execute-effects!
+          executor
+          (list
+            (make-command-effect
+              'file.read
+              (make-open-request
+                origin-view-id
+                offset-path
+                9))))])
+  (unless
+    (and
+      (effect-result-continue? result)
+      (null? (effect-result-messages result)))
+    (error 'file-tests
+           "positioned open did not start asynchronously")))
+(finish-file-read!)
+(unless
+  (let ([view (editor-active-view editor)])
+    (and
+      (string=? (buffer-file-path (view-buffer view)) offset-path)
+      (= (view-caret view) 9)))
+  (error 'file-tests
+         "positioned open did not restore the requested byte offset"))
+
 (editor-close! editor)
 (runtime-close! runtime)
 (when (file-exists? save-path)
@@ -1295,3 +1327,5 @@
   (delete-file external-path))
 (when (file-exists? insert-path)
   (delete-file insert-path))
+(when (file-exists? offset-path)
+  (delete-file offset-path))

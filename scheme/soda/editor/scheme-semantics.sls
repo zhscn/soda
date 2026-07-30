@@ -7,6 +7,7 @@
           scheme-semantic-snapshot-uses
           scheme-semantic-snapshot-tokens
           scheme-semantic-snapshot-imports
+          scheme-semantic-snapshot-visible-index-definitions
           scheme-definition-id?
           scheme-definition-id-source
           scheme-definition-id-document-id
@@ -61,7 +62,14 @@
     (scheme-semantic-snapshot
       %make-scheme-semantic-snapshot
       scheme-semantic-snapshot?)
-    (fields document-id revision definitions uses tokens imports))
+    (fields
+      document-id
+      revision
+      definitions
+      uses
+      tokens
+      imports
+      visible-index-definitions))
 
   (define-record-type token
     (fields kind value start end))
@@ -652,23 +660,7 @@
       soda-built-in-api-index))
 
   (define scheme-global-definitions
-    (append
-      scheme-index-definitions
-      scheme-primitive-definitions))
-
-  (define scheme-global-definition-table
-    (let ([table (make-hashtable string-hash string=?)])
-      (for-each
-        (lambda (definition)
-          (let ([name (scheme-definition-name definition)])
-            (hashtable-set!
-              table
-              name
-              (cons
-                definition
-                (hashtable-ref table name '())))))
-        scheme-global-definitions)
-      table))
+    (append scheme-index-definitions scheme-primitive-definitions))
 
   (define (scheme-definition-library definition)
     (unless (scheme-definition? definition)
@@ -681,8 +673,22 @@
         (eq? (scheme-definition-id-source id) 'index)
         (scheme-definition-id-revision id))))
 
-  (define import-modifiers
-    '(only except prefix rename for))
+  (define scheme-index-library-table
+    (let ([table (make-hashtable equal-hash equal?)])
+      (for-each
+        (lambda (definition)
+          (let ([library (scheme-definition-library definition)])
+            (hashtable-set!
+              table
+              library
+              (cons
+                definition
+                (hashtable-ref table library '())))))
+        scheme-index-definitions)
+      table))
+
+  (define-record-type import-binding
+    (fields library transforms))
 
   (define (library-name? value)
     (and
@@ -694,25 +700,70 @@
               (and (integer? part) (exact? part))))
         value)))
 
-  (define (import-spec-library specification)
-    (and
-      (pair? specification)
-      (if (memq (car specification) import-modifiers)
-          (and
-            (pair? (cdr specification))
-            (import-spec-library (cadr specification)))
-          (and
-            (library-name? specification)
-            specification))))
+  (define (identifier-list? values)
+    (and (list? values) (for-all symbol? values)))
 
-  (define (import-clause-libraries clause)
+  (define (rename-list? values)
+    (and
+      (list? values)
+      (for-all
+        (lambda (value)
+          (and
+            (list? value)
+            (= (length value) 2)
+            (symbol? (car value))
+            (symbol? (cadr value))))
+        values)))
+
+  (define (extend-import-binding binding transform)
+    (and
+      binding
+      (make-import-binding
+        (import-binding-library binding)
+        (append
+          (import-binding-transforms binding)
+          (list transform)))))
+
+  (define (normalize-import-specification specification)
+    (cond
+      [(library-name? specification)
+       (make-import-binding specification '())]
+      [(not (pair? specification)) #f]
+      [(and
+         (memq (car specification) '(only except))
+         (pair? (cdr specification))
+         (identifier-list? (cddr specification)))
+       (extend-import-binding
+         (normalize-import-specification (cadr specification))
+         (cons (car specification) (cddr specification)))]
+      [(and
+         (eq? (car specification) 'prefix)
+         (= (length specification) 3)
+         (symbol? (caddr specification)))
+       (extend-import-binding
+         (normalize-import-specification (cadr specification))
+         (list 'prefix (caddr specification)))]
+      [(and
+         (eq? (car specification) 'rename)
+         (pair? (cdr specification))
+         (rename-list? (cddr specification)))
+       (extend-import-binding
+         (normalize-import-specification (cadr specification))
+         (cons 'rename (cddr specification)))]
+      [(and
+         (eq? (car specification) 'for)
+         (pair? (cdr specification)))
+       (normalize-import-specification (cadr specification))]
+      [else #f]))
+
+  (define (import-clause-bindings clause)
     (if (and (pair? clause) (eq? (car clause) 'import))
         (filter
           (lambda (value) value)
-          (map import-spec-library (cdr clause)))
+          (map normalize-import-specification (cdr clause)))
         '()))
 
-  (define (datum-imports datum)
+  (define (datum-import-bindings datum)
     (cond
       [(and
          (pair? datum)
@@ -720,9 +771,9 @@
          (pair? (cdr datum)))
        (apply
          append
-         (map import-clause-libraries (cddr datum)))]
+         (map import-clause-bindings (cddr datum)))]
       [(and (pair? datum) (eq? (car datum) 'import))
-       (import-clause-libraries datum)]
+       (import-clause-bindings datum)]
       [else '()]))
 
   (define (partial-datum tokens)
@@ -759,29 +810,109 @@
                 tail
                 (if datum (cons datum result) result)))))))
 
-  (define (source-imports bytes)
+  (define (source-import-bindings bytes)
     (apply
       append
       (map
-        datum-imports
+        datum-import-bindings
         (partial-data
           (remove-ignored-data
             (semantic-tokens (tokenize bytes)))))))
 
-  (define (definition-visible-from? definition imports)
-    (let ([library (scheme-definition-library definition)])
-      (or
-        (not library)
-        (member library imports))))
+  (define (rename-definition definition name)
+    (if (string=? name (scheme-definition-name definition))
+        definition
+        (make-scheme-definition
+          (scheme-definition-id definition)
+          name
+          (scheme-definition-kind definition)
+          (scheme-definition-start definition)
+          (scheme-definition-end definition)
+          (string-append
+            (scheme-definition-detail definition)
+            " as "
+            name))))
 
-  (define (visible-global-definitions-named name imports)
-    (filter
-      (lambda (definition)
-        (definition-visible-from? definition imports))
-      (hashtable-ref
-        scheme-global-definition-table
-        name
-        '())))
+  (define (symbol-names symbols)
+    (map symbol->string symbols))
+
+  (define (apply-import-transform definitions transform)
+    (let ([kind (car transform)]
+          [arguments (cdr transform)])
+      (case kind
+        [(only)
+         (let ([names (symbol-names arguments)])
+           (filter
+             (lambda (definition)
+               (member
+                 (scheme-definition-name definition)
+                 names))
+             definitions))]
+        [(except)
+         (let ([names (symbol-names arguments)])
+           (filter
+             (lambda (definition)
+               (not
+                 (member
+                   (scheme-definition-name definition)
+                   names)))
+             definitions))]
+        [(prefix)
+         (let ([prefix (symbol->string (car arguments))])
+           (map
+             (lambda (definition)
+               (rename-definition
+                 definition
+                 (string-append
+                   prefix
+                   (scheme-definition-name definition))))
+             definitions))]
+        [(rename)
+         (let ([renames
+                 (map
+                   (lambda (pair)
+                     (cons
+                       (symbol->string (car pair))
+                       (symbol->string (cadr pair))))
+                   arguments)])
+           (map
+             (lambda (definition)
+               (let ([rename
+                       (assoc
+                         (scheme-definition-name definition)
+                         renames)])
+                 (if rename
+                     (rename-definition definition (cdr rename))
+                     definition)))
+             definitions))]
+        [else definitions])))
+
+  (define (definitions-for-import binding)
+    (fold-left
+      apply-import-transform
+      (reverse
+        (hashtable-ref
+          scheme-index-library-table
+          (import-binding-library binding)
+          '()))
+      (import-binding-transforms binding)))
+
+  (define (visible-index-definitions bindings)
+    (apply append (map definitions-for-import bindings)))
+
+  (define (make-definition-table definitions)
+    (let ([table (make-hashtable string-hash string=?)])
+      (for-each
+        (lambda (definition)
+          (let ([name (scheme-definition-name definition)])
+            (hashtable-set!
+              table
+              name
+              (cons
+                definition
+                (hashtable-ref table name '())))))
+        definitions)
+      table))
 
   (define (scheme-definition-id=? left right)
     (and (scheme-definition-id? left)
@@ -812,7 +943,7 @@
                 (scheme-definition-end definition))))
       definitions))
 
-  (define (scan-uses tokens definitions imports)
+  (define (scan-uses tokens definitions global-table)
     (let loop ([tokens (remove-ignored-data tokens)]
                [uses '()])
       (cond
@@ -827,9 +958,10 @@
                 [resolved
                   (if (pair? local)
                       local
-                      (visible-global-definitions-named
+                      (hashtable-ref
+                        global-table
                         name
-                        imports))])
+                        '()))])
            (loop
              (cdr tokens)
              (cons
@@ -936,13 +1068,23 @@
         bytes))
     (let* ([tokens (tokenize bytes)]
            [semantic (semantic-tokens tokens)]
-           [imports (source-imports bytes)]
+           [import-bindings (source-import-bindings bytes)]
+           [imports
+             (map import-binding-library import-bindings)]
+           [visible-index
+             (visible-index-definitions import-bindings)]
+           [global-table
+             (make-definition-table
+               (append
+                 visible-index
+                 scheme-primitive-definitions))]
            [definitions
              (scan-definitions document-id revision semantic)])
       (%make-scheme-semantic-snapshot
         document-id
         revision
         definitions
-        (scan-uses semantic definitions imports)
+        (scan-uses semantic definitions global-table)
         tokens
-        imports))))
+        imports
+        visible-index))))

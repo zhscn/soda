@@ -173,12 +173,14 @@ Buffer 所在目录；没有文件路径的 Buffer 使用进程当前目录。ch
 解析结果在进入 Buffer identity 和异步读取请求前折叠空 field、`.`、`..` 与重复
 分隔符，使不同的词法写法引用同一个文件 Buffer。
 
-最终文件路径通过 `file.read` effect 提交。请求携带发起操作的 view identity；
-runtime adapter 先异步 stat 路径，再按结果进入目录、读取或新文件分支。目录重新
-打开以该目录为初值的 find-file，普通文件启动异步 read，`ENOENT` 直接进入新文件
-分支。文件内容和完成状态以 internal command 返回 editor。成功结果创建带
-`file_path` 的 Buffer，根据路径选择初始 major mode，并记录原始换行约定。
-成功 stat 的文件状态随读取结果进入 Buffer，作为后续保存的版本前提。
+最终文件路径通过 `file.read` effect 提交。请求携带发起操作的 view identity 与
+可选目标 byte offset；runtime adapter 先异步 stat 路径，再按结果进入目录、读取或
+新文件分支。目录重新打开以该目录为初值的 find-file，普通文件启动异步 read，
+`ENOENT` 直接进入新文件分支。相同路径的并发读取合并为一个 operation，每个 View
+保留独立目标 offset。文件内容和完成状态以 internal command 返回 editor。成功
+结果创建带 `file_path` 的 Buffer，根据路径选择初始 major mode，恢复各 View 的
+目标位置，并记录原始换行约定。成功 stat 的文件状态随读取结果进入 Buffer，作为
+后续保存的版本前提。
 
 runtime 把 libuv status 转换成稳定的错误名和消息。`ENOENT` 结果创建一个访问该
 路径的空 Buffer，并设置首次保存要求；该 Buffer 即使尚无文本编辑也处于 modified

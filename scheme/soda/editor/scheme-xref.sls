@@ -5,12 +5,19 @@
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
+          (soda editor file)
           (soda editor keymap)
           (soda editor language)
           (soda editor location)
           (soda editor navigation)
           (soda editor scheme-semantics)
           (soda editor state))
+
+  (define (exact-non-negative-integer? value)
+    (and
+      (integer? value)
+      (exact? value)
+      (not (negative? value))))
 
   (define (buffer-semantic-snapshot buffer)
     (let* ([document (buffer-document buffer)]
@@ -52,22 +59,68 @@
 
   (define (definition-location editor definition)
     (let ([id (scheme-definition-id definition)])
+      (case (scheme-definition-id-source id)
+        [(document)
+         (let ([buffer
+                 (buffer-for-document
+                   editor
+                   (scheme-definition-id-document-id id))])
+           (and
+             buffer
+             (make-location-item
+               (buffer-id buffer)
+               (buffer-resource buffer)
+               (scheme-definition-id-revision id)
+               (scheme-definition-start definition)
+               (scheme-definition-end definition)
+               (scheme-definition-name definition)
+               definition)))]
+        [(index)
+         (let* ([resource
+                  (scheme-definition-id-document-id id)]
+                [buffer
+                  (and
+                    resource
+                    (editor-buffer-for-resource
+                      editor
+                      resource))])
+           (and
+             buffer
+             (integer? (scheme-definition-start definition))
+             (integer? (scheme-definition-end definition))
+             (make-location-item
+               (buffer-id buffer)
+               resource
+               (buffer-revision buffer)
+               (scheme-definition-start definition)
+               (scheme-definition-end definition)
+               (scheme-definition-name definition)
+               definition)))]
+        [else #f])))
+
+  (define (definition-open-effect context definitions)
+    (let ([definition
+            (find
+              (lambda (definition)
+                (let ([id (scheme-definition-id definition)])
+                  (and
+                    (eq?
+                      (scheme-definition-id-source id)
+                      'index)
+                    (string?
+                      (scheme-definition-id-document-id id))
+                    (exact-non-negative-integer?
+                      (scheme-definition-start definition)))))
+              definitions)])
       (and
-        (eq? (scheme-definition-id-source id) 'document)
-        (let ([buffer
-                (buffer-for-document
-                  editor
-                  (scheme-definition-id-document-id id))])
-          (and
-            buffer
-            (make-location-item
-              (buffer-id buffer)
-              (buffer-resource buffer)
-              (scheme-definition-id-revision id)
-              (scheme-definition-start definition)
-              (scheme-definition-end definition)
-              (scheme-definition-name definition)
-              definition))))))
+        definition
+        (make-command-effect
+          'file.read
+          (make-open-request
+            (view-id (command-context-view context))
+            (scheme-definition-id-document-id
+              (scheme-definition-id definition))
+            (scheme-definition-start definition))))))
 
   (define (use-location buffer revision use)
     (make-location-item
@@ -133,25 +186,34 @@
                       (lambda (definition)
                         (definition-location editor definition))
                       definitions))])
-            (if (publish-and-jump!
-                  editor
-                  'scheme-definition
-                  items)
-                (editor-set-status-message!
-                  editor
-                  (string-append
-                    "Definition"
-                    (if (> (length items) 1)
-                        (string-append
-                          "s: "
-                          (number->string (length items)))
-                        "")))
-                (editor-set-status-message!
-                  editor
-                  (if (pair? definitions)
-                      "Definition has no source location"
-                      "No definition at point"))))))
-      '()))
+            (cond
+              [(publish-and-jump!
+                 editor
+                 'scheme-definition
+                 items)
+               (editor-set-status-message!
+                 editor
+                 (string-append
+                   "Definition"
+                   (if (> (length items) 1)
+                       (string-append
+                         "s: "
+                         (number->string (length items)))
+                       "")))
+               '()]
+              [(definition-open-effect context definitions) =>
+               (lambda (effect)
+                 (editor-set-status-message!
+                   editor
+                   "Reading definition source")
+                 (list effect))]
+              [else
+               (editor-set-status-message!
+                 editor
+                 (if (pair? definitions)
+                     "Definition has no source location"
+                     "No definition at point"))
+               '()]))))))
 
   (define (find-references-command context)
     (let ([editor (command-context-editor context)])

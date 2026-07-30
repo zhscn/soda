@@ -223,6 +223,11 @@ import clause 仍然有效。静态 completion 只暴露当前文档 import 的 
 本地定义按名称遮蔽 catalog，primitive metadata 位于最后。索引内部保留跨 library
 同名 export，呈现层对相同名称去重。
 
+import set 在进入查询层前按 R6RS 组合顺序归一化。`only` 与 `except` 过滤当前
+surface，`prefix` 重写全部可见名称，`rename` 重写指定名称，`for` 保留 library
+identity。重写后的候选保存显示名称和原始 DefinitionId；补全插入显示名称，
+definition 与 references 查询沿原始 identity 工作。
+
 ## Completion
 
 Scheme completion provider 的请求包含 document、revision、position 和 query
@@ -279,9 +284,11 @@ catalog 与 primitive。scope graph 可在同一 snapshot 和 DefinitionId 接�
 表示。
 
 自举 xref provider 把 definition 和 resolved uses 转成通用 LocationList。当前
-Document 的 declaration 与 references 可立即导航；primitive 只有 metadata、
-没有 source location 时返回明确的无源码结果。跨 library references 在 workspace
-层解析 import/export edges 后进入同一 LocationList 接口。
+Document 的 declaration 与 references 可立即导航。带 source resource 的嵌入 API
+definition 通过带目标 byte offset 的异步文件读取请求打开；资源已经访问时直接在
+现有 Buffer 中跳转。primitive 只有 metadata、没有 source location 时返回明确的
+无源码结果。跨 library references 在 workspace 层解析 import/export edges 后
+进入同一 LocationList 接口。
 
 ## Definition、references 与 rename
 

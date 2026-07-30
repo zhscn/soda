@@ -1,7 +1,12 @@
 #!r6rs
 (import (rnrs)
+        (soda document)
+        (soda editor buffer)
         (soda editor builtin-api-index)
-        (soda editor scheme-semantics))
+        (soda editor core)
+        (soda editor file)
+        (soda editor scheme-semantics)
+        (only (soda editor state) view-set-caret!))
 
 (define editor-command-entry
   (find
@@ -54,3 +59,152 @@
   (error
     'embedded-api-index-tests
     "incomplete source did not resolve the imported editor API"))
+
+(define (snapshot-for-import import-set body)
+  (make-scheme-semantic-snapshot
+    2
+    0
+    (string->utf8
+      (string-append
+        "(library (sample modifiers)\n"
+        "  (export)\n"
+        "  (import (rnrs) "
+        import-set
+        ")\n"
+        "  "
+        body))))
+
+(define (visible-name? snapshot name)
+  (exists
+    (lambda (definition)
+      (string=? (scheme-definition-name definition) name))
+    (scheme-semantic-snapshot-visible-index-definitions snapshot)))
+
+(define (use-named snapshot name)
+  (find
+    (lambda (use)
+      (string=? (scheme-use-name use) name))
+    (scheme-semantic-snapshot-uses snapshot)))
+
+(define only-snapshot
+  (snapshot-for-import
+    "(only (soda editor core) editor-register-command!)"
+    "(editor-register-command!"))
+
+(unless
+  (and
+    (visible-name? only-snapshot "editor-register-command!")
+    (not (visible-name? only-snapshot "editor-bind-key!")))
+  (error
+    'embedded-api-index-tests
+    "only import did not restrict visible Soda APIs"))
+
+(define except-snapshot
+  (snapshot-for-import
+    "(except (soda editor core) editor-register-command!)"
+    "(editor-register-command!"))
+
+(unless
+  (and
+    (not
+      (visible-name?
+        except-snapshot
+        "editor-register-command!"))
+    (visible-name? except-snapshot "editor-bind-key!"))
+  (error
+    'embedded-api-index-tests
+    "except import did not remove the excluded Soda API"))
+
+(define prefix-snapshot
+  (snapshot-for-import
+    "(prefix (soda editor core) soda:)"
+    "(soda:editor-register-command!"))
+
+(unless
+  (and
+    (visible-name?
+      prefix-snapshot
+      "soda:editor-register-command!")
+    (not
+      (visible-name?
+        prefix-snapshot
+        "editor-register-command!")))
+  (error
+    'embedded-api-index-tests
+    "prefix import did not rewrite visible Soda API names"))
+
+(define rename-snapshot
+  (snapshot-for-import
+    (string-append
+      "(rename (soda editor core) "
+      "(editor-register-command! register!))")
+    "(register!"))
+
+(unless
+  (let ([renamed-use (use-named rename-snapshot "register!")])
+    (and
+      (visible-name? rename-snapshot "register!")
+      (not
+        (visible-name?
+          rename-snapshot
+          "editor-register-command!"))
+      renamed-use
+      (= (length (scheme-use-resolution renamed-use)) 1)
+      (string=?
+        (scheme-definition-id-name
+          (car (scheme-use-resolution renamed-use)))
+        "editor-register-command!")))
+  (error
+    'embedded-api-index-tests
+    "rename import did not preserve canonical API identity"))
+
+(define xref-source
+  (string-append
+    "(library (sample xref)\n"
+    "  (export)\n"
+    "  (import (rnrs) (soda editor core))\n"
+    "  (editor-register-command!"))
+(define xref-snapshot
+  (make-scheme-semantic-snapshot
+    3
+    0
+    (string->utf8 xref-source)))
+(define xref-use
+  (find
+    (lambda (use)
+      (string=?
+        (scheme-use-name use)
+        "editor-register-command!"))
+    (scheme-semantic-snapshot-uses xref-snapshot)))
+(define xref-document (make-document xref-source 3))
+(define xref-buffer
+  (make-buffer
+    3
+    xref-document
+    "embedded-xref.sls"
+    'scheme-mode))
+(define xref-editor (make-editor xref-buffer))
+(view-set-caret!
+  (editor-active-view xref-editor)
+  (scheme-use-start xref-use))
+(define xref-effects
+  (editor-update!
+    xref-editor
+    (make-command-message 'xref.find-definition #f)))
+
+(unless
+  (and
+    (= (length xref-effects) 1)
+    (eq? (command-effect-kind (car xref-effects)) 'file.read)
+    (open-request?
+      (command-effect-payload (car xref-effects)))
+    (string?
+      (open-request-path
+        (command-effect-payload (car xref-effects))))
+    (integer?
+      (open-request-offset
+        (command-effect-payload (car xref-effects)))))
+  (error
+    'embedded-api-index-tests
+    "indexed xref did not request its source location"))
+(editor-close! xref-editor)
