@@ -452,6 +452,12 @@
       (eq? (annotation-set-namespace set) namespace)
       (= (annotation-set-buffer-id set) buffer-id)))
 
+  (define (diagnostic-annotation-set? set)
+    (exists
+      (lambda (annotation)
+        (eq? (annotation-kind annotation) 'diagnostic))
+      (annotation-set-annotations set)))
+
   (define (invalidate-diagnostic-list-for-buffers! editor buffer-ids)
     (let ([locations (editor-current-location-list editor)])
       (when
@@ -510,10 +516,19 @@
           (annotation-set-close! set)
           #f)
         (begin
-          (when current (annotation-set-close! current))
-          (invalidate-diagnostic-list-for-buffers!
-            editor
-            (list buffer-id))
+          (let ([diagnostics-changed?
+                  (or
+                    (diagnostic-annotation-set? set)
+                    (and
+                      current
+                      (diagnostic-annotation-set?
+                        current)))])
+            (when current
+              (annotation-set-close! current))
+            (when diagnostics-changed?
+              (invalidate-diagnostic-list-for-buffers!
+                editor
+                (list buffer-id))))
           (editor-annotation-sets-set!
             editor
             (cons
@@ -554,11 +569,17 @@
                 (not buffer-id)
                 (= (annotation-set-buffer-id set) buffer-id))))
           (editor-annotation-sets editor))])
-      (for-each annotation-set-close! removed)
-      (unless (null? removed)
-        (invalidate-diagnostic-list-for-buffers!
-          editor
-          (map annotation-set-buffer-id removed)))
+      (let ([diagnostic-removed
+              (filter
+                diagnostic-annotation-set?
+                removed)])
+        (for-each annotation-set-close! removed)
+        (unless (null? diagnostic-removed)
+          (invalidate-diagnostic-list-for-buffers!
+            editor
+            (map
+              annotation-set-buffer-id
+              diagnostic-removed))))
       (editor-annotation-sets-set! editor retained)
       (unless (null? removed)
         (editor-invalidate! editor 'overlay))

@@ -369,7 +369,19 @@
          (map
            (lambda (use)
              (definition-at-use lexical-snapshot use))
-           shadow-uses)])
+           shadow-uses)]
+       [parameter-highlights
+         (and
+           parameter-shadow
+           (scheme-semantic-document-highlights-at
+             lexical-snapshot
+             (scheme-definition-start parameter-shadow)))]
+       [root-highlights
+         (and
+           root-shadow
+           (scheme-semantic-document-highlights-at
+             lexical-snapshot
+             (scheme-definition-end root-shadow)))])
   (unless
     (and
       root-shadow
@@ -403,9 +415,29 @@
            (scheme-semantic-references
              lexical-snapshot
              (scheme-definition-id root-shadow)))
-         1))
+         1)
+      (= (length parameter-highlights) 9)
+      (= (length root-highlights) 2)
+      (= (length
+           (filter
+             (lambda (highlight)
+               (eq?
+                 (scheme-document-highlight-kind highlight)
+                 'declaration))
+             parameter-highlights))
+         1)
+      (for-all
+        (lambda (highlight)
+          (and
+            (<
+              (scheme-document-highlight-start highlight)
+              (scheme-document-highlight-end highlight))
+            (pair?
+              (scheme-document-highlight-definition-ids
+                highlight))))
+        parameter-highlights))
     (error 'scheme-semantics-tests
-           "lexical parameter did not shadow the root definition")))
+           "lexical parameter highlights did not follow DefinitionId shadowing")))
 
 (for-each
   (lambda (specification)
@@ -1058,7 +1090,8 @@
 (define dynamic-import-source
   (string-append
     "(import (prefix (sample project) project:))\n"
-    "(project:project-value 1)\n"))
+    "(project:project-value 1)\n"
+    "(project:project-value 2)\n"))
 (define dynamic-import-snapshot
   (make-scheme-semantic-snapshot-with-library-index
     73
@@ -1099,6 +1132,23 @@
   (error
     'scheme-semantics-tests
     "dynamic project library index did not preserve import transforms"))
+
+(let ([highlights
+        (scheme-semantic-document-highlights-at
+          dynamic-import-snapshot
+          (scheme-use-start dynamic-import-use))])
+  (unless
+    (and
+      (= (length highlights) 2)
+      (for-all
+        (lambda (highlight)
+          (eq?
+            (scheme-document-highlight-kind highlight)
+            'reference))
+        highlights))
+    (error
+      'scheme-semantics-tests
+      "imported definition highlights did not stay within the current document")))
 
 (define invalid-import-source
   (string-append

@@ -613,6 +613,7 @@
           (soda editor prefix-commands)
           (soda editor repl)
           (soda editor scheme-completion)
+          (soda editor scheme-document-highlight)
           (soda editor scheme-help)
           (soda editor scheme-repl-completion)
           (soda editor scheme-rename)
@@ -743,6 +744,8 @@
       (install-search-commands! editor)
       (install-window-commands! editor)
       (install-scheme-help-commands!
+        editor scheme-workspace)
+      (install-scheme-document-highlights!
         editor scheme-workspace)
       (install-diagnostic-commands!
         editor scheme-workspace)

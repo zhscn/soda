@@ -48,6 +48,11 @@
           scheme-use-start
           scheme-use-end
           scheme-use-resolution
+          scheme-document-highlight?
+          scheme-document-highlight-start
+          scheme-document-highlight-end
+          scheme-document-highlight-kind
+          scheme-document-highlight-definition-ids
           scheme-diagnostic?
           scheme-diagnostic-code
           scheme-diagnostic-start
@@ -65,6 +70,7 @@
           scheme-semantic-definitions-at
           scheme-semantic-call-context-at
           scheme-semantic-references
+          scheme-semantic-document-highlights-at
           scheme-primitive-definitions
           scheme-index-definitions
           scheme-definition-library
@@ -114,6 +120,9 @@
 
   (define-record-type scheme-use
     (fields name start end resolution))
+
+  (define-record-type scheme-document-highlight
+    (fields start end kind definition-ids))
 
   (define-record-type scheme-rename-replacement
     (fields start end text))
@@ -2697,6 +2706,113 @@
             (scheme-definition-id=? resolved definition-id))
           (scheme-use-resolution use)))
       (scheme-semantic-snapshot-uses snapshot)))
+
+  (define (scheme-semantic-document-highlights-at
+            snapshot
+            offset)
+    (unless (scheme-semantic-snapshot? snapshot)
+      (assertion-violation
+        'scheme-semantic-document-highlights-at
+        "expected a Scheme semantic snapshot"
+        snapshot))
+    (unless (exact-non-negative-integer? offset)
+      (assertion-violation
+        'scheme-semantic-document-highlights-at
+        "offset must be an exact non-negative integer"
+        offset))
+    (let* ([definitions
+             (let ([direct
+                     (scheme-semantic-definitions-at
+                       snapshot offset)])
+               (if
+                 (or (pair? direct) (zero? offset))
+                 direct
+                 (scheme-semantic-definitions-at
+                   snapshot (- offset 1))))]
+           [target-ids
+             (map
+               scheme-definition-id
+               (filter
+                 (lambda (definition)
+                   (not
+                     (eq?
+                       (scheme-definition-kind definition)
+                       'syntax)))
+                 definitions))])
+      (if
+        (null? target-ids)
+        '()
+        (let ([seen
+                (make-hashtable equal-hash equal?)])
+          (define (target-id? id)
+            (exists
+              (lambda (target)
+                (scheme-definition-id=? id target))
+              target-ids))
+          (define (add-highlight
+                    result
+                    start
+                    end
+                    kind
+                    ids)
+            (let ([key (list start end kind)])
+              (if
+                (hashtable-contains? seen key)
+                result
+                (begin
+                  (hashtable-set! seen key #t)
+                  (cons
+                    (make-scheme-document-highlight
+                      start end kind ids)
+                    result)))))
+          (define (highlight-before? left right)
+            (or
+              (<
+                (scheme-document-highlight-start left)
+                (scheme-document-highlight-start right))
+              (and
+                (=
+                  (scheme-document-highlight-start left)
+                  (scheme-document-highlight-start right))
+                (<
+                  (scheme-document-highlight-end left)
+                  (scheme-document-highlight-end right)))))
+          (list-sort
+            highlight-before?
+            (fold-left
+              (lambda (result use)
+                (let ([ids
+                        (filter
+                          target-id?
+                          (scheme-use-resolution use))])
+                  (if
+                    (null? ids)
+                    result
+                    (add-highlight
+                      result
+                      (scheme-use-start use)
+                      (scheme-use-end use)
+                      'reference
+                      ids))))
+              (fold-left
+                (lambda (result definition)
+                  (let ([id
+                          (scheme-definition-id
+                            definition)])
+                    (if
+                      (target-id? id)
+                      (add-highlight
+                        result
+                        (scheme-definition-start definition)
+                        (scheme-definition-end definition)
+                        'declaration
+                        (list id))
+                      result)))
+                '()
+                (scheme-semantic-snapshot-definitions
+                  snapshot))
+              (scheme-semantic-snapshot-uses
+                snapshot)))))))
 
   (define (matching-delimiters? open close)
     (case open

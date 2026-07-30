@@ -61,6 +61,7 @@
         (cons 'minibuffer-prompt (pface 'base 'mauve '(bold)))
         (cons 'completion-selected (pface 'text 'surface1 '(bold)))
         (cons 'selection (pface 'inherit 'surface2 '()))
+        (cons 'symbol-highlight (pface 'inherit 'surface1 '()))
         (cons 'line-number (pface 'overlay0 'base '()))
         (cons 'syntax-comment (pface 'overlay1 'inherit '(italic)))
         (cons 'syntax-doc-comment (pface 'overlay1 'inherit '(italic bold)))

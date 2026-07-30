@@ -20,6 +20,7 @@
         (soda editor prompt)
         (soda editor repl)
         (soda editor scheme-semantics)
+        (soda editor scheme-document-highlight)
         (soda editor scheme-workspace)
         (soda editor scheme-xref)
         (only (soda editor state)
@@ -2334,6 +2335,105 @@
       labels)))
 (editor-abort-prompt! document-symbol-editor)
 (editor-close! document-symbol-editor)
+
+(define document-highlight-source
+  (string-append
+    "(define highlighted-value 1)\n"
+    "(list highlighted-value highlighted-value)\n"))
+(define document-highlight-buffer
+  (make-buffer
+    1988
+    (make-document document-highlight-source 1988)
+    "*document-highlights*"
+    'scheme-mode))
+(define document-highlight-editor
+  (make-editor document-highlight-buffer))
+(define document-highlight-view
+  (editor-active-view document-highlight-editor))
+(define highlighted-value-start
+  (substring-position
+    document-highlight-source
+    "highlighted-value"))
+(view-set-caret!
+  document-highlight-view
+  highlighted-value-start)
+(editor-refresh-scheme-document-highlights!
+  document-highlight-editor)
+(define current-document-highlight-set
+  (find
+    (lambda (set)
+      (eq?
+        (annotation-set-namespace set)
+        'scheme-document-highlight))
+    (editor-annotation-sets-for-buffer
+      document-highlight-editor
+      (buffer-id document-highlight-buffer))))
+(unless
+  (and
+    current-document-highlight-set
+    (= (length
+         (annotation-set-annotations
+           current-document-highlight-set))
+       3)
+    (= (length
+         (filter
+           (lambda (annotation)
+             (eq?
+               (scheme-document-highlight-kind
+                 (annotation-payload annotation))
+               'declaration))
+           (annotation-set-annotations
+             current-document-highlight-set)))
+       1)
+    (let ([runs
+            (annotation-set-decoration-runs
+              current-document-highlight-set
+              (buffer-revision
+                document-highlight-buffer)
+              0
+              (bytevector-length
+                (buffer-bytes
+                  document-highlight-buffer)))])
+      (and
+        (= (length runs) 3)
+        (for-all
+          (lambda (run)
+            (and
+              (eq?
+                (decoration-run-layer run)
+                'search)
+              (eq?
+                (decoration-run-face run)
+                'symbol-highlight)))
+          runs))))
+  (error
+    'editor-tests
+    "Scheme document highlights were not published as search-layer annotations"))
+(view-set-caret!
+  document-highlight-view
+  0)
+(editor-refresh-scheme-document-highlights!
+  document-highlight-editor)
+(let ([cleared
+        (find
+          (lambda (set)
+            (eq?
+              (annotation-set-namespace set)
+              'scheme-document-highlight))
+          (editor-annotation-sets-for-buffer
+            document-highlight-editor
+            (buffer-id document-highlight-buffer)))])
+  (unless
+    (and
+      cleared
+      (annotation-set-closed?
+        current-document-highlight-set)
+      (null?
+        (annotation-set-annotations cleared)))
+    (error
+      'editor-tests
+      "leaving a Scheme identifier did not clear document highlights")))
+(editor-close! document-highlight-editor)
 
 (define highlight-document
   (make-document

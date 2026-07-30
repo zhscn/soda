@@ -400,6 +400,17 @@ completing-read 与 fzf matching 打开当前文档候选，接受后通过普�
 移动到声明。`xref.find-symbol`（`M-g I`）仍独立合并整个 Project、打开的 Buffer
 和带源码的嵌入 API。
 
+document highlight 查询解析光标下的 declaration 或 use，并在当前 semantic
+snapshot 中返回同一 DefinitionId 的 declaration 与 reference range。lexical
+shadowing 因此产生互不干扰的高亮集合。外部 library 和 primitive binding 只返回
+当前文档中的 reference，不构造本地 declaration；syntax binding 不参与该查询。
+
+editor 在每个顶层命令结束后按 Buffer revision、caret 和 workspace catalog
+generation 刷新当前 Scheme Buffer 的结果。结果发布到独立的
+`scheme-document-highlight` annotation namespace，使用 `symbol-highlight` face 和
+search decoration layer。selection layer 保持更高优先级，diagnostic 与 semantic
+annotation 的生命周期不受光标高亮替换影响。
+
 ## 自举静态 Provider
 
 `scheme-mode` 通过 `completion-providers` setting 启用 `scheme-static`。provider

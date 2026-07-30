@@ -196,9 +196,10 @@
           (car range)
           (cdr range)
           (annotation-face annotation)
-          (if (eq? (annotation-kind annotation) 'diagnostic)
-              'diagnostic
-              'semantic)
+          (case (annotation-kind annotation)
+            [(diagnostic) 'diagnostic]
+            [(document-highlight) 'search]
+            [else 'semantic])
           (severity-priority (annotation-severity annotation))
           namespace
           annotation))))
