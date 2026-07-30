@@ -615,6 +615,7 @@
                   next-frame
                   previous-frame
                   evaluate
+                  inspect-local
                   inspect-ref
                   inspect-up
                   retry
@@ -673,6 +674,27 @@
          (debugger-session-selected-index debugger)))
     (error 'repl-tests
            "debug next-frame did not move the selected frame")))
+(let ([local-frame
+        (find
+          (lambda (frame)
+            (pair? (debugger-frame-variables frame)))
+          (debugger-session-frames debugger))])
+  (when local-frame
+    (debugger-session-next-frame!
+      debugger
+      (-
+        (debugger-frame-index local-frame)
+        (debugger-session-selected-index debugger)))
+    (dispatch!
+      (make-command-message
+        'scheme.debug-inspect-local
+        0))
+    (unless
+      (string-contains?
+        (buffer-string debugger-buffer)
+        "Inspector path: frame[")
+      (error 'repl-tests
+             "debug inspector did not expose a frame local"))))
 (press-key!
   'character
   (char->integer #\e)
@@ -695,7 +717,7 @@
       "Frame evaluations:")
     (string-contains?
       (buffer-string debugger-buffer)
-      "=> 42"))
+      "=> frame "))
   (error 'repl-tests
          "debug frame evaluation did not persist its value"))
 (dispatch!
@@ -709,7 +731,7 @@
       "Debugger evaluation failed:")
     (string-contains?
       (buffer-string debugger-buffer)
-      "!  (car 42)"))
+      ": (car 42)"))
   (error 'repl-tests
          "debug frame evaluation did not persist its condition"))
 (dispatch!

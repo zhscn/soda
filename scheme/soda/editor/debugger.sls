@@ -20,6 +20,7 @@
           debugger-session-next-frame!
           debugger-session-previous-frame!
           debugger-session-evaluate
+          debugger-session-inspect-local!
           debugger-session-inspection-down!
           debugger-session-inspection-up!
           debugger-session->string
@@ -57,7 +58,7 @@
             inspector))
 
   (define-record-type debugger-evaluation
-    (fields source status output))
+    (fields frame-index source status output))
 
   (define-record-type
     (debugger-session %make-debugger-session debugger-session?)
@@ -399,6 +400,7 @@
            (record-evaluation!
              debugger
              (make-debugger-evaluation
+               (debugger-frame-index frame)
                source
                'condition
                (condition->string condition)))
@@ -413,6 +415,7 @@
           (record-evaluation!
             debugger
             (make-debugger-evaluation
+              (debugger-frame-index frame)
               source
               'values
               (values->preview values)))
@@ -425,6 +428,57 @@
                     "result[0]"
                     (inspect/object (car values))))))
           values))))
+
+  (define (debugger-session-inspect-local! debugger index)
+    (require-open-debugger
+      'debugger-session-inspect-local!
+      debugger)
+    (unless
+      (and (integer? index)
+           (exact? index)
+           (not (negative? index)))
+      (assertion-violation
+        'debugger-session-inspect-local!
+        "local index must be a non-negative exact integer"
+        index))
+    (let ([frame (debugger-session-selected-frame debugger)])
+      (unless frame
+        (assertion-violation
+          'debugger-session-inspect-local!
+          "debugger has no selected frame"))
+      (let ([variables (debugger-frame-variables frame)])
+        (unless (< index (length variables))
+          (assertion-violation
+            'debugger-session-inspect-local!
+            "local index is out of range"
+            index))
+        (let* ([variable (list-ref variables index)]
+               [inspector
+                 (safe-call
+                   #f
+                   (lambda ()
+                     ((debugger-variable-inspector variable)
+                      'ref)))])
+          (unless inspector
+            (assertion-violation
+              'debugger-session-inspect-local!
+              "local value is unavailable"
+              index))
+          (debugger-session-inspection-stack-set!
+            debugger
+            (list
+              (cons
+                (string-append
+                  "frame["
+                  (number->string
+                    (debugger-frame-index frame))
+                  "] local["
+                  (if (debugger-variable-name variable)
+                      (format "~s"
+                        (debugger-variable-name variable))
+                      (number->string index))
+                  "]")
+                inspector)))))))
 
   (define (record-evaluation! debugger evaluation)
     (let loop ([remaining
@@ -732,6 +786,12 @@
                     "=> "
                     "!  ")
                 port)
+              (display "frame " port)
+              (display
+                (number->string
+                  (debugger-evaluation-frame-index evaluation))
+                port)
+              (display ": " port)
               (display
                 (debugger-evaluation-source evaluation)
                 port)

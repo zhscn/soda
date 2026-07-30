@@ -145,7 +145,7 @@
         (debugger-session-selected-frame-byte-offset debugger))
       (editor-set-status-message!
         editor
-        "Debugger: n/p frame, e eval, d/u inspect, v source, x exit, q discard")
+        "Debugger: n/p frame, e eval, l local, d/u inspect, v source, x/q exit")
       buffer))
 
   (define (editor-capture-condition! editor label condition)
@@ -476,6 +476,81 @@
            argument)])
       '()))
 
+  (define (debug-inspect-local-command context)
+    (let* ([editor (command-context-editor context)]
+           [target
+             (require-debug-target
+               'scheme.debug-inspect-local
+               context)]
+           [debugger (cadr target)]
+           [argument (command-context-argument context)])
+      (cond
+        [(and (integer? argument)
+              (exact? argument)
+              (not (negative? argument)))
+         (debugger-session-inspect-local! debugger argument)
+         (refresh-debugger-buffer! editor debugger)]
+        [(not argument)
+         (editor-open-prompt!
+           editor
+           (make-prompt-request
+             "Inspect local index: "
+             ""
+             'scheme-debug-inspect-local
+             #f
+             'free
+             #f
+             'scheme.debug-inspect-local-accept
+             #f
+             (cons
+               (debugger-session-origin debugger)
+               (debugger-session-generation debugger))))]
+        [else
+         (assertion-violation
+           'scheme.debug-inspect-local
+           "local index must be a non-negative exact integer or #f"
+           argument)])
+      '()))
+
+  (define (apply-inspect-local-result! editor view result)
+    (let* ([identity
+             (and
+               (prompt-result? result)
+               (prompt-result-data result))]
+           [source
+             (and
+               (prompt-result? result)
+               (prompt-result-value result))]
+           [target (active-debug-target editor view)])
+      (when
+        (and target source (positive? (string-length source)))
+        (let ([debugger (cadr target)])
+          (when
+            (and
+              (pair? identity)
+              (eq? (car identity)
+                   (debugger-session-origin debugger))
+              (= (cdr identity)
+                 (debugger-session-generation debugger)))
+            (let ([index (string->number source)])
+              (unless
+                (and index
+                     (integer? index)
+                     (exact? index)
+                     (not (negative? index)))
+                (editor-user-error
+                  'scheme.debug-inspect-local
+                  "local index must be a non-negative integer"))
+              (debugger-session-inspect-local! debugger index)
+              (refresh-debugger-buffer! editor debugger)))))))
+
+  (define (debug-inspect-local-accept-command context)
+    (apply-inspect-local-result!
+      (command-context-editor context)
+      (command-context-view context)
+      (command-context-argument context))
+    '())
+
   (define (debug-inspect-ref-accept-command context)
     (let* ([editor (command-context-editor context)]
            [result (command-context-argument context)]
@@ -625,6 +700,10 @@
           debug-inspect-ref-command
           "Inspect a child of the last debugger evaluation result.")
         (list
+          'scheme.debug-inspect-local
+          debug-inspect-local-command
+          "Inspect a local value in the selected debugger frame.")
+        (list
           'scheme.debug-inspect-up
           debug-inspect-up-command
           "Return to the parent debugger inspection object.")
@@ -656,6 +735,12 @@
         'scheme.debug-inspect-ref-accept
         debug-inspect-ref-accept-command
         "Apply a child index from the debugger inspector prompt."))
+    (editor-register-internal-command!
+      editor
+      (make-internal-context-command
+        'scheme.debug-inspect-local-accept
+        debug-inspect-local-accept-command
+        "Apply a local index from the debugger inspector prompt."))
     (register-major-mode!
       (editor-language-catalog editor)
       (make-major-mode
@@ -680,6 +765,7 @@
         '((#\n . scheme.debug-next-frame)
           (#\p . scheme.debug-previous-frame)
           (#\e . scheme.debug-eval-frame)
+          (#\l . scheme.debug-inspect-local)
           (#\d . scheme.debug-inspect-ref)
           (#\u . scheme.debug-inspect-up)
           (#\v . scheme.debug-visit-source)

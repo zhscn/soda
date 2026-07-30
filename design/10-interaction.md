@@ -196,6 +196,7 @@ interaction 的失败状态可以同时保留。
 - `scheme.debug-eval-frame` 通过 minibuffer 读取一个 datum，并使用选中 frame 的
   inspector environment 求值；
 - frame 求值结果保存在 debugger Buffer 中，并作为 Chez inspector object 的根。
+  `scheme.debug-inspect-local` 直接选择当前 frame 中按序号标识的局部值；
   `scheme.debug-inspect-ref` 按子项序号进入 pair、vector、record、procedure 等对象，
   `scheme.debug-inspect-up` 返回父对象；对象预览、子项数量与求值历史具有固定上限；
 - `scheme.debug-visit-source` 通过异步 VFS open request 打开选中 frame 的 source
@@ -207,8 +208,9 @@ interaction 的失败状态可以同时保留。
 - `scheme.debug-discard` 释放 debugger Buffer、condition 与 continuation；对
   interaction failure 同时退出 `failed` 状态。
 
-debugger Buffer 的 `n`、`p`、`e`、`d`、`u`、`v`、`r`、`x`、`q` 分别映射到
-frame 导航、求值、进入和退出对象子项、源码访问、重试、保留退出与丢弃操作。
+debugger Buffer 的 `n`、`p`、`e`、`l`、`d`、`u`、`v`、`r`、`x`、`q` 分别映射到
+frame 导航、求值、检查局部值、进入和退出对象子项、源码访问、重试、保留退出与
+丢弃操作。
 源码访问复用普通 `file.read` effect，文件
 读取期间 command loop 保持可用；打开完成后 debugger 状态仍可重新激活。重试和
 丢弃会先把所有显示 debugger Buffer 的 View 切回来源 Buffer。Editor 关闭时释放
