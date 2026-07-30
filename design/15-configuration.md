@@ -57,3 +57,31 @@ interaction session 或文件状态。事务期间 Buffer 的创建、移除和 
 
 较窄的 `call-with-editor-setting-transaction` 只覆盖 setting store 和 Buffer-local
 值，适合不修改扩展 catalog 的批量设置。
+
+## Extension owner
+
+Editor 保存有序的 extension owner：
+
+```text
+Extension {
+  name,
+  loader
+}
+```
+
+首次加载 extension 时，Editor 捕获不含扩展贡献的 baseline。加载新 owner、替换同名
+owner、卸载任意 owner 或显式 reload 时，Editor 恢复 baseline，并按 owner 顺序重新
+执行全部 loader。同名替换保持原顺序，新名称追加到末尾。
+
+整个重建运行在 configuration transaction 中。任一 loader 抛出 condition 时，当前
+已提交的扩展集合和配置状态保持不变；只有全部 loader 成功后才发布新的 owner 列表。
+卸载最后一个 owner 后 baseline 重新成为普通 Editor 配置，下一次首次加载会从当时
+的配置创建新 baseline。
+
+Loader 接收 Editor，并通过配置 API 注册其贡献。Loader 应具有可重复执行语义，且其
+副作用必须落在 configuration snapshot 覆盖的 Editor 状态中。文件写入、进程启动和
+其他外部副作用不属于扩展事务。
+
+Baseline 建立后创建的 Buffer 不属于旧 snapshot 的局部状态。扩展重建保留这些 Buffer；
+恢复 language catalog 时，仍存在的 major mode 会重新创建 runtime，已经移除的
+extension mode 回退到 `fundamental-mode`。

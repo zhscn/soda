@@ -75,6 +75,12 @@
           editor-configuration-snapshot
           editor-restore-configuration!
           call-with-editor-configuration-transaction
+          editor-extension-names
+          editor-extension-loaded?
+          editor-load-extension!
+          editor-unload-extension!
+          editor-reload-extension!
+          editor-reload-extensions!
           editor-register-language-profile!
           editor-register-major-mode!
           editor-keymap
@@ -284,6 +290,13 @@
       (mutable dirty-reasons
                editor-dirty-reasons
                editor-dirty-reasons-set!)
+      (mutable extension-baseline
+               editor-extension-baseline
+               editor-extension-baseline-set!)
+      (mutable extensions editor-extensions editor-extensions-set!)
+      (mutable rebuilding-extensions?
+               editor-rebuilding-extensions?
+               editor-rebuilding-extensions?-set!)
       (mutable configuration-transaction-depth
                editor-configuration-transaction-depth
                editor-configuration-transaction-depth-set!)
@@ -294,6 +307,10 @@
       %make-editor-buffer-configuration-state
       editor-buffer-configuration-state?)
     (fields buffer mode settings))
+
+  (define-record-type
+    (editor-extension %make-editor-extension editor-extension?)
+    (fields name loader))
 
   (define-record-type
     (editor-configuration-state
@@ -2504,10 +2521,6 @@
         snapshot))
     (let ([buffer-states
             (editor-configuration-state-buffers snapshot)])
-      (unless (same-configuration-buffers? value buffer-states)
-        (assertion-violation
-          'editor-restore-configuration!
-          "buffer topology changed after the configuration snapshot"))
       (setting-store-restore!
         (editor-setting-store value)
         (editor-configuration-state-settings snapshot))
@@ -2536,16 +2549,34 @@
         value
         (editor-configuration-state-theme snapshot))
       (for-each
-        (lambda (state)
-          (let ([buffer
-                  (editor-buffer-configuration-state-buffer state)])
-            (buffer-restore-settings!
-              buffer
-              (editor-buffer-configuration-state-settings state))
-            (buffer-set-major-mode!
-              buffer
-              (editor-buffer-configuration-state-mode state))))
-        buffer-states)
+        (lambda (buffer)
+          (let ([state
+                  (find
+                    (lambda (candidate)
+                      (eq?
+                        buffer
+                        (editor-buffer-configuration-state-buffer
+                          candidate)))
+                    buffer-states)])
+            (when state
+              (buffer-restore-settings!
+                buffer
+                (editor-buffer-configuration-state-settings state)))
+            (let ([mode
+                    (if state
+                        (editor-buffer-configuration-state-mode state)
+                        (let ([current
+                                (buffer-major-mode-name buffer)])
+                          (if
+                            (find-major-mode
+                              (editor-language-catalog value)
+                              current)
+                            current
+                            'fundamental-mode)))])
+              (buffer-set-major-mode! buffer mode))))
+        (table-values
+          (editor-buffer-table value)
+          (editor-buffer-ids value)))
       (editor-invalidate! value 'configuration)
       value))
 
@@ -2586,6 +2617,146 @@
             (editor-configuration-transaction-depth-set!
               value
               depth))))))
+
+  (define (editor-extension-names value)
+    (require-open-editor 'editor-extension-names value)
+    (map editor-extension-name (editor-extensions value)))
+
+  (define (editor-extension-loaded? value name)
+    (require-open-editor 'editor-extension-loaded? value)
+    (unless (symbol? name)
+      (assertion-violation
+        'editor-extension-loaded?
+        "extension name must be a symbol"
+        name))
+    (and (memq name (editor-extension-names value)) #t))
+
+  (define (require-extension-lifecycle-mutable who value)
+    (when (editor-rebuilding-extensions? value)
+      (assertion-violation
+        who
+        "extension lifecycle cannot change while extensions are rebuilding"))
+    (when
+      (positive? (editor-configuration-transaction-depth value))
+      (assertion-violation
+        who
+        "extension lifecycle cannot change in a configuration transaction")))
+
+  (define (invoke-extension-loader! value extension)
+    (call-with-values
+      (lambda ()
+        ((editor-extension-loader extension) value))
+      (lambda results #f)))
+
+  (define (rebuild-extension-set! value baseline extensions)
+    (dynamic-wind
+      (lambda ()
+        (editor-rebuilding-extensions?-set! value #t))
+      (lambda ()
+        (call-with-editor-configuration-transaction
+          value
+          (lambda ()
+            (editor-restore-configuration! value baseline)
+            (for-each
+              (lambda (extension)
+                (invoke-extension-loader! value extension))
+              extensions))))
+      (lambda ()
+        (editor-rebuilding-extensions?-set! value #f))))
+
+  (define (replace-extension extensions replacement)
+    (let ([name (editor-extension-name replacement)]
+          [replaced? #f])
+      (let ([result
+              (map
+                (lambda (extension)
+                  (if
+                    (eq? (editor-extension-name extension) name)
+                    (begin
+                      (set! replaced? #t)
+                      replacement)
+                    extension))
+                extensions)])
+        (if replaced?
+            result
+            (append result (list replacement))))))
+
+  (define (editor-load-extension! value name loader)
+    (require-open-editor 'editor-load-extension! value)
+    (require-extension-lifecycle-mutable
+      'editor-load-extension!
+      value)
+    (unless (symbol? name)
+      (assertion-violation
+        'editor-load-extension!
+        "extension name must be a symbol"
+        name))
+    (unless (procedure? loader)
+      (assertion-violation
+        'editor-load-extension!
+        "extension loader must be a procedure"
+        loader))
+    (let* ([baseline
+             (or
+               (editor-extension-baseline value)
+               (editor-configuration-snapshot value))]
+           [extensions
+             (replace-extension
+               (editor-extensions value)
+               (%make-editor-extension name loader))])
+      (rebuild-extension-set! value baseline extensions)
+      (editor-extension-baseline-set! value baseline)
+      (editor-extensions-set! value extensions)
+      name))
+
+  (define (editor-unload-extension! value name)
+    (require-open-editor 'editor-unload-extension! value)
+    (require-extension-lifecycle-mutable
+      'editor-unload-extension!
+      value)
+    (unless (symbol? name)
+      (assertion-violation
+        'editor-unload-extension!
+        "extension name must be a symbol"
+        name))
+    (unless (editor-extension-loaded? value name)
+      (assertion-violation
+        'editor-unload-extension!
+        "unknown extension"
+        name))
+    (let* ([baseline (editor-extension-baseline value)]
+           [extensions
+             (filter
+               (lambda (extension)
+                 (not (eq? (editor-extension-name extension) name)))
+               (editor-extensions value))])
+      (rebuild-extension-set! value baseline extensions)
+      (editor-extensions-set! value extensions)
+      (when (null? extensions)
+        (editor-extension-baseline-set! value #f))
+      name))
+
+  (define (editor-reload-extensions! value)
+    (require-open-editor 'editor-reload-extensions! value)
+    (require-extension-lifecycle-mutable
+      'editor-reload-extensions!
+      value)
+    (when (editor-extension-baseline value)
+      (rebuild-extension-set!
+        value
+        (editor-extension-baseline value)
+        (editor-extensions value)))
+    (editor-extension-names value))
+
+  (define (editor-reload-extension! value name)
+    (require-open-editor 'editor-reload-extension! value)
+    (unless (editor-extension-loaded? value name)
+      (assertion-violation
+        'editor-reload-extension!
+        "unknown extension"
+        name))
+    (editor-reload-extensions! value)
+    name)
 
   (define (refresh-buffers! value)
     (for-each
@@ -3057,6 +3228,9 @@
                default-theme
                0
                '(initial)
+               #f
+               '()
+               #f
                0
                #f)])
       (hashtable-set! buffers (buffer-id buffer) buffer)

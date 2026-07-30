@@ -90,6 +90,12 @@
           editor-configuration-snapshot
           editor-restore-configuration!
           call-with-editor-configuration-transaction
+          editor-extension-names
+          editor-extension-loaded?
+          editor-load-extension!
+          editor-unload-extension!
+          editor-reload-extension!
+          editor-reload-extensions!
           editor-register-language-profile!
           editor-register-major-mode!
           editor-keymap

@@ -5012,4 +5012,184 @@
   (error 'editor-tests
          "rejected configuration buffer mutation leaked a buffer"))
 
+(define extension-a-loads 0)
+(define extension-b-loads 0)
+(define (load-extension-a editor)
+  (set! extension-a-loads (+ extension-a-loads 1))
+  (editor-register-setting!
+    editor
+    (make-setting-definition
+      'extension-value
+      'a
+      symbol?
+      "Value contributed by extension A."
+      'configuration))
+  (editor-set-global-setting! editor 'extension-value 'a)
+  (editor-register-command!
+    editor
+    (make-interactive-context-command
+      'extension.a
+      (lambda (context) '())
+      "Extension A command.")))
+(define (load-extension-a2 editor)
+  (set! extension-a-loads (+ extension-a-loads 1))
+  (editor-register-setting!
+    editor
+    (make-setting-definition
+      'extension-value
+      'a2
+      symbol?
+      "Value contributed by extension A version two."
+      'configuration))
+  (editor-set-global-setting! editor 'extension-value 'a2)
+  (editor-register-command!
+    editor
+    (make-interactive-context-command
+      'extension.a
+      (lambda (context) '())
+      "Extension A version two command.")))
+(define (load-extension-b editor)
+  (set! extension-b-loads (+ extension-b-loads 1))
+  (editor-register-command!
+    editor
+    (make-interactive-context-command
+      'extension.b
+      (lambda (context) '())
+      "Extension B command.")))
+
+(editor-load-extension!
+  configuration-editor
+  'extension-a
+  load-extension-a)
+(editor-load-extension!
+  configuration-editor
+  'extension-b
+  load-extension-b)
+(unless
+  (and
+    (equal?
+      (editor-extension-names configuration-editor)
+      '(extension-a extension-b))
+    (= extension-a-loads 2)
+    (= extension-b-loads 1)
+    (eq?
+      (editor-global-setting-ref
+        configuration-editor
+        'extension-value)
+      'a)
+    (command-registered?
+      (editor-command-registry configuration-editor)
+      'extension.a)
+    (command-registered?
+      (editor-command-registry configuration-editor)
+      'extension.b))
+  (error 'editor-tests
+         "extension loaders were not replayed in registration order"))
+
+(editor-load-extension!
+  configuration-editor
+  'extension-a
+  load-extension-a2)
+(unless
+  (and
+    (equal?
+      (editor-extension-names configuration-editor)
+      '(extension-a extension-b))
+    (eq?
+      (editor-global-setting-ref
+        configuration-editor
+        'extension-value)
+      'a2)
+    (string=?
+      (command-documentation
+        (editor-command-registry configuration-editor)
+        'extension.a)
+      "Extension A version two command."))
+  (error 'editor-tests
+         "replacing an extension did not rebuild its contribution"))
+
+(unless
+  (guard
+    (condition [else #t])
+    (editor-load-extension!
+      configuration-editor
+      'extension-b
+      (lambda (editor)
+        (editor-register-command!
+          editor
+          (make-interactive-context-command
+            'extension.failed
+            (lambda (context) '())
+            "Failed extension command."))
+        (error 'editor-tests "abort extension reload")))
+    #f)
+  (error 'editor-tests "failed extension replacement did not raise"))
+(unless
+  (and
+    (equal?
+      (editor-extension-names configuration-editor)
+      '(extension-a extension-b))
+    (command-registered?
+      (editor-command-registry configuration-editor)
+      'extension.b)
+    (not
+      (command-registered?
+        (editor-command-registry configuration-editor)
+        'extension.failed)))
+  (error 'editor-tests
+         "failed extension replacement did not restore prior version"))
+
+(define extension-late-buffer
+  (editor-create-buffer!
+    configuration-editor
+    "*extension-late-buffer*"
+    'fundamental-mode
+    "late"))
+(editor-reload-extensions! configuration-editor)
+(unless
+  (eq?
+    (editor-buffer-ref
+      configuration-editor
+      (buffer-id extension-late-buffer))
+    extension-late-buffer)
+  (error 'editor-tests
+         "extension reload lost a buffer created after the baseline"))
+
+(editor-unload-extension! configuration-editor 'extension-a)
+(unless
+  (and
+    (equal?
+      (editor-extension-names configuration-editor)
+      '(extension-b))
+    (not
+      (command-registered?
+        (editor-command-registry configuration-editor)
+        'extension.a))
+    (command-registered?
+      (editor-command-registry configuration-editor)
+      'extension.b)
+    (guard
+      (condition [else #t])
+      (editor-global-setting-ref
+        configuration-editor
+        'extension-value)
+      #f))
+  (error 'editor-tests
+         "unloading a non-final extension did not rebuild remaining owners"))
+(editor-unload-extension! configuration-editor 'extension-b)
+(unless
+  (and
+    (null? (editor-extension-names configuration-editor))
+    (not
+      (command-registered?
+        (editor-command-registry configuration-editor)
+        'extension.b))
+    (eq?
+      (editor-buffer-ref
+        configuration-editor
+        (buffer-id extension-late-buffer))
+      extension-late-buffer))
+  (error 'editor-tests
+         "unloading the final extension did not restore the baseline"))
+
 (editor-close! configuration-editor)
