@@ -1815,7 +1815,7 @@
     (component-node-find
       (frame-layout multi-window-prompt-frame)
       'editor.minibuffer)
-    (= (frame-cursor-row multi-window-prompt-frame) 6)
+    (= (frame-cursor-row multi-window-prompt-frame) 1)
     (= (view-viewport-rows first-window-view) 1)
     (= (view-viewport-rows second-window-view) 1))
   (error 'editor-tests
@@ -2633,31 +2633,41 @@
        [completion-node
          (component-node-find layout 'editor.completions)])
   (unless (and node
-               (= (rect-row (component-node-rect node)) 4)
+               (= (rect-row (component-node-rect node)) 3)
                (= (rect-rows (component-node-rect node)) 1)
                completion-node
                (= (rect-row
                     (component-node-rect completion-node))
-                  3)
-               (string=? (cell-text (frame-cell-ref prompt-frame 3 0))
+                  4)
+               (string=? (cell-text (frame-cell-ref prompt-frame 4 0))
                          "t")
-               (eq? (cell-face (frame-cell-ref prompt-frame 3 0))
-                    'completion-match)
-               (string=? (cell-text (frame-cell-ref prompt-frame 4 0)) "M")
-               (string=? (cell-text (frame-cell-ref prompt-frame 4 4)) "t")
                (eq? (cell-face (frame-cell-ref prompt-frame 4 0))
+                    'completion-match)
+               (string=? (cell-text (frame-cell-ref prompt-frame 3 0)) "M")
+               (string=? (cell-text (frame-cell-ref prompt-frame 3 4)) "t")
+               (eq? (cell-face (frame-cell-ref prompt-frame 3 0))
                     'minibuffer-prompt)
+               (eq? (cell-face (frame-cell-ref prompt-frame 3 4))
+                    'minibuffer-input)
+               (not
+                 (equal?
+                   (style-background
+                     (cell-style
+                       (frame-cell-ref prompt-frame 3 0)))
+                   (style-background
+                     (cell-style
+                       (frame-cell-ref prompt-frame 3 4)))))
                (= (view-viewport-rows
                     (editor-base-view prompt-editor))
                   2)
                (frame-cursor-visible? prompt-frame)
-               (= (frame-cursor-row prompt-frame) 4))
+               (= (frame-cursor-row prompt-frame) 3))
     (error 'editor-tests
            "minibuffer component did not preserve body layout and focus"
            (and completion-node
                 (component-node-rect completion-node))
-           (cell-text (frame-cell-ref prompt-frame 3 0))
-           (cell-face (frame-cell-ref prompt-frame 3 0))
+           (cell-text (frame-cell-ref prompt-frame 4 0))
+           (cell-face (frame-cell-ref prompt-frame 4 0))
            (view-viewport-rows
              (editor-base-view prompt-editor))
            (frame-cursor-row prompt-frame))))

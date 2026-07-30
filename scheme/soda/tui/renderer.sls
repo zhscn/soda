@@ -62,6 +62,7 @@
             position
             detail
             component-id
+            base-face
             theme
             styled-chunks)
     (let* ([chunk
@@ -71,7 +72,7 @@
            [runs (if chunk (styled-chunk-runs chunk) '())]
            [decoration-faces (map decoration-run-face runs)]
            [faces
-             (cons 'default decoration-faces)]
+             (cons base-face decoration-faces)]
            [decoration-sources
              (map
                (lambda (run)
@@ -102,6 +103,7 @@
             first-column
             buffer-id
             component-id
+            base-face
             theme
             styled-chunks)
     (let ([value (decode-text bytes)]
@@ -125,6 +127,7 @@
                     line-end
                     'line-end
                     component-id
+                    base-face
                     theme
                     styled-chunks)))
               column)
@@ -175,6 +178,7 @@
                            byte-position
                            'tab
                            component-id
+                           base-face
                            theme
                            styled-chunks)))))
                  (loop
@@ -197,6 +201,7 @@
                        byte-position
                        character
                        component-id
+                       base-face
                        theme
                        styled-chunks)))
                  (loop
@@ -421,6 +426,7 @@
                 (editor-render-context-first-column context)
                 (buffer-id buffer)
                 component-id
+                'default
                 theme
                 styled-chunks)))))
       (let ([cursor-row
@@ -495,8 +501,8 @@
         (make-cell
           " "
           1
-          '(default)
-          (resolve-faces theme '(default))
+          '(minibuffer-input)
+          (resolve-faces theme '(minibuffer-input))
           #f
           sources))
       (when (and session (positive? (rect-rows rectangle)))
@@ -571,6 +577,7 @@
                           (view-first-column view)
                           (buffer-id buffer)
                           component-id
+                          'minibuffer-input
                           theme
                           (make-styled-chunk-cursor
                             (decoration-runs->styled-chunks
@@ -824,8 +831,8 @@
                    (list
                      (make-flex-extent 1)
                      (make-fixed-extent 1)
-                     (make-fixed-extent prompt-completion-rows)
-                     (make-fixed-extent 1))
+                     (make-fixed-extent 1)
+                     (make-fixed-extent prompt-completion-rows))
                    (list
                      (make-flex-extent 1)
                      (make-fixed-extent 1))))])
@@ -847,20 +854,20 @@
               '()))
           (if minibuffer?
               (append
+                (list
+                  (make-component-node
+                    'editor.minibuffer
+                    (caddr rectangles)
+                    editor-minibuffer-component
+                    '()))
                 (if (positive? prompt-completion-rows)
                     (list
                       (make-component-node
                         'editor.completions
-                        (caddr rectangles)
+                        (cadddr rectangles)
                         editor-completions-component
                         '()))
-                    '())
-                (list
-                  (make-component-node
-                    'editor.minibuffer
-                    (cadddr rectangles)
-                    editor-minibuffer-component
-                    '())))
+                    '()))
               '())
           (if document-completion-rectangle
               (list
@@ -1192,8 +1199,8 @@
                (if prompt
                    (list
                      (make-flex-extent 1)
-                     (make-fixed-extent prompt-completion-rows)
-                     (make-fixed-extent 1))
+                     (make-fixed-extent 1)
+                     (make-fixed-extent prompt-completion-rows))
                    (list (make-flex-extent 1))))]
            [windows-rectangle (car rectangles)]
            [focused-view-id
@@ -1289,7 +1296,7 @@
                      (positive? prompt-completion-rows)
                      (make-component-node
                        'editor.completions
-                       (cadr rectangles)
+                       (caddr rectangles)
                        editor-completions-component
                        '()))]
                  [minibuffer-node
@@ -1297,7 +1304,7 @@
                      prompt
                      (make-component-node
                        'editor.minibuffer
-                       (caddr rectangles)
+                       (cadr rectangles)
                        editor-minibuffer-component
                        '()))]
                  [tree

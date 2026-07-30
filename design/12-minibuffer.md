@@ -86,9 +86,10 @@ Document transaction。session 关闭时 View、anchor、Buffer 和 Document 一
 - 最外层 session 的 origin 始终是正文显示 View；
 - 嵌套不会创建第二个事件循环。
 
-TUI root 在 session 活动时按正文、modeline、可选 completion list 和 minibuffer
-布局。minibuffer 与候选列表占用底部保留行并参与 reflow；prompt 使用独立 face，
-输入 cell 保留 transient Document position 和 component source，因此光标与
+TUI root 在 session 活动时按正文、modeline、minibuffer 和可选 completion list
+布局。候选列表从 minibuffer 的下一行向下展开；两者占用底部保留行并参与 reflow。
+prompt 与 transient input 分别使用 `minibuffer-prompt` 和 `minibuffer-input`
+face。输入 cell 保留 transient Document position 和 component source，因此光标与
 `describe-char` 仍使用统一的 frame 数据。
 
 ## Keymap 与 history

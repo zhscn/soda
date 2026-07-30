@@ -48,7 +48,8 @@
       (list
         (cons 'default (pface 'text 'base '()))
         (cons 'modeline (pface 'text 'surface0 '(bold)))
-        (cons 'minibuffer-prompt (pface 'mauve 'base '(bold)))
+        (cons 'minibuffer-input (pface 'text 'surface0 '()))
+        (cons 'minibuffer-prompt (pface 'base 'mauve '(bold)))
         (cons 'completion-selected (pface 'text 'surface1 '(bold)))
         (cons 'selection (pface 'inherit 'surface2 '()))
         (cons 'line-number (pface 'overlay0 'base '()))
