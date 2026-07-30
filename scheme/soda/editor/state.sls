@@ -2581,7 +2581,39 @@
       (register-buffer-resource! value buffer)
       (hashtable-set! views 1 view)
       (keymap-catalog-register! keymaps 'editor.override (make-keymap))
-      (keymap-catalog-register! keymaps 'editor.default (make-keymap))
+      (let ([default-map (make-keymap)]
+            [ctl-x-map (make-keymap)]
+            [help-map (make-keymap)])
+        (keymap-set!
+          default-map
+          (make-key-stroke
+            'character
+            (char->integer #\x)
+            4)
+          ctl-x-map)
+        (keymap-set!
+          default-map
+          (make-key-stroke
+            'character
+            (char->integer #\h)
+            4)
+          help-map)
+        (keymap-set!
+          default-map
+          (make-key-stroke 'f1 #f 0)
+          help-map)
+        (keymap-catalog-register!
+          keymaps
+          'editor.default
+          default-map)
+        (keymap-catalog-register!
+          keymaps
+          'editor.ctl-x
+          ctl-x-map)
+        (keymap-catalog-register!
+          keymaps
+          'editor.help
+          help-map))
       value))
 
   (define (editor-close! value)
