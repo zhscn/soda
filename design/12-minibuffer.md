@@ -142,7 +142,7 @@ choice source metadata 为匹配和选择声明策略：
 
 ```text
 category:    command | file | buffer | ...
-styles:      (prefix substring flex)
+styles:      (prefix substring flex fzf)
 ignore-case: boolean
 preselect:   boolean
 ```
@@ -152,12 +152,18 @@ styles 按顺序尝试，每个匹配结果包含 score、匹配区间和 exact 
 选择保持为空，避免 `RET` 意外接受列表首项。需要传统首项选择行为的 source 可以
 设置 `preselect`。
 
+minibuffer 的命令、Buffer、主题和文件 source 使用 `fzf` 风格。matcher 按字符边界、
+路径分隔符、camelCase 转换和连续匹配加权，并对间隔匹配扣分；同分候选依次按匹配
+跨度、起点和候选长度排序。匹配保留原字符串中的字符位置，使大小写不敏感的搜索也
+能准确生成非连续高亮区间。Document completion 的 source 独立声明匹配 styles，
+语言 provider 可以继续使用 prefix 等面向标识符的策略。
+
 completion component 始终显式表示 pending、无匹配、候选数量和当前选择位置。选择
 按 `(provider, item-id)` 保持身份；refilter 或异步结果到达后，只要候选仍然存在，
 选择不会因排序位置变化而漂移。
 
 `M-x` 使用 command registry choice source 和 `extended-command` history 读取
-command symbol。它使用大小写不敏感的 prefix/flex 匹配，并保持无预选状态。发起
+command symbol。它使用大小写不敏感的 `fzf` 匹配，并保持无预选状态。发起
 `M-x` 的 prefix argument 作为 request data 跨 prompt
 生命周期保存，`prompt.execute-command` 把它放入 interactive command message，
 因此最终命令收到与直接按键调用相同的 `CommandContext`。

@@ -53,7 +53,8 @@
               (editor-buffers editor))])
       (make-choice-source
         'buffer
-        '((category . buffer))
+        '((category . buffer)
+          (styles . (fzf)))
         (lambda (input point)
           (cons 0 (string-length input)))
         (lambda (query) items)

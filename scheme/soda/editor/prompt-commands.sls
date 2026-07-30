@@ -58,7 +58,7 @@
     (make-choice-source
       'command
       '((category . command)
-        (styles . (prefix flex))
+        (styles . (fzf))
         (ignore-case . #t))
       (lambda (input point)
         (cons 0 (string-length input)))

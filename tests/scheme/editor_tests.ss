@@ -2888,7 +2888,7 @@
       match
       (> (length (completion-match-ranges match)) 1))
     (error 'editor-tests
-           "flex completion did not expose match ranges")))
+           "fuzzy completion did not expose match ranges")))
 (send! prompt-editor prompt-decoder (bytes 7))
 
 (editor-open-prompt!

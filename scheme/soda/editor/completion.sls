@@ -97,7 +97,8 @@
           completion-session-select-next!
           completion-session-select-previous!)
   (import (rnrs)
-          (soda document))
+          (soda document)
+          (soda editor fuzzy))
 
   (define-record-type
     (completion-item %make-completion-item completion-item?)
@@ -642,11 +643,40 @@
              first
              last)]))))
 
-  (define (match-with-style style query value)
+  (define (positions->ranges positions)
+    (reverse
+      (let loop ([remaining positions] [ranges '()])
+        (if (null? remaining)
+            ranges
+            (loop
+              (cdr remaining)
+              (adjoin-match-index (car remaining) ranges))))))
+
+  (define (fzf-style-match query value ignore-case?)
+    (let ([match (fzf-match query value ignore-case?)])
+      (and
+        match
+        (make-completion-match
+          (fuzzy-match-score match)
+          (positions->ranges (fuzzy-match-positions match))
+          (fuzzy-match-exact? match)))))
+
+  (define (match-with-style
+            style query value ignore-case?)
     (case style
-      [(prefix) (prefix-match query value)]
-      [(substring) (substring-match query value)]
-      [(flex) (flex-match query value)]
+      [(prefix)
+       (prefix-match
+         (normalize-string query ignore-case?)
+         (normalize-string value ignore-case?))]
+      [(substring)
+       (substring-match
+         (normalize-string query ignore-case?)
+         (normalize-string value ignore-case?))]
+      [(flex)
+       (flex-match
+         (normalize-string query ignore-case?)
+         (normalize-string value ignore-case?))]
+      [(fzf) (fzf-style-match query value ignore-case?)]
       [else
        (assertion-violation
          'completion-session-refresh!
@@ -657,13 +687,7 @@
     (let* ([ignore-case?
              (choice-source-option source 'ignore-case #f)]
            [styles
-             (choice-source-option source 'styles '(prefix))]
-           [normalized-query
-             (normalize-string query ignore-case?)]
-           [normalized-value
-             (normalize-string
-               (completion-item-filter-text item)
-               ignore-case?)])
+             (choice-source-option source 'styles '(prefix))])
       (unless (and (list? styles) (for-all symbol? styles))
         (assertion-violation
           'completion-session-refresh!
@@ -675,9 +699,24 @@
           (or
             (match-with-style
               (car remaining)
-              normalized-query
-              normalized-value)
+              query
+              (completion-item-filter-text item)
+              ignore-case?)
             (loop (cdr remaining)))))))
+
+  (define (match-start match)
+    (if (null? (completion-match-ranges match))
+        0
+        (caar (completion-match-ranges match))))
+
+  (define (match-span match)
+    (if (null? (completion-match-ranges match))
+        0
+        (let ([start (caar (completion-match-ranges match))])
+          (let loop ([ranges (completion-match-ranges match)])
+            (if (null? (cdr ranges))
+                (- (cdar ranges) start)
+                (loop (cdr ranges)))))))
 
   (define (matched-item<? left right)
     (let* ([left-item (car left)]
@@ -689,6 +728,25 @@
       (cond
         [(not (= left-score right-score))
          (> left-score right-score)]
+        [(not (= (match-span left-match)
+                 (match-span right-match)))
+         (< (match-span left-match)
+            (match-span right-match))]
+        [(not (= (match-start left-match)
+                 (match-start right-match)))
+         (< (match-start left-match)
+            (match-start right-match))]
+        [(not
+           (=
+             (string-length
+               (completion-item-filter-text left-item))
+             (string-length
+               (completion-item-filter-text right-item))))
+         (<
+           (string-length
+             (completion-item-filter-text left-item))
+           (string-length
+             (completion-item-filter-text right-item)))]
         [(not
            (string=?
              (completion-item-sort-text left-item)

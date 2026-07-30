@@ -461,7 +461,7 @@
     (make-choice-source
       'file
       `((category . file)
-        (styles . (prefix flex))
+        (styles . (fzf))
         (preselect . #f)
         (providers . (filesystem))
         (base-directory . ,base-directory))
