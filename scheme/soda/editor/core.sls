@@ -117,6 +117,7 @@
           call-with-editor-configuration-transaction
           editor-extension-names
           editor-extension-loaded?
+          editor-register-extension-cleanup!
           editor-load-extension!
           editor-unload-extension!
           editor-reload-extension!

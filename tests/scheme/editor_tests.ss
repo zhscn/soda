@@ -5615,6 +5615,169 @@
   (error 'editor-tests
          "unloading the final extension did not restore the baseline"))
 
+(define extension-resource-loads 0)
+(define extension-resource-trace '())
+(unless
+  (guard
+    (condition [else #t])
+    (editor-register-extension-cleanup!
+      configuration-editor
+      (lambda () #f))
+    #f)
+  (error 'editor-tests
+         "extension cleanup registration escaped loader scope"))
+(define (load-resource-extension editor)
+  (set! extension-resource-loads
+    (+ extension-resource-loads 1))
+  (let ([generation extension-resource-loads])
+    (editor-register-extension-cleanup!
+      editor
+      (lambda ()
+        (editor-set-global-setting!
+          editor
+          'indent-width
+          88)
+        (set! extension-resource-trace
+          (append
+            extension-resource-trace
+            (list (list 'first generation))))))
+    (editor-register-extension-cleanup!
+      editor
+      (lambda ()
+        (set! extension-resource-trace
+          (append
+            extension-resource-trace
+            (list (list 'second generation)))))))
+  (editor-register-command!
+    editor
+    (make-interactive-context-command
+      'extension.resource
+      (lambda (context) '())
+      "Resource extension version one.")))
+(editor-load-extension!
+  configuration-editor
+  'resource-extension
+  load-resource-extension)
+(editor-reload-extension!
+  configuration-editor
+  'resource-extension)
+(unless
+  (and
+    (= extension-resource-loads 2)
+    (= (editor-global-setting-ref
+         configuration-editor
+         'indent-width)
+       10)
+    (equal?
+      extension-resource-trace
+      '((second 1) (first 1))))
+  (error 'editor-tests
+         "extension reload did not release resources in LIFO order"
+         extension-resource-trace))
+
+(define failed-resource-cleanups 0)
+(unless
+  (guard
+    (condition [else #t])
+    (editor-load-extension!
+      configuration-editor
+      'resource-extension
+      (lambda (editor)
+        (editor-register-extension-cleanup!
+          editor
+          (lambda ()
+            (set! failed-resource-cleanups
+              (+ failed-resource-cleanups 1))))
+        (editor-register-command!
+          editor
+          (make-interactive-context-command
+            'extension.resource
+            (lambda (context) '())
+            "Rejected resource extension."))
+        (error 'editor-tests "abort resource extension replacement")))
+    #f)
+  (error 'editor-tests
+         "failed resource extension replacement did not raise"))
+(unless
+  (and
+    (= extension-resource-loads 3)
+    (= failed-resource-cleanups 1)
+    (= (editor-global-setting-ref
+         configuration-editor
+         'indent-width)
+       10)
+    (equal?
+      extension-resource-trace
+      '((second 1) (first 1)
+        (second 2) (first 2)))
+    (string=?
+      (command-documentation
+        (editor-command-registry configuration-editor)
+        'extension.resource)
+      "Resource extension version one."))
+  (error 'editor-tests
+         "failed replacement did not restore extension resources"
+         extension-resource-loads
+         extension-resource-trace
+         failed-resource-cleanups))
+(editor-unload-extension!
+  configuration-editor
+  'resource-extension)
+(unless
+  (and
+    (equal?
+      extension-resource-trace
+      '((second 1) (first 1)
+        (second 2) (first 2)
+        (second 3) (first 3)))
+    (not
+      (command-registered?
+        (editor-command-registry configuration-editor)
+        'extension.resource)))
+  (error 'editor-tests
+         "extension unload did not release recovered resources"))
+
+(define cleanup-failure-trace '())
+(define cleanup-failure-notices '())
+(editor-add-hook!
+  configuration-editor
+  'extension-cleanup-failed
+  'test.extension-cleanup-failed
+  (lambda (editor name condition)
+    (set! cleanup-failure-notices
+      (append cleanup-failure-notices (list name)))))
+(editor-load-extension!
+  configuration-editor
+  'cleanup-failure-extension
+  (lambda (editor)
+    (editor-register-extension-cleanup!
+      editor
+      (lambda ()
+        (set! cleanup-failure-trace
+          (append cleanup-failure-trace '(continued)))))
+    (editor-register-extension-cleanup!
+      editor
+      (lambda ()
+        (error 'editor-tests "cleanup failure")))))
+(editor-unload-extension!
+  configuration-editor
+  'cleanup-failure-extension)
+(unless
+  (and
+    (equal? cleanup-failure-notices
+            '(cleanup-failure-extension))
+    (equal? cleanup-failure-trace '(continued))
+    (not
+      (editor-extension-loaded?
+        configuration-editor
+        'cleanup-failure-extension)))
+  (error 'editor-tests
+         "cleanup condition prevented remaining owner cleanup"))
+(editor-remove-hook!
+  configuration-editor
+  'extension-cleanup-failed
+  'test.extension-cleanup-failed)
+
 (define editor-init-file (getenv "SODA_TEST_INIT_FILE"))
 (define editor-init-v2-file (getenv "SODA_TEST_INIT_V2_FILE"))
 (define editor-init-failing-file
@@ -5758,5 +5921,30 @@
       'fundamental-mode))
   (error 'editor-tests
          "unloading auto-mode extension did not reselect file mode"))
+
+(define close-resource-document
+  (make-document "" 9901))
+(define close-resource-buffer
+  (make-buffer
+    9901
+    close-resource-document
+    "*close-resource*"
+    'fundamental-mode))
+(define close-resource-editor
+  (make-editor close-resource-buffer))
+(define close-resource-cleanups 0)
+(editor-load-extension!
+  close-resource-editor
+  'close-resource
+  (lambda (editor)
+    (editor-register-extension-cleanup!
+      editor
+      (lambda ()
+        (set! close-resource-cleanups
+          (+ close-resource-cleanups 1))))))
+(editor-close! close-resource-editor)
+(unless (= close-resource-cleanups 1)
+  (error 'editor-tests
+         "editor close did not release extension resources"))
 
 (editor-close! configuration-editor)

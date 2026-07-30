@@ -93,6 +93,7 @@
           call-with-editor-configuration-transaction
           editor-extension-names
           editor-extension-loaded?
+          editor-register-extension-cleanup!
           editor-load-extension!
           editor-unload-extension!
           editor-reload-extension!
@@ -318,6 +319,9 @@
       (mutable rebuilding-extensions?
                editor-rebuilding-extensions?
                editor-rebuilding-extensions?-set!)
+      (mutable extension-cleanup-scope
+               editor-extension-cleanup-scope
+               editor-extension-cleanup-scope-set!)
       (mutable configuration-transaction-depth
                editor-configuration-transaction-depth
                editor-configuration-transaction-depth-set!)
@@ -331,7 +335,7 @@
 
   (define-record-type
     (editor-extension %make-editor-extension editor-extension?)
-    (fields name loader))
+    (fields name loader cleanups))
 
   (define-record-type
     (editor-configuration-state
@@ -2910,35 +2914,236 @@
         who
         "extension lifecycle cannot change in a configuration transaction")))
 
-  (define (invoke-extension-loader! value extension)
-    (call-with-values
-      (lambda ()
-        ((editor-extension-loader extension) value))
-      (lambda results #f)))
+  (define (editor-register-extension-cleanup! value cleanup)
+    (require-open-editor
+      'editor-register-extension-cleanup!
+      value)
+    (unless (procedure? cleanup)
+      (assertion-violation
+        'editor-register-extension-cleanup!
+        "cleanup must be a procedure"
+        cleanup))
+    (unless (list? (editor-extension-cleanup-scope value))
+      (assertion-violation
+        'editor-register-extension-cleanup!
+        "cleanup can only be registered while an extension loader is running"))
+    (editor-extension-cleanup-scope-set!
+      value
+      (cons cleanup (editor-extension-cleanup-scope value)))
+    cleanup)
 
-  (define (rebuild-extension-set! value baseline extensions)
-    (dynamic-wind
-      (lambda ()
-        (editor-rebuilding-extensions?-set! value #t))
-      (lambda ()
+  (define (report-extension-cleanup-condition!
+            value
+            name
+            condition)
+    (editor-set-status-message!
+      value
+      (string-append
+        "Extension cleanup failed: "
+        (symbol->string name)
+        (if (message-condition? condition)
+            (string-append ": " (condition-message condition))
+            "")))
+    (guard (hook-condition [else #f])
+      (editor-run-hooks!
+        value
+        'extension-cleanup-failed
+        value
+        name
+        condition)))
+
+  (define (run-extension-cleanups! value name cleanups)
+    (let loop ([pending cleanups] [conditions '()])
+      (if (null? pending)
+          (reverse conditions)
+          (guard
+            (condition
+              [else
+               (report-extension-cleanup-condition!
+                 value
+                 name
+                 condition)
+               (loop
+                 (cdr pending)
+                 (cons condition conditions))])
+            ((car pending))
+            (loop (cdr pending) conditions)))))
+
+  (define (dispose-extension! value extension)
+    (run-extension-cleanups!
+      value
+      (editor-extension-name extension)
+      (editor-extension-cleanups extension)))
+
+  (define (dispose-extension-set! value extensions)
+    (fold-left
+      append
+      '()
+      (map
+        (lambda (extension)
+          (dispose-extension! value extension))
+        (reverse extensions))))
+
+  (define (invoke-extension-loader! value extension)
+    (let ([loaded #f])
+      (dynamic-wind
+        (lambda ()
+          (when (editor-extension-cleanup-scope value)
+            (assertion-violation
+              'invoke-extension-loader!
+              "extension cleanup scopes cannot be nested"))
+          (editor-extension-cleanup-scope-set! value '()))
+        (lambda ()
+          (guard
+            (condition
+              [else
+               (run-extension-cleanups!
+                 value
+                 (editor-extension-name extension)
+                 (editor-extension-cleanup-scope value))
+               (raise condition)])
+            (call-with-values
+              (lambda ()
+                ((editor-extension-loader extension) value))
+              (lambda results #f))
+            (set! loaded
+              (%make-editor-extension
+                (editor-extension-name extension)
+                (editor-extension-loader extension)
+                (editor-extension-cleanup-scope value)))))
+        (lambda ()
+          (editor-extension-cleanup-scope-set! value #f)))
+      loaded))
+
+  (define (load-extension-set! value extensions)
+    (let ([loaded '()])
+      (guard
+        (condition
+          [else
+           (dispose-extension-set! value (reverse loaded))
+           (raise condition)])
+        (let loop ([pending extensions])
+          (if (null? pending)
+              (reverse loaded)
+              (begin
+                (set! loaded
+                  (cons
+                    (invoke-extension-loader! value (car pending))
+                    loaded))
+                (loop (cdr pending))))))))
+
+  (define (refresh-extension-file-modes! value)
+    (for-each
+      (lambda (buffer)
+        (when (buffer-file-path buffer)
+          (editor-select-buffer-major-mode!
+            value
+            buffer
+            (buffer-file-path buffer))))
+      (editor-buffers value)))
+
+  (define (apply-extension-set! value baseline extensions)
+    (let ([loaded '()])
+      (guard
+        (condition
+          [else
+           (unless (null? loaded)
+             (dispose-extension-set! value loaded))
+           (raise condition)])
         (call-with-editor-configuration-transaction
           value
           (lambda ()
             (editor-restore-configuration! value baseline)
+            (set! loaded
+              (load-extension-set! value extensions))
+            (refresh-extension-file-modes! value)))
+        loaded)))
+
+  (define (call-with-internal-configuration-transaction
+            value
+            procedure)
+    (let ([depth (editor-configuration-transaction-depth value)])
+      (dynamic-wind
+        (lambda ()
+          (editor-configuration-transaction-depth-set!
+            value
+            (+ depth 1)))
+        (lambda ()
+          (call-with-editor-configuration-transaction
+            value
+            procedure))
+        (lambda ()
+          (editor-configuration-transaction-depth-set!
+            value
+            depth)))))
+
+  (define (recover-extension-resources! value extensions)
+    (let ([snapshot (editor-configuration-snapshot value)]
+          [loaded '()]
+          [recovered '()])
+      (guard
+        (condition
+          [else
+           (dispose-extension-set! value (reverse loaded))
+           (raise condition)])
+        (call-with-internal-configuration-transaction
+          value
+          (lambda ()
             (for-each
               (lambda (extension)
-                (invoke-extension-loader! value extension))
+                (if
+                  (null? (editor-extension-cleanups extension))
+                  (set! recovered (cons extension recovered))
+                  (let ([replacement
+                          (invoke-extension-loader!
+                            value
+                            extension)])
+                    (set! loaded (cons replacement loaded))
+                    (set! recovered
+                      (cons replacement recovered)))))
               extensions)
-            (for-each
-              (lambda (buffer)
-                (when (buffer-file-path buffer)
-                  (editor-select-buffer-major-mode!
-                    value
-                    buffer
-                    (buffer-file-path buffer))))
-              (editor-buffers value)))))
-      (lambda ()
-        (editor-rebuilding-extensions?-set! value #f))))
+            (editor-restore-configuration!
+              value
+              snapshot)))
+        (reverse recovered))))
+
+  (define (rebuild-extension-set! value baseline extensions)
+    (let ([old-extensions (editor-extensions value)]
+          [committed-snapshot
+            (editor-configuration-snapshot value)])
+      (dynamic-wind
+        (lambda ()
+          (editor-rebuilding-extensions?-set! value #t))
+        (lambda ()
+          (dispose-extension-set! value old-extensions)
+          (guard
+            (condition
+              [else
+               (editor-restore-configuration!
+                 value
+                 committed-snapshot)
+               (guard
+                 (recovery-condition
+                   [else
+                    (editor-extensions-set!
+                      value
+                      old-extensions)
+                    (raise recovery-condition)])
+                 (editor-extensions-set!
+                   value
+                   (recover-extension-resources!
+                     value
+                     old-extensions)))
+               (raise condition)])
+            (let ([loaded
+                    (apply-extension-set!
+                      value
+                      baseline
+                      extensions)])
+              (editor-extensions-set! value loaded)
+              loaded)))
+        (lambda ()
+          (editor-rebuilding-extensions?-set! value #f)))))
 
   (define (replace-extension extensions replacement)
     (let ([name (editor-extension-name replacement)]
@@ -2979,10 +3184,9 @@
            [extensions
              (replace-extension
                (editor-extensions value)
-               (%make-editor-extension name loader))])
+               (%make-editor-extension name loader '()))])
       (rebuild-extension-set! value baseline extensions)
       (editor-extension-baseline-set! value baseline)
-      (editor-extensions-set! value extensions)
       name))
 
   (define (editor-unload-extension! value name)
@@ -3007,7 +3211,6 @@
                  (not (eq? (editor-extension-name extension) name)))
                (editor-extensions value))])
       (rebuild-extension-set! value baseline extensions)
-      (editor-extensions-set! value extensions)
       (when (null? extensions)
         (editor-extension-baseline-set! value #f))
       name))
@@ -3547,6 +3750,7 @@
                #f
                '()
                #f
+               #f
                0
                #f)])
       (hashtable-set! buffers (buffer-id buffer) buffer)
@@ -3595,6 +3799,17 @@
         (assertion-violation
           'editor-close!
           "editor cannot close in a configuration transaction"))
+      (dynamic-wind
+        (lambda ()
+          (editor-rebuilding-extensions?-set! value #t))
+        (lambda ()
+          (dispose-extension-set!
+            value
+            (editor-extensions value))
+          (editor-extensions-set! value '())
+          (editor-extension-baseline-set! value #f))
+        (lambda ()
+          (editor-rebuilding-extensions?-set! value #f)))
       (cancel-queued-completion-effects-now! value)
       (for-each
         (lambda (session)

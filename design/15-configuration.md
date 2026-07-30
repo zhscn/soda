@@ -79,8 +79,22 @@ owner、卸载任意 owner 或显式 reload 时，Editor 恢复 baseline，并�
 的配置创建新 baseline。
 
 Loader 接收 Editor，并通过配置 API 注册其贡献。Loader 应具有可重复执行语义，且其
-副作用必须落在 configuration snapshot 覆盖的 Editor 状态中。文件写入、进程启动和
-其他外部副作用不属于扩展事务。
+配置副作用应落在 configuration snapshot 覆盖的 Editor 状态中。
+
+Loader 可以在取得 watcher、timer、进程或 language session 等外部资源后立即调用
+`editor-register-extension-cleanup!` 登记无参数 cleanup。登记只在当前 loader 的
+动态 scope 内有效。一个 owner 内按登记的逆序运行 cleanup，多个 owner 按加载的逆序
+释放，保证依赖资源先于被依赖资源关闭。
+
+Reload、同名替换、unload 和 Editor close 都会释放 owner resources。新 loader 失败
+时，已成功的新 owner 和失败 loader 已登记的部分资源都会释放；原 configuration
+snapshot 恢复后，拥有 cleanup 的旧 owner 重新执行 loader 以取得新资源句柄。资源
+恢复期间产生的配置写入会被丢弃，因此旧 evaluator、catalog 对象和 setting 值保持
+失败前的精确身份。
+
+Cleanup 应可重复调用并在有限时间内返回。Cleanup condition 不阻止后续 cleanup，
+Editor 通过 `extension-cleanup-failed` hook 报告 condition。文件写入和其他不可逆
+操作不属于 cleanup scope，loader 仍应避免执行这类操作。
 
 Baseline 建立后创建的 Buffer 不属于旧 snapshot 的局部状态。扩展重建保留这些 Buffer；
 恢复 language catalog 时，仍存在的 major mode 会重新创建 runtime，已经移除的
@@ -124,6 +138,7 @@ after-init(editor)
 theme-changed(editor, old-theme, new-theme)
 configuration-committed(editor)
 configuration-rolled-back(editor, condition)
+extension-cleanup-failed(editor, extension-name, condition)
 buffer-created(editor, buffer)
 before-buffer-removed(editor, buffer)
 major-mode-changed(editor, buffer, old-mode, new-mode)
