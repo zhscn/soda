@@ -29,6 +29,10 @@
 (unless
   (and
     (> (length soda-built-in-api-index) 100)
+    (> (length soda-built-in-library-index) 20)
+    (member
+      '(soda editor core)
+      soda-built-in-library-index)
     editor-command-entry
     (eq? (cadr editor-command-entry) 'procedure)
     (string? (list-ref editor-command-entry 3))
@@ -47,6 +51,35 @@
   (error
     'embedded-api-index-tests
     "embedded Scheme API catalog is missing the editor command interface"))
+
+(define missing-library-source
+  "(import (soda editor library-that-does-not-exist))\n")
+(define missing-library-snapshot
+  (make-scheme-semantic-snapshot
+    3
+    0
+    (string->utf8 missing-library-source)))
+(define missing-library-diagnostic
+  (find
+    (lambda (diagnostic)
+      (eq?
+        (scheme-diagnostic-code diagnostic)
+        'library-not-found))
+    (scheme-semantic-snapshot-diagnostics
+      missing-library-snapshot)))
+
+(unless
+  (and
+    missing-library-diagnostic
+    (equal?
+      (scheme-diagnostic-payload
+        missing-library-diagnostic)
+      '(soda editor library-that-does-not-exist))
+    (= (scheme-diagnostic-start missing-library-diagnostic) 8)
+    (= (scheme-diagnostic-end missing-library-diagnostic) 49))
+  (error
+    'embedded-api-index-tests
+    "unknown Soda imports did not produce a source-ranged diagnostic"))
 
 (define partial-source
   (string-append

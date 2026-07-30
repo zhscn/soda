@@ -1,5 +1,6 @@
 (library (soda editor diagnostics)
-  (export install-diagnostic-commands!)
+  (export install-diagnostic-commands!
+          editor-refresh-scheme-diagnostics!)
   (import (rnrs)
           (soda editor annotation)
           (soda editor buffer)
@@ -8,7 +9,114 @@
           (soda editor keymap)
           (soda editor location)
           (soda editor navigation)
+          (soda editor scheme-query)
+          (soda editor scheme-semantics)
           (soda editor state))
+
+  (define scheme-diagnostic-namespace
+    'scheme-semantic-diagnostics)
+
+  (define (scheme-annotation-id diagnostic)
+    (list
+      (scheme-diagnostic-code diagnostic)
+      (scheme-diagnostic-start diagnostic)
+      (scheme-diagnostic-end diagnostic)))
+
+  (define (scheme-diagnostic->annotation diagnostic)
+    (make-diagnostic
+      (scheme-annotation-id diagnostic)
+      (scheme-diagnostic-start diagnostic)
+      (scheme-diagnostic-end diagnostic)
+      (scheme-diagnostic-severity diagnostic)
+      (scheme-diagnostic-message diagnostic)
+      diagnostic))
+
+  (define (scheme-annotation-set editor buffer)
+    (find
+      (lambda (set)
+        (eq?
+          (annotation-set-namespace set)
+          scheme-diagnostic-namespace))
+      (editor-annotation-sets-for-buffer
+        editor
+        (buffer-id buffer))))
+
+  (define (next-generation current)
+    (if current
+        (+ (annotation-set-generation current) 1)
+        0))
+
+  (define (publish-scheme-diagnostics!
+            editor
+            buffer
+            current)
+    (let* ([snapshot
+             (buffer-scheme-semantic-snapshot buffer)]
+           [revision
+             (scheme-semantic-snapshot-revision snapshot)]
+           [annotations
+             (map
+               scheme-diagnostic->annotation
+               (scheme-semantic-snapshot-diagnostics snapshot))])
+      (editor-publish-annotation-set!
+        editor
+        (make-buffer-annotation-set
+          buffer
+          scheme-diagnostic-namespace
+          revision
+          (next-generation current)
+          annotations))))
+
+  (define (clear-scheme-diagnostics!
+            editor
+            buffer
+            current)
+    (when current
+      (editor-publish-annotation-set!
+        editor
+        (make-buffer-annotation-set
+          buffer
+          scheme-diagnostic-namespace
+          (buffer-revision buffer)
+          (next-generation current)
+          '()))))
+
+  (define (editor-refresh-scheme-diagnostics! editor)
+    (for-each
+      (lambda (buffer)
+        (let ([current
+                (scheme-annotation-set editor buffer)])
+          (cond
+            [(scheme-buffer? buffer)
+             (unless
+               (and
+                 current
+                 (=
+                   (annotation-set-source-revision current)
+                   (buffer-revision buffer)))
+               (publish-scheme-diagnostics!
+                 editor buffer current))]
+            [current
+             (clear-scheme-diagnostics!
+               editor buffer current)])))
+      (editor-buffers editor))
+    editor)
+
+  (define (refresh-after-buffer-event
+            editor
+            buffer
+            . arguments)
+    (editor-refresh-scheme-diagnostics! editor))
+
+  (define (refresh-after-command
+            context
+            definition
+            arguments
+            effects
+            condition)
+    (guard (failure [else #f])
+      (editor-refresh-scheme-diagnostics!
+        (command-context-editor context))))
 
   (define (diagnostic-item? item)
     (let ([metadata (location-item-metadata item)])
@@ -102,4 +210,20 @@
       editor
       (list (stroke #\g 2) (stroke #\d 0))
       'diagnostics.list)
+    (for-each
+      (lambda (phase)
+        (editor-add-hook!
+          editor
+          phase
+          'scheme-semantic-diagnostics
+          refresh-after-buffer-event))
+      '(buffer-created
+        major-mode-changed
+        after-revert))
+    (add-command-hook!
+      (editor-command-registry editor)
+      'post-command
+      'scheme-semantic-diagnostics
+      refresh-after-command)
+    (editor-refresh-scheme-diagnostics! editor)
     editor))

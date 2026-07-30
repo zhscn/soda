@@ -1,5 +1,6 @@
 (library (soda editor scheme-api-indexer)
-  (export scheme-sources-api-index)
+  (export scheme-sources-api-index
+          scheme-sources-library-index)
   (import (rnrs)
           (soda editor scheme-semantics))
 
@@ -202,4 +203,35 @@
                                 (symbol->string (car export)))))
                           (library-source-exports source)))
                       metadata))))])
-        result))))
+        result)))
+
+  (define (scheme-sources-library-index sources)
+    (unless
+      (and
+        (list? sources)
+        (for-all
+          (lambda (source)
+            (and
+              (pair? source)
+              (string? (car source))
+              (bytevector? (cdr source))))
+          sources))
+      (assertion-violation
+        'scheme-sources-library-index
+        "expected (resource . bytevector) source pairs"
+        sources))
+    (fold-left
+      (lambda (result source)
+        (let ([metadata (source-metadata source)])
+          (if
+            (or
+              (not metadata)
+              (member
+                (library-source-name metadata)
+                result))
+            result
+            (append
+              result
+              (list (library-source-name metadata))))))
+      '()
+      sources)))

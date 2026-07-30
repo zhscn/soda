@@ -47,6 +47,8 @@
     (list-sort string<? (source-files source-root))))
 
 (define index (scheme-sources-api-index sources))
+(define library-index
+  (scheme-sources-library-index sources))
 
 (call-with-port
   (open-file-output-port
@@ -58,8 +60,12 @@
     (display
       "(library (soda editor builtin-api-index)\n"
       port)
-    (display "  (export soda-built-in-api-index)\n" port)
+    (display
+      "  (export soda-built-in-api-index\n          soda-built-in-library-index)\n"
+      port)
     (display "  (import (rnrs))\n\n" port)
     (display "  (define soda-built-in-api-index\n    '" port)
     (write index port)
+    (display ")\n\n  (define soda-built-in-library-index\n    '" port)
+    (write library-index port)
     (display "))\n" port)))

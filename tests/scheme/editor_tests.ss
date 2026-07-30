@@ -2074,6 +2074,67 @@
          (editor-status-message xref-editor)))
 (editor-close! xref-editor)
 
+(define semantic-diagnostic-document
+  (make-document
+    "(lambda (value value) value)\n"
+    1984))
+(define semantic-diagnostic-buffer
+  (make-buffer
+    1984
+    semantic-diagnostic-document
+    "*scheme-diagnostics*"
+    'scheme-mode))
+(define semantic-diagnostic-editor
+  (make-editor semantic-diagnostic-buffer))
+(define (current-scheme-diagnostic-set)
+  (find
+    (lambda (set)
+      (eq?
+        (annotation-set-namespace set)
+        'scheme-semantic-diagnostics))
+    (editor-annotation-sets-for-buffer
+      semantic-diagnostic-editor
+      (buffer-id semantic-diagnostic-buffer))))
+(define initial-scheme-diagnostic-set
+  (current-scheme-diagnostic-set))
+(unless
+  (and
+    initial-scheme-diagnostic-set
+    (= (length
+         (annotation-set-annotations
+           initial-scheme-diagnostic-set))
+       1)
+    (eq?
+      (annotation-severity
+        (car
+          (annotation-set-annotations
+            initial-scheme-diagnostic-set)))
+      'error))
+  (error 'editor-tests
+         "Scheme diagnostics were not published for the initial revision"))
+(buffer-replace-range!
+  semantic-diagnostic-buffer
+  15
+  20
+  (string->utf8 "other"))
+(editor-update!
+  semantic-diagnostic-editor
+  (make-command-message 'move.forward-character #f))
+(let ([refreshed (current-scheme-diagnostic-set)])
+  (unless
+    (and
+      refreshed
+      (not (eq? refreshed initial-scheme-diagnostic-set))
+      (annotation-set-closed?
+        initial-scheme-diagnostic-set)
+      (=
+        (annotation-set-source-revision refreshed)
+        (buffer-revision semantic-diagnostic-buffer))
+      (null? (annotation-set-annotations refreshed)))
+    (error 'editor-tests
+           "post-command diagnostics did not replace the stale revision")))
+(editor-close! semantic-diagnostic-editor)
+
 (define highlight-document
   (make-document
     "(define answer \"yes\") ; note\n"
@@ -2300,9 +2361,14 @@
       refreshed-diagnostic-set)
     (annotation-set-closed? diagnostic-set)
     (= (length
-         (editor-annotation-sets-for-buffer
-           highlight-editor
-           (buffer-id highlight-buffer)))
+         (filter
+           (lambda (set)
+             (eq?
+               (annotation-set-namespace set)
+               'test-diagnostics))
+           (editor-annotation-sets-for-buffer
+             highlight-editor
+             (buffer-id highlight-buffer))))
        1))
   (error 'editor-tests
          "new diagnostic generation did not atomically replace the old set"))
@@ -2317,10 +2383,15 @@
          (buffer-id highlight-buffer))
        1)
     (annotation-set-closed? refreshed-diagnostic-set)
-    (null?
-      (editor-annotation-sets-for-buffer
-        highlight-editor
-        (buffer-id highlight-buffer)))
+    (not
+      (exists
+        (lambda (set)
+          (eq?
+            (annotation-set-namespace set)
+            'test-diagnostics))
+        (editor-annotation-sets-for-buffer
+          highlight-editor
+          (buffer-id highlight-buffer))))
     (not (editor-current-location-list highlight-editor)))
   (error 'editor-tests
          "diagnostic namespace was not cleared"))

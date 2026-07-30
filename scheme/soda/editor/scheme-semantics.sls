@@ -8,6 +8,7 @@
           scheme-semantic-snapshot-tokens
           scheme-semantic-snapshot-scopes
           scheme-semantic-snapshot-imports
+          scheme-semantic-snapshot-diagnostics
           scheme-semantic-snapshot-visible-index-definitions
           scheme-semantic-snapshot-root-definitions
           scheme-semantic-visible-definitions-at
@@ -46,6 +47,13 @@
           scheme-use-start
           scheme-use-end
           scheme-use-resolution
+          scheme-diagnostic?
+          scheme-diagnostic-code
+          scheme-diagnostic-start
+          scheme-diagnostic-end
+          scheme-diagnostic-severity
+          scheme-diagnostic-message
+          scheme-diagnostic-payload
           scheme-lexical-token?
           scheme-lexical-token-kind
           scheme-lexical-token-value
@@ -97,6 +105,9 @@
   (define-record-type scheme-use
     (fields name start end resolution))
 
+  (define-record-type scheme-diagnostic
+    (fields code start end severity message payload))
+
   (define-record-type scheme-scope
     (fields id parent-id start end definitions))
 
@@ -124,6 +135,7 @@
       tokens
       scopes
       imports
+      diagnostics
       visible-index-definitions))
 
   (define-record-type token
@@ -1023,6 +1035,14 @@
         scheme-index-definitions)
       table))
 
+  (define scheme-known-library-table
+    (let ([table (make-hashtable equal-hash equal?)])
+      (for-each
+        (lambda (library)
+          (hashtable-set! table library #t))
+        soda-built-in-library-index)
+      table))
+
   (define-record-type import-binding
     (fields library transforms))
 
@@ -1092,26 +1112,6 @@
        (normalize-import-specification (cadr specification))]
       [else #f]))
 
-  (define (import-clause-bindings clause)
-    (if (and (pair? clause) (eq? (car clause) 'import))
-        (filter
-          (lambda (value) value)
-          (map normalize-import-specification (cdr clause)))
-        '()))
-
-  (define (datum-import-bindings datum)
-    (cond
-      [(and
-         (pair? datum)
-         (eq? (car datum) 'library)
-         (pair? (cdr datum)))
-       (apply
-         append
-         (map import-clause-bindings (cddr datum)))]
-      [(and (pair? datum) (eq? (car datum) 'import))
-       (import-clause-bindings datum)]
-      [else '()]))
-
   (define (partial-datum tokens)
     (cond
       [(null? tokens) (values #f '())]
@@ -1134,26 +1134,6 @@
                   tail
                   (if datum (cons datum result) result))))]))]
       [else (values #f (cdr tokens))]))
-
-  (define (partial-data tokens)
-    (let loop ([remaining tokens] [result '()])
-      (if (null? remaining)
-          (reverse result)
-          (call-with-values
-            (lambda () (partial-datum remaining))
-            (lambda (datum tail)
-              (loop
-                tail
-                (if datum (cons datum result) result)))))))
-
-  (define (source-import-bindings bytes)
-    (apply
-      append
-      (map
-        datum-import-bindings
-        (partial-data
-          (remove-ignored-data
-            (semantic-tokens (tokenize bytes)))))))
 
   (define (rename-definition definition name)
     (if (string=? name (scheme-definition-name definition))
@@ -1364,6 +1344,66 @@
       (token-value
         (syntax-form-token
           (car (syntax-form-children form))))))
+
+  (define (syntax-form->datum form)
+    (cond
+      [(syntax-symbol? form)
+       (string->symbol
+         (token-value (syntax-form-token form)))]
+      [(syntax-list? form)
+       (map
+         syntax-form->datum
+         (syntax-form-children form))]
+      [else #f]))
+
+  (define (import-form-bindings form)
+    (if
+      (and
+        (syntax-list? form)
+        (string=? (or (syntax-head-symbol form) "") "import"))
+      (filter
+        (lambda (value) value)
+        (map
+          (lambda (specification)
+            (let ([binding
+                    (normalize-import-specification
+                      (syntax-form->datum specification))])
+              (and
+                binding
+                (cons binding specification))))
+          (cdr (syntax-form-children form))))
+      '()))
+
+  (define (source-import-locations tokens)
+    (apply
+      append
+      (map
+        (lambda (form)
+          (cond
+            [(and
+               (syntax-list? form)
+               (string=?
+                 (or (syntax-head-symbol form) "")
+                 "import"))
+             (import-form-bindings form)]
+            [(and
+               (syntax-list? form)
+               (string=?
+                 (or (syntax-head-symbol form) "")
+                 "library"))
+             (apply
+               append
+               (map
+                 import-form-bindings
+                 (let ([children
+                         (syntax-form-children form)])
+                   (if
+                     (pair? (cdr children))
+                     (cddr children)
+                     '()))))]
+            [else '()]))
+        (parse-syntax-forms
+          (call-context-tokens-from tokens)))))
 
   (define (formal-nodes form)
     (cond
@@ -2090,6 +2130,245 @@
           (scheme-use-resolution use)))
       (scheme-semantic-snapshot-uses snapshot)))
 
+  (define (matching-delimiters? open close)
+    (case open
+      [(40) (= close 41)]
+      [(91) (= close 93)]
+      [(123) (= close 125)]
+      [else #f]))
+
+  (define (delimiter-name byte)
+    (string (integer->char byte)))
+
+  (define (delimiter-diagnostics tokens)
+    (let loop ([remaining tokens] [stack '()] [result '()])
+      (cond
+        [(null? remaining)
+         (append
+           (reverse result)
+           (map
+             (lambda (open)
+               (make-scheme-diagnostic
+                 'unclosed-delimiter
+                 (token-start open)
+                 (token-end open)
+                 'error
+                 (string-append
+                   "Unclosed delimiter "
+                   (delimiter-name (token-value open)))
+                 (token-value open)))
+             stack))]
+        [(eq? (token-kind (car remaining)) 'open)
+         (loop
+           (cdr remaining)
+           (cons (car remaining) stack)
+           result)]
+        [(eq? (token-kind (car remaining)) 'close)
+         (let ([close (car remaining)])
+           (if
+             (and
+               (pair? stack)
+               (matching-delimiters?
+                 (token-value (car stack))
+                 (token-value close)))
+             (loop (cdr remaining) (cdr stack) result)
+             (loop
+               (cdr remaining)
+               stack
+               (cons
+                 (make-scheme-diagnostic
+                   'unexpected-delimiter
+                   (token-start close)
+                   (token-end close)
+                   'error
+                   (string-append
+                     "Unexpected delimiter "
+                     (delimiter-name (token-value close)))
+                   (token-value close))
+                 result))))]
+        [else
+         (loop (cdr remaining) stack result)])))
+
+  (define (escaped-delimiter-terminated?
+            bytes
+            start
+            size
+            delimiter)
+    (let loop ([index (+ start 1)] [escaped? #f])
+      (cond
+        [(= index size) #f]
+        [escaped? (loop (+ index 1) #f)]
+        [(= (bytevector-u8-ref bytes index) 92)
+         (loop (+ index 1) #t)]
+        [(= (bytevector-u8-ref bytes index) delimiter)
+         #t]
+        [else (loop (+ index 1) #f)])))
+
+  (define (block-comment-terminated? bytes start size)
+    (let loop ([index (+ start 2)] [depth 1])
+      (cond
+        [(>= index size) #f]
+        [(and
+           (< (+ index 1) size)
+           (= (bytevector-u8-ref bytes index) 35)
+           (= (bytevector-u8-ref bytes (+ index 1)) 124))
+         (loop (+ index 2) (+ depth 1))]
+        [(and
+           (< (+ index 1) size)
+           (= (bytevector-u8-ref bytes index) 124)
+           (= (bytevector-u8-ref bytes (+ index 1)) 35))
+         (if
+           (= depth 1)
+           #t
+           (loop (+ index 2) (- depth 1)))]
+        [else (loop (+ index 1) depth)])))
+
+  (define (lexical-termination-diagnostics bytes tokens)
+    (let ([size (bytevector-length bytes)])
+      (fold-left
+        (lambda (result token)
+          (let* ([start (token-start token)]
+                 [kind (token-kind token)]
+                 [block-comment?
+                   (and
+                     (eq? kind 'comment)
+                     (< (+ start 1) size)
+                     (= (bytevector-u8-ref bytes start) 35)
+                     (=
+                       (bytevector-u8-ref bytes (+ start 1))
+                       124))]
+                 [diagnostic
+                   (cond
+                     [(and
+                        (eq? kind 'string)
+                        (not
+                          (escaped-delimiter-terminated?
+                            bytes start size 34)))
+                      (make-scheme-diagnostic
+                        'unterminated-string
+                        start
+                        (min size (+ start 1))
+                        'error
+                        "Unterminated string literal"
+                        #f)]
+                     [(and
+                        (eq? kind 'symbol)
+                        (< start size)
+                        (= (bytevector-u8-ref bytes start) 124)
+                        (not
+                          (escaped-delimiter-terminated?
+                            bytes start size 124)))
+                      (make-scheme-diagnostic
+                        'unterminated-symbol
+                        start
+                        (min size (+ start 1))
+                        'error
+                        "Unterminated escaped symbol"
+                        #f)]
+                     [(and
+                        block-comment?
+                        (not
+                          (block-comment-terminated?
+                            bytes start size)))
+                      (make-scheme-diagnostic
+                        'unterminated-block-comment
+                        start
+                        (min size (+ start 2))
+                        'error
+                        "Unterminated block comment"
+                        #f)]
+                     [else #f])])
+            (if diagnostic
+                (cons diagnostic result)
+                result)))
+        '()
+        tokens)))
+
+  (define (duplicate-definition-diagnostics scopes)
+    (apply
+      append
+      (map
+        (lambda (scope)
+          (let ([seen
+                  (make-hashtable string-hash string=?)])
+            (fold-left
+              (lambda (result definition)
+                (let ([name
+                        (scheme-definition-name definition)])
+                  (if (hashtable-contains? seen name)
+                      (cons
+                        (make-scheme-diagnostic
+                          'duplicate-binding
+                          (scheme-definition-start definition)
+                          (scheme-definition-end definition)
+                          'error
+                          (string-append
+                            "Duplicate binding "
+                            name)
+                          (scheme-definition-id definition))
+                        result)
+                      (begin
+                        (hashtable-set! seen name #t)
+                        result))))
+              '()
+              (scheme-scope-definitions scope))))
+        scopes)))
+
+  (define (unknown-soda-library-diagnostics
+            import-locations)
+    (fold-left
+      (lambda (result location)
+        (let* ([binding (car location)]
+               [form (cdr location)]
+               [library (import-binding-library binding)])
+          (if
+            (and
+              (pair? soda-built-in-library-index)
+              (pair? library)
+              (eq? (car library) 'soda)
+              (not
+                (hashtable-contains?
+                  scheme-known-library-table
+                  library)))
+            (cons
+              (make-scheme-diagnostic
+                'library-not-found
+                (syntax-form-start form)
+                (syntax-form-end form)
+                'error
+                (string-append
+                  "Scheme library not found: "
+                  (library-name->string library))
+                library)
+              result)
+            result)))
+      '()
+      import-locations))
+
+  (define (diagnostic-before? left right)
+    (or
+      (< (scheme-diagnostic-start left)
+         (scheme-diagnostic-start right))
+      (and
+        (= (scheme-diagnostic-start left)
+           (scheme-diagnostic-start right))
+        (< (scheme-diagnostic-end left)
+           (scheme-diagnostic-end right)))))
+
+  (define (semantic-diagnostics
+            bytes
+            tokens
+            scopes
+            import-locations)
+    (list-sort
+      diagnostic-before?
+      (append
+        (lexical-termination-diagnostics bytes tokens)
+        (delimiter-diagnostics tokens)
+        (duplicate-definition-diagnostics scopes)
+        (unknown-soda-library-diagnostics
+          import-locations))))
+
   (define (make-scheme-semantic-snapshot
             document-id
             revision
@@ -2108,7 +2387,10 @@
         bytes))
     (let* ([tokens (tokenize bytes)]
            [semantic (semantic-tokens tokens)]
-           [import-bindings (source-import-bindings bytes)]
+           [import-locations
+             (source-import-locations tokens)]
+           [import-bindings
+             (map car import-locations)]
            [imports
              (map import-binding-library import-bindings)]
            [visible-index
@@ -2141,4 +2423,9 @@
             tokens
             scopes
             imports
+            (semantic-diagnostics
+              bytes
+              tokens
+              scopes
+              import-locations)
             visible-index))))))

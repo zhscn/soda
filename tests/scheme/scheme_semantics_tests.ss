@@ -65,6 +65,77 @@
       (string=? name (scheme-definition-name definition)))
     definitions))
 
+(define diagnostic-source
+  (string-append
+    "(define (duplicate-parameter value value) value)\n"
+    "(let ([item 1] [item 2]) item)\n"
+    "(let* ([item 1] [item 2]) item)\n"
+    "(list]\n"
+    "{value\n"
+    "\"unfinished"))
+(define diagnostic-snapshot
+  (make-scheme-semantic-snapshot
+    79
+    0
+    (string->utf8 diagnostic-source)))
+(define semantic-diagnostics
+  (scheme-semantic-snapshot-diagnostics
+    diagnostic-snapshot))
+(define (diagnostics-with-code code)
+  (filter
+    (lambda (diagnostic)
+      (eq? (scheme-diagnostic-code diagnostic) code))
+    semantic-diagnostics))
+
+(unless
+  (and
+    (= (length
+         (diagnostics-with-code 'duplicate-binding))
+       2)
+    (= (length
+         (diagnostics-with-code 'unexpected-delimiter))
+       1)
+    (= (length
+         (diagnostics-with-code 'unclosed-delimiter))
+       2)
+    (= (length
+         (diagnostics-with-code 'unterminated-string))
+       1)
+    (for-all
+      (lambda (diagnostic)
+        (and
+          (scheme-diagnostic? diagnostic)
+          (eq? (scheme-diagnostic-severity diagnostic) 'error)
+          (< (scheme-diagnostic-start diagnostic)
+             (scheme-diagnostic-end diagnostic))
+          (string? (scheme-diagnostic-message diagnostic))))
+      semantic-diagnostics))
+  (error 'scheme-semantics-tests
+         "structured Scheme diagnostics lost scope or delimiter errors"
+         (map scheme-diagnostic-code semantic-diagnostics)))
+
+(for-each
+  (lambda (source+code)
+    (let ([diagnostics
+            (scheme-semantic-snapshot-diagnostics
+              (make-scheme-semantic-snapshot
+                80
+                0
+                (string->utf8 (car source+code))))])
+      (unless
+        (exists
+          (lambda (diagnostic)
+            (eq?
+              (scheme-diagnostic-code diagnostic)
+              (cdr source+code)))
+          diagnostics)
+        (error 'scheme-semantics-tests
+               "unterminated lexical form was not diagnosed"
+               source+code))))
+  (list
+    (cons "|unfinished" 'unterminated-symbol)
+    (cons "#| unfinished" 'unterminated-block-comment)))
+
 (unless
   (and
     (exists
@@ -731,10 +802,27 @@
         (string-append
           "(library (sample facade)\n"
           "  (export alpha-value run)\n"
-          "  (import (sample alpha))))\n")))))
+          "  (import (sample alpha))))\n")))
+    (cons
+      "empty.sls"
+      (string->utf8
+        (string-append
+          "(library (sample empty)\n"
+          "  (export)\n"
+          "  (import (rnrs)))\n")))))
 
 (define generated-index
   (scheme-sources-api-index indexed-sources))
+(define generated-library-index
+  (scheme-sources-library-index indexed-sources))
+
+(unless
+  (equal?
+    generated-library-index
+    '((sample alpha) (sample facade) (sample empty)))
+  (error 'scheme-semantics-tests
+         "library catalog omitted a library without exports"
+         generated-library-index))
 
 (define (index-entry name library)
   (find

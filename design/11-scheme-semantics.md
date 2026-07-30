@@ -12,7 +12,8 @@ Scheme syntax view ──> binding analysis ──> semantic snapshot
                                                 │
                                                 ├── completion provider
                                                 ├── definition provider
-                                                └── reference provider
+                                                ├── reference provider
+                                                └── diagnostic publisher
 
 InteractionSession ──> Chez environment symbol view ──┘
 ```
@@ -214,8 +215,10 @@ library identity 或源码定义。
 
 Soda 的公共 library metadata 在应用构建时从 Scheme source tree 生成。索引器读取
 R6RS `library` 与 `export` form，归一化直接导出和 rename，并把 re-export 关联到
-可用的源码定义。生成结果是只含不可变 datum 的 Scheme library，随 whole-program
-editor boot 一起编译和嵌入。
+可用的源码定义。生成结果同时包含独立的 library catalog 和 export symbol
+catalog。library catalog 保存没有 export 的 library，因此 import 解析不需要从
+补全符号反推 library 是否存在。两个 catalog 都是只含不可变 datum 的 Scheme
+library，随 whole-program editor boot 一起编译和嵌入。
 
 procedure metadata 从过程定义、以 `lambda` 初始化的定义和 `case-lambda` 分支提取
 formals。索引保存不带过程名的原始 formals datum；呈现签名时使用当前可见 binding
@@ -243,6 +246,43 @@ import set 在进入查询层前按 R6RS 组合顺序归一化。`only` 与 `exc
 surface，`prefix` 重写全部可见名称，`rename` 重写指定名称，`for` 保留 library
 identity。重写后的候选保存显示名称和原始 DefinitionId；补全插入显示名称，
 definition 与 references 查询沿原始 identity 工作。
+
+## Diagnostics
+
+`SchemeSemanticSnapshot` 保存结构化的 `SchemeDiagnostic`：
+
+```text
+SchemeDiagnostic {
+  code,
+  range,
+  severity,
+  message,
+  payload
+}
+```
+
+诊断 range 使用 Document UTF-8 byte offset。语义分析器负责产生诊断值，不依赖
+Buffer、face 或 TUI。editor diagnostic publisher 把它们转换为 annotation set，
+namespace 为 `scheme-semantic-diagnostics`，source revision 与 semantic snapshot
+一致。annotation payload 保留原始 `SchemeDiagnostic`，describe-char、LocationList
+和后续 quick-fix 可以共享同一个诊断身份。
+
+自举诊断覆盖：
+
+- 不匹配、意外出现和未闭合的 list delimiter；
+- 未闭合的 string、escaped symbol 和嵌套 block comment；
+- 同一 lexical scope 中重复的 parameter、let binding 或 definition；
+- 嵌入 Soda library catalog 中不存在的 `(soda ...)` import。
+
+重复 binding 按 scope graph 判断。`let*` 和 `let*-values` 的逐级 scope 允许后续
+binding 遮蔽前一层，`lambda`、并行 let 和同一 `case-lambda` clause 中的重复名字
+属于同一 binding group。import modifier 的外层 form 作为 library-not-found 的
+source range，payload 保存归一化后的 library name。
+
+publisher 在 buffer 创建、major mode 变化和 revert 后同步诊断，并在顶层交互命令
+结束后检查所有 Scheme buffer。source revision 未变化时不重新分析；revision
+变化时用更高 generation 原子替换同 namespace 的 annotation set。空诊断集仍记录
+已分析 revision，使光标移动和只读命令只执行 freshness 检查。
 
 ## Completion
 
