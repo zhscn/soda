@@ -19,6 +19,7 @@
           scheme-scope-start
           scheme-scope-end
           scheme-scope-definitions
+          make-scheme-definition-id
           scheme-definition-id?
           scheme-definition-id-source
           scheme-definition-id-document-id
@@ -35,6 +36,7 @@
           scheme-definition-signature-formals
           scheme-definition-signatures
           scheme-definition-documentation
+          make-scheme-use
           scheme-call-context?
           scheme-call-context-name
           scheme-call-context-start

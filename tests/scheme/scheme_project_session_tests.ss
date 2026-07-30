@@ -122,6 +122,15 @@
     "  (define (compiled-call value options) value))\n"))
 (define compiled-interface-resource
   "/build/cache/compiled-dependency.sls")
+(define compiled-indexed-consumer-resource
+  "/build/cache/compiled-consumer.sls")
+(define compiled-indexed-consumer-source
+  (string-append
+    "(library (fixture compiled-indexed-consumer)\n"
+    "  (export call-compiled)\n"
+    "  (import (rnrs) (fixture compiled-dependency))\n"
+    "  (define (call-compiled value)\n"
+    "    (compiled-call value '())))\n"))
 (define compiled-interface-index
   (scheme-interface-index-decode
     (scheme-interface-index-encode
@@ -132,7 +141,11 @@
           (cons
             compiled-interface-resource
             (string->utf8
-              compiled-interface-source)))))))
+              compiled-interface-source))
+          (cons
+            compiled-indexed-consumer-resource
+            (string->utf8
+              compiled-indexed-consumer-source)))))))
 
 (define compiled-interface-path
   (vfs-path-join root "compiled-interface.fasl"))
@@ -277,6 +290,112 @@
     "compiled interface index did not drive plugin resolution"
     compiled-call-definition))
 
+(define compiled-call-references
+  (scheme-workspace-references
+    workspace
+    editor
+    compiled-call-definition))
+(unless
+  (and
+    (exists
+      (lambda (reference)
+        (and
+          (not
+            (scheme-workspace-reference-buffer-id
+              reference))
+          (string=?
+            (scheme-workspace-reference-resource
+              reference)
+            compiled-indexed-consumer-resource)))
+      compiled-call-references)
+    (exists
+      (lambda (reference)
+        (equal?
+          (scheme-workspace-reference-buffer-id
+            reference)
+          (buffer-id compiled-consumer-buffer)))
+      compiled-call-references))
+  (error
+    'scheme-project-session-tests
+    "compiled references did not join live Buffer references"
+    compiled-call-references))
+
+(editor-set-view-buffer!
+  editor
+  (view-id (editor-active-view editor))
+  (buffer-id compiled-consumer-buffer))
+(view-set-caret!
+  (editor-active-view editor)
+  (scheme-use-start compiled-call-use))
+(editor-update!
+  editor
+  (make-command-message
+    'xref.find-references
+    #f))
+(let ([locations
+        (editor-current-location-list editor)])
+  (unless
+    (and
+      (location-list? locations)
+      (exists
+        (lambda (item)
+          (and
+            (not (location-item-buffer-id item))
+            (string=?
+              (location-item-resource item)
+              compiled-indexed-consumer-resource)))
+        (location-list-items locations)))
+    (error
+      'scheme-project-session-tests
+      "xref.find-references did not expose a compiled source location"
+      locations)))
+
+(define compiled-reference-shadow
+  (make-buffer
+    101
+    (make-document
+      (string-append
+        "(library (fixture compiled-indexed-consumer)\n"
+        "  (export call-compiled)\n"
+        "  (import (rnrs))\n"
+        "  (define (call-compiled value) value))\n")
+      101)
+    compiled-indexed-consumer-resource
+    'scheme-mode))
+(editor-add-buffer! editor compiled-reference-shadow)
+(unless
+  (not
+    (exists
+      (lambda (reference)
+        (string=?
+          (scheme-workspace-reference-resource
+            reference)
+          compiled-indexed-consumer-resource))
+      (scheme-workspace-references
+        workspace
+        editor
+        compiled-call-definition)))
+  (error
+    'scheme-project-session-tests
+    "compiled references remained active behind a live Buffer revision"))
+(editor-remove-buffer!
+  editor
+  (buffer-id compiled-reference-shadow))
+(unless
+  (exists
+    (lambda (reference)
+      (string=?
+        (scheme-workspace-reference-resource
+          reference)
+        compiled-indexed-consumer-resource))
+    (scheme-workspace-references
+      workspace
+      editor
+      compiled-call-definition))
+  (error
+    'scheme-project-session-tests
+    "closing a live Buffer did not reveal compiled references"))
+
 (define compiled-interface-generation
   (scheme-workspace-generation workspace))
 (scheme-interface-index-write-file!
@@ -374,6 +493,33 @@
       'scheme-project-session-tests
       "reloading an interface owner did not atomically replace its surface"
       definitions)))
+
+(let ([references
+        (scheme-workspace-references
+          workspace
+          editor
+          compiled-call-definition)])
+  (unless
+    (and
+      (exists
+        (lambda (reference)
+          (equal?
+            (scheme-workspace-reference-buffer-id
+              reference)
+            (buffer-id compiled-consumer-buffer)))
+        references)
+      (not
+        (exists
+          (lambda (reference)
+            (string=?
+              (scheme-workspace-reference-resource
+                reference)
+              compiled-indexed-consumer-resource))
+          references)))
+    (error
+      'scheme-project-session-tests
+      "replacing an interface owner retained stale compiled references"
+      references)))
 
 (editor-update!
   editor

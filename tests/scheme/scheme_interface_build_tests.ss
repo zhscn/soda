@@ -59,7 +59,43 @@
             (string-append
               source-root
               "/fixture/scheme-interface-build/dependency.sls"))))
-      (scheme-interface-index-entries index)))
+      (scheme-interface-index-entries index))
+    (exists
+      (lambda (reference)
+        (and
+          (string=?
+            (list-ref reference 0)
+            program-source)
+          (string=?
+            (list-ref reference 2)
+            "fixture-value")
+          (exists
+            (lambda (resolution)
+              (and
+                (eq? (list-ref resolution 0) 'index)
+                (string=?
+                  (list-ref resolution 1)
+                  (string-append
+                    source-root
+                    "/fixture/scheme-interface-build/dependency.sls"))
+                (string=?
+                  (list-ref resolution 4)
+                  "fixture-value")))
+            (list-ref reference 5))))
+      (scheme-interface-index-references index))
+    (exists
+      (lambda (reference)
+        (and
+          (string=?
+            (list-ref reference 2)
+            "public-fixture-value")
+          (exists
+            (lambda (resolution)
+              (string=?
+                (list-ref resolution 4)
+                "public-fixture-value"))
+            (list-ref reference 5))))
+      (scheme-interface-index-references index)))
   (assertion-violation
     'scheme-interface-build-tests
     "compiled sources were not represented in the interface artifact"

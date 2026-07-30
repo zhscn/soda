@@ -533,10 +533,31 @@ name` 建立这两种身份的等价集合。references 查询在每个已索引
 结果。
 
 构建过程把本次编译解析到的 library source 投影为 `SchemeInterfaceIndex`。该产物
-保存 owner、内容 revision、library catalog 和 export entries；entry 包含 library
-identity、binding kind、procedure formals、documentation 以及可用的 declaration
-resource 与 byte range。产物以带格式版本、Chez 版本和 machine type 的 FASL datum
-编码，加载时完整验证 manifest 和 entry shape。它只接受受信任构建流程产生的内容。
+保存 owner、内容 revision、library catalog、export entries 和编译引用。entry 包含
+library identity、binding kind、procedure formals、documentation 以及可用的
+declaration resource 与 byte range。编译引用使用紧凑 datum：
+
+```text
+InterfaceReference {
+  resource,
+  source_revision,
+  spelling,
+  range,
+  resolutions: InterfaceDefinitionId[]
+}
+```
+
+`InterfaceDefinitionId` 由 `resource + library + declaration offset + exported name`
+构成。构建分析把源码中的 document-local definition identity 映射到同一声明的全部
+export identity，因此直接 export、rename 和 re-export 共享 canonical reference
+关系。只持久化能够映射到 exported interface 的 resolution；lexical local binding
+保留在实时 Buffer snapshot 内。
+
+产物以带格式版本、Chez 版本和 machine type 的 FASL datum 编码，加载时完整验证
+manifest、entry 和 reference shape。workspace 直接把 reference datum 加入
+DefinitionId 倒排表，不读取或重新分析对应源码。打开相同 resource 的 Buffer 时，
+实时 revision 整体遮蔽 artifact 中该 resource 的引用；关闭 Buffer 后 artifact
+引用恢复可见。同一 owner 的新 artifact 同时替换 export surface 和引用集合。
 
 `call-with-scheme-interface-build` 包住项目原有的 Chez 编译过程。它代理
 `library-search-handler`，记录编译器在声明 source root 内实际解析到的 source，
@@ -602,6 +623,11 @@ Buffer revision 替代；其余 catalog 条目以
 `resource + declaration start + name` 去重。候选 key 使用
 `buffer id + revision + declaration` 或 `resource + declaration`，不会依赖过滤
 后的列表位置。
+
+编译引用使 `xref.find-references` 能返回未打开 source 的位置，并通过普通异步
+`file.read` 完成首次跳转。artifact 不保存源码文本、scope graph 或 rename plan；
+跨未打开 source 的 rename 需要 session source snapshot，打开的 Buffer 始终使用
+实时 semantic snapshot。
 
 `xref.find-symbol`（`M-g i`）通过通用 completing-read 打开模糊匹配的 symbol
 候选。候选保存定义 kind 与 source resource，显示层只负责匹配和选择。接受已打开

@@ -450,9 +450,67 @@
         reference
         (hashtable-ref table id '()))))
 
+  (define (interface-definition-id datum)
+    (make-scheme-definition-id
+      (list-ref datum 0)
+      (list-ref datum 1)
+      (list-ref datum 2)
+      (list-ref datum 3)
+      (list-ref datum 4)))
+
+  (define (workspace-resource-table index)
+    (let ([resources
+            (make-hashtable string-hash string=?)])
+      (for-each
+        (lambda (document)
+          (let ([resource
+                  (scheme-workspace-document-resource
+                    document)])
+            (when (string? resource)
+              (hashtable-set! resources resource #t))))
+        (all-workspace-documents index))
+      resources))
+
+  (define (add-interface-references!
+            index
+            table
+            workspace-resources)
+    (for-each
+      (lambda (interface-index)
+        (for-each
+          (lambda (datum)
+            (let ([resource (list-ref datum 0)])
+              (unless
+                (hashtable-contains?
+                  workspace-resources
+                  resource)
+                (let* ([use
+                         (make-scheme-use
+                           (list-ref datum 2)
+                           (list-ref datum 3)
+                           (list-ref datum 4)
+                           (map
+                             interface-definition-id
+                             (list-ref datum 5)))]
+                       [reference
+                         (make-scheme-workspace-reference
+                           #f
+                           resource
+                           (list-ref datum 1)
+                           use)])
+                  (for-each
+                    (lambda (id)
+                      (add-reference! table id reference))
+                    (scheme-use-resolution use))))))
+          (scheme-interface-index-references
+            interface-index)))
+      (scheme-workspace-index-interface-indexes index)))
+
   (define (rebuild-references! index)
     (let ([table
-            (scheme-workspace-index-references index)])
+            (scheme-workspace-index-references index)]
+          [workspace-resources
+            (workspace-resource-table index)])
       (hashtable-clear! table)
       (for-each
         (lambda (document)
@@ -475,6 +533,10 @@
               (scheme-workspace-document-snapshot
                 document))))
         (workspace-documents index))
+      (add-interface-references!
+        index
+        table
+        workspace-resources)
       (scheme-workspace-index-dirty?-set!
         index #f)))
 

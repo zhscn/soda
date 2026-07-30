@@ -1,6 +1,7 @@
 (library (soda editor scheme-api-indexer)
   (export scheme-sources-api-index
-          scheme-sources-library-index)
+          scheme-sources-library-index
+          scheme-sources-api+library-index)
   (import (rnrs)
           (soda editor scheme-semantics))
 
@@ -206,7 +207,7 @@
                      (string=? left-part right-part)
                      (compare (cdr left) (cdr right)))))]))))))
 
-  (define (scheme-sources-api-index sources)
+  (define (validate-sources who sources)
     (unless
       (and
         (list? sources)
@@ -218,61 +219,66 @@
               (bytevector? (cdr source))))
           sources))
       (assertion-violation
-        'scheme-sources-api-index
+        who
         "expected (resource . bytevector) source pairs"
-        sources))
-    (let* ([metadata
-             (filter
-               (lambda (value) value)
-               (map source-metadata sources))])
-      (let ([result
-              (list-sort
-                entry<?
-                (deduplicate
-                  (apply
-                    append
-                    (map
-                      (lambda (source)
-                        (map
-                          (lambda (export)
-                            (entry
-                              source
-                              export
-                              (find-definition
-                                metadata
-                                source
-                                (symbol->string (car export)))))
-                          (library-source-exports source)))
-                      metadata))))])
-        result)))
+        sources)))
 
-  (define (scheme-sources-library-index sources)
-    (unless
-      (and
-        (list? sources)
-        (for-all
-          (lambda (source)
-            (and
-              (pair? source)
-              (string? (car source))
-              (bytevector? (cdr source))))
-          sources))
-      (assertion-violation
-        'scheme-sources-library-index
-        "expected (resource . bytevector) source pairs"
-        sources))
+  (define (sources-metadata sources)
+    (filter
+      (lambda (value) value)
+      (map source-metadata sources)))
+
+  (define (metadata-api-index metadata)
+    (list-sort
+      entry<?
+      (deduplicate
+        (apply
+          append
+          (map
+            (lambda (source)
+              (map
+                (lambda (export)
+                  (entry
+                    source
+                    export
+                    (find-definition
+                      metadata
+                      source
+                      (symbol->string (car export)))))
+                (library-source-exports source)))
+            metadata)))))
+
+  (define (metadata-library-index metadata)
     (fold-left
       (lambda (result source)
-        (let ([metadata (source-metadata source)])
-          (if
-            (or
-              (not metadata)
-              (member
-                (library-source-name metadata)
-                result))
+        (if
+          (member
+            (library-source-name source)
+            result)
+          result
+          (append
             result
-            (append
-              result
-              (list (library-source-name metadata))))))
+            (list (library-source-name source)))))
       '()
-      sources)))
+      metadata))
+
+  (define (scheme-sources-api+library-index sources)
+    (validate-sources
+      'scheme-sources-api+library-index
+      sources)
+    (let ([metadata (sources-metadata sources)])
+      (values
+        (metadata-api-index metadata)
+        (metadata-library-index metadata))))
+
+  (define (scheme-sources-api-index sources)
+    (call-with-values
+      (lambda ()
+        (scheme-sources-api+library-index sources))
+      (lambda (entries libraries) entries)))
+
+  (define (scheme-sources-library-index sources)
+    (call-with-values
+      (lambda ()
+        (scheme-sources-api+library-index sources))
+      (lambda (entries libraries) libraries))))
