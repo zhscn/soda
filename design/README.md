@@ -23,6 +23,7 @@
 | 13 | [13-rendering-theme.md](13-rendering-theme.md) | 增量高亮、display mapping、theme 与终端渲染管线 |
 | 14 | [14-command-extensibility.md](14-command-extensibility.md) | interactive command、hook、advice 与 minor mode |
 | 15 | [15-configuration.md](15-configuration.md) | setting、配置快照与跨 catalog 原子事务 |
+| 16 | [16-tui-applications.md](16-tui-applications.md) | application Buffer、声明式 TUI、消息循环与完整输入协议 |
 
 依赖关系：
 
@@ -52,6 +53,10 @@
 
       03 input ──> 12 minibuffer <── 06 completion
       03 input <──────────────── 13 rendering/theme
+
+      03 input ──┐
+      04 workbench ─┼──> 16 TUI applications <── 13 rendering/theme
+      08 Scheme-first ─┘
 ```
 
 上层模块持有策略与可组合状态；native 模块提供具有明确生命周期、revision
