@@ -430,7 +430,7 @@
             'character
             (char->integer #\p)
             2))
-        'interaction.history-previous)
+        'interaction.history-previous-prefix)
       (keymap-bind!
         keymap
         (list
@@ -438,7 +438,83 @@
             'character
             (char->integer #\n)
             2))
+        'interaction.history-next-prefix)
+      (keymap-bind!
+        keymap
+        (list
+          (make-key-stroke
+            'character
+            (char->integer #\P)
+            2))
+        'interaction.history-previous-contains)
+      (keymap-bind!
+        keymap
+        (list
+          (make-key-stroke
+            'character
+            (char->integer #\N)
+            2))
+        'interaction.history-next-contains)
+      (keymap-bind!
+        keymap
+        (list (make-key-stroke 'up #f 2))
+        'interaction.history-previous)
+      (keymap-bind!
+        keymap
+        (list (make-key-stroke 'down #f 2))
         'interaction.history-next)
+      (keymap-bind!
+        keymap
+        (list (make-key-stroke 'up #f 0))
+        'interaction.previous-line-or-history)
+      (keymap-bind!
+        keymap
+        (list (make-key-stroke 'down #f 0))
+        'interaction.next-line-or-history)
+      (keymap-bind!
+        keymap
+        (list
+          (make-key-stroke
+            'character
+            (char->integer #\p)
+            4))
+        'interaction.previous-line-or-history)
+      (keymap-bind!
+        keymap
+        (list
+          (make-key-stroke
+            'character
+            (char->integer #\n)
+            4))
+        'interaction.next-line-or-history)
+      (keymap-bind!
+        keymap
+        (list
+          (make-key-stroke
+            'character
+            (char->integer #\<)
+            2))
+        'interaction.entry-start)
+      (keymap-bind!
+        keymap
+        (list
+          (make-key-stroke
+            'character
+            (char->integer #\>)
+            2))
+        'interaction.entry-end)
+      (keymap-bind!
+        keymap
+        (list (make-key-stroke 'home #f 0))
+        'interaction.line-start)
+      (keymap-bind!
+        keymap
+        (list
+          (make-key-stroke
+            'character
+            (char->integer #\a)
+            4))
+        'interaction.line-start)
       (keymap-bind!
         keymap
         (list

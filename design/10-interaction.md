@@ -105,11 +105,20 @@ Enter 使用 Chez reader 检查当前输入是否包含完整 forms。完整输�
 继续编辑。其他 reader condition 作为完整请求提交，由 evaluator 将 condition
 呈现在 transcript 中。
 
-session 保存有界、按提交顺序排列的输入历史，忽略空输入和连续重复项。REPL
-keymap 提供以下操作：
+session 保存有界、按提交顺序排列的输入历史，忽略空输入和连续重复项。历史搜索
+保留搜索开始时的输入作为 key 和草稿；向较新方向越过最后一个匹配项时恢复该
+草稿。prefix 搜索忽略历史项的前导空格，输入自身以空格开头时则把空格作为
+prefix 的一部分。
 
-- `M-p` 选择较早的输入；
-- `M-n` 选择较新的输入，并在越过最新记录时恢复开始浏览前的草稿；
+REPL 把 prompt 之后的完整输入视为一个 entry。`M-<` 和 `M->` 在 entry
+边界之间移动；`Home` 和 `C-a` 移动到当前行首，并在首行停于 prompt 之后。
+垂直移动和历史访问形成连续导航：
+
+- `Up`、`C-p` 和 `Down`、`C-n` 在多行 entry 内移动，到首行或末行后访问相邻
+  历史项；
+- `M-Up` 和 `M-Down` 直接按提交顺序访问历史；
+- `M-p` 和 `M-n` 按当前 entry 的 prefix 向前、向后搜索；
+- `M-P` 和 `M-N` 按当前 entry 包含的文本向前、向后搜索；
 - `C-c C-u` 清空当前输入并结束历史浏览。
 
 由源码 Buffer 发起的 `scheme.eval-expression` 与当前 REPL 草稿共享同一个

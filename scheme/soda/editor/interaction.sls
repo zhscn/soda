@@ -18,6 +18,8 @@
           interaction-session-history-draft
           interaction-session-history-previous!
           interaction-session-history-next!
+          interaction-session-history-search-previous!
+          interaction-session-history-search-next!
           interaction-session-reset-history-navigation!
           interaction-session-prompt-start
           interaction-session-prompt-end
@@ -298,6 +300,30 @@
       session)
     (interaction-history-next!
       (interaction-session-history-state session)))
+
+  (define (interaction-session-history-search-previous!
+            session
+            current-input
+            kind)
+    (require-open-session
+      'interaction-session-history-search-previous!
+      session)
+    (interaction-history-search-previous!
+      (interaction-session-history-state session)
+      current-input
+      kind))
+
+  (define (interaction-session-history-search-next!
+            session
+            current-input
+            kind)
+    (require-open-session
+      'interaction-session-history-search-next!
+      session)
+    (interaction-history-search-next!
+      (interaction-session-history-state session)
+      current-input
+      kind))
 
   (define (interaction-session-complete! session result)
     (require-open-session 'interaction-session-complete! session)

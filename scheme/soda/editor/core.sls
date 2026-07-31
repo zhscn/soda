@@ -413,6 +413,8 @@
           interaction-session-history-draft
           interaction-session-history-previous!
           interaction-session-history-next!
+          interaction-session-history-search-previous!
+          interaction-session-history-search-next!
           interaction-session-reset-history-navigation!
           interaction-session-prompt-start
           interaction-session-prompt-end

@@ -453,14 +453,14 @@
 (insert-text! "pending-draft")
 (define history-before-navigation
   (interaction-session-history session))
-(press-key! 'character (char->integer #\p) 2)
+(press-key! 'up #f 2)
 (unless
   (string=?
     (repl-input)
     (car (reverse history-before-navigation)))
   (error 'repl-tests
-         "M-p did not select the newest REPL history entry"))
-(press-key! 'character (char->integer #\p) 2)
+         "M-Up did not select the newest REPL history entry"))
+(press-key! 'up #f 2)
 (unless
   (string=?
     (repl-input)
@@ -468,21 +468,95 @@
       history-before-navigation
       (- (length history-before-navigation) 2)))
   (error 'repl-tests
-         "repeated M-p did not move backward through REPL history"))
-(press-key! 'character (char->integer #\n) 2)
+         "repeated M-Up did not move backward through REPL history"))
+(press-key! 'down #f 2)
 (unless
   (string=?
     (repl-input)
     (car (reverse history-before-navigation)))
   (error 'repl-tests
-         "M-n did not move forward through REPL history"))
-(press-key! 'character (char->integer #\n) 2)
+         "M-Down did not move forward through REPL history"))
+(press-key! 'down #f 2)
 (unless
   (and (string=? (repl-input) "pending-draft")
        (not (interaction-session-history-index session)))
   (error 'repl-tests
          "history navigation did not restore the pending draft"))
 (dispatch! (make-command-message 'scheme.repl-clear-input #f))
+
+(insert-text! "(+")
+(press-key! 'character (char->integer #\p) 2)
+(unless
+  (string=? (repl-input) "(+ repl-value 3)")
+  (error 'repl-tests
+         "M-p did not search REPL history by prefix"))
+(press-key! 'character (char->integer #\p) 2)
+(unless
+  (string=? (repl-input) "(+ repl-value 1)")
+  (error 'repl-tests
+         "repeated M-p did not continue prefix history search"))
+(press-key! 'character (char->integer #\n) 2)
+(unless
+  (string=? (repl-input) "(+ repl-value 3)")
+  (error 'repl-tests
+         "M-n did not search forward with the retained prefix"))
+(press-key! 'character (char->integer #\n) 2)
+(unless
+  (string=? (repl-input) "(+")
+  (error 'repl-tests
+         "forward prefix search did not restore its draft"))
+(dispatch! (make-command-message 'scheme.repl-clear-input #f))
+
+(insert-text! "repl-value")
+(press-key! 'character (char->integer #\P) 2)
+(unless
+  (string=? (repl-input) "(+ repl-value 3)")
+  (error 'repl-tests
+         "M-P did not search REPL history by containment"))
+(press-key! 'character (char->integer #\N) 2)
+(unless
+  (string=? (repl-input) "repl-value")
+  (error 'repl-tests
+         "M-N did not restore the contains-search draft"))
+(dispatch! (make-command-message 'scheme.repl-clear-input #f))
+
+(insert-text! "first\nsecond")
+(press-key! 'character (char->integer #\<) 2)
+(unless
+  (= (view-caret (editor-active-view editor))
+     (interaction-session-input-start session))
+  (error 'repl-tests
+         "M-< did not move to the start of the REPL entry"))
+(press-key! 'character (char->integer #\a) 4)
+(unless
+  (= (view-caret (editor-active-view editor))
+     (interaction-session-input-start session))
+  (error 'repl-tests
+         "C-a moved into the protected REPL prompt"))
+(press-key! 'character (char->integer #\>) 2)
+(unless
+  (= (view-caret (editor-active-view editor))
+     (bytevector-length (buffer-bytes repl-buffer)))
+  (error 'repl-tests
+         "M-> did not move to the end of the REPL entry"))
+(press-key! 'up #f 0)
+(unless
+  (< (view-caret (editor-active-view editor))
+     (bytevector-length (buffer-bytes repl-buffer)))
+  (error 'repl-tests
+         "Up did not move within a multiline REPL entry"))
+(dispatch! (make-command-message 'scheme.repl-clear-input #f))
+(press-key! 'up #f 0)
+(unless
+  (string=?
+    (repl-input)
+    (car (reverse history-before-navigation)))
+  (error 'repl-tests
+         "Up at the first entry line did not enter REPL history"))
+(press-key! 'down #f 0)
+(unless (string=? (repl-input) "")
+  (error 'repl-tests
+         "Down at the last entry line did not restore the draft"))
 
 (define generation-before-multiline
   (interaction-session-generation session))

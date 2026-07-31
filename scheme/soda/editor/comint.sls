@@ -10,6 +10,10 @@
           comint-move-session-views-to-end!
           comint-history-previous-command
           comint-history-next-command
+          comint-history-search-previous-prefix-command
+          comint-history-search-next-prefix-command
+          comint-history-search-previous-contains-command
+          comint-history-search-next-contains-command
           comint-clear-input-command
           install-comint-commands!)
   (import (rnrs)
@@ -203,6 +207,19 @@
           "active buffer is not an interaction transcript"
           (buffer-id buffer)))))
 
+  (define (with-buffer-text buffer procedure)
+    (let ([snapshot
+            (document-snapshot (buffer-document buffer))])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (let ([text (snapshot-text snapshot)])
+            (dynamic-wind
+              (lambda () #f)
+              (lambda () (procedure text))
+              (lambda () (text-close! text)))))
+        (lambda () (snapshot-close! snapshot)))))
+
   (define (comint-history-previous-command context)
     (let* ([editor (command-context-editor context)]
            [session
@@ -228,6 +245,143 @@
       (when input
         (comint-replace-input! editor session input))
       '()))
+
+  (define (comint-history-search-command context direction kind)
+    (let* ([editor (command-context-editor context)]
+           [session
+             (active-interaction
+               'interaction.history-search
+               context)]
+           [current-input (comint-current-input editor session)]
+           [input
+             (case direction
+               [(previous)
+                (interaction-session-history-search-previous!
+                  session
+                  current-input
+                  kind)]
+               [(next)
+                (interaction-session-history-search-next!
+                  session
+                  current-input
+                  kind)]
+               [else
+                (assertion-violation
+                  'interaction.history-search
+                  "unknown history search direction"
+                  direction)])])
+      (when input
+        (comint-replace-input! editor session input))
+      '()))
+
+  (define (comint-history-search-previous-prefix-command context)
+    (comint-history-search-command context 'previous 'prefix))
+
+  (define (comint-history-search-next-prefix-command context)
+    (comint-history-search-command context 'next 'prefix))
+
+  (define (comint-history-search-previous-contains-command context)
+    (comint-history-search-command context 'previous 'contains))
+
+  (define (comint-history-search-next-contains-command context)
+    (comint-history-search-command context 'next 'contains))
+
+  (define (comint-entry-start-command context)
+    (let* ([session
+             (active-interaction
+               'interaction.entry-start
+               context)]
+           [view (command-context-view context)])
+      (view-set-caret!
+        view
+        (interaction-session-input-start session))
+      '()))
+
+  (define (comint-entry-end-command context)
+    (let* ([session
+             (active-interaction
+               'interaction.entry-end
+               context)]
+           [view (command-context-view context)])
+      (view-set-caret!
+        view
+        (buffer-size (comint-session-buffer
+                       (command-context-editor context)
+                       session)))
+      '()))
+
+  (define (comint-line-start-command context)
+    (let* ([session
+             (active-interaction
+               'interaction.line-start
+               context)]
+           [view (command-context-view context)]
+           [buffer (view-buffer view)]
+           [input-start (interaction-session-input-start session)])
+      (view-set-caret!
+        view
+        (with-buffer-text
+          buffer
+          (lambda (text)
+            (max
+              input-start
+              (text-line-start
+                text
+                (car
+                  (text-position text (view-caret view))))))))
+      '()))
+
+  (define (comint-line-or-history-command context direction)
+    (let* ([editor (command-context-editor context)]
+           [session
+             (active-interaction
+               'interaction.line-or-history
+               context)]
+           [view (command-context-view context)]
+           [buffer (view-buffer view)]
+           [move?
+             (with-buffer-text
+               buffer
+               (lambda (text)
+                 (let ([line
+                         (car
+                           (text-position text (view-caret view)))]
+                       [input-line
+                         (car
+                           (text-position
+                             text
+                             (interaction-session-input-start session)))]
+                       [end-line
+                         (car
+                           (text-position text (text-size text)))])
+                   (case direction
+                     [(previous) (> line input-line)]
+                     [(next) (< line end-line)]
+                     [else
+                      (assertion-violation
+                        'interaction.line-or-history
+                        "unknown line movement direction"
+                        direction)]))))])
+      (if move?
+          (editor-execute-command!
+            editor
+            (if
+              (eq? direction 'previous)
+              'move.previous-line
+              'move.next-line)
+            (command-context-event context)
+            #f
+            (command-context-prefix context))
+          (if
+            (eq? direction 'previous)
+            (comint-history-previous-command context)
+            (comint-history-next-command context)))))
+
+  (define (comint-previous-line-or-history-command context)
+    (comint-line-or-history-command context 'previous))
+
+  (define (comint-next-line-or-history-command context)
+    (comint-line-or-history-command context 'next))
 
   (define (comint-clear-input-command context)
     (let* ([editor (command-context-editor context)]
@@ -257,6 +411,42 @@
           'interaction.history-next
           comint-history-next-command
           "Replace interaction input with the next history entry.")
+        (list
+          'interaction.history-previous-prefix
+          comint-history-search-previous-prefix-command
+          "Search backward for interaction input with the same prefix.")
+        (list
+          'interaction.history-next-prefix
+          comint-history-search-next-prefix-command
+          "Search forward for interaction input with the same prefix.")
+        (list
+          'interaction.history-previous-contains
+          comint-history-search-previous-contains-command
+          "Search backward for interaction input containing the entry.")
+        (list
+          'interaction.history-next-contains
+          comint-history-search-next-contains-command
+          "Search forward for interaction input containing the entry.")
+        (list
+          'interaction.entry-start
+          comint-entry-start-command
+          "Move to the start of the editable interaction entry.")
+        (list
+          'interaction.entry-end
+          comint-entry-end-command
+          "Move to the end of the editable interaction entry.")
+        (list
+          'interaction.line-start
+          comint-line-start-command
+          "Move to the line start without crossing the interaction prompt.")
+        (list
+          'interaction.previous-line-or-history
+          comint-previous-line-or-history-command
+          "Move up in the entry or to the previous history entry.")
+        (list
+          'interaction.next-line-or-history
+          comint-next-line-or-history-command
+          "Move down in the entry or to the next history entry.")
         (list
           'interaction.clear-input
           comint-clear-input-command
