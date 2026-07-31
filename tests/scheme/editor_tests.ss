@@ -7648,6 +7648,169 @@
              (completion-session-items completion))))))
 (editor-close! continuing-scheme-editor)
 
+(define exhausted-completion-buffer
+  (make-buffer
+    9413
+    (make-document (string->utf8 "name") 9413)
+    "*exhausted-completion*"
+    'fundamental-mode))
+(define exhausted-completion-editor
+  (make-editor exhausted-completion-buffer))
+(define exhausted-completion-view
+  (editor-active-view exhausted-completion-editor))
+(define exhausted-completion-decoder (make-input-decoder))
+(define exhausted-completion-source
+  (make-choice-source
+    'exhausted
+    '()
+    (lambda (input point) (cons 0 point))
+    (lambda (query)
+      (list
+        (make-completion-item
+          'name-extra
+          'test
+          "name-extra"
+          "name-extra"
+          "name-extra"
+          #f
+          #f
+          'name-extra)))
+    (lambda (value) #f)
+    (lambda (generation) #f)))
+(view-set-caret! exhausted-completion-view 4)
+(editor-start-document-completion!
+  exhausted-completion-editor
+  exhausted-completion-source
+  0
+  4)
+(unless (editor-active-completion exhausted-completion-editor)
+  (error 'editor-tests "exhausted completion fixture did not start"))
+(send!
+  exhausted-completion-editor
+  exhausted-completion-decoder
+  (string->utf8 ")"))
+(when (editor-active-completion exhausted-completion-editor)
+  (error 'editor-tests
+         "locally exhausted completion retained its input state"))
+(send! exhausted-completion-editor exhausted-completion-decoder (bytes 13))
+(unless
+  (and
+    (bytevector=?
+      (buffer-bytes exhausted-completion-buffer)
+      (string->utf8 "name)\n"))
+    (not
+      (and
+        (editor-status-message exhausted-completion-editor)
+        (string=?
+          (editor-status-message exhausted-completion-editor)
+          "No completion candidate"))))
+  (error 'editor-tests
+         "Enter did not fall through after completion was exhausted"))
+(editor-close! exhausted-completion-editor)
+
+(define pending-completion-buffer
+  (make-buffer
+    9414
+    (make-document (string->utf8 "a") 9414)
+    "*pending-completion*"
+    'fundamental-mode))
+(define pending-completion-editor
+  (make-editor pending-completion-buffer))
+(define pending-completion-view
+  (editor-active-view pending-completion-editor))
+(define pending-completion-decoder (make-input-decoder))
+(define pending-completion-source
+  (make-choice-source
+    'pending
+    '()
+    (lambda (input point) (cons 0 point))
+    (lambda (query) '())
+    (lambda (value) #f)
+    (lambda (generation) #f)))
+(editor-register-completion-provider!
+  pending-completion-editor
+  (make-completion-provider
+    'pending-provider
+    (lambda (request) '())
+    (lambda (request) #f)))
+(view-set-caret! pending-completion-view 1)
+(editor-start-document-completion!
+  pending-completion-editor
+  pending-completion-source
+  0
+  1
+  '(pending-provider))
+(let* ([completion
+         (editor-active-completion pending-completion-editor)]
+       [effects
+         (editor-take-completion-effects!
+           pending-completion-editor)]
+       [request
+         (and
+           (= (length effects) 1)
+           (command-effect-payload (car effects)))])
+  (unless
+    (and
+      completion
+      (completion-session-pending? completion)
+      (not
+        (eq?
+          (input-state-name
+            (view-current-input-state pending-completion-view))
+          'completion))
+      (completion-request? request))
+    (error 'editor-tests
+           "candidate-free pending completion captured input"))
+  (unless
+    (editor-apply-completion-response!
+      pending-completion-editor
+      (make-completion-response-for-request
+        request
+        (list
+          (make-completion-item
+            'alpha
+            'pending-provider
+            "alpha"
+            "alpha"
+            "alpha"
+            #f
+            #f
+            'alpha))
+        #t))
+    (error 'editor-tests
+           "pending completion response was rejected"))
+  (unless
+    (eq?
+      (input-state-name
+        (view-current-input-state pending-completion-view))
+      'completion)
+    (error 'editor-tests
+           "available asynchronous candidate did not capture input")))
+(editor-cancel-completion! pending-completion-editor)
+(editor-take-completion-effects! pending-completion-editor)
+(editor-start-document-completion!
+  pending-completion-editor
+  pending-completion-source
+  0
+  1
+  '(pending-provider))
+(editor-take-completion-effects! pending-completion-editor)
+(send! pending-completion-editor pending-completion-decoder (bytes 13))
+(unless
+  (and
+    (bytevector=?
+      (buffer-bytes pending-completion-buffer)
+      (string->utf8 "a\n"))
+    (not
+      (and
+        (editor-status-message pending-completion-editor)
+        (string=?
+          (editor-status-message pending-completion-editor)
+          "No completion candidate"))))
+  (error 'editor-tests
+         "pending completion without a candidate captured Enter"))
+(editor-close! pending-completion-editor)
+
 (define scheme-completion-document
   (make-document
     (string->utf8

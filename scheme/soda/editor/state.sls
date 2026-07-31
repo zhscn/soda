@@ -1852,17 +1852,38 @@
                'completion)
       (view-pop-input-state! view)))
 
+  (define (push-completion-input-state! view)
+    (let ([name
+            (input-state-name
+              (view-current-input-state view))])
+      (when (eq? name 'editing)
+        (view-push-input-state!
+          view
+          (make-input-state
+            'completion
+            '(completion.menu)
+            'accept)))))
+
+  (define (sync-completion-input-state! view completion)
+    (if (completion-session-selected-item completion)
+        (push-completion-input-state! view)
+        (pop-completion-input-state! view)))
+
+  (define (retire-completion! value completion)
+    (unregister-completion! value completion)
+    (queue-completion-cancellation! value completion)
+    (choice-source-cancel!
+      (completion-session-source completion)
+      (completion-session-generation completion))
+    (let ([target (completion-session-target completion)])
+      (when (document-completion-target? target)
+        (document-completion-target-close! target)))
+    completion)
+
   (define (cancel-view-completion! value view)
     (let ([completion (view-completion view)])
       (when completion
-        (unregister-completion! value completion)
-        (queue-completion-cancellation! value completion)
-        (choice-source-cancel!
-          (completion-session-source completion)
-          (completion-session-generation completion))
-        (let ([target (completion-session-target completion)])
-          (when (document-completion-target? target)
-            (document-completion-target-close! target)))
+        (retire-completion! value completion)
         (view-completion-set! view #f)
         (pop-completion-input-state! view))
       completion))
@@ -1969,7 +1990,13 @@
                      (completion-session-generation completion))
                   (queue-completion-generation!
                     value
-                    completion)))
+                    completion))
+                (sync-completion-input-state! view completion)
+                (when
+                  (and
+                    (null? (completion-session-items completion))
+                    (not (completion-session-pending? completion)))
+                  (cancel-view-completion! value view)))
               (cancel-view-completion! value view))))
       (view-completion view)))
 
@@ -2076,12 +2103,6 @@
            (editor-next-completion-id-set! value (+ id 1))
            (register-completion! value completion)
            (view-completion-set! view completion)
-           (view-push-input-state!
-             view
-             (make-input-state
-               'completion
-               '(completion.menu)
-               'accept))
            (editor-refresh-document-completion! value #f)
            completion))]))
 
@@ -2459,6 +2480,19 @@
       (when
         (and
           accepted?
+          (document-completion-target?
+            (completion-session-target completion)))
+        (let* ([target (completion-session-target completion)]
+               [view
+                 (hashtable-ref
+                   (editor-view-table value)
+                   (document-completion-target-view-id target)
+                   #f)])
+          (when view
+            (sync-completion-input-state! view completion))))
+      (when
+        (and
+          accepted?
           (prompt-completion-target?
             (completion-session-target completion)))
         (let ([prompt
@@ -2783,17 +2817,9 @@
                (prompt-request-data
                  (prompt-session-request session)))])
       (when (prompt-session-completion session)
-        (unregister-completion!
+        (retire-completion!
           value
-          (prompt-session-completion session))
-        (queue-completion-cancellation!
-          value
-          (prompt-session-completion session))
-        (choice-source-cancel!
-          (completion-session-source
-            (prompt-session-completion session))
-          (completion-session-generation
-            (prompt-session-completion session))))
+          (prompt-session-completion session)))
       (prompt-session-state-set! session status)
       (editor-prompt-ids-set! value (cdr (editor-prompt-ids value)))
       (hashtable-delete! (editor-prompt-table value) id)
