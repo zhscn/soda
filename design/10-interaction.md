@@ -112,6 +112,12 @@ input start 和 Document editable boundary 推进到 prompt 末尾。Buffer 中�
 或替换时，这些位置通过 anchor 语义保持有效。移动、复制、历史导航和子进程 adapter
 查询 field，不解析 prompt 文本。
 
+交互 adapter 可以设置 continuation prompt，并通过 Buffer 的 display-run provider
+从 input field ledger 生成投影。DisplayMap 在每个多行 input 的第二行及后续行行首
+投影该文本，使当前输入和历史输入具有相同的视觉基线。continuation prompt 是
+virtual run，不进入 Document、input field 或求值 source；缩进、补全、history 和
+reader 始终处理原始输入。field anchor 移动后，下一帧从新位置重新生成投影。
+
 新建 transcript View 继承当前编辑 View 的 viewport，并保证初始内容和 caret 所在
 行列都能容纳在占位 viewport 中。终端 resize 随后设置实际 viewport。重新激活
 已有 View 时，caret 位于 Buffer 末尾，因此尚未提交的草稿仍是当前编辑位置。

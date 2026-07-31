@@ -247,6 +247,7 @@
               (view-set-caret!
                 view
                 (+ caret (bytevector-length bytes)))
+              (view-set-first-column! view 0)
               (ensure-view-visible! view))))
         (lambda ()
           (when change

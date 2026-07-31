@@ -65,6 +65,7 @@
         (cons 'modeline.message (pface 'text 'inherit '()))
         (cons 'minibuffer.input (pface 'text 'mantle '()))
         (cons 'minibuffer.prompt (pface 'base 'mauve '(bold)))
+        (cons 'interaction.prompt (pface 'overlay1 'inherit '(bold)))
         (cons 'popup (pface 'text 'surface0 '()))
         (cons 'popup.selected (pface 'text 'surface1 '(bold)))
         (cons 'popup.scrollbar (pface 'inherit 'overlay0 '()))

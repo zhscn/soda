@@ -64,6 +64,13 @@
           (< (display-run-start right)
              (display-run-end left)))))
 
+  (define (buffer-display-provider-runs buffer text providers)
+    (fold-left
+      (lambda (runs provider)
+        (append runs (provider buffer text)))
+      '()
+      providers))
+
   (define (view-effective-display-map view)
     (unless (view? view)
       (assertion-violation
@@ -82,9 +89,16 @@
                  (display-map-valid-for?
                    base document-id revision))
                (display-map-runs base)
+               '())]
+           [display-providers
+             (buffer-setting-ref
+               buffer
+               'display-run-providers
                '())])
       (if
-        (null? (view-folds view))
+        (and
+          (null? (view-folds view))
+          (null? display-providers))
         (and
           base
           (display-map-valid-for?
@@ -99,7 +113,12 @@
                 (dynamic-wind
                   (lambda () #f)
                   (lambda ()
-                    (let* ([fold-runs
+                    (let* ([provider-runs
+                             (buffer-display-provider-runs
+                               buffer
+                               text
+                               display-providers)]
+                           [fold-runs
                              (filter
                                (lambda (run) run)
                                (map
@@ -115,7 +134,7 @@
                                        (run-overlaps?
                                          run fold-run))
                                      fold-runs)))
-                               base-runs)]
+                               (append base-runs provider-runs))]
                            [runs
                              (append visible-base fold-runs)])
                       (and

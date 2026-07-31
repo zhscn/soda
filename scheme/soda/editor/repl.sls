@@ -12,10 +12,12 @@
           (soda editor comint)
           (soda editor condition)
           (soda editor debugger-commands)
+          (soda editor display-map)
           (soda editor effect)
           (soda editor evaluator)
           (soda editor event)
           (soda editor interaction)
+          (soda editor interaction-transcript)
           (soda editor keymap)
           (soda editor scheme-indentation)
           (soda editor scheme-repl-indentation)
@@ -24,6 +26,7 @@
 
   (define repl-resource "*scheme-repl*")
   (define repl-prompt "> ")
+  (define repl-continuation-prompt ". ")
   (define repl-header "Soda Chez Scheme REPL\n> ")
 
   (define (buffer-size buffer)
@@ -37,6 +40,65 @@
               (lambda () (text-size text))
               (lambda () (text-close! text)))))
         (lambda () (snapshot-close! snapshot)))))
+
+  (define (input-field-continuation-runs
+            text
+            field
+            prompt
+            current?)
+    (let* ([start (interaction-field-start field)]
+           [end (interaction-field-end field)]
+           [first-line (car (text-position text start))]
+           [line-count (text-line-count text)])
+      (let loop ([line (+ first-line 1)] [runs '()])
+        (if
+          (= line line-count)
+          (reverse runs)
+          (let ([position (text-line-start text line)])
+            (if
+              (if current? (<= position end) (< position end))
+              (loop
+                (+ line 1)
+                (cons
+                  (make-virtual-display-run
+                    position
+                    prompt
+                    'before
+                    '(interaction.prompt)
+                    'interaction.continuation-prompt
+                    #f)
+                  runs))
+              (reverse runs)))))))
+
+  (define (make-repl-display-run-provider session)
+    (lambda (buffer text)
+      (let* ([prompt
+               (buffer-setting-ref
+                 buffer
+                 'interaction-continuation-prompt
+                 repl-continuation-prompt)]
+             [size (text-size text)])
+        (if
+          (and
+            (string? prompt)
+            (positive? (string-length prompt)))
+          (fold-left
+            (lambda (runs field)
+              (if
+                (eq? (interaction-field-kind field) 'input)
+                (append
+                  runs
+                  (input-field-continuation-runs
+                    text
+                    field
+                    prompt
+                    (= (interaction-field-end field) size)))
+                runs))
+            '()
+            (interaction-transcript-fields
+              (interaction-session-transcript session)
+              buffer))
+          '()))))
 
   (define (string-contains? value needle)
     (let ([limit (- (string-length value)
@@ -124,6 +186,15 @@
               buffer
               'completion-auto-trigger?
               #f)
+            (buffer-set-local-setting!
+              buffer
+              'interaction-continuation-prompt
+              repl-continuation-prompt)
+            (buffer-set-local-setting!
+              buffer
+              'display-run-providers
+              (list
+                (make-repl-display-run-provider session)))
             (document-set-editable-start!
               (buffer-document buffer)
               input-start)

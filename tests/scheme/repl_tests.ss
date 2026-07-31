@@ -272,6 +272,16 @@
 (unless (string=? (repl-input) "(soda-no-such-binding-xyz\n  ")
   (error 'repl-tests
          "empty completion state captured the following REPL Enter"))
+(let ([frame (render-editor-frame editor 24 80)])
+  (unless
+    (and
+      (frame-has-row-prefix? frame 24 4 ".   ")
+      (string=?
+        (repl-input)
+        "(soda-no-such-binding-xyz\n  "))
+    (error 'repl-tests
+           "continuation prompt did not preserve logical REPL input"
+           (repl-input))))
 (dispatch! (make-command-message 'scheme.repl-clear-input #f))
 
 (dispatch! (make-command-message 'scheme.open-repl #f))
@@ -308,10 +318,12 @@
 (dispatch! (make-command-message 'scheme.open-repl #f))
 
 (define first-source-revision (buffer-revision repl-buffer))
+(define first-evaluation-source
+  "(begin\n  (define repl-value 40)\n  (define repl-procedure (case-lambda [() 0] [(left right . rest) left]))\n  (display \"hello\")\n  (+ repl-value 2))")
 (dispatch!
   (make-command-message
     'scheme.eval-expression
-    "(begin (define repl-value 40) (define repl-procedure (case-lambda [() 0] [(left right . rest) left])) (display \"hello\") (+ repl-value 2))"))
+    first-evaluation-source))
 
 (define first-request
   (evaluation-result-request
@@ -337,7 +349,21 @@
            repl-buffer
            (interaction-session-last-input-start session)
            (interaction-session-last-input-end session))
-         "(begin (define repl-value 40) (define repl-procedure (case-lambda [() 0] [(left right . rest) left])) (display \"hello\") (+ repl-value 2))")
+         first-evaluation-source)
+       (let ([display-map
+               (view-effective-display-map
+                 (editor-active-view editor))])
+         (and
+           display-map
+           (exists
+             (lambda (run)
+               (and
+                 (eq? (display-run-owner run)
+                      'interaction.continuation-prompt)
+                 (< (interaction-session-last-input-start session)
+                    (display-run-start run)
+                    (interaction-session-last-input-end session))))
+             (display-map-runs display-map))))
        (string=?
          (buffer-string-range
            repl-buffer
