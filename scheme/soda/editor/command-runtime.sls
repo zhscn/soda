@@ -19,6 +19,7 @@
           (soda editor buffer)
           (soda editor command)
           (soda editor completion)
+          (soda editor condition)
           (soda editor effect)
           (soda editor event)
           (soda editor keymap)
@@ -539,9 +540,9 @@
                (let ([active
                        (editor-active-command-invocation editor)])
                  (when (and active (not (eq? active invocation)))
-                   (assertion-violation
+                   (editor-user-error
                      'editor-execute-interactive-command!
-                     "another interactive command is awaiting input"
+                     "Another interactive command is awaiting input"
                      (command-definition-name
                        (command-invocation-definition active))))
                  (command-invocation-set-remaining-readers!

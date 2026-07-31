@@ -41,6 +41,7 @@
           buffer-undo-to!)
   (import (rnrs)
           (soda document)
+          (soda editor condition)
           (soda editor language)
           (soda editor setting))
 
@@ -264,9 +265,9 @@
         revision
         (buffer-revision value)))
     (when (buffer-save-pending? value)
-      (assertion-violation
+      (editor-user-error
         'buffer-begin-save!
-        "buffer already has a pending save"
+        "Buffer already has a pending save"
         (buffer-id value)
         (buffer-pending-save-revision value)))
     (buffer-pending-save-revision-set! value revision)

@@ -179,6 +179,7 @@
           (soda editor command)
           (soda editor completion)
           (soda editor completion-provider)
+          (soda editor condition)
           (soda editor debugger)
           (soda editor display)
           (soda editor event)
@@ -1644,9 +1645,9 @@
          'editor-start-document-completion!
          value)
        (when (editor-active-prompt value)
-         (assertion-violation
+         (editor-user-error
            'editor-start-document-completion!
-           "document completion cannot start inside a prompt"))
+           "Document completion cannot start inside a prompt"))
        (unless (choice-source? source)
          (assertion-violation
            'editor-start-document-completion!

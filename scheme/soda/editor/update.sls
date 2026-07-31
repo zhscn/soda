@@ -281,7 +281,6 @@
                  (editor-clear-pending-prefix! editor)
                  (editor-set-pending-keys! editor '())
                  (editor-set-last-command-class! editor #f)
-                 (editor-set-active-command-invocation! editor #f)
                  (editor-set-status-message!
                    editor
                    (condition->string condition))

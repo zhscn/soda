@@ -131,9 +131,9 @@
       editor)
     (let ([leaves (editor-window-leaves editor)])
       (when (null? (cdr leaves))
-        (assertion-violation
+        (editor-user-error
           'editor-delete-window!
-          "cannot delete the only editor window"))
+          "Cannot delete the only editor window"))
       (let* ([active-id (editor-active-window-id editor)]
              [index (leaf-index leaves active-id)]
              [active (list-ref leaves index)]

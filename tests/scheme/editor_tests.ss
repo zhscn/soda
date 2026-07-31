@@ -1068,6 +1068,15 @@
   (error 'editor-tests "force kill left a view on the closed buffer"))
 
 (buffer-begin-save! kill-second (buffer-revision kill-second))
+(unless
+  (guard
+    (condition
+      [(editor-user-error-condition? condition) #t]
+      [else #f])
+    (buffer-begin-save! kill-second (buffer-revision kill-second))
+    #f)
+  (error 'editor-tests
+         "duplicate save did not raise a user-level error"))
 (editor-update!
   kill-editor
   (make-command-message 'buffer.force-kill-current #f))
@@ -2087,6 +2096,14 @@
 (unless (and (= (length (editor-window-leaves window-editor)) 1)
              (= (length (editor-visible-views window-editor)) 1))
   (error 'editor-tests "C-x 1 did not retain only the active window"))
+(send! window-editor window-decoder (bytes 24 48))
+(unless
+  (and
+    (= (length (editor-window-leaves window-editor)) 1)
+    (not (editor-debugger window-editor))
+    (string? (editor-status-message window-editor)))
+  (error 'editor-tests
+         "deleting the only window did not report a user error"))
 (editor-close! window-editor)
 
 (define xref-source
@@ -3652,6 +3669,21 @@
     (not typed-command-result))
   (error 'editor-tests
          "interactive invocation was not retained across minibuffer input"))
+(let ([invocation
+        (editor-active-command-invocation prompt-editor)]
+      [prompt (editor-active-prompt prompt-editor)])
+  (editor-update!
+    prompt-editor
+    (make-command-message 'test.typed-command #f))
+  (unless
+    (and
+      (eq? (editor-active-command-invocation prompt-editor)
+           invocation)
+      (eq? (editor-active-prompt prompt-editor) prompt)
+      (not (editor-debugger prompt-editor))
+      (string? (editor-status-message prompt-editor)))
+    (error 'editor-tests
+           "reader reentry did not preserve the suspended invocation")))
 (send! prompt-editor prompt-decoder (string->utf8 "hello"))
 (dispatch-prompt-effects!
   (send! prompt-editor prompt-decoder (bytes 13)))
