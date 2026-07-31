@@ -243,20 +243,32 @@ TSTreeHandle
 TSQueryHandle
 ```
 
-parser module 和 query bundle 是分别维护、版本化和分发的资源。parser module 只
-提供 `TSLanguage`；query bundle 属于 Soda 的 editor policy，不由共享库提供，也不
-从其他编辑器的运行时目录隐式发现。
+parser module 和 query bundle 使用独立文件格式，由同一个 Soda runtime package
+维护、版本化和分发。parser module 只提供 `TSLanguage`；query bundle 属于 Soda 的
+editor policy，不由共享库提供。
 
-grammar registry 以 parser symbol 为键，允许覆盖共享库路径与导出符号。默认约定
-使用 `libtree-sitter-<parser>` 和 `tree_sitter_<parser>`；加载器依次检查语言
-专用的 `SODA_TREE_SITTER_<LANGUAGE>_LIBRARY`、由
-`SODA_TREE_SITTER_GRAMMAR_PATH` 提供的平台分隔目录列表、可执行文件同目录、安装
-目录和系统动态库路径。环境变量中的 language 名称转为大写并将连字符替换为下划线；
-语言专用路径指定单个共享库并优先于通用 search path。
-创建 parser 前会验证 grammar language ABI 是否落在静态 Tree-sitter core 支持的
-范围内。major mode 显式拥有 parser session；language availability、grammar
-identity 与 parser identity 相互独立，为同语言多个 parser 和 injection layer
-保留空间。
+grammar registry 以 parser symbol 为键。parser module 使用
+`grammars/<parser>.<platform-extension>`，默认导出
+`tree_sitter_<parser>`；parser 名称中的连字符在导出符号中转为下划线。创建 parser
+前会验证 grammar language ABI 是否落在静态 Tree-sitter core 支持的范围内。
+major mode 显式拥有 parser session；language availability、grammar identity 与
+parser identity 相互独立，为同语言多个 parser 和 injection layer 保留空间。
+
+runtime package 使用固定布局：
+
+```text
+runtime/
+  grammars/
+    <parser>.<platform-extension>
+  queries/
+    <language>/
+      <kind>.scm
+```
+
+parser 和 query 共享同一组 runtime roots，依次为 `SODA_RUNTIME`、可执行文件同目录
+的 `runtime`、安装数据目录的 `soda/runtime`。`SODA_RUNTIME` 指定一个完整 package
+root；loader 不提供单独的 grammar/query search path 或单语言动态库覆盖。构建目录
+和安装目录都生成相同布局，因此 portable distribution 与系统安装使用同一 resolver。
 
 Tree-sitter file association 由 rule name、suffix 集合、parser language、major mode
 和 priority 组成。注册关联时，已有的专用 major mode 保留自己的 language profile；
@@ -295,11 +307,10 @@ language spec 显式声明启用的 query kind 和组成 bundle 的 language 顺
 缓存 handle。同一个 compiled query 可以跨增量 parse 后产生的新 tree 重复执行。
 关闭 session 时先释放 query handle，再释放 parser 和 grammar module。
 
-query loader 依次检查 `SODA_TREE_SITTER_QUERY_PATH` 的平台分隔目录列表、可执行文件
-同目录的 `queries`、安装数据目录的 `soda/queries`。每个根目录都必须使用上述布局。
-spec 声明的 query 是该 profile 的必需资源；缺失、语法错误或与 grammar 不兼容会使
-对应 session 建立失败并产生 editor condition。query 文件不承载 major mode、文件
-关联、缩进宽度或 completion policy。
+query loader 对每个 runtime root 检查 `queries/<language>/<kind>.scm`。spec 声明
+的 query 是该 profile 的必需资源；缺失、语法错误或与 grammar 不兼容会使对应
+session 建立失败并产生 editor condition。query 文件不承载 major mode、文件关联、
+缩进宽度或 completion policy。
 
 `TreeSitterLanguageSpec` 是可声明的数据：
 

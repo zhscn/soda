@@ -1,6 +1,5 @@
 (library (soda tree-sitter)
   (export make-tree-sitter-parser
-          register-tree-sitter-language!
           tree-sitter-language-available?
           tree-sitter-parser?
           tree-sitter-parser-close!
@@ -32,8 +31,6 @@
   (define native-library-loaded
     (load-soda-native-library! "SODA_TREE_SITTER_LIBRARY"))
 
-  (define language-overrides (make-eq-hashtable))
-
   (define-record-type tree-sitter-capture
     (fields name start end node-kind depth))
 
@@ -46,12 +43,12 @@
   (define %language-available
     (foreign-procedure
       __atomic "soda_ts_language_available"
-      (string string string)
+      (string)
       int))
   (define %parser-create
     (foreign-procedure
       __atomic "soda_ts_parser_create"
-      (string string string)
+      (string)
       void*))
   (define %parser-destroy
     (foreign-procedure
@@ -156,52 +153,15 @@
     (unless (and (change? value) (change-pointer value))
       (assertion-violation who "expected an open change" value)))
 
-  (define register-tree-sitter-language!
-    (case-lambda
-      [(language)
-       (register-tree-sitter-language! language #f #f)]
-      [(language library)
-       (register-tree-sitter-language! language library #f)]
-      [(language library symbol)
-       (unless (symbol? language)
-         (assertion-violation
-           'register-tree-sitter-language!
-           "language must be a symbol"
-           language))
-       (unless (or (not library) (string? library))
-         (assertion-violation
-           'register-tree-sitter-language!
-           "library must be a string or #f"
-           library))
-       (unless (or (not symbol) (string? symbol))
-         (assertion-violation
-           'register-tree-sitter-language!
-           "entry symbol must be a string or #f"
-           symbol))
-       (hashtable-set!
-         language-overrides
-         language
-         (cons (or library "") (or symbol "")))
-       language]))
-
-  (define (language-load-specification language)
-    (hashtable-ref
-      language-overrides
-      language
-      (cons "" "")))
-
   (define (tree-sitter-language-available? language)
     (unless (symbol? language)
       (assertion-violation
         'tree-sitter-language-available?
         "language must be a symbol"
         language))
-    (let ([specification (language-load-specification language)])
-      (positive?
-        (%language-available
-          (symbol->string language)
-          (car specification)
-          (cdr specification)))))
+    (positive?
+      (%language-available
+        (symbol->string language))))
 
   (define (make-tree-sitter-parser language)
     (unless (symbol? language)
@@ -209,13 +169,9 @@
         'make-tree-sitter-parser
         "language must be a symbol"
         language))
-    (let* ([specification
-             (language-load-specification language)]
-           [pointer
-             (%parser-create
-               (symbol->string language)
-               (car specification)
-               (cdr specification))])
+    (let ([pointer
+            (%parser-create
+              (symbol->string language))])
       (unless pointer
         (native-error 'make-tree-sitter-parser))
       (%make-tree-sitter-parser pointer)))

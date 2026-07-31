@@ -124,30 +124,35 @@ executable, bundled language grammar modules, and Soda query bundles:
 cmk install -c Release --prefix ./dist
 ```
 
-Tree-sitter grammar modules use the conventional
-`libtree-sitter-<language>.so` name and export
-`tree_sitter_<language>`. `SODA_TREE_SITTER_GRAMMAR_PATH` supplies a
-platform-separated list of additional grammar directories:
+Tree-sitter parser modules and query bundles form one Soda runtime package:
 
-```sh
-SODA_TREE_SITTER_GRAMMAR_PATH=/opt/soda/grammars:/work/grammars soda file.json
+```text
+runtime/
+  grammars/
+    json.so
+  queries/
+    json/
+      highlights.scm
+      folds.scm
+      textobjects.scm
 ```
 
-`SODA_TREE_SITTER_<LANGUAGE>_LIBRARY` selects an exact module for one language
-and takes precedence over the directory search path. The language name is
-uppercased and hyphens become underscores:
+Parser modules use the platform shared-library extension and export
+`tree_sitter_<language>`. Hyphens in a parser name become underscores in the
+entry symbol. Soda resolves both parser modules and queries through the same
+ordered runtime roots:
+
+1. `SODA_RUNTIME`, when set;
+2. `runtime` beside the executable;
+3. `<prefix>/share/soda/runtime`.
 
 ```sh
-SODA_TREE_SITTER_JSON_LIBRARY=/work/grammars/libtree-sitter-json.so soda file.json
+SODA_RUNTIME=/opt/soda/runtime soda file.json
 ```
 
-Tree-sitter query bundles are separate from parser modules. Soda loads
-`queries/<language>/<kind>.scm` from the installed data directory, the
-executable directory, or a platform-separated `SODA_TREE_SITTER_QUERY_PATH`:
-
-```sh
-SODA_TREE_SITTER_QUERY_PATH=/opt/soda/queries:/work/soda-queries soda file.json
-```
+The runtime root is the unit of deployment and override. Parser and query
+resources do not have separate search-path or per-language environment
+overrides.
 
 Language specs associate files, modes, parsers, editing policy, and owned query
 bundles:
@@ -181,9 +186,7 @@ The convenience API associates suffixes with a parser name:
 
 This creates `python-ts-mode`, backed by the `python` grammar. An optional
 major-mode argument selects an existing Tree-sitter mode, and an optional final
-integer sets auto-mode priority. `register-tree-sitter-language!` overrides the
-shared-library path or exported parser symbol when a grammar does not follow
-the default naming convention. C, C++, and Scheme use their specialized syntax
+integer sets auto-mode priority. C, C++, and Scheme use their specialized syntax
 providers rather than Tree-sitter language specs.
 
 Printable input inserts text. The default keymap provides Emacs character,

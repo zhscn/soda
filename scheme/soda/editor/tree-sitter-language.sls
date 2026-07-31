@@ -21,7 +21,6 @@
           editor-register-tree-sitter-language-spec!
           editor-register-tree-sitter-language-specs!
           editor-register-tree-sitter-file-association!
-          register-tree-sitter-language!
           tree-sitter-language-available?)
   (import (rnrs)
           (soda document)

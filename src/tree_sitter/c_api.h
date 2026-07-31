@@ -28,11 +28,9 @@ typedef struct soda_ts_query_result soda_ts_query_result;
 SODA_TREE_SITTER_API uint32_t soda_tree_sitter_abi_version(void);
 SODA_TREE_SITTER_API const char* soda_tree_sitter_last_error(void);
 
-// Language grammars are loaded from shared modules.
-SODA_TREE_SITTER_API int soda_ts_language_available(const char* language, const char* library,
-                                                    const char* symbol);
-SODA_TREE_SITTER_API soda_ts_parser* soda_ts_parser_create(const char* language,
-                                                           const char* library, const char* symbol);
+// Language grammars and queries are resolved from the Soda runtime package.
+SODA_TREE_SITTER_API int soda_ts_language_available(const char* language);
+SODA_TREE_SITTER_API soda_ts_parser* soda_ts_parser_create(const char* language);
 SODA_TREE_SITTER_API void soda_ts_parser_destroy(soda_ts_parser* parser);
 SODA_TREE_SITTER_API int soda_ts_parser_parse(soda_ts_parser* parser,
                                               const soda_snapshot* snapshot);

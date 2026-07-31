@@ -132,7 +132,6 @@
           built-in-tree-sitter-language-specs
           make-tree-sitter-syntax-provider
           make-tree-sitter-language-profile
-          register-tree-sitter-language!
           tree-sitter-language-available?
           editor-major-mode-for-path
           editor-select-buffer-major-mode!

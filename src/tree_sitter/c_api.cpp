@@ -35,10 +35,6 @@
 #endif
 #endif
 
-#ifndef SODA_TREE_SITTER_INSTALL_LIBDIR
-#define SODA_TREE_SITTER_INSTALL_LIBDIR "lib"
-#endif
-
 #ifndef SODA_TREE_SITTER_INSTALL_DATADIR
 #define SODA_TREE_SITTER_INSTALL_DATADIR "share"
 #endif
@@ -133,22 +129,13 @@ const soda_ts_parser& parser_handle(const soda_ts_parser* parser) {
     return value;
 }
 
-std::string platform_library_name(std::string_view language, bool prefix) {
+std::string platform_library_name(std::string_view language) {
 #if defined(_WIN32)
-    (void)prefix;
-    return "tree-sitter-" + std::string(language) + ".dll";
+    return std::string(language) + ".dll";
 #elif defined(__APPLE__)
-    return (prefix ? "lib" : "") + std::string("tree-sitter-") + std::string(language) + ".dylib";
+    return std::string(language) + ".dylib";
 #else
-    return (prefix ? "lib" : "") + std::string("tree-sitter-") + std::string(language) + ".so";
-#endif
-}
-
-char path_list_separator() {
-#if defined(_WIN32)
-    return ';';
-#else
-    return ':';
+    return std::string(language) + ".so";
 #endif
 }
 
@@ -218,70 +205,32 @@ std::string library_error() {
 #endif
 }
 
-std::string language_environment_name(std::string_view language) {
-    std::string result = "SODA_TREE_SITTER_";
-    for (const char character : language) {
-        if (character == '-') {
-            result.push_back('_');
-        } else {
-            result.push_back(
-                static_cast<char>(std::toupper(static_cast<unsigned char>(character))));
-        }
-    }
-    result += "_LIBRARY";
-    return result;
-}
-
 bool valid_component(std::string_view value) {
     return !value.empty() && std::ranges::all_of(value, [](unsigned char character) {
         return std::isalnum(character) != 0 || character == '_' || character == '-';
     });
 }
 
-std::vector<std::filesystem::path> language_candidates(std::string_view language,
-                                                       std::string_view override_library) {
-    std::vector<std::filesystem::path> candidates;
-    if (!override_library.empty()) {
-        candidates.emplace_back(override_library);
-        return candidates;
-    }
-    const std::string environment_name = language_environment_name(language);
-    if (const char* configured = std::getenv(environment_name.c_str());
+std::vector<std::filesystem::path> runtime_roots() {
+    std::vector<std::filesystem::path> roots;
+    if (const char* configured = std::getenv("SODA_RUNTIME");
         configured != nullptr && configured[0] != '\0') {
-        candidates.emplace_back(configured);
-        return candidates;
-    }
-    const std::array names{
-        platform_library_name(language, true),
-        platform_library_name(language, false),
-    };
-    if (const char* search_path = std::getenv("SODA_TREE_SITTER_GRAMMAR_PATH");
-        search_path != nullptr) {
-        std::string_view remaining(search_path);
-        while (!remaining.empty()) {
-            const auto separator = remaining.find(path_list_separator());
-            const std::string_view directory = remaining.substr(0, separator);
-            if (!directory.empty()) {
-                for (const auto& name : names) {
-                    candidates.emplace_back(std::filesystem::path(directory) / name);
-                }
-            }
-            if (separator == std::string_view::npos) {
-                break;
-            }
-            remaining.remove_prefix(separator + 1);
-        }
+        roots.emplace_back(configured);
     }
     if (const auto executable = executable_path(); executable.has_value()) {
         const auto directory = executable->parent_path();
-        for (const auto& name : names) {
-            candidates.emplace_back(directory / name);
-            candidates.emplace_back(directory.parent_path() / SODA_TREE_SITTER_INSTALL_LIBDIR /
-                                    "soda" / "grammars" / name);
-        }
+        roots.emplace_back(directory / "runtime");
+        roots.emplace_back(directory.parent_path() / SODA_TREE_SITTER_INSTALL_DATADIR / "soda" /
+                           "runtime");
     }
-    for (const auto& name : names) {
-        candidates.emplace_back(name);
+    return roots;
+}
+
+std::vector<std::filesystem::path> language_candidates(std::string_view language) {
+    std::vector<std::filesystem::path> candidates;
+    const auto name = platform_library_name(language);
+    for (const auto& root : runtime_roots()) {
+        candidates.emplace_back(root / "grammars" / name);
     }
     return candidates;
 }
@@ -291,16 +240,14 @@ struct LoadedLanguage {
     const TSLanguage* language = nullptr;
 };
 
-LoadedLanguage load_language(std::string_view name, std::string_view override_library,
-                             std::string_view override_symbol) {
+LoadedLanguage load_language(std::string_view name) {
     if (!valid_component(name)) {
         throw std::invalid_argument("Tree-sitter language name is invalid");
     }
-    std::string symbol =
-        override_symbol.empty() ? "tree_sitter_" + std::string(name) : std::string(override_symbol);
+    std::string symbol = "tree_sitter_" + std::string(name);
     std::ranges::replace(symbol, '-', '_');
     std::string failures;
-    for (const auto& candidate : language_candidates(name, override_library)) {
+    for (const auto& candidate : language_candidates(name)) {
         void* library = open_library(candidate);
         if (library == nullptr) {
             if (!failures.empty()) {
@@ -338,26 +285,8 @@ std::vector<std::filesystem::path> query_candidates(std::string_view language,
     const std::filesystem::path relative =
         std::filesystem::path(language) / (std::string(query_name) + ".scm");
     std::vector<std::filesystem::path> candidates;
-    if (const char* search_path = std::getenv("SODA_TREE_SITTER_QUERY_PATH");
-        search_path != nullptr) {
-        std::string_view remaining(search_path);
-        while (!remaining.empty()) {
-            const auto separator = remaining.find(path_list_separator());
-            const std::string_view directory = remaining.substr(0, separator);
-            if (!directory.empty()) {
-                candidates.emplace_back(std::filesystem::path(directory) / relative);
-            }
-            if (separator == std::string_view::npos) {
-                break;
-            }
-            remaining.remove_prefix(separator + 1);
-        }
-    }
-    if (const auto executable = executable_path(); executable.has_value()) {
-        const auto directory = executable->parent_path();
-        candidates.emplace_back(directory / "queries" / relative);
-        candidates.emplace_back(directory.parent_path() / SODA_TREE_SITTER_INSTALL_DATADIR /
-                                "soda" / "queries" / relative);
+    for (const auto& root : runtime_roots()) {
+        candidates.emplace_back(root / "queries" / relative);
     }
     return candidates;
 }
@@ -527,14 +456,12 @@ const char* soda_tree_sitter_last_error(void) {
     return last_error.data();
 }
 
-int soda_ts_language_available(const char* language, const char* library, const char* symbol) {
+int soda_ts_language_available(const char* language) {
     return guard(-1, [&] {
         if (language == nullptr) {
             throw std::invalid_argument("Tree-sitter language is null");
         }
-        LoadedLanguage loaded =
-            load_language(language, library == nullptr ? std::string_view{} : library,
-                          symbol == nullptr ? std::string_view{} : symbol);
+        LoadedLanguage loaded = load_language(language);
         TSParser* parser = ts_parser_new();
         if (parser == nullptr) {
             close_library(loaded.library);
@@ -554,16 +481,13 @@ int soda_ts_language_available(const char* language, const char* library, const 
     });
 }
 
-soda_ts_parser* soda_ts_parser_create(const char* language, const char* library,
-                                      const char* symbol) {
+soda_ts_parser* soda_ts_parser_create(const char* language) {
     return guard<soda_ts_parser*>(nullptr, [&] {
         if (language == nullptr) {
             throw std::invalid_argument("Tree-sitter language is null");
         }
         auto value = std::make_unique<soda_ts_parser>();
-        LoadedLanguage loaded =
-            load_language(language, library == nullptr ? std::string_view{} : library,
-                          symbol == nullptr ? std::string_view{} : symbol);
+        LoadedLanguage loaded = load_language(language);
         value->language = loaded.language;
         value->language_library = loaded.library;
         value->parser = ts_parser_new();

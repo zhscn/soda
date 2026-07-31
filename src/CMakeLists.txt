@@ -59,7 +59,6 @@ target_include_directories(soda_tree_sitter PUBLIC
 )
 target_compile_features(soda_tree_sitter PUBLIC cxx_std_23)
 target_compile_definitions(soda_tree_sitter PRIVATE
-  SODA_TREE_SITTER_INSTALL_LIBDIR="${CMAKE_INSTALL_LIBDIR}"
   SODA_TREE_SITTER_INSTALL_DATADIR="${CMAKE_INSTALL_DATADIR}"
 )
 target_link_libraries(soda_tree_sitter
@@ -76,7 +75,12 @@ target_include_directories(soda_tree_sitter_json PRIVATE
   "${tree_sitter_SOURCE_DIR}/lib/include"
 )
 set_target_properties(soda_tree_sitter_json PROPERTIES
-  OUTPUT_NAME "tree-sitter-json"
+  PREFIX ""
+  OUTPUT_NAME "json"
+  LIBRARY_OUTPUT_DIRECTORY
+    "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/runtime/grammars"
+  RUNTIME_OUTPUT_DIRECTORY
+    "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/runtime/grammars"
 )
 
 add_library(soda_runtime STATIC
@@ -153,7 +157,6 @@ file(CONFIGURE
 )
 
 add_executable(soda launcher/main.c)
-add_dependencies(soda soda_tree_sitter_json)
 target_include_directories(soda PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}"
   "${soda_generated_dir}"
@@ -176,15 +179,16 @@ soda_embed_chez_application(soda
   PROGRAM "soda/editor/main.ss"
   SOURCES ${SODA_SCHEME_SOURCES}
 )
-add_custom_target(soda_tree_sitter_queries ALL
+add_custom_target(soda_tree_sitter_runtime ALL
   COMMAND
     "${CMAKE_COMMAND}" -E copy_directory
-    "${PROJECT_SOURCE_DIR}/queries"
-    "$<TARGET_FILE_DIR:soda>/queries"
-  COMMENT "Copying Soda Tree-sitter query bundles"
+    "${PROJECT_SOURCE_DIR}/runtime/queries"
+    "$<TARGET_FILE_DIR:soda>/runtime/queries"
+  COMMENT "Assembling the Soda Tree-sitter runtime"
   VERBATIM
 )
-add_dependencies(soda soda_tree_sitter_queries)
+add_dependencies(soda_tree_sitter_runtime soda_tree_sitter_json)
+add_dependencies(soda soda_tree_sitter_runtime)
 
 if(BUILD_TESTING)
   add_test(
@@ -231,7 +235,6 @@ if(BUILD_TESTING)
   )
   target_compile_features(soda_scheme_native_test PUBLIC cxx_std_23)
   target_compile_definitions(soda_scheme_native_test PRIVATE
-    SODA_TREE_SITTER_INSTALL_LIBDIR="${CMAKE_INSTALL_LIBDIR}"
     SODA_TREE_SITTER_INSTALL_DATADIR="${CMAKE_INSTALL_DATADIR}"
   )
   target_include_directories(soda_scheme_native_test PRIVATE
@@ -245,9 +248,10 @@ endif()
 
 install(
   TARGETS soda_tree_sitter_json
-  LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}/soda/grammars"
+  LIBRARY DESTINATION "${CMAKE_INSTALL_DATADIR}/soda/runtime/grammars"
+  RUNTIME DESTINATION "${CMAKE_INSTALL_DATADIR}/soda/runtime/grammars"
 )
 install(
-  DIRECTORY "${PROJECT_SOURCE_DIR}/queries/"
-  DESTINATION "${CMAKE_INSTALL_DATADIR}/soda/queries"
+  DIRECTORY "${PROJECT_SOURCE_DIR}/runtime/queries/"
+  DESTINATION "${CMAKE_INSTALL_DATADIR}/soda/runtime/queries"
 )
