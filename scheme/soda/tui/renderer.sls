@@ -438,6 +438,73 @@
                    column
                    tab-width))])))))
 
+  (define (make-line-projection
+            line next-line chunks line-end)
+    (vector line next-line chunks line-end))
+
+  (define (line-projection-line projection)
+    (vector-ref projection 0))
+
+  (define (line-projection-next-line projection)
+    (vector-ref projection 1))
+
+  (define (line-projection-chunks projection)
+    (vector-ref projection 2))
+
+  (define (line-projection-end projection)
+    (vector-ref projection 3))
+
+  (define (visible-line-projections
+            display-map text first-line rows line-count)
+    (let loop
+      ([line
+         (if
+           (and display-map (< first-line line-count))
+           (display-map-normalize-line
+             display-map text first-line)
+           first-line)]
+       [remaining rows]
+       [result '()])
+      (if
+        (or (zero? remaining) (>= line line-count))
+        (reverse result)
+        (if display-map
+            (call-with-values
+              (lambda ()
+                (display-map-project-line
+                  display-map text line))
+              (lambda (chunks next-line line-end)
+                (loop
+                  next-line
+                  (- remaining 1)
+                  (cons
+                    (make-line-projection
+                      line next-line chunks line-end)
+                    result))))
+            (loop
+              (+ line 1)
+              (- remaining 1)
+              (cons
+                (make-line-projection
+                  line
+                  (+ line 1)
+                  #f
+                  (text-line-content-end text line))
+                result))))))
+
+  (define (projection-row-at projections line)
+    (let loop ([remaining projections] [row 0])
+      (and
+        (pair? remaining)
+        (let ([projection (car remaining)])
+          (if
+            (and
+              (<= (line-projection-line projection) line)
+              (< line
+                 (line-projection-next-line projection)))
+            (cons row projection)
+            (loop (cdr remaining) (+ row 1)))))))
+
   (define (draw-string!
             frame
             row
@@ -828,6 +895,13 @@
                    (buffer-revision buffer))
                  (not (display-map-identity? candidate))
                  candidate))]
+           [projections
+             (visible-line-projections
+               display-map
+               text
+               (editor-render-context-first-line context)
+               (rect-rows rectangle)
+               (editor-render-context-line-count context))]
            [gutter-width
              (render-context-gutter-width
                context
@@ -849,25 +923,22 @@
            [selection-start (and region (car region))]
            [selection-end (and region (cdr region))]
            [visible-start
-             (if
-               (< (editor-render-context-first-line context)
-                  (editor-render-context-line-count context))
+             (if (pair? projections)
                (text-line-start
                  text
-                 (editor-render-context-first-line context))
+                 (line-projection-line
+                   (car projections)))
                (text-size text))]
-           [last-line
-             (min
-               (editor-render-context-line-count context)
-               (+ (editor-render-context-first-line context)
-                  (rect-rows rectangle)))]
            [visible-end
-             (if (zero? last-line)
-                 0
-                 (if (= last-line
-                        (editor-render-context-line-count context))
+             (if (null? projections)
+                 visible-start
+                 (let ([next-line
+                         (line-projection-next-line
+                           (car (reverse projections)))])
+                   (if (= next-line
+                          (editor-render-context-line-count context))
                      (text-size text)
-                     (text-line-start text last-line)))]
+                     (text-line-start text next-line))))]
            [syntax-decorations
              (buffer-highlight-runs
                buffer
@@ -926,16 +997,17 @@
           #f
           sources))
       (let ([caret-line (editor-render-context-caret-line context)]
+            [caret-projection
+              (projection-row-at
+                projections
+                (editor-render-context-caret-line context))]
             [cursorline?
               (and
                 (editor-render-context-focused? context)
                 (buffer-setting-ref buffer 'show-cursorline? #f))])
         (when cursorline?
-          (let ([caret-offset
-                  (- caret-line
-                     (editor-render-context-first-line context))])
-            (when (and (<= 0 caret-offset)
-                       (< caret-offset (rect-rows rectangle)))
+          (when caret-projection
+            (let ([caret-offset (car caret-projection)])
               (frame-fill-rect!
                 frame
                 (make-rect
@@ -950,17 +1022,19 @@
                   (resolve-faces theme '(editor.background cursorline))
                   #f
                   sources)))))
-        (do ([row-offset 0 (+ row-offset 1)])
-            ((= row-offset (rect-rows rectangle)))
-          (let ([line
-                  (+ (editor-render-context-first-line context)
-                     row-offset)])
-            (when (< line (editor-render-context-line-count context))
+        (let draw-projections
+          ([remaining projections] [row-offset 0])
+          (unless (null? remaining)
+            (let* ([projection (car remaining)]
+                   [line (line-projection-line projection)])
               (let* ([line-start (text-line-start text line)]
-                     [line-end (text-line-content-end text line)]
+                     [line-end (line-projection-end projection)]
                      [caret-row?
                        (and
-                         (= line caret-line)
+                         (<= line caret-line)
+                         (< caret-line
+                            (line-projection-next-line
+                              projection))
                          (editor-render-context-focused? context))]
                      [gutter-faces
                        (cond
@@ -993,11 +1067,7 @@
                       frame
                       text-rectangle
                       (+ (rect-row rectangle) row-offset)
-                      (display-map-line-chunks
-                        display-map
-                        text
-                        line-start
-                        line-end)
+                      (line-projection-chunks projection)
                       line-end
                       (editor-render-context-tab-width context)
                       (editor-render-context-first-column context)
@@ -1022,34 +1092,38 @@
                       component-id
                       line-faces
                       theme
-                      styled-chunks)))))))
-      (let ([cursor-row
-              (+ (rect-row text-rectangle)
-                 (- (editor-render-context-caret-line context)
-                    (editor-render-context-first-line context)))]
+                      styled-chunks))
+                (draw-projections
+                  (cdr remaining)
+                  (+ row-offset 1)))))))
+      (let* ([caret-projection
+               (projection-row-at
+                 projections
+                 (editor-render-context-caret-line context))]
+             [cursor-row
+              (and
+                caret-projection
+                (+ (rect-row text-rectangle)
+                   (car caret-projection)))]
             [cursor-column
-              (+ (rect-column text-rectangle)
-                 (-
-                   (if display-map
-                       (let* ([line
-                                (editor-render-context-caret-line
-                                  context)]
-                              [line-start
-                                (text-line-start text line)]
-                              [line-end
-                                (text-line-content-end text line)])
+              (and
+                caret-projection
+                (+ (rect-column text-rectangle)
+                   (-
+                     (if display-map
                          (display-chunks-column-at
-                           (display-map-line-chunks
-                             display-map
-                             text
-                             line-start
-                             line-end)
+                           (line-projection-chunks
+                             (cdr caret-projection))
                            (view-caret view)
                            (editor-render-context-tab-width
-                             context)))
-                       (editor-render-context-caret-column context))
-                    (editor-render-context-first-column context)))])
+                             context))
+                         (editor-render-context-caret-column
+                           context))
+                     (editor-render-context-first-column
+                       context))))])
         (if (and (editor-render-context-focused? context)
+                 cursor-row
+                 cursor-column
                  (rect-contains?
                    text-rectangle
                    cursor-row

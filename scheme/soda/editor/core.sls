@@ -712,6 +712,8 @@
           display-map-runs
           display-map-identity?
           display-map-valid-for?
+          display-map-normalize-line
+          display-map-project-line
           display-map-line-chunks
           display-chunk?
           display-chunk-kind

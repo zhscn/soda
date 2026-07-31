@@ -325,6 +325,11 @@ Styled document chunks
 position，也可以使用锚点和 before/after affinity 映射虚拟内容。replacement 和
 fold placeholder 保留被替换的 source range。
 
+跨物理行的 replacement 投影为一个视觉行：起始行的真实前缀、placeholder 与结束行
+的真实后缀依次组成 display chunks，中间物理行不占屏幕行。投影同时返回下一条可见
+物理行，viewport、gutter、cursorline 和 caret 定位都使用该映射。viewport 起点落在
+被替换范围内时从 replacement 的结束位置恢复显示。
+
 View 持有 `(document_id, revision)` 绑定的 DisplayMap。安装映射时校验其与
 Buffer 当前 revision 一致；Buffer 推进到新 revision 后，renderer 使用 identity
 映射，直到 display provider 发布匹配新 revision 的映射。切换 Buffer 会清除

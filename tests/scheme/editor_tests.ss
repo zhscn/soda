@@ -8162,6 +8162,75 @@
   (error 'editor-tests "view did not clear its display map"))
 (editor-close! mapped-editor)
 
+(define folded-source
+  "head {\n  hidden\n  tail\n} done\nnext\n")
+(define folded-document
+  (make-document folded-source 1009))
+(define folded-buffer
+  (make-buffer
+    1009
+    folded-document
+    "*folded-display-map*"
+    'fundamental-mode))
+(define folded-editor (make-editor folded-buffer))
+(define folded-view (editor-active-view folded-editor))
+(define folded-end
+  (substring-position folded-source "} done"))
+(define folded-display-map
+  (make-display-map
+    (document-id folded-document)
+    (buffer-revision folded-buffer)
+    (list
+      (make-replacement-display-run
+        6
+        folded-end
+        "…"
+        'after
+        '(comment)
+        'test.fold
+        'fold))))
+(editor-set-view-display-map!
+  folded-editor
+  (view-id folded-view)
+  folded-display-map)
+(let* ([snapshot (document-snapshot folded-document)]
+       [text (snapshot-text snapshot)])
+  (call-with-values
+    (lambda ()
+      (display-map-project-line
+        folded-display-map
+        text
+        0))
+    (lambda (chunks next-line line-end)
+      (unless
+        (and
+          (= next-line 4)
+          (= line-end
+             (text-line-content-end text 3))
+          (string=?
+            (apply
+              string-append
+              (map display-chunk-text chunks))
+            "head {…} done"))
+        (error 'editor-tests
+               "cross-line DisplayMap projection differs"))))
+  (text-close! text)
+  (snapshot-close! snapshot))
+(let ([frame (render-editor-frame folded-editor 4 30)])
+  (unless
+    (and
+      (string=?
+        (substring (frame-row-text frame 0) 0 13)
+        "head {…} done")
+      (string=?
+        (substring (frame-row-text frame 1) 0 4)
+        "next"))
+    (error 'editor-tests
+           "renderer did not collapse cross-line DisplayMap replacement"
+           (frame-row-text frame 0)
+           (frame-row-text frame 1))))
+(editor-close! folded-editor)
+
 (define json-document
   (make-document "{\"name\":\"soda\",\"enabled\":true}" 992))
 (define json-buffer

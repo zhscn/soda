@@ -17,6 +17,8 @@
           display-map-runs
           display-map-identity?
           display-map-valid-for?
+          display-map-normalize-line
+          display-map-project-line
           display-map-line-chunks
           display-chunk?
           display-chunk-kind
@@ -191,6 +193,131 @@
             (and (< (display-run-start run) end)
                  (< start (display-run-end run)))))
       (display-map-runs value)))
+
+  (define (replacement-containing-offset value offset)
+    (find
+      (lambda (run)
+        (and
+          (eq? (display-run-kind run) 'replacement)
+          (< (display-run-start run) offset)
+          (< offset (display-run-end run))))
+      (display-map-runs value)))
+
+  (define (display-map-normalize-line value text line)
+    (unless (display-map? value)
+      (assertion-violation
+        'display-map-normalize-line
+        "expected a display map"
+        value))
+    (unless (text? text)
+      (assertion-violation
+        'display-map-normalize-line
+        "expected text"
+        text))
+    (unless
+      (and
+        (exact-non-negative-integer? line)
+        (< line (text-line-count text)))
+      (assertion-violation
+        'display-map-normalize-line
+        "invalid physical line"
+        line))
+    (let* ([start (text-line-start text line)]
+           [replacement
+             (replacement-containing-offset value start)])
+      (if replacement
+          (car
+            (text-position
+              text
+              (display-run-end replacement)))
+          line)))
+
+  (define (runs-starting-in-range value start end)
+    (filter
+      (lambda (run)
+        (<= start (display-run-start run) end))
+      (display-map-runs value)))
+
+  (define (display-map-project-line value text line)
+    (unless (display-map? value)
+      (assertion-violation
+        'display-map-project-line
+        "expected a display map"
+        value))
+    (unless (text? text)
+      (assertion-violation
+        'display-map-project-line
+        "expected text"
+        text))
+    (unless
+      (and
+        (exact-non-negative-integer? line)
+        (< line (text-line-count text)))
+      (assertion-violation
+        'display-map-project-line
+        "invalid physical line"
+        line))
+    (let* ([line (display-map-normalize-line value text line)]
+           [physical-start (text-line-start text line)]
+           [covering
+             (replacement-containing-offset
+               value
+               physical-start)]
+           [start
+             (if covering
+                 (display-run-end covering)
+                 physical-start)]
+           [initial-end (text-line-content-end text line)])
+      (let loop
+        ([runs
+           (runs-starting-in-range
+             value
+             start
+             initial-end)]
+         [position start]
+         [projection-end initial-end]
+         [next-line (+ line 1)]
+         [result '()])
+        (if (null? runs)
+            (values
+              (reverse
+                (if (< position projection-end)
+                    (cons
+                      (real-chunk text position projection-end)
+                      result)
+                    result))
+              next-line
+              projection-end)
+            (let* ([run (car runs)]
+                   [run-start (display-run-start run)]
+                   [run-end (display-run-end run)]
+                   [result
+                     (if (< position run-start)
+                         (cons
+                           (real-chunk text position run-start)
+                           result)
+                         result)])
+              (if
+                (eq? (display-run-kind run) 'replacement)
+                (let* ([end-line
+                         (car (text-position text run-end))]
+                       [new-end
+                         (text-line-content-end text end-line)])
+                  (loop
+                    (runs-starting-in-range
+                      value
+                      run-end
+                      new-end)
+                    run-end
+                    new-end
+                    (+ end-line 1)
+                    (cons (run-chunk run) result)))
+                (loop
+                  (cdr runs)
+                  (max position run-start)
+                  projection-end
+                  next-line
+                  (cons (run-chunk run) result))))))))
 
   (define (display-map-line-chunks value text start end)
     (unless (display-map? value)
