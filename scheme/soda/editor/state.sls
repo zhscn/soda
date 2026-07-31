@@ -2588,13 +2588,7 @@
                        (not
                          (=
                            (prompt-completion-target-start old-target)
-                           (prompt-completion-target-start target)))
-                       (not
-                         (=
-                           (prompt-completion-target-replacement-end
-                             old-target)
-                           (prompt-completion-target-replacement-end
-                             target))))])
+                           (prompt-completion-target-start target))))])
               (completion-session-target-set! completion target)
               (completion-session-refresh!
                 completion

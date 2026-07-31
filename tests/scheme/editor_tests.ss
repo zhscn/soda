@@ -5405,6 +5405,70 @@
                 '("test.prompt-target"))
   (error 'editor-tests "accepted input was not recorded in history"))
 
+(editor-register-completion-provider!
+  prompt-editor
+  (make-completion-provider
+    'stable-prompt-provider
+    (lambda (request) '())
+    (lambda (request) #f)))
+(define stable-prompt-source
+  (make-choice-source
+    'stable-prompt
+    '((providers . (stable-prompt-provider)))
+    (lambda (input point) (cons 0 point))
+    (lambda (query) '())
+    (lambda (value) #t)
+    (lambda (generation) #f)))
+(editor-open-prompt!
+  prompt-editor
+  (make-completing-prompt-request
+    "Stable: "
+    "a"
+    #f
+    #f
+    'free
+    stable-prompt-source
+    'test.capture-prompt
+    #f))
+(let* ([effects (editor-take-completion-effects! prompt-editor)]
+       [request
+         (and (= (length effects) 1)
+              (command-effect-payload (car effects)))])
+  (unless (and request (completion-request? request))
+    (error 'editor-tests "prompt completion did not request its provider"))
+  (unless
+    (editor-apply-completion-response!
+      prompt-editor
+      (make-completion-response-for-request
+        request
+        (list
+          (make-completion-item
+            'abc
+            'stable-prompt-provider
+            "abc"
+            "abc"
+            "abc"
+            #f
+            #f
+            'abc))
+        #t))
+    (error 'editor-tests "prompt completion response was rejected")))
+(let ([effects
+        (send! prompt-editor prompt-decoder (string->utf8 "b"))]
+      [completion
+        (editor-active-prompt-completion prompt-editor)])
+  (unless
+    (and
+      (null? effects)
+      (= (length (completion-session-items completion)) 1)
+      (string=?
+        (completion-item-insert-text
+          (car (completion-session-items completion)))
+        "abc"))
+    (error 'editor-tests
+           "editing within one prompt field restarted its provider")))
+(send! prompt-editor prompt-decoder (bytes 7))
+
 (send! prompt-editor prompt-decoder (bytes 27 120))
 (define full-completion-height
   (rect-rows
