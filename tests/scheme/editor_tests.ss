@@ -7831,3 +7831,69 @@
     (error 'editor-tests
            "M-x row did not include binding and documentation columns")))
 (editor-close! binding-editor)
+
+(define mapped-document (make-document "alpha beta\n" 991))
+(define mapped-buffer
+  (make-buffer 991 mapped-document "*display-map*" 'fundamental-mode))
+(define mapped-editor (make-editor mapped-buffer))
+(define mapped-view (editor-active-view mapped-editor))
+(define mapped-display-map
+  (make-display-map
+    (document-id mapped-document)
+    (buffer-revision mapped-buffer)
+    (list
+      (make-virtual-display-run
+        5 "+" 'after '(warning) 'test.virtual 'inlay)
+      (make-replacement-display-run
+        6 10 "…" 'before '(comment) 'test.fold 'fold))))
+(editor-set-view-display-map!
+  mapped-editor
+  (view-id mapped-view)
+  mapped-display-map)
+(unless (eq? (view-display-map mapped-view) mapped-display-map)
+  (error 'editor-tests "view did not retain its display map"))
+(view-set-caret! mapped-view 10)
+(let* ([frame (render-editor-frame mapped-editor 3 30)]
+       [virtual-cell (frame-cell-ref frame 0 5)]
+       [replacement-cell (frame-cell-ref frame 0 7)]
+       [display-source?
+         (lambda (cell owner)
+           (exists
+             (lambda (source)
+               (and
+                 (eq? (cell-source-layer source) 'display)
+                 (eq? (cell-source-owner source) owner)))
+             (cell-sources cell)))])
+  (unless
+    (and
+      (string=? (substring (frame-row-text frame 0) 0 8) "alpha+ …")
+      (= (cell-document-position virtual-cell) 5)
+      (memq 'warning (cell-faces virtual-cell))
+      (display-source? virtual-cell 'test.virtual)
+      (= (cell-document-position replacement-cell) 6)
+      (memq 'comment (cell-faces replacement-cell))
+      (display-source? replacement-cell 'test.fold)
+      (= (frame-cursor-column frame) 8))
+    (error 'editor-tests
+           "renderer did not preserve DisplayMap text, faces, and sources")))
+(unless
+  (guard
+    (condition
+      [(assertion-violation? condition) #t]
+      [else #f])
+    (make-display-map
+      (document-id mapped-document)
+      (buffer-revision mapped-buffer)
+      (list
+        (make-replacement-display-run
+          0 5 "x" 'before '() 'test.first #f)
+        (make-replacement-display-run
+          4 6 "y" 'before '() 'test.second #f)))
+    #f)
+  (error 'editor-tests "DisplayMap accepted overlapping replacements"))
+(editor-clear-view-display-map!
+  mapped-editor
+  (view-id mapped-view))
+(unless (not (view-display-map mapped-view))
+  (error 'editor-tests "view did not clear its display map"))
+(editor-close! mapped-editor)

@@ -325,6 +325,12 @@ Styled document chunks
 position，也可以使用锚点和 before/after affinity 映射虚拟内容。replacement 和
 fold placeholder 保留被替换的 source range。
 
+View 持有 `(document_id, revision)` 绑定的 DisplayMap。安装映射时校验其与
+Buffer 当前 revision 一致；Buffer 推进到新 revision 后，renderer 使用 identity
+映射，直到 display provider 发布匹配新 revision 的映射。切换 Buffer 会清除
+View 的旧映射。display cell 的 source 同时记录 transform owner 与 detail，使
+`describe-char` 可以追溯 virtual text、replacement 和 fold provider。
+
 没有 fold、virtual text 或 soft wrap 的 View 使用 identity transform；tab 展开
 仍在 cell 生成阶段按显示列处理。新增 display feature 通过独立 transform 接入，
 不会在 renderer 中增加按 feature 类型分派的绘制路径。

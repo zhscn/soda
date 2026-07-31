@@ -124,8 +124,9 @@ fold 不删除 Text，也不进入 Document undo。编辑触及 fold 时，polic
 对应 range；anchor 负责其余编辑下的位置结算。
 
 fold、virtual run、replacement run、tab 展开与 soft wrap 按固定顺序组成
-DisplayMap。尚未启用非恒等 transform 的 View 使用 identity DisplayMap，renderer
-不需要为各类 display feature 增加特殊分支。
+DisplayMap。DisplayMap 属于 View 并绑定 Document identity 与 Buffer revision；
+revision 不匹配时使用 identity DisplayMap。renderer 只区分真实 chunk 与统一的
+display transform chunk，不按 inlay、fold 或诊断等 feature 类型分派。
 
 ## Generated buffer
 

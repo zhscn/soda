@@ -18,6 +18,8 @@
           editor-active-view
           editor-set-active-view!
           editor-set-view-buffer!
+          editor-set-view-display-map!
+          editor-clear-view-display-map!
           editor-base-view
           editor-window-root
           editor-root-viewport-columns
@@ -159,6 +161,7 @@
           view-viewport-columns
           view-keymap-layers
           view-input-states
+          view-display-map
           view-navigation-walk
           view-completion
           view-current-input-state
@@ -183,6 +186,7 @@
           (soda editor condition)
           (soda editor debugger)
           (soda editor display)
+          (soda editor display-map)
           (soda editor event)
           (soda editor hook)
           (soda editor input-state)
@@ -220,6 +224,7 @@
       (mutable input-states view-input-states view-input-states-set!)
       (mutable completion view-completion view-completion-set!)
       (mutable pending-keys view-pending-keys view-pending-keys-set!)
+      (mutable display-map view-display-map view-display-map-set!)
       (immutable navigation-walk view-navigation-walk)))
 
   (define-record-type (editor %make-editor editor?)
@@ -1223,6 +1228,7 @@
                    'accept))
                #f
                '()
+               #f
                (make-navigation-walk))])
       (hashtable-set! (editor-view-table value) id view)
       (editor-view-ids-set!
@@ -1376,11 +1382,42 @@
         (view-buffer-set! view buffer)
         (view-caret-anchor-set! view anchor)
         (view-mark-anchor-set! view #f)
-        (view-mark-active?-set! view #f))
+        (view-mark-active?-set! view #f)
+        (view-display-map-set! view #f))
       (view-first-line-set! view 0)
       (view-first-column-set! view 0)
       (view-reset-input-states! view)
       (view-pending-keys-set! view '())))
+
+  (define (editor-set-view-display-map! value view-id display-map)
+    (require-open-editor 'editor-set-view-display-map! value)
+    (unless (display-map? display-map)
+      (assertion-violation
+        'editor-set-view-display-map!
+        "expected a display map"
+        display-map))
+    (let* ([view (editor-view-ref value view-id)]
+           [buffer (view-buffer view)]
+           [document-id (document-id (buffer-document buffer))]
+           [revision (buffer-revision buffer)])
+      (unless
+        (display-map-valid-for? display-map document-id revision)
+        (assertion-violation
+          'editor-set-view-display-map!
+          "display map does not match the view buffer revision"
+          (display-map-document-id display-map)
+          (display-map-revision display-map)
+          document-id
+          revision))
+      (view-display-map-set! view display-map)
+      (editor-invalidate! value 'viewport)))
+
+  (define (editor-clear-view-display-map! value view-id)
+    (require-open-editor 'editor-clear-view-display-map! value)
+    (let ([view (editor-view-ref value view-id)])
+      (when (view-display-map view)
+        (view-display-map-set! view #f)
+        (editor-invalidate! value 'viewport))))
 
   (define (editor-prompts value)
     (require-open-editor 'editor-prompts value)
@@ -4013,6 +4050,7 @@
                    'accept))
                #f
                '()
+               #f
                (make-navigation-walk))]
            [value
              (%make-editor

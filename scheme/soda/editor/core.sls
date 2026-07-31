@@ -17,6 +17,8 @@
           editor-active-view
           editor-set-active-view!
           editor-set-view-buffer!
+          editor-set-view-display-map!
+          editor-clear-view-display-map!
           editor-base-view
           editor-window-root
           editor-active-window-id
@@ -383,6 +385,7 @@
           view-viewport-columns
           view-keymap-layers
           view-input-states
+          view-display-map
           view-completion
           view-current-input-state
           view-push-input-state!
@@ -601,7 +604,36 @@
           install-prompt-effect-handler!
           command-effect?
           command-effect-kind
-          command-effect-payload)
+          command-effect-payload
+          make-virtual-display-run
+          make-replacement-display-run
+          display-run?
+          display-run-kind
+          display-run-start
+          display-run-end
+          display-run-text
+          display-run-affinity
+          display-run-faces
+          display-run-owner
+          display-run-detail
+          make-display-map
+          display-map?
+          display-map-document-id
+          display-map-revision
+          display-map-runs
+          display-map-identity?
+          display-map-valid-for?
+          display-map-line-chunks
+          display-chunk?
+          display-chunk-kind
+          display-chunk-text
+          display-chunk-start
+          display-chunk-end
+          display-chunk-position
+          display-chunk-affinity
+          display-chunk-faces
+          display-chunk-owner
+          display-chunk-detail)
   (import (rnrs)
           (soda editor annotation)
           (soda editor auto-mode)
@@ -623,6 +655,7 @@
           (soda editor cpp-commands)
           (soda editor debugger)
           (soda editor decoration)
+          (soda editor display-map)
           (soda editor diagnostics)
           (soda editor edit)
           (soda editor event)

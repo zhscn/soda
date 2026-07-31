@@ -66,7 +66,9 @@
             component-id
             base-faces
             theme
-            styled-chunks)
+            styled-chunks
+            extra-faces
+            extra-sources)
     (let* ([chunk
              (styled-chunk-cursor-at!
                styled-chunks
@@ -74,7 +76,7 @@
            [runs (if chunk (styled-chunk-runs chunk) '())]
            [decoration-faces (map decoration-run-face runs)]
            [faces
-             (append base-faces decoration-faces)]
+             (append base-faces decoration-faces extra-faces)]
            [decoration-sources
              (map
                (lambda (run)
@@ -92,6 +94,7 @@
         (append
           (list (document-source buffer-id position detail))
           decoration-sources
+          extra-sources
           (list (component-source component-id))))))
 
   (define (draw-document-line!
@@ -131,7 +134,9 @@
                     component-id
                     base-faces
                     theme
-                    styled-chunks)))
+                    styled-chunks
+                    '()
+                    '())))
               column)
             (let* ([character (string-ref value index)]
                    [byte-length (character-byte-length character)]
@@ -182,7 +187,9 @@
                            component-id
                            base-faces
                            theme
-                           styled-chunks)))))
+                           styled-chunks
+                           '()
+                           '())))))
                  (loop
                    (+ index 1)
                    (+ byte-position byte-length)
@@ -205,12 +212,231 @@
                        component-id
                        base-faces
                        theme
-                       styled-chunks)))
+                       styled-chunks
+                       '()
+                       '())))
                  (loop
                    (+ index 1)
                    (+ byte-position byte-length)
                    (+ column width)
                    column)]))))))
+
+  (define (display-chunk-source chunk)
+    (make-cell-source
+      'display
+      (display-chunk-owner chunk)
+      (display-chunk-detail chunk)))
+
+  (define (draw-display-line!
+            frame
+            rectangle
+            screen-row
+            chunks
+            line-end
+            tab-width
+            first-column
+            buffer-id
+            component-id
+            base-faces
+            theme
+            styled-chunks)
+    (let ([limit (+ first-column (rect-columns rectangle))])
+      (let draw-chunks ([remaining chunks]
+                        [column 0]
+                        [previous-column #f])
+        (if (null? remaining)
+            (begin
+              (when (and (<= first-column column) (< column limit))
+                (frame-put-cell!
+                  frame
+                  screen-row
+                  (+ (rect-column rectangle)
+                     (- column first-column))
+                  (document-cell
+                    " "
+                    1
+                    buffer-id
+                    line-end
+                    'line-end
+                    component-id
+                    base-faces
+                    theme
+                    styled-chunks
+                    '()
+                    '())))
+              column)
+            (let* ([chunk (car remaining)]
+                   [value (display-chunk-text chunk)]
+                   [transformed?
+                     (not (eq? (display-chunk-kind chunk) 'text))]
+                   [extra-faces
+                     (if transformed? (display-chunk-faces chunk) '())]
+                   [extra-sources
+                     (if transformed?
+                         (list (display-chunk-source chunk))
+                         '())])
+              (let draw-string ([index 0]
+                                [byte-position
+                                  (display-chunk-start chunk)]
+                                [column column]
+                                [previous-column previous-column])
+                (if (= index (string-length value))
+                    (draw-chunks
+                      (cdr remaining)
+                      column
+                      previous-column)
+                    (let* ([character (string-ref value index)]
+                           [byte-length
+                             (character-byte-length character)]
+                           [position
+                             (if transformed?
+                                 (display-chunk-position chunk)
+                                 byte-position)]
+                           [tab? (char=? character #\tab)]
+                           [width
+                             (if tab?
+                                 (- (next-tab-stop column tab-width)
+                                    column)
+                                 (character-cell-width character))]
+                           [next-byte-position
+                             (if transformed?
+                                 byte-position
+                                 (+ byte-position byte-length))])
+                      (cond
+                        [(zero? width)
+                         (when (and previous-column
+                                    (<= first-column previous-column)
+                                    (< previous-column limit))
+                           (frame-append-cell-text!
+                             frame
+                             screen-row
+                             (+ (rect-column rectangle)
+                                (- previous-column first-column))
+                             (string character)
+                             (if transformed?
+                                 (display-chunk-source chunk)
+                                 (document-source
+                                   buffer-id
+                                   position
+                                   character))))
+                         (draw-string
+                           (+ index 1)
+                           next-byte-position
+                           column
+                           previous-column)]
+                        [(>= column limit) column]
+                        [tab?
+                         (do ([offset 0 (+ offset 1)])
+                             ((= offset width))
+                           (let ([cell-column (+ column offset)])
+                             (when
+                               (and
+                                 (<= first-column cell-column)
+                                 (< cell-column limit))
+                               (frame-put-cell!
+                                 frame
+                                 screen-row
+                                 (+ (rect-column rectangle)
+                                    (- cell-column first-column))
+                                 (document-cell
+                                   " "
+                                   1
+                                   buffer-id
+                                   position
+                                   'tab
+                                   component-id
+                                   base-faces
+                                   theme
+                                   styled-chunks
+                                   extra-faces
+                                   extra-sources)))))
+                         (draw-string
+                           (+ index 1)
+                           next-byte-position
+                           (+ column width)
+                           (+ column (- width 1)))]
+                        [else
+                         (when
+                           (and
+                             (<= first-column column)
+                             (<= (+ column width) limit))
+                           (frame-put-cell!
+                             frame
+                             screen-row
+                             (+ (rect-column rectangle)
+                                (- column first-column))
+                             (document-cell
+                               (string
+                                 (display-character character))
+                               width
+                               buffer-id
+                               position
+                               character
+                               component-id
+                               base-faces
+                               theme
+                               styled-chunks
+                               extra-faces
+                               extra-sources)))
+                         (draw-string
+                           (+ index 1)
+                           next-byte-position
+                           (+ column width)
+                           column)])))))))))
+
+  (define (display-string-end-column value start-column tab-width)
+    (let loop ([index 0] [column start-column])
+      (if (= index (string-length value))
+          column
+          (let ([character (string-ref value index)])
+            (loop
+              (+ index 1)
+              (if (char=? character #\tab)
+                  (next-tab-stop column tab-width)
+                  (+ column (character-cell-width character))))))))
+
+  (define (display-chunks-column-at chunks position tab-width)
+    (let loop ([remaining chunks] [column 0])
+      (if (null? remaining)
+          column
+          (let* ([chunk (car remaining)]
+                 [kind (display-chunk-kind chunk)]
+                 [start (display-chunk-start chunk)]
+                 [end (display-chunk-end chunk)]
+                 [include?
+                   (cond
+                     [(eq? kind 'text) (> position start)]
+                     [(eq? kind 'virtual)
+                      (or
+                        (> position start)
+                        (and
+                          (= position start)
+                          (eq? (display-chunk-affinity chunk) 'before)))]
+                     [else
+                      (or
+                        (>= position end)
+                        (and
+                          (> position start)
+                          (< position end)
+                          (eq? (display-chunk-affinity chunk) 'after)))])])
+            (cond
+              [(not include?) column]
+              [(and (eq? kind 'text) (< position end))
+               (let* ([bytes (string->utf8 (display-chunk-text chunk))]
+                      [length (- position start)]
+                      [prefix (make-bytevector length)])
+                 (bytevector-copy! bytes 0 prefix 0 length)
+                 (display-string-end-column
+                   (utf8->string prefix)
+                   column
+                   tab-width))]
+              [else
+               (loop
+                 (cdr remaining)
+                 (display-string-end-column
+                   (display-chunk-text chunk)
+                   column
+                   tab-width))])))))
 
   (define (draw-string!
             frame
@@ -592,6 +818,16 @@
                (editor-render-context-editor context))]
            [buffer (editor-render-context-buffer context)]
            [text (editor-render-context-text context)]
+           [display-map
+             (let ([candidate (view-display-map view)])
+               (and
+                 candidate
+                 (display-map-valid-for?
+                   candidate
+                   (document-id (buffer-document buffer))
+                   (buffer-revision buffer))
+                 (not (display-map-identity? candidate))
+                 candidate))]
            [gutter-width
              (render-context-gutter-width
                context
@@ -752,30 +988,66 @@
                         'line-number
                         line)
                       (component-source component-id))))
-                (draw-document-line!
-                  frame
-                  text-rectangle
-                  (+ (rect-row rectangle) row-offset)
-                  (text-subbytevector
-                    text
-                    line-start
-                    line-end)
-                  line-start
-                  line-end
-                  (editor-render-context-tab-width context)
-                  (editor-render-context-first-column context)
-                  (buffer-id buffer)
-                  component-id
-                  line-faces
-                  theme
-                  styled-chunks))))))
+                (if display-map
+                    (draw-display-line!
+                      frame
+                      text-rectangle
+                      (+ (rect-row rectangle) row-offset)
+                      (display-map-line-chunks
+                        display-map
+                        text
+                        line-start
+                        line-end)
+                      line-end
+                      (editor-render-context-tab-width context)
+                      (editor-render-context-first-column context)
+                      (buffer-id buffer)
+                      component-id
+                      line-faces
+                      theme
+                      styled-chunks)
+                    (draw-document-line!
+                      frame
+                      text-rectangle
+                      (+ (rect-row rectangle) row-offset)
+                      (text-subbytevector
+                        text
+                        line-start
+                        line-end)
+                      line-start
+                      line-end
+                      (editor-render-context-tab-width context)
+                      (editor-render-context-first-column context)
+                      (buffer-id buffer)
+                      component-id
+                      line-faces
+                      theme
+                      styled-chunks)))))))
       (let ([cursor-row
               (+ (rect-row text-rectangle)
                  (- (editor-render-context-caret-line context)
                     (editor-render-context-first-line context)))]
             [cursor-column
               (+ (rect-column text-rectangle)
-                 (- (editor-render-context-caret-column context)
+                 (-
+                   (if display-map
+                       (let* ([line
+                                (editor-render-context-caret-line
+                                  context)]
+                              [line-start
+                                (text-line-start text line)]
+                              [line-end
+                                (text-line-content-end text line)])
+                         (display-chunks-column-at
+                           (display-map-line-chunks
+                             display-map
+                             text
+                             line-start
+                             line-end)
+                           (view-caret view)
+                           (editor-render-context-tab-width
+                             context)))
+                       (editor-render-context-caret-column context))
                     (editor-render-context-first-column context)))])
         (if (and (editor-render-context-focused? context)
                  (rect-contains?
