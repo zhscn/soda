@@ -443,6 +443,53 @@
           (buffer-replace-range! buffer start end replacement)))
       '()))
 
+  (define (full-line-range text start end)
+    (let* ([start-line (car (text-position text start))]
+           [first
+             (if (= start (text-line-start text start-line))
+                 start-line
+                 (+ start-line 1))]
+           [end-line (car (text-position text end))]
+           [last
+             (cond
+               [(= end (text-line-start text end-line)) (- end-line 1)]
+               [(>= end (text-line-content-end text end-line)) end-line]
+               [else (- end-line 1)])])
+      (and
+        (<= first last)
+        (< first (text-line-count text))
+        (cons
+          (text-line-start text first)
+          (text-line-content-end text last)))))
+
+  (define-command (reverse-region-command context target)
+    "Reverse complete lines in the active region."
+    (interactive region-transform-target-reader)
+    (let* ([view (command-context-view context)]
+           [buffer (view-buffer view)])
+      (unless (command-target-current? target buffer)
+        (editor-user-error
+          'edit.reverse-region
+          "The region target is stale"))
+      (with-document-text
+        (buffer-document buffer)
+        (lambda (text)
+          (let ([range
+                  (full-line-range
+                    text
+                    (command-target-start target)
+                    (command-target-end target))])
+            (unless range
+              (editor-user-error
+                'edit.reverse-region
+                "The region contains no complete lines"))
+            (let* ([start (car range)]
+                   [end (cdr range)]
+                   [lines (range-lines text start end)]
+                   [replacement (join-lines (reverse lines) #f)])
+              (buffer-replace-range! buffer start end replacement)))))
+      '()))
+
   (define (word-transform-target context)
     (let* ([view (command-context-view context)]
            [buffer (view-buffer view)]
@@ -544,6 +591,10 @@
           'edit.sort-lines
           sort-lines-command
           "Sort lines in the active region.")
+        (list
+          'edit.reverse-region
+          reverse-region-command
+          "Reverse complete lines in the active region.")
         (list
           'edit.upcase-word
           upcase-word-command

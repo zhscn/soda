@@ -2753,6 +2753,44 @@
   (error 'editor-tests "sort-lines was not one transaction"))
 (editor-close! sort-lines-editor)
 
+(define reverse-region-buffer
+  (make-buffer
+    9765
+    (make-document "head\none\ntwo\nthree\ntail" 9765)
+    "*reverse-region*"
+    'fundamental-mode))
+(define reverse-region-editor (make-editor reverse-region-buffer))
+(define reverse-region-view (editor-active-view reverse-region-editor))
+;; The partial first and last lines remain outside the operation.
+(view-set-mark! reverse-region-view 2)
+(view-set-caret! reverse-region-view 21)
+(editor-update!
+  reverse-region-editor
+  (make-command-message 'edit.reverse-region #f))
+(unless
+  (bytevector=?
+    (buffer-bytes reverse-region-buffer)
+    (string->utf8 "head\nthree\ntwo\none\ntail"))
+  (error 'editor-tests "reverse-region did not preserve partial boundary lines"))
+(buffer-undo! reverse-region-buffer)
+(unless
+  (bytevector=?
+    (buffer-bytes reverse-region-buffer)
+    (string->utf8 "head\none\ntwo\nthree\ntail"))
+  (error 'editor-tests "reverse-region was not one transaction"))
+;; A backward region resolves through the same command-target contract.
+(view-set-mark! reverse-region-view 19)
+(view-set-caret! reverse-region-view 5)
+(editor-update!
+  reverse-region-editor
+  (make-command-message 'edit.reverse-region #f))
+(unless
+  (bytevector=?
+    (buffer-bytes reverse-region-buffer)
+    (string->utf8 "head\nthree\ntwo\none\ntail"))
+  (error 'editor-tests "reverse-region did not accept a backward region"))
+(editor-close! reverse-region-editor)
+
 (define yank-pop-document (make-document "" 977))
 (define yank-pop-buffer
   (make-buffer
