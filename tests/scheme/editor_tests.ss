@@ -2839,6 +2839,52 @@
   (error 'editor-tests "delete-duplicate-lines was not one transaction"))
 (editor-close! duplicate-lines-editor)
 
+(define align-regexp-buffer
+  (make-buffer
+    9767
+    (make-document "a=1\nlong=2\nx =3\n" 9767)
+    "*align-regexp*"
+    'fundamental-mode))
+(define align-regexp-editor (make-editor align-regexp-buffer))
+(define align-regexp-view (editor-active-view align-regexp-editor))
+(define align-regexp-decoder (make-input-decoder))
+(define align-regexp-executor (make-effect-executor))
+(install-prompt-effect-handler! align-regexp-executor)
+(install-command-effect-handler! align-regexp-executor)
+(define (dispatch-align-regexp-effects! effects)
+  (unless (null? effects)
+    (let ([result (execute-effects! align-regexp-executor effects)])
+      (for-each
+        (lambda (message)
+          (dispatch-align-regexp-effects!
+            (editor-update! align-regexp-editor message)))
+        (effect-result-messages result)))))
+(view-set-mark! align-regexp-view 0)
+(view-set-caret!
+  align-regexp-view
+  (bytevector-length (buffer-bytes align-regexp-buffer)))
+(dispatch-align-regexp-effects!
+  (editor-update!
+    align-regexp-editor
+    (make-command-message 'edit.align-regexp #f)))
+(unless (editor-active-prompt align-regexp-editor)
+  (error 'editor-tests "align-regexp did not read its regexp interactively"))
+(send! align-regexp-editor align-regexp-decoder (string->utf8 "="))
+(dispatch-align-regexp-effects!
+  (send! align-regexp-editor align-regexp-decoder (bytes 13)))
+(unless
+  (bytevector=?
+    (buffer-bytes align-regexp-buffer)
+    (string->utf8 "a   =1\nlong=2\nx   =3\n"))
+  (error 'editor-tests "align-regexp did not align first matches"))
+(buffer-undo! align-regexp-buffer)
+(unless
+  (bytevector=?
+    (buffer-bytes align-regexp-buffer)
+    (string->utf8 "a=1\nlong=2\nx =3\n"))
+  (error 'editor-tests "align-regexp was not one transaction"))
+(editor-close! align-regexp-editor)
+
 (define yank-pop-document (make-document "" 977))
 (define yank-pop-buffer
   (make-buffer

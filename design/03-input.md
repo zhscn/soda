@@ -21,6 +21,7 @@
 | `edit.sort-lines` | 已实现 |
 | `edit.reverse-region` | 已实现 |
 | `edit.delete-duplicate-lines` | 已实现 |
+| `edit.align-regexp` | 已实现 |
 
 本文只定义文本编辑器当前使用的输入路径。minibuffer 的读取与焦点规则由
 [12-minibuffer.md](12-minibuffer.md) 定义；command 与 interactive 参数由
@@ -194,6 +195,10 @@ transaction 提交。
 universal prefix 保留最后一次出现，两个 universal prefix 只比较相邻行，三个
 universal prefix 还保留重复空行。命令只替换 region，并在一次 Buffer transaction
 中提交所有删除。
+
+`edit.align-regexp` 从 minibuffer 读取 regexp，把 active region 每一行的第一个匹配
+起点对齐到最右匹配列。没有匹配的行保持原样，边界外文本不参与变换，所有 padding
+作为一次 Buffer transaction 提交。
 
 ## Search 与 query replace
 

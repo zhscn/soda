@@ -10,6 +10,7 @@
           (soda editor edit)
           (soda editor keymap)
           (soda editor motion-runtime)
+          (soda editor regexp)
           (soda editor state))
 
   (define (with-document-text document procedure)
@@ -65,6 +66,11 @@
                  [length (bytevector-length value)])
             (bytevector-copy! value 0 result offset length)
             (loop (cdr values) (+ offset length)))))
+      result))
+
+  (define (bytevector-slice value start end)
+    (let ([result (make-bytevector (- end start))])
+      (bytevector-copy! value start result 0 (- end start))
       result))
 
   (define (transpose-character-once! view)
@@ -582,6 +588,63 @@
                         (if (= deleted 1) "" "s")))))))))
       '()))
 
+  (define (align-line-match line pattern)
+    (regexp-find-forward
+      pattern
+      (utf8->string line)
+      0
+      (bytevector-length line)))
+
+  (define (align-lines lines pattern)
+    (let* ([matches
+             (map (lambda (line) (align-line-match line pattern)) lines)]
+           [column
+             (fold-left
+               (lambda (maximum match)
+                 (if match (max maximum (car match)) maximum))
+               0
+               matches)])
+      (map
+        (lambda (line match)
+          (if (or (not match) (= (car match) column))
+              line
+              (let* ([position (car match)]
+                     [padding (make-bytevector (- column position) 32)])
+                (append-bytevectors
+                  (bytevector-slice line 0 position)
+                  padding
+                  (bytevector-slice
+                    line position (bytevector-length line))))))
+        lines
+        matches)))
+
+  (define-command (align-regexp-command context target pattern)
+    "Align the first regexp match on each line in the active region."
+    (interactive
+      region-transform-target-reader
+      (interactive-string "Align regexp: " 'align-regexp))
+    (let* ([view (command-context-view context)]
+           [buffer (view-buffer view)]
+           [start (command-target-start target)]
+           [end (command-target-end target)])
+      (unless (command-target-current? target buffer)
+        (editor-user-error 'edit.align-regexp "The region target is stale"))
+      (when (zero? (string-length pattern))
+        (editor-user-error 'edit.align-regexp "Regexp must not be empty"))
+      (when (< start end)
+        (with-document-text
+          (buffer-document buffer)
+          (lambda (text)
+            (let* ([trailing-newline?
+                     (= (text-byte-at text (- end 1)) 10)]
+                   [lines (range-lines text start end)]
+                   [replacement
+                     (join-lines
+                       (align-lines lines pattern)
+                       trailing-newline?)])
+              (buffer-replace-range! buffer start end replacement)))))
+      '()))
+
   (define (word-transform-target context)
     (let* ([view (command-context-view context)]
            [buffer (view-buffer view)]
@@ -691,6 +754,10 @@
           'edit.delete-duplicate-lines
           delete-duplicate-lines-command
           "Delete duplicate lines in the active region.")
+        (list
+          'edit.align-regexp
+          align-regexp-command
+          "Align regexp matches in the active region.")
         (list
           'edit.upcase-word
           upcase-word-command
