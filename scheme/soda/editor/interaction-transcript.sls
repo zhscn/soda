@@ -11,6 +11,12 @@
           interaction-transcript-last-input-end
           interaction-transcript-last-output-start
           interaction-transcript-last-output-end
+          interaction-transcript-fields
+          interaction-transcript-field-at
+          interaction-field?
+          interaction-field-kind
+          interaction-field-start
+          interaction-field-end
           interaction-transcript-current-input
           interaction-transcript-replace-input!
           interaction-transcript-stash-input!
@@ -52,12 +58,21 @@
       (mutable last-output-end-anchor
                interaction-transcript-last-output-end-anchor
                interaction-transcript-last-output-end-anchor-set!)
+      (mutable tracked-fields
+               interaction-transcript-tracked-fields
+               interaction-transcript-tracked-fields-set!)
       (mutable stashed-input
                interaction-transcript-stashed-input
                interaction-transcript-stashed-input-set!)
       (mutable closed?
                interaction-transcript-closed?
                interaction-transcript-closed?-set!)))
+
+  (define-record-type interaction-field
+    (fields kind start end))
+
+  (define-record-type tracked-interaction-field
+    (fields kind start-anchor end-anchor))
 
   (define (exact-non-negative-integer? value)
     (and
@@ -146,6 +161,25 @@
       offset
       anchor-before-insertion))
 
+  (define (make-tracked-field document kind start end)
+    (make-tracked-interaction-field
+      kind
+      (make-anchor document start)
+      (make-anchor document end)))
+
+  (define (append-tracked-field! transcript kind start end)
+    (when (< start end)
+      (interaction-transcript-tracked-fields-set!
+        transcript
+        (append
+          (interaction-transcript-tracked-fields transcript)
+          (list
+            (make-tracked-field
+              (interaction-transcript-document transcript)
+              kind
+              start
+              end))))))
+
   (define (remove-anchor! transcript anchor)
     (when anchor
       (document-remove-anchor!
@@ -224,19 +258,32 @@
                    prompt))
                (- input-start prompt-size)
                input-start)])
-      (%make-interaction-transcript
-        (buffer-id buffer)
-        document
-        prompt
-        (make-anchor document input-start)
-        (make-anchor document prompt-start)
-        (make-anchor document input-start)
-        #f
-        #f
-        #f
-        #f
-        #f
-        #f)))
+      (let ([transcript
+              (%make-interaction-transcript
+                (buffer-id buffer)
+                document
+                prompt
+                (make-anchor document input-start)
+                (make-anchor document prompt-start)
+                (make-anchor document input-start)
+                #f
+                #f
+                #f
+                #f
+                '()
+                #f
+                #f)])
+        (append-tracked-field!
+          transcript
+          'output
+          0
+          prompt-start)
+        (append-tracked-field!
+          transcript
+          'prompt
+          prompt-start
+          input-start)
+        transcript)))
 
   (define (interaction-transcript-input-start transcript)
     (require-open-transcript
@@ -296,6 +343,59 @@
     (anchor-offset
       transcript
       (interaction-transcript-last-output-end-anchor transcript)))
+
+  (define (tracked-field->field transcript field)
+    (make-interaction-field
+      (tracked-interaction-field-kind field)
+      (anchor-offset
+        transcript
+        (tracked-interaction-field-start-anchor field))
+      (anchor-offset
+        transcript
+        (tracked-interaction-field-end-anchor field))))
+
+  (define (interaction-transcript-fields transcript buffer)
+    (require-open-transcript
+      'interaction-transcript-fields
+      transcript)
+    (require-buffer
+      'interaction-transcript-fields
+      transcript
+      buffer)
+    (append
+      (map
+        (lambda (field)
+          (tracked-field->field transcript field))
+        (interaction-transcript-tracked-fields transcript))
+      (list
+        (make-interaction-field
+          'input
+          (interaction-transcript-input-start transcript)
+          (buffer-size buffer)))))
+
+  (define (interaction-transcript-field-at transcript buffer offset)
+    (unless (exact-non-negative-integer? offset)
+      (assertion-violation
+        'interaction-transcript-field-at
+        "offset must be a non-negative exact integer"
+        offset))
+    (when (> offset (buffer-size buffer))
+      (assertion-violation
+        'interaction-transcript-field-at
+        "offset is outside the transcript buffer"
+        offset))
+    (let ([fields
+            (interaction-transcript-fields transcript buffer)])
+      (find
+        (lambda (field)
+          (or
+            (and
+              (<= (interaction-field-start field) offset)
+              (< offset (interaction-field-end field)))
+            (and
+              (= offset (buffer-size buffer))
+              (eq? (interaction-field-kind field) 'input))))
+        fields)))
 
   (define (interaction-transcript-current-input transcript buffer)
     (require-open-transcript
@@ -418,6 +518,11 @@
     (let* ([start (interaction-transcript-input-start transcript)]
            [input-end (buffer-size buffer)]
            [end (append-buffer! buffer "\n")])
+      (append-tracked-field!
+        transcript
+        'input
+        start
+        input-end)
       (set-last-input! transcript start input-end)
       (clear-current-prompt! transcript)
       (set-input-start! transcript end)
@@ -458,6 +563,16 @@
                  (positive? (string-length stashed-input)))
                (append-buffer! buffer stashed-input)
                input-start)])
+      (append-tracked-field!
+        transcript
+        'output
+        output-start
+        output-end)
+      (append-tracked-field!
+        transcript
+        'prompt
+        prompt-start
+        input-start)
       (set-last-output! transcript output-start output-end)
       (set-current-prompt! transcript prompt-start input-start)
       (set-input-start! transcript input-start)
@@ -482,4 +597,13 @@
           (interaction-transcript-last-input-end-anchor transcript)
           (interaction-transcript-last-output-start-anchor transcript)
           (interaction-transcript-last-output-end-anchor transcript)))
+      (for-each
+        (lambda (field)
+          (remove-anchor!
+            transcript
+            (tracked-interaction-field-start-anchor field))
+          (remove-anchor!
+            transcript
+            (tracked-interaction-field-end-anchor field)))
+        (interaction-transcript-tracked-fields transcript))
       (interaction-transcript-closed?-set! transcript #t))))

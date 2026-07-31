@@ -11,8 +11,10 @@
         (soda editor evaluator)
         (soda editor event)
         (soda editor interaction)
+        (soda editor interaction-transcript)
         (soda editor repl)
         (soda editor scheme-indentation)
+        (only (soda editor state) view-set-caret!)
         (soda tui frame)
         (soda tui renderer))
 
@@ -557,6 +559,30 @@
      (interaction-session-input-start session))
   (error 'repl-tests
          "C-a moved into the protected REPL prompt"))
+(let* ([fields
+         (interaction-transcript-fields
+           (interaction-session-transcript session)
+           repl-buffer)]
+       [historical-prompt
+         (find
+           (lambda (field)
+             (and
+               (eq? (interaction-field-kind field) 'prompt)
+               (< (interaction-field-end field)
+                  (interaction-session-prompt-start session))))
+           (reverse fields))])
+  (unless historical-prompt
+    (error 'repl-tests
+           "interaction transcript did not retain historical fields"))
+  (view-set-caret!
+    (editor-active-view editor)
+    (interaction-field-start historical-prompt))
+  (press-key! 'character (char->integer #\a) 4)
+  (unless
+    (= (view-caret (editor-active-view editor))
+       (interaction-field-end historical-prompt))
+    (error 'repl-tests
+           "C-a did not use the prompt field as a soft line beginning")))
 (press-key! 'character (char->integer #\>) 2)
 (unless
   (= (view-caret (editor-active-view editor))

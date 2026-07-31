@@ -81,20 +81,21 @@ pending key sequence，但不关闭 Editor、Buffer 或 runtime。
 
 transcript Buffer 由不可编辑的历史前缀和一个可编辑的当前输入区组成。
 `InteractionTranscript.output-mark`、`input-start` 与 `Document.editable-start`
-指向当前 prompt 之后的同一位置。transcript 使用 Document anchors 保存以下
-结构位置：
+指向当前 prompt 之后的同一位置。transcript 使用 Document anchors 保存当前
+结构位置，并维护按显示顺序排列的 field ledger：
 
 ```text
-last-input-start  last-input-end
-last-output-start last-output-end
-prompt-start      prompt-end
-output-mark       input-start
+output field
+prompt field
+input field
 ```
 
-提交输入时，comint 记录 last-input range 并将边界推进到终止换行之后。应用结果
-时记录 last-output range，追加新 prompt，再把 output mark、input start 和
-Document editable boundary 推进到 prompt 末尾。Buffer 中发生插入或替换时，
-这些位置通过 anchor 语义保持有效。
+固定的历史 output、prompt 和 input field 使用成对 anchor；当前 input field 的
+末端是 Buffer 末端。提交输入时，comint 固定当前 input field，并将边界推进到
+终止换行之后。应用结果时追加 output field 和新 prompt field，再把 output mark、
+input start 和 Document editable boundary 推进到 prompt 末尾。Buffer 中发生插入
+或替换时，这些位置通过 anchor 语义保持有效。移动、复制、历史导航和子进程 adapter
+查询 field，不解析 prompt 文本。
 
 新建 transcript View 继承当前编辑 View 的 viewport，并保证初始内容和 caret 所在
 行列都能容纳在占位 viewport 中。终端 resize 随后设置实际 viewport。重新激活
@@ -114,7 +115,9 @@ session 保存有界、按提交顺序排列的输入历史，忽略空输入和
 prefix 的一部分。
 
 REPL 把 prompt 之后的完整输入视为一个 entry。`M-<` 和 `M->` 在 entry
-边界之间移动；`Home` 和 `C-a` 移动到当前行首，并在首行停于 prompt 之后。
+边界之间移动；`Home` 和 `C-a` 移动到所在行的软行首：含 prompt field 的行停在
+该 field 末端，续行和普通 output 行停在物理行首。该规则同样适用于历史 entry；
+prefix argument 请求物理行首。
 垂直移动和历史访问形成连续导航：
 
 - `Up`、`C-p` 和 `Down`、`C-n` 在多行 entry 内移动，到首行或末行后访问相邻

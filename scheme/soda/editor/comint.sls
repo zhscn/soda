@@ -8,6 +8,7 @@
           comint-append-output!
           comint-insert-newline!
           comint-insert-newline-with-indent!
+          comint-line-beginning-position
           comint-move-session-views-to-end!
           comint-history-previous-command
           comint-history-next-command
@@ -327,25 +328,53 @@
                        session)))
       '()))
 
+  (define (comint-line-beginning-position session buffer offset)
+    (with-buffer-text
+      buffer
+      (lambda (text)
+        (let* ([line
+                 (car (text-position text offset))]
+               [line-start (text-line-start text line)]
+               [line-end (text-line-content-end text line)]
+               [prompt
+                 (find
+                   (lambda (field)
+                     (and
+                       (eq? (interaction-field-kind field) 'prompt)
+                       (<= line-start
+                           (interaction-field-start field)
+                           (interaction-field-end field)
+                           line-end)))
+                   (interaction-transcript-fields
+                     (interaction-session-transcript session)
+                     buffer))])
+          (if prompt
+              (interaction-field-end prompt)
+              line-start)))))
+
   (define (comint-line-start-command context)
     (let* ([session
              (active-interaction
                'interaction.line-start
                context)]
            [view (command-context-view context)]
-           [buffer (view-buffer view)]
-           [input-start (interaction-session-input-start session)])
+           [buffer (view-buffer view)])
       (view-set-caret!
         view
-        (with-buffer-text
-          buffer
-          (lambda (text)
-            (max
-              input-start
-              (text-line-start
-                text
-                (car
-                  (text-position text (view-caret view))))))))
+        (if (command-context-prefix context)
+            (with-buffer-text
+              buffer
+              (lambda (text)
+                (text-line-start
+                  text
+                  (car
+                    (text-position
+                      text
+                      (view-caret view))))))
+            (comint-line-beginning-position
+              session
+              buffer
+              (view-caret view))))
       '()))
 
   (define (comint-line-or-history-command context direction)
