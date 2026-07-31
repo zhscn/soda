@@ -66,13 +66,22 @@
           workbench-mru
           workbench-slots
           workbench-pinned-window-ids
+          workbench-set-name!
           workbench-set-slot!
+          workbench-replace-mru!
           workbench-clear-slot!
           workbench-slot-window-id
           workbench-window-role
           workbench-pin-window!
           workbench-unpin-window!
           workbench-window-pinned?
+          default-workbench-session-path
+          workbench-session-encode
+          workbench-session-decode
+          workbench-session-resources
+          editor-restore-workbench-session!
+          load-workbench-session-file
+          ensure-workbench-session-directory!
           window-leaf?
           window-leaf-id
           window-leaf-view-id
@@ -1153,7 +1162,8 @@
           (soda editor window)
           (soda editor window-runtime)
           (soda editor workbench)
-          (soda editor workbench-commands))
+          (soda editor workbench-commands)
+          (soda editor workbench-session))
 
   (define (positive-exact-integer? value)
     (and (integer? value) (exact? value) (positive? value)))

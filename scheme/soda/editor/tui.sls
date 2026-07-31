@@ -22,6 +22,7 @@
           (soda editor scheme-interface-runtime)
           (soda editor scheme-project-build-runtime)
           (soda editor vfs-runtime)
+          (soda editor workbench-session)
           (soda runtime)
           (soda vfs)
           (soda tui commands)
@@ -171,6 +172,59 @@
                    (runtime-status-message
                      (event-status (car events)))))]
               [else (find (cdr events))]))))))
+
+  (define (persist-workbench-session! runtime editor path)
+    (when path
+      (ensure-workbench-session-directory! path)
+      (let ([source
+              (runtime-write-file!
+                runtime
+                path
+                (workbench-session-encode editor))])
+        (let wait ()
+          (let find ([events (runtime-poll! runtime)])
+            (cond
+              [(null? events) (wait)]
+              [(and (= (event-source (car events)) source)
+                    (eq? (event-kind (car events)) 'file-write))
+               (unless (zero? (event-status (car events)))
+                 (error
+                   'persist-workbench-session!
+                   "cannot write Workbench session state"
+                   path
+                   (runtime-status-message
+                     (event-status (car events)))))]
+              [else (find (cdr events))]))))))
+
+  (define (load-session-buffer! runtime editor resource)
+    (or
+      (editor-buffer-for-resource editor resource)
+      (call-with-values
+        (lambda () (load-bytes runtime resource))
+        (lambda (bytes new-file? observed-state)
+          (let ([buffer
+                  (editor-create-buffer!
+                    editor
+                    resource
+                    (file-major-mode-for-path resource)
+                    bytes)])
+            (buffer-set-file-path! buffer resource)
+            (buffer-set-local-setting!
+              buffer
+              'file-line-ending
+              (detect-file-line-ending bytes))
+            (when new-file?
+              (buffer-set-local-setting!
+                buffer
+                'file-needs-save?
+                #t))
+            (when observed-state
+              (buffer-set-local-setting!
+                buffer
+                'file-observed-state
+                observed-state))
+            (editor-select-buffer-major-mode! editor buffer resource)
+            buffer)))))
 
   (define (call-with-editor
             bytes
@@ -621,13 +675,27 @@
                 resource
                 new-file?
                 (lambda (editor)
-                  (let ([save-place-path (default-save-place-path)])
+                  (let ([save-place-path (default-save-place-path)]
+                        [workbench-session-path
+                          (and
+                            (not path)
+                            (default-workbench-session-path))])
                     (editor-replace-save-places!
                       editor
                       (load-save-place-file save-place-path))
-                    (editor-restore-view-place!
-                      editor
-                      (editor-active-view editor))
+                    (let ([session
+                            (load-workbench-session-file
+                              workbench-session-path)])
+                      (if session
+                          (editor-restore-workbench-session!
+                            editor
+                            session
+                            (lambda (resource)
+                              (load-session-buffer!
+                                runtime editor resource)))
+                          (editor-restore-view-place!
+                            editor
+                            (editor-active-view editor))))
                     (editor-set-global-setting!
                       editor
                       'show-line-numbers?
@@ -649,4 +717,7 @@
                           editor)))
                     (guard (condition [else #f])
                       (persist-save-places!
-                        runtime editor save-place-path))))))))))))
+                        runtime editor save-place-path))
+                    (guard (condition [else #f])
+                      (persist-workbench-session!
+                        runtime editor workbench-session-path))))))))))))

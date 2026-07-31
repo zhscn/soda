@@ -9,11 +9,13 @@
           workbench-mru
           workbench-slots
           workbench-pinned-window-ids
+          workbench-set-name!
           workbench-set-layout!
           workbench-set-active-window-id!
           workbench-adopt-project!
           workbench-remove-project!
           workbench-touch-buffer!
+          workbench-replace-mru!
           workbench-set-slot!
           workbench-clear-slot!
           workbench-slot-window-id
@@ -135,6 +137,16 @@
     (unless (workbench? value)
       (assertion-violation who "expected a workbench" value)))
 
+  (define (workbench-set-name! value name)
+    (require-workbench 'workbench-set-name! value)
+    (unless (and (string? name) (positive? (string-length name)))
+      (assertion-violation
+        'workbench-set-name!
+        "name must be a non-empty string"
+        name))
+    (workbench-name-set! value name)
+    name)
+
   (define (workbench-set-layout! value layout)
     (require-workbench 'workbench-set-layout! value)
     (unless (window-node? layout)
@@ -208,6 +220,20 @@
       value
       (cons buffer-id (remv buffer-id (workbench-mru value))))
     (workbench-mru value))
+
+  (define (workbench-replace-mru! value buffer-ids)
+    (require-workbench 'workbench-replace-mru! value)
+    (unless
+      (and
+        (list? buffer-ids)
+        (for-all exact-positive-integer? buffer-ids)
+        (unique? buffer-ids =))
+      (assertion-violation
+        'workbench-replace-mru!
+        "MRU must contain unique Buffer ids"
+        buffer-ids))
+    (workbench-mru-set! value buffer-ids)
+    buffer-ids)
 
   (define (workbench-slot-window-id value role)
     (require-workbench 'workbench-slot-window-id value)
