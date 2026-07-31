@@ -88,7 +88,7 @@ Document transaction。session 关闭时 View、anchor、Buffer 和 Document 一
 
 TUI root 在 session 活动时按正文、modeline、minibuffer 和可选 completion list
 布局。候选列表从 minibuffer 的下一行向下展开；两者占用底部保留行并参与 reflow。
-prompt 与 transient input 分别使用 `minibuffer-prompt` 和 `minibuffer-input`
+prompt 与 transient input 分别使用 `minibuffer.prompt` 和 `minibuffer.input`
 face。输入 cell 保留 transient Document position 和 component source，因此光标与
 `describe-char` 仍使用统一的 frame 数据。带 completion 的 prompt 为位置指示器保留
 固定列宽；初次打开和 terminal resize 使用同一个 input viewport 计算契约。
