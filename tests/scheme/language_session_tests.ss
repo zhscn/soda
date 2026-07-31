@@ -5,10 +5,12 @@
         (soda editor display-placement)
         (soda editor language)
         (soda editor language-session)
+        (soda editor jump-graph)
         (soda editor location)
         (soda editor navigation)
         (soda editor resource-context)
-        (soda editor state))
+        (soda editor state)
+        (soda editor workbench))
 
 (define (check condition message . irritants)
   (unless condition
@@ -101,6 +103,12 @@
           (jump-history-entry-target jump)))
       (language-attachment-id home)))
   "navigation history must preserve source and target attachment provenance")
+(check
+  (= (length
+       (jump-graph-edges
+         (workbench-jump-graph (editor-active-workbench editor))))
+     1)
+  "semantic navigation must record an edge in the Workbench JumpGraph")
 
 (define independent
   (editor-open-view!

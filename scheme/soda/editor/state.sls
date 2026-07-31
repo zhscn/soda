@@ -631,6 +631,9 @@
         'editor-set-current-location-list!
         "expected a location list or #f"
         locations))
+    (workbench-set-current-location-list!
+      (editor-active-workbench editor)
+      locations)
     (editor-current-location-list-set! editor locations))
 
   (define (same-annotation-owner? set namespace buffer-id)
@@ -658,6 +661,9 @@
                 (location-item-buffer-id item)
                 buffer-ids))
             (location-list-items locations)))
+        (workbench-set-current-location-list!
+          (editor-active-workbench editor)
+          #f)
         (editor-current-location-list-set! editor #f))))
 
   (define (editor-annotation-sets-for-buffer editor buffer-id)
@@ -1353,6 +1359,9 @@
                         (location-item-buffer-id item)])
                   (and buffer-id (= buffer-id id))))
               (location-list-items locations))))
+        (workbench-set-current-location-list!
+          (editor-active-workbench value)
+          #f)
         (editor-current-location-list-set! value #f))
       (for-each
         annotation-set-close!
@@ -1922,6 +1931,9 @@
       (unless (= id (editor-active-workbench-id value))
         (editor-active-workbench-id-set! value id)
         (editor-window-root-set! value (workbench-layout target))
+        (editor-current-location-list-set!
+          value
+          (workbench-current-location-list target))
         (editor-active-window-id-set!
           value
           (workbench-active-window-id target))

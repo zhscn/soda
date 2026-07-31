@@ -68,6 +68,9 @@
           workbench-mru
           workbench-slots
           workbench-pinned-window-ids
+          workbench-jump-graph
+          workbench-location-lists
+          workbench-current-location-list
           workbench-set-name!
           workbench-set-slot!
           workbench-replace-mru!
@@ -77,6 +80,25 @@
           workbench-pin-window!
           workbench-unpin-window!
           workbench-window-pinned?
+          jump-node?
+          jump-node-id
+          jump-node-resource
+          jump-node-buffer-id
+          jump-node-revision
+          jump-node-start
+          jump-node-end
+          jump-node-excerpt
+          jump-node-language-context
+          jump-node-last-visit
+          jump-edge?
+          jump-edge-from
+          jump-edge-to
+          jump-edge-kind
+          jump-edge-timestamp
+          jump-graph?
+          jump-graph-nodes
+          jump-graph-edges
+          jump-graph-limit
           default-workbench-session-path
           workbench-session-encode
           workbench-session-decode
@@ -1153,6 +1175,7 @@
           (soda editor indentation-runtime)
           (soda editor interaction)
           (soda editor inspector)
+          (soda editor jump-graph)
           (soda editor kill)
           (soda editor language-session)
           (soda editor location)

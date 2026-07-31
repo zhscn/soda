@@ -9,6 +9,10 @@
           workbench-mru
           workbench-slots
           workbench-pinned-window-ids
+          workbench-jump-graph
+          workbench-location-lists
+          workbench-current-location-list
+          workbench-set-current-location-list!
           workbench-set-name!
           workbench-set-layout!
           workbench-set-active-window-id!
@@ -24,6 +28,8 @@
           workbench-unpin-window!
           workbench-window-pinned?)
   (import (rnrs)
+          (soda editor jump-graph)
+          (soda editor location)
           (soda editor window))
 
   (define-record-type
@@ -36,7 +42,11 @@
       (mutable active-window-id)
       (mutable mru)
       (mutable slots)
-      (mutable pinned-window-ids)))
+      (mutable pinned-window-ids)
+      (immutable jump-graph workbench-jump-graph)
+      (mutable location-lists
+               workbench-location-lists
+               workbench-location-lists-set!)))
 
   (define (exact-positive-integer? value)
     (and (integer? value) (exact? value) (positive? value)))
@@ -131,7 +141,9 @@
         "pinned windows must be unique layout leaves"
         pinned-window-ids))
     (%make-workbench
-      id name scope layout active-window-id mru slots pinned-window-ids))
+      id name scope layout active-window-id mru slots pinned-window-ids
+      (make-jump-graph)
+      '()))
 
   (define (require-workbench who value)
     (unless (workbench? value)
@@ -234,6 +246,37 @@
         buffer-ids))
     (workbench-mru-set! value buffer-ids)
     buffer-ids)
+
+  (define (workbench-current-location-list value)
+    (require-workbench 'workbench-current-location-list value)
+    (and
+      (pair? (workbench-location-lists value))
+      (car (workbench-location-lists value))))
+
+  (define (workbench-set-current-location-list! value locations)
+    (require-workbench 'workbench-set-current-location-list! value)
+    (unless (or (not locations) (location-list? locations))
+      (assertion-violation
+        'workbench-set-current-location-list!
+        "expected a LocationList or #f"
+        locations))
+    (cond
+      [(not locations)
+       (workbench-location-lists-set! value '())]
+      [(and
+         (pair? (workbench-location-lists value))
+         (eq?
+           (location-list-source
+             (car (workbench-location-lists value)))
+           (location-list-source locations)))
+       (workbench-location-lists-set!
+         value
+         (cons locations (cdr (workbench-location-lists value))))]
+      [else
+       (workbench-location-lists-set!
+         value
+         (cons locations (workbench-location-lists value)))])
+    locations)
 
   (define (workbench-slot-window-id value role)
     (require-workbench 'workbench-slot-window-id value)

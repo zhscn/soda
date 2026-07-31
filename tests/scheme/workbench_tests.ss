@@ -3,6 +3,7 @@
         (soda document)
         (soda editor buffer)
         (soda editor display-placement)
+        (soda editor location)
         (soda editor project)
         (soda editor resource-context)
         (soda editor state)
@@ -50,10 +51,33 @@
     (= (length (window-node-leaves (workbench-layout secondary))) 1))
   "creating a workbench must preserve an independent scope and layout")
 
+(define primary-locations
+  (make-location-list
+    'primary
+    (list
+      (make-location-item
+        (buffer-id buffer)
+        "/work/fixture/primary.cpp"
+        (buffer-revision buffer)
+        0 0 #f '()))))
+(editor-set-current-location-list! editor primary-locations)
+
 (editor-switch-workbench! editor (workbench-id secondary))
 (check
-  (eq? (editor-active-workbench editor) secondary)
-  "switch must activate the selected workbench")
+  (and
+    (eq? (editor-active-workbench editor) secondary)
+    (not (editor-current-location-list editor)))
+  "switch must activate the selected workbench and its location-list stack")
+(define secondary-locations
+  (make-location-list
+    'secondary
+    (list
+      (make-location-item
+        (buffer-id buffer)
+        "/work/fixture/secondary.cpp"
+        (buffer-revision buffer)
+        0 0 #f '()))))
+(editor-set-current-location-list! editor secondary-locations)
 (editor-split-window! editor 'vertical)
 (check
   (= (length (window-node-leaves (workbench-layout secondary))) 2)
@@ -63,6 +87,7 @@
 (check
   (and
     (eq? (editor-active-workbench editor) primary)
+    (eq? (editor-current-location-list editor) primary-locations)
     (= (length (editor-window-leaves editor)) 1))
   "switch must restore the target layout without changing another layout")
 

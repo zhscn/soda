@@ -15,6 +15,7 @@
           (soda editor command-runtime)
           (soda editor display-placement)
           (soda editor keymap)
+          (soda editor jump-graph)
           (soda editor location)
           (soda editor resource-context)
           (soda editor state)
@@ -235,6 +236,14 @@
                     source-location 'source kind source-language-context)
                   (editor-location->item
                     location 'target kind target-language-context))])
+         (let ([workbench
+                 (editor-workbench-for-view editor (view-id view))])
+           (when workbench
+             (jump-graph-record!
+               (workbench-jump-graph workbench)
+               (jump-history-entry-source jump)
+               (jump-history-entry-target jump)
+               kind)))
          (navigation-walk-replace-entries!
            walk
            (append base-entries (list location)))
@@ -326,22 +335,29 @@
                [placeholder (pending-jump-placeholder pending)])
           (navigation-walk-replace-entries!
             walk (append (drop-last entries) (list target)))
-          (navigation-walk-replace-jumps!
-            walk
-            (append
-              (drop-last jumps)
-              (list
-                (make-jump-history-entry
-                  (pending-jump-kind pending)
-                  (jump-history-entry-source jump)
-                  (editor-location->item
-                    target
-                    'target
+          (let ([completed
+                  (make-jump-history-entry
                     (pending-jump-kind pending)
-                    (resource-context-language-context
-                      (editor-view-resource-context
-                        editor
-                        (view-id view))))))))
+                    (jump-history-entry-source jump)
+                    (editor-location->item
+                      target
+                      'target
+                      (pending-jump-kind pending)
+                      (resource-context-language-context
+                        (editor-view-resource-context
+                          editor
+                          (view-id view)))))])
+            (navigation-walk-replace-jumps!
+              walk
+              (append (drop-last jumps) (list completed)))
+            (let ([workbench
+                    (editor-workbench-for-view editor (view-id view))])
+              (when workbench
+                (jump-graph-record!
+                  (workbench-jump-graph workbench)
+                  (jump-history-entry-source completed)
+                  (jump-history-entry-target completed)
+                  (pending-jump-kind pending)))))
           (navigation-walk-pending-set! walk #f)
           (editor-location-close! placeholder)
           (activate-location! editor view target)
