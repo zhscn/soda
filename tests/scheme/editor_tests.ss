@@ -2049,7 +2049,10 @@
       'editor.minibuffer)
     (= (frame-cursor-row multi-window-prompt-frame) 1)
     (= (view-viewport-rows first-window-view) 1)
-    (= (view-viewport-rows second-window-view) 1))
+    (= (view-viewport-rows second-window-view) 1)
+    (= (view-viewport-columns
+         (editor-active-view window-editor))
+       9))
   (error 'editor-tests
          "minibuffer did not reflow the complete window tree"
          (and

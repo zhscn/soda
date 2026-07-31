@@ -20,6 +20,7 @@
           editor-set-view-buffer!
           editor-base-view
           editor-window-root
+          editor-root-viewport-columns
           editor-active-window-id
           editor-set-window-root!
           editor-set-active-window-id!
@@ -1483,6 +1484,30 @@
       (editor-active-prompt-completion value)
       (view-completion (editor-active-view value))))
 
+  (define (editor-root-viewport-columns value)
+    (require-open-editor
+      'editor-root-viewport-columns
+      value)
+    (let measure ([node (editor-window-root value)])
+      (cond
+        [(window-leaf? node)
+         (view-viewport-columns
+           (editor-view-ref
+             value
+             (window-leaf-view-id node)))]
+        [(window-split? node)
+         (let ([columns
+                 (map measure (window-split-children node))])
+           (if
+             (eq? (window-split-orientation node) 'horizontal)
+             (apply + columns)
+             (apply max columns)))]
+        [else
+         (assertion-violation
+           'editor-root-viewport-columns
+           "invalid editor window node"
+           node)])))
+
   (define (pop-completion-input-state! view)
     (when (eq? (input-state-name (view-current-input-state view))
                'completion)
@@ -2204,7 +2229,7 @@
         1
         (prompt-input-viewport-columns
           request
-          (view-viewport-columns origin-view)))
+          (editor-root-viewport-columns value)))
       (view-set-caret!
         view
         (buffer-text-size buffer))

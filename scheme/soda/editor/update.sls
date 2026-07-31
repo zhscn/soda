@@ -268,7 +268,7 @@
               1
               (prompt-input-viewport-columns
                 (prompt-session-request session)
-                columns))
+                (editor-root-viewport-columns editor)))
             (ensure-view-visible! prompt-view))))
       '()))
 
