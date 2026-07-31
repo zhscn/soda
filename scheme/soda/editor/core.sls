@@ -19,6 +19,8 @@
           editor-set-view-buffer!
           editor-set-view-display-map!
           editor-clear-view-display-map!
+          editor-replace-view-folds!
+          editor-clear-view-folds!
           editor-base-view
           editor-window-root
           editor-active-window-id
@@ -475,6 +477,13 @@
           view-keymap-layers
           view-input-states
           view-display-map
+          view-folds
+          fold?
+          fold-kind
+          fold-capture
+          fold-start
+          fold-end
+          view-effective-display-map
           view-completion
           view-current-input-state
           view-push-input-state!
@@ -753,6 +762,8 @@
           (soda editor event)
           (soda editor evaluator)
           (soda editor file)
+          (soda editor fold)
+          (soda editor fold-runtime)
           (soda editor input-state)
           (soda editor indentation-protocol)
           (soda editor indentation-runtime)
@@ -961,6 +972,7 @@
       (install-prefix-commands! editor)
       (install-basic-commands! editor)
       (install-structural-commands! editor)
+      (install-fold-commands! editor)
       (install-transform-commands! editor)
       (install-navigation-commands! editor)
       (install-buffer-commands! editor)

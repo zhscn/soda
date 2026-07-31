@@ -162,6 +162,9 @@
           view-keymap-layers
           view-input-states
           view-display-map
+          view-folds
+          editor-replace-view-folds!
+          editor-clear-view-folds!
           view-navigation-walk
           view-completion
           view-current-input-state
@@ -188,6 +191,7 @@
           (soda editor display)
           (soda editor display-map)
           (soda editor event)
+          (soda editor fold)
           (soda editor hook)
           (soda editor input-state)
           (soda editor interaction)
@@ -225,6 +229,7 @@
       (mutable completion view-completion view-completion-set!)
       (mutable pending-keys view-pending-keys view-pending-keys-set!)
       (mutable display-map view-display-map view-display-map-set!)
+      (mutable folds view-folds view-folds-set!)
       (immutable navigation-walk view-navigation-walk)))
 
   (define-record-type (editor %make-editor editor?)
@@ -1229,6 +1234,7 @@
                #f
                '()
                #f
+               '()
                (make-navigation-walk))])
       (hashtable-set! (editor-view-table value) id view)
       (editor-view-ids-set!
@@ -1261,6 +1267,8 @@
           "an open editor requires at least one view"
           id))
       (cancel-view-completion! value view)
+      (for-each fold-close! (view-folds view))
+      (view-folds-set! view '())
       (when (view-mark-anchor view)
         (document-remove-anchor!
           (buffer-document (view-buffer view))
@@ -1367,6 +1375,8 @@
     (let ([view (editor-view-ref value view-id)]
           [buffer (editor-buffer-ref value buffer-id)])
       (cancel-view-completion! value view)
+      (for-each fold-close! (view-folds view))
+      (view-folds-set! view '())
       (let ([anchor
               (document-create-anchor!
                 (buffer-document buffer)
@@ -1418,6 +1428,40 @@
       (when (view-display-map view)
         (view-display-map-set! view #f)
         (editor-invalidate! value 'viewport))))
+
+  (define (editor-replace-view-folds! value view-id folds)
+    (require-open-editor 'editor-replace-view-folds! value)
+    (unless (and (list? folds) (for-all fold? folds))
+      (assertion-violation
+        'editor-replace-view-folds!
+        "expected a list of folds"
+        folds))
+    (let* ([view (editor-view-ref value view-id)]
+           [document-id
+             (document-id
+               (buffer-document (view-buffer view)))])
+      (unless
+        (for-all
+          (lambda (fold)
+            (and
+              (not (fold-closed? fold))
+              (= (fold-document-id fold) document-id)))
+          folds)
+        (assertion-violation
+          'editor-replace-view-folds!
+          "folds must belong to the view document"
+          folds))
+      (for-each
+        (lambda (fold)
+          (unless (memq fold folds)
+            (fold-close! fold)))
+        (view-folds view))
+      (view-folds-set! view folds)
+      (editor-invalidate! value 'viewport)
+      folds))
+
+  (define (editor-clear-view-folds! value view-id)
+    (editor-replace-view-folds! value view-id '()))
 
   (define (editor-prompts value)
     (require-open-editor 'editor-prompts value)
@@ -4051,6 +4095,7 @@
                #f
                '()
                #f
+               '()
                (make-navigation-walk))]
            [value
              (%make-editor
@@ -4225,6 +4270,8 @@
                 (view-completion view)))
             (view-completion-set! view #f))
           (view-pending-keys-set! view '())
+          (for-each fold-close! (view-folds view))
+          (view-folds-set! view '())
           (when (view-mark-anchor view)
             (document-remove-anchor!
               (buffer-document (view-buffer view))

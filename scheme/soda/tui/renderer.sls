@@ -886,15 +886,7 @@
            [buffer (editor-render-context-buffer context)]
            [text (editor-render-context-text context)]
            [display-map
-             (let ([candidate (view-display-map view)])
-               (and
-                 candidate
-                 (display-map-valid-for?
-                   candidate
-                   (document-id (buffer-document buffer))
-                   (buffer-revision buffer))
-                 (not (display-map-identity? candidate))
-                 candidate))]
+             (view-effective-display-map view)]
            [projections
              (visible-line-projections
                display-map

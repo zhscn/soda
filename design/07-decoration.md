@@ -123,6 +123,12 @@ Fold { anchor_range, placeholder, kind, collapsed }
 fold 不删除 Text，也不进入 Document undo。编辑触及 fold 时，policy 可以展开
 对应 range；anchor 负责其余编辑下的位置结算。
 
+Tree-sitter major mode 的 `folds` query 产生 revision-scoped 候选范围。
+`display.toggle-fold` 选择包含 point 的最小候选，或 point 之后的首个候选；
+`display.fold-all` 折叠互不重叠的最外层候选，`display.unfold-all` 清空当前 View
+的折叠。折叠状态使用 Document anchors 保存，因此普通编辑后仍可为新 revision
+重建 DisplayMap。切换 View 的 Buffer 或关闭 View 时释放这些 anchors。
+
 fold、virtual run、replacement run、tab 展开与 soft wrap 按固定顺序组成
 DisplayMap。DisplayMap 属于 View 并绑定 Document identity 与 Buffer revision；
 revision 不匹配时使用 identity DisplayMap。renderer 只区分真实 chunk 与统一的

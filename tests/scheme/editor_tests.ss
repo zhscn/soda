@@ -8361,6 +8361,41 @@
   (error 'editor-tests
          "Tree-sitter indent captures did not drive region indentation"
          (utf8->string (buffer-bytes json-indent-buffer))))
+(view-set-caret! (editor-active-view json-editor) 0)
+(editor-update!
+  json-editor
+  (make-command-message 'display.toggle-fold #f))
+(let* ([view (editor-active-view json-editor)]
+       [frame (render-editor-frame json-editor 4 40)])
+  (unless
+    (and
+      (= (length (view-folds view)) 1)
+      (string=?
+        (substring (frame-row-text frame 0) 0 5)
+        "{ … }"))
+    (error 'editor-tests
+           "fold query did not create a collapsed View transform"
+           (frame-row-text frame 0))))
+(buffer-replace-range!
+  json-indent-buffer
+  (substring-position json-indent-expected "\"soda\"")
+  (substring-position json-indent-expected "\"soda\"")
+  (string->utf8 "the-"))
+(let ([frame (render-editor-frame json-editor 4 40)])
+  (unless
+    (string=?
+      (substring (frame-row-text frame 0) 0 5)
+      "{ … }")
+    (error 'editor-tests
+           "fold anchors did not survive a document edit")))
+(view-set-caret! (editor-active-view json-editor) 0)
+(editor-update!
+  json-editor
+  (make-command-message 'display.toggle-fold #f))
+(unless
+  (null? (view-folds (editor-active-view json-editor)))
+  (error 'editor-tests
+         "toggle-fold did not expand an existing fold"))
 (editor-register-tree-sitter-file-association!
   json-editor
   'test-json-files

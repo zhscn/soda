@@ -171,6 +171,10 @@ highlight、fold、indent、text object、locals 与 injection 使用具名 quer
 选择各自 capture 集合。provider 没有 query 能力时返回 unavailable；调用方按
 major mode 的 syntax capability 和 feature 选择回退实现。
 
+`fold` capture 由 View fold runtime 转换为 anchored collapsed range，并在绘制时
+组合成 DisplayMap replacement。query 只定义可折叠语法范围；每个 View 独立保存
+哪些范围处于 collapsed 状态。
+
 Buffer 在 commit、undo、redo 和显式接受 native change 后同步 session。若 provider
 不能接受 change chain，则从目标 snapshot 重建。View 借用 syntax view 时必须显式
 close；provider session 关闭前释放全部 view。
