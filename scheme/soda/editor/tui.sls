@@ -24,6 +24,7 @@
           (soda runtime)
           (soda vfs)
           (soda tui commands)
+          (soda tui clipboard)
           (soda tui input)
           (soda tui output)
           (soda tui renderer))
@@ -411,6 +412,8 @@
         executor
         'quit
         (lambda (payload) (make-effect-result #f '())))
+      (install-terminal-clipboard-effect-handler!
+        executor queue-control-output!)
       (set! file-adapter
         (install-file-runtime! executor runtime))
       (set! scheme-interface-adapter

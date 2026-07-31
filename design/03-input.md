@@ -23,6 +23,7 @@
 | `edit.delete-duplicate-lines` | 已实现 |
 | `edit.align-regexp` | 已实现 |
 | whitespace cleanup policy 与 command | 已实现 |
+| OSC 52 clipboard capability 与显式 clipboard command | 已实现 |
 
 本文只定义文本编辑器当前使用的输入路径。minibuffer 的读取与焦点规则由
 [12-minibuffer.md](12-minibuffer.md) 定义；command 与 interactive 参数由
@@ -206,6 +207,13 @@ Buffer，prefix argument 强制选择整个 Buffer。`whitespace-cleanup-trailin
 horizontal whitespace，`whitespace-cleanup-final-newline` 取 `preserve`、`ensure` 或
 `remove`，`whitespace-cleanup-max-final-blank-lines` 限制文件末尾空行。文件末尾策略只
 作用于 whole-buffer target，全部修改作为一次 Buffer transaction 提交。
+
+Kill ring 是复制和粘贴历史的权威状态。`clipboard.copy-region` 总是先把 active region
+写入 kill ring；`clipboard-integration` 为 `osc52` 时再产生 terminal clipboard
+effect，由 TUI output queue 发送 OSC 52，`clipboard-osc52-max-bytes` 限制源文本大小。
+超过限制或 integration 为 `internal` 时保留纯内部复制。`clipboard.paste` 从 kill ring
+经普通 command target 和 Buffer transaction 粘贴；终端发来的系统粘贴继续走 text
+input 或 bracketed-paste input，不建立第二条编辑路径。
 
 ## Search 与 query replace
 

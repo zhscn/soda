@@ -972,6 +972,7 @@
           (soda editor commands basic)
           (soda editor commands bookmark)
           (soda editor commands buffer)
+          (soda editor commands clipboard)
           (soda editor commands comment)
           (soda editor commands paragraph)
           (soda editor commands configuration)
@@ -1068,6 +1069,9 @@
 
   (define (final-newline-policy? value)
     (memq value '(preserve ensure remove)))
+
+  (define (clipboard-integration? value)
+    (memq value '(internal osc52)))
 
   (define (install-core-settings! editor)
     (for-each
@@ -1245,7 +1249,19 @@
             (or (not value)
                 (and (integer? value) (exact? value) (not (negative? value)))))
           "Maximum blank lines retained at end of file, or #f for no limit."
-          'document)))
+          'document)
+        (make-setting-definition
+          'clipboard-integration
+          'osc52
+          clipboard-integration?
+          "Clipboard backend used by explicit clipboard copy commands."
+          'chrome)
+        (make-setting-definition
+          'clipboard-osc52-max-bytes
+          100000
+          positive-exact-integer?
+          "Maximum source byte length sent through OSC 52."
+          'chrome)))
     editor)
 
   (define (install-core-auto-modes! editor)
@@ -1291,6 +1307,7 @@
       (install-prefix-commands! editor)
       (install-basic-commands! editor)
       (install-bookmark-commands! editor)
+      (install-clipboard-commands! editor)
       (install-comment-commands! editor)
       (install-paragraph-commands! editor)
       (install-structural-commands! editor)

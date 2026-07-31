@@ -43,6 +43,7 @@
               view-set-first-visual-row!
               view-set-mark!)
         (soda tui commands)
+        (soda tui clipboard)
         (soda tui component)
         (soda tui frame)
         (soda tui input)
@@ -2935,6 +2936,70 @@
     (string->utf8 "a\nb"))
   (error 'editor-tests "whitespace cleanup ignored final newline policy"))
 (editor-close! whitespace-cleanup-editor)
+
+(define clipboard-buffer
+  (make-buffer
+    9769
+    (make-document "copy" 9769)
+    "*clipboard*"
+    'fundamental-mode))
+(define clipboard-editor (make-editor clipboard-buffer))
+(define clipboard-view (editor-active-view clipboard-editor))
+(view-set-mark! clipboard-view 0)
+(view-set-caret! clipboard-view 4)
+(define clipboard-effects
+  (editor-update!
+    clipboard-editor
+    (make-command-message 'clipboard.copy-region #f)))
+(unless
+  (and
+    (= (length clipboard-effects) 1)
+    (eq? (command-effect-kind (car clipboard-effects))
+         'terminal.clipboard-copy)
+    (bytevector=?
+      (car (command-effect-payload (car clipboard-effects)))
+      (string->utf8 "copy"))
+    (bytevector=?
+      (car (editor-kill-ring clipboard-editor))
+      (string->utf8 "copy")))
+  (error 'editor-tests "clipboard copy did not retain kill-ring authority"))
+(define clipboard-control #f)
+(define clipboard-executor (make-effect-executor))
+(install-terminal-clipboard-effect-handler!
+  clipboard-executor
+  (lambda (control) (set! clipboard-control control)))
+(execute-effects! clipboard-executor clipboard-effects)
+(unless
+  (and
+    (string=?
+      clipboard-control
+      (string-append
+        (string (integer->char 27))
+        "]52;c;Y29weQ=="
+        (string (integer->char 7))))
+    (not (osc52-copy-control (string->utf8 "copy") 3)))
+  (error 'editor-tests "clipboard copy did not encode OSC 52 output"))
+(view-set-caret! clipboard-view 4)
+(editor-update!
+  clipboard-editor
+  (make-command-message 'clipboard.paste #f))
+(unless
+  (bytevector=?
+    (buffer-bytes clipboard-buffer)
+    (string->utf8 "copycopy"))
+  (error 'editor-tests "clipboard paste bypassed the normal yank path"))
+(buffer-undo! clipboard-buffer)
+(editor-set-buffer-setting!
+  clipboard-editor clipboard-buffer 'clipboard-integration 'internal)
+(view-set-mark! clipboard-view 0)
+(view-set-caret! clipboard-view 4)
+(unless
+  (null?
+    (editor-update!
+      clipboard-editor
+      (make-command-message 'clipboard.copy-region #f)))
+  (error 'editor-tests "internal clipboard mode emitted terminal output"))
+(editor-close! clipboard-editor)
 
 (define yank-pop-document (make-document "" 977))
 (define yank-pop-buffer
