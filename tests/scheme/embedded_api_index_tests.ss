@@ -86,7 +86,20 @@
     (eq? (cadr chez-arity-entry) 'procedure))
   (error
     'embedded-api-index-tests
-    "embedded Scheme API catalog is missing editor or top-environment metadata"))
+    "embedded Scheme API catalog is missing editor or top-environment metadata"
+    (list
+      (cons 'soda-api-count
+            (length soda-built-in-api-index))
+      (cons 'soda-library-count
+            (length soda-built-in-library-index))
+      (cons 'editor-command editor-command-entry)
+      (cons 'completion-item completion-item-accessor-entry)
+      (cons 'scheme-api-count
+            (length scheme-built-in-api-index))
+      (cons 'scheme-libraries
+            scheme-built-in-library-index)
+      (cons 'rnrs-map rnrs-map-entry)
+      (cons 'chez-arity chez-arity-entry))))
 
 (define top-environment-source
   (string-append

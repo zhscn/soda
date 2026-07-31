@@ -108,6 +108,9 @@ function(soda_embed_chez_application target)
       "${staging_dir}"
       "${SODA_CHEZ_PROGRAM}"
       "${editor_boot}"
+    COMMAND "${CMAKE_COMMAND}" -E rm -f
+      "${staging_dir}/soda/editor/builtin-api-index.so"
+      "${staging_dir}/soda/editor/builtin-api-index.wpo"
     COMMAND
       "${SODA_XXD_EXECUTABLE}"
       -i
