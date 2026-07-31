@@ -11,6 +11,16 @@
   (define adapter
     (install-managed-process-runtime! executor runtime))
   (define owner (list 'language-server-owner))
+  (define (string-contains? value needle)
+    (let ([limit (- (string-length value) (string-length needle))])
+      (let loop ([index 0])
+        (and
+          (<= index limit)
+          (or
+            (string=?
+              (substring value index (+ index (string-length needle)))
+              needle)
+            (loop (+ index 1)))))))
   (define process
     (make-managed-process
       "language-server"
@@ -135,5 +145,66 @@
         (zero? (managed-process-event-status event)))
       (error 'managed-process-tests
              "managed process exit lifecycle differs")))
+
+  (define terminal-process
+    (make-managed-process
+      "terminal"
+      '("/bin/sh"
+        "-c"
+        "IFS= read line; size=$(stty size); printf 'line=%s size=%s' \"$line\" \"$size\"")
+      ""
+      owner
+      'terminal.output
+      'terminal.exit
+      'pty
+      24
+      80))
+  (execute!
+    (make-command-effect
+      'managed-process.start
+      terminal-process))
+  (execute!
+    (make-command-effect
+      'managed-process.resize-terminal
+      (make-managed-process-resize-request
+        terminal-process
+        40
+        120)))
+  (execute!
+    (make-command-effect
+      'managed-process.write
+      (make-managed-process-write-request
+        terminal-process
+        (string->utf8 "terminal input\n"))))
+  (define terminal-output "")
+  (let loop ()
+    (let* ([message (next-message)]
+           [event (internal-command-message-argument message)])
+      (case (managed-process-event-kind event)
+        [(process-output)
+         (unless
+           (= (managed-process-event-flags event) process-terminal)
+           (error 'managed-process-tests
+                  "terminal output has the wrong stream flag"))
+         (set! terminal-output
+           (string-append
+             terminal-output
+             (utf8->string (managed-process-event-data event))))
+         (loop)]
+        [(process-exit)
+         (unless
+           (and
+             (zero? (managed-process-event-status event))
+             (= (managed-process-terminal-rows terminal-process) 40)
+             (= (managed-process-terminal-columns terminal-process) 120)
+             (eq? (managed-process-transport terminal-process) 'pty))
+           (error 'managed-process-tests
+                  "terminal process lifecycle differs"))])))
+  (unless
+    (and
+      (string-contains? terminal-output "terminal input")
+      (string-contains? terminal-output "size=40 120"))
+    (error 'managed-process-tests
+           "terminal process did not observe input and resize"))
 
   (runtime-close! runtime)

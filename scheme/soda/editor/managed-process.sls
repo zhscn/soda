@@ -4,6 +4,9 @@
           managed-process-name
           managed-process-arguments
           managed-process-working-directory
+          managed-process-transport
+          managed-process-terminal-rows
+          managed-process-terminal-columns
           managed-process-owner
           managed-process-state
           managed-process-generation
@@ -22,6 +25,7 @@
           managed-process-event-restarted?
           make-managed-process-write-request
           make-managed-process-signal-request
+          make-managed-process-resize-request
           install-managed-process-runtime!
           managed-process-runtime?
           managed-process-runtime-handle-event)
@@ -37,6 +41,13 @@
       name
       arguments
       working-directory
+      transport
+      (mutable terminal-rows
+               managed-process-terminal-rows
+               managed-process-terminal-rows-set!)
+      (mutable terminal-columns
+               managed-process-terminal-columns
+               managed-process-terminal-columns-set!)
       owner
       output-command
       exit-command
@@ -68,6 +79,9 @@
   (define-record-type managed-process-signal-request
     (fields process signal))
 
+  (define-record-type managed-process-resize-request
+    (fields process rows columns))
+
   (define-record-type managed-process-event
     (fields
       process
@@ -84,53 +98,59 @@
       managed-process-runtime?)
     (fields runtime processes))
 
-  (define (make-managed-process
-            name
-            arguments
-            working-directory
-            owner
-            output-command
-            exit-command)
-    (unless (and (string? name) (positive? (string-length name)))
-      (assertion-violation
-        'make-managed-process
-        "name must be a non-empty string"
-        name))
-    (unless
-      (and
-        (pair? arguments)
-        (list? arguments)
-        (for-all string? arguments)
-        (positive? (string-length (car arguments))))
-      (assertion-violation
-        'make-managed-process
-        "arguments must be a non-empty list of strings"
-        arguments))
-    (unless (string? working-directory)
-      (assertion-violation
-        'make-managed-process
-        "working directory must be a string"
-        working-directory))
-    (unless (and (symbol? output-command) (symbol? exit-command))
-      (assertion-violation
-        'make-managed-process
-        "output and exit commands must be symbols"
-        output-command
-        exit-command))
-    (%make-managed-process
-      name
-      arguments
-      working-directory
-      owner
-      output-command
-      exit-command
-      'created
-      0
-      #f
-      #f
-      #f
-      #f
-      #f))
+  (define make-managed-process
+    (case-lambda
+      [(name arguments working-directory owner output-command exit-command)
+       (make-managed-process
+         name arguments working-directory owner output-command exit-command
+         'pipe 24 80)]
+      [(name arguments working-directory owner output-command exit-command
+             transport terminal-rows terminal-columns)
+       (unless (and (string? name) (positive? (string-length name)))
+         (assertion-violation
+           'make-managed-process
+           "name must be a non-empty string"
+           name))
+       (unless
+         (and
+           (pair? arguments)
+           (list? arguments)
+           (for-all string? arguments)
+           (positive? (string-length (car arguments))))
+         (assertion-violation
+           'make-managed-process
+           "arguments must be a non-empty list of strings"
+           arguments))
+       (unless (string? working-directory)
+         (assertion-violation
+           'make-managed-process
+           "working directory must be a string"
+           working-directory))
+       (unless (memq transport '(pipe pty))
+         (assertion-violation
+           'make-managed-process
+           "transport must be pipe or pty"
+           transport))
+       (unless
+         (and
+           (integer? terminal-rows) (exact? terminal-rows)
+           (positive? terminal-rows)
+           (integer? terminal-columns) (exact? terminal-columns)
+           (positive? terminal-columns))
+         (assertion-violation
+           'make-managed-process
+           "terminal rows and columns must be positive exact integers"
+           terminal-rows terminal-columns))
+       (unless (and (symbol? output-command) (symbol? exit-command))
+         (assertion-violation
+           'make-managed-process
+           "output and exit commands must be symbols"
+           output-command
+           exit-command))
+       (%make-managed-process
+         name arguments working-directory transport
+         terminal-rows terminal-columns owner output-command exit-command
+         'created 0 #f #f #f #f #f)]))
 
   (define (managed-process-running? process)
     (unless (managed-process? process)
@@ -165,10 +185,18 @@
         "managed process cannot start from its current state"
         (managed-process-state process)))
     (let ([source
-            (runtime-spawn-process!
-              (managed-process-runtime-runtime adapter)
-              (managed-process-arguments process)
-              (managed-process-working-directory process))])
+            (if
+              (eq? (managed-process-transport process) 'pty)
+              (runtime-spawn-terminal-process!
+                (managed-process-runtime-runtime adapter)
+                (managed-process-arguments process)
+                (managed-process-working-directory process)
+                (managed-process-terminal-rows process)
+                (managed-process-terminal-columns process))
+              (runtime-spawn-process!
+                (managed-process-runtime-runtime adapter)
+                (managed-process-arguments process)
+                (managed-process-working-directory process)))])
       (managed-process-generation-set!
         process
         (+ 1 (managed-process-generation process)))
@@ -220,11 +248,50 @@
       (assertion-violation
         'managed-process.close-input
         "managed process input is already closed"))
-    (runtime-close-process-input!
-      (managed-process-runtime-runtime adapter)
-      (managed-process-source process))
+    (if
+      (eq? (managed-process-transport process) 'pty)
+      (runtime-write-process!
+        (managed-process-runtime-runtime adapter)
+        (managed-process-source process)
+        #vu8(4))
+      (runtime-close-process-input!
+        (managed-process-runtime-runtime adapter)
+        (managed-process-source process)))
     (managed-process-input-open?-set! process #f)
     (make-effect-result #t '()))
+
+  (define (resize-process-terminal! adapter request)
+    (unless (managed-process-resize-request? request)
+      (assertion-violation
+        'managed-process.resize-terminal
+        "expected a managed process resize request"
+        request))
+    (let ([process
+            (require-running-process
+              'managed-process.resize-terminal
+              (managed-process-resize-request-process request))]
+          [rows (managed-process-resize-request-rows request)]
+          [columns (managed-process-resize-request-columns request)])
+      (unless (eq? (managed-process-transport process) 'pty)
+        (assertion-violation
+          'managed-process.resize-terminal
+          "managed process does not use a pseudo-terminal"))
+      (unless
+        (and
+          (integer? rows) (exact? rows) (positive? rows)
+          (integer? columns) (exact? columns) (positive? columns))
+        (assertion-violation
+          'managed-process.resize-terminal
+          "terminal rows and columns must be positive exact integers"
+          rows columns))
+      (runtime-resize-process-terminal!
+        (managed-process-runtime-runtime adapter)
+        (managed-process-source process)
+        rows
+        columns)
+      (managed-process-terminal-rows-set! process rows)
+      (managed-process-terminal-columns-set! process columns)
+      (make-effect-result #t '())))
 
   (define (signal-process! adapter request)
     (unless (managed-process-signal-request? request)
@@ -308,6 +375,11 @@
         'managed-process.close-input
         (lambda (process)
           (close-process-input! adapter process)))
+      (register-effect-handler!
+        executor
+        'managed-process.resize-terminal
+        (lambda (request)
+          (resize-process-terminal! adapter request)))
       (register-effect-handler!
         executor
         'managed-process.signal

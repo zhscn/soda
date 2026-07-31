@@ -82,6 +82,9 @@
           managed-process-name
           managed-process-arguments
           managed-process-working-directory
+          managed-process-transport
+          managed-process-terminal-rows
+          managed-process-terminal-columns
           managed-process-owner
           managed-process-state
           managed-process-generation
@@ -100,6 +103,7 @@
           managed-process-event-restarted?
           make-managed-process-write-request
           make-managed-process-signal-request
+          make-managed-process-resize-request
           editor-evaluator
           editor-debugger
           editor-set-debugger!
