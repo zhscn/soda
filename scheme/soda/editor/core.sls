@@ -915,6 +915,7 @@
           (soda editor commands basic)
           (soda editor commands buffer)
           (soda editor commands comment)
+          (soda editor commands paragraph)
           (soda editor commands configuration)
           (soda editor commands theme)
           (soda editor commands transform)
@@ -1052,6 +1053,12 @@
           "Closing delimiter used by block comment commands."
           'document)
         (make-setting-definition
+          'fill-column
+          80
+          positive-exact-integer?
+          "Preferred column for paragraph filling."
+          'document)
+        (make-setting-definition
           'read-only?
           #f
           boolean?
@@ -1169,6 +1176,7 @@
       (install-prefix-commands! editor)
       (install-basic-commands! editor)
       (install-comment-commands! editor)
+      (install-paragraph-commands! editor)
       (install-structural-commands! editor)
       (install-fold-commands! editor)
       (install-transform-commands! editor)

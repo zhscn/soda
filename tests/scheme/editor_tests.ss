@@ -2025,6 +2025,40 @@
   (error 'editor-tests "comment-dwim did not uncomment Scheme lines"))
 (editor-close! comment-editor)
 
+(define paragraph-source "one two three four five\n")
+(define paragraph-buffer
+  (make-buffer
+    1012
+    (make-document paragraph-source 1012)
+    "paragraph.txt"
+    'fundamental-mode))
+(define paragraph-editor (make-editor paragraph-buffer))
+(define paragraph-view (editor-active-view paragraph-editor))
+(buffer-set-local-setting! paragraph-buffer 'fill-column 12)
+(editor-update!
+  paragraph-editor
+  (make-command-message 'edit.fill-paragraph #f))
+(unless
+  (bytevector=?
+    (buffer-bytes paragraph-buffer)
+    (string->utf8 "one two\nthree four\nfive\n"))
+  (error 'editor-tests "fill-paragraph did not wrap at fill-column"))
+(buffer-replace-range!
+  paragraph-buffer
+  0
+  (bytevector-length (buffer-bytes paragraph-buffer))
+  (string->utf8 "one two three"))
+(view-set-caret! paragraph-view 13)
+(editor-enable-minor-mode!
+  paragraph-editor paragraph-buffer 'auto-fill-mode)
+(send! paragraph-editor (make-input-decoder) (string->utf8 " "))
+(unless
+  (bytevector=?
+    (buffer-bytes paragraph-buffer)
+    (string->utf8 "one two\nthree"))
+  (error 'editor-tests "auto-fill-mode did not fill after whitespace"))
+(editor-close! paragraph-editor)
+
 (define structural-source
   "(define (f x)\n  (list x '(a b)))\n\n(g 1 2)")
 (define structural-document
