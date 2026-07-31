@@ -5,6 +5,9 @@
         (soda document)
         (soda editor buffer)
         (soda editor command)
+        (only (soda editor completion)
+              completion-session-apply-response!
+              completion-session-schedule-requests!)
         (soda editor core)
         (soda editor cpp-language)
         (soda editor diagnostics)
@@ -4476,6 +4479,47 @@
         (< (abs (completion-match-score match)) 1000))
       (error 'editor-tests
              "fzf score escaped its completion style tier"))))
+
+(let* ([source
+         (make-choice-source
+           'malformed-provider-test
+           '((category . malformed-provider-test))
+           (lambda (input point) (cons 0 point))
+           (lambda (query) '())
+           (lambda (value) #f)
+           (lambda (generation) #f))]
+       [session
+         (make-completion-session
+           937
+           (make-prompt-completion-target 937 0 0)
+           source
+           '(broken-provider))])
+  (completion-session-refresh! session "")
+  (completion-session-schedule-requests! session)
+  (unless
+    (completion-session-apply-response!
+      session
+      (completion-session-generation session)
+      'broken-provider
+      '(not-a-completion-item)
+      #f)
+    (error 'editor-tests
+           "current malformed provider response was rejected"))
+  (unless
+    (and
+      (null? (completion-session-items session))
+      (not (completion-session-pending? session))
+      (exists
+        (lambda (result)
+          (and
+            (eq?
+              (completion-provider-result-provider result)
+              'broken-provider)
+            (completion-provider-result-complete? result)
+            (null? (completion-provider-result-items result))))
+        (completion-session-provider-results session)))
+    (error 'editor-tests
+           "malformed provider response did not become an empty final result")))
 
 (define completion-document
   (make-document (string->utf8 "alpha alpine beta al") 940))

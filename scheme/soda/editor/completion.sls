@@ -948,31 +948,32 @@
           [(completion-item-identity=? item (car remaining)) index]
           [else (loop (cdr remaining) (+ index 1))]))))
 
-  (define (validate-provider-items who provider items)
-    (unless
-      (and
-        (list? items)
-        (for-all
-          (lambda (item)
+  (define (provider-items-valid? provider items)
+    (and
+      (list? items)
+      (let loop ([remaining items] [ids '()])
+        (or
+          (null? remaining)
+          (let ([item (car remaining)])
             (and
               (completion-item? item)
-              (eq? provider (completion-item-provider item))))
-          items))
+              (eq? provider (completion-item-provider item))
+              (not
+                (exists
+                  (lambda (value)
+                    (equal? (completion-item-id item) value))
+                  ids))
+              (loop
+                (cdr remaining)
+                (cons (completion-item-id item) ids))))))))
+
+  (define (validate-provider-items who provider items)
+    (unless (provider-items-valid? provider items)
       (assertion-violation
         who
-        "provider response contains invalid completion items"
+        "provider response contains invalid or duplicate completion items"
         provider
-        items))
-    (let loop ([remaining items] [ids '()])
-      (unless (null? remaining)
-        (let ([id (completion-item-id (car remaining))])
-          (when (exists (lambda (value) (equal? id value)) ids)
-            (assertion-violation
-              who
-              "provider response contains duplicate item ids"
-              provider
-              id))
-          (loop (cdr remaining) (cons id ids))))))
+        items)))
 
   (define (items->provider-results items)
     (define (add-item item results)
@@ -1529,28 +1530,26 @@
               generation
               provider)))
         #f
-        (begin
-          (validate-provider-items
-            'completion-session-apply-response!
-            provider
-            items)
-          (let ([selected (completion-session-selected-item session)])
+        (let* ([valid? (provider-items-valid? provider items)]
+               [response-items (if valid? items '())]
+               [response-complete? (if valid? complete? #t)]
+               [selected (completion-session-selected-item session)])
             (completion-session-provider-results-set!
               session
               (replace-provider-result
                 (completion-session-provider-results session)
                 (make-completion-provider-result
                   provider
-                  complete?
-                  items
+                  response-complete?
+                  response-items
                   #t)))
-            (when complete?
+            (when response-complete?
               (completion-session-finish-provider-request!
                 session
                 generation
                 provider))
             (rebuild-session-items! session selected)
-            #t))))
+            #t)))
 
   (define (completion-session-replace-item!
             session
