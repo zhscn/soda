@@ -215,7 +215,7 @@
   (define completion-window-max-rows 6)
 
   (define-record-type completion-provider-result
-    (fields provider complete? items))
+    (fields provider complete? items asynchronous?))
 
   (define-record-type completion-request
     (fields session-id
@@ -1004,7 +1004,8 @@
           (make-completion-provider-result
             provider
             #t
-            items)))
+            items
+            #f)))
       groups))
 
   (define (replace-provider-result results replacement)
@@ -1020,6 +1021,32 @@
            (cons replacement (cdr remaining)))]
         [else
          (loop (cdr remaining) (cons (car remaining) prefix))])))
+
+  (define (merge-refilter-results session synchronous-results)
+    (fold-left
+      (lambda (results result)
+        (replace-provider-result results result))
+      (filter
+        (lambda (result)
+          (completion-provider-result-asynchronous? result))
+        (completion-session-provider-results session))
+      synchronous-results))
+
+  (define (completion-session-provider-needs-request?
+            session
+            provider)
+    (let ([result
+            (find
+              (lambda (result)
+                (and
+                  (eq?
+                    provider
+                    (completion-provider-result-provider result))
+                  (completion-provider-result-asynchronous? result)))
+              (completion-session-provider-results session))])
+      (or
+        (not result)
+        (not (completion-provider-result-complete? result)))))
 
   (define (adjust-session-viewport! session)
     (let* ([items (completion-session-items session)]
@@ -1279,7 +1306,12 @@
             (map
               (lambda (provider)
                 (completion-session-request session provider))
-              (completion-session-provider-names session))])
+              (filter
+                (lambda (provider)
+                  (completion-session-provider-needs-request?
+                    session
+                    provider))
+                (completion-session-provider-names session)))])
       (completion-session-active-requests-set! session started)
       (values cancelled started)))
 
@@ -1346,8 +1378,15 @@
          (let* ([generation
                   (+ (completion-session-generation session) 1)]
                 [source (completion-session-source session)]
+                [selected
+                  (and
+                    (not force?)
+                    (completion-session-selected-item session))]
                 [items
-                  (choice-source-candidates source query)])
+                  (choice-source-candidates source query)]
+                [synchronous-results
+                  (provider-groups->results
+                    (items->provider-results items))])
            (choice-source-cancel!
              source
              (completion-session-generation session))
@@ -1356,9 +1395,12 @@
            (completion-session-context-set! session context)
            (completion-session-provider-results-set!
              session
-             (provider-groups->results
-               (items->provider-results items)))
-           (rebuild-session-items! session #f)))
+             (if force?
+                 synchronous-results
+                 (merge-refilter-results
+                   session
+                   synchronous-results)))
+           (rebuild-session-items! session selected)))
        session]))
 
   (define (completion-session-provider-request-active?
@@ -1430,7 +1472,8 @@
                 (make-completion-provider-result
                   provider
                   complete?
-                  items)))
+                  items
+                  #t)))
             (when complete?
               (completion-session-finish-provider-request!
                 session

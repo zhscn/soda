@@ -1582,7 +1582,13 @@
                        (not
                          (= revision
                             (document-completion-target-revision
-                              target)))])
+                              target)))]
+                     [revision-only-change?
+                       (and
+                         revision-changed?
+                         (string=?
+                           (car query+target)
+                           (completion-session-query completion)))])
                 (document-completion-target-refresh!
                   target
                   revision
@@ -1591,7 +1597,7 @@
                   completion
                   (car query+target)
                   #f
-                  revision-changed?)
+                  revision-only-change?)
                 (unless
                   (= generation
                      (completion-session-generation completion))
@@ -2092,11 +2098,30 @@
           (lambda ()
             (compute-prompt-completion-context value completion))
           (lambda (query target context)
-            (let ([generation
-                    (completion-session-generation completion)])
+            (let* ([generation
+                     (completion-session-generation completion)]
+                   [old-target
+                     (completion-session-target completion)]
+                   [field-changed?
+                     (or
+                       (not
+                         (prompt-completion-target? old-target))
+                       (not
+                         (=
+                           (prompt-completion-target-start old-target)
+                           (prompt-completion-target-start target)))
+                       (not
+                         (=
+                           (prompt-completion-target-replacement-end
+                             old-target)
+                           (prompt-completion-target-replacement-end
+                             target))))])
               (completion-session-target-set! completion target)
               (completion-session-refresh!
-                completion query context)
+                completion
+                query
+                context
+                field-changed?)
               (unless
                 (= generation
                    (completion-session-generation completion))

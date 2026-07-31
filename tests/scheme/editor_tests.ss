@@ -4588,14 +4588,14 @@
       (document-completion-target-revision target)
       (list
         (make-completion-item
-          'altar
+          'alpine-extra
           'semantic
-          "altar"
-          "altar"
-          "altar"
+          "alpine-extra"
+          "alpine-extra"
+          "alpine-extra"
           "semantic"
           #f
-          'altar))
+          'alpine-extra))
       #t))
   (unless
     (and
@@ -4655,30 +4655,51 @@
          (= (document-completion-target-end target) 21)
          (= (document-completion-target-revision target)
             (buffer-revision completion-buffer))
-         (= (length (completion-session-items completion)) 2))
+         (= (length (completion-session-items completion)) 3))
     (error 'editor-tests
            "document completion did not follow command-loop edits")))
 
 (unless
-  (and
-    (= (length completion-update-effects) 1)
-    (eq? (command-effect-kind
-           (car completion-update-effects))
-         'completion.request))
+  (null? completion-update-effects)
   (error 'editor-tests
-         "query change did not start replacement provider work"))
-(define completion-update-result
-  (execute-effects!
-    completion-executor
-    completion-update-effects))
-(for-each
-  (lambda (message)
-    (editor-update! completion-editor message))
-  (effect-result-messages completion-update-result))
+         "complete provider was resent after query change"
+         (map command-effect-kind completion-update-effects)))
 (let ([completion (editor-active-completion completion-editor)])
   (unless (= (length (completion-session-items completion)) 3)
     (error 'editor-tests
-           "current async response was not refiltered and merged")))
+           "complete async response was not locally refiltered")))
+
+(let* ([completion (editor-active-completion completion-editor)]
+       [generation (completion-session-generation completion)]
+       [start-count semantic-start-count])
+  (let ([extension-effects
+          (send!
+            completion-editor
+            completion-decoder
+            (string->utf8 "i"))])
+    (unless
+      (and
+        (= (completion-session-generation completion) (+ generation 1))
+        (= semantic-start-count start-count)
+        (null? extension-effects)
+        (exists
+          (lambda (item)
+            (equal? (completion-item-id item) 'alpine-extra))
+          (completion-session-items completion)))
+      (error 'editor-tests
+             "complete provider result was not locally refiltered")))
+  (let ([contraction-effects
+          (send!
+            completion-editor
+            completion-decoder
+            (bytes 127))])
+    (unless
+      (and
+        (string=? (completion-session-query completion) "alp")
+        (= semantic-start-count start-count)
+        (null? contraction-effects))
+      (error 'editor-tests
+             "complete provider was resent after query contraction"))))
 
 (let* ([completion (editor-active-completion completion-editor)]
        [generation (completion-session-generation completion)]
@@ -4751,7 +4772,7 @@
 (unless
   (and
     (not (editor-active-completion completion-editor))
-    (= semantic-start-count 3)
+    (= semantic-start-count 2)
     (= semantic-cancel-count 0)
     (bytevector=?
       (buffer-bytes completion-buffer)
