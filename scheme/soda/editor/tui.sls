@@ -16,6 +16,7 @@
           (soda editor file-runtime)
           (soda editor managed-process)
           (soda editor process-comint)
+          (soda editor project-resource-runtime)
           (soda editor repl)
           (soda editor save-place-store)
           (soda editor scheme-interface-runtime)
@@ -266,6 +267,7 @@
           [scheme-interface-adapter #f]
           [scheme-project-build-adapter #f]
           [managed-process-adapter #f]
+          [project-resource-adapter #f]
           [vfs-adapter #f])
       (define (cancel-flush-timer!)
         (when flush-timer
@@ -425,6 +427,9 @@
       (set! managed-process-adapter
         (install-managed-process-runtime!
           executor runtime))
+      (set! project-resource-adapter
+        (install-project-resource-runtime!
+          executor runtime))
       (set! vfs-adapter
         (install-vfs-runtime! editor runtime))
       (set! evaluation-adapter
@@ -501,6 +506,10 @@
                          [interface-message
                            (scheme-interface-runtime-handle-event
                              scheme-interface-adapter
+                             (car events))]
+                         [project-message
+                           (project-resource-runtime-handle-event
+                             project-resource-adapter
                              (car events))])
                      (process
                        (cdr events)
@@ -513,11 +522,19 @@
                          (or
                            (not interface-message)
                            (handle-session-message!
-                             interface-message)))))]
+                             interface-message))
+                         (or
+                           (not project-message)
+                           (handle-session-message!
+                             project-message)))))]
                   [(eq? (event-kind (car events)) 'directory-scan)
                    (let ([message
                            (vfs-runtime-handle-event
                              vfs-adapter
+                             (car events))]
+                         [project-message
+                           (project-resource-runtime-handle-event
+                             project-resource-adapter
                              (car events))])
                      (process
                        (cdr events)
@@ -526,7 +543,11 @@
                          (or
                            (not message)
                            (handle-session-message!
-                             message)))))]
+                             message))
+                         (or
+                           (not project-message)
+                           (handle-session-message!
+                             project-message)))))]
                   [(memq
                      (event-kind (car events))
                      '(process-output process-exit))
@@ -559,6 +580,10 @@
           (when resize-timer
             (guard (condition [else #f])
               (runtime-cancel! runtime resize-timer)))
+          (when project-resource-adapter
+            (guard (condition [else #f])
+              (project-resource-runtime-close!
+                project-resource-adapter)))
           (guard (condition [else #f])
             (drain-output!))
           (when screen?

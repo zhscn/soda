@@ -8,7 +8,8 @@
 | 显式 process working directory 与异步请求 origin | 部分实现 |
 | 通用 `ResourceContext`、View origin 与文件选择上下文冻结 | 部分实现 |
 | Project identity、发现缓存与 known registry | 已实现 |
-| Project resource enumerator、settings layer 与 task definition runtime | 未实现 |
+| Project resource enumerator 与 watch lifecycle | 已实现 |
+| Project settings layer 与 task definition runtime | 未实现 |
 | Workbench scope、slot、visitor、provenance 与持久化 | 未实现 |
 | intent 驱动的统一 display placement policy | 部分实现 |
 
@@ -109,8 +110,8 @@ index 或 process。一个 Buffer 可以通过路径发现 home Project，也可
 描述值，LanguageSession 是否启动由 language policy 决定。
 
 resource enumerator 由 Project 操作按需启动，通过 libuv directory scan 逐层展开
-目录，并通过异步 file read 产生调用方需要的 resource snapshot。隐藏目录、VCS
-metadata、构建输出和依赖目录由枚举 policy 排除。enumerator 不为后台索引创建
+目录并产生路径 snapshot。需要内容的调用方通过异步 file read 单独读取资源。隐藏目录、
+VCS metadata、构建输出和依赖目录由枚举 policy 排除。enumerator 不为后台索引创建
 Buffer；用户访问资源时才由普通文件打开流程建立 Buffer identity。
 
 目录 watch 只承担失效通知。合并后的异步重扫定义 resource 集合，接入新增子目录并

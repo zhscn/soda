@@ -5,6 +5,7 @@
           (soda editor command-runtime)
           (soda editor completion)
           (soda editor project)
+          (soda editor project-resource)
           (soda editor prompt)
           (soda editor resource-context)
           (soda editor state))
@@ -94,12 +95,72 @@
              (editor-forget-project!
                editor
                (project-id project)))
+        (begin
+          (editor-clear-project-resource-snapshot!
+            editor
+            (project-id project))
+          (editor-set-status-message!
+            editor
+            (string-append
+              "Forgot Project: "
+              (project-label project)))
+          (list
+            (make-command-effect
+              'project.stop-resources
+              (project-id project))))
+        (begin
+          (editor-set-status-message! editor "No Project selected")
+          '()))))
+
+  (define-command (refresh-project-resources-command context)
+    "Discover the current Project and refresh its resource snapshot."
+    (interactive)
+    (let* ([editor (command-context-editor context)]
+           [project
+             (current-project
+               editor
+               (command-context-view context))])
+      (if project
+          (let* ([project-id (project-id project)]
+                 [current
+                   (editor-project-resource-snapshot
+                     editor
+                     project-id)]
+                 [generation
+                   (if current
+                       (+ 1
+                          (project-resource-snapshot-generation
+                            current))
+                       0)])
+            (editor-remember-project! editor project)
+            (editor-set-status-message!
+              editor
+              (string-append
+                "Scanning Project: "
+                (project-label project)))
+            (list
+              (make-command-effect
+                'project.refresh-resources
+                (make-project-resource-request
+                  project
+                  generation
+                  default-project-resource-policy))))
+          (begin
+            (editor-set-status-message! editor "No Project found")
+            '()))))
+
+  (define (apply-project-resource-snapshot-command context)
+    (let* ([editor (command-context-editor context)]
+           [snapshot (command-context-argument context)])
+      (when
+        (editor-apply-project-resource-snapshot! editor snapshot)
         (editor-set-status-message!
           editor
           (string-append
-            "Forgot Project: "
-            (project-label project)))
-        (editor-set-status-message! editor "No Project selected"))
+            "Project resources: "
+            (number->string
+              (length
+                (project-resource-snapshot-resources snapshot))))))
       '()))
 
   (define (install-project-commands! editor)
@@ -115,5 +176,17 @@
         'project.forget
         forget-project-command
         "Forget a known Project."))
+    (editor-register-command!
+      editor
+      (make-interactive-context-command
+        'project.refresh-resources
+        refresh-project-resources-command
+        "Refresh the current Project resource snapshot."))
+    (editor-register-internal-command!
+      editor
+      (make-internal-context-command
+        'project.apply-resource-snapshot
+        apply-project-resource-snapshot-command
+        "Apply an asynchronous Project resource snapshot."))
     editor)
 )

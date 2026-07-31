@@ -261,6 +261,21 @@
           editor-known-projects
           editor-remember-project!
           editor-forget-project!
+          make-project-resource-policy
+          project-resource-policy?
+          project-resource-policy-include-hidden?
+          project-resource-policy-ignored-directory-names
+          project-resource-policy-include-entry?
+          default-project-resource-policy
+          make-project-resource-snapshot
+          project-resource-snapshot?
+          project-resource-snapshot-project-id
+          project-resource-snapshot-generation
+          project-resource-snapshot-resources
+          project-resource-snapshot-directories
+          editor-project-resource-snapshot
+          editor-apply-project-resource-snapshot!
+          editor-clear-project-resource-snapshot!
           make-resource-context
           resource-context?
           resource-context-base-resource
@@ -1059,6 +1074,7 @@
           (soda editor process-comint)
           (soda editor project)
           (soda editor project-commands)
+          (soda editor project-resource)
           (soda editor repl)
           (soda editor resource-context)
           (soda editor scheme-completion)

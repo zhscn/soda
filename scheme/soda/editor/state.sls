@@ -95,6 +95,9 @@
           editor-known-projects
           editor-remember-project!
           editor-forget-project!
+          editor-project-resource-snapshot
+          editor-apply-project-resource-snapshot!
+          editor-clear-project-resource-snapshot!
           editor-setting-store
           editor-setting-names
           editor-setting-definition
@@ -260,6 +263,7 @@
           (soda editor prefix)
           (soda editor prompt)
           (soda editor project)
+          (soda editor project-resource)
           (soda editor resource-context)
           (soda editor setting)
           (soda editor theme)
@@ -362,6 +366,8 @@
       (immutable languages editor-language-catalog)
       (immutable auto-modes editor-auto-mode-catalog)
       (immutable projects editor-project-catalog)
+      (immutable project-resource-snapshots
+                 editor-project-resource-snapshots)
       (immutable settings editor-setting-store)
       (immutable completion-providers
                  editor-completion-provider-catalog)
@@ -3232,6 +3238,53 @@
         (editor-invalidate! value 'configuration))
       forgotten))
 
+  (define (editor-project-resource-snapshot value project-id)
+    (require-open-editor 'editor-project-resource-snapshot value)
+    (hashtable-ref
+      (editor-project-resource-snapshots value)
+      project-id
+      #f))
+
+  (define (editor-apply-project-resource-snapshot! value snapshot)
+    (require-open-editor
+      'editor-apply-project-resource-snapshot!
+      value)
+    (unless (project-resource-snapshot? snapshot)
+      (assertion-violation
+        'editor-apply-project-resource-snapshot!
+        "expected a project resource snapshot"
+        snapshot))
+    (let* ([project-id
+             (project-resource-snapshot-project-id snapshot)]
+           [current
+             (editor-project-resource-snapshot value project-id)])
+      (if
+        (and
+          current
+          (< (project-resource-snapshot-generation snapshot)
+             (project-resource-snapshot-generation current)))
+        #f
+        (begin
+          (hashtable-set!
+            (editor-project-resource-snapshots value)
+            project-id
+            snapshot)
+          (editor-invalidate! value 'project)
+          snapshot))))
+
+  (define (editor-clear-project-resource-snapshot! value project-id)
+    (require-open-editor
+      'editor-clear-project-resource-snapshot!
+      value)
+    (let ([snapshot
+            (editor-project-resource-snapshot value project-id)])
+      (when snapshot
+        (hashtable-delete!
+          (editor-project-resource-snapshots value)
+          project-id)
+        (editor-invalidate! value 'project))
+      snapshot))
+
   (define (editor-setting-buffer who editor buffer)
     (unless (buffer? buffer)
       (assertion-violation who "expected a buffer" buffer))
@@ -5271,6 +5324,7 @@
                (buffer-language-catalog buffer)
                (make-auto-mode-catalog)
                (make-project-catalog)
+               (make-hashtable equal-hash equal?)
                (buffer-setting-store buffer)
                (make-completion-provider-catalog)
                '()
