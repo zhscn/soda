@@ -857,6 +857,88 @@
          (editor-change-ring change-ring-editor)))
 (editor-close! change-ring-editor)
 
+(define bookmark-buffer
+  (make-buffer
+    7403
+    (make-document "aa\nbbb\n" 7403)
+    "/tmp/soda-bookmark-a.scm"
+    'fundamental-mode))
+(define bookmark-editor (make-editor bookmark-buffer))
+(define bookmark-view (editor-active-view bookmark-editor))
+(define bookmark-other
+  (editor-create-buffer!
+    bookmark-editor
+    "*bookmark-other*"
+    'fundamental-mode
+    ""))
+(define bookmark-entry
+  (editor-set-bookmark!
+    bookmark-editor "work" bookmark-buffer 4 "note"))
+(buffer-replace-range! bookmark-buffer 0 0 (string->utf8 "!"))
+(unless
+  (and
+    (= (bookmark-offset-for-buffer bookmark-entry bookmark-buffer) 5)
+    (string=? (bookmark-resource bookmark-entry)
+              "/tmp/soda-bookmark-a.scm")
+    (= (bookmark-line bookmark-entry) 1)
+    (= (bookmark-column bookmark-entry) 1)
+    (equal? (bookmark-annotation bookmark-entry) "note"))
+  (error 'editor-tests "bookmark anchor or fallback metadata differs"))
+(unless
+  (and
+    (editor-rename-bookmark! bookmark-editor "work" "renamed")
+    (editor-find-bookmark bookmark-editor "renamed")
+    (not (editor-find-bookmark bookmark-editor "work")))
+  (error 'editor-tests "bookmark rename failed"))
+(editor-set-view-buffer!
+  bookmark-editor
+  (view-id bookmark-view)
+  (buffer-id bookmark-other))
+(editor-remove-buffer! bookmark-editor (buffer-id bookmark-buffer))
+(unless
+  (and
+    (not (bookmark-buffer-id bookmark-entry))
+    (string=? (bookmark-resource bookmark-entry)
+              "/tmp/soda-bookmark-a.scm"))
+  (error 'editor-tests
+         "removing a Buffer did not detach its bookmark anchor"))
+(define bookmark-reopened
+  (editor-create-buffer!
+    bookmark-editor
+    "/tmp/soda-bookmark-a.scm"
+    'fundamental-mode
+    "x\n012345\n"))
+(execute-command-definition!
+  (editor-command-registry bookmark-editor)
+  (command-definition-ref
+    (editor-command-registry bookmark-editor)
+    'bookmark.jump)
+  (make-command-context bookmark-editor bookmark-view #f #f #f)
+  '("renamed"))
+(unless
+  (and
+    (eq? (view-buffer bookmark-view) bookmark-reopened)
+    (= (view-caret bookmark-view) 3)
+    (eq? (jump-history-entry-kind
+           (car (reverse (editor-jump-history bookmark-editor))))
+         'bookmark))
+  (error 'editor-tests "bookmark jump did not use its fallback location"))
+(editor-update!
+  bookmark-editor
+  (make-command-message 'bookmark.list #f))
+(unless
+  (and
+    (string=?
+      (buffer-resource (view-buffer bookmark-view))
+      "*Bookmarks*")
+    (string-contains?
+      (utf8->string (buffer-bytes (view-buffer bookmark-view)))
+      "renamed"))
+  (error 'editor-tests "bookmark list Buffer was not materialized"))
+(unless (editor-delete-bookmark! bookmark-editor "renamed")
+  (error 'editor-tests "bookmark delete failed"))
+(editor-close! bookmark-editor)
+
 (define unicode-document (make-document "a\néx\n" 74))
 (define unicode-buffer
   (make-buffer 20 unicode-document "*unicode*" 'fundamental-mode))

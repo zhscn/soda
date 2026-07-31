@@ -315,6 +315,20 @@
           editor-change-ring
           editor-previous-change!
           editor-next-change!
+          bookmark?
+          bookmark-name
+          bookmark-resource
+          bookmark-buffer-id
+          bookmark-revision
+          bookmark-line
+          bookmark-column
+          bookmark-annotation
+          editor-bookmarks
+          editor-set-bookmark!
+          editor-find-bookmark
+          editor-rename-bookmark!
+          editor-delete-bookmark!
+          bookmark-offset-for-buffer
           editor-push-kill!
           editor-record-kill!
           editor-current-kill
@@ -943,6 +957,7 @@
           (soda editor command-runtime)
           (soda editor command-target)
           (soda editor commands basic)
+          (soda editor commands bookmark)
           (soda editor commands buffer)
           (soda editor commands comment)
           (soda editor commands paragraph)
@@ -1224,6 +1239,7 @@
       (install-command-runtime-commands! editor)
       (install-prefix-commands! editor)
       (install-basic-commands! editor)
+      (install-bookmark-commands! editor)
       (install-comment-commands! editor)
       (install-paragraph-commands! editor)
       (install-structural-commands! editor)

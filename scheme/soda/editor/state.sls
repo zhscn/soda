@@ -131,6 +131,20 @@
           editor-change-ring
           editor-previous-change!
           editor-next-change!
+          bookmark?
+          bookmark-name
+          bookmark-resource
+          bookmark-buffer-id
+          bookmark-revision
+          bookmark-line
+          bookmark-column
+          bookmark-annotation
+          editor-bookmarks
+          editor-set-bookmark!
+          editor-find-bookmark
+          editor-rename-bookmark!
+          editor-delete-bookmark!
+          bookmark-offset-for-buffer
           editor-last-yank
           editor-set-last-yank!
           editor-current-location-list
@@ -325,6 +339,7 @@
       (mutable change-ring-index
                editor-change-ring-index
                editor-change-ring-index-set!)
+      (mutable bookmarks editor-bookmarks editor-bookmarks-set!)
       (mutable last-yank editor-last-yank editor-last-yank-set!)
       (mutable current-location-list
                editor-current-location-list
@@ -385,6 +400,19 @@
 
   (define-record-type change-ring-entry
     (fields buffer-id anchor class))
+
+  (define-record-type
+    (bookmark %make-bookmark bookmark?)
+    (fields
+      (mutable name bookmark-name bookmark-name-set!)
+      resource
+      revision
+      (mutable buffer-id bookmark-buffer-id bookmark-buffer-id-set!)
+      (mutable document bookmark-document bookmark-document-set!)
+      (mutable anchor bookmark-anchor bookmark-anchor-set!)
+      line
+      column
+      annotation))
 
   (define-record-type
     (editor-buffer-configuration-state
@@ -1188,6 +1216,7 @@
         buffer)
       (editor-clear-buffer-global-marks! value buffer)
       (editor-clear-buffer-changes! value buffer)
+      (editor-detach-buffer-bookmarks! value buffer)
       (hashtable-delete! (editor-buffer-table value) id)
       (let ([resource (buffer-resource buffer)])
         (when
@@ -4238,6 +4267,127 @@
       (editor-change-ring-entries-set! editor kept)
       (editor-change-ring-index-set! editor -1)))
 
+  (define (editor-find-bookmark editor name)
+    (require-open-editor 'editor-find-bookmark editor)
+    (unless (string? name)
+      (assertion-violation
+        'editor-find-bookmark "expected a bookmark name" name))
+    (find
+      (lambda (entry) (string=? (bookmark-name entry) name))
+      (editor-bookmarks editor)))
+
+  (define (close-bookmark! entry)
+    (when (and (bookmark-document entry) (bookmark-anchor entry))
+      (document-remove-anchor!
+        (bookmark-document entry)
+        (bookmark-anchor entry)))
+    (bookmark-document-set! entry #f)
+    (bookmark-anchor-set! entry #f)
+    (bookmark-buffer-id-set! entry #f))
+
+  (define (editor-delete-bookmark! editor name)
+    (require-open-editor 'editor-delete-bookmark! editor)
+    (let ([entry (editor-find-bookmark editor name)])
+      (and
+        entry
+        (begin
+          (close-bookmark! entry)
+          (editor-bookmarks-set!
+            editor
+            (filter
+              (lambda (candidate) (not (eq? candidate entry)))
+              (editor-bookmarks editor)))
+          #t))))
+
+  (define (editor-set-bookmark! editor name buffer offset annotation)
+    (require-open-editor 'editor-set-bookmark! editor)
+    (unless (and (string? name)
+                 (positive? (string-length name))
+                 (buffer? buffer)
+                 (eq? buffer
+                      (hashtable-ref
+                        (editor-buffer-table editor)
+                        (buffer-id buffer)
+                        #f))
+                 (exact-non-negative-integer? offset))
+      (assertion-violation
+        'editor-set-bookmark!
+        "invalid bookmark name, buffer, or offset"
+        name
+        buffer
+        offset))
+    (let ([position
+            (with-document-text
+              (buffer-document buffer)
+              (lambda (text) (text-position text offset)))])
+      (editor-delete-bookmark! editor name)
+      (let ([entry
+              (%make-bookmark
+                name
+                (buffer-resource buffer)
+                (buffer-revision buffer)
+                (buffer-id buffer)
+                (buffer-document buffer)
+                (document-create-anchor!
+                  (buffer-document buffer)
+                  offset
+                  anchor-before-insertion)
+                (car position)
+                (cdr position)
+                annotation)])
+        (editor-bookmarks-set!
+          editor
+          (cons entry (editor-bookmarks editor)))
+        entry)))
+
+  (define (editor-rename-bookmark! editor old-name new-name)
+    (require-open-editor 'editor-rename-bookmark! editor)
+    (unless (and (string? new-name)
+                 (positive? (string-length new-name)))
+      (assertion-violation
+        'editor-rename-bookmark!
+        "new bookmark name must be non-empty"
+        new-name))
+    (let ([entry (editor-find-bookmark editor old-name)])
+      (and
+        entry
+        (begin
+          (let ([collision (editor-find-bookmark editor new-name)])
+            (when (and collision (not (eq? collision entry)))
+              (editor-delete-bookmark! editor new-name)))
+          (bookmark-name-set! entry new-name)
+          entry))))
+
+  (define (bookmark-offset-for-buffer entry buffer)
+    (unless (and (bookmark? entry) (buffer? buffer))
+      (assertion-violation
+        'bookmark-offset-for-buffer
+        "expected a bookmark and buffer"))
+    (if (and (bookmark-anchor entry)
+             (eq? (bookmark-document entry)
+                  (buffer-document buffer)))
+        (document-anchor-offset
+          (buffer-document buffer)
+          (bookmark-anchor entry))
+        (with-document-text
+          (buffer-document buffer)
+          (lambda (text)
+            (let* ([line
+                     (min
+                       (bookmark-line entry)
+                       (- (text-line-count text) 1))]
+                   [start (text-line-start text line)]
+                   [end (text-line-content-end text line)])
+              (+ start (min (bookmark-column entry) (- end start))))))))
+
+  (define (editor-detach-buffer-bookmarks! editor buffer)
+    (for-each
+      (lambda (entry)
+        (when (and (bookmark-buffer-id entry)
+                   (= (bookmark-buffer-id entry) (buffer-id buffer)))
+          (close-bookmark! entry)))
+      (editor-bookmarks editor)))
+
   (define (replace-view-caret-anchor! value offset)
     (let* ([document (buffer-document (view-buffer value))]
            [anchor
@@ -4773,6 +4923,7 @@
                '()
                '()
                -1
+               '()
                #f
                #f
                '()
@@ -4908,6 +5059,8 @@
         (editor-change-ring-entries value))
       (editor-change-ring-entries-set! value '())
       (editor-change-ring-index-set! value -1)
+      (for-each close-bookmark! (editor-bookmarks value))
+      (editor-bookmarks-set! value '())
       (for-each
         (lambda (view)
           (when (view-completion view)

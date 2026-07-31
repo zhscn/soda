@@ -6,6 +6,7 @@
 |---|---|
 | `EditorLocation`、per-View back/forward walk | 已实现 |
 | source/target `LocationItem` jump history entry | 已实现 |
+| anchor-backed bookmark 与列表 Buffer | 已实现 |
 | `LocationItem`、`LocationList` 与 next/previous navigation | 已实现 |
 | Scheme definition/reference/diagnostic producer | 已实现 |
 | Workbench 级语义 `JumpGraph` | 未实现 |
@@ -53,6 +54,11 @@ source/target `LocationItem`，用于保留发起时的 resource、revision、ra
 live `EditorLocation` 继续负责编辑后的 anchor 跟踪。definition、xref、diagnostic、
 search、goto-line 和显式 API jump 都写入该入口。back/forward 激活位置前先验证目标
 Buffer 和 anchor；已移除 Buffer 的 detached entry 会被跳过。
+
+bookmark catalog 由 Editor 持有。每个 bookmark 保存名称、resource、source revision、
+活 Buffer anchor、行列 fallback 和可选 annotation。覆盖、重命名和删除会结算旧 anchor；
+Buffer 移除时 bookmark 保留 resource 与 fallback，重新打开资源后按夹取后的行列恢复。
+bookmark jump 写入普通 jump history，bookmark list 则物化为只读工具 Buffer。
 
 显式 jump 在 walk 尾部追加 target。用户从历史中间发起新 jump 时，walk 先追加
 当前位置的 revisit，再追加新 target，因此 back 能回到分叉点，继续 back 仍可
