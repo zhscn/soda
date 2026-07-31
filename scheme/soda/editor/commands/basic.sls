@@ -1762,6 +1762,12 @@
     (editor-bind-key!
       editor
       (list
+        (stroke 'character (char->integer #\g) 2)
+        (stroke 'character (char->integer #\g) 2))
+      'move.goto-line-column)
+    (editor-bind-key!
+      editor
+      (list
         (stroke 'character (char->integer #\x) 4)
         (stroke 'character (char->integer #\u) 0))
       'edit.undo)

@@ -4815,6 +4815,17 @@
     (= (completion-session-selected-index completion) 0)
     (error 'editor-tests
            "document completion policy did not cycle forward")))
+(let ([completion (editor-active-completion completion-editor)])
+  (send! completion-editor completion-decoder (bytes 14))
+  (unless
+    (= (completion-session-selected-index completion) 1)
+    (error 'editor-tests
+           "C-n did not select the next completion candidate"))
+  (send! completion-editor completion-decoder (bytes 16))
+  (unless
+    (= (completion-session-selected-index completion) 0)
+    (error 'editor-tests
+           "C-p did not select the previous completion candidate")))
 
 (define completion-frame
   (render-editor-frame completion-editor 6 30))
@@ -7650,3 +7661,82 @@
          "status severity did not style the message"
          chrome-message-text))
 (editor-close! chrome-editor)
+
+(define binding-document (make-document "" 9903))
+(define binding-buffer
+  (make-buffer 9903 binding-document "*bindings*" 'fundamental-mode))
+(define binding-editor (make-editor binding-buffer))
+(define (default-binding-command sequence)
+  (call-with-values
+    (lambda ()
+      (keymap-resolve
+        (keymap-catalog-find
+          (editor-keymap-catalog binding-editor)
+          'editor.default)
+        sequence))
+    (lambda (status command)
+      (and (eq? status 'command) command))))
+(for-each
+  (lambda (entry)
+    (unless (eq? (default-binding-command (car entry)) (cdr entry))
+      (error 'editor-tests
+             "Emacs-style key sequence was not bound"
+             (cdr entry))))
+  (list
+    (cons
+      (list (make-key-stroke 'character (char->integer #\:) 2))
+      'scheme.eval-expression)
+    (cons
+      (list
+        (make-key-stroke 'character (char->integer #\c) 4)
+        (make-key-stroke 'character (char->integer #\b) 4))
+      'scheme.eval-buffer)
+    (cons
+      (list
+        (make-key-stroke 'character (char->integer #\g) 2)
+        (make-key-stroke 'character (char->integer #\g) 2))
+      'move.goto-line-column)
+    (cons
+      (list
+        (make-key-stroke 'character (char->integer #\g) 2)
+        (make-key-stroke 'character (char->integer #\n) 2))
+      'xref.next-location)
+    (cons
+      (list
+        (make-key-stroke 'character (char->integer #\g) 2)
+        (make-key-stroke 'character (char->integer #\p) 2))
+      'xref.previous-location)
+    (cons
+      (list
+        (make-key-stroke 'character (char->integer #\g) 2)
+        (make-key-stroke 'character (char->integer #\d) 2))
+      'diagnostics.list-workspace)
+    (cons
+      (list
+        (make-key-stroke 'character (char->integer #\x) 4)
+        (make-key-stroke 'character (char->integer #\x) 0)
+        (make-key-stroke 'character (char->integer #\g) 0))
+      'file.reload)))
+(define binding-decoder (make-input-decoder))
+(editor-update! binding-editor (make-resize-message 8 60))
+(send! binding-editor binding-decoder (bytes 27 120))
+(let* ([completion (editor-active-prompt-completion binding-editor)]
+       [items (completion-session-items completion)]
+       [item-for
+         (lambda (name)
+           (find
+             (lambda (item)
+               (eq? (completion-item-payload item) name))
+             items))]
+       [extended (item-for 'execute-extended-command)]
+       [find-file (item-for 'file.find)])
+  (unless
+    (and
+      extended
+      (equal? (completion-item-annotation extended) "M-x")
+      (string? (completion-item-documentation extended))
+      find-file
+      (equal? (completion-item-annotation find-file) "C-x C-f"))
+    (error 'editor-tests
+           "M-x candidates did not carry key binding annotations")))
+(editor-close! binding-editor)

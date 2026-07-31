@@ -1095,15 +1095,17 @@
       (let ([annotation (completion-item-annotation item)])
         (when
           (and annotation (< annotation-column columns))
-          (draw-string!
-            frame
-            row
-            (+ column annotation-column)
-            (- columns annotation-column)
-            annotation
-            base-faces
-            base-style
-            sources)))))
+          (let ([annotation-faces
+                  (append base-faces '(popup.annotation))])
+            (draw-string!
+              frame
+              row
+              (+ column annotation-column)
+              (- columns annotation-column)
+              annotation
+              annotation-faces
+              (resolve-faces theme annotation-faces)
+              sources))))))
 
   (define (render-completions-component! context frame rectangle)
     (let* ([editor (editor-render-context-editor context)]

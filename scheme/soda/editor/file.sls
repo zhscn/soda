@@ -1926,4 +1926,11 @@
         (make-key-stroke 'character (char->integer #\x) 4)
         (make-key-stroke 'character (char->integer #\w) 4))
       'file.save-as)
+    (editor-bind-key!
+      editor
+      (list
+        (make-key-stroke 'character (char->integer #\x) 4)
+        (make-key-stroke 'character (char->integer #\x) 0)
+        (make-key-stroke 'character (char->integer #\g) 0))
+      'file.reload)
     editor))

@@ -469,6 +469,17 @@
         (make-key-stroke 'character (char->integer #\x) 4)
         (make-key-stroke 'character (char->integer #\r) 4))
       'scheme.eval-region)
+    (editor-bind-key!
+      editor
+      (list
+        (make-key-stroke 'character (char->integer #\:) 2))
+      'scheme.eval-expression)
+    (editor-bind-key!
+      editor
+      (list
+        (make-key-stroke 'character (char->integer #\c) 4)
+        (make-key-stroke 'character (char->integer #\b) 4))
+      'scheme.eval-buffer)
     editor)
 
   (define (install-interaction-effect-handler! executor editor)

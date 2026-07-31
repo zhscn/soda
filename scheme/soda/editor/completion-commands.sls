@@ -358,7 +358,9 @@
           (cons (stroke 'tab 9 0) 'completion.next)
           (cons (stroke 'tab 9 1) 'completion.previous)
           (cons (stroke 'down #f 0) 'completion.next)
-          (cons (stroke 'up #f 0) 'completion.previous)))
+          (cons (stroke 'up #f 0) 'completion.previous)
+          (cons (stroke 'character 110 4) 'completion.next)
+          (cons (stroke 'character 112 4) 'completion.previous)))
       (keymap-catalog-register!
         (editor-keymap-catalog editor)
         'completion.menu

@@ -619,6 +619,12 @@
             (list (stroke #\g 2) (stroke #\p 0))
             'xref.previous-location)
           (cons
+            (list (stroke #\g 2) (stroke #\n 2))
+            'xref.next-location)
+          (cons
+            (list (stroke #\g 2) (stroke #\p 2))
+            'xref.previous-location)
+          (cons
             (list (stroke #\g 2) (stroke #\i 0))
             'xref.find-document-symbol)
           (cons

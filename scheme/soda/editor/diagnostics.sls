@@ -384,6 +384,11 @@
       editor
       (list (stroke #\g 2) (stroke #\d 0))
       'diagnostics.list)
+    (when workspace
+      (editor-bind-key!
+        editor
+        (list (stroke #\g 2) (stroke #\d 2))
+        'diagnostics.list-workspace))
     (for-each
       (lambda (phase)
         (editor-add-hook!

@@ -56,6 +56,40 @@
       (command-context-editor context))
     '())
 
+  (define command-binding-keymaps
+    '(editor.override editor.default))
+
+  (define (command-binding-table editor)
+    (let ([table (make-eq-hashtable)])
+      (for-each
+        (lambda (keymap-name)
+          (let ([keymap
+                  (keymap-catalog-find
+                    (editor-keymap-catalog editor)
+                    keymap-name)])
+            (when keymap
+              (for-each
+                (lambda (binding)
+                  (when (eq? (key-binding-status binding) 'command)
+                    (let ([description
+                            (key-sequence-description
+                              (key-binding-sequence binding))]
+                          [existing
+                            (hashtable-ref
+                              table
+                              (key-binding-command binding)
+                              #f)])
+                      (when (or (not existing)
+                                (< (string-length description)
+                                   (string-length existing)))
+                        (hashtable-set!
+                          table
+                          (key-binding-command binding)
+                          description)))))
+                (keymap-bindings keymap)))))
+        command-binding-keymaps)
+      table))
+
   (define (command-choice-source editor)
     (make-choice-source
       'command
@@ -66,27 +100,35 @@
       (lambda (input point)
         (cons 0 (string-length input)))
       (lambda (query)
-        (map
-          (lambda (name)
-            (let ([label (symbol->string name)])
-              (make-completion-item
-                name
-                'command-registry
-                label
-                label
-                label
-                (command-documentation
-                  (editor-command-registry editor)
-                  name)
-                #f
-                name)))
-          (list-sort
-            (lambda (left right)
-              (string<?
-                (symbol->string left)
-                (symbol->string right)))
-            (interactive-command-names
-              (editor-command-registry editor)))))
+        (let ([bindings (command-binding-table editor)])
+          (map
+            (lambda (name)
+              (let ([label (symbol->string name)])
+                (make-completion-item
+                  name
+                  'command-registry
+                  label
+                  label
+                  label
+                  'choice
+                  #f
+                  #f
+                  label
+                  #f
+                  #t
+                  (command-documentation
+                    (editor-command-registry editor)
+                    name)
+                  name
+                  (hashtable-ref bindings name #f)
+                  #f)))
+            (list-sort
+              (lambda (left right)
+                (string<?
+                  (symbol->string left)
+                  (symbol->string right)))
+              (interactive-command-names
+                (editor-command-registry editor))))))
       (lambda (value)
         (command-registered?
           (editor-command-registry editor)
