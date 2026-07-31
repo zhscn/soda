@@ -536,6 +536,7 @@
           view-deactivate-mark!
           view-clear-mark!
           view-region
+          view-caret-display-affinity
           view-first-line
           view-first-visual-row
           view-first-column
@@ -900,6 +901,7 @@
           display-map-normalize-line
           display-map-project-line
           display-map-line-chunks
+          display-map-visual-line-segments
           display-map-visual-lines
           visual-line?
           visual-line-physical-line
@@ -909,6 +911,9 @@
           visual-line-end
           visual-line-continuation?
           visual-line-final?
+          visual-line-index-at
+          visual-line-column-at
+          visual-line-position-at-column
           display-chunk?
           display-chunk-kind
           display-chunk-text

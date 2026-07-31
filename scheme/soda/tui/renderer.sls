@@ -446,7 +446,8 @@
       (visual-line-end visual-line)
       (visual-line-start visual-line)
       (visual-line-continuation? visual-line)
-      (visual-line-final? visual-line)))
+      (visual-line-final? visual-line)
+      visual-line))
 
   (define (line-projection-line projection)
     (vector-ref projection 0))
@@ -469,6 +470,9 @@
   (define (line-projection-final? projection)
     (vector-ref projection 6))
 
+  (define (line-projection-visual-line projection)
+    (vector-ref projection 7))
+
   (define (visible-line-projections
             display-map text first-line rows width tab-width
             truncate-lines? word-wrap? wrap-column first-visual-row)
@@ -486,7 +490,7 @@
         wrap-column
         first-visual-row)))
 
-  (define (projection-row-at projections position)
+  (define (projection-row-at projections position affinity)
     (let loop ([remaining projections] [row 0])
       (and
         (pair? remaining)
@@ -494,11 +498,13 @@
           (if
             (and
               (<= (line-projection-start projection) position)
-              (or
-                (< position (line-projection-end projection))
-                (and
-                  (line-projection-final? projection)
-                  (= position (line-projection-end projection)))))
+              (if (eq? affinity 'upstream)
+                  (<= position (line-projection-end projection))
+                  (or
+                    (< position (line-projection-end projection))
+                    (and
+                      (line-projection-final? projection)
+                      (= position (line-projection-end projection))))))
             (cons row projection)
             (loop (cdr remaining) (+ row 1)))))))
 
@@ -996,7 +1002,8 @@
             [caret-projection
               (projection-row-at
                 projections
-                (view-caret view))]
+                (view-caret view)
+                (view-caret-display-affinity view))]
             [cursorline?
               (and
                 (editor-render-context-focused? context)
@@ -1077,7 +1084,8 @@
        (let* ([caret-projection
                (projection-row-at
                  projections
-                 (view-caret view))]
+                 (view-caret view)
+                 (view-caret-display-affinity view))]
              [cursor-row
               (and
                 caret-projection
@@ -1086,15 +1094,26 @@
             [cursor-column
               (and
                 caret-projection
-                (+ (rect-column text-rectangle)
-                   (-
-                     (display-chunks-column-at
-                       (line-projection-chunks
-                         (cdr caret-projection))
-                       (view-caret view)
-                       (editor-render-context-tab-width
-                         context))
-                     first-column)))])
+                (let* ([display-column
+                         (-
+                           (visual-line-column-at
+                             (line-projection-visual-line
+                               (cdr caret-projection))
+                             (view-caret view)
+                             (editor-render-context-tab-width
+                               context))
+                           first-column)]
+                       [display-column
+                         (if (and
+                               (eq?
+                                 (view-caret-display-affinity view)
+                                 'upstream)
+                               (>= display-column
+                                   (rect-columns text-rectangle)))
+                             (- (rect-columns text-rectangle) 1)
+                             display-column)])
+                  (+ (rect-column text-rectangle)
+                     display-column)))])
         (if (and (editor-render-context-focused? context)
                  cursor-row
                  cursor-column

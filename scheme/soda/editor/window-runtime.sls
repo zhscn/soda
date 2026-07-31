@@ -45,7 +45,13 @@
       (editor-window-leaves editor)))
 
   (define (copy-view-state! source target)
-    (view-set-caret! target (view-caret source))
+    (if (view-preferred-column source)
+        (view-set-visual-caret!
+          target
+          (view-caret source)
+          (view-preferred-column source)
+          (view-caret-display-affinity source))
+        (view-set-caret! target (view-caret source)))
     (let ([mark (view-mark source)])
       (when mark
         (view-set-mark! target mark)

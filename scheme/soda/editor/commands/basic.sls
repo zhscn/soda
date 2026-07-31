@@ -8,6 +8,7 @@
           (soda editor command-target)
           (soda editor condition)
           (soda editor display)
+          (soda editor display-map)
           (soda editor edit)
           (soda editor event)
           (soda editor input-state)
@@ -16,6 +17,8 @@
           (soda editor keymap)
           (soda editor language)
           (soda editor motion-runtime)
+          (soda editor minor-mode)
+          (soda editor minor-mode-runtime)
           (soda editor prompt)
           (soda editor state))
 
@@ -177,6 +180,186 @@
             view
             target-offset
             column)))))
+
+  (define (visual-text-width view text)
+    (let* ([buffer (view-buffer view)]
+           [columns (max 1 (view-viewport-columns view))]
+           [line-count (text-line-count text)])
+      (if (buffer-setting-ref buffer 'show-line-numbers? #f)
+          (max
+            1
+            (- columns
+               (min
+                 (line-number-gutter-width line-count)
+                 (max 0 (- columns 1)))))
+          columns)))
+
+  (define (view-visual-policy view text)
+    (let* ([buffer (view-buffer view)]
+           [tab-width
+             (let ([setting
+                     (buffer-setting-ref buffer 'tab-width 8)])
+               (if (and (integer? setting)
+                        (exact? setting)
+                        (positive? setting))
+                   setting
+                   8))]
+           [display-map (view-effective-display-map view)])
+      (values
+        display-map
+        tab-width
+        (visual-text-width view text)
+        (buffer-setting-ref buffer 'truncate-lines #t)
+        (buffer-setting-ref buffer 'word-wrap #t)
+        (buffer-setting-ref buffer 'wrap-column #f))))
+
+  (define (visual-line-group
+            display-map text line width tab-width
+            truncate-lines? word-wrap? wrap-column)
+    (display-map-visual-line-segments
+      display-map text line width tab-width
+      truncate-lines? word-wrap? wrap-column))
+
+  (define (advance-visual-line
+            display-map text lines index remaining width tab-width
+            truncate-lines? word-wrap? wrap-column)
+    (cond
+      [(zero? remaining) (cons lines index)]
+      [(positive? remaining)
+       (if (< (+ index 1) (length lines))
+           (advance-visual-line
+             display-map text lines (+ index 1) (- remaining 1)
+             width tab-width truncate-lines? word-wrap? wrap-column)
+           (let ([next-line
+                   (visual-line-next-physical-line
+                     (car (reverse lines)))])
+             (if (>= next-line (text-line-count text))
+                 (cons lines index)
+                 (let ([next
+                         (visual-line-group
+                           display-map text next-line width tab-width
+                           truncate-lines? word-wrap? wrap-column)])
+                   (advance-visual-line
+                     display-map text next 0 (- remaining 1)
+                     width tab-width truncate-lines? word-wrap?
+                     wrap-column)))))]
+      [(positive? index)
+       (advance-visual-line
+         display-map text lines (- index 1) (+ remaining 1)
+         width tab-width truncate-lines? word-wrap? wrap-column)]
+      [else
+       (let ([line (visual-line-physical-line (car lines))])
+         (if (zero? line)
+             (cons lines index)
+             (let ([previous
+                     (visual-line-group
+                       display-map text (- line 1) width tab-width
+                       truncate-lines? word-wrap? wrap-column)])
+               (advance-visual-line
+                 display-map
+                 text
+                 previous
+                 (- (length previous) 1)
+                 (+ remaining 1)
+                 width tab-width truncate-lines? word-wrap?
+                 wrap-column))))]))
+
+  (define (move-visual! view delta)
+    (with-document-text
+      (buffer-document (view-buffer view))
+      (lambda (text)
+        (call-with-values
+          (lambda () (view-visual-policy view text))
+          (lambda (display-map tab-width width truncate? word-wrap? wrap-column)
+            (let* ([physical-line
+                     (car (text-position text (view-caret view)))]
+                   [lines
+                     (visual-line-group
+                       display-map text physical-line width tab-width
+                       truncate? word-wrap? wrap-column)]
+                   [current
+                     (or
+                       (visual-line-index-at
+                         lines
+                         (view-caret view)
+                         (view-caret-display-affinity view))
+                       0)]
+                   [current-line (list-ref lines current)]
+                     [column
+                       (or
+                         (view-preferred-column view)
+                         (visual-line-column-at
+                           current-line
+                           (view-caret view)
+                           tab-width))]
+                     [target
+                       (advance-visual-line
+                         display-map text lines current delta width tab-width
+                         truncate? word-wrap? wrap-column)]
+                     [location
+                       (visual-line-position-at-column
+                         (list-ref (car target) (cdr target))
+                         column
+                         tab-width)])
+              (view-set-visual-caret!
+                view
+                (car location)
+                column
+                (cdr location))))))))
+
+  (define (move-visual-boundary! view end?)
+    (with-document-text
+      (buffer-document (view-buffer view))
+      (lambda (text)
+        (call-with-values
+          (lambda () (view-visual-policy view text))
+          (lambda (display-map tab-width width truncate? word-wrap? wrap-column)
+            (let* ([physical-line
+                     (car (text-position text (view-caret view)))]
+                   [lines
+                     (visual-line-group
+                       display-map text physical-line width tab-width
+                       truncate? word-wrap? wrap-column)]
+                   [index
+                     (visual-line-index-at
+                       lines
+                       (view-caret view)
+                       (view-caret-display-affinity view))])
+              (when index
+                (let* ([line (list-ref lines index)]
+                       [location
+                         (if end?
+                             (visual-line-position-at-column
+                               line
+                               (+ (text-size text) 1)
+                               tab-width)
+                             (cons
+                               (visual-line-start line)
+                               'downstream))]
+                       [column
+                         (if end?
+                             (visual-line-column-at
+                               line
+                               (car location)
+                               tab-width)
+                             0)])
+                  (view-set-visual-caret!
+                    view
+                    (car location)
+                    column
+                    (cdr location))))))))))
+
+  (define visual-line-mode
+    (make-minor-mode-definition
+      'visual-line-mode
+      "Move by screen lines and enable soft wrapping."
+      'buffer
+      " Visual Line"
+      'editor.visual-line-mode
+      (lambda (editor buffer)
+        (buffer-set-local-setting! buffer 'truncate-lines #f))
+      (lambda (editor buffer)
+        (buffer-set-local-setting! buffer 'truncate-lines #t))))
 
   (define replace-target-selector
     (make-command-target-selector
@@ -797,6 +980,26 @@
     (move-vertical!
       (context-view context)
       (command-context-count context))
+    '())
+
+  (define (previous-visual-line-command context)
+    (move-visual!
+      (context-view context)
+      (- (command-context-count context)))
+    '())
+
+  (define (next-visual-line-command context)
+    (move-visual!
+      (context-view context)
+      (command-context-count context))
+    '())
+
+  (define (visual-line-start-command context)
+    (move-visual-boundary! (context-view context) #f)
+    '())
+
+  (define (visual-line-end-command context)
+    (move-visual-boundary! (context-view context) #t)
     '())
 
   (define (sentence-whitespace-byte? byte)
@@ -1773,6 +1976,14 @@
           next-line-command
           "Move to the next line.")
         (list
+          'move.previous-visual-line
+          previous-visual-line-command
+          "Move to the previous screen line.")
+        (list
+          'move.next-visual-line
+          next-visual-line-command
+          "Move to the next screen line.")
+        (list
           'move.previous-page
           previous-page-command
           "Move backward by one viewport.")
@@ -1800,6 +2011,14 @@
           'move.line-end
           line-end-command
           "Move to the end of the line.")
+        (list
+          'move.visual-line-start
+          visual-line-start-command
+          "Move to the start of the screen line.")
+        (list
+          'move.visual-line-end
+          visual-line-end-command
+          "Move to the end of the screen line.")
         (list
           'move.buffer-start
           buffer-start-command
@@ -2029,6 +2248,32 @@
         (stroke 'character (char->integer #\x) 4)
         (stroke 'character (char->integer #\h) 0))
       'mark.whole-buffer)
+    (let ([keymap (make-keymap)])
+      (for-each
+        (lambda (entry)
+          (keymap-bind! keymap (list (car entry)) (cdr entry)))
+        (list
+          (cons (stroke 'up #f 0) 'move.previous-visual-line)
+          (cons (stroke 'down #f 0) 'move.next-visual-line)
+          (cons
+            (stroke 'character (char->integer #\p) 4)
+            'move.previous-visual-line)
+          (cons
+            (stroke 'character (char->integer #\n) 4)
+            'move.next-visual-line)
+          (cons (stroke 'home #f 0) 'move.visual-line-start)
+          (cons (stroke 'end #f 0) 'move.visual-line-end)
+          (cons
+            (stroke 'character (char->integer #\a) 4)
+            'move.visual-line-start)
+          (cons
+            (stroke 'character (char->integer #\e) 4)
+            'move.visual-line-end)))
+      (keymap-catalog-register!
+        (editor-keymap-catalog editor)
+        'editor.visual-line-mode
+        keymap))
+    (editor-register-minor-mode! editor visual-line-mode)
     (keymap-bind!
       (keymap-catalog-ref
         (editor-keymap-catalog editor)

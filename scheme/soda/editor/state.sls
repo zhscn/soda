@@ -162,6 +162,7 @@
           view-clear-mark!
           view-region
           view-preferred-column
+          view-caret-display-affinity
           view-first-line
           view-first-visual-row
           view-first-column
@@ -170,6 +171,7 @@
           view-keymap-layers
           view-input-states
           view-display-map
+          view-effective-display-map
           view-folds
           editor-replace-view-folds!
           editor-clear-view-folds!
@@ -181,6 +183,7 @@
           view-reset-input-states!
           view-set-caret!
           view-set-vertical-caret!
+          view-set-visual-caret!
           view-set-first-line!
           view-set-first-visual-row!
           view-set-first-column!
@@ -227,6 +230,9 @@
       (mutable preferred-column
                view-preferred-column
                view-preferred-column-set!)
+      (mutable caret-display-affinity
+               view-caret-display-affinity
+               view-caret-display-affinity-set!)
       (mutable first-line view-first-line view-first-line-set!)
       (mutable first-visual-row
                view-first-visual-row
@@ -1322,6 +1328,7 @@
                #f
                '()
                #f
+               #f
                0
                0
                0
@@ -1510,6 +1517,7 @@
       (view-first-line-set! view 0)
       (view-first-visual-row-set! view 0)
       (view-first-column-set! view 0)
+      (view-caret-display-affinity-set! view #f)
       (view-reset-input-states! view)
       (view-pending-keys-set! view '())))
 
@@ -4017,7 +4025,8 @@
         "offset must be a non-negative exact integer"
         offset))
     (replace-view-caret-anchor! value offset)
-    (view-preferred-column-set! value #f))
+    (view-preferred-column-set! value #f)
+    (view-caret-display-affinity-set! value #f))
 
   (define (view-set-vertical-caret! value offset column)
     (unless (view? value)
@@ -4033,7 +4042,25 @@
         offset
         column))
     (replace-view-caret-anchor! value offset)
-    (view-preferred-column-set! value column))
+    (view-preferred-column-set! value column)
+    (view-caret-display-affinity-set! value #f))
+
+  (define (view-set-visual-caret! value offset column affinity)
+    (unless (view? value)
+      (assertion-violation
+        'view-set-visual-caret! "expected a view" value))
+    (unless (and (exact-non-negative-integer? offset)
+                 (exact-non-negative-integer? column)
+                 (memq affinity '(#f upstream downstream)))
+      (assertion-violation
+        'view-set-visual-caret!
+        "invalid offset, column, or display affinity"
+        offset
+        column
+        affinity))
+    (replace-view-caret-anchor! value offset)
+    (view-preferred-column-set! value column)
+    (view-caret-display-affinity-set! value affinity))
 
   (define (view-set-first-line! value line)
     (unless (view? value)
@@ -4174,33 +4201,90 @@
               (lambda () (text-close! text)))))
         (lambda () (snapshot-close! snapshot)))))
 
-  (define (visual-line-contains-position? line position)
-    (and
-      (<= (visual-line-start line) position)
-      (or
-        (< position (visual-line-end line))
-        (and
-          (visual-line-final? line)
-          (= position (visual-line-end line))))))
+  (define (display-line-leading-end text line)
+    (let ([end (text-line-content-end text line)])
+      (let loop ([offset (text-line-start text line)])
+        (if (and (< offset end)
+                 (memv (text-byte-at text offset) '(9 32)))
+            (loop (+ offset 1))
+            offset))))
 
-  (define (visual-line-index-at lines position)
-    (let loop ([remaining lines] [index 0])
+  (define (fold-display-run fold text)
+    (let* ([size (text-size text)]
+           [start (min (fold-start fold) size)]
+           [end (min (fold-end fold) size)]
+           [start-line (car (text-position text start))]
+           [end-position (if (> end start) (- end 1) end)]
+           [end-line (car (text-position text end-position))])
       (and
-        (pair? remaining)
-        (if (visual-line-contains-position?
-              (car remaining) position)
-            index
-            (loop (cdr remaining) (+ index 1))))))
+        (< start-line end-line)
+        (let ([display-start (text-line-content-end text start-line)]
+              [display-end (display-line-leading-end text end-line)])
+          (and
+            (< display-start display-end)
+            (make-replacement-display-run
+              display-start display-end " … " 'after '(comment)
+              'syntax.fold
+              (list
+                (cons 'kind (fold-kind fold))
+                (cons 'capture (fold-capture fold)))))))))
 
-  (define (valid-view-display-map view buffer)
-    (let ([display-map (view-display-map view)])
-      (and
-        display-map
-        (display-map-valid-for?
-          display-map
-          (document-id (buffer-document buffer))
-          (buffer-revision buffer))
-        display-map)))
+  (define (display-runs-overlap? left right)
+    (if (eq? (display-run-kind left) 'virtual)
+        (and (< (display-run-start right) (display-run-start left))
+             (< (display-run-start left) (display-run-end right)))
+        (and (< (display-run-start left) (display-run-end right))
+             (< (display-run-start right) (display-run-end left)))))
+
+  (define (view-effective-display-map view)
+    (unless (view? view)
+      (assertion-violation
+        'view-effective-display-map "expected a view" view))
+    (let* ([buffer (view-buffer view)]
+           [document (buffer-document buffer)]
+           [document-id (document-id document)]
+           [revision (buffer-revision buffer)]
+           [base (view-display-map view)]
+           [base-runs
+             (if (and base
+                      (display-map-valid-for?
+                        base document-id revision))
+                 (display-map-runs base)
+                 '())]
+           [providers
+             (buffer-setting-ref buffer 'display-run-providers '())])
+      (if (and (null? (view-folds view)) (null? providers))
+          (and base
+               (display-map-valid-for? base document-id revision)
+               (not (display-map-identity? base))
+               base)
+          (with-document-text
+            document
+            (lambda (text)
+              (let* ([provider-runs
+                       (fold-left
+                         (lambda (runs provider)
+                           (append runs (provider buffer text)))
+                         '()
+                         providers)]
+                     [fold-runs
+                       (filter
+                         (lambda (run) run)
+                         (map
+                           (lambda (fold) (fold-display-run fold text))
+                           (view-folds view)))]
+                     [visible-base
+                       (filter
+                         (lambda (run)
+                           (not
+                             (exists
+                               (lambda (fold-run)
+                                 (display-runs-overlap? run fold-run))
+                               fold-runs)))
+                         (append base-runs provider-runs))]
+                     [runs (append visible-base fold-runs)])
+                (and (pair? runs)
+                     (make-display-map document-id revision runs))))))))
 
   (define (ensure-view-visible! view)
     (unless (view? view)
@@ -4259,7 +4343,7 @@
                          #f
                          #f)
                        (let* ([display-map
-                                (valid-view-display-map view buffer)]
+                                (view-effective-display-map view)]
                               [line-size
                                 (-
                                   (text-line-content-end text caret-line)
@@ -4279,7 +4363,9 @@
                               [caret-row
                                 (or
                                   (visual-line-index-at
-                                    caret-lines caret)
+                                    caret-lines
+                                    caret
+                                    (view-caret-display-affinity view))
                                   0)]
                               [first-line (view-first-line view)]
                               [relative-row
@@ -4307,7 +4393,9 @@
                                              (view-first-visual-row
                                                view))])
                                     (visual-line-index-at
-                                      lines caret)))])
+                                      lines
+                                      caret
+                                      (view-caret-display-affinity view))))])
                          (list
                            caret-line
                            0
@@ -4396,6 +4484,7 @@
                #f
                #f
                '()
+               #f
                #f
                0
                0

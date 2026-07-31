@@ -20,6 +20,7 @@
           display-map-normalize-line
           display-map-project-line
           display-map-line-chunks
+          display-map-visual-line-segments
           display-map-visual-lines
           visual-line?
           visual-line-physical-line
@@ -29,6 +30,9 @@
           visual-line-end
           visual-line-continuation?
           visual-line-final?
+          visual-line-index-at
+          visual-line-column-at
+          visual-line-position-at-column
           display-chunk?
           display-chunk-kind
           display-chunk-text
@@ -441,6 +445,103 @@
           (next-tab-stop column tab-width)
           (+ column (character-cell-width character)))))
 
+  (define (visual-line-contains-position? line position affinity)
+    (and
+      (<= (visual-line-start line) position)
+      (if (eq? affinity 'upstream)
+          (<= position (visual-line-end line))
+          (or
+            (< position (visual-line-end line))
+            (and
+              (visual-line-final? line)
+              (= position (visual-line-end line)))))))
+
+  (define (visual-line-index-at lines position affinity)
+    (unless (and (list? lines) (for-all visual-line? lines))
+      (assertion-violation
+        'visual-line-index-at
+        "expected visual lines"
+        lines))
+    (unless (and (exact-non-negative-integer? position)
+                 (memq affinity '(#f upstream downstream)))
+      (assertion-violation
+        'visual-line-index-at
+        "invalid position or display affinity"
+        position
+        affinity))
+    (let loop ([remaining lines] [index 0])
+      (and
+        (pair? remaining)
+        (if (visual-line-contains-position?
+              (car remaining) position affinity)
+            index
+            (loop (cdr remaining) (+ index 1))))))
+
+  (define (visual-line-column-at line position tab-width)
+    (unless (visual-line? line)
+      (assertion-violation
+        'visual-line-column-at "expected a visual line" line))
+    (unless (and (exact-non-negative-integer? position)
+                 (exact-non-negative-integer? tab-width)
+                 (positive? tab-width))
+      (assertion-violation
+        'visual-line-column-at "invalid position or tab width"))
+    (let loop ([atoms (chunks->atoms (visual-line-chunks line))]
+               [column 0])
+      (if (null? atoms)
+          column
+          (let* ([atom (car atoms)]
+                 [kind (display-chunk-kind atom)]
+                 [start (display-chunk-start atom)]
+                 [end (display-chunk-end atom)]
+                 [include?
+                   (cond
+                     [(eq? kind 'text) (> position start)]
+                     [(eq? kind 'virtual)
+                      (or (> position start)
+                          (and (= position start)
+                               (eq? (display-chunk-affinity atom)
+                                    'before)))]
+                     [else
+                      (or (>= position end)
+                          (and (> position start)
+                               (< position end)
+                               (eq? (display-chunk-affinity atom)
+                                    'after)))])])
+            (if include?
+                (loop
+                  (cdr atoms)
+                  (atom-next-column atom column tab-width))
+                column)))))
+
+  (define (atom-document-position atom)
+    (if (eq? (display-chunk-kind atom) 'text)
+        (display-chunk-start atom)
+        (display-chunk-position atom)))
+
+  (define (visual-line-position-at-column line target-column tab-width)
+    (unless (visual-line? line)
+      (assertion-violation
+        'visual-line-position-at-column "expected a visual line" line))
+    (unless (and (exact-non-negative-integer? target-column)
+                 (exact-non-negative-integer? tab-width)
+                 (positive? tab-width))
+      (assertion-violation
+        'visual-line-position-at-column
+        "invalid target column or tab width"))
+    (let loop ([atoms (chunks->atoms (visual-line-chunks line))]
+               [column 0])
+      (if (null? atoms)
+          (cons
+            (visual-line-end line)
+            (and (not (visual-line-final? line)) 'upstream))
+          (let* ([atom (car atoms)]
+                 [next-column
+                   (atom-next-column atom column tab-width)])
+            (if (< target-column next-column)
+                (cons (atom-document-position atom) 'downstream)
+                (loop (cdr atoms) next-column))))))
+
   (define (segment-end-index atoms start width tab-width word-wrap?)
     (let ([size (vector-length atoms)])
       (let loop ([index start] [column 0] [word-break #f])
@@ -513,6 +614,69 @@
             (+ line 1)
             end))))
 
+  (define (display-map-visual-line-segments
+            display-map text line viewport-width tab-width
+            truncate-lines? word-wrap? wrap-column)
+    (unless (or (not display-map) (display-map? display-map))
+      (assertion-violation
+        'display-map-visual-line-segments
+        "expected a display map or #f"
+        display-map))
+    (unless (and
+              (text? text)
+              (exact-non-negative-integer? line)
+              (< line (text-line-count text))
+              (exact-non-negative-integer? viewport-width)
+              (positive? viewport-width)
+              (exact-non-negative-integer? tab-width)
+              (positive? tab-width)
+              (boolean? truncate-lines?)
+              (boolean? word-wrap?)
+              (or (not wrap-column)
+                  (and (exact-non-negative-integer? wrap-column)
+                       (positive? wrap-column))))
+      (assertion-violation
+        'display-map-visual-line-segments
+        "invalid visual-line projection input"))
+    (let* ([line
+             (if display-map
+                 (display-map-normalize-line display-map text line)
+                 line)]
+           [width
+             (if wrap-column
+                 (min viewport-width wrap-column)
+                 viewport-width)]
+           [projection
+             (logical-line-projection display-map text line)]
+           [chunks (car projection)]
+           [next-line (cadr projection)]
+           [line-end (caddr projection)]
+           [segments
+             (if truncate-lines?
+                 (list chunks)
+                 (wrap-chunks chunks width tab-width word-wrap?))])
+      (let loop ([remaining segments]
+                 [continuation? #f]
+                 [result '()])
+        (if (null? remaining)
+            (reverse result)
+            (let* ([segment (car remaining)]
+                   [final? (null? (cdr remaining))]
+                   [range (segment-range segment line-end)])
+              (loop
+                (cdr remaining)
+                #t
+                (cons
+                  (make-visual-line
+                    line
+                    (if final? next-line line)
+                    segment
+                    (car range)
+                    (cdr range)
+                    continuation?
+                    final?)
+                  result)))))))
+
   (define (display-map-visual-lines
             display-map
             text
@@ -551,10 +715,6 @@
         'display-map-visual-lines
         "invalid visual-line projection policy"))
     (let* ([line-count (text-line-count text)]
-           [width
-             (if wrap-column
-                 (min viewport-width wrap-column)
-                 viewport-width)]
            [initial-line
              (if (and display-map (< first-line line-count))
                  (display-map-normalize-line
@@ -564,27 +724,23 @@
         ([line initial-line] [remaining row-count] [result '()])
         (if (or (zero? remaining) (>= line line-count))
             (reverse result)
-            (let* ([projection
-                     (logical-line-projection display-map text line)]
-                   [chunks (car projection)]
-                   [next-line (cadr projection)]
-                   [line-end (caddr projection)]
-                   [segments
-                     (if truncate-lines?
-                         (list chunks)
-                         (wrap-chunks
-                           chunks width tab-width word-wrap?))]
+            (let* ([visual-lines
+                     (display-map-visual-line-segments
+                       display-map text line viewport-width tab-width
+                       truncate-lines? word-wrap? wrap-column)]
+                   [next-line
+                     (visual-line-next-physical-line
+                       (car (reverse visual-lines)))]
                    [segments
                      (if (= line initial-line)
                          (let ([skip
                                  (min
                                    first-visual-row
-                                   (max 0 (- (length segments) 1)))])
-                           (list-tail segments skip))
-                         segments)])
+                                   (max 0 (- (length visual-lines) 1)))])
+                           (list-tail visual-lines skip))
+                         visual-lines)])
               (let loop-segments
                 ([segments segments]
-                 [continuation? #f]
                  [remaining remaining]
                  [result result])
                 (cond
@@ -593,22 +749,8 @@
                        (reverse result)
                        (loop-lines next-line remaining result))]
                   [else
-                   (let* ([segment (car segments)]
-                          [final? (null? (cdr segments))]
-                          [range
-                            (segment-range segment line-end)])
-                     (loop-segments
-                       (cdr segments)
-                       #t
-                       (- remaining 1)
-                       (cons
-                         (make-visual-line
-                           line
-                           (if final? next-line line)
-                           segment
-                           (car range)
-                           (cdr range)
-                           continuation?
-                           final?)
-                         result)))])))))))
+                   (loop-segments
+                     (cdr segments)
+                     (- remaining 1)
+                     (cons (car segments) result))])))))))
 )

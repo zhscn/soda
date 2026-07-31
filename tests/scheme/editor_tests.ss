@@ -33,7 +33,9 @@
         (soda editor scheme-xref)
         (only (soda editor state)
               editor-refresh-completion-after-command!
+              view-caret-display-affinity
               view-clear-mark!
+              view-preferred-column
               view-set-caret!
               view-set-mark!)
         (soda tui commands)
@@ -8668,6 +8670,13 @@
   (unless
     (and
       (equal? (map visual-line-text lines) '("one+" " …"))
+      (= (visual-line-column-at (car lines) 3 4) 3)
+      (equal?
+        (visual-line-position-at-column (car lines) 3 4)
+        '(3 . downstream))
+      (equal?
+        (visual-line-position-at-column (cadr lines) 1 4)
+        '(4 . downstream))
       (memq 'test.virtual owners)
       (memq 'test.fold owners))
     (error 'editor-tests
@@ -8758,6 +8767,85 @@
     (error 'editor-tests
            "soft-wrap projection did not follow viewport resize")))
 (editor-close! soft-wrap-editor)
+
+(define visual-motion-document
+  (make-document "ab界cd ef\nxy\n" 9905))
+(define visual-motion-buffer
+  (make-buffer
+    9905
+    visual-motion-document
+    "*visual-motion*"
+    'fundamental-mode))
+(define visual-motion-editor (make-editor visual-motion-buffer))
+(define visual-motion-view (editor-active-view visual-motion-editor))
+(define visual-motion-decoder (make-input-decoder))
+(editor-set-buffer-setting!
+  visual-motion-editor visual-motion-buffer 'tab-width 4)
+(editor-set-buffer-setting!
+  visual-motion-editor visual-motion-buffer 'word-wrap #t)
+(editor-update! visual-motion-editor (make-resize-message 4 4))
+(editor-update!
+  visual-motion-editor
+  (make-command-message 'visual-line-mode #f))
+(unless
+  (and
+    (editor-minor-mode-active?
+      visual-motion-editor visual-motion-buffer 'visual-line-mode)
+    (not
+      (buffer-setting-ref
+        visual-motion-buffer 'truncate-lines #t)))
+  (error 'editor-tests "visual-line-mode did not enable soft wrapping"))
+(view-set-caret! visual-motion-view 1)
+(editor-update!
+  visual-motion-editor
+  (make-command-message 'move.next-visual-line #f))
+(unless
+  (and
+    (= (view-caret visual-motion-view) 6)
+    (= (view-preferred-column visual-motion-view) 1))
+  (error 'editor-tests
+         "next visual line did not preserve the display column"
+         (view-caret visual-motion-view)
+         (view-preferred-column visual-motion-view)))
+(editor-update!
+  visual-motion-editor
+  (make-command-message 'move.previous-visual-line #f))
+(unless (= (view-caret visual-motion-view) 1)
+  (error 'editor-tests "previous visual line did not return to point"))
+(view-set-caret! visual-motion-view 0)
+(editor-update!
+  visual-motion-editor
+  (make-command-message 'move.visual-line-end #f))
+(unless
+  (and
+    (= (view-caret visual-motion-view) 5)
+    (eq? (view-caret-display-affinity visual-motion-view) 'upstream)
+    (= (frame-cursor-row
+         (render-editor-frame visual-motion-editor 4 4))
+       0))
+  (error 'editor-tests
+         "visual line end lost the upstream wrap-boundary affinity"))
+(editor-update!
+  visual-motion-editor
+  (make-command-message 'move.visual-line-start #f))
+(unless (= (view-caret visual-motion-view) 0)
+  (error 'editor-tests "visual line start did not use the current segment"))
+(view-set-caret! visual-motion-view 0)
+(send! visual-motion-editor visual-motion-decoder (bytes 27 91 66))
+(unless (= (view-caret visual-motion-view) 5)
+  (error 'editor-tests
+         "visual-line-mode did not replace the down binding"))
+(editor-update!
+  visual-motion-editor
+  (make-command-message 'visual-line-mode #f))
+(view-set-caret! visual-motion-view 0)
+(send! visual-motion-editor visual-motion-decoder (bytes 27 91 66))
+(unless
+  (= (view-caret visual-motion-view)
+     (bytevector-length (string->utf8 "ab界cd ef\n")))
+  (error 'editor-tests
+         "disabling visual-line-mode did not restore logical line motion"))
+(editor-close! visual-motion-editor)
 
 (define mapped-document (make-document "alpha beta\n" 991))
 (define mapped-buffer

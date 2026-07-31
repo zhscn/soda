@@ -10,7 +10,7 @@
 | dirty reason、Frame diff、row span presenter 与输出合并 | 已实现 |
 | modeline、component tree 与 cell source inspection | 已实现 |
 | soft wrap 与 continuation gutter | 已实现 |
-| visual-line motion | 未实现 |
+| visual-line motion | 已实现 |
 
 ## 职责边界
 
@@ -359,6 +359,16 @@ View 保存 viewport 起始逻辑行及该行内的 visual-row offset。resize�
 计算与 renderer 消费相同的 visual-line 数据。tab 展开仍在 cell 生成阶段按显示列
 处理。新增 display feature 通过独立 transform 接入，不会在 renderer 中增加按
 feature 类型分派的绘制路径。
+
+visual line 同时提供 document position 到 display column 的正向映射，以及 display
+column 到 document position 的反向映射。软换行边界上的同一 document position
+可以通过 upstream/downstream affinity 表示上一屏幕行末或下一屏幕行首；View 在
+visual-line 命令之间保存该 affinity，普通 point 修改会将其清除。renderer、viewport、
+region、cell source 和 visual-line motion 共享这一坐标契约。
+
+`visual-line-mode` 是 buffer-local minor mode。它启用 soft wrap，并用 visual-line
+版本替换上下移动、行首和行尾绑定；`move.previous-line`、`move.next-line`、
+`move.line-start` 和 `move.line-end` 继续表示逻辑行操作。
 
 ## Frame 与 presenter
 

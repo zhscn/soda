@@ -18,7 +18,7 @@ Soda 是一个 Scheme-first 的原生 TUI 编辑器。Chez Scheme 持有命令�
 | 通用跨 Buffer 修改与组合结果视图 | 部分实现 |
 | Scheme 宏展开与完整 phase 语义 | 部分实现 |
 | soft wrap | 已实现 |
-| visual-line 移动与编辑 | 未实现 |
+| visual-line 移动与编辑 | 已实现 |
 | LSP client | 未实现 |
 | Buffer 承载的声明式 TUI application framework | 未实现 |
 | Scheme application 独立打包器 | 未实现 |
