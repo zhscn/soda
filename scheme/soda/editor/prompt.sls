@@ -51,7 +51,25 @@
           (soda editor completion)
           (soda editor display))
 
-  (define minibuffer-completion-indicator-columns 7)
+  (define (decimal-digit-count value)
+    (let loop ([remaining value] [count 1])
+      (if (< remaining 10)
+          count
+          (loop (div remaining 10) (+ count 1)))))
+
+  (define (minibuffer-completion-indicator-columns item-count)
+    (unless
+      (and
+        (integer? item-count)
+        (exact? item-count)
+        (not (negative? item-count)))
+      (assertion-violation
+        'minibuffer-completion-indicator-columns
+        "item count must be a non-negative exact integer"
+        item-count))
+    (max
+      7
+      (+ (* 2 (decimal-digit-count item-count)) 1)))
 
   (define-record-type
     (prompt-request %make-prompt-request prompt-request?)
@@ -88,31 +106,33 @@
   (define-record-type prompt-reply
     (fields command result))
 
-  (define (prompt-input-viewport-columns
-            request
-            total-columns)
-    (unless (prompt-request? request)
-      (assertion-violation
-        'prompt-input-viewport-columns
-        "expected a prompt request"
-        request))
-    (unless
-      (and
-        (integer? total-columns)
-        (exact? total-columns)
-        (positive? total-columns))
-      (assertion-violation
-        'prompt-input-viewport-columns
-        "total columns must be a positive exact integer"
-        total-columns))
-    (max
-      1
-      (-
-        total-columns
-        (string-cell-width (prompt-request-prompt request) 8)
-        (if (prompt-request-completion-source request)
-            minibuffer-completion-indicator-columns
-            0))))
+  (define prompt-input-viewport-columns
+    (case-lambda
+      [(request total-columns)
+       (prompt-input-viewport-columns request total-columns 0)]
+      [(request total-columns item-count)
+       (unless (prompt-request? request)
+         (assertion-violation
+           'prompt-input-viewport-columns
+           "expected a prompt request"
+           request))
+       (unless
+         (and
+           (integer? total-columns)
+           (exact? total-columns)
+           (positive? total-columns))
+         (assertion-violation
+           'prompt-input-viewport-columns
+           "total columns must be a positive exact integer"
+           total-columns))
+       (max
+         1
+         (-
+           total-columns
+           (string-cell-width (prompt-request-prompt request) 8)
+           (if (prompt-request-completion-source request)
+               (minibuffer-completion-indicator-columns item-count)
+               0)))]))
 
   (define (prompt-request-completion-selection-policy request)
     (unless (prompt-request? request)

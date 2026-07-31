@@ -977,6 +977,31 @@
     (not (terminal-output-pending? output-state)))
   (error 'editor-tests "terminal output did not reach desired frame"))
 
+(define control-output-state (make-terminal-output-state))
+(terminal-output-enqueue-control! control-output-state "first")
+(terminal-output-enqueue-control! control-output-state "second")
+(terminal-output-enqueue-control! control-output-state "third")
+(for-each
+  (lambda (expected)
+    (unless
+      (string=?
+        (utf8->string
+          (terminal-output-pending-bytes control-output-state))
+        expected)
+      (error 'editor-tests
+             "terminal control output did not preserve FIFO order"
+             expected))
+    (terminal-output-advance!
+      control-output-state
+      (-
+        (bytevector-length
+          (terminal-output-pending-bytes control-output-state))
+        (terminal-output-pending-offset control-output-state))))
+  '("first" "second" "third"))
+(when (terminal-output-pending? control-output-state)
+  (error 'editor-tests
+         "terminal control output retained an empty queue"))
+
 (define created-buffer
   (editor-create-buffer!
     editor
@@ -3424,6 +3449,10 @@
      36)
   (error 'editor-tests
          "resizing did not reserve completion indicator columns"))
+(unless
+  (= (minibuffer-completion-indicator-columns 10000) 11)
+  (error 'editor-tests
+         "minibuffer completion indicator did not grow with its count"))
 (editor-update! prompt-editor (make-resize-message 5 40))
 (define prompt-frame (render-editor-frame prompt-editor 5 40))
 (let* ([layout (frame-layout prompt-frame)]
@@ -4860,25 +4889,33 @@
         (completion-session-provider-results completion)))
     (error 'editor-tests
            "async provider response did not merge by provider"))
-  (editor-update!
-    completion-editor
-    (make-completion-response-message
-      (completion-session-id completion)
-      (- generation 1)
-      'semantic
-      (document-completion-target-document-id target)
-      (document-completion-target-revision target)
-      (list
-        (make-completion-item
-          'aardvark
-          'semantic
-          "aardvark"
-          "aardvark"
-          "aardvark"
-          #f
-          #f
-          'aardvark))
-      #t))
+  (editor-take-dirty-reasons! completion-editor)
+  (let ([render-generation
+          (editor-render-generation completion-editor)])
+    (editor-update!
+      completion-editor
+      (make-completion-response-message
+        (completion-session-id completion)
+        (- generation 1)
+        'semantic
+        (document-completion-target-document-id target)
+        (document-completion-target-revision target)
+        (list
+          (make-completion-item
+            'aardvark
+            'semantic
+            "aardvark"
+            "aardvark"
+            "aardvark"
+            #f
+            #f
+            'aardvark))
+        #t))
+    (unless
+      (= (editor-render-generation completion-editor)
+         render-generation)
+      (error 'editor-tests
+             "rejected completion response invalidated rendering")))
   (unless (= (length (completion-session-items completion)) 3)
     (error 'editor-tests
            "stale completion generation changed visible items"))

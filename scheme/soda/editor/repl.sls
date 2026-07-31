@@ -115,6 +115,10 @@
               buffer
               'completion-providers
               '(scheme-repl))
+            (buffer-set-local-setting!
+              buffer
+              'completion-auto-trigger?
+              #f)
             (document-set-editable-start!
               (buffer-document buffer)
               input-start)

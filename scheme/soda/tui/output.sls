@@ -21,6 +21,9 @@
       (mutable controls
                terminal-output-controls
                terminal-output-controls-set!)
+      (mutable control-backlog
+               terminal-output-control-backlog
+               terminal-output-control-backlog-set!)
       (mutable committed-frame
                terminal-output-committed-frame
                terminal-output-committed-frame-set!)
@@ -41,7 +44,7 @@
                terminal-output-pending-kind-set!)))
 
   (define (make-terminal-output-state)
-    (%make-terminal-output-state '() #f #f #f #f 0 #f))
+    (%make-terminal-output-state '() '() #f #f #f #f 0 #f))
 
   (define (require-state who value)
     (unless (terminal-output-state? value)
@@ -87,6 +90,13 @@
            (if (zero? (bytevector-length bytes))
                (prepare-output! value)
                (install-pending! value bytes 'control #f)))]
+        [(pair? (terminal-output-control-backlog value))
+         (terminal-output-controls-set!
+           value
+           (reverse
+             (terminal-output-control-backlog value)))
+         (terminal-output-control-backlog-set! value '())
+         (prepare-output! value)]
         [(and
            (terminal-output-desired-frame value)
            (not
@@ -112,11 +122,11 @@
             (data->bytes
               'terminal-output-enqueue-control!
               data)])
-      (terminal-output-controls-set!
+      (terminal-output-control-backlog-set!
         value
-        (append
-          (terminal-output-controls value)
-          (list bytes)))
+        (cons
+          bytes
+          (terminal-output-control-backlog value)))
       (prepare-output! value)))
 
   (define (terminal-output-request-frame! value frame)

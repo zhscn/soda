@@ -886,7 +886,10 @@
                [prompt (prompt-request-prompt request)]
                [indicator
                  (if completion
-                     (let* ([selected
+                     (let* ([item-count
+                              (length
+                                (completion-session-items completion))]
+                            [selected
                               (completion-session-selected-index
                                 completion)]
                             [marker
@@ -901,25 +904,25 @@
                               (string-append
                                 marker
                                 "/"
-                                (number->string
-                                  (length
-                                    (completion-session-items
-                                      completion))))])
+                                (number->string item-count))]
+                            [columns
+                              (minibuffer-completion-indicator-columns
+                                item-count)])
                        (string-append
                          raw
                          (make-string
                            (max
                              0
-                             (-
-                               minibuffer-completion-indicator-columns
-                               (string-length raw)))
+                             (- columns (string-length raw)))
                            #\space)))
                      "")]
                [indicator-columns
                  (if completion
                      (min
                        (rect-columns rectangle)
-                       minibuffer-completion-indicator-columns)
+                       (minibuffer-completion-indicator-columns
+                         (length
+                           (completion-session-items completion))))
                      0)]
                [prompt-columns
                  (min
@@ -935,6 +938,8 @@
                    editor
                    (prompt-session-view-id session))]
                [buffer (view-buffer view)]
+               [tab-width
+                 (editor-setting-ref editor buffer 'tab-width)]
                [snapshot (document-snapshot (buffer-document buffer))])
           (draw-string!
             frame
@@ -984,7 +989,7 @@
                                (text-cell-column
                                  text
                                  (view-caret view)
-                                 8)]
+                                 tab-width)]
                              [cursor-column
                                (+ (rect-column input-rectangle)
                                   (- caret-column
@@ -999,7 +1004,7 @@
                             line-end)
                           line-start
                           line-end
-                          8
+                          tab-width
                           (view-first-column view)
                           (buffer-id buffer)
                           component-id

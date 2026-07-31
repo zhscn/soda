@@ -1536,6 +1536,25 @@
            "invalid editor window node"
            node)])))
 
+  (define (configure-prompt-view-viewport! value session)
+    (let* ([completion (prompt-session-completion session)]
+           [item-count
+             (if completion
+                 (length (completion-session-items completion))
+                 0)]
+           [view
+             (editor-view-ref
+               value
+               (prompt-session-view-id session))])
+      (view-set-viewport!
+        view
+        1
+        (prompt-input-viewport-columns
+          (prompt-session-request session)
+          (editor-root-viewport-columns value)
+          item-count))
+      (ensure-view-visible! view)))
+
   (define (pop-completion-input-state! view)
     (when (eq? (input-state-name (view-current-input-state view))
                'completion)
@@ -2148,6 +2167,19 @@
       (when
         (and
           accepted?
+          (prompt-completion-target?
+            (completion-session-target completion)))
+        (let ([prompt
+                (hashtable-ref
+                  (editor-prompt-table value)
+                  (prompt-completion-target-prompt-id
+                    (completion-session-target completion))
+                  #f)])
+          (when prompt
+            (configure-prompt-view-viewport! value prompt))))
+      (when
+        (and
+          accepted?
           (document-completion-target?
             (completion-session-target completion))
           (null? (completion-session-items completion))
@@ -2280,7 +2312,12 @@
               (unless
                 (= generation
                    (completion-session-generation completion))
-                (queue-completion-generation! value completion))))))
+                (queue-completion-generation! value completion)))))
+        (configure-prompt-view-viewport!
+          value
+          (active-prompt-session
+            'editor-refresh-prompt-completion!
+            value)))
       completion))
 
   (define (editor-prompt-completion-next! value)
@@ -2361,12 +2398,7 @@
                completion)])
       (cancel-view-completion! value origin-view)
       (buffer-set-local-setting! buffer 'track-modified? #f)
-      (view-set-viewport!
-        view
-        1
-        (prompt-input-viewport-columns
-          request
-          (editor-root-viewport-columns value)))
+      (configure-prompt-view-viewport! value session)
       (view-set-caret!
         view
         (buffer-text-size buffer))

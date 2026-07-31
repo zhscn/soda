@@ -282,13 +282,20 @@
               1
               (prompt-input-viewport-columns
                 (prompt-session-request session)
-                (editor-root-viewport-columns editor)))
+                (editor-root-viewport-columns editor)
+                (let ([completion
+                        (prompt-session-completion session)])
+                  (if completion
+                      (length
+                        (completion-session-items completion))
+                      0))))
             (ensure-view-visible! prompt-view))))
       '()))
 
   (define (editor-update! editor message)
     (require-open-editor 'editor-update! editor)
-    (let ([result
+    (let ([completion-response-accepted? #f])
+      (let ([result
             (guard
               (condition
                 [(editor-user-error-condition? condition)
@@ -336,19 +343,23 @@
                    (internal-command-message-name message)
                    (internal-command-message-argument message))]
                 [(completion-response-message? message)
-                 (editor-apply-completion-response! editor message)
+                 (set!
+                   completion-response-accepted?
+                   (editor-apply-completion-response! editor message))
                  '()]
                 [else
                  (assertion-violation
                    'editor-update!
                    "expected an editor message"
                    message)]))])
-      (editor-invalidate!
-        editor
-        (cond
-          [(resize-message? message) 'resize]
-          [(completion-response-message? message) 'overlay]
-          [(or (input-message? message) (key-message? message))
-           'cursor]
-          [else 'document]))
-      result)))
+        (let ([reason
+                (cond
+                  [(resize-message? message) 'resize]
+                  [(completion-response-message? message)
+                   (and completion-response-accepted? 'overlay)]
+                  [(or (input-message? message) (key-message? message))
+                   'cursor]
+                  [else 'document])])
+          (when reason
+            (editor-invalidate! editor reason)))
+        result))))
