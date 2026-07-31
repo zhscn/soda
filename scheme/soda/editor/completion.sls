@@ -802,7 +802,11 @@
       (and
         match
         (make-completion-match
-          (fuzzy-match-score match)
+          (+
+            (if (fuzzy-match-exact? match) 10000 0)
+            (max
+              -999
+              (min 999 (fuzzy-match-score match))))
           (positions->ranges (fuzzy-match-positions match))
           (fuzzy-match-exact? match)))))
 

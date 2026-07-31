@@ -4428,6 +4428,44 @@
     (error 'editor-tests
            "semantically equivalent completion items were not deduplicated")))
 
+(let* ([query (make-string 200 #\a)]
+       [candidate (string-append query "b")]
+       [source
+         (make-choice-source
+           'fzf-tier-test
+           '((category . fzf-tier-test)
+             (styles . (fzf)))
+           (lambda (input point) (cons 0 point))
+           (lambda (input)
+             (list
+               (make-completion-item
+                 'long-fuzzy
+                 'fzf-tier-test
+                 candidate
+                 candidate
+                 candidate
+                 #f
+                 #f
+                 'long-fuzzy)))
+           (lambda (value) #f)
+           (lambda (generation) #f))]
+       [session
+         (make-completion-session
+           938
+           (make-prompt-completion-target 938 0 0)
+           source)])
+  (completion-session-refresh! session query)
+  (let ([match
+          (completion-session-item-match
+            session
+            (car (completion-session-items session)))])
+    (unless
+      (and
+        match
+        (< (abs (completion-match-score match)) 1000))
+      (error 'editor-tests
+             "fzf score escaped its completion style tier"))))
+
 (define completion-document
   (make-document (string->utf8 "alpha alpine beta al") 940))
 (define completion-buffer
