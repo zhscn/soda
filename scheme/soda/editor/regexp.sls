@@ -4,6 +4,7 @@
           regexp-match-end
           regexp-match-group-count
           regexp-match-group
+          regexp-expand-replacement
           regexp-search-forward
           regexp-search-backward
           regexp-find-forward
@@ -32,6 +33,125 @@
         match
         index))
     (vector-ref (regexp-match-groups match) index))
+
+  (define (byte-substring value range)
+    (if (not range)
+        ""
+        (let* ([bytes (string->utf8 value)]
+               [start (car range)]
+               [end (cdr range)])
+          (unless (and (<= 0 start end)
+                       (<= end (bytevector-length bytes)))
+            (assertion-violation
+              'regexp-expand-replacement
+              "capture range is outside the source"
+              range))
+          (let ([result (make-bytevector (- end start))])
+            (bytevector-copy! bytes start result 0 (- end start))
+            (utf8->string result)))))
+
+  (define (regexp-expand-replacement template value match)
+    (unless (and (string? template)
+                 (string? value)
+                 (regexp-match? match))
+      (assertion-violation
+        'regexp-expand-replacement
+        "expected a template, source string, and regexp match"
+        template
+        value
+        match))
+    (let-values ([(port extract) (open-string-output-port)])
+      (let ([persistent-case #f] [next-case #f] [size (string-length template)])
+        (define (ascii-digit? character)
+          (char<=? #\0 character #\9))
+        (define (convert character mode)
+          (case mode
+            [(upper) (char-upcase character)]
+            [(lower) (char-downcase character)]
+            [else character]))
+        (define (emit-string text)
+          (for-each
+            (lambda (character)
+              (put-char
+                port
+                (convert
+                  character
+                  (or next-case persistent-case)))
+              (when next-case (set! next-case #f)))
+            (string->list text)))
+        (define (emit-group index)
+          (when (> index (regexp-match-group-count match))
+            (assertion-violation
+              'regexp-expand-replacement
+              "capture reference is outside the pattern"
+              index))
+          (emit-string
+            (byte-substring value (regexp-match-group match index))))
+        (let loop ([index 0])
+          (if (= index size)
+              (extract)
+              (let ([character (string-ref template index)])
+                (if (not (char=? character #\\))
+                    (begin
+                      (emit-string (string character))
+                      (loop (+ index 1)))
+                    (begin
+                      (when (= (+ index 1) size)
+                        (assertion-violation
+                          'regexp-expand-replacement
+                          "trailing replacement escape"
+                          template))
+                      (let ([escaped (string-ref template (+ index 1))])
+                        (cond
+                          [(ascii-digit? escaped)
+                           (let digits ([cursor (+ index 1)] [number 0])
+                             (if (and (< cursor size)
+                                      (ascii-digit?
+                                        (string-ref template cursor)))
+                                 (digits
+                                   (+ cursor 1)
+                                   (+
+                                     (* number 10)
+                                     (-
+                                       (char->integer
+                                         (string-ref template cursor))
+                                       (char->integer #\0))))
+                                 (begin
+                                   (emit-group number)
+                                   (loop cursor))))]
+                          [(char=? escaped #\&)
+                           (emit-group 0)
+                           (loop (+ index 2))]
+                          [(char=? escaped #\n)
+                           (emit-string (string #\newline))
+                           (loop (+ index 2))]
+                          [(char=? escaped #\t)
+                           (emit-string (string #\tab))
+                           (loop (+ index 2))]
+                          [(char=? escaped #\r)
+                           (emit-string (string #\return))
+                           (loop (+ index 2))]
+                          [(char=? escaped #\u)
+                           (set! next-case 'upper)
+                           (loop (+ index 2))]
+                          [(char=? escaped #\l)
+                           (set! next-case 'lower)
+                           (loop (+ index 2))]
+                          [(char=? escaped #\U)
+                           (set! persistent-case 'upper)
+                           (set! next-case #f)
+                           (loop (+ index 2))]
+                          [(char=? escaped #\L)
+                           (set! persistent-case 'lower)
+                           (set! next-case #f)
+                           (loop (+ index 2))]
+                          [(char=? escaped #\E)
+                           (set! persistent-case #f)
+                           (set! next-case #f)
+                           (loop (+ index 2))]
+                          [else
+                           (emit-string (string escaped))
+                           (loop (+ index 2))]))))))))))
 
   (define (parse-regexp pattern)
     (unless (string? pattern)

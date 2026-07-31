@@ -13,7 +13,8 @@
 | change ring 与跨 Buffer change navigation | 已实现 |
 | 基础 motion、editing、search、replace 与 window command | 已实现 |
 | Unicode regexp matcher、编号 capture 与双向搜索 | 已实现 |
-| capture replacement 与 search case policy | 未实现 |
+| regexp capture replacement 与大小写转换 | 已实现 |
+| search case policy | 未实现 |
 
 本文只定义文本编辑器当前使用的输入路径。minibuffer 的读取与焦点规则由
 [12-minibuffer.md](12-minibuffer.md) 定义；command 与 interactive 参数由
@@ -182,6 +183,16 @@ word 定义。字符 class、range、capturing group、`(?:...)`、alternation �
 `*`/`+`/`?` 在 forward/backward 中使用相同语义。case-fold 是一次 match request 的
 显式参数，使用 Unicode case-insensitive character comparison。零长度结果是合法
 的 `[offset, offset)` range；遍历者负责在消费该结果后推进至少一个字符边界。
+
+regexp replacement 直接消费当前 `RegexpMatch`。`\&` 和 `\0` 引用完整匹配，
+`\1` 等十进制编号引用 capture；未参与的 capture 展开为空字符串。`\\`、`\n`、
+`\t`、`\r` 处理 replacement escape，`\u`/`\l` 转换下一个字符，`\U`/`\L` 持续
+转换直到 `\E`。case conversion 使用 Unicode character mapping。decision UI 的
+replacement preview 与最终 transaction 保存并消费同一个展开结果。
+
+query replace 的 scan position 始终位于 UTF-8 character boundary。消费非空匹配后
+从 replacement 末尾继续；零长度匹配在 replacement 末尾再推进一个完整字符，位于
+EOF 时进入显式终止位置，因此 skip、逐项 replace 和 replace-all 都单调前进。
 
 ## View 边界
 

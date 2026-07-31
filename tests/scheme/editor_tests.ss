@@ -2893,6 +2893,75 @@
       (buffer-bytes search-buffer)
       (string->utf8 "<foo12> bar <foo345>")))
   (error 'editor-tests "query-replace-regexp did not replace all matches"))
+
+(buffer-replace-range!
+  search-buffer
+  0
+  (bytevector-length (buffer-bytes search-buffer))
+  (string->utf8 "foo12 foo345"))
+(view-set-caret! search-view 0)
+(editor-update!
+  search-editor
+  (make-command-message 'query-replace-regexp #f))
+(search-send! (string->utf8 "(foo)([0-9]+)"))
+(search-send! (bytes 13))
+(search-send! (string->utf8 "\\u\\1-\\2"))
+(search-send! (bytes 13))
+(unless
+  (and
+    (editor-active-prompt search-editor)
+    (string-contains?
+      (editor-status-message search-editor)
+      "Foo-12"))
+  (error 'editor-tests "query-replace preview did not expand captures"))
+(search-send! (string->utf8 "!"))
+(unless
+  (bytevector=?
+    (buffer-bytes search-buffer)
+    (string->utf8 "Foo-12 Foo-345"))
+  (error 'editor-tests "query-replace capture expansion differs"))
+
+(buffer-replace-range!
+  search-buffer
+  0
+  (bytevector-length (buffer-bytes search-buffer))
+  (string->utf8 "é"))
+(view-set-caret! search-view 0)
+(editor-update!
+  search-editor
+  (make-command-message 'query-replace-regexp #f))
+(search-send! (string->utf8 "^|$"))
+(search-send! (bytes 13))
+(search-send! (bytes 13))
+(search-send! (string->utf8 "!"))
+(unless
+  (and
+    (not (editor-active-prompt search-editor))
+    (bytevector=? (buffer-bytes search-buffer) (string->utf8 "é"))
+    (string-contains?
+      (editor-status-message search-editor)
+      "Replaced 2"))
+  (error 'editor-tests
+         "zero-length regexp replacement did not advance by character"))
+
+(buffer-replace-range!
+  search-buffer
+  0
+  (bytevector-length (buffer-bytes search-buffer))
+  (string->utf8 "a"))
+(view-set-caret! search-view 0)
+(editor-update!
+  search-editor
+  (make-command-message 'query-replace-regexp #f))
+(search-send! (string->utf8 "\\b"))
+(search-send! (bytes 13))
+(search-send! (string->utf8 "-"))
+(search-send! (bytes 13))
+(search-send! (string->utf8 "!"))
+(unless
+  (bytevector=? (buffer-bytes search-buffer) (string->utf8 "-a-"))
+  (error 'editor-tests
+         "non-empty zero-length replacement did not terminate"))
 (editor-close! search-editor)
 
 (define window-document

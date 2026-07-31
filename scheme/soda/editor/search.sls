@@ -36,6 +36,8 @@
       (mutable scan-position)
       (mutable match-start)
       (mutable match-end)
+      (mutable match-result)
+      (mutable expanded-replacement)
       (mutable count)))
 
   (define (text-matches-at? text query offset)
@@ -64,11 +66,30 @@
           [(text-matches-at? text query offset) offset]
           [else (loop (- offset 1))]))))
 
+  (define (next-character-offset text offset)
+    (let ([size (text-size text)])
+      (if (>= offset size)
+          (+ size 1)
+          (let* ([lead (text-byte-at text offset)]
+                 [width
+                   (cond
+                     [(< lead #x80) 1]
+                     [(< lead #xe0) 2]
+                     [(< lead #xf0) 3]
+                     [else 4])])
+            (min size (+ offset width))))))
+
   (define (regexp-match text pattern start end backward?)
     (let ([value (utf8->string (text->bytevector text))])
       (if backward?
           (regexp-find-backward pattern value start end)
           (regexp-find-forward pattern value start end))))
+
+  (define (regexp-match-result text pattern start end backward?)
+    (let ([value (utf8->string (text->bytevector text))])
+      (if backward?
+          (regexp-search-backward pattern value start end)
+          (regexp-search-forward pattern value start end))))
 
   (define (with-buffer-text buffer procedure)
     (let ([snapshot (document-snapshot (buffer-document buffer))])
@@ -81,6 +102,11 @@
               (lambda () (procedure text))
               (lambda () (text-close! text)))))
         (lambda () (snapshot-close! snapshot)))))
+
+  (define (written-string value)
+    (let-values ([(port extract) (open-string-output-port)])
+      (write value port)
+      (extract)))
 
   (define (search-data editor)
     (let ([prompt (editor-active-prompt editor)])
@@ -339,26 +365,55 @@
              (with-buffer-text
                buffer
                (lambda (text)
-                 (if (query-replace-session-regexp? session)
-                     (regexp-match
-                       text
-                       (query-replace-session-query session)
-                       (query-replace-session-scan-position session)
-                       (text-size text)
-                       #f)
-                     (let ([match
-                             (find-forward
-                               text
-                               query
-                               (query-replace-session-scan-position session)
-                               (text-size text))])
-                       (and match
-                            (cons match (+ match length)))))))])
+                 (let ([scan
+                         (query-replace-session-scan-position session)]
+                       [size (text-size text)])
+                   (if (> scan size)
+                       #f
+                       (if (query-replace-session-regexp? session)
+                           (let ([result
+                                   (regexp-match-result
+                                     text
+                                     (query-replace-session-query session)
+                                     scan
+                                     size
+                                     #f)])
+                             (query-replace-session-match-result-set!
+                               session result)
+                             (and result
+                                  (regexp-match-group result 0)))
+                           (let ([match
+                                   (find-forward
+                                     text query scan size)])
+                             (query-replace-session-match-result-set!
+                               session #f)
+                             (and match
+                                  (cons match (+ match length)))))))))])
       (if (not match-range)
-          #f
+          (begin
+            (query-replace-session-match-result-set! session #f)
+            (query-replace-session-expanded-replacement-set! session #f)
+            #f)
           (let ([view (query-replace-origin-view editor session)]
                 [match (car match-range)]
                 [end (cdr match-range)])
+            (query-replace-session-expanded-replacement-set!
+              session
+              (if (query-replace-session-regexp? session)
+                  (with-buffer-text
+                    buffer
+                    (lambda (text)
+                      (regexp-expand-replacement
+                        (query-replace-session-replacement session)
+                        (utf8->string (text->bytevector text))
+                        (query-replace-session-match-result session))))
+                  (query-replace-session-replacement session)))
+            (editor-set-status-message!
+              editor
+              (string-append
+                "Replacement: "
+                (written-string
+                  (query-replace-session-expanded-replacement session))))
             (view-set-mark! view match)
             (view-set-caret! view end)
             (query-replace-session-match-start-set! session match)
@@ -393,6 +448,8 @@
                #f
                'query
                (view-caret view)
+               #f
+               #f
                #f
                #f
                0)])
@@ -504,33 +561,8 @@
     (let* ([buffer (query-replace-buffer editor session)]
            [start (query-replace-session-match-start session)]
            [end (query-replace-session-match-end session)]
-           [matched
-             (and
-               (query-replace-session-regexp? session)
-               (with-buffer-text
-                 buffer
-                 (lambda (text)
-                   (utf8->string
-                     (text-subbytevector text start end)))))]
            [replacement-value
-             (if
-               matched
-               (let ([template
-                       (query-replace-session-replacement session)])
-                 (let-values ([(port extract) (open-string-output-port)])
-                   (let loop ([index 0])
-                     (cond
-                       [(= index (string-length template)) (extract)]
-                       [(and
-                          (< (+ index 1) (string-length template))
-                          (char=? (string-ref template index) #\\)
-                          (char=? (string-ref template (+ index 1)) #\&))
-                        (put-string port matched)
-                        (loop (+ index 2))]
-                       [else
-                        (put-char port (string-ref template index))
-                        (loop (+ index 1))]))))
-               (query-replace-session-replacement session))]
+             (query-replace-session-expanded-replacement session)]
            [replacement
              (string->utf8 replacement-value)]
            [new-end (+ start (bytevector-length replacement))])
@@ -545,7 +577,9 @@
           (with-buffer-text
             buffer
             (lambda (text)
-              (min (text-size text) (+ new-end 1))))))
+              (next-character-offset text new-end)))))
+      (query-replace-session-match-result-set! session #f)
+      (query-replace-session-expanded-replacement-set! session #f)
       (view-set-caret!
         (query-replace-origin-view editor session)
         new-end)))
@@ -567,9 +601,17 @@
         (assertion-violation
           'query-replace.no
           "no active query replace"))
-      (query-replace-session-scan-position-set!
-        session
-        (query-replace-session-match-end session))
+      (let ([start (query-replace-session-match-start session)]
+            [end (query-replace-session-match-end session)])
+        (query-replace-session-scan-position-set!
+          session
+          (if (= start end)
+              (with-buffer-text
+                (query-replace-buffer editor session)
+                (lambda (text) (next-character-offset text end)))
+              end)))
+      (query-replace-session-match-result-set! session #f)
+      (query-replace-session-expanded-replacement-set! session #f)
       (query-replace-next-or-finish! editor session)))
 
   (define (query-replace-all-command context)

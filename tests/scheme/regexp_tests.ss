@@ -19,6 +19,15 @@
     (equal? (regexp-match-group grouped 2) '(5 . 7)))
   (error 'regexp-tests "numbered capture ranges differ"))
 
+(unless
+  (string=?
+    (regexp-expand-replacement
+      "\\u\\1-\\L\\2\\E-\\&-\\\\-\\n"
+      "x foo12 y"
+      grouped)
+    "Foo-12-foo12-\\-\n")
+  (error 'regexp-tests "capture or case replacement expansion differs"))
+
 (define nested
   (require-match "((a)|b)(c)?" "bc" 0 2))
 (unless
