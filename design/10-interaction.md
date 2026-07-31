@@ -102,8 +102,11 @@ Document editable boundary 推进到 prompt 末尾。Buffer 中发生插入或�
 
 Enter 使用 Chez reader 检查当前输入是否包含完整 forms。完整输入作为一个
 `EvaluationRequest` 提交；因输入结束而无法闭合的 form 在 caret 处插入换行并
-继续编辑。其他 reader condition 作为完整请求提交，由 evaluator 将 condition
-呈现在 transcript 中。
+继续编辑。换行缩进由 Scheme lexical scanner 根据 caret 前的 entry prefix
+计算：字符串、quoted symbol、字符字面量、行注释和嵌套块注释不贡献结构
+delimiter；未闭合 form 优先与较近的第二个 datum 对齐，否则相对 opener 使用
+`indent-width`。换行与缩进属于同一个 Buffer transaction。其他 reader
+condition 作为完整请求提交，由 evaluator 将 condition 呈现在 transcript 中。
 
 session 保存有界、按提交顺序排列的输入历史，忽略空输入和连续重复项。历史搜索
 保留搜索开始时的输入作为 key 和草稿；向较新方向越过最后一个匹配项时恢复该

@@ -7,6 +7,7 @@
           comint-commit-input!
           comint-append-output!
           comint-insert-newline!
+          comint-insert-newline-with-indent!
           comint-move-session-views-to-end!
           comint-history-previous-command
           comint-history-next-command
@@ -168,10 +169,21 @@
         end)
       end))
 
-  (define (comint-insert-newline! view)
+  (define (comint-insert-newline-with-indent! view indentation)
+    (unless
+      (and
+        (integer? indentation)
+        (exact? indentation)
+        (not (negative? indentation)))
+      (assertion-violation
+        'comint-insert-newline-with-indent!
+        "indentation must be a non-negative exact integer"
+        indentation))
     (let* ([buffer (view-buffer view)]
            [caret (view-caret view)]
+           [bytes (make-bytevector (+ indentation 1) 32)]
            [change #f])
+      (bytevector-u8-set! bytes 0 10)
       (dynamic-wind
         (lambda () #f)
         (lambda ()
@@ -183,15 +195,20 @@
                   (transaction-insert!
                     transaction
                     caret
-                    (make-bytevector 1 10)))))
+                    bytes))))
             (lambda (result committed-change)
               (set! change committed-change)
-              (view-set-caret! view (+ caret 1))
+              (view-set-caret!
+                view
+                (+ caret (bytevector-length bytes)))
               (ensure-view-visible! view))))
         (lambda ()
           (when change
             (change-close! change)))))
     '())
+
+  (define (comint-insert-newline! view)
+    (comint-insert-newline-with-indent! view 0))
 
   (define (active-interaction who context)
     (let* ([editor (command-context-editor context)]

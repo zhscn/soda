@@ -15,6 +15,7 @@
           (soda editor event)
           (soda editor interaction)
           (soda editor keymap)
+          (soda editor scheme-indentation)
           (soda editor state))
 
   (define repl-resource "*scheme-repl*")
@@ -220,7 +221,17 @@
               #f
               (buffer-origin buffer start end))
             (begin
-              (comint-insert-newline! view)
+              (comint-insert-newline-with-indent!
+                view
+                (scheme-continuation-indent
+                  (buffer-range-source
+                    buffer
+                    start
+                    (view-caret view))
+                  (buffer-setting-ref
+                    buffer
+                    'indent-width
+                    2)))
               '())))))
 
   (define (eval-expression-command context)

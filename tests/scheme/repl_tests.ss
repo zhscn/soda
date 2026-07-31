@@ -12,8 +12,22 @@
         (soda editor event)
         (soda editor interaction)
         (soda editor repl)
+        (soda editor scheme-indentation)
         (soda tui frame)
         (soda tui renderer))
+
+(unless
+  (and
+    (= (scheme-continuation-indent "(+ 1" 2) 3)
+    (= (scheme-continuation-indent "(define (value x)" 2) 2)
+    (= (scheme-continuation-indent "(let ([value 1])" 2) 2)
+    (= (scheme-continuation-indent "  [value" 2) 4)
+    (= (scheme-continuation-indent "(display \"(\")" 2) 0)
+    (= (scheme-continuation-indent "(begin #| ) |#" 2) 2)
+    (= (scheme-continuation-indent "(list #\\(" 2) 2)
+    (= (scheme-continuation-indent "(list |(|)" 2) 0))
+  (error 'repl-tests
+         "Scheme continuation indentation differs from Expeditor rules"))
 
 (define (buffer-bytes buffer)
   (let ([snapshot (document-snapshot (buffer-document buffer))])
@@ -225,7 +239,7 @@
   (error 'repl-tests
          "an empty final provider result left completion active"))
 (press-key! 'enter 13 0)
-(unless (string=? (repl-input) "(soda-no-such-binding-xyz\n")
+(unless (string=? (repl-input) "(soda-no-such-binding-xyz\n  ")
   (error 'repl-tests
          "empty completion state captured the following REPL Enter"))
 (dispatch! (make-command-message 'scheme.repl-clear-input #f))
@@ -569,17 +583,17 @@
           generation-before-multiline)
        (= (length (interaction-session-history session))
           history-length-before-multiline)
-       (string=? (repl-input) "(+ 1\n"))
+       (string=? (repl-input) "(+ 1\n   "))
   (error 'repl-tests
          "Enter submitted an incomplete Scheme form"))
-(insert-text! " 2)")
+(insert-text! "2)")
 (press-key! 'enter 13 0)
 (unless
   (and (= (interaction-session-generation session)
           (+ generation-before-multiline 1))
        (string=?
          (car (reverse (interaction-session-history session)))
-         "(+ 1\n 2)")
+         "(+ 1\n   2)")
        (string-contains? (buffer-string repl-buffer) "3\n> ")
        (string=? (repl-input) ""))
   (error 'repl-tests
