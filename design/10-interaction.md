@@ -303,7 +303,17 @@ condition failure 提供默认的 `retry`、有 continuation 时的 `use-value`�
   `scheme.debug-inspect-up` 返回父对象，`scheme.debug-inspect-top` 返回当前根；
   `scheme.debug-inspect-code`、`scheme.debug-inspect-call`、
   `scheme.debug-inspect-closure` 和 `scheme.debug-inspect-source` 选择节点公开的
-  专用 child；对象预览、子项数量与求值历史具有固定上限；
+  专用 child。每个 child 保存对象内稳定的逻辑 index；Buffer 每次显示固定大小的
+  page，`scheme.debug-inspect-next-page` 和
+  `scheme.debug-inspect-previous-page` 只移动显示窗口，因此跨页后
+  `scheme.debug-inspect-ref` 的参数含义保持不变；
+- `scheme.debug-inspect-print` 使用 Chez Inspector 的 `print` 操作生成 pretty
+  representation，`scheme.debug-inspect-write` 使用 `write` 生成可写表示；完整结果
+  保存在 debugger session 中并投影到 Buffer，对象预览仍保持有界；
+- `scheme.debug-inspect-find` 在选中 frame 中求值一元 predicate，并通过 Chez
+  object finder 搜索当前对象可达图。匹配结果到搜索根的对象路径成为 Inspector
+  path，因此 `up` 和 `top` 继续可用；`scheme.debug-inspect-find-next` 复用 finder
+  的遍历状态查找下一个匹配对象；
 - `scheme.debug-set-value` 在选中 frame 中求值 replacement expression，并通过
   assignable variable inspector 更新局部值；
 - `scheme.debug-apply` 在选中 frame 中求值一个 procedure，并把当前对象传给它。
@@ -327,11 +337,12 @@ condition failure 提供默认的 `retry`、有 continuation 时的 `use-value`�
   interaction failure 同时退出 `failed` 状态，对 suspended evaluation 同时释放
   保存的 engine。
 
-debugger Buffer 的 `n`、`p`、`e`、`i`、`k`、`l`、`d`、`u`、`t`、`!`、`a`、
-`v`、`c`、`r`、`=`、`x`、`q` 分别映射到 frame 导航、求值、检查 condition、
-检查 continuation、检查局部值、进入子项、返回父节点、返回根节点、设置变量、
-应用 procedure、源码访问、继续、action selector、replacement value、保留退出
-与丢弃操作。
+debugger Buffer 的 `n`、`p`、`e`、`i`、`k`、`l`、`d`、`u`、`t`、`[`、`]`、
+`P`、`W`、`/`、`N`、`!`、`a`、`v`、`c`、`r`、`=`、`x`、`q` 分别映射到 frame
+导航、求值、检查 condition、检查 continuation、检查局部值、进入子项、返回父
+节点、返回根节点、Inspector 分页、print、write、find、find-next、设置变量、应用
+procedure、源码访问、继续、action selector、replacement value、保留退出与丢弃
+操作。
 源码访问复用普通 `file.read` effect，文件
 读取期间 command loop 保持可用；打开完成后 debugger 状态仍可重新激活。重试和
 丢弃会先把所有显示 debugger Buffer 的 View 切回来源 Buffer。Editor 关闭时释放

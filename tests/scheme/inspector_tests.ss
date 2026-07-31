@@ -91,6 +91,67 @@
       "replacement"))
   "debugger action parameter contract differs")
 
+(define paged-vector
+  (list->vector (iota 100)))
+(define paged-node
+  (make-inspector-node
+    "vector"
+    (inspect/object paged-vector)))
+(define second-page
+  (inspector-node-children-range
+    paged-node
+    32
+    inspector-default-page-size))
+
+(require-test
+  (and
+    (= (inspector-node-child-count paged-node) 100)
+    (= (length second-page) inspector-default-page-size)
+    (= (inspector-child-index (car second-page)) 32)
+    (= (inspector-child-index (car (reverse second-page))) 63)
+    (=
+      (inspector-node-value
+        (inspector-child-node
+          (inspector-node-child-ref paged-node 77)))
+      77))
+  "Inspector child pagination does not preserve stable indices")
+
+(define rendered-list
+  (make-inspector-node
+    "rendered"
+    (inspect/object '(alpha beta))))
+(require-test
+  (and
+    (string=? (inspector-node-write rendered-list) "(alpha beta)")
+    (string=?
+      (inspector-node-print rendered-list)
+      "(alpha beta)\n"))
+  "Inspector print and write representations differ")
+
+(define object-search
+  (make-inspector-search
+    paged-node
+    (lambda (value) (eqv? value 77))))
+(define object-search-path
+  (inspector-search-next object-search))
+(require-test
+  (and
+    (pair? object-search-path)
+    (=
+      (inspector-node-value
+        (car object-search-path))
+      77)
+    (string=?
+      (inspector-node-label
+        (car object-search-path))
+      "find result")
+    (eq?
+      (inspector-node-value
+        (car (reverse object-search-path)))
+      paged-vector)
+    (not (inspector-search-next object-search)))
+  "Inspector object search does not preserve a navigable path")
+
 (define list-node
   (make-inspector-node
     "values"

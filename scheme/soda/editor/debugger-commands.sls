@@ -713,6 +713,169 @@
       (debugger-session-inspection-top! debugger)
       '()))
 
+  (define (debug-inspect-next-page-command context)
+    (let* ([target
+             (require-debug-target
+               'scheme.debug-inspect-next-page
+               context)]
+           [debugger (cadr target)])
+      (debugger-session-inspection-next-page!
+        debugger)
+      '()))
+
+  (define (debug-inspect-previous-page-command context)
+    (let* ([target
+             (require-debug-target
+               'scheme.debug-inspect-previous-page
+               context)]
+           [debugger (cadr target)])
+      (debugger-session-inspection-previous-page!
+        debugger)
+      '()))
+
+  (define (debug-inspect-render-command
+            context
+            who
+            style)
+    (let* ([target
+             (require-debug-target who context)]
+           [debugger (cadr target)])
+      (guard
+        (condition
+          [else
+           (editor-user-error
+             who
+             (string-append
+               "Inspector rendering failed: "
+               (condition->string condition)))])
+        (debugger-session-inspection-render!
+          debugger
+          style))
+      '()))
+
+  (define (debug-inspect-print-command context)
+    (debug-inspect-render-command
+      context
+      'scheme.debug-inspect-print
+      'print))
+
+  (define (debug-inspect-write-command context)
+    (debug-inspect-render-command
+      context
+      'scheme.debug-inspect-write
+      'write))
+
+  (define (run-inspector-find!
+            editor
+            debugger
+            source)
+    (guard
+      (condition
+        [else
+         (editor-user-error
+           'scheme.debug-inspect-find
+           (string-append
+             "Inspector search failed: "
+             (condition->string condition)))])
+      (unless
+        (debugger-session-inspection-find!
+          debugger
+          source)
+        (editor-user-error
+          'scheme.debug-inspect-find
+          "No matching object"))
+      '()))
+
+  (define (debug-inspect-find-command context)
+    (let* ([editor (command-context-editor context)]
+           [target
+             (require-debug-target
+               'scheme.debug-inspect-find
+               context)]
+           [debugger (cadr target)]
+           [argument (command-context-argument context)])
+      (cond
+        [(string? argument)
+         (run-inspector-find!
+           editor
+           debugger
+           argument)]
+        [(not argument)
+         (unless
+           (debugger-session-inspection-node debugger)
+           (editor-user-error
+             'scheme.debug-inspect-find
+             "The debugger has no inspected object"))
+         (editor-open-prompt!
+           editor
+           (make-prompt-request
+             "Find object matching predicate: "
+             ""
+             'scheme-debug-inspect-find
+             #f
+             'must-match
+             (lambda (value)
+               (positive? (string-length value)))
+             'scheme.debug-inspect-find-accept
+             #f
+             debugger))
+         '()]
+        [else
+         (assertion-violation
+           'scheme.debug-inspect-find
+           "predicate expression must be a string or #f"
+           argument)])))
+
+  (define (debug-inspect-find-accept-command context)
+    (let* ([editor (command-context-editor context)]
+           [result (command-context-argument context)]
+           [debugger
+             (and
+               (prompt-result? result)
+               (prompt-result-data result))]
+           [source
+             (and
+               (prompt-result? result)
+               (eq? (prompt-result-status result) 'accepted)
+               (prompt-result-value result))]
+           [target
+             (active-debug-target
+               editor
+               (command-context-view context))])
+      (if
+        (and
+          target
+          source
+          (eq? debugger (cadr target)))
+        (run-inspector-find!
+          editor
+          debugger
+          source)
+        '())))
+
+  (define (debug-inspect-find-next-command context)
+    (let* ([editor (command-context-editor context)]
+           [target
+             (require-debug-target
+               'scheme.debug-inspect-find-next
+               context)]
+           [debugger (cadr target)])
+      (guard
+        (condition
+          [else
+           (editor-user-error
+             'scheme.debug-inspect-find-next
+             (string-append
+               "Inspector search failed: "
+               (condition->string condition)))])
+        (unless
+          (debugger-session-inspection-find-next!
+            debugger)
+          (editor-user-error
+            'scheme.debug-inspect-find-next
+            "No further matching object")))
+      '()))
+
   (define (debug-inspect-role context who role)
     (let* ([editor (command-context-editor context)]
            [target
@@ -1657,6 +1820,30 @@
           debug-inspect-top-command
           "Return to the root debugger inspection object.")
         (list
+          'scheme.debug-inspect-next-page
+          debug-inspect-next-page-command
+          "Show the next page of Inspector children.")
+        (list
+          'scheme.debug-inspect-previous-page
+          debug-inspect-previous-page-command
+          "Show the previous page of Inspector children.")
+        (list
+          'scheme.debug-inspect-print
+          debug-inspect-print-command
+          "Pretty-print the inspected object.")
+        (list
+          'scheme.debug-inspect-write
+          debug-inspect-write-command
+          "Write the inspected object.")
+        (list
+          'scheme.debug-inspect-find
+          debug-inspect-find-command
+          "Find an object reachable from the inspected object.")
+        (list
+          'scheme.debug-inspect-find-next
+          debug-inspect-find-next-command
+          "Find the next object matching the active Inspector search.")
+        (list
           'scheme.debug-inspect-code
           debug-inspect-code-command
           "Inspect the selected continuation's procedure code.")
@@ -1725,6 +1912,12 @@
     (editor-register-internal-command!
       editor
       (make-internal-context-command
+        'scheme.debug-inspect-find-accept
+        debug-inspect-find-accept-command
+        "Apply an Inspector search predicate from minibuffer input."))
+    (editor-register-internal-command!
+      editor
+      (make-internal-context-command
         'scheme.debug-action-accept
         debug-action-accept-command
         "Apply the debugger action selected by the minibuffer."))
@@ -1778,6 +1971,12 @@
           (#\d . scheme.debug-inspect-ref)
           (#\u . scheme.debug-inspect-up)
           (#\t . scheme.debug-inspect-top)
+          (#\[ . scheme.debug-inspect-previous-page)
+          (#\] . scheme.debug-inspect-next-page)
+          (#\P . scheme.debug-inspect-print)
+          (#\W . scheme.debug-inspect-write)
+          (#\/ . scheme.debug-inspect-find)
+          (#\N . scheme.debug-inspect-find-next)
           (#\! . scheme.debug-set-value)
           (#\a . scheme.debug-apply)
           (#\v . scheme.debug-visit-source)

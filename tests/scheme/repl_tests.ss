@@ -1004,6 +1004,110 @@
 (dispatch!
   (make-command-message
     'scheme.debug-eval-frame
+    "(let ([v (make-vector 70)]) (do ([i 0 (+ i 1)]) ((= i 70) v) (vector-set! v i i)))"))
+(unless
+  (and
+    (string-contains?
+      (buffer-string debugger-buffer)
+      "Children 0-32 of 70:")
+    (string-contains?
+      (buffer-string debugger-buffer)
+      "  31 31 = 31"))
+  (error 'repl-tests
+         "debug Inspector did not show the first child page"))
+(dispatch!
+  (make-command-message
+    'scheme.debug-inspect-next-page
+    #f))
+(unless
+  (and
+    (= (debugger-session-inspection-page-start debugger) 32)
+    (string-contains?
+      (buffer-string debugger-buffer)
+      "Children 32-64 of 70:")
+    (string-contains?
+      (buffer-string debugger-buffer)
+      "  32 32 = 32"))
+  (error 'repl-tests
+         "debug Inspector did not advance to the next child page"))
+(dispatch!
+  (make-command-message
+    'scheme.debug-inspect-previous-page
+    #f))
+(unless
+  (= (debugger-session-inspection-page-start debugger) 0)
+  (error 'repl-tests
+         "debug Inspector did not return to the previous child page"))
+(dispatch!
+  (make-command-message
+    'scheme.debug-inspect-print
+    #f))
+(unless
+  (and
+    (eq? (debugger-session-inspection-output-style debugger) 'print)
+    (string-contains?
+      (buffer-string debugger-buffer)
+      "Inspector print:\n#("))
+  (error 'repl-tests
+         "debug Inspector did not project pretty-printed output"))
+(dispatch!
+  (make-command-message
+    'scheme.debug-inspect-write
+    #f))
+(unless
+  (and
+    (eq? (debugger-session-inspection-output-style debugger) 'write)
+    (string-contains?
+      (debugger-session-inspection-output-text debugger)
+      "#(0 1 2"))
+  (error 'repl-tests
+         "debug Inspector did not retain written output"))
+(dispatch!
+  (make-command-message
+    'scheme.debug-inspect-find
+    "(lambda (value) (and (integer? value) (>= value 65)))"))
+(unless
+  (and
+    (string-contains?
+      (buffer-string debugger-buffer)
+      "Inspector path: result[0] / find result")
+    (string-contains?
+      (buffer-string debugger-buffer)
+      "Object: 65"))
+  (error 'repl-tests
+         "debug Inspector did not navigate to a found object"))
+(dispatch!
+  (make-command-message
+    'scheme.debug-inspect-find-next
+    #f))
+(unless
+  (string-contains?
+    (buffer-string debugger-buffer)
+    "Object: 66")
+  (error 'repl-tests
+         "debug Inspector did not navigate to the next found object"))
+(dispatch!
+  (make-command-message
+    'scheme.debug-inspect-top
+    #f))
+(dispatch!
+  (make-command-message
+    'scheme.debug-inspect-find
+    #f))
+(unless
+  (and
+    (editor-active-prompt editor)
+    (string=?
+      (prompt-request-prompt
+        (prompt-session-request
+          (editor-active-prompt editor)))
+      "Find object matching predicate: "))
+  (error 'repl-tests
+         "debug Inspector find command did not open its predicate prompt"))
+(editor-abort-prompt! editor)
+(dispatch!
+  (make-command-message
+    'scheme.debug-eval-frame
     "(list 'alpha 'beta)"))
 (unless
   (and

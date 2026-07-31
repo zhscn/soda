@@ -17,6 +17,10 @@
           debugger-session-inspection-active?
           debugger-session-inspection-node
           debugger-session-inspection-capabilities
+          debugger-session-inspection-page-start
+          debugger-session-inspection-page-size
+          debugger-session-inspection-output-style
+          debugger-session-inspection-output-text
           debugger-session-actions
           debugger-session-action
           debugger-session-set-actions!
@@ -36,6 +40,11 @@
           debugger-session-inspection-select-role!
           debugger-session-inspection-up!
           debugger-session-inspection-top!
+          debugger-session-inspection-next-page!
+          debugger-session-inspection-previous-page!
+          debugger-session-inspection-render!
+          debugger-session-inspection-find!
+          debugger-session-inspection-find-next!
           debugger-session-set-inspected-value!
           debugger-session-apply-inspected
           debugger-session-evaluate-procedure
@@ -79,6 +88,12 @@
   (define-record-type debugger-evaluation
     (fields frame-index source status output))
 
+  (define-record-type debugger-inspection-output
+    (fields style text))
+
+  (define-record-type debugger-inspection-search
+    (fields search outer-stack))
+
   (define-record-type
     (debugger-session %make-debugger-session debugger-session?)
     (fields interaction-id
@@ -105,6 +120,15 @@
             (mutable inspection-stack
                      debugger-session-inspection-stack
                      debugger-session-inspection-stack-set!)
+            (mutable inspection-page-start
+                     debugger-session-inspection-page-start
+                     debugger-session-inspection-page-start-set!)
+            (mutable inspection-output
+                     debugger-session-inspection-output
+                     debugger-session-inspection-output-set!)
+            (mutable inspection-search
+                     debugger-session-inspection-search
+                     debugger-session-inspection-search-set!)
             (mutable actions
                      debugger-session-actions
                      debugger-session-actions-set!)
@@ -385,6 +409,9 @@
           (and (pair? frames) 0)
           '()
           '()
+          0
+          #f
+          #f
           (list (built-in-action 'dismiss #t #f))
           0
           #f
@@ -426,6 +453,9 @@
           (and (pair? frames) 0)
           '()
           '()
+          0
+          #f
+          #f
           (evaluation-actions
             (evaluation-result-status result)
             continuation
@@ -646,6 +676,7 @@
                 (make-inspector-node
                   "result[0]"
                   (inspect/object (car values))))))
+        (reset-inspection-view! debugger #t)
         (debugger-session-touch! debugger)
         values)))
 
@@ -703,6 +734,7 @@
                       (number->string index))
                   "]")
                 (debugger-variable-inspector variable))))
+          (reset-inspection-view! debugger #t)
           (debugger-session-touch! debugger)))))
 
   (define (debugger-session-inspect-condition! debugger)
@@ -716,6 +748,7 @@
           "condition"
           (inspect/object
             (debugger-session-condition debugger)))))
+    (reset-inspection-view! debugger #t)
     (debugger-session-touch! debugger))
 
   (define (debugger-session-inspect-continuation! debugger)
@@ -734,6 +767,7 @@
           (make-inspector-node
             "raise continuation"
             (inspect/object continuation))))
+      (reset-inspection-view! debugger #t)
       (debugger-session-touch! debugger)))
 
   (define (record-evaluation! debugger evaluation)
@@ -773,6 +807,44 @@
           (inspector-node-capabilities node)
           '())))
 
+  (define (debugger-session-inspection-page-size debugger)
+    (require-open-debugger
+      'debugger-session-inspection-page-size
+      debugger)
+    inspector-default-page-size)
+
+  (define (debugger-session-inspection-output-style debugger)
+    (require-open-debugger
+      'debugger-session-inspection-output-style
+      debugger)
+    (let ([output
+            (debugger-session-inspection-output debugger)])
+      (and output
+           (debugger-inspection-output-style output))))
+
+  (define (debugger-session-inspection-output-text debugger)
+    (require-open-debugger
+      'debugger-session-inspection-output-text
+      debugger)
+    (let ([output
+            (debugger-session-inspection-output debugger)])
+      (and output
+           (debugger-inspection-output-text output))))
+
+  (define (reset-inspection-view!
+            debugger
+            clear-search?)
+    (debugger-session-inspection-page-start-set!
+      debugger
+      0)
+    (debugger-session-inspection-output-set!
+      debugger
+      #f)
+    (when clear-search?
+      (debugger-session-inspection-search-set!
+        debugger
+        #f)))
+
   (define (debugger-session-inspection-down! debugger index)
     (require-open-debugger
       'debugger-session-inspection-down!
@@ -790,19 +862,22 @@
         (assertion-violation
           'debugger-session-inspection-down!
           "debugger has no inspected value"))
-      (let ([children
-              (inspector-node-children (car stack))])
-        (unless (< index (length children))
+      (let ([child
+              (inspector-node-child-ref
+                (car stack)
+                index)])
+        (unless child
           (assertion-violation
             'debugger-session-inspection-down!
-            "inspection child index is out of range"
+            "inspection child is unavailable"
             index))
-        (let ([child (list-ref children index)])
+        (let ()
           (debugger-session-inspection-stack-set!
             debugger
             (cons
               (inspector-child-node child)
               stack))
+          (reset-inspection-view! debugger #f)
           (debugger-session-touch! debugger)))))
 
   (define (debugger-session-inspection-select-role!
@@ -836,6 +911,7 @@
         (debugger-session-inspection-stack-set!
           debugger
           (cons (inspector-child-node child) stack))
+        (reset-inspection-view! debugger #f)
         (debugger-session-touch! debugger)
         (inspector-child-node child))))
 
@@ -848,6 +924,7 @@
         (debugger-session-inspection-stack-set!
           debugger
           (cdr stack))
+        (reset-inspection-view! debugger #f)
         (debugger-session-touch! debugger))))
 
   (define (debugger-session-inspection-top! debugger)
@@ -860,7 +937,146 @@
         (debugger-session-inspection-stack-set!
           debugger
           (list (car (reverse stack))))
+        (reset-inspection-view! debugger #f)
         (debugger-session-touch! debugger))))
+
+  (define (debugger-session-inspection-next-page! debugger)
+    (require-open-debugger
+      'debugger-session-inspection-next-page!
+      debugger)
+    (let ([node
+            (debugger-session-inspection-node debugger)])
+      (unless node
+        (assertion-violation
+          'debugger-session-inspection-next-page!
+          "debugger has no inspected value"))
+      (let* ([start
+               (debugger-session-inspection-page-start
+                 debugger)]
+             [next
+               (+ start inspector-default-page-size)]
+             [count (inspector-node-child-count node)])
+        (when (< next count)
+          (debugger-session-inspection-page-start-set!
+            debugger
+            next)
+          (debugger-session-touch! debugger))
+        (debugger-session-inspection-page-start
+          debugger))))
+
+  (define (debugger-session-inspection-previous-page! debugger)
+    (require-open-debugger
+      'debugger-session-inspection-previous-page!
+      debugger)
+    (unless (debugger-session-inspection-node debugger)
+      (assertion-violation
+        'debugger-session-inspection-previous-page!
+        "debugger has no inspected value"))
+    (let* ([start
+             (debugger-session-inspection-page-start debugger)]
+           [previous
+             (max
+               0
+               (- start inspector-default-page-size))])
+      (unless (= start previous)
+        (debugger-session-inspection-page-start-set!
+          debugger
+          previous)
+        (debugger-session-touch! debugger))
+      previous))
+
+  (define (debugger-session-inspection-render!
+            debugger
+            style)
+    (require-open-debugger
+      'debugger-session-inspection-render!
+      debugger)
+    (unless (memq style '(print write))
+      (assertion-violation
+        'debugger-session-inspection-render!
+        "render style must be print or write"
+        style))
+    (let ([node
+            (debugger-session-inspection-node debugger)])
+      (unless node
+        (assertion-violation
+          'debugger-session-inspection-render!
+          "debugger has no inspected value"))
+      (let ([text
+              (case style
+                [(print) (inspector-node-print node)]
+                [(write) (inspector-node-write node)])])
+        (debugger-session-inspection-output-set!
+          debugger
+          (make-debugger-inspection-output
+            style
+            text))
+        (debugger-session-touch! debugger)
+        text)))
+
+  (define (set-inspection-search-result!
+            debugger
+            search-state)
+    (let ([path
+            (inspector-search-next
+              (debugger-inspection-search-search
+                search-state))])
+      (and
+        path
+        (begin
+          (debugger-session-inspection-stack-set!
+            debugger
+            (append
+              path
+              (debugger-inspection-search-outer-stack
+                search-state)))
+          (reset-inspection-view! debugger #f)
+          (debugger-session-touch! debugger)
+          (car path)))))
+
+  (define (debugger-session-inspection-find!
+            debugger
+            source)
+    (require-open-debugger
+      'debugger-session-inspection-find!
+      debugger)
+    (let ([node
+            (debugger-session-inspection-node debugger)])
+      (unless node
+        (assertion-violation
+          'debugger-session-inspection-find!
+          "debugger has no inspected value"))
+      (let* ([predicate
+               (debugger-session-evaluate-procedure
+                 debugger
+                 source)]
+             [search-state
+               (make-debugger-inspection-search
+                 (make-inspector-search node predicate)
+                 (cdr
+                   (debugger-session-inspection-stack
+                     debugger)))])
+        (debugger-session-inspection-search-set!
+          debugger
+          search-state)
+        (set-inspection-search-result!
+          debugger
+          search-state))))
+
+  (define (debugger-session-inspection-find-next!
+            debugger)
+    (require-open-debugger
+      'debugger-session-inspection-find-next!
+      debugger)
+    (let ([search-state
+            (debugger-session-inspection-search debugger)])
+      (unless search-state
+        (assertion-violation
+          'debugger-session-inspection-find-next!
+          "debugger has no active Inspector search"))
+      (set-inspection-search-result!
+        debugger
+        search-state)))
 
   (define (evaluate-in-selected-frame debugger source)
     (let ([frame
@@ -914,6 +1130,9 @@
             'debugger-session-set-inspected-value!
             "replacement expression must produce one value"))
         (inspector-node-set-value! node (car values))
+        (debugger-session-inspection-output-set!
+          debugger
+          #f)
         (debugger-session-touch! debugger)
         values)))
 
@@ -960,6 +1179,7 @@
                   (make-inspector-node
                     "apply result[0]"
                     (inspect/object (car values))))))
+          (reset-inspection-view! debugger #t)
           (debugger-session-touch! debugger)
           values))))
 
@@ -1050,12 +1270,22 @@
     (let ([stack (debugger-session-inspection-stack debugger)])
       (when (pair? stack)
         (let* ([node (car stack)]
+               [child-count
+                 (inspector-node-child-count node)]
+               [page-start
+                 (min
+                   (debugger-session-inspection-page-start
+                     debugger)
+                   child-count)]
                [children
                  (if
                    (inspector-node-has-capability?
                      node
                      'children)
-                   (inspector-node-children node)
+                   (inspector-node-children-range
+                     node
+                     page-start
+                     inspector-default-page-size)
                    '())])
           (newline port)
           (display "Inspector path: " port)
@@ -1076,13 +1306,28 @@
           (display "Capabilities: " port)
           (write (inspector-node-capabilities node) port)
           (newline port)
-          (unless (null? children)
-            (display "Children:\n" port)
-            (let loop ([remaining children] [index 0])
+          (when (positive? child-count)
+            (display "Children " port)
+            (display (number->string page-start) port)
+            (display "-" port)
+            (display
+              (number->string
+                (min
+                  child-count
+                  (+ page-start
+                     inspector-default-page-size)))
+              port)
+            (display " of " port)
+            (display (number->string child-count) port)
+            (display ":\n" port)
+            (let loop ([remaining children])
               (unless (null? remaining)
                 (let ([child (car remaining)])
                   (display "  " port)
-                  (display (number->string index) port)
+                  (display
+                    (number->string
+                      (inspector-child-index child))
+                    port)
                   (display " " port)
                   (display
                     (inspector-child-label child)
@@ -1093,9 +1338,29 @@
                       (inspector-child-node child))
                     port)
                   (newline port)
-                  (loop
-                    (cdr remaining)
-                    (+ index 1))))))))))
+                  (loop (cdr remaining))))))
+          (let ([output
+                  (debugger-session-inspection-output debugger)])
+            (when output
+              (display "Inspector " port)
+              (display
+                (symbol->string
+                  (debugger-inspection-output-style output))
+                port)
+              (display ":\n" port)
+              (let ([text
+                      (debugger-inspection-output-text output)])
+                (display text port)
+                (when
+                  (or
+                    (zero? (string-length text))
+                    (not
+                      (char=?
+                        (string-ref
+                          text
+                          (- (string-length text) 1))
+                        #\newline)))
+                  (newline port)))))))))
 
   (define (source->string frame)
     (let ([path (debugger-frame-source-path frame)]
@@ -1261,6 +1526,9 @@
       (debugger-session-frames-set! debugger '())
       (debugger-session-evaluations-set! debugger '())
       (debugger-session-inspection-stack-set! debugger '())
+      (debugger-session-inspection-page-start-set! debugger 0)
+      (debugger-session-inspection-output-set! debugger #f)
+      (debugger-session-inspection-search-set! debugger #f)
       (debugger-session-actions-set! debugger '())
       (debugger-session-continuation-set! debugger #f)
       (debugger-session-condition-set! debugger #f)

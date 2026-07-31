@@ -598,6 +598,10 @@
           debugger-session-previous-frame!
           debugger-session-inspection-node
           debugger-session-inspection-capabilities
+          debugger-session-inspection-page-start
+          debugger-session-inspection-page-size
+          debugger-session-inspection-output-style
+          debugger-session-inspection-output-text
           debugger-session-actions
           debugger-session-action
           debugger-session-set-actions!
@@ -606,6 +610,11 @@
           debugger-session-evaluate-in-frame
           debugger-session-inspection-top!
           debugger-session-inspection-select-role!
+          debugger-session-inspection-next-page!
+          debugger-session-inspection-previous-page!
+          debugger-session-inspection-render!
+          debugger-session-inspection-find!
+          debugger-session-inspection-find-next!
           debugger-session-set-inspected-value!
           debugger-session-apply-inspected
           debugger-session-evaluate-procedure
@@ -662,14 +671,24 @@
           inspector-node-capabilities
           inspector-node-has-capability?
           inspector-node-children
+          inspector-node-child-count
+          inspector-node-child-ref
+          inspector-node-children-range
           inspector-node-value
+          inspector-node-print
+          inspector-node-write
           inspector-node-evaluate
           inspector-node-set-value!
           inspector-node-apply
+          make-inspector-search
+          inspector-search?
+          inspector-search-next
+          inspector-default-page-size
           inspector-child?
           inspector-child-label
           inspector-child-node
           inspector-child-role
+          inspector-child-index
           make-prompt-request
           make-completing-prompt-request
           prompt-request?
