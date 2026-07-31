@@ -37,7 +37,6 @@
           interaction-session-resume!
           interaction-session-abort-suspension!
           interaction-session-dismiss-failure!
-          interaction-session-debug-actions
           interaction-session-close!
           interaction-session-closed?
           make-evaluation-origin
@@ -497,43 +496,6 @@
     (when (eq? (interaction-session-state session) 'failed)
       (interaction-session-state-set! session 'ready))
     session)
-
-  (define (interaction-session-debug-actions session)
-    (require-open-session 'interaction-session-debug-actions session)
-    (case (interaction-session-state session)
-      [(failed)
-       (if (interaction-session-debugger session)
-           '(open
-             next-frame
-             previous-frame
-             evaluate
-             inspect-condition
-             inspect-continuation
-             inspect-local
-             inspect-ref
-             inspect-up
-             inspect-top
-             inspect-code
-             inspect-call
-             inspect-closure
-             inspect-source
-             set-value
-             apply
-             use-value
-             retry
-             edit-and-retry
-             exit
-             discard)
-           '(retry discard))]
-      [(suspended)
-       '(open
-         continue
-         inspect-condition
-         inspect-continuation
-         retry
-         edit-and-retry
-         abort)]
-      [else '()]))
 
   (define (interaction-session-close! session)
     (when (and (interaction-session? session)

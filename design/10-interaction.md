@@ -247,11 +247,25 @@ variable inspector，读取时动态解引用，因此赋值后不需要重建 i
 
 `debugger-mode` 是 interface mode，其 Buffer 是 session 与 InspectorNode 状态的
 只读文本投影。投影包含异常来源、`who`、message、irritants、frame 列表、选中
-frame 的 locals，以及当前 InspectorNode 的 path、type、capabilities、preview
-和带序号的 children。continuation 的 children 是 frame；frame 进一步暴露 pending
-call、procedure code、closure、source、局部变量和自由变量。选择 frame 或
-InspectorNode 后重新生成投影，caret 跟随选中的 frame 行。每个 debugger 使用
-独立的 generated resource，因此不同 interaction 的失败状态可以同时保留。
+frame 的 locals、可用 action，以及当前 InspectorNode 的 path、type、capabilities、
+preview 和带序号的 children。continuation 的 children 是 frame；frame 进一步
+暴露 pending call、procedure code、closure、source、局部变量和自由变量。选择
+frame 或 InspectorNode 后重新生成投影，caret 跟随选中的 frame 行。每个 debugger
+使用独立的 generated resource，因此不同 interaction 的失败状态可以同时保留。
+
+每个可恢复或终止的操作由 `DebuggerAction` 描述。descriptor 包含稳定 id、显示
+名称、说明、`resume | restart | terminate` 类别、`none | expression | source`
+输入类型、执行 command 和 default 标记。同一 action set 的 id 唯一，且至多一个
+action 是默认项。`DebuggerSession` 持有 action set；Buffer、minibuffer picker
+和命令校验读取该集合，不根据 session state 重复推导操作。扩展可以注册普通
+interactive command，并通过 `debugger-session-register-action!` 添加或替换对应
+descriptor；`debugger-session-set-actions!` 原子替换完整 action set。
+
+condition failure 提供默认的 `retry`、有 continuation 时的 `use-value`、
+`edit-and-retry` 和 `abort`。suspended evaluation 提供默认的 `continue`、`retry`、
+`edit-and-retry` 和 `abort`。Editor command condition 提供 `dismiss`。默认 action
+在模糊排序前具有 selection priority，因此 picker 初始选择与 Buffer 中的 `>`
+标记一致。
 
 失败状态提供以下动作：
 
@@ -282,6 +296,9 @@ InspectorNode 后重新生成投影，caret 跟随选中的 frame 行。每个 d
 - `scheme.debug-retry` 关闭当前 debugger，使用新的 generation 重放原始 source
   和 origin；
 - `scheme.debug-edit-and-retry` 读取替换后的 source，并以新的 generation 求值；
+- `scheme.debug-action` 接受 action id 直接执行，未提供 id 时用 minibuffer 展示
+  当前 session 的 action set；picker 根据 descriptor 的 command 调用同一组
+  interactive command；
 - `scheme.debug-exit` 关闭 debugger Buffer 并返回触发异常的 Buffer，同时保留
   condition、continuation 和 frame inspector；
 - `scheme.debug-discard` 释放 debugger Buffer、condition 与 continuation；对
@@ -291,7 +308,7 @@ InspectorNode 后重新生成投影，caret 跟随选中的 frame 行。每个 d
 debugger Buffer 的 `n`、`p`、`e`、`i`、`k`、`l`、`d`、`u`、`t`、`!`、`a`、
 `v`、`c`、`r`、`=`、`x`、`q` 分别映射到 frame 导航、求值、检查 condition、
 检查 continuation、检查局部值、进入子项、返回父节点、返回根节点、设置变量、
-应用 procedure、源码访问、继续、restart selector、replacement value、保留退出
+应用 procedure、源码访问、继续、action selector、replacement value、保留退出
 与丢弃操作。
 源码访问复用普通 `file.read` effect，文件
 读取期间 command loop 保持可用；打开完成后 debugger 状态仍可重新激活。重试和

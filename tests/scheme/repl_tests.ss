@@ -12,6 +12,7 @@
         (soda editor event)
         (soda editor interaction)
         (soda editor interaction-transcript)
+        (soda editor prompt)
         (soda editor repl)
         (soda editor scheme-indentation)
         (only (soda editor state) view-set-caret!)
@@ -761,28 +762,18 @@
        (pair?
          (debugger-session-frames
            (interaction-session-debugger session)))
-       (equal? (interaction-session-debug-actions session)
-               '(open
-                  next-frame
-                  previous-frame
-                  evaluate
-                  inspect-condition
-                  inspect-continuation
-                  inspect-local
-                  inspect-ref
-                  inspect-up
-                  inspect-top
-                  inspect-code
-                  inspect-call
-                  inspect-closure
-                  inspect-source
-                  set-value
-                  apply
-                  use-value
-                  retry
-                  edit-and-retry
-                  exit
-                  discard))
+       (equal?
+         (map
+           debugger-action-id
+           (debugger-session-actions
+             (interaction-session-debugger session)))
+         '(retry use-value edit-and-retry abort))
+       (eq?
+         (debugger-action-id
+           (debugger-actions-default
+             (debugger-session-actions
+               (interaction-session-debugger session))))
+         'retry)
        (string-contains? (buffer-string repl-buffer) "Exception:"))
   (error 'repl-tests
          "failed evaluation did not create debugger state"))
@@ -805,6 +796,12 @@
     (string-contains?
       (buffer-string debugger-buffer)
       "Soda Scheme Debugger")
+    (string-contains?
+      (buffer-string debugger-buffer)
+      "Actions:\n> retry [restart] Retry")
+    (string-contains?
+      (buffer-string debugger-buffer)
+      "use-value [resume] Use value <expression>")
     (string-contains?
       (buffer-string debugger-buffer)
       "Frames:")
@@ -1060,7 +1057,40 @@
   (error 'repl-tests
          "debug inspector did not apply a procedure to its object"))
 (dispatch!
-  (make-command-message 'scheme.debug-retry #f))
+  (make-command-message 'scheme.debug-action #f))
+(let* ([completion
+         (editor-active-prompt-completion editor)]
+       [selected
+         (and
+           completion
+           (completion-session-selected-item completion))]
+       [actions
+         (and
+           completion
+           (map
+             (lambda (item)
+               (debugger-action-id
+                 (completion-item-payload item)))
+             (completion-session-items completion)))])
+  (unless
+    (and
+      selected
+      (eq?
+        (debugger-action-id
+          (completion-item-payload selected))
+        'retry)
+      (= (length actions) 4)
+      (for-all
+        (lambda (id)
+          (and (memq id actions) #t))
+        '(retry use-value edit-and-retry abort)))
+    (error 'repl-tests
+           "debugger action selector did not project session actions")))
+(let ([reply (editor-accept-prompt! editor)])
+  (dispatch!
+    (make-internal-command-message
+      (prompt-reply-command reply)
+      (prompt-reply-result reply))))
 (unless
   (and (= (interaction-session-generation session)
           (+ generation-before-retry 1))
@@ -1106,7 +1136,6 @@
 (unless
   (and (eq? (interaction-session-state session) 'ready)
        (not (interaction-session-debugger session))
-       (null? (interaction-session-debug-actions session))
        (= (buffer-id (view-buffer (editor-active-view editor)))
           (buffer-id repl-buffer)))
   (error 'repl-tests

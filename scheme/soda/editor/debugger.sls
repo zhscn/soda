@@ -17,6 +17,10 @@
           debugger-session-inspection-active?
           debugger-session-inspection-node
           debugger-session-inspection-capabilities
+          debugger-session-actions
+          debugger-session-action
+          debugger-session-set-actions!
+          debugger-session-register-action!
           debugger-session-buffer-id
           debugger-session-set-buffer-id!
           debugger-session-next-frame!
@@ -49,6 +53,7 @@
           debugger-variable-name
           debugger-variable-preview)
   (import (chezscheme)
+          (soda editor debugger-action)
           (soda editor evaluator)
           (soda editor inspector)
           (soda editor interaction))
@@ -97,6 +102,9 @@
             (mutable inspection-stack
                      debugger-session-inspection-stack
                      debugger-session-inspection-stack-set!)
+            (mutable actions
+                     debugger-session-actions
+                     debugger-session-actions-set!)
             (mutable buffer-id
                      debugger-session-buffer-id
                      debugger-session-buffer-id-set!)
@@ -187,6 +195,92 @@
   (define (condition-continuation/safe condition)
     (safe-call #f (lambda () (condition-continuation condition))))
 
+  (define (built-in-action id default?)
+    (case id
+      [(continue)
+       (make-debugger-action
+         'continue
+         "Continue"
+         "Continue the suspended evaluation"
+         'resume
+         'none
+         'scheme.debug-continue
+         default?)]
+      [(use-value)
+       (make-debugger-action
+         'use-value
+         "Use value"
+         "Resume the condition continuation with replacement values"
+         'resume
+         'expression
+         'scheme.debug-use-value
+         default?)]
+      [(retry)
+       (make-debugger-action
+         'retry
+         "Retry"
+         "Evaluate the original source in a new generation"
+         'restart
+         'none
+         'scheme.debug-retry
+         default?)]
+      [(edit-and-retry)
+       (make-debugger-action
+         'edit-and-retry
+         "Edit and retry"
+         "Edit the source and evaluate it in a new generation"
+         'restart
+         'source
+         'scheme.debug-edit-and-retry
+         default?)]
+      [(abort)
+       (make-debugger-action
+         'abort
+         "Abort"
+         "Discard the failed or suspended evaluation"
+         'terminate
+         'none
+         'scheme.debug-discard
+         default?)]
+      [(dismiss)
+       (make-debugger-action
+         'dismiss
+         "Dismiss"
+         "Discard the saved editor condition"
+         'terminate
+         'none
+         'scheme.debug-discard
+         default?)]
+      [else
+       (assertion-violation
+         'built-in-action
+         "unknown built-in debugger action"
+         id)]))
+
+  (define (evaluation-actions status continuation)
+    (debugger-actions-validate
+      (case status
+        [(suspended)
+         (list
+           (built-in-action 'continue #t)
+           (built-in-action 'retry #f)
+           (built-in-action 'edit-and-retry #f)
+           (built-in-action 'abort #f))]
+        [(condition)
+         (append
+           (list (built-in-action 'retry #t))
+           (if continuation
+               (list (built-in-action 'use-value #f))
+               '())
+           (list
+             (built-in-action 'edit-and-retry #f)
+             (built-in-action 'abort #f)))]
+        [else
+         (assertion-violation
+           'evaluation-actions
+           "expected a failed or suspended evaluation status"
+           status)])))
+
   (define (condition-frames condition)
     (let ([continuation (condition-continuation/safe condition)])
       (if (not (procedure? continuation))
@@ -264,6 +358,7 @@
           (and (pair? frames) 0)
           '()
           '()
+          (list (built-in-action 'dismiss #t))
           #f
           #f))))
 
@@ -302,6 +397,9 @@
           (and (pair? frames) 0)
           '()
           '()
+          (evaluation-actions
+            (evaluation-result-status result)
+            continuation)
           #f
           #f))))
 
@@ -337,6 +435,62 @@
         "buffer id must be a non-negative exact integer or #f"
         buffer-id))
     (debugger-session-buffer-id-set! debugger buffer-id))
+
+  (define (debugger-session-action debugger id)
+    (require-open-debugger
+      'debugger-session-action
+      debugger)
+    (debugger-actions-find
+      (debugger-session-actions debugger)
+      id))
+
+  (define (debugger-session-set-actions! debugger actions)
+    (require-open-debugger
+      'debugger-session-set-actions!
+      debugger)
+    (debugger-session-actions-set!
+      debugger
+      (debugger-actions-validate actions))
+    actions)
+
+  (define (debugger-session-register-action!
+            debugger
+            action)
+    (require-open-debugger
+      'debugger-session-register-action!
+      debugger)
+    (unless (debugger-action? action)
+      (assertion-violation
+        'debugger-session-register-action!
+        "expected a debugger action"
+        action))
+    (let loop
+      ([remaining (debugger-session-actions debugger)]
+       [result '()]
+       [replaced? #f])
+      (cond
+        [(null? remaining)
+         (let ([actions
+                 (reverse
+                   (if replaced?
+                       result
+                       (cons action result)))])
+           (debugger-session-set-actions!
+             debugger
+             actions)
+           action)]
+        [(eq?
+           (debugger-action-id (car remaining))
+           (debugger-action-id action))
+         (loop
+           (cdr remaining)
+           (cons action result)
+           #t)]
+        [else
+         (loop
+           (cdr remaining)
+           (cons (car remaining) result)
+           replaced?)])))
 
   (define (move-frame! debugger delta)
     (require-open-debugger 'debugger.move-frame debugger)
@@ -766,6 +920,41 @@
       (write (condition-irritants condition) port)
       (newline port)))
 
+  (define (write-actions debugger port)
+    (display "Actions:\n" port)
+    (for-each
+      (lambda (action)
+        (display
+          (if (debugger-action-default? action)
+              "> "
+              "  ")
+          port)
+        (display
+          (symbol->string
+            (debugger-action-id action))
+          port)
+        (display " [" port)
+        (display
+          (symbol->string
+            (debugger-action-kind action))
+          port)
+        (display "] " port)
+        (display (debugger-action-label action) port)
+        (unless
+          (eq? (debugger-action-input-kind action) 'none)
+          (display " <" port)
+          (display
+            (symbol->string
+              (debugger-action-input-kind action))
+            port)
+          (display ">" port))
+        (display " — " port)
+        (display
+          (debugger-action-description action)
+          port)
+        (newline port))
+      (debugger-session-actions debugger)))
+
   (define (write-inspection debugger port)
     (let ([stack (debugger-session-inspection-stack debugger)])
       (when (pair? stack)
@@ -861,6 +1050,8 @@
         (write-condition-details
           (debugger-session-condition debugger)
           port)
+        (newline port)
+        (write-actions debugger port)
         (newline port)
         (display "Frames:\n" port)
         (if (null? (debugger-session-frames debugger))
@@ -979,6 +1170,7 @@
       (debugger-session-frames-set! debugger '())
       (debugger-session-evaluations-set! debugger '())
       (debugger-session-inspection-stack-set! debugger '())
+      (debugger-session-actions-set! debugger '())
       (debugger-session-continuation-set! debugger #f)
       (debugger-session-condition-set! debugger #f)
       (debugger-session-closed?-set! debugger #t))))

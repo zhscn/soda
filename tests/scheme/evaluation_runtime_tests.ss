@@ -117,6 +117,18 @@
           (interaction-session-last-result session))
         'suspended)
       (interaction-session-debugger session)
+      (equal?
+        (map
+          debugger-action-id
+          (debugger-session-actions
+            (interaction-session-debugger session)))
+        '(continue retry edit-and-retry abort))
+      (eq?
+        (debugger-action-id
+          (debugger-actions-default
+            (debugger-session-actions
+              (interaction-session-debugger session))))
+        'continue)
       (evaluation-suspension-condition?
         (evaluation-result-condition
           (interaction-session-last-result session)))

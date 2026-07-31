@@ -400,15 +400,38 @@
       (debugger-session-origin
         (editor-debugger editor))
       'command)
+    (equal?
+      (map
+        debugger-action-id
+        (debugger-session-actions
+          (editor-debugger editor)))
+      '(dismiss))
+    (string-contains?
+      (utf8->string
+        (buffer-bytes
+          (view-buffer (editor-active-view editor))))
+      "Actions:\n> dismiss [terminate] Dismiss")
     (eq?
       (buffer-major-mode-name
         (view-buffer (editor-active-view editor)))
       'debugger-mode))
   (error 'editor-tests
          "interactive command failure did not open the debugger"))
+(debugger-session-register-action!
+  (editor-debugger editor)
+  (make-debugger-action
+    'close-command-debugger
+    "Close"
+    "Close the command debugger"
+    'terminate
+    'none
+    'scheme.debug-discard
+    #f))
 (editor-update!
   editor
-  (make-command-message 'scheme.debug-discard #f))
+  (make-command-message
+    'scheme.debug-action
+    'close-command-debugger))
 (unless
   (and
     (not (editor-debugger editor))

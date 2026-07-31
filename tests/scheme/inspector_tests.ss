@@ -1,10 +1,53 @@
 #!r6rs
 (import (chezscheme)
+        (soda editor debugger-action)
         (soda editor inspector))
 
 (define (require-test condition message)
   (unless condition
     (error 'inspector-tests message)))
+
+(define debugger-actions
+  (debugger-actions-validate
+    (list
+      (make-debugger-action
+        'retry
+        "Retry"
+        "Retry the evaluation"
+        'restart
+        'none
+        'scheme.debug-retry
+        #t)
+      (make-debugger-action
+        'use-value
+        "Use value"
+        "Supply replacement values"
+        'resume
+        'expression
+        'scheme.debug-use-value
+        #f))))
+
+(require-test
+  (and
+    (eq?
+      (debugger-action-id
+        (debugger-actions-default debugger-actions))
+      'retry)
+    (eq?
+      (debugger-action-input-kind
+        (debugger-actions-find debugger-actions 'use-value))
+      'expression)
+    (not (debugger-actions-find debugger-actions 'missing)))
+  "debugger action selection differs")
+
+(require-test
+  (guard (condition [else #t])
+    (debugger-actions-validate
+      (list
+        (car debugger-actions)
+        (car debugger-actions)))
+    #f)
+  "duplicate debugger action ids were accepted")
 
 (define list-node
   (make-inspector-node

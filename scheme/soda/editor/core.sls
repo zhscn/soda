@@ -580,7 +580,6 @@
           interaction-session-last-output-end
           interaction-session-last-result
           interaction-session-debugger
-          interaction-session-debug-actions
           debugger-session?
           debugger-session-interaction-id
           debugger-session-generation
@@ -594,6 +593,10 @@
           debugger-session-selected-frame
           debugger-session-inspection-node
           debugger-session-inspection-capabilities
+          debugger-session-actions
+          debugger-session-action
+          debugger-session-set-actions!
+          debugger-session-register-action!
           debugger-session-inspection-top!
           debugger-session-inspection-select-role!
           debugger-session-set-inspected-value!
@@ -611,6 +614,18 @@
           debugger-variable-index
           debugger-variable-name
           debugger-variable-preview
+          make-debugger-action
+          debugger-action?
+          debugger-action-id
+          debugger-action-label
+          debugger-action-description
+          debugger-action-kind
+          debugger-action-input-kind
+          debugger-action-command
+          debugger-action-default?
+          debugger-actions-validate
+          debugger-actions-find
+          debugger-actions-default
           make-inspector-node
           inspector-node?
           inspector-node-label
@@ -834,6 +849,7 @@
           (soda editor configuration)
           (soda editor cpp-commands)
           (soda editor debugger)
+          (soda editor debugger-action)
           (soda editor decoration)
           (soda editor display-map)
           (soda editor diagnostics)
