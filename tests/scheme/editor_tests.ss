@@ -3425,6 +3425,12 @@
 (define prompt-frame (render-editor-frame prompt-editor 5 40))
 (let* ([layout (frame-layout prompt-frame)]
        [node (component-node-find layout 'editor.minibuffer)]
+       [modeline-node
+         (component-node-find layout 'editor.modeline)]
+       [modeline-row
+         (and
+           modeline-node
+           (rect-row (component-node-rect modeline-node)))]
        [completion-node
          (component-node-find layout 'editor.completions)])
   (unless (and node
@@ -3460,6 +3466,11 @@
                (= (view-viewport-rows
                     (editor-base-view prompt-editor))
                   1)
+               modeline-row
+               (memq
+                 'modeline.inactive
+                 (cell-faces
+                   (frame-cell-ref prompt-frame modeline-row 0)))
                (frame-cursor-visible? prompt-frame)
                (= (frame-cursor-row prompt-frame) 1))
     (error 'editor-tests

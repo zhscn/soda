@@ -1538,7 +1538,7 @@
                              first-line
                              first-column
                              line-count
-                             #t)
+                             (not (editor-active-prompt editor)))
                            columns)]
                        [document-completion
                          (and
@@ -1586,7 +1586,7 @@
                       first-line
                       first-column
                       line-count
-                      #t)
+                      (not (editor-active-prompt editor)))
                     frame)
                   frame))
               (lambda () (text-close! text)))))
