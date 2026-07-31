@@ -9,6 +9,7 @@
           (soda cpp-analysis)
           (soda document)
           (soda editor decoration)
+          (soda editor indentation-protocol)
           (soda editor language)
           (soda indentation))
 
@@ -179,6 +180,62 @@
       line
       style))
 
+  (define style-properties
+    '(indent-width
+      continuation-indent
+      tab-width
+      use-tabs?
+      align-open-bracket?
+      brace-init-continuation?
+      indent-wrapped-function-names?
+      align-operands?
+      break-before-ternary?
+      namespace-indentation
+      indent-type-body?
+      indent-case-label?
+      indent-case-body?
+      access-specifier-offset
+      pp-directive-indent
+      pp-indent-width
+      constructor-initializers))
+
+  (define (open-cpp-indent-context setting-ref)
+    (let ([style (make-cpp-indent-style)]
+          [missing (list 'missing)]
+          [complete? #f])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (for-each
+            (lambda (property)
+              (let ([value (setting-ref property missing)])
+                (unless (eq? value missing)
+                  (cpp-indent-style-set!
+                    style property value))))
+            style-properties)
+          (set! complete? #t)
+          style)
+        (lambda ()
+          (unless complete?
+            (cpp-indent-style-close! style))))))
+
+  (define cpp-indentation-provider
+    (make-indentation-provider
+      open-cpp-indent-context
+      (lambda (style session snapshot line)
+        (let ([result
+                (cpp-language-compute-indent
+                  session snapshot line style)])
+          (dynamic-wind
+            (lambda () #f)
+            (lambda ()
+              (and
+                (not (indent-result-preserve? result))
+                (string->utf8
+                  (indent-result-indentation result))))
+            (lambda () (indent-result-close! result)))))
+      cpp-indent-style-close!))
+
   (define (cpp-identifier-character? character)
     (or
       (char-alphabetic? character)
@@ -197,7 +254,7 @@
       (make-language-profile
         'cpp
         cpp-syntax-provider
-        cpp-language-compute-indent
+        cpp-indentation-provider
         '((#\( . #\))
           (#\[ . #\])
           (#\{ . #\}))

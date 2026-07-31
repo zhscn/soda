@@ -6,6 +6,7 @@
           (soda editor command)
           (soda editor command-runtime)
           (soda editor edit)
+          (soda editor indentation-runtime)
           (soda editor keymap)
           (soda editor scheme-indentation)
           (soda editor state))
@@ -35,65 +36,12 @@
         value
         2)))
 
-  (define (line-whitespace-end text line)
-    (let ([end (text-line-content-end text line)])
-      (let loop ([offset (text-line-start text line)])
-        (if
-          (and
-            (< offset end)
-            (memv (text-byte-at text offset) '(9 32)))
-          (loop (+ offset 1))
-          offset))))
-
   (define (scheme-indent-line-command context)
     (let* ([view (command-context-view context)]
-           [buffer (view-buffer view)]
-           [caret (view-caret view)]
-           [snapshot
-             (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda ()
-                (let* ([line
-                         (car (text-position text caret))]
-                       [start (text-line-start text line)]
-                       [whitespace-end
-                         (line-whitespace-end text line)]
-                       [indentation
-                         (scheme-line-indent
-                           (buffer-range-source buffer 0 start)
-                           (indent-width buffer))])
-                  (when indentation
-                    (let* ([old-length
-                             (- whitespace-end start)]
-                           [delta
-                             (- indentation old-length)])
-                      (unless
-                        (and
-                          (= old-length indentation)
-                          (let loop ([offset start])
-                            (or
-                              (= offset whitespace-end)
-                              (and
-                                (= (text-byte-at text offset) 32)
-                                (loop (+ offset 1))))))
-                        (buffer-replace-range!
-                          buffer
-                          start
-                          whitespace-end
-                          (make-bytevector indentation 32))
-                        (view-set-caret!
-                          view
-                          (if
-                            (<= caret whitespace-end)
-                            (+ start indentation)
-                            (+ caret delta))))))))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot))))
+           [buffer (view-buffer view)])
+      (buffer-reindent-line!
+        buffer
+        (view-caret view)))
     '())
 
   (define (newline-and-indent-bytes count indentation)

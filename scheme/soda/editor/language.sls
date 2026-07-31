@@ -57,8 +57,10 @@
   (import (rnrs)
           (soda document)
           (soda editor decoration)
+          (soda editor indentation-protocol)
           (soda editor motion-protocol)
           (soda editor scheme-highlighting)
+          (soda editor scheme-indentation-provider)
           (soda editor scheme-structure)
           (soda editor structure))
 
@@ -285,10 +287,11 @@
            'make-language-profile
            "syntax must be a syntax provider or #f"
            syntax))
-       (unless (or (not indent) (procedure? indent))
+       (unless
+         (or (not indent) (indentation-provider? indent))
          (assertion-violation
            'make-language-profile
-           "indent must be a procedure or #f"
+           "indent must be an indentation provider or #f"
            indent))
       (unless (list? pairs)
         (assertion-violation 'make-language-profile "pairs must be a list" pairs))
@@ -847,7 +850,7 @@
     (make-language-profile
       'scheme
       scheme-syntax-provider
-      #f
+      scheme-indentation-provider
       '((#\( . #\))
         (#\[ . #\])
         (#\{ . #\}))

@@ -3315,6 +3315,84 @@
          "scheme-mode Tab did not align a continuation datum"))
 (editor-close! scheme-indent-editor)
 
+(define scheme-range-indent-source
+  "(define (first x)\n(+ x\n1))\n\n(define (second)\n(display \"x\"))\n")
+(define scheme-range-indent-expected
+  "(define (first x)\n  (+ x\n     1))\n\n(define (second)\n  (display \"x\"))\n")
+(define scheme-range-indent-buffer
+  (make-buffer
+    1007
+    (make-document scheme-range-indent-source 1007)
+    "*scheme-range-indent*"
+    'scheme-mode))
+(define scheme-range-indent-editor
+  (make-editor scheme-range-indent-buffer))
+(define scheme-range-indent-view
+  (editor-active-view scheme-range-indent-editor))
+(view-set-caret! scheme-range-indent-view 0)
+(editor-update!
+  scheme-range-indent-editor
+  (make-command-message 'edit.indent-sexp #f))
+(unless
+  (bytevector=?
+    (buffer-bytes scheme-range-indent-buffer)
+    (string->utf8
+      "(define (first x)\n  (+ x\n     1))\n\n(define (second)\n(display \"x\"))\n"))
+  (error 'editor-tests
+         "indent-sexp did not use the next structural expression"
+         (utf8->string
+           (buffer-bytes scheme-range-indent-buffer))))
+(view-set-caret!
+  scheme-range-indent-view
+  (substring-position
+    (utf8->string (buffer-bytes scheme-range-indent-buffer))
+    "(display"))
+(editor-update!
+  scheme-range-indent-editor
+  (make-command-message
+    'edit.indent-sexp
+    #f
+    (prefix-argument-universal #f)))
+(unless
+  (bytevector=?
+    (buffer-bytes scheme-range-indent-buffer)
+    (string->utf8 scheme-range-indent-expected))
+  (error 'editor-tests
+         "indent-sexp prefix did not select the enclosing definition"))
+(editor-update!
+  scheme-range-indent-editor
+  (make-command-message 'edit.undo #f))
+(unless
+  (bytevector=?
+    (buffer-bytes scheme-range-indent-buffer)
+    (string->utf8
+      "(define (first x)\n  (+ x\n     1))\n\n(define (second)\n(display \"x\"))\n"))
+  (error 'editor-tests
+         "semantic range indentation was not one undo operation"))
+(let ([second-start
+        (substring-position
+          scheme-range-indent-expected
+          "(define (second)")])
+  (view-set-mark! scheme-range-indent-view second-start)
+  (view-set-caret!
+    scheme-range-indent-view
+    (string-length scheme-range-indent-source))
+  (editor-update!
+    scheme-range-indent-editor
+    (make-command-message
+      'edit.indent-sexp
+      #f
+      (prefix-argument-universal #f))))
+(unless
+  (and
+    (bytevector=?
+      (buffer-bytes scheme-range-indent-buffer)
+      (string->utf8 scheme-range-indent-expected))
+    (not (view-mark-active? scheme-range-indent-view)))
+  (error 'editor-tests
+         "active region did not take precedence over the prefix target"))
+(editor-close! scheme-range-indent-editor)
+
 (define scheme-enter-source "(define (value x)")
 (define scheme-enter-document
   (make-document scheme-enter-source 989))

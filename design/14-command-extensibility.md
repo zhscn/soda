@@ -77,6 +77,48 @@ payload，并为一个 reader 产生一个或多个类型化参数。
 `make-interactive-suspend`。prompt 的 accept 和 abort responder 分别使用
 `command.resume-interactive` 与 `command.abort-interactive`。
 
+## 交互参数与命令目标
+
+`CommandContext` 保存原始 prefix argument、event、message argument、Editor 和
+View。`command-context-count` 把缺省 prefix 解释为 1；需要区分无 prefix、`C-u`、
+显式数字和负参数的命令读取 `command-context-prefix`，或在 interactive plan 中使用
+`interactive-prefix-raw`。`PrefixArgument` 保留 kind、sign 和 magnitude，因此命令
+可以让同一个过程根据参数种类选择语义，而不把按键序列编码进命令体。
+
+涉及文本范围的命令使用 `CommandTarget` 作为类型化参数：
+
+```text
+CommandTarget {
+  source,
+  buffer_id,
+  document_id,
+  revision,
+  start,
+  end,
+  point,
+  mark,
+  direction,
+  properties
+}
+```
+
+`CommandTargetSelector` 声明 active region 的 policy 为 `prefer`、`require` 或
+`ignore`，并提供没有 region 时的 mode-aware fallback。fallback 可以根据 raw
+prefix、当前位置和 major-mode feature 选择 line、sexp、defun 或 buffer。
+`make-command-target-reader` 在 interactive argument resolution 阶段冻结 target；
+执行写操作前用 `command-target-current?` 验证 Buffer 与 revision，防止
+minibuffer suspension 或异步状态变化后把范围应用到错误文本。
+
+这种分层使 Scheme 过程接收已解析参数，而不是重复解释 editor 状态。例如结构缩进
+命令的普通调用接收一个明确 target；交互调用优先使用 region，无 region 时选择下一
+个 sexp，带 raw prefix 时选择包含 point 或紧随 point 的 defun。major mode 可以通过
+具名 feature（例如 `forward-sexp-function`）替换结构动作，而命令和 key binding
+保持不变。
+
+连续调用语义读取 Editor 的 `last-command` 与 command class。`mark.sexp` 在首次调用
+时建立 mark，连续调用时沿原方向扩展；minibuffer 内为外层 invocation 读取参数的
+命令不覆盖这个 identity。
+
 ## Invocation 与 command loop
 
 每次交互调用创建一个 `CommandInvocation`：

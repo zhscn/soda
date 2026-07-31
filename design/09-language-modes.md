@@ -80,8 +80,8 @@ LanguageProfile {
 }
 ```
 
-project settings 可覆盖 style、provider 配置和 query 搜索路径。profile 是普通
-Scheme 值，major mode 只引用其名字；同一 provider 可以被多个 mode 复用。
+project settings 可覆盖 style 和 provider 配置。profile 是普通 Scheme 值，
+major mode 只引用其名字；同一 provider 可以被多个 mode 复用。
 
 Scheme profile 组合 revision-scoped syntax view、静态 binding analyzer 和运行时
 session catalog。scope graph、library index、completion 与 xref 的契约见
@@ -191,41 +191,36 @@ close；provider session 关闭前释放全部 view。
 
 ## Indentation
 
-indentation provider 使用 snapshot、syntax view、position 和 style，返回：
+`IndentationProvider` 是 major-mode profile 的缩进扩展点：
 
 ```text
-IndentDecision {
-  column,
-  rule,
-  trace?
-}
+open(setting_ref) -> context
+line(context, syntax_session, snapshot, line) -> leading_bytes | preserve
+close(context)
 ```
 
-通用 delimiter provider 可覆盖 block 与 continuation；Tree-sitter provider
-可以由 query capture 提供语言规则；specialized provider 可使用更深语法结构。
-把空白写回 Document 是 command 的责任，因此缩进查询保持纯函数，多个前端和
-批量命令可以复用。
+runtime 对一个 revision 打开 provider context，查询目标涉及的各行，再把 leading
+whitespace replacement 从后向前放入一个 Buffer transaction。一次 region 或
+structural target 缩进只产生一个 revision 和一个 undo entry。provider 只决定
+目标 whitespace，不直接修改 Document；`preserve` 保留不适合自动缩进的行。
 
-基础编辑命令提供不依赖 parser 的缩进层。Buffer 的 `auto-indent?` 设置使
-`edit.newline` 复制当前行的 leading whitespace，`M-i` 切换该 buffer-local
-设置。没有活动 region 时，TAB 根据 `use-tabs?` 插入 tab，或按 `tab-width`
-前进到下一个显示列 tab stop；有活动 region 时，TAB 按 `indent-width` 增加其涉及
-的每一行。Shift-TAB 按 `indent-width` 反缩进活动 region 或当前行。`M-}` 与 `M-{`
-也提供 region 缩进命令。整组多行变换在一次 Buffer transaction 中提交。
-major-mode keymap 可以用语言专用命令覆盖这些基础行为。
+Scheme provider 为 snapshot 建立规范化逐行缩进表，按未闭合 delimiter、operator 和
+第二个 datum 的位置计算列宽。批量查询共享同一张表，因此后一行不依赖原文中前一行的
+错误 indentation。字符串、quoted symbol、字符字面量和注释中的 delimiter 不参与
+结构缩进。C++ provider 持有 native indent style，并通过 Buffer 的增量 analyzer
+计算每行结果。
 
-`cpp.indent-line` 通过 profile 的 indentation provider 查询 native
-IndentDecision，再用普通 Buffer transaction 写回 leading whitespace。`cpp-mode`
-的 TAB 绑定到该命令。Enter 绑定到 `cpp.newline-and-indent`；native engine 对
-between-braces 等结构执行单次原子编辑并返回 Document change，Buffer 接受 change
-后统一更新 revision、undo history、View caret 与 language runtime。
+`edit.indent-region` 使用 `CommandTarget` 要求 active region，并由 profile provider
+执行语义缩进；`C-M-\` 调用该命令。`edit.indent-sexp` 优先缩进 active region，
+否则缩进下一结构表达式；带 raw prefix 时缩进包含 point 或紧随 point 的 defun。
+`C-M-q` 调用该命令。TAB 在 region 激活且 mode 提供 provider 时执行语义缩进；
+没有 provider 时按 `indent-width` 右移。`C-M-}` 始终执行右移，`C-M-{` 与
+Shift-TAB 执行左移。
 
-`scheme-mode` 的 Tab 绑定到 `scheme.indent-line`，按未闭合 delimiter、operator 和
-第二个 datum 的位置重新计算当前行缩进。Enter 绑定到
-`scheme.newline-and-indent`，用 caret 前的 Scheme lexical context 生成换行和
-leading spaces；active region 被同一次 replacement 取代。字符串、quoted symbol、
-字符字面量和注释中的 delimiter 不参与结构缩进。每次命令只产生一个 Document
-transaction。
+没有活动 region 时，TAB 根据 `use-tabs?` 插入 tab，或按 `tab-width` 前进到下一个
+显示列 tab stop。Buffer 的 `auto-indent?` 设置使 `edit.newline` 复制当前行的
+leading whitespace，`M-i` 切换该 buffer-local 设置。`cpp-mode` 和 `scheme-mode`
+的语言专用 Enter 命令在一个 transaction 中插入换行及结构 indentation。
 
 language profile 的 delimiter pairs 同时驱动通用 `move.matching-delimiter`
 命令。`M-]` 接受 point 上或 point 前的 delimiter，以同类嵌套深度扫描并移动到

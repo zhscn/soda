@@ -5,8 +5,10 @@
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
+          (soda editor command-target)
           (soda editor condition)
           (soda editor edit)
+          (soda editor indentation-runtime)
           (soda editor keymap)
           (soda editor kill)
           (soda editor mode-runtime)
@@ -327,6 +329,75 @@
         (transpose-sexps-once! context))
       '()))
 
+  (define (thing-command-target context source thing)
+    (let* ([view (context-view context)]
+           [buffer (context-buffer context)]
+           [document (buffer-document buffer)])
+      (make-command-target
+        source
+        (buffer-id buffer)
+        (document-id document)
+        (buffer-revision buffer)
+        (structural-thing-start thing)
+        (structural-thing-end thing)
+        (view-caret view)
+        (and (view-mark-active? view) (view-mark view))
+        #t
+        (list (cons 'thing thing)))))
+
+  (define (indent-sexp-fallback context)
+    (let* ([view (context-view context)]
+           [point (view-caret view)]
+           [index (structure-index context)]
+           [defun?
+             (and (command-context-prefix context) #t)]
+           [thing
+             (if defun?
+                 (or
+                   (structure-index-thing-at
+                     index 'defun point)
+                   (structure-index-next
+                     index 'defun point))
+                 (structure-index-next
+                   index 'sexp point))])
+      (and
+        thing
+        (thing-command-target
+          context
+          (if defun? 'defun 'thing)
+          thing))))
+
+  (define indent-sexp-selector
+    (make-command-target-selector
+      'prefer
+      #f
+      indent-sexp-fallback))
+
+  (define indent-sexp-target-reader
+    (make-command-target-reader
+      'indent-target
+      indent-sexp-selector))
+
+  (define-command (indent-sexp-command context target)
+    "Reindent a region, expression, or prefix-selected definition."
+    (interactive indent-sexp-target-reader)
+    (let* ([view (context-view context)]
+           [buffer (context-buffer context)])
+      (unless (command-target-current? target buffer)
+        (editor-user-error
+          'edit.indent-sexp
+          "The indentation target is stale"))
+      (unless
+        (buffer-reindent-range!
+          buffer
+          (command-target-start target)
+          (command-target-end target))
+        (editor-user-error
+          'edit.indent-sexp
+          "Major mode has no indentation provider"))
+      (view-deactivate-mark! view)
+      '()))
+
   (define (defun-at-or-near index point direction)
     (or
       (structure-index-thing-at index 'defun point)
@@ -439,7 +510,11 @@
         (list
           'edit.transpose-sexps
           transpose-sexps-command
-          "Transpose adjacent balanced expressions.")))
+          "Transpose adjacent balanced expressions.")
+        (list
+          'edit.indent-sexp
+          indent-sexp-command
+          "Reindent the region, next expression, or prefix-selected defun.")))
     (for-each
       (lambda (entry)
         (editor-bind-key!
@@ -455,5 +530,6 @@
         (cons #\e 'move.end-of-defun)
         (cons #\space 'mark.sexp)
         (cons #\k 'edit.kill-sexp)
-        (cons #\t 'edit.transpose-sexps)))
+        (cons #\t 'edit.transpose-sexps)
+        (cons #\q 'edit.indent-sexp)))
     editor))

@@ -5,10 +5,13 @@
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
+          (soda editor command-target)
+          (soda editor condition)
           (soda editor display)
           (soda editor edit)
           (soda editor event)
           (soda editor input-state)
+          (soda editor indentation-runtime)
           (soda editor kill)
           (soda editor keymap)
           (soda editor language)
@@ -449,11 +452,44 @@
                       unindent?)))))))
       '()))
 
-  (define (indent-region-command context)
-    (shift-region-command context #f))
+  (define indent-region-selector
+    (make-command-target-selector 'require #f #f))
+
+  (define indent-region-reader
+    (make-command-target-reader
+      'indent-region
+      indent-region-selector))
+
+  (define (reindent-command-target! context target)
+    (let* ([editor (command-context-editor context)]
+           [view (context-view context)]
+           [buffer (context-buffer context)])
+      (unless (command-target-current? target buffer)
+        (editor-user-error
+          'edit.indent-region
+          "The indentation target is stale"))
+      (if
+        (not
+          (buffer-reindent-range!
+            buffer
+            (command-target-start target)
+            (command-target-end target)))
+        (editor-set-status-message!
+          editor
+          "Major mode has no indentation provider")
+        (view-deactivate-mark! view))
+      '()))
+
+  (define-command (indent-region-command context target)
+    "Reindent the active region according to the major mode."
+    (interactive indent-region-reader)
+    (reindent-command-target! context target))
 
   (define (unindent-region-command context)
     (shift-region-command context #t))
+
+  (define (shift-region-right-command context)
+    (shift-region-command context #f))
 
   (define (tab-command context)
     (let* ([view (context-view context)]
@@ -465,7 +501,13 @@
                context)])
       (cond
         [region
-         (shift-region-command context #f)]
+         (if (buffer-indentation-provider buffer)
+             (reindent-command-target!
+               context
+               (resolve-command-target
+                 indent-region-selector
+                 context))
+             (shift-region-command context #f))]
         [(positive? count)
          (let* ([caret (view-caret view)]
                 [width (tab-width buffer)]
@@ -1484,7 +1526,11 @@
         (list
           'edit.indent-region
           indent-region-command
-          "Indent every line touched by the active region.")
+          "Reindent the active region according to the major mode.")
+        (list
+          'edit.shift-region-right
+          shift-region-right-command
+          "Shift the active region right by one indentation level.")
         (list
           'edit.unindent-region
           unindent-region-command
@@ -1676,10 +1722,13 @@
         (cons (stroke 'character (char->integer #\o) 4) 'edit.open-line)
         (cons
           (stroke 'character (char->integer #\}) 2)
-          'edit.indent-region)
+          'edit.shift-region-right)
         (cons
           (stroke 'character (char->integer #\{) 2)
           'edit.unindent-region)
+        (cons
+          (stroke 'character (char->integer #\\) 6)
+          'edit.indent-region)
         (cons (stroke 'left #f 0) 'move.backward-character)
         (cons (stroke 'right #f 0) 'move.forward-character)
         (cons

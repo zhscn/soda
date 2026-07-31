@@ -161,6 +161,14 @@
           make-structure-provider
           structure-provider?
           structure-provider-build
+          make-indentation-provider
+          indentation-provider?
+          indentation-provider-open
+          indentation-provider-line
+          indentation-provider-close!
+          buffer-indentation-provider
+          buffer-reindent-range!
+          buffer-reindent-line!
           editor-major-mode-for-path
           editor-select-buffer-major-mode!
           make-setting-definition
@@ -744,6 +752,8 @@
           (soda editor evaluator)
           (soda editor file)
           (soda editor input-state)
+          (soda editor indentation-protocol)
+          (soda editor indentation-runtime)
           (soda editor interaction)
           (soda editor kill)
           (soda editor location)
