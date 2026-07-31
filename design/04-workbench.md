@@ -7,7 +7,7 @@
 | Window tree、View 生命周期与基础 display 操作 | 已实现 |
 | 显式 process working directory | 已实现 |
 | 异步 file/display 请求的冻结 origin | 已实现 |
-| 通用 `ResourceContext`、View origin 与文件选择上下文冻结 | 部分实现 |
+| 通用 `ResourceContext`、View origin 与文件选择上下文冻结 | 已实现 |
 | Project identity、发现缓存与 known registry | 已实现 |
 | Project resource enumerator 与 watch lifecycle | 已实现 |
 | Project settings layer、task definition 与 comint runtime | 已实现 |

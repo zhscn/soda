@@ -153,6 +153,31 @@
       "/work/fixture/source.scm"))
   "a unique Workbench Project must provide the resource fallback")
 
+(define other-project
+  (make-project
+    'other
+    '("/other")
+    'test
+    'explicit
+    #f
+    #f
+    '()))
+(editor-workbench-adopt-project!
+  context-editor
+  (workbench-id (editor-active-workbench context-editor))
+  other-project)
+(check
+  (not
+    (resource-context-project-hint
+      (editor-view-resource-context
+        context-editor
+        (view-id (editor-active-view context-editor)))))
+  "multiple Workbench Projects must not produce an implicit Project hint")
+(editor-workbench-remove-project!
+  context-editor
+  (workbench-id (editor-active-workbench context-editor))
+  (project-id other-project))
+
 (define generated
   (editor-create-buffer!
     context-editor

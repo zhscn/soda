@@ -589,14 +589,6 @@
           (- (string-length value) (string-length suffix))
           (string-length value)))))
 
-  (define (buffer-default-directory buffer)
-    (let ([path (buffer-file-path buffer)]
-          [fallback (vfs-directory-path (current-directory))])
-      (if path
-          (vfs-parent-directory
-            (vfs-resolve-path fallback path))
-          fallback)))
-
   (define (make-file-choice-source base-directory)
     (make-choice-source
       'file
@@ -924,9 +916,7 @@
   (define (find-buffer-by-path editor path)
     (editor-buffer-for-resource
       editor
-      (vfs-resolve-path
-        (vfs-directory-path (current-directory))
-        path)))
+      (vfs-normalize-path path)))
 
   (define (find-view-by-id editor id)
     (and
@@ -1100,13 +1090,6 @@
             (editor-cancel-async-jump!
               editor view (open-result-path result)))))
       (open-result-requests result)))
-
-  (define (view-default-directory editor view-id)
-    (let ([view (find-view-by-id editor view-id)])
-      (if view
-          (resource-context-base-resource
-            (editor-view-resource-context editor view-id))
-          (vfs-directory-path (current-directory)))))
 
   (define (prompt-resource-context editor result)
     (let ([data (and (prompt-result? result)
@@ -1860,8 +1843,11 @@
                 input
                 (positive? (string-length input))
                 (vfs-resolve-path
-                  (if buffer
-                      (buffer-default-directory buffer)
+                  (if view
+                      (resource-context-base-resource
+                        (editor-view-resource-context
+                          editor
+                          (view-id view)))
                       (vfs-directory-path (current-directory)))
                   input))])
       (cond
