@@ -12,6 +12,8 @@
 | Editor-global mark ring | 已实现 |
 | change ring 与跨 Buffer change navigation | 已实现 |
 | 基础 motion、editing、search、replace 与 window command | 已实现 |
+| Unicode regexp matcher、编号 capture 与双向搜索 | 已实现 |
+| capture replacement 与 search case policy | 未实现 |
 
 本文只定义文本编辑器当前使用的输入路径。minibuffer 的读取与焦点规则由
 [12-minibuffer.md](12-minibuffer.md) 定义；command 与 interactive 参数由
@@ -168,6 +170,18 @@ live location、方向、当前 match 和 wrap 状态。query 改变时从来源
 query replace 由 query、replacement 和 decision 三个非递归阶段组成。decision state
 处理替换、跳过、全部替换和结束。literal 与 regexp 版本共享同一遍历和 Buffer
 transaction 机制；每次替换从 replacement 末尾继续扫描。
+
+regexp matcher 返回结构化的 `RegexpMatch`，其中 group 0 是完整匹配，后续 group 按
+左括号出现顺序稳定编号；未参与当前 alternative 的 group 为 `#f`。所有 range 使用
+UTF-8 byte offset。forward search 选择最早起点，并在同一起点选择最长结果；backward
+search 选择最晚结束点，并在同一结束点选择最长结果。两者共享 capture 结果契约。
+
+matcher 的 `.` 不跨 newline，`^`/`$` 匹配文档或逻辑行边界。`\d`、`\w`、`\s` 及
+其反向形式使用 Unicode character predicate，word 额外包含 `_`；`\b`/`\B` 使用同一
+word 定义。字符 class、range、capturing group、`(?:...)`、alternation 和
+`*`/`+`/`?` 在 forward/backward 中使用相同语义。case-fold 是一次 match request 的
+显式参数，使用 Unicode case-insensitive character comparison。零长度结果是合法
+的 `[offset, offset)` range；遍历者负责在消费该结果后推进至少一个字符边界。
 
 ## View 边界
 

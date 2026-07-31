@@ -133,6 +133,15 @@ if(CHEZ_SCHEME_EXECUTABLE)
   )
 
   add_test(
+    NAME scheme_regexp_tests
+    CONFIGURATIONS Debug Release
+    COMMAND
+      ${CHEZ_SCHEME_EXECUTABLE}
+      --libdirs ${PROJECT_SOURCE_DIR}/scheme
+      --program ${CMAKE_CURRENT_SOURCE_DIR}/scheme/regexp_tests.ss
+  )
+
+  add_test(
     NAME scheme_editor_tests
     CONFIGURATIONS Debug Release
     COMMAND
