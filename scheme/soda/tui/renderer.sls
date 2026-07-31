@@ -1039,6 +1039,34 @@
             annotation)
           (completion-item-label item))))
 
+  (define (completion-documentation-line item)
+    (let ([documentation (completion-item-documentation item)])
+      (and (string? documentation)
+           (positive? (string-length documentation))
+           (let loop ([index 0])
+             (cond
+               [(= index (string-length documentation))
+                documentation]
+               [(char=? (string-ref documentation index) #\newline)
+                (substring documentation 0 index)]
+               [else (loop (+ index 1))])))))
+
+  (define (truncate-cells value width)
+    (if (<= (string-cell-width value 8) width)
+        value
+        (let loop ([index 0] [used 0])
+          (if (= index (string-length value))
+              value
+              (let ([next
+                      (+ used
+                         (character-cell-width
+                           (string-ref value index)))])
+                (if (> next (- width 1))
+                    (string-append
+                      (substring value 0 index)
+                      "…")
+                    (loop (+ index 1) next)))))))
+
   (define (completion-index-matched? match index)
     (and
       match
@@ -1059,7 +1087,8 @@
             base-style
             theme
             sources
-            annotation-column)
+            annotation-column
+            documentation-column)
     (let* ([label (completion-item-label item)]
            [highlight?
              (string=?
@@ -1105,7 +1134,22 @@
               annotation
               annotation-faces
               (resolve-faces theme annotation-faces)
-              sources))))))
+              sources))))
+      (when documentation-column
+        (let ([documentation (completion-documentation-line item)]
+              [width (- columns documentation-column)])
+          (when (and documentation (>= width 2))
+            (let ([documentation-faces
+                    (append base-faces '(popup.documentation))])
+              (draw-string!
+                frame
+                row
+                (+ column documentation-column)
+                width
+                (truncate-cells documentation width)
+                documentation-faces
+                (resolve-faces theme documentation-faces)
+                sources)))))))
 
   (define (render-completions-component! context frame rectangle)
     (let* ([editor (editor-render-context-editor context)]
@@ -1142,7 +1186,10 @@
               '(popup)
               (resolve-faces theme '(popup))
               background-sources)
-            (let* ([selected-item
+            (let* ([document-target?
+                     (document-completion-target?
+                       (completion-session-target completion))]
+                   [selected-item
                      (completion-session-selected-item completion)]
                    [documentation
                      (and
@@ -1150,6 +1197,7 @@
                        (completion-item-documentation selected-item))]
                    [documentation?
                      (and
+                       document-target?
                        (string? documentation)
                        (positive? (string-length documentation))
                        (> (rect-rows rectangle) 1))]
@@ -1185,10 +1233,29 @@
                                8)))
                          0
                          visible))]
+                   [annotation-width
+                     (fold-left
+                       (lambda (width item)
+                         (let ([annotation
+                                 (completion-item-annotation item)])
+                           (if annotation
+                               (max
+                                 width
+                                 (string-cell-width annotation 8))
+                               width)))
+                       0
+                       visible)]
+                   [documentation-column
+                     (and
+                       (not document-target?)
+                       (+
+                         annotation-column
+                         (if (positive? annotation-width)
+                             (+ annotation-width 2)
+                             0)))]
                    [indicator
                      (and
-                       (document-completion-target?
-                         (completion-session-target completion))
+                       document-target?
                        (if selected
                            (string-append
                              (number->string (+ selected 1))
@@ -1269,7 +1336,8 @@
                       style
                       theme
                       sources
-                      annotation-column)
+                      annotation-column
+                      documentation-column)
                     (when
                       (and
                         scrollbar?

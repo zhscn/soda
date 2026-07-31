@@ -7739,4 +7739,18 @@
       (equal? (completion-item-annotation find-file) "C-x C-f"))
     (error 'editor-tests
            "M-x candidates did not carry key binding annotations")))
+(send! binding-editor binding-decoder (string->utf8 "file.re"))
+(let ([frame (render-editor-frame binding-editor 8 60)])
+  (unless
+    (let loop ([row 0])
+      (and (< row (frame-rows frame))
+           (or
+             (let ([text (frame-row-text frame row)])
+               (and
+                 (string-contains? text "file.reload")
+                 (string-contains? text "C-x x g")
+                 (string-contains? text "Replace an unmodified")))
+             (loop (+ row 1)))))
+    (error 'editor-tests
+           "M-x row did not include binding and documentation columns")))
 (editor-close! binding-editor)
