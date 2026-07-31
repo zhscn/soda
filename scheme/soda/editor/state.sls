@@ -2398,6 +2398,7 @@
                completion)])
       (cancel-view-completion! value origin-view)
       (buffer-set-local-setting! buffer 'track-modified? #f)
+      (buffer-set-local-setting! buffer 'show-line-numbers? #f)
       (configure-prompt-view-viewport! value session)
       (view-set-caret!
         view
