@@ -1151,20 +1151,11 @@
                        (rect-rows rectangle)
                        (if documentation? 1 0))]
                    [start
-                     (let* ([rows candidate-rows]
-                            [maximum-start
-                              (max 0 (- (length items) rows))]
-                            [stored
-                              (min
-                                (completion-session-viewport-start
-                                  completion)
-                                maximum-start)])
-                       (cond
-                         [(not selected) 0]
-                         [(< selected stored) selected]
-                         [(>= selected (+ stored rows))
-                          (- selected (- rows 1))]
-                         [else stored]))]
+                     (begin
+                       (completion-session-set-viewport-rows!
+                         completion
+                         candidate-rows)
+                       (completion-session-viewport-start completion))]
                    [visible
                      (let loop ([remaining (list-tail items start)]
                                 [count candidate-rows]
@@ -1439,6 +1430,9 @@
                  (and documentation? (positive? candidate-rows))
                  1
                  0))])
+      (completion-session-set-viewport-rows!
+        completion
+        candidate-rows)
       (and
         (positive? popup-rows)
         (let* ([desired-width

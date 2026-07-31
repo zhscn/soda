@@ -220,6 +220,10 @@
                     (if session
                         (+ 1 completion-rows)
                         0)))])
+        (when completion
+          (completion-session-set-viewport-rows!
+            completion
+            completion-rows))
         (if (null?
               (cdr
                 (window-node-leaves

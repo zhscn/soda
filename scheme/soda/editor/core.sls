@@ -592,6 +592,8 @@
           completion-window-max-rows
           completion-session-selected-index
           completion-session-viewport-start
+          completion-session-viewport-rows
+          completion-session-set-viewport-rows!
           completion-session-selected-item
           completion-session-refresh!
           install-prompt-effect-handler!

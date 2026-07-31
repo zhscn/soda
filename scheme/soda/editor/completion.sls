@@ -110,6 +110,8 @@
           completion-window-max-rows
           completion-session-selected-index
           completion-session-viewport-start
+          completion-session-viewport-rows
+          completion-session-set-viewport-rows!
           completion-session-selected-item
           completion-session-refresh!
           completion-session-apply-response!
@@ -211,7 +213,8 @@
             (mutable matches)
             selection-policy
             (mutable selected-index)
-            (mutable viewport-start)))
+            (mutable viewport-start)
+            (mutable viewport-rows)))
 
   (define completion-window-max-rows 6)
 
@@ -1057,8 +1060,9 @@
     (let* ([items (completion-session-items session)]
            [count (length items)]
            [selected (completion-session-selected-index session)]
+           [rows (completion-session-viewport-rows session)]
            [maximum-start
-             (max 0 (- count completion-window-max-rows))]
+             (max 0 (- count rows))]
            [start
              (min
                (completion-session-viewport-start session)
@@ -1066,11 +1070,26 @@
       (completion-session-viewport-start-set!
         session
         (cond
+          [(zero? rows) 0]
           [(not selected) 0]
           [(< selected start) selected]
-          [(>= selected (+ start completion-window-max-rows))
-           (- selected (- completion-window-max-rows 1))]
+          [(>= selected (+ start rows))
+           (- selected (- rows 1))]
           [else start]))))
+
+  (define (completion-session-set-viewport-rows! session rows)
+    (unless
+      (and
+        (completion-session? session)
+        (exact-non-negative-integer? rows))
+      (assertion-violation
+        'completion-session-set-viewport-rows!
+        "viewport rows must be a non-negative exact integer"
+        session
+        rows))
+    (completion-session-viewport-rows-set! session rows)
+    (adjust-session-viewport! session)
+    rows)
 
   (define (rebuild-session-items! session selected-item)
     (let* ([query (or (completion-session-query session) "")]
@@ -1238,7 +1257,8 @@
          '()
          selection-policy
          #f
-         0)]))
+         0
+         completion-window-max-rows)]))
 
   (define (completion-session-selection-state session)
     (unless (completion-session? session)
