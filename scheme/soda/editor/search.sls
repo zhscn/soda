@@ -11,6 +11,7 @@
           (soda editor location)
           (soda editor navigation)
           (soda editor prompt)
+          (soda editor regexp)
           (soda editor state))
 
   (define-record-type search-session
@@ -18,6 +19,7 @@
       origin-view-id
       origin
       (mutable direction)
+      regexp?
       (mutable query)
       (mutable match-start)
       (mutable match-end)
@@ -27,6 +29,7 @@
     (fields
       origin-view-id
       origin
+      regexp?
       (mutable query)
       (mutable replacement)
       (mutable phase)
@@ -60,6 +63,12 @@
           [(< offset lower-bound) #f]
           [(text-matches-at? text query offset) offset]
           [else (loop (- offset 1))]))))
+
+  (define (regexp-match text pattern start end backward?)
+    (let ([value (utf8->string (text->bytevector text))])
+      (if backward?
+          (regexp-find-backward pattern value start end)
+          (regexp-find-forward pattern value start end))))
 
   (define (with-buffer-text buffer procedure)
     (let ([snapshot (document-snapshot (buffer-document buffer))])
@@ -167,26 +176,40 @@
                                 1))
                           origin-offset)]
                     [first
-                      (if (eq? direction 'forward)
-                          (find-forward text bytes start size)
-                          (find-backward text bytes start 0))]
+                      (if (search-session-regexp? session)
+                          (if (eq? direction 'forward)
+                              (regexp-match text query start size #f)
+                              (regexp-match text query 0 start #t))
+                          (let ([match
+                                  (if (eq? direction 'forward)
+                                      (find-forward text bytes start size)
+                                      (find-backward text bytes start 0))])
+                            (and match (cons match (+ match length)))))]
                     [wrapped
                       (and
                         (not first)
-                        (if (eq? direction 'forward)
-                            (find-forward
-                              text bytes 0 (min start size))
-                            (find-backward
-                              text bytes
-                              (- size length)
-                              (max 0 (+ start 1)))))]
+                        (if (search-session-regexp? session)
+                            (if (eq? direction 'forward)
+                                (regexp-match text query 0 (min start size) #f)
+                                (regexp-match text query
+                                              (max 0 (+ start 1)) size #t))
+                            (let ([match
+                                    (if (eq? direction 'forward)
+                                        (find-forward
+                                          text bytes 0 (min start size))
+                                        (find-backward
+                                          text bytes
+                                          (- size length)
+                                          (max 0 (+ start 1))))])
+                              (and match
+                                   (cons match (+ match length))))))]
                     [match (or first wrapped)])
                (if match
                    (show-match!
                      editor
                      session
-                     match
-                     (+ match length)
+                     (car match)
+                     (cdr match)
                      (and wrapped #t))
                    (editor-set-status-message!
                      editor
@@ -194,7 +217,7 @@
                        "Failing search: "
                        query))))))])))
 
-  (define (start-search! context direction)
+  (define (start-search! context direction regexp?)
     (let* ([editor (command-context-editor context)]
            [active (search-data editor)])
       (if active
@@ -213,6 +236,7 @@
                        (view-buffer view)
                        (view-caret view))
                      direction
+                     regexp?
                      ""
                      #f
                      #f
@@ -220,9 +244,11 @@
             (editor-open-prompt!
               editor
               (make-prompt-request
-                (if (eq? direction 'forward)
-                    "I-search: "
-                    "I-search backward: ")
+                (string-append
+                  (if regexp? "Regexp " "")
+                  (if (eq? direction 'forward)
+                      "I-search: "
+                      "I-search backward: "))
                 ""
                 'search
                 #f
@@ -235,20 +261,33 @@
       '()))
 
   (define (forward-search-command context)
-    (start-search! context 'forward))
+    (start-search! context 'forward #f))
 
   (define (backward-search-command context)
-    (start-search! context 'backward))
+    (start-search! context 'backward #f))
+
+  (define (forward-regexp-search-command context)
+    (start-search! context 'forward #t))
+
+  (define (backward-regexp-search-command context)
+    (start-search! context 'backward #t))
 
   (define (search-changed-command context)
     (let* ([editor (command-context-editor context)]
            [session (search-data editor)])
       (when session
-        (search-from!
-          editor
-          session
-          (editor-active-prompt-input editor)
-          #f))
+        (guard
+          (condition
+            [else
+             (if (search-session-regexp? session)
+                 (editor-set-status-message!
+                   editor "Incomplete or invalid regexp")
+                 (raise condition))])
+          (search-from!
+            editor
+            session
+            (editor-active-prompt-input editor)
+            #f)))
       '()))
 
   (define (finish-search! context accepted?)
@@ -295,19 +334,30 @@
     (let* ([buffer (query-replace-buffer editor session)]
            [query (string->utf8 (query-replace-session-query session))]
            [length (bytevector-length query)]
-           [match
+           [match-range
              (with-buffer-text
                buffer
                (lambda (text)
-                 (find-forward
-                   text
-                   query
-                   (query-replace-session-scan-position session)
-                   (text-size text))))])
-      (if (not match)
+                 (if (query-replace-session-regexp? session)
+                     (regexp-match
+                       text
+                       (query-replace-session-query session)
+                       (query-replace-session-scan-position session)
+                       (text-size text)
+                       #f)
+                     (let ([match
+                             (find-forward
+                               text
+                               query
+                               (query-replace-session-scan-position session)
+                               (text-size text))])
+                       (and match
+                            (cons match (+ match length)))))))])
+      (if (not match-range)
           #f
           (let ([view (query-replace-origin-view editor session)]
-                [end (+ match length)])
+                [match (car match-range)]
+                [end (cdr match-range)])
             (view-set-mark! view match)
             (view-set-caret! view end)
             (query-replace-session-match-start-set! session match)
@@ -328,7 +378,7 @@
           (query-replace-session-phase-set! session 'finished)
           (query-replace-close-prompt! editor))))
 
-  (define (query-replace-start-command context)
+  (define (start-query-replace! context regexp?)
     (let* ([editor (command-context-editor context)]
            [view (command-context-view context)]
            [session
@@ -337,6 +387,7 @@
                (make-buffer-location
                  (view-buffer view)
                  (view-caret view))
+               regexp?
                #f
                #f
                'query
@@ -347,7 +398,7 @@
       (editor-open-prompt!
         editor
         (make-prompt-request
-          "Query replace: "
+          (if regexp? "Query replace regexp: " "Query replace: ")
           ""
           'query-replace
           #f
@@ -358,6 +409,12 @@
           session))
       '()))
 
+  (define (query-replace-start-command context)
+    (start-query-replace! context #f))
+
+  (define (query-replace-regexp-start-command context)
+    (start-query-replace! context #t))
+
   (define (query-replace-read-replacement-command context)
     (let* ([editor (command-context-editor context)]
            [result (command-context-argument context)]
@@ -366,15 +423,28 @@
                   (prompt-result-data result))]
            [query
              (and (prompt-result? result)
-                  (prompt-result-value result))])
+                  (prompt-result-value result))]
+           [valid-regexp?
+             (or
+               (not (and
+                      (query-replace-session? session)
+                      (query-replace-session-regexp? session)))
+               (guard
+                 (condition [else #f])
+                 (regexp-find-forward (or query "") "" 0 0)
+                 #t))])
       (when (query-replace-session? session)
-        (if (or (not query) (zero? (string-length query)))
+        (if (or (not query)
+                (zero? (string-length query))
+                (not valid-regexp?))
             (begin
               (editor-location-close!
                 (query-replace-session-origin session))
               (editor-set-status-message!
                 editor
-                "Query is empty"))
+                (if valid-regexp?
+                    "Query is empty"
+                    "Invalid regexp")))
             (begin
               (query-replace-session-query-set! session query)
               (query-replace-session-phase-set! session 'replacement)
@@ -433,15 +503,48 @@
     (let* ([buffer (query-replace-buffer editor session)]
            [start (query-replace-session-match-start session)]
            [end (query-replace-session-match-end session)]
-           [replacement
-             (string->utf8
+           [matched
+             (and
+               (query-replace-session-regexp? session)
+               (with-buffer-text
+                 buffer
+                 (lambda (text)
+                   (utf8->string
+                     (text-subbytevector text start end)))))]
+           [replacement-value
+             (if
+               matched
+               (let ([template
+                       (query-replace-session-replacement session)])
+                 (let-values ([(port extract) (open-string-output-port)])
+                   (let loop ([index 0])
+                     (cond
+                       [(= index (string-length template)) (extract)]
+                       [(and
+                          (< (+ index 1) (string-length template))
+                          (char=? (string-ref template index) #\\)
+                          (char=? (string-ref template (+ index 1)) #\&))
+                        (put-string port matched)
+                        (loop (+ index 2))]
+                       [else
+                        (put-char port (string-ref template index))
+                        (loop (+ index 1))]))))
                (query-replace-session-replacement session))]
+           [replacement
+             (string->utf8 replacement-value)]
            [new-end (+ start (bytevector-length replacement))])
       (buffer-replace-range! buffer start end replacement)
       (query-replace-session-count-set!
         session
         (+ (query-replace-session-count session) 1))
       (query-replace-session-scan-position-set! session new-end)
+      (when (= start end)
+        (query-replace-session-scan-position-set!
+          session
+          (with-buffer-text
+            buffer
+            (lambda (text)
+              (min (text-size text) (+ new-end 1))))))
       (view-set-caret!
         (query-replace-origin-view editor session)
         new-end)))
@@ -569,6 +672,14 @@
           backward-search-command
           "Start or repeat incremental backward search.")
         (list
+          'search.forward-regexp
+          forward-regexp-search-command
+          "Start or repeat incremental forward regexp search.")
+        (list
+          'search.backward-regexp
+          backward-regexp-search-command
+          "Start or repeat incremental backward regexp search.")
+        (list
           'search.accept
           search-accept-command
           "Commit the active incremental search.")
@@ -580,6 +691,10 @@
           'query-replace
           query-replace-start-command
           "Interactively replace occurrences following point.")
+        (list
+          'query-replace-regexp
+          query-replace-regexp-start-command
+          "Interactively replace regexp matches following point.")
         (list
           'query-replace.yes
           query-replace-yes-command
@@ -635,8 +750,20 @@
       'search.backward)
     (editor-bind-key!
       editor
+      (list (stroke #\s 6))
+      'search.forward-regexp)
+    (editor-bind-key!
+      editor
+      (list (stroke #\r 6))
+      'search.backward-regexp)
+    (editor-bind-key!
+      editor
       (list (stroke #\% 2))
       'query-replace)
+    (editor-bind-key!
+      editor
+      (list (stroke #\% 6))
+      'query-replace-regexp)
     (let ([keymap (make-keymap)])
       (for-each
         (lambda (entry)

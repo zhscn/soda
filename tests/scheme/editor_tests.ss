@@ -2023,6 +2023,25 @@
 (unless
   (bytevector=? (buffer-bytes comment-buffer) (string->utf8 comment-source))
   (error 'editor-tests "comment-dwim did not uncomment Scheme lines"))
+(buffer-set-local-setting! comment-buffer 'comment-line-prefix #f)
+(buffer-set-local-setting! comment-buffer 'comment-block-start "/*")
+(buffer-set-local-setting! comment-buffer 'comment-block-end "*/")
+(view-set-mark! comment-view 0)
+(view-set-caret! comment-view (string-length comment-source))
+(editor-update! comment-editor (make-command-message 'edit.comment-dwim #f))
+(unless
+  (bytevector=?
+    (buffer-bytes comment-buffer)
+    (string->utf8 (string-append "/*" comment-source "*/")))
+  (error 'editor-tests "comment-dwim did not apply a block policy"))
+(view-set-mark! comment-view 0)
+(view-set-caret!
+  comment-view
+  (bytevector-length (buffer-bytes comment-buffer)))
+(editor-update! comment-editor (make-command-message 'edit.comment-dwim #f))
+(unless
+  (bytevector=? (buffer-bytes comment-buffer) (string->utf8 comment-source))
+  (error 'editor-tests "comment-dwim did not remove block comments"))
 (editor-close! comment-editor)
 
 (define paragraph-source "one two three four five\n")
@@ -2491,6 +2510,40 @@
       (editor-status-message search-editor)
       "Replaced 3"))
   (error 'editor-tests "query-replace all did not replace remaining matches"))
+
+(buffer-replace-range!
+  search-buffer
+  0
+  (bytevector-length (buffer-bytes search-buffer))
+  (string->utf8 "foo12 bar foo345"))
+(view-set-caret! search-view 0)
+(editor-update!
+  search-editor
+  (make-command-message 'search.forward-regexp #f))
+(search-send! (string->utf8 "foo[0-9]+"))
+(unless
+  (equal? (view-region search-view) (cons 0 5))
+  (error 'editor-tests
+         "incremental regexp search chose the wrong match"
+         (view-region search-view)
+         (editor-status-message search-editor)))
+(search-send! (bytes 13))
+(view-set-caret! search-view 0)
+(editor-update!
+  search-editor
+  (make-command-message 'query-replace-regexp #f))
+(search-send! (string->utf8 "foo[0-9]+"))
+(search-send! (bytes 13))
+(search-send! (string->utf8 "<\\&>"))
+(search-send! (bytes 13))
+(search-send! (string->utf8 "!"))
+(unless
+  (and
+    (not (editor-active-prompt search-editor))
+    (bytevector=?
+      (buffer-bytes search-buffer)
+      (string->utf8 "<foo12> bar <foo345>")))
+  (error 'editor-tests "query-replace-regexp did not replace all matches"))
 (editor-close! search-editor)
 
 (define window-document

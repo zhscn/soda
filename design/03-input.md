@@ -153,6 +153,11 @@ mark 与 caret 都使用 Document anchor，因此 region 可跨普通编辑、un
 和 yank 把 active region 作为替换范围。切换 View 的 Buffer 或关闭 View 会释放
 mark anchor。
 
+每个 View 另持有至多 16 个 Document anchor 组成的 mark ring。设置 mark、
+`mark-whole-buffer` 和 `mark-defun` 在改变 point/mark 前保存原 point；带 prefix 的
+`C-SPC` 弹出最近位置并移动 point。mark ring 随普通编辑保持定位，切换 Buffer 或
+关闭 View 时释放全部 anchor。
+
 Editor 拥有有界 kill ring。copy-region 和 kill command 把 UTF-8 bytes 复制到
 ring，yank 插入最新条目。连续的 kill class command 共享最新条目：向前 kill
 追加，向后 kill 前置。每次删除仍是独立的 Buffer transaction，因此 kill ring
@@ -246,14 +251,19 @@ snapshot 计算 UTF-8 byte range，再通过普通 Buffer replace transaction �
 - Backspace 与 `C-d` 删除字符，`M-Backspace`、`M-d`、`C-k`、`M-k`
   使用相应 motion 的范围执行 kill；
 - `C-SPC` 设置 mark，`C-x C-x` 交换 point 与 mark，`M-w`、`C-w`、`C-y`、
-  `M-y` 操作 region 和 kill ring；
+  `M-y` 操作 region 和 kill ring；`C-x h` 标记整个 Buffer，`C-M-h` 标记当前
+  或下一个 defun；
 - `C-/`、`C-_`、`C-x u` 执行 undo，`C-g` 取消 pending sequence、prefix
   argument、completion 或 minibuffer；
 - `C-x C-f`、`C-x C-s` 访问文件，`C-x b` 切换 Buffer，`C-x C-b` 显示
   Buffer list，`M-x` 从 command registry 读取并调用 command；
 - `C-x 2`、`C-x 3`、`C-x 0`、`C-x 1`、`C-x o` 操作 TUI frame 内的
   Window tree；
-- `C-s`、`C-r` 执行 incremental search；`C-h c`、`C-h k`、`C-h x`、
+- `M-;` 根据 major mode comment policy 注释或取消注释 region/当前行，`M-q`
+  按 `fill-column` 填充当前 paragraph；buffer-local `auto-fill-mode` 在输入空白越过
+  fill column 时调用同一填充内核；
+- `C-s`、`C-r` 执行 literal incremental search，`C-M-s`、`C-M-r` 执行 regexp
+  incremental search；`C-h c`、`C-h k`、`C-h x`、
   `C-h a` 和 `C-h m` 从 keymap、command registry 与 Buffer major mode
   提供帮助。传统终端把 Control-H 编码成 Backspace 时，F1 引用同一个 help
   prefix map。
@@ -282,6 +292,18 @@ query replace 由 query、replacement 和 decision 三个非递归阶段组成�
 - `n` 或 Delete：跳过当前 match；
 - `!`：替换全部剩余 match；
 - `q`：保留已经完成的替换并结束。
+
+`M-%` 使用 literal query，`C-M-%` 使用 regexp query。regexp 匹配按 Unicode
+character 执行，支持 grouping、alternation、`.`、`*`、`+`、`?`、character class、
+range、negated class、`^`、`$` 和反斜线转义；`.` 不跨 newline，`^` 与 `$` 匹配
+行边界。regexp replacement 中的 `\&` 展开为完整 match。输入中的不完整 regexp
+保留当前搜索位置并显示状态，接受 query-replace 前会验证完整 pattern。
+
+major mode 通过 `comment-line-prefix`、`comment-block-start` 和
+`comment-block-end` settings 声明 comment policy。line policy 对 region 中各物理行
+执行幂等 toggle；只有 block policy 的语言以成对 delimiter 包围目标。paragraph
+填充保留首行 indentation，并在 line-comment paragraph 的每个输出行恢复 comment
+prefix。
 
 每次替换使用 Buffer range transaction，并从 replacement 末尾继续扫描，从而不会
 重复匹配刚插入的 replacement。`C-g` 在读取阶段恢复 origin；在 decision 阶段停止
