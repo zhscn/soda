@@ -289,6 +289,56 @@
 (define buffer (make-buffer 17 document "*editor-test*" 'fundamental-mode))
 (define editor (make-editor buffer))
 (install-tui-commands! editor)
+
+(unless
+  (equal?
+    (map
+      project-finder-name
+      (project-catalog-finders
+        (editor-project-catalog editor)))
+    '(soda-project-marker
+      build-project-marker
+      vcs-project-marker))
+  (error 'editor-tests "built-in project finder registry differs"))
+(define editor-test-project
+  (editor-discover-project
+    editor
+    "/virtual/repository/src"
+    (lambda (path)
+      (if (string=? path "/virtual/repository/CMakeLists.txt")
+          'present
+          'absent))))
+(unless
+  (and
+    (project? editor-test-project)
+    (eq? (project-kind editor-test-project) 'build)
+    (string=?
+      (project-primary-root editor-test-project)
+      "/virtual/repository"))
+  (error 'editor-tests "editor project discovery differs"))
+(editor-remember-project! editor editor-test-project)
+(unless
+  (eq? (car (editor-known-projects editor)) editor-test-project)
+  (error 'editor-tests "editor known project registry differs"))
+(guard
+  (condition [else #f])
+  (call-with-editor-configuration-transaction
+    editor
+    (lambda ()
+      (editor-register-project-finder!
+        editor
+        (make-marker-project-finder
+          'temporary-project-marker
+          1000
+          'temporary
+          '("temporary.marker")))
+      (error 'editor-tests "rollback project finder transaction"))))
+(when
+  (project-catalog-find-finder
+    (editor-project-catalog editor)
+    'temporary-project-marker)
+  (error 'editor-tests
+         "configuration rollback retained a project finder"))
 (define decoder (make-input-decoder))
 
 (unless (and (editor? editor)

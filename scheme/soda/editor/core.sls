@@ -233,6 +233,34 @@
           buffer-reindent-line!
           editor-major-mode-for-path
           editor-select-buffer-major-mode!
+          make-project
+          project?
+          project-id
+          project-roots
+          project-primary-root
+          project-kind
+          project-discovery-provenance
+          project-resource-enumerator
+          project-settings-layer
+          project-task-definitions
+          project-contains-resource?
+          make-project-finder
+          make-marker-project-finder
+          project-finder?
+          project-finder-name
+          project-finder-priority
+          project-catalog-generation
+          project-catalog-finders
+          project-catalog-find-finder
+          project-discovery-unavailable
+          default-project-marker-probe
+          editor-project-catalog
+          editor-register-project-finder!
+          editor-remove-project-finder!
+          editor-discover-project
+          editor-known-projects
+          editor-remember-project!
+          editor-forget-project!
           make-setting-definition
           setting-definition?
           setting-definition-name
@@ -1018,6 +1046,7 @@
           (soda editor prefix)
           (soda editor prefix-commands)
           (soda editor process-comint)
+          (soda editor project)
           (soda editor repl)
           (soda editor scheme-completion)
           (soda editor scheme-commands)
@@ -1207,6 +1236,13 @@
     (install-built-in-tree-sitter-languages! editor)
     editor)
 
+  (define (install-core-project-finders! editor)
+    (for-each
+      (lambda (finder)
+        (editor-register-project-finder! editor finder))
+      (built-in-project-finders))
+    editor)
+
   (define (make-editor buffer)
     (let* ([editor (make-editor-state buffer)]
            [scheme-workspace
@@ -1227,6 +1263,7 @@
           'scheme-environment-libraries
           '((soda editor core))))
       (install-core-auto-modes! editor)
+      (install-core-project-finders! editor)
       (install-command-runtime-commands! editor)
       (install-prefix-commands! editor)
       (install-basic-commands! editor)

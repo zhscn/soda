@@ -7,7 +7,8 @@
 | Window tree、View 生命周期与基础 display 操作 | 已实现 |
 | 显式 process working directory 与异步请求 origin | 部分实现 |
 | 通用 `ResourceContext` 与 origin 传播 | 未实现 |
-| Project identity、发现缓存、known registry、resource enumerator 与 settings layer | 未实现 |
+| Project identity、发现缓存与 known registry | 已实现 |
+| Project resource enumerator、settings layer 与 task definition runtime | 未实现 |
 | Workbench scope、slot、visitor、provenance 与持久化 | 未实现 |
 | intent 驱动的统一 display placement policy | 部分实现 |
 

@@ -86,6 +86,13 @@
           editor-register-auto-mode-rule!
           editor-major-mode-for-path
           editor-select-buffer-major-mode!
+          editor-project-catalog
+          editor-register-project-finder!
+          editor-remove-project-finder!
+          editor-discover-project
+          editor-known-projects
+          editor-remember-project!
+          editor-forget-project!
           editor-setting-store
           editor-setting-names
           editor-setting-definition
@@ -248,6 +255,7 @@
           (soda editor minor-mode)
           (soda editor prefix)
           (soda editor prompt)
+          (soda editor project)
           (soda editor setting)
           (soda editor theme)
           (soda editor themes catppuccin)
@@ -344,6 +352,7 @@
       (immutable keymaps editor-keymap-catalog)
       (immutable languages editor-language-catalog)
       (immutable auto-modes editor-auto-mode-catalog)
+      (immutable projects editor-project-catalog)
       (immutable settings editor-setting-store)
       (immutable completion-providers
                  editor-completion-provider-catalog)
@@ -468,6 +477,7 @@
             keymaps
             languages
             auto-modes
+            projects
             completion-providers
             minor-modes
             global-minor-modes
@@ -3112,6 +3122,66 @@
           path))
       mode))
 
+  (define (editor-register-project-finder! value finder)
+    (require-open-editor 'editor-register-project-finder! value)
+    (unless (project-finder? finder)
+      (assertion-violation
+        'editor-register-project-finder!
+        "expected a project finder"
+        finder))
+    (let ([registered
+            (project-catalog-register-finder!
+              (editor-project-catalog value)
+              finder)])
+      (editor-invalidate! value 'configuration)
+      registered))
+
+  (define (editor-remove-project-finder! value name)
+    (require-open-editor 'editor-remove-project-finder! value)
+    (let ([removed
+            (project-catalog-remove-finder!
+              (editor-project-catalog value)
+              name)])
+      (when removed
+        (editor-invalidate! value 'configuration))
+      removed))
+
+  (define editor-discover-project
+    (case-lambda
+      [(value directory)
+       (editor-discover-project
+         value directory default-project-marker-probe)]
+      [(value directory probe)
+       (require-open-editor 'editor-discover-project value)
+       (project-catalog-discover
+         (editor-project-catalog value)
+         directory
+         probe)]))
+
+  (define (editor-known-projects value)
+    (require-open-editor 'editor-known-projects value)
+    (project-catalog-known-projects
+      (editor-project-catalog value)))
+
+  (define (editor-remember-project! value project)
+    (require-open-editor 'editor-remember-project! value)
+    (let ([remembered
+            (project-catalog-remember!
+              (editor-project-catalog value)
+              project)])
+      (editor-invalidate! value 'configuration)
+      remembered))
+
+  (define (editor-forget-project! value id)
+    (require-open-editor 'editor-forget-project! value)
+    (let ([forgotten
+            (project-catalog-forget!
+              (editor-project-catalog value)
+              id)])
+      (when forgotten
+        (editor-invalidate! value 'configuration))
+      forgotten))
+
   (define (editor-setting-buffer who editor buffer)
     (unless (buffer? buffer)
       (assertion-violation who "expected a buffer" buffer))
@@ -3345,6 +3415,7 @@
       (keymap-catalog-snapshot (editor-keymap-catalog value))
       (language-catalog-snapshot (editor-language-catalog value))
       (auto-mode-catalog-snapshot (editor-auto-mode-catalog value))
+      (project-catalog-snapshot (editor-project-catalog value))
       (completion-provider-catalog-snapshot
         (editor-completion-provider-catalog value))
       (minor-mode-catalog-snapshot
@@ -3403,6 +3474,9 @@
       (auto-mode-catalog-restore!
         (editor-auto-mode-catalog value)
         (editor-configuration-state-auto-modes snapshot))
+      (project-catalog-restore!
+        (editor-project-catalog value)
+        (editor-configuration-state-projects snapshot))
       (editor-global-minor-modes-set!
         value
         (editor-configuration-state-global-minor-modes snapshot))
@@ -5141,6 +5215,7 @@
                keymaps
                (buffer-language-catalog buffer)
                (make-auto-mode-catalog)
+               (make-project-catalog)
                (buffer-setting-store buffer)
                (make-completion-provider-catalog)
                '()
