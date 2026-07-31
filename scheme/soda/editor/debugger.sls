@@ -26,10 +26,12 @@
           debugger-session-inspect-continuation!
           debugger-session-inspect-local!
           debugger-session-inspection-down!
+          debugger-session-inspection-select-role!
           debugger-session-inspection-up!
           debugger-session-inspection-top!
           debugger-session-set-inspected-value!
           debugger-session-apply-inspected
+          debugger-session-evaluate-procedure
           debugger-session-set-local-value!
           debugger-session->string
           debugger-session-selected-frame-byte-offset
@@ -563,6 +565,39 @@
               (inspector-child-node child)
               stack))))))
 
+  (define (debugger-session-inspection-select-role!
+            debugger
+            role)
+    (require-open-debugger
+      'debugger-session-inspection-select-role!
+      debugger)
+    (unless (symbol? role)
+      (assertion-violation
+        'debugger-session-inspection-select-role!
+        "child role must be a symbol"
+        role))
+    (let* ([stack
+             (debugger-session-inspection-stack debugger)]
+           [node (and (pair? stack) (car stack))])
+      (unless node
+        (assertion-violation
+          'debugger-session-inspection-select-role!
+          "debugger has no inspected value"))
+      (let ([child
+              (find
+                (lambda (child)
+                  (eq? (inspector-child-role child) role))
+                (inspector-node-children node))])
+        (unless child
+          (assertion-violation
+            'debugger-session-inspection-select-role!
+            "inspected object does not expose the requested role"
+            role))
+        (debugger-session-inspection-stack-set!
+          debugger
+          (cons (inspector-child-node child) stack))
+        (inspector-child-node child))))
+
   (define (debugger-session-inspection-up! debugger)
     (require-open-debugger
       'debugger-session-inspection-up!
@@ -597,6 +632,23 @@
            'eval
            (read-one source)))
         list)))
+
+  (define (debugger-session-evaluate-procedure debugger source)
+    (require-open-debugger
+      'debugger-session-evaluate-procedure
+      debugger)
+    (let ([values
+            (evaluate-in-selected-frame
+              debugger
+              source)])
+      (unless
+        (and
+          (= (length values) 1)
+          (procedure? (car values)))
+        (assertion-violation
+          'debugger-session-evaluate-procedure
+          "expression must produce one procedure"))
+      (car values)))
 
   (define (debugger-session-set-inspected-value!
             debugger
@@ -640,23 +692,21 @@
         (assertion-violation
           'debugger-session-apply-inspected
           "debugger has no inspected value"))
-      (let ([procedures
-              (evaluate-in-selected-frame
+      (when
+        (eq? (inspector-node-type node) 'continuation)
+        (assertion-violation
+          'debugger-session-apply-inspected
+          "continuation application must be scheduled by the evaluation runtime"))
+      (let ([procedure
+              (debugger-session-evaluate-procedure
                 debugger
                 source)])
-        (unless
-          (and
-            (= (length procedures) 1)
-            (procedure? (car procedures)))
-          (assertion-violation
-            'debugger-session-apply-inspected
-            "expression must produce one procedure"))
         (let ([values
                 (call-with-values
                   (lambda ()
                     (inspector-node-apply
                       node
-                      (car procedures)))
+                      procedure))
                   list)])
           (debugger-session-inspection-stack-set!
             debugger

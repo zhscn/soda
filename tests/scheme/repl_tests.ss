@@ -746,7 +746,7 @@
 (dispatch!
   (make-command-message
     'scheme.eval-expression
-    "(begin (define (soda-debug-inner debug-local) (car debug-local)) (soda-debug-inner 41))"))
+    "(begin (define (soda-debug-inner debug-local) (set! debug-local debug-local) (car debug-local)) (soda-debug-inner 41))"))
 (define failed-result
   (interaction-session-last-result session))
 (unless
@@ -771,6 +771,13 @@
                   inspect-local
                   inspect-ref
                   inspect-up
+                  inspect-top
+                  inspect-code
+                  inspect-call
+                  inspect-closure
+                  inspect-source
+                  set-value
+                  apply
                   use-value
                   retry
                   edit-and-retry
@@ -828,6 +835,54 @@
     "Inspector path: condition")
   (error 'repl-tests
          "debug inspector did not expose the original condition"))
+(dispatch!
+  (make-command-message
+    'scheme.debug-inspect-continuation
+    #f))
+(define code-frame-index
+  (let loop
+    ([children
+       (inspector-node-children
+         (debugger-session-inspection-node debugger))]
+     [index 0])
+    (cond
+      [(null? children) #f]
+      [(and
+         (eq? (inspector-child-role (car children))
+              'frame)
+         (inspector-node-has-capability?
+           (inspector-child-node (car children))
+           'code))
+       index]
+      [else
+       (loop (cdr children) (+ index 1))])))
+(unless code-frame-index
+  (error 'repl-tests
+         "continuation inspector did not expose procedure code"))
+(dispatch!
+  (make-command-message
+    'scheme.debug-inspect-ref
+    code-frame-index))
+(dispatch!
+  (make-command-message
+    'scheme.debug-inspect-code
+    #f))
+(unless
+  (string-contains?
+    (buffer-string debugger-buffer)
+    "procedure code")
+  (error 'repl-tests
+         "debugger did not inspect continuation procedure code"))
+(dispatch!
+  (make-command-message
+    'scheme.debug-inspect-top
+    #f))
+(unless
+  (string-contains?
+    (buffer-string debugger-buffer)
+    "Inspector path: raise continuation\n")
+  (error 'repl-tests
+         "debugger did not restore the continuation inspector root"))
 (press-key!
   'character
   (char->integer #\n)
@@ -860,6 +915,56 @@
         "Inspector path: frame[")
       (error 'repl-tests
              "debug inspector did not expose a frame local"))))
+(define assignable-local
+  (let frame-loop ([frames (debugger-session-frames debugger)])
+    (and
+      (pair? frames)
+      (let ([frame (car frames)])
+        (debugger-session-next-frame!
+          debugger
+          (-
+            (debugger-frame-index frame)
+            (debugger-session-selected-index debugger)))
+        (or
+          (let variable-loop
+            ([index 0]
+             [variables
+               (debugger-frame-variables frame)])
+            (and
+              (pair? variables)
+              (begin
+                (debugger-session-inspect-local!
+                  debugger
+                  index)
+                (if
+                  (memq
+                    'set-value
+                    (debugger-session-inspection-capabilities
+                      debugger))
+                  (cons
+                    (debugger-frame-index frame)
+                    index)
+                  (variable-loop
+                    (+ index 1)
+                    (cdr variables))))))
+          (frame-loop (cdr frames)))))))
+(unless assignable-local
+  (error 'repl-tests
+         "debugger did not expose an assignable frame variable"))
+(dispatch!
+  (make-command-message
+    'scheme.debug-set-value
+    "99"))
+(unless
+  (and
+    (string-contains?
+      (editor-status-message editor)
+      "Set inspected value to 99")
+    (string-contains?
+      (buffer-string debugger-buffer)
+      "Object: 99"))
+  (error 'repl-tests
+         "debugger did not update an assignable frame variable"))
 (press-key!
   'character
   (char->integer #\e)
@@ -929,6 +1034,31 @@
     "Inspector path: result[0]\n")
   (error 'repl-tests
          "debug inspector did not return to its parent"))
+(dispatch!
+  (make-command-message 'scheme.debug-inspect-ref 0))
+(dispatch!
+  (make-command-message 'scheme.debug-inspect-top #f))
+(unless
+  (string-contains?
+    (buffer-string debugger-buffer)
+    "Inspector path: result[0]\n")
+  (error 'repl-tests
+         "debug inspector did not return to its root"))
+(dispatch!
+  (make-command-message 'scheme.debug-apply "length"))
+(unless
+  (and
+    (string-contains?
+      (editor-status-message editor)
+      "Inspector apply => 2")
+    (string-contains?
+      (buffer-string debugger-buffer)
+      "Inspector path: apply result[0]")
+    (string-contains?
+      (buffer-string debugger-buffer)
+      "Object: 2"))
+  (error 'repl-tests
+         "debug inspector did not apply a procedure to its object"))
 (dispatch!
   (make-command-message 'scheme.debug-retry #f))
 (unless

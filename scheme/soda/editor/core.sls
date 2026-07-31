@@ -595,8 +595,10 @@
           debugger-session-inspection-node
           debugger-session-inspection-capabilities
           debugger-session-inspection-top!
+          debugger-session-inspection-select-role!
           debugger-session-set-inspected-value!
           debugger-session-apply-inspected
+          debugger-session-evaluate-procedure
           debugger-session-set-local-value!
           debugger-frame?
           debugger-frame-index

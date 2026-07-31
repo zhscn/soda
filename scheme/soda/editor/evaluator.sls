@@ -19,6 +19,7 @@
           evaluation-task-interrupt!
           evaluation-task-resume!
           evaluation-task-resume-condition!
+          evaluation-task-resume-continuation!
           evaluation-task-abort!
           evaluation-result-continuation
           evaluation-result->transcript
@@ -579,6 +580,49 @@
       (evaluation-task-result-set! task #f)
       (evaluation-task-state-set! task 'running)
       task))
+
+  (define (evaluation-task-resume-continuation!
+            task
+            procedure
+            continuation)
+    (unless (evaluation-task? task)
+      (assertion-violation
+        'evaluation-task-resume-continuation!
+        "expected an evaluation task"
+        task))
+    (unless (procedure? procedure)
+      (assertion-violation
+        'evaluation-task-resume-continuation!
+        "continuation transformer must be a procedure"
+        procedure))
+    (unless (procedure? continuation)
+      (assertion-violation
+        'evaluation-task-resume-continuation!
+        "inspected continuation must be a procedure"
+        continuation))
+    (unless
+      (and
+        (eq? (evaluation-task-state task) 'failed)
+        (evaluation-task-result task))
+      (assertion-violation
+        'evaluation-task-resume-continuation!
+        "evaluation task has no failed continuation"
+        (evaluation-task-state task)))
+    (evaluation-control-failure-set!
+      (evaluation-task-control task)
+      #f)
+    (evaluation-task-engine-set!
+      task
+      (make-engine
+        (lambda ()
+          (call-with-values
+            (lambda ()
+              (procedure continuation))
+            (lambda values
+              (apply continuation values))))))
+    (evaluation-task-result-set! task #f)
+    (evaluation-task-state-set! task 'running)
+    task)
 
   (define (evaluation-task-abort! task)
     (unless (evaluation-task? task)

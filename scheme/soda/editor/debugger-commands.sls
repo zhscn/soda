@@ -15,6 +15,7 @@
           (soda editor edit)
           (soda editor file)
           (soda editor interaction)
+          (soda editor inspector)
           (soda editor keymap)
           (soda editor language)
           (soda editor prompt)
@@ -654,6 +655,292 @@
       (refresh-debugger-buffer! editor debugger)
       '()))
 
+  (define (debug-inspect-top-command context)
+    (let* ([editor (command-context-editor context)]
+           [target
+             (require-debug-target
+               'scheme.debug-inspect-top
+               context)]
+           [debugger (cadr target)])
+      (debugger-session-inspection-top! debugger)
+      (refresh-debugger-buffer! editor debugger)
+      '()))
+
+  (define (debug-inspect-role context who role)
+    (let* ([editor (command-context-editor context)]
+           [target
+             (require-debug-target who context)]
+           [debugger (cadr target)])
+      (guard
+        (condition
+          [else
+           (editor-user-error
+             who
+             "The inspected object does not expose that component")])
+        (debugger-session-inspection-select-role!
+          debugger
+          role)
+        (refresh-debugger-buffer! editor debugger))
+      '()))
+
+  (define (debug-inspect-code-command context)
+    (debug-inspect-role
+      context
+      'scheme.debug-inspect-code
+      'code))
+
+  (define (debug-inspect-call-command context)
+    (debug-inspect-role
+      context
+      'scheme.debug-inspect-call
+      'call))
+
+  (define (debug-inspect-closure-command context)
+    (debug-inspect-role
+      context
+      'scheme.debug-inspect-closure
+      'closure))
+
+  (define (debug-inspect-source-command context)
+    (debug-inspect-role
+      context
+      'scheme.debug-inspect-source
+      'source))
+
+  (define (debug-expression-prompt
+            debugger
+            label
+            history
+            accept-command)
+    (make-prompt-request
+      label
+      ""
+      history
+      #f
+      'free
+      #f
+      accept-command
+      #f
+      (cons
+        (debugger-session-origin debugger)
+        (debugger-session-generation debugger))))
+
+  (define (prompt-matches-debugger? result debugger)
+    (let ([identity
+            (and
+              (prompt-result? result)
+              (prompt-result-data result))])
+      (and
+        (pair? identity)
+        (eq? (car identity)
+             (debugger-session-origin debugger))
+        (= (cdr identity)
+           (debugger-session-generation debugger)))))
+
+  (define (set-inspected-value! editor debugger source)
+    (unless
+      (memq
+        'set-value
+        (debugger-session-inspection-capabilities debugger))
+      (editor-user-error
+        'scheme.debug-set-value
+        "The inspected reference is not assignable"))
+    (guard
+      (condition
+        [else
+         (editor-set-status-message!
+           editor
+           (string-append
+             "Inspector assignment failed: "
+             (condition->string condition)))])
+      (let ([values
+              (debugger-session-set-inspected-value!
+                debugger
+                source)])
+        (refresh-debugger-buffer! editor debugger)
+        (editor-set-status-message!
+          editor
+          (string-append
+            "Set inspected value to "
+            (values->string values))))))
+
+  (define (debug-set-value-command context)
+    (let* ([editor (command-context-editor context)]
+           [target
+             (require-debug-target
+               'scheme.debug-set-value
+               context)]
+           [debugger (cadr target)]
+           [argument (command-context-argument context)])
+      (cond
+        [(string? argument)
+         (set-inspected-value!
+           editor
+           debugger
+           argument)]
+        [(not argument)
+         (unless
+           (memq
+             'set-value
+             (debugger-session-inspection-capabilities debugger))
+           (editor-user-error
+             'scheme.debug-set-value
+             "The inspected reference is not assignable"))
+         (editor-open-prompt!
+           editor
+           (debug-expression-prompt
+             debugger
+             "Set inspected value: "
+             'scheme-debug-set-value
+             'scheme.debug-set-value-accept))]
+        [else
+         (assertion-violation
+           'scheme.debug-set-value
+           "replacement expression must be a string or #f"
+           argument)])
+      '()))
+
+  (define (debug-set-value-accept-command context)
+    (let* ([editor (command-context-editor context)]
+           [result (command-context-argument context)]
+           [source
+             (and
+               (prompt-result? result)
+               (eq? (prompt-result-status result) 'accepted)
+               (prompt-result-value result))]
+           [target
+             (active-debug-target
+               editor
+               (command-context-view context))])
+      (when
+        (and
+          target
+          source
+          (positive? (string-length source))
+          (prompt-matches-debugger?
+            result
+            (cadr target)))
+        (set-inspected-value!
+          editor
+          (cadr target)
+          source))
+      '()))
+
+  (define (apply-inspected!
+            editor
+            target
+            source)
+    (let* ([session (car target)]
+           [debugger (cadr target)]
+           [node
+             (debugger-session-inspection-node debugger)])
+      (unless node
+        (editor-user-error
+          'scheme.debug-apply
+          "The debugger has no inspected object"))
+      (if (eq? (inspector-node-type node) 'continuation)
+          (begin
+            (unless
+              (and
+                session
+                (eq? (interaction-session-state session) 'failed))
+              (editor-user-error
+                'scheme.debug-apply
+                "The inspected continuation is not attached to a failed evaluation"))
+            (let ([transformer
+                    (debugger-session-evaluate-procedure
+                      debugger
+                      source)]
+                  [continuation
+                    (inspector-node-value node)])
+              (close-session-debugger! editor session)
+              (interaction-session-resume! session)
+              (list
+                (make-command-effect
+                  'scheme.resume-evaluation
+                  (make-evaluation-resume-request
+                    (interaction-session-id session)
+                    (interaction-session-generation session)
+                    'apply-continuation
+                    (list transformer continuation))))))
+          (guard
+            (condition
+              [else
+               (editor-set-status-message!
+                 editor
+                 (string-append
+                   "Inspector apply failed: "
+                   (condition->string condition)))
+               '()])
+            (let ([values
+                    (debugger-session-apply-inspected
+                      debugger
+                      source)])
+              (refresh-debugger-buffer! editor debugger)
+              (editor-set-status-message!
+                editor
+                (string-append
+                  "Inspector apply => "
+                  (values->string values)))
+              '())))))
+
+  (define (debug-apply-command context)
+    (let* ([editor (command-context-editor context)]
+           [target
+             (require-debug-target
+               'scheme.debug-apply
+               context)]
+           [debugger (cadr target)]
+           [argument (command-context-argument context)])
+      (cond
+        [(string? argument)
+         (apply-inspected!
+           editor
+           target
+           argument)]
+        [(not argument)
+         (unless
+           (debugger-session-inspection-node debugger)
+           (editor-user-error
+             'scheme.debug-apply
+             "The debugger has no inspected object"))
+         (editor-open-prompt!
+           editor
+           (debug-expression-prompt
+             debugger
+             "Apply procedure to inspected object: "
+             'scheme-debug-apply
+             'scheme.debug-apply-accept))
+         '()]
+        [else
+         (assertion-violation
+           'scheme.debug-apply
+           "procedure expression must be a string or #f"
+           argument)])))
+
+  (define (debug-apply-accept-command context)
+    (let* ([editor (command-context-editor context)]
+           [result (command-context-argument context)]
+           [source
+             (and
+               (prompt-result? result)
+               (eq? (prompt-result-status result) 'accepted)
+               (prompt-result-value result))]
+           [target
+             (active-debug-target
+               editor
+               (command-context-view context))])
+      (if
+        (and
+          target
+          source
+          (positive? (string-length source))
+          (prompt-matches-debugger?
+            result
+            (cadr target)))
+        (apply-inspected! editor target source)
+        '())))
+
   (define (restart-evaluation!
             editor
             session
@@ -1095,6 +1382,34 @@
           debug-inspect-up-command
           "Return to the parent debugger inspection object.")
         (list
+          'scheme.debug-inspect-top
+          debug-inspect-top-command
+          "Return to the root debugger inspection object.")
+        (list
+          'scheme.debug-inspect-code
+          debug-inspect-code-command
+          "Inspect the selected continuation's procedure code.")
+        (list
+          'scheme.debug-inspect-call
+          debug-inspect-call-command
+          "Inspect the selected continuation's pending call.")
+        (list
+          'scheme.debug-inspect-closure
+          debug-inspect-closure-command
+          "Inspect the selected continuation's closure.")
+        (list
+          'scheme.debug-inspect-source
+          debug-inspect-source-command
+          "Inspect the selected procedure or continuation source.")
+        (list
+          'scheme.debug-set-value
+          debug-set-value-command
+          "Set the inspected assignable reference.")
+        (list
+          'scheme.debug-apply
+          debug-apply-command
+          "Apply a procedure to the inspected object.")
+        (list
           'scheme.debug-visit-source
           debug-visit-source-command
           "Visit the source location of the selected debugger frame.")
@@ -1154,6 +1469,18 @@
         'scheme.debug-use-value-accept
         debug-use-value-accept-command
         "Resume a failed continuation with replacement values."))
+    (editor-register-internal-command!
+      editor
+      (make-internal-context-command
+        'scheme.debug-set-value-accept
+        debug-set-value-accept-command
+        "Set an inspected assignable reference from minibuffer input."))
+    (editor-register-internal-command!
+      editor
+      (make-internal-context-command
+        'scheme.debug-apply-accept
+        debug-apply-accept-command
+        "Apply a procedure from minibuffer input to the inspected object."))
     (register-major-mode!
       (editor-language-catalog editor)
       (make-major-mode
@@ -1185,6 +1512,9 @@
           (#\l . scheme.debug-inspect-local)
           (#\d . scheme.debug-inspect-ref)
           (#\u . scheme.debug-inspect-up)
+          (#\t . scheme.debug-inspect-top)
+          (#\! . scheme.debug-set-value)
+          (#\a . scheme.debug-apply)
           (#\v . scheme.debug-visit-source)
           (#\r . scheme.debug-restart)
           (#\x . scheme.debug-exit)

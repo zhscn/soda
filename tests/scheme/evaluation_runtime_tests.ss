@@ -249,5 +249,63 @@
            (evaluation-result-values
              (interaction-session-last-result session))))
 
+  (define transformed-request
+    (interaction-session-begin!
+      session
+      "(let ([bad '()]) (soda-test-half (+ 12 bad)))"))
+  (execute!
+    (list
+      (make-command-effect
+        'scheme.evaluate
+        transformed-request)))
+  (let loop ()
+    (let ([messages
+            (evaluation-runtime-handle-event
+              adapter
+              (next-evaluation-event))])
+      (if (null? messages)
+          (loop)
+          (apply-messages! messages))))
+  (execute!
+    (editor-update!
+      editor
+      (make-command-message
+        'scheme.debug-open
+        #f)))
+  (execute!
+    (editor-update!
+      editor
+      (make-command-message
+        'scheme.debug-inspect-continuation
+        #f)))
+  (execute!
+    (editor-update!
+      editor
+      (make-command-message
+        'scheme.debug-apply
+        "(lambda (continuation) (continuation 20))")))
+  (let loop ()
+    (let ([messages
+            (evaluation-runtime-handle-event
+              adapter
+              (next-evaluation-event))])
+      (if (null? messages)
+          (loop)
+          (apply-messages! messages))))
+
+  (unless
+    (and
+      (eq? (interaction-session-state session) 'ready)
+      (equal?
+        (evaluation-result-values
+          (interaction-session-last-result session))
+        '(10))
+      (not
+        (evaluation-runtime-busy?
+          adapter
+          (interaction-session-id session))))
+    (error 'evaluation-runtime-tests
+           "continuation transformer did not resume the failed computation"))
+
   (editor-close! editor)
   (runtime-close! runtime)

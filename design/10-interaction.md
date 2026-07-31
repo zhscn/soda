@@ -239,11 +239,19 @@ replacement value 可以返回原计算的剩余上下文。condition continuati
 
 debugger 分为数据模型和 editor adapter。数据模型只负责 continuation inspection、
 frame selection 与 frame-relative evaluation；adapter 管理 command、major mode、
-generated Buffer、prompt 和返回 Buffer 切换。`debugger-mode` 是 interface mode，
-其 Buffer 是 session 状态的只读文本投影。投影包含异常来源、`who`、message、
-irritants、frame 列表和选中 frame 的 locals。选择 frame 后重新生成投影，caret
-跟随选中的 frame 行。每个 debugger 使用独立的 generated resource，因此不同
-interaction 的失败状态可以同时保留。
+generated Buffer、prompt 和返回 Buffer 切换。Chez inspector object 由
+`InspectorNode` 包装。节点公开 `preview`、`children`、`evaluate`、`set-value`、
+`apply`、`code`、`call`、`closure` 和 `source` 等显式 capability，调用者只依赖
+节点声明的 capability，不按 Chez object type 猜测可用操作。变量节点保留原始
+variable inspector，读取时动态解引用，因此赋值后不需要重建 inspection path。
+
+`debugger-mode` 是 interface mode，其 Buffer 是 session 与 InspectorNode 状态的
+只读文本投影。投影包含异常来源、`who`、message、irritants、frame 列表、选中
+frame 的 locals，以及当前 InspectorNode 的 path、type、capabilities、preview
+和带序号的 children。continuation 的 children 是 frame；frame 进一步暴露 pending
+call、procedure code、closure、source、局部变量和自由变量。选择 frame 或
+InspectorNode 后重新生成投影，caret 跟随选中的 frame 行。每个 debugger 使用
+独立的 generated resource，因此不同 interaction 的失败状态可以同时保留。
 
 失败状态提供以下动作：
 
@@ -256,7 +264,16 @@ interaction 的失败状态可以同时保留。
   `scheme.debug-inspect-condition` 把原始 condition 设为 inspector 根对象；
   `scheme.debug-inspect-local` 直接选择当前 frame 中按序号标识的局部值；
   `scheme.debug-inspect-ref` 按子项序号进入 pair、vector、record、procedure 等对象，
-  `scheme.debug-inspect-up` 返回父对象；对象预览、子项数量与求值历史具有固定上限；
+  `scheme.debug-inspect-up` 返回父对象，`scheme.debug-inspect-top` 返回当前根；
+  `scheme.debug-inspect-code`、`scheme.debug-inspect-call`、
+  `scheme.debug-inspect-closure` 和 `scheme.debug-inspect-source` 选择节点公开的
+  专用 child；对象预览、子项数量与求值历史具有固定上限；
+- `scheme.debug-set-value` 在选中 frame 中求值 replacement expression，并通过
+  assignable variable inspector 更新局部值；
+- `scheme.debug-apply` 在选中 frame 中求值一个 procedure，并把当前对象传给它。
+  普通对象的结果成为新的 InspectorNode 根；continuation application 作为
+  evaluation resume request 进入 engine。transformer 可以直接调用 continuation，
+  也可以返回一个或多个 replacement value，由 engine 传给 continuation；
 - `scheme.debug-visit-source` 通过异步 VFS open request 打开选中 frame 的 source
   path，并按行与字符位置定位 caret；
 - `scheme.debug-continue` 恢复用户中断时保存的 engine；
@@ -271,10 +288,11 @@ interaction 的失败状态可以同时保留。
   interaction failure 同时退出 `failed` 状态，对 suspended evaluation 同时释放
   保存的 engine。
 
-debugger Buffer 的 `n`、`p`、`e`、`i`、`k`、`l`、`d`、`u`、`v`、`c`、`r`、
-`=`、`x`、`q` 分别映射到 frame 导航、求值、检查 condition、检查 continuation、
-检查局部值、进入和退出对象子项、源码访问、继续、restart selector、replacement
-value、保留退出与丢弃操作。
+debugger Buffer 的 `n`、`p`、`e`、`i`、`k`、`l`、`d`、`u`、`t`、`!`、`a`、
+`v`、`c`、`r`、`=`、`x`、`q` 分别映射到 frame 导航、求值、检查 condition、
+检查 continuation、检查局部值、进入子项、返回父节点、返回根节点、设置变量、
+应用 procedure、源码访问、继续、restart selector、replacement value、保留退出
+与丢弃操作。
 源码访问复用普通 `file.read` effect，文件
 读取期间 command loop 保持可用；打开完成后 debugger 状态仍可重新激活。重试和
 丢弃会先把所有显示 debugger Buffer 的 View 切回来源 Buffer。Editor 关闭时释放

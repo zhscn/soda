@@ -60,6 +60,23 @@
     (exists
       (lambda (child)
         (eq? (inspector-child-role child) 'frame))
+      continuation-children)
+    (exists
+      (lambda (child)
+        (and
+          (eq? (inspector-child-role child) 'frame)
+          (let ([children
+                  (inspector-node-children
+                    (inspector-child-node child))])
+            (and
+              (exists
+                (lambda (entry)
+                  (eq? (inspector-child-role entry) 'code))
+                children)
+              (exists
+                (lambda (entry)
+                  (eq? (inspector-child-role entry) 'call))
+                children)))))
       continuation-children))
   "continuation inspection does not expose frames")
 

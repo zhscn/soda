@@ -128,7 +128,22 @@
         [(use-values)
          (evaluation-task-resume-condition!
            task
-           (evaluation-resume-request-values request))])
+           (evaluation-resume-request-values request))]
+        [(apply-continuation)
+         (let ([values
+                 (evaluation-resume-request-values request)])
+           (unless
+             (and
+               (= (length values) 2)
+               (procedure? (car values))
+               (procedure? (cadr values)))
+             (assertion-violation
+               'scheme.resume-evaluation
+               "continuation application requires a transformer and continuation"))
+           (evaluation-task-resume-continuation!
+             task
+             (car values)
+             (cadr values)))])
       (arm-task! adapter session-id)
       (make-effect-result #t '())))
 
