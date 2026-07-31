@@ -17,6 +17,9 @@
           evaluation-task-state
           evaluation-task-step!
           evaluation-task-interrupt!
+          evaluation-task-resume!
+          evaluation-task-resume-condition!
+          evaluation-task-abort!
           evaluation-result-continuation
           evaluation-result->transcript
           runtime-binding?
@@ -59,11 +62,18 @@
       signature-formals
       generation))
 
+  (define-record-type evaluation-control
+    (fields
+      (mutable failure
+               evaluation-control-failure
+               evaluation-control-failure-set!)))
+
   (define-record-type
     (evaluation-task %make-evaluation-task evaluation-task?)
     (fields
       request
       evaluator
+      control
       (mutable engine
                evaluation-task-engine
                evaluation-task-engine-set!)
@@ -352,11 +362,12 @@
         (chez-evaluator-invalidate! evaluator)
         values)))
 
-  (define (chez-evaluator-evaluate
+  (define (evaluate-with-control
             evaluator
             request
             editor
-            session)
+            session
+            control)
     (unless (chez-evaluator? evaluator)
       (assertion-violation
         'chez-evaluator-evaluate
@@ -381,7 +392,6 @@
             (let ([environment (chez-evaluator-environment evaluator)]
                   [input-port (open-string-input-port "")]
                   [result-values '()]
-                  [failure #f]
                   [messages '()])
               (define emit-command!
                 (case-lambda
@@ -408,26 +418,47 @@
                 emit-command!
                 environment)
               (guard (condition
-                       [else (set! failure condition)])
+                       [else
+                        (evaluation-control-failure-set!
+                          control
+                          condition)])
                 (parameterize
                   ([current-input-port input-port]
                    [current-output-port output-port]
                    [current-error-port error-port]
-                   [generate-inspector-information #t])
+                   [generate-inspector-information #t]
+                   [run-cp0 (lambda (cp0 form) form)])
                   (set! result-values
                     (evaluate-source
                       environment
                       (evaluation-request-source request)))))
-              (close-port input-port)
-              (chez-evaluator-invalidate! evaluator)
-              (make-evaluation-result
-                request
-                (if failure 'condition 'value)
-                (if failure '() result-values)
-                (extract-output)
-                (extract-error)
-                failure
-                (reverse messages))))))))
+              (let ([failure
+                      (evaluation-control-failure control)]
+                    [output (extract-output)]
+                    [error-output (extract-error)]
+                    [result-messages (reverse messages)])
+                (set! messages '())
+                (chez-evaluator-invalidate! evaluator)
+                (make-evaluation-result
+                  request
+                  (if failure 'condition 'value)
+                  (if failure '() result-values)
+                  output
+                  error-output
+                  failure
+                  result-messages))))))))
+
+  (define (chez-evaluator-evaluate
+            evaluator
+            request
+            editor
+            session)
+    (evaluate-with-control
+      evaluator
+      request
+      editor
+      session
+      (make-evaluation-control #f)))
 
   (define (make-evaluation-task evaluator request editor session)
     (unless (chez-evaluator? evaluator)
@@ -445,19 +476,22 @@
         'make-evaluation-task
         "expected an interaction session"
         session))
-    (%make-evaluation-task
-      request
-      evaluator
-      (make-engine
-        (lambda ()
-          (chez-evaluator-evaluate
-            evaluator
-            request
-            editor
-            session)))
-      'ready
-      #f
-      #f))
+    (let ([control (make-evaluation-control #f)])
+      (%make-evaluation-task
+        request
+        evaluator
+        control
+        (make-engine
+          (lambda ()
+            (evaluate-with-control
+              evaluator
+              request
+              editor
+              session
+              control)))
+        'ready
+        #f
+        #f)))
 
   (define (evaluation-task-interrupt! task)
     (unless (evaluation-task? task)
@@ -469,19 +503,93 @@
       (when (evaluation-task-started? task)
         (chez-evaluator-invalidate!
           (evaluation-task-evaluator task)))
-      (let ([result
-              (make-evaluation-result
-                (evaluation-task-request task)
-                'interrupted
-                '()
-                ""
-                ""
-                #f
-                '())])
-        (evaluation-task-engine-set! task #f)
+      (let* ([request (evaluation-task-request task)]
+             [engine (evaluation-task-engine task)]
+             [suspension
+               (condition
+                 (make-evaluation-suspension-condition
+                   (evaluation-request-session-id request)
+                   (evaluation-request-generation request)
+                   engine)
+                 (make-who-condition 'scheme.evaluate)
+                 (make-message-condition
+                   "evaluation interrupted by the user"))]
+             [result
+               (make-evaluation-result
+                 request
+                 'suspended
+                 '()
+                 ""
+                 ""
+                 suspension
+                 '())])
         (evaluation-task-result-set! task result)
-        (evaluation-task-state-set! task 'interrupted)))
+        (evaluation-task-state-set! task 'suspended)))
     (evaluation-task-result task))
+
+  (define (evaluation-task-resume! task)
+    (unless (evaluation-task? task)
+      (assertion-violation
+        'evaluation-task-resume!
+        "expected an evaluation task"
+        task))
+    (unless (eq? (evaluation-task-state task) 'suspended)
+      (assertion-violation
+        'evaluation-task-resume!
+        "evaluation task is not suspended"
+        (evaluation-task-state task)))
+    (evaluation-task-result-set! task #f)
+    (evaluation-task-state-set! task 'running)
+    task)
+
+  (define (evaluation-task-resume-condition! task values)
+    (unless (evaluation-task? task)
+      (assertion-violation
+        'evaluation-task-resume-condition!
+        "expected an evaluation task"
+        task))
+    (unless (list? values)
+      (assertion-violation
+        'evaluation-task-resume-condition!
+        "replacement values must be a list"
+        values))
+    (unless
+      (and
+        (eq? (evaluation-task-state task) 'failed)
+        (evaluation-task-result task))
+      (assertion-violation
+        'evaluation-task-resume-condition!
+        "evaluation task has no failed continuation"
+        (evaluation-task-state task)))
+    (let ([continuation
+            (evaluation-result-continuation
+              (evaluation-task-result task))])
+      (unless continuation
+        (assertion-violation
+          'evaluation-task-resume-condition!
+          "failed evaluation has no continuation"))
+      (evaluation-control-failure-set!
+        (evaluation-task-control task)
+        #f)
+      (evaluation-task-engine-set!
+        task
+        (make-engine
+          (lambda ()
+            (apply continuation values))))
+      (evaluation-task-result-set! task #f)
+      (evaluation-task-state-set! task 'running)
+      task))
+
+  (define (evaluation-task-abort! task)
+    (unless (evaluation-task? task)
+      (assertion-violation
+        'evaluation-task-abort!
+        "expected an evaluation task"
+        task))
+    (evaluation-task-engine-set! task #f)
+    (evaluation-task-result-set! task #f)
+    (evaluation-task-state-set! task 'aborted)
+    task)
 
   (define (evaluation-task-step! task ticks)
     (unless (evaluation-task? task)
@@ -500,7 +608,7 @@
         "ticks must be a positive fixnum"
         ticks))
     (case (evaluation-task-state task)
-      [(completed interrupted)
+      [(completed suspended)
        (evaluation-task-result task)]
       [(ready running)
        (evaluation-task-started?-set! task #t)
@@ -516,7 +624,14 @@
            [(completed)
             (evaluation-task-engine-set! task #f)
             (evaluation-task-result-set! task (cadr outcome))
-            (evaluation-task-state-set! task 'completed)
+            (evaluation-task-state-set!
+              task
+              (if
+                (eq?
+                  (evaluation-result-status (cadr outcome))
+                  'condition)
+                'failed
+                'completed))
             (evaluation-task-result task)]
            [(expired)
             (evaluation-task-engine-set! task (cadr outcome))
@@ -579,6 +694,6 @@
              (evaluation-result-condition result)
              port)
            (newline port)]
-          [(interrupted)
+          [(suspended)
            (display "Interrupted" port)
            (newline port)])))))

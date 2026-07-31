@@ -50,11 +50,18 @@
            [session
              (editor-interaction-ref editor session-id)]
            [tasks (evaluation-runtime-tasks adapter)])
-      (when (hashtable-contains? tasks session-id)
-        (assertion-violation
-          'scheme.evaluate
-          "interaction session already has a running evaluation"
-          session-id))
+      (let ([existing
+              (hashtable-ref tasks session-id #f)])
+        (when existing
+          (if
+            (eq? (evaluation-task-state existing) 'failed)
+            (begin
+              (evaluation-task-abort! existing)
+              (hashtable-delete! tasks session-id))
+            (assertion-violation
+              'scheme.evaluate
+              "interaction session already has a running evaluation"
+              session-id))))
       (hashtable-set!
         tasks
         session-id
@@ -87,6 +94,54 @@
           "interaction session is not evaluating"
           session-id))
       (evaluation-task-interrupt! task)
+      (make-effect-result #t '())))
+
+  (define (resume-task! adapter request)
+    (unless (evaluation-resume-request? request)
+      (assertion-violation
+        'scheme.resume-evaluation
+        "expected an evaluation resume request"
+        request))
+    (let* ([session-id
+             (evaluation-resume-request-session-id request)]
+           [task
+            (hashtable-ref
+              (evaluation-runtime-tasks adapter)
+              session-id
+              #f)])
+      (unless task
+        (assertion-violation
+          'scheme.resume-evaluation
+          "interaction session has no suspended evaluation"
+          session-id))
+      (unless
+        (= (evaluation-request-generation
+             (evaluation-task-request task))
+           (evaluation-resume-request-generation request))
+        (assertion-violation
+          'scheme.resume-evaluation
+          "evaluation resume request is stale"
+          request))
+      (case (evaluation-resume-request-kind request)
+        [(continue)
+         (evaluation-task-resume! task)]
+        [(use-values)
+         (evaluation-task-resume-condition!
+           task
+           (evaluation-resume-request-values request))])
+      (arm-task! adapter session-id)
+      (make-effect-result #t '())))
+
+  (define (abort-task! adapter session-id)
+    (let* ([tasks (evaluation-runtime-tasks adapter)]
+           [task (hashtable-ref tasks session-id #f)])
+      (unless task
+        (assertion-violation
+          'scheme.abort-evaluation
+          "interaction session has no suspended evaluation"
+          session-id))
+      (evaluation-task-abort! task)
+      (hashtable-delete! tasks session-id)
       (make-effect-result #t '())))
 
   (define install-evaluation-runtime!
@@ -135,6 +190,16 @@
            'scheme.interrupt-evaluation
            (lambda (session-id)
              (interrupt-task! adapter session-id)))
+         (register-effect-handler!
+           executor
+           'scheme.resume-evaluation
+           (lambda (request)
+             (resume-task! adapter request)))
+         (register-effect-handler!
+           executor
+           'scheme.abort-evaluation
+           (lambda (session-id)
+             (abort-task! adapter session-id)))
          adapter)]))
 
   (define (evaluation-runtime-event? adapter event)
@@ -188,13 +253,21 @@
                 task
                 (evaluation-runtime-slice-ticks adapter))])
         (if result
-            (begin
-              (hashtable-delete! tasks session-id)
-              (cons
+            (if
+              (eq? (evaluation-result-status result) 'suspended)
+              (list
                 (make-internal-command-message
-                  'scheme.apply-evaluation-result
-                  result)
-                (evaluation-result-messages result)))
+                  'scheme.apply-evaluation-suspension
+                  result))
+              (begin
+                (when
+                  (eq? (evaluation-result-status result) 'value)
+                  (hashtable-delete! tasks session-id))
+                (cons
+                  (make-internal-command-message
+                    'scheme.apply-evaluation-result
+                    result)
+                  (evaluation-result-messages result))))
             (begin
               (arm-task! adapter session-id)
               '())))))

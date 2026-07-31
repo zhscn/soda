@@ -6,6 +6,8 @@
         (soda editor core)
         (soda editor effect)
         (soda editor evaluation-runtime)
+        (only (soda editor evaluator)
+              evaluation-result-continuation)
         (soda editor interaction)
         (soda editor repl)
         (soda runtime))
@@ -109,17 +111,143 @@
 
   (unless
     (and
-      (eq? (interaction-session-state session) 'ready)
+      (eq? (interaction-session-state session) 'suspended)
       (eq?
         (evaluation-result-status
           (interaction-session-last-result session))
-        'interrupted)
+        'suspended)
+      (interaction-session-debugger session)
+      (evaluation-suspension-condition?
+        (evaluation-result-condition
+          (interaction-session-last-result session)))
+      (evaluation-runtime-busy?
+        adapter
+        (interaction-session-id session)))
+    (error 'evaluation-runtime-tests
+           "interrupt did not capture a resumable evaluation"))
+
+  (execute!
+    (editor-update!
+      editor
+      (make-command-message 'scheme.debug-continue #f)))
+  (unless
+    (and
+      (eq? (interaction-session-state session) 'evaluating)
+      (not (interaction-session-debugger session)))
+    (error 'evaluation-runtime-tests
+           "debugger continue did not resume the evaluation"))
+
+  (unless
+    (null?
+      (evaluation-runtime-handle-event
+        adapter
+        (next-evaluation-event)))
+    (error 'evaluation-runtime-tests
+           "resumed infinite evaluation unexpectedly completed"))
+
+  (execute!
+    (list
+      (make-command-effect
+        'scheme.interrupt-evaluation
+        (interaction-session-id session))))
+  (apply-messages!
+    (evaluation-runtime-handle-event
+      adapter
+      (next-evaluation-event)))
+  (execute!
+    (editor-update!
+      editor
+      (make-command-message 'scheme.debug-discard #f)))
+
+  (unless
+    (and
+      (eq? (interaction-session-state session) 'ready)
+      (not (interaction-session-debugger session))
       (not
         (evaluation-runtime-busy?
           adapter
           (interaction-session-id session))))
     (error 'evaluation-runtime-tests
-           "interrupt did not complete the cooperative evaluation"))
+           "aborting a suspended evaluation did not release its engine"))
+
+  (define helper-request
+    (interaction-session-begin!
+      session
+      "(define (soda-test-half value) (/ value 2))"))
+  (execute!
+    (list
+      (make-command-effect 'scheme.evaluate helper-request)))
+  (let loop ()
+    (let ([messages
+            (evaluation-runtime-handle-event
+              adapter
+              (next-evaluation-event))])
+      (if (null? messages)
+          (loop)
+          (apply-messages! messages))))
+
+  (define failed-request
+    (interaction-session-begin!
+      session
+      "(let ([bad '()]) (soda-test-half (+ 12 bad)))"))
+  (execute!
+    (list
+      (make-command-effect 'scheme.evaluate failed-request)))
+  (let loop ()
+    (let ([messages
+            (evaluation-runtime-handle-event
+              adapter
+              (next-evaluation-event))])
+      (if (null? messages)
+          (loop)
+          (apply-messages! messages))))
+
+  (unless
+    (and
+      (eq? (interaction-session-state session) 'failed)
+      (evaluation-result-continuation
+        (interaction-session-last-result session))
+      (evaluation-runtime-busy?
+        adapter
+        (interaction-session-id session)))
+    (error 'evaluation-runtime-tests
+           "failed evaluation did not retain its condition continuation"))
+
+  (interaction-session-resume! session)
+  (execute!
+    (list
+      (make-command-effect
+        'scheme.resume-evaluation
+        (make-evaluation-resume-request
+          (interaction-session-id session)
+          (interaction-session-generation session)
+          'use-values
+          '(16)))))
+  (let loop ()
+    (let ([messages
+            (evaluation-runtime-handle-event
+              adapter
+              (next-evaluation-event))])
+      (if (null? messages)
+          (loop)
+          (apply-messages! messages))))
+
+  (unless
+    (and
+      (eq? (interaction-session-state session) 'ready)
+      (equal?
+        (evaluation-result-values
+          (interaction-session-last-result session))
+        '(8))
+      (not
+        (evaluation-runtime-busy?
+          adapter
+          (interaction-session-id session))))
+    (error 'evaluation-runtime-tests
+           "replacement value did not resume the failed continuation"
+           (interaction-session-state session)
+           (evaluation-result-values
+             (interaction-session-last-result session))))
 
   (editor-close! editor)
   (runtime-close! runtime)

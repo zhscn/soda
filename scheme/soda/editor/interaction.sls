@@ -32,6 +32,9 @@
           interaction-session-set-debugger!
           interaction-session-begin!
           interaction-session-complete!
+          interaction-session-suspend!
+          interaction-session-resume!
+          interaction-session-abort-suspension!
           interaction-session-dismiss-failure!
           interaction-session-debug-actions
           interaction-session-close!
@@ -49,6 +52,12 @@
           evaluation-request-generation
           evaluation-request-source
           evaluation-request-origin
+          make-evaluation-resume-request
+          evaluation-resume-request?
+          evaluation-resume-request-session-id
+          evaluation-resume-request-generation
+          evaluation-resume-request-kind
+          evaluation-resume-request-values
           make-evaluation-result
           evaluation-result?
           evaluation-result-request
@@ -58,6 +67,11 @@
           evaluation-result-stderr
           evaluation-result-condition
           evaluation-result-messages
+          make-evaluation-suspension-condition
+          evaluation-suspension-condition?
+          evaluation-suspension-session-id
+          evaluation-suspension-generation
+          evaluation-suspension-engine
           interaction-transcript?
           interaction-transcript-closed?)
   (import (rnrs)
@@ -99,8 +113,23 @@
     (fields session-id generation source origin))
 
   (define-record-type
+    (evaluation-resume-request
+      %make-evaluation-resume-request
+      evaluation-resume-request?)
+    (fields session-id generation kind values))
+
+  (define-record-type
     (evaluation-result %make-evaluation-result evaluation-result?)
     (fields request status values stdout stderr condition messages))
+
+  (define-condition-type
+    &evaluation-suspension
+    &condition
+    make-evaluation-suspension-condition
+    evaluation-suspension-condition?
+    (session-id evaluation-suspension-session-id)
+    (generation evaluation-suspension-generation)
+    (engine evaluation-suspension-engine))
 
   (define (interaction-session-buffer-id session)
     (interaction-transcript-buffer-id
@@ -227,6 +256,36 @@
       #f
       #f))
 
+  (define (make-evaluation-resume-request
+            session-id
+            generation
+            kind
+            values)
+    (unless
+      (and
+        (exact-non-negative-integer? session-id)
+        (exact-non-negative-integer? generation))
+      (assertion-violation
+        'make-evaluation-resume-request
+        "session id and generation must be non-negative exact integers"
+        session-id
+        generation))
+    (unless (memq kind '(continue use-values))
+      (assertion-violation
+        'make-evaluation-resume-request
+        "resume kind must be continue or use-values"
+        kind))
+    (unless (list? values)
+      (assertion-violation
+        'make-evaluation-resume-request
+        "resume values must be a list"
+        values))
+    (%make-evaluation-resume-request
+      session-id
+      generation
+      kind
+      values))
+
   (define (require-open-session who session)
     (unless (interaction-session? session)
       (assertion-violation who "expected an interaction session" session))
@@ -351,6 +410,66 @@
           'ready))
     result)
 
+  (define (require-current-result who session result expected-state)
+    (unless (evaluation-result? result)
+      (assertion-violation
+        who
+        "expected an evaluation result"
+        result))
+    (let ([request (evaluation-result-request result)])
+      (unless
+        (and
+          (= (evaluation-request-session-id request)
+             (interaction-session-id session))
+          (= (evaluation-request-generation request)
+             (interaction-session-generation session))
+          (eq? (interaction-session-state session) expected-state))
+        (assertion-violation
+          who
+          "evaluation result is stale"
+          request))))
+
+  (define (interaction-session-suspend! session result)
+    (require-open-session 'interaction-session-suspend! session)
+    (require-current-result
+      'interaction-session-suspend!
+      session
+      result
+      'evaluating)
+    (unless (eq? (evaluation-result-status result) 'suspended)
+      (assertion-violation
+        'interaction-session-suspend!
+        "expected a suspended evaluation result"
+        result))
+    (interaction-session-last-result-set! session result)
+    (interaction-session-state-set! session 'suspended)
+    result)
+
+  (define (interaction-session-resume! session)
+    (require-open-session 'interaction-session-resume! session)
+    (unless
+      (memq
+        (interaction-session-state session)
+        '(failed suspended))
+      (assertion-violation
+        'interaction-session-resume!
+        "interaction session is not failed or suspended"
+        (interaction-session-id session)))
+    (interaction-session-state-set! session 'evaluating)
+    session)
+
+  (define (interaction-session-abort-suspension! session)
+    (require-open-session
+      'interaction-session-abort-suspension!
+      session)
+    (unless (eq? (interaction-session-state session) 'suspended)
+      (assertion-violation
+        'interaction-session-abort-suspension!
+        "interaction session is not suspended"
+        (interaction-session-id session)))
+    (interaction-session-state-set! session 'ready)
+    session)
+
   (define (interaction-session-set-debugger! session debugger)
     (require-open-session
       'interaction-session-set-debugger!
@@ -366,21 +485,33 @@
 
   (define (interaction-session-debug-actions session)
     (require-open-session 'interaction-session-debug-actions session)
-    (if (eq? (interaction-session-state session) 'failed)
-        (if (interaction-session-debugger session)
-            '(open
-              next-frame
-              previous-frame
-              evaluate
-              inspect-condition
-              inspect-local
-              inspect-ref
-              inspect-up
-              retry
-              exit
-              discard)
-            '(retry discard))
-        '()))
+    (case (interaction-session-state session)
+      [(failed)
+       (if (interaction-session-debugger session)
+           '(open
+             next-frame
+             previous-frame
+             evaluate
+             inspect-condition
+             inspect-continuation
+             inspect-local
+             inspect-ref
+             inspect-up
+             use-value
+             retry
+             edit-and-retry
+             exit
+             discard)
+           '(retry discard))]
+      [(suspended)
+       '(open
+         continue
+         inspect-condition
+         inspect-continuation
+         retry
+         edit-and-retry
+         abort)]
+      [else '()]))
 
   (define (interaction-session-close! session)
     (when (and (interaction-session? session)
@@ -405,10 +536,10 @@
         'make-evaluation-result
         "expected an evaluation request"
         request))
-    (unless (memq status '(value condition interrupted))
+    (unless (memq status '(value condition suspended))
       (assertion-violation
         'make-evaluation-result
-        "status must be value, condition, or interrupted"
+        "status must be value, condition, or suspended"
         status))
     (unless (list? values)
       (assertion-violation
@@ -422,7 +553,7 @@
         stdout
         stderr))
     (unless
-      (if (eq? status 'condition)
+      (if (memq status '(condition suspended))
           (condition? condition)
           (not condition))
       (assertion-violation

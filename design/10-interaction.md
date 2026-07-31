@@ -67,11 +67,12 @@ slice。engine 完成时产生 result，fuel 耗尽时保存后继 engine 并重
 timer turn 之间，command loop 继续分发输入、处理 I/O 和绘制 frame。Scheme
 计算因此具有协作式抢占，而 Editor 状态仍由单线程串行持有。
 
-`scheme.interrupt-evaluation` 将运行中的 task 标记为 interrupted 并丢弃其后继
-engine。下一次 timer turn 产生 `interrupted` result，session 回到 `ready`，
-transcript 显示中断状态。已经执行的顶层副作用不会回滚，evaluator generation
-随中断失效。engine 的 tick 抢占发生在 Chez 安全点；不可分割的 native FFI 调用
-必须自行保持有界或使用异步 runtime。
+`scheme.interrupt-evaluation` 在下一个 timer turn 把运行中的 task 转为
+`suspended`，保留其后继 engine，并为该 generation 打开 debugger。`continue`
+重新安排同一个 engine；`abort` 释放 engine、结束该 request，并在 transcript
+写入中断结果与新 prompt。已经执行的顶层副作用不会回滚。engine 的 tick 抢占
+发生在 Chez 安全点；不可分割的 native FFI 调用必须自行保持有界或使用异步
+runtime。
 
 每个 editor message 构成一个顶层异常边界。正常 command result 继续进入 effect
 executor；未处理的 Scheme condition 被保存为 Editor 所有的 `DebuggerSession`，
@@ -199,11 +200,13 @@ Editor command 或 effect handler 失败则创建 Editor 所有的 debugger，�
 触发异常的 View 切换到 debugger Buffer。两类 debugger 使用相同的数据模型和
 命令，不创建递归 REPL 或第二个事件循环。
 
-evaluator 在编译和执行 request 时保留 Chez inspector information。condition
-continuation 由 `DebuggerSession` 投影为有序 frame；每个 frame 保存 procedure
-name、可用的源码位置和 variable inspector。局部值只在显示时生成有界 preview，
-原始 Scheme 对象留在 Chez heap 中。没有 raise continuation 的 condition 仍可
-进入 debugger 并显示结构化 condition 信息，其 frame 列表标记为不可用。
+evaluator 在编译和执行 request 时保留 Chez inspector information，并为交互式
+求值关闭 CP0 源级优化。该编译策略保留异常点之后的 continuation 结构，使
+replacement value 可以返回原计算的剩余上下文。condition continuation 由
+`DebuggerSession` 投影为有序 frame；每个 frame 保存 procedure name、可用的源码
+位置和 variable inspector。局部值只在显示时生成有界 preview，原始 Scheme 对象
+留在 Chez heap 中。没有 raise continuation 的 condition 仍可进入 debugger 并
+显示结构化 condition 信息，其 frame 列表标记为不可用。
 
 debugger 分为数据模型和 editor adapter。数据模型只负责 continuation inspection、
 frame selection 与 frame-relative evaluation；adapter 管理 command、major mode、
@@ -227,16 +230,22 @@ interaction 的失败状态可以同时保留。
   `scheme.debug-inspect-up` 返回父对象；对象预览、子项数量与求值历史具有固定上限；
 - `scheme.debug-visit-source` 通过异步 VFS open request 打开选中 frame 的 source
   path，并按行与字符位置定位 caret；
+- `scheme.debug-continue` 恢复用户中断时保存的 engine；
+- `scheme.debug-use-value` 在选中 frame 中求值 replacement expression，把产生的
+  多值传给 condition continuation，并在新的 engine 中继续原计算；
 - `scheme.debug-retry` 关闭当前 debugger，使用新的 generation 重放原始 source
   和 origin；
+- `scheme.debug-edit-and-retry` 读取替换后的 source，并以新的 generation 求值；
 - `scheme.debug-exit` 关闭 debugger Buffer 并返回触发异常的 Buffer，同时保留
   condition、continuation 和 frame inspector；
 - `scheme.debug-discard` 释放 debugger Buffer、condition 与 continuation；对
-  interaction failure 同时退出 `failed` 状态。
+  interaction failure 同时退出 `failed` 状态，对 suspended evaluation 同时释放
+  保存的 engine。
 
-debugger Buffer 的 `n`、`p`、`e`、`c`、`l`、`d`、`u`、`v`、`r`、`x`、`q`
-分别映射到 frame 导航、求值、检查 condition、检查局部值、进入和退出对象子项、
-源码访问、重试、保留退出与丢弃操作。
+debugger Buffer 的 `n`、`p`、`e`、`i`、`k`、`l`、`d`、`u`、`v`、`c`、`r`、
+`=`、`x`、`q` 分别映射到 frame 导航、求值、检查 condition、检查 continuation、
+检查局部值、进入和退出对象子项、源码访问、继续、restart selector、replacement
+value、保留退出与丢弃操作。
 源码访问复用普通 `file.read` effect，文件
 读取期间 command loop 保持可用；打开完成后 debugger 状态仍可重新激活。重试和
 丢弃会先把所有显示 debugger Buffer 的 View 切回来源 Buffer。Editor 关闭时释放

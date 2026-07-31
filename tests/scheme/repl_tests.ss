@@ -767,10 +767,13 @@
                   previous-frame
                   evaluate
                   inspect-condition
+                  inspect-continuation
                   inspect-local
                   inspect-ref
                   inspect-up
+                  use-value
                   retry
+                  edit-and-retry
                   exit
                   discard))
        (string-contains? (buffer-string repl-buffer) "Exception:"))

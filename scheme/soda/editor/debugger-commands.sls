@@ -9,6 +9,7 @@
           (soda editor command)
           (soda editor command-runtime)
           (soda editor comint)
+          (soda editor completion)
           (soda editor condition)
           (soda editor debugger)
           (soda editor edit)
@@ -145,7 +146,13 @@
         (debugger-session-selected-frame-byte-offset debugger))
       (editor-set-status-message!
         editor
-        "Debugger: n/p frame, e eval, c condition, l local, d/u inspect")
+        (if
+          (and
+            (debugger-session-interaction-id debugger)
+            (evaluation-suspension-condition?
+              (debugger-session-condition debugger)))
+          "Debugger: c continue, r restart, q abort, k continuation"
+          "Debugger: n/p frame, e eval, i condition, l local, d/u inspect"))
       buffer))
 
   (define (editor-capture-condition! editor label condition)
@@ -180,18 +187,33 @@
             session
             result)
     (close-session-debugger! editor session)
-    (if (eq? (evaluation-result-status result) 'condition)
+    (if
+      (memq
+        (evaluation-result-status result)
+        '(condition suspended))
         (guard (condition
                  [else
                   (editor-set-status-message!
                     editor
                     "Evaluation failed; debugger is unavailable")])
-          (interaction-session-set-debugger!
-            session
-            (make-debugger-session session result))
-          (editor-set-status-message!
-            editor
-            "Evaluation failed; M-x scheme.debug-open"))
+          (let ([debugger
+                  (make-debugger-session session result)])
+            (interaction-session-set-debugger!
+              session
+              debugger)
+            (if
+              (eq? (evaluation-result-status result) 'suspended)
+              (begin
+                (open-debugger!
+                  editor
+                  (editor-active-view editor)
+                  debugger)
+                (editor-set-status-message!
+                  editor
+                  "Evaluation suspended; c continue, r restart, q abort"))
+              (editor-set-status-message!
+                editor
+                "Evaluation failed; M-x scheme.debug-open"))))
         (editor-set-status-message! editor #f)))
 
   (define (debugger-matches-buffer? debugger buffer-id)
@@ -523,6 +545,23 @@
       (refresh-debugger-buffer! editor debugger)
       '()))
 
+  (define (debug-inspect-continuation-command context)
+    (let* ([editor (command-context-editor context)]
+           [target
+             (require-debug-target
+               'scheme.debug-inspect-continuation
+               context)]
+           [debugger (cadr target)])
+      (guard
+        (condition
+          [else
+           (editor-user-error
+             'scheme.debug-inspect-continuation
+             "The raise continuation is unavailable")])
+        (debugger-session-inspect-continuation! debugger)
+        (refresh-debugger-buffer! editor debugger))
+      '()))
+
   (define (apply-inspect-local-result! editor view result)
     (let* ([identity
              (and
@@ -615,6 +654,143 @@
       (refresh-debugger-buffer! editor debugger)
       '()))
 
+  (define (restart-evaluation!
+            editor
+            session
+            source
+            origin)
+    (let ([suspended?
+            (eq? (interaction-session-state session) 'suspended)])
+      (comint-stash-current-input! editor session)
+      (when suspended?
+        (interaction-session-abort-suspension! session))
+      (close-session-debugger! editor session)
+      (comint-replace-input! editor session ";; retry")
+      (comint-commit-input! editor session)
+      (let ([evaluate-effect
+              (make-command-effect
+                'scheme.evaluate
+                (interaction-session-begin!
+                  session
+                  source
+                  origin))])
+        (if suspended?
+            (list
+              (make-command-effect
+                'scheme.abort-evaluation
+                (interaction-session-id session))
+              evaluate-effect)
+            (list evaluate-effect)))))
+
+  (define (debug-continue-command context)
+    (let* ([editor (command-context-editor context)]
+           [target
+             (require-debug-target
+               'scheme.debug-continue
+               context)]
+           [session (car target)])
+      (unless
+        (and
+          session
+          (eq? (interaction-session-state session) 'suspended))
+        (editor-user-error
+          'scheme.debug-continue
+          "The debugger has no suspended evaluation"))
+      (close-session-debugger! editor session)
+      (interaction-session-resume! session)
+      (list
+        (make-command-effect
+          'scheme.resume-evaluation
+          (make-evaluation-resume-request
+            (interaction-session-id session)
+            (interaction-session-generation session)
+            'continue
+            '())))))
+
+  (define (debug-use-value-command context)
+    (let* ([target
+             (require-debug-target
+               'scheme.debug-use-value
+               context)]
+           [debugger (cadr target)])
+      (unless
+        (debugger-session-continuation debugger)
+        (editor-user-error
+          'scheme.debug-use-value
+          "The condition has no resumable continuation"))
+      (editor-open-prompt!
+        (command-context-editor context)
+        (make-prompt-request
+          "Replacement expression: "
+          ""
+          'scheme-debug-replacement
+          #f
+          'free
+          #f
+          'scheme.debug-use-value-accept
+          #f
+          (cons
+            (debugger-session-origin debugger)
+            (debugger-session-generation debugger))))
+      '()))
+
+  (define (debug-use-value-accept-command context)
+    (let* ([editor (command-context-editor context)]
+           [prompt-result (command-context-argument context)]
+           [source
+             (and
+               (prompt-result? prompt-result)
+               (eq? (prompt-result-status prompt-result) 'accepted)
+               (prompt-result-value prompt-result))]
+           [identity
+             (and
+               (prompt-result? prompt-result)
+               (prompt-result-data prompt-result))]
+           [target
+             (active-debug-target
+               editor
+               (command-context-view context))])
+      (if
+        (and
+          target
+          source
+          (positive? (string-length source))
+          (pair? identity)
+          (eq? (car identity)
+               (debugger-session-origin (cadr target)))
+          (= (cdr identity)
+             (debugger-session-generation (cadr target))))
+        (guard
+          (condition
+            [else
+             (editor-set-status-message!
+               editor
+               (string-append
+                 "Replacement evaluation failed: "
+                 (condition->string condition)))
+             '()])
+          (let* ([session (car target)]
+                 [debugger (cadr target)]
+                 [values
+                   (debugger-session-evaluate
+                     debugger
+                     source)])
+            (unless session
+              (editor-user-error
+                'scheme.debug-use-value
+                "The debugger is not attached to an evaluation"))
+            (close-session-debugger! editor session)
+            (interaction-session-resume! session)
+            (list
+              (make-command-effect
+                'scheme.resume-evaluation
+                (make-evaluation-resume-request
+                  (interaction-session-id session)
+                  (interaction-session-generation session)
+                  'use-values
+                  values)))))
+        '())))
+
   (define (debug-retry-command context)
     (let* ([editor (command-context-editor context)]
            [target
@@ -629,19 +805,161 @@
         (assertion-violation
           'scheme.debug-retry
           "active interaction has no failed evaluation"))
-      (comint-stash-current-input! editor session)
-      (close-session-debugger! editor session)
-      (comint-replace-input! editor session ";; retry")
-      (comint-commit-input! editor session)
-      (list
-        (make-command-effect
-          'scheme.evaluate
-          (interaction-session-begin!
+      (let ([request (evaluation-result-request result)])
+        (restart-evaluation!
+          editor
+          session
+          (evaluation-request-source request)
+          (evaluation-request-origin request)))))
+
+  (define (debug-edit-and-retry-command context)
+    (let* ([editor (command-context-editor context)]
+           [target
+             (require-debug-target
+               'scheme.debug-edit-and-retry
+               context)]
+           [session (car target)]
+           [debugger (cadr target)]
+           [result
+             (and session
+                  (interaction-session-last-result session))])
+      (unless result
+        (editor-user-error
+          'scheme.debug-edit-and-retry
+          "The debugger is not attached to an evaluation"))
+      (editor-open-prompt!
+        editor
+        (make-prompt-request
+          "Restart source: "
+          (evaluation-request-source
+            (evaluation-result-request result))
+          'scheme-debug-restart-source
+          #f
+          'free
+          #f
+          'scheme.debug-edit-and-retry-accept
+          #f
+          (cons
+            (debugger-session-origin debugger)
+            (debugger-session-generation debugger))))
+      '()))
+
+  (define (debug-edit-and-retry-accept-command context)
+    (let* ([editor (command-context-editor context)]
+           [result (command-context-argument context)]
+           [source
+             (and
+               (prompt-result? result)
+               (eq? (prompt-result-status result) 'accepted)
+               (prompt-result-value result))]
+           [identity
+             (and
+               (prompt-result? result)
+               (prompt-result-data result))]
+           [target
+             (active-debug-target
+               editor
+               (command-context-view context))])
+      (if
+        (and
+          target
+          source
+          (positive? (string-length source))
+          (pair? identity)
+          (eq? (car identity)
+               (debugger-session-origin (cadr target)))
+          (= (cdr identity)
+             (debugger-session-generation (cadr target))))
+        (let* ([session (car target)]
+               [debugger (cadr target)]
+               [failed
+                 (and session
+                      (interaction-session-last-result session))])
+          (unless failed
+            (editor-user-error
+              'scheme.debug-edit-and-retry
+              "The failed evaluation is unavailable"))
+          (restart-evaluation!
+            editor
             session
-            (evaluation-request-source
-              (evaluation-result-request result))
+            source
             (evaluation-request-origin
-              (evaluation-result-request result)))))))
+              (evaluation-result-request failed))))
+        '())))
+
+  (define (restart-options session debugger)
+    (if
+      (and
+        session
+        (eq? (interaction-session-state session) 'suspended))
+      '(("continue" continue "Continue the suspended evaluation")
+        ("retry" retry "Retry the original evaluation")
+        ("edit-and-retry" edit-and-retry "Edit source before retrying")
+        ("abort" abort "Abort the suspended evaluation"))
+      (append
+        '(("retry" retry "Retry the original evaluation"))
+        (if (debugger-session-continuation debugger)
+            '(("use-value" use-value "Resume with replacement values"))
+            '())
+        '(("edit-and-retry" edit-and-retry "Edit source before retrying")
+          ("abort" abort "Discard the failed evaluation")))))
+
+  (define (restart-choice-source options)
+    (let ([items
+            (map
+              (lambda (entry)
+                (make-completion-item
+                  (cadr entry)
+                  'scheme-debugger
+                  (car entry)
+                  (car entry)
+                  (car entry)
+                  (caddr entry)
+                  #f
+                  (cadr entry)))
+              options)])
+      (make-choice-source
+        'scheme-debug-restart
+        '((styles . (fzf))
+          (preselect . #t))
+        (lambda (input point)
+          (cons 0 (string-length input)))
+        (lambda (query) items)
+        (lambda (value)
+          (exists
+            (lambda (entry)
+              (string=? value (car entry)))
+            options))
+        (lambda (generation) #f))))
+
+  (define (debug-restart-command context)
+    (let* ([target
+             (require-debug-target
+               'scheme.debug-restart
+               context)]
+           [session (car target)]
+           [debugger (cadr target)]
+           [options (restart-options session debugger)])
+      (editor-open-prompt!
+        (command-context-editor context)
+        (make-completing-prompt-request
+          "Restart: "
+          ""
+          'scheme-debug-restart
+          (if
+            (and
+              session
+              (eq? (interaction-session-state session) 'suspended))
+            "continue"
+            "retry")
+          'must-match
+          (restart-choice-source options)
+          'scheme.debug-restart-accept
+          #f
+          (cons
+            (debugger-session-origin debugger)
+            (debugger-session-generation debugger))))
+      '()))
 
   (define (debug-exit-command context)
     (let* ([editor (command-context-editor context)]
@@ -663,11 +981,53 @@
                context)]
            [session (car target)]
            [debugger (cadr target)])
-      (discard-debugger! editor session debugger)
-      (when session
-        (interaction-session-dismiss-failure! session))
-      (editor-set-status-message! editor #f)
-      '()))
+      (let* ([suspended?
+              (and
+                session
+                (eq? (interaction-session-state session)
+                     'suspended))]
+             [evaluation?
+               (and
+                 session
+                 (memq
+                   (interaction-session-state session)
+                   '(failed suspended)))])
+        (discard-debugger! editor session debugger)
+        (when session
+          (if suspended?
+              (begin
+                (interaction-session-abort-suspension! session)
+                (comint-append-output!
+                  editor
+                  session
+                  "Interrupted\n"))
+              (interaction-session-dismiss-failure! session)))
+        (editor-set-status-message! editor #f)
+        (if evaluation?
+            (list
+              (make-command-effect
+                'scheme.abort-evaluation
+                (interaction-session-id session)))
+            '()))))
+
+  (define (debug-restart-accept-command context)
+    (let* ([result (command-context-argument context)]
+           [candidate
+             (and
+               (prompt-result? result)
+               (prompt-result-candidate result))]
+           [choice
+             (and
+               candidate
+               (completion-item-payload candidate))])
+      (case choice
+        [(continue) (debug-continue-command context)]
+        [(use-value) (debug-use-value-command context)]
+        [(retry) (debug-retry-command context)]
+        [(edit-and-retry)
+         (debug-edit-and-retry-command context)]
+        [(abort) (debug-discard-command context)]
+        [else '()])))
 
   (define (register-debugger-command!
             editor
@@ -695,6 +1055,14 @@
           debug-open-command
           "Open the debugger for the failed Scheme evaluation.")
         (list
+          'scheme.debug-continue
+          debug-continue-command
+          "Continue a suspended Scheme evaluation.")
+        (list
+          'scheme.debug-use-value
+          debug-use-value-command
+          "Resume a failed continuation with replacement values.")
+        (list
           'scheme.debug-next-frame
           debug-next-frame-command
           "Select the next Scheme debugger frame.")
@@ -719,6 +1087,10 @@
           debug-inspect-condition-command
           "Inspect the original Scheme condition object.")
         (list
+          'scheme.debug-inspect-continuation
+          debug-inspect-continuation-command
+          "Inspect the saved raise continuation.")
+        (list
           'scheme.debug-inspect-up
           debug-inspect-up-command
           "Return to the parent debugger inspection object.")
@@ -730,6 +1102,14 @@
           'scheme.debug-retry
           debug-retry-command
           "Retry the failed evaluation in the active interaction.")
+        (list
+          'scheme.debug-edit-and-retry
+          debug-edit-and-retry-command
+          "Edit and retry the failed evaluation.")
+        (list
+          'scheme.debug-restart
+          debug-restart-command
+          "Select a restart for the failed evaluation.")
         (list
           'scheme.debug-exit
           debug-exit-command
@@ -756,6 +1136,24 @@
         'scheme.debug-inspect-local-accept
         debug-inspect-local-accept-command
         "Apply a local index from the debugger inspector prompt."))
+    (editor-register-internal-command!
+      editor
+      (make-internal-context-command
+        'scheme.debug-edit-and-retry-accept
+        debug-edit-and-retry-accept-command
+        "Restart a failed evaluation with edited source."))
+    (editor-register-internal-command!
+      editor
+      (make-internal-context-command
+        'scheme.debug-restart-accept
+        debug-restart-accept-command
+        "Apply the debugger restart selected by the minibuffer."))
+    (editor-register-internal-command!
+      editor
+      (make-internal-context-command
+        'scheme.debug-use-value-accept
+        debug-use-value-accept-command
+        "Resume a failed continuation with replacement values."))
     (register-major-mode!
       (editor-language-catalog editor)
       (make-major-mode
@@ -780,12 +1178,15 @@
         '((#\n . scheme.debug-next-frame)
           (#\p . scheme.debug-previous-frame)
           (#\e . scheme.debug-eval-frame)
-          (#\c . scheme.debug-inspect-condition)
+          (#\c . scheme.debug-continue)
+          (#\i . scheme.debug-inspect-condition)
+          (#\k . scheme.debug-inspect-continuation)
+          (#\= . scheme.debug-use-value)
           (#\l . scheme.debug-inspect-local)
           (#\d . scheme.debug-inspect-ref)
           (#\u . scheme.debug-inspect-up)
           (#\v . scheme.debug-visit-source)
-          (#\r . scheme.debug-retry)
+          (#\r . scheme.debug-restart)
           (#\x . scheme.debug-exit)
           (#\q . scheme.debug-discard)))
       (keymap-catalog-register!

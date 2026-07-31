@@ -266,6 +266,22 @@
           'scheme.interrupt-evaluation
           (interaction-session-id session)))))
 
+  (define (keyboard-quit-evaluation-advice
+            next
+            context
+            arguments)
+    (let ([editor (command-context-editor context)])
+      (if
+        (and
+          (not (editor-active-prompt editor))
+          (exists
+            (lambda (session)
+              (eq? (interaction-session-state session)
+                   'evaluating))
+            (editor-interactions editor)))
+        (interrupt-evaluation-command context)
+        (next context arguments))))
+
   (define (eval-expression-command context)
     (let* ([argument (command-context-argument context)]
            [source
@@ -430,6 +446,25 @@
           result)
         '())))
 
+  (define (apply-evaluation-suspension-command context)
+    (let ([result (command-context-argument context)]
+          [editor (command-context-editor context)])
+      (unless
+        (and
+          (evaluation-result? result)
+          (eq? (evaluation-result-status result) 'suspended))
+        (assertion-violation
+          'scheme.apply-evaluation-suspension
+          "expected a suspended evaluation result"
+          result))
+      (let ([session (matching-result-session editor result)])
+        (interaction-session-suspend! session result)
+        (interaction-attach-debugger-result!
+          editor
+          session
+          result)
+        '())))
+
   (define (install-interaction-commands! editor)
     (for-each
       (lambda (entry)
@@ -486,6 +521,12 @@
         'scheme.apply-evaluation-result
         apply-evaluation-result-command
         "Apply an evaluator result to its interaction session."))
+    (editor-register-internal-command!
+      editor
+      (make-internal-context-command
+        'scheme.apply-evaluation-suspension
+        apply-evaluation-suspension-command
+        "Attach the debugger to a suspended evaluation."))
     (install-debugger-commands! editor)
     (let ([keymap
             (or
@@ -619,6 +660,13 @@
             (char->integer #\c)
             4))
         'scheme.interrupt-evaluation))
+    (command-add-advice!
+      (editor-command-registry editor)
+      'keyboard.quit
+      'scheme.interrupt-running-evaluation
+      'around
+      keyboard-quit-evaluation-advice
+      -100)
     (editor-bind-key!
       editor
       (list
@@ -677,4 +725,9 @@
                 'scheme.apply-evaluation-result
                 result)
               (evaluation-result-messages result))))))
+    (register-effect-handler!
+      executor
+      'scheme.abort-evaluation
+      (lambda (session-id)
+        (make-effect-result #t '())))
     executor))

@@ -21,6 +21,7 @@
           debugger-session-previous-frame!
           debugger-session-evaluate
           debugger-session-inspect-condition!
+          debugger-session-inspect-continuation!
           debugger-session-inspect-local!
           debugger-session-inspection-down!
           debugger-session-inspection-up!
@@ -280,10 +281,12 @@
     (unless
       (and
         (evaluation-result? result)
-        (eq? (evaluation-result-status result) 'condition))
+        (memq
+          (evaluation-result-status result)
+          '(condition suspended)))
       (assertion-violation
         'make-debugger-session
-        "expected a failed evaluation result"
+        "expected a failed or suspended evaluation result"
         result))
     (call-with-values
       (lambda ()
@@ -492,6 +495,23 @@
           "condition"
           (inspect/object
             (debugger-session-condition debugger))))))
+
+  (define (debugger-session-inspect-continuation! debugger)
+    (require-open-debugger
+      'debugger-session-inspect-continuation!
+      debugger)
+    (let ([continuation
+            (debugger-session-continuation debugger)])
+      (unless continuation
+        (assertion-violation
+          'debugger-session-inspect-continuation!
+          "debugger has no saved continuation"))
+      (debugger-session-inspection-stack-set!
+        debugger
+        (list
+          (cons
+            "raise continuation"
+            (inspect/object continuation))))))
 
   (define (record-evaluation! debugger evaluation)
     (let loop ([remaining
