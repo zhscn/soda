@@ -1,5 +1,15 @@
 # 语言模式与语法服务
 
+## 实现状态
+
+| 能力 | 状态 |
+|---|---|
+| major mode、parent mode、profile 与 provider contract | 已实现 |
+| 文件关联、Tree-sitter grammar/session/query 生命周期 | 已实现 |
+| highlights、indents、textobjects、folds 与 injections 接口 | 已实现 |
+| C/C++ 和 Scheme 专用 provider | 已实现 |
+| 各分发语言的 query 覆盖 | 部分实现 |
+
 ## 分层
 
 语言支持由三个独立概念组成：

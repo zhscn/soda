@@ -1,5 +1,16 @@
 # 渲染管线与 Theme
 
+## 实现状态
+
+| 能力 | 状态 |
+|---|---|
+| revision-cached highlight 与 decoration sweep | 已实现 |
+| `DisplayMap`、fold、虚拟文本和文档坐标映射 | 已实现 |
+| semantic face、Catppuccin theme 与主题切换 | 已实现 |
+| dirty reason、Frame diff、row span presenter 与输出合并 | 已实现 |
+| modeline、component tree 与 cell source inspection | 已实现 |
+| soft wrap、visual-line motion 与 continuation gutter | 未实现 |
+
 ## 职责边界
 
 渲染管线把一个 revision-scoped Document snapshot 和 View 状态投影为 terminal

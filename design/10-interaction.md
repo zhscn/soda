@@ -1,5 +1,16 @@
 # Scheme 交互与调试
 
+## 实现状态
+
+| 能力 | 状态 |
+|---|---|
+| 编辑器内 Chez REPL、transcript 与来源跟踪 | 已实现 |
+| 通用子进程 comint、prompt boundary 与 process transport | 已实现 |
+| 异常边界、continuation capture 与 debugger Buffer | 已实现 |
+| restart/action、继续执行、检查与源码定位 | 已实现 |
+| 长时间求值的协作中断与 engine 调度 | 已实现 |
+| 跨进程持久历史 | 未实现 |
+
 ## 交互模型
 
 Chez Scheme 运行在编辑器进程内。编辑器 command loop 是唯一的交互前端，终端
@@ -89,8 +100,8 @@ host 对 effect handler 使用同样的边界，因此异步回调或 adapter �
 `editor-user-error` 表示可预期且可恢复的交互失败，例如修改只读区域或使用已经
 过期的 xref 位置。这类 condition 只更新 status message。普通 `error`、
 assertion violation 和未分类的 condition 视为实现异常，立即打开 debugger
-Buffer。异常边界清理尚未完成的 interactive invocation、prefix argument 和
-pending key sequence，但不关闭 Editor、Buffer 或 runtime。
+Buffer。异常边界撤销处于进行状态的 interactive invocation，并清理 prefix
+argument 和 pending key sequence，但不关闭 Editor、Buffer 或 runtime。
 
 ## Transcript 与输入
 

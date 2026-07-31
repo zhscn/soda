@@ -1,5 +1,14 @@
 # C++ 语言内核
 
+## 实现状态
+
+| 能力 | 状态 |
+|---|---|
+| lossless lexer 与容错 CST | 已实现 |
+| revision-scoped analysis session 与增量更新 | 已实现 |
+| 结构查询、缩进决策和原子编辑机制 | 已实现 |
+| C ABI 与独立生命周期 | 已实现 |
+
 ## 定位
 
 C++ 语言内核从 `Text` 或 `DocumentSnapshot` 派生 lossless token、容错 CST、

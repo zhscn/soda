@@ -1,11 +1,21 @@
 # TUI Application Framework
 
+## 实现状态
+
+| 能力 | 状态 |
+|---|---|
+| 所依赖的 Buffer/View/Window、Frame、Theme 与基础 InputState | 已实现 |
+| `TuiApplicationDefinition`、catalog、session 与 lifecycle | 未实现 |
+| message/update/effect 与 generation 模型 | 未实现 |
+| application input handler、focus、pointer 与 replay | 未实现 |
+| 声明式 node、layout、surface 与 Frame composition | 未实现 |
+| text projection、inspection、persistence 与 sole host | 未实现 |
+
 ## 定位
 
-Soda 同时提供文本编辑器和可嵌入 Workbench 的 TUI application framework。TUI
-application 以 Buffer 作为公开身份，以 Window 中的 View rectangle 作为显示区域，
-并复用编辑器的 command loop、effect runtime、keymap、theme、minibuffer、
-modeline、异常边界和 display placement。
+TUI application framework 以 Buffer 作为公开身份，以 Window 中的 View rectangle
+作为显示区域，并复用编辑器的 command loop、effect runtime、keymap、theme、
+minibuffer、modeline、异常边界和 display placement。
 
 TUI application 不拥有终端。raw mode、alternate screen、Kitty keyboard protocol、
 bracketed paste、terminal cursor、输出队列和 ANSI presenter 由 Soda TUI host 统一
@@ -339,13 +349,11 @@ InputState {
 
 遮蔽是严格的：未消费的事件只经过栈顶 transient state 的 handler 与 keymap
 layers；被遮 transient 的 layers 不参与解析，直到重新成为栈顶。durable state
-的 handler 与 layers 始终参与，排在全部 transient 之后。实现迁移时必须修正
-早期"折叠全部栈层"的行为：`completion.menu` 一类 transient layer 在被遮蔽
-期间不得再响应按键。
+的 handler 与 layers 始终参与，排在全部 transient 之后。`completion.menu` 一类
+transient layer 在被遮蔽期间不响应按键。
 
-`key-capture-command` 是 handler 的前身，等价于只返回
-`DispatchCommand`/`Consume` 的受限 handler。迁移期两者并存时按 handler 参与
-解析；新代码不再使用 capture-command。
+单键捕获使用只返回 `DispatchCommand` 或 `Consume` 的受限 handler，不引入另一套
+capture contract。
 
 `editing` major mode 通常使用接受文本的 durable state。`interface` major mode
 通常使用 `application` text policy 和 application input handler。同一 Buffer 的
@@ -856,7 +864,7 @@ runtime、第二个事件循环或递归 REPL。
 
 同一个 TuiSession 支持两种宿主，application 代码不感知差异：
 
-- **embedded host**：现状。application Buffer 显示在编辑器 Window leaf 中，
+- **embedded host**：application Buffer 显示在编辑器 Window leaf 中，
   与文本 Buffer、minibuffer 和其他 application 共存；开发期配合 REPL、
   `scheme.eval-buffer` 与 debugger 在运行时演进应用。
 - **sole host**：打包产物（[17-packaging.md](17-packaging.md)）的启动模式。
@@ -868,9 +876,9 @@ runtime、第二个事件循环或递归 REPL。
 两种模式共享 lifecycle、消息循环、渲染管线和输入分发；sole host 只是把
 Window 树退化为单一 leaf 并跳过编辑器 chrome 组件。
 
-## 实现分层
+## 组件边界
 
-框架按以下机制层组织：
+框架由以下机制层组成：
 
 1. `TuiApplicationDefinition`、catalog、TuiSession 和 lifecycle；
 2. Buffer presentation 与 Window renderer dispatch；
@@ -879,11 +887,10 @@ Window 树退化为单一 leaf 并跳过编辑器 chrome 组件。
 5. TuiNode、measure/arrange、TuiSurface 与 Frame composition；
 6. Text、Row、Column、Padding、Border、Scroll、List 和 Table 基础组件；
 7. accessibility projection、inspection、pointer routing 与 persistence；
-8. host 能力扩展：`TuiKeyRelease` 需要的 Kitty enhancement flags、cursor
-   shape 的 DECSCUSR、SGR mouse 解码与 mouse mode 聚合。每项都改变终端
-   握手序列，须同步 [03-input.md](03-input.md)、
-   [13-rendering-theme.md](13-rendering-theme.md) 与 TUI smoke 测试的
-   握手断言。
+8. host capabilities：`TuiKeyRelease` 使用 Kitty enhancement flags，cursor
+   shape 使用 DECSCUSR，pointer 使用 SGR mouse 解码与 mouse mode 聚合。终端握手
+   由 [03-input.md](03-input.md) 持有，Frame 输出由
+   [13-rendering-theme.md](13-rendering-theme.md) 持有。
 
 最小一致性样例包含 counter、异步 list 和可输入 form：
 

@@ -1,5 +1,14 @@
 # 补全管线
 
+## 实现状态
+
+| 能力 | 状态 |
+|---|---|
+| provider、session、generation 与取消 | 已实现 |
+| fuzzy refilter、排序与候选元数据 | 已实现 |
+| 文档补全 UI、导航、预览与应用 | 已实现 |
+| minibuffer completion adapter | 已实现 |
+
 ## 定位
 
 补全是一个多 provider、异步、revision-aware 的会话。provider 生产候选与补充

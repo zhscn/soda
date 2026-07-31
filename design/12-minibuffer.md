@@ -1,5 +1,15 @@
 # Minibuffer 与读取协议
 
+## 实现状态
+
+| 能力 | 状态 |
+|---|---|
+| 非递归 request/session/continuation 协议 | 已实现 |
+| 独立 Buffer/View、history 与取消恢复 | 已实现 |
+| Vertico 风格候选窗口、固定高度与滚动 | 已实现 |
+| 固定集合和任意输入的 selection policy | 已实现 |
+| `interactive-completing-read` | 已实现 |
+
 ## 定位
 
 minibuffer 是 command loop 管理的临时输入会话。它复用 Buffer、View、keymap 和

@@ -1,64 +1,56 @@
 # Soda 设计文档
 
-本目录描述 Soda 的当前架构与扩展契约。文档同时覆盖已落地的 native
-机制和编辑器上层的目标数据模型；实现细节以公开 ABI、Scheme library
-和测试所表达的契约为准。
+本目录描述 Soda 的当前架构、稳定扩展契约和尚未实现的目标模型。每份文档使用统一
+状态词：
 
-## 阅读顺序
+- **已实现**：对应机制和公开入口存在；
+- **部分实现**：核心机制存在，但文档列出的部分能力仍缺失；
+- **未实现**：文档是目标契约，尚无对应运行时机制。
 
-| # | 文档 | 内容 |
+状态只表示实现覆盖，不表示优先级、完成时间或兼容承诺。细分能力以各文档开头的
+状态表为准。
+
+## 文档索引
+
+| 文档 | 主题 | 总体状态 |
 |---|---|---|
-| 01 | [01-kernel.md](01-kernel.md) | C++ lossless lexer、容错 CST、增量分析与缩进机制 |
-| 02 | [02-buffer.md](02-buffer.md) | `Text`、`Document`、事务、anchor、snapshot 与 undo tree |
-| 03 | [03-input.md](03-input.md) | 终端输入、Kitty 协议、keymap、command loop 与 selection |
-| 04 | [04-workbench.md](04-workbench.md) | project、workbench、window、layout 与 display placement |
-| 05 | [05-jump.md](05-jump.md) | 跳转图、位置列表、组合视图与跨 buffer 事务 |
-| 06 | [06-completion.md](06-completion.md) | 异步补全管线、条目模型、取消、过滤与应用 |
-| 07 | [07-decoration.md](07-decoration.md) | 文本区间元数据、诊断、虚拟文本与 fold |
-| 08 | [08-scheme-first.md](08-scheme-first.md) | Chez Scheme、native core、libuv 与 TUI 的所有权边界 |
-| 09 | [09-language-modes.md](09-language-modes.md) | major mode、language profile 与 syntax provider |
-| 10 | [10-interaction.md](10-interaction.md) | 进程内 REPL、求值 request、来源与 debugger 状态 |
-| 11 | [11-scheme-semantics.md](11-scheme-semantics.md) | Scheme scope graph、语义索引、补全与 xref |
-| 12 | [12-minibuffer.md](12-minibuffer.md) | minibuffer session、读取协议、history 与补全目标 |
-| 13 | [13-rendering-theme.md](13-rendering-theme.md) | 增量高亮、display mapping、theme 与终端渲染管线 |
-| 14 | [14-command-extensibility.md](14-command-extensibility.md) | interactive command、hook、advice 与 minor mode |
-| 15 | [15-configuration.md](15-configuration.md) | setting、配置快照与跨 catalog 原子事务 |
-| 16 | [16-tui-applications.md](16-tui-applications.md) | application Buffer、声明式 TUI、消息循环与完整输入协议 |
-| 17 | [17-packaging.md](17-packaging.md) | 进程内编译流水线、trailer 容器、纯 Chez 与 soda runtime 打包 |
+| [01-kernel.md](01-kernel.md) | C++ lossless lexer、容错 CST、增量分析与缩进 | 已实现 |
+| [02-buffer.md](02-buffer.md) | `Text`、`Document`、Buffer、文件事务与 undo | 部分实现 |
+| [03-input.md](03-input.md) | 编辑器终端输入、keymap、input state 与基础编辑 | 已实现 |
+| [04-workbench.md](04-workbench.md) | Project、Workbench、Window 与 display placement | 部分实现 |
+| [05-jump.md](05-jump.md) | 位置列表、跳转历史、组合视图与跨 Buffer 事务 | 部分实现 |
+| [06-completion.md](06-completion.md) | 补全 session、provider、过滤、取消与应用 | 已实现 |
+| [07-decoration.md](07-decoration.md) | annotation、decoration、DisplayMap 与 fold | 部分实现 |
+| [08-scheme-first.md](08-scheme-first.md) | Chez、native core、libuv 与线程所有权 | 已实现 |
+| [09-language-modes.md](09-language-modes.md) | major mode、language profile 与 syntax provider | 已实现 |
+| [10-interaction.md](10-interaction.md) | REPL、comint、求值、continuation 与 debugger | 已实现 |
+| [11-scheme-semantics.md](11-scheme-semantics.md) | Scheme scope、索引、补全、xref 与 rename | 部分实现 |
+| [12-minibuffer.md](12-minibuffer.md) | minibuffer session、读取协议与选择策略 | 已实现 |
+| [13-rendering-theme.md](13-rendering-theme.md) | highlight、DisplayMap、theme 与增量 presenter | 部分实现 |
+| [14-command-extensibility.md](14-command-extensibility.md) | interactive command、hook、advice 与 minor mode | 已实现 |
+| [15-configuration.md](15-configuration.md) | setting、配置快照、用户 init 与热替换 | 已实现 |
+| [16-tui-applications.md](16-tui-applications.md) | Buffer 承载的声明式 TUI application framework | 未实现 |
+| [17-packaging.md](17-packaging.md) | 单文件编辑器发行与 Scheme application 打包 | 部分实现 |
 
-依赖关系：
+## 规范边界
+
+后出现的专用文档拥有其领域的完整契约，其他文档只引用，不重复定义：
+
+- `03` 定义当前编辑器输入；`16` 定义 TUI application 对输入系统的扩展；
+- `06` 定义补全数据与生命周期；`12` 定义 minibuffer 对补全的呈现和选择策略；
+- `07` 定义区间元数据与显示映射；`13` 定义这些数据进入 Frame 的方式；
+- `09` 定义语言 provider；`11` 只定义 Scheme provider 的语义内容；
+- `10` 定义交互与调试 session；`17` 只定义构建和发行边界。
+
+核心依赖方向：
 
 ```text
-                    08 Scheme-first composition root
-                     │
-          ┌──────────┼──────────┬───────────┐
-          ▼          ▼          ▼           ▼
-      03 input   04 workbench 09 modes  10 interaction
-                     │          │           │
-              ┌──────┴───┐      ├────┬──────┘
-              ▼          ▼      ▼    ▼
-           05 jump  06 completion  11 Scheme semantics
-              │          │      │
-              └──────┬───┴──────┘
-                     ▼
-                07 decoration
-                     │
-             ┌───────┴───────┐
-             ▼               ▼
-        02 Text / Document  13 rendering/theme
-                              ▲
-                              │
-                          09 modes
+Text / Document
+  -> Buffer / View / Window
+  -> command + input + minibuffer
+  -> language provider + completion + interaction
+  -> decoration + DisplayMap
+  -> renderer + theme + presenter
 
-      09 modes ───────────────> 01 C++ language core
-
-      03 input ──> 12 minibuffer <── 06 completion
-      03 input <──────────────── 13 rendering/theme
-
-      03 input ──┐
-      04 workbench ─┼──> 16 TUI applications <── 13 rendering/theme
-      08 Scheme-first ─┘
+Chez command loop -> native ABI -> libuv / terminal / parsers
 ```
-
-上层模块持有策略与可组合状态；native 模块提供具有明确生命周期、revision
-和线程归属的机制。前端只消费编辑器状态并产生输入事件，不拥有文档语义。

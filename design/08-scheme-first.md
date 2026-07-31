@@ -1,5 +1,14 @@
 # Scheme-first 架构
 
+## 实现状态
+
+| 能力 | 状态 |
+|---|---|
+| C launcher、嵌入式 Chez runtime 与 editor boot | 已实现 |
+| Scheme command loop 与单线程状态所有权 | 已实现 |
+| native ABI 注册与不回调 Scheme 的 libuv 边界 | 已实现 |
+| native core 静态链接与运行时 grammar 动态加载 | 已实现 |
+
 ## 组合根
 
 ELF executable 是部署容器，Chez Scheme 是编辑器的组合根。C 入口嵌入 Chez

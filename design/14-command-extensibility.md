@@ -1,5 +1,14 @@
 # Command 与扩展机制
 
+## 实现状态
+
+| 能力 | 状态 |
+|---|---|
+| `define-command`、interactive plan 与 typed reader | 已实现 |
+| prefix argument、region/thing/defun command target | 已实现 |
+| command registry、替换、hook 与 advice | 已实现 |
+| minor mode definition、keymap、lighter 与 lifecycle | 已实现 |
+
 Soda 把普通 Scheme 过程、可交互参数读取和编辑器命令调用分开。命令定义保留普通
 过程，使库代码可以直接传入参数；command registry 持有交互元数据、文档、command
 class、适用 mode 和 advice。

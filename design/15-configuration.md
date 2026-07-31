@@ -1,5 +1,14 @@
 # 配置状态与原子更新
 
+## 实现状态
+
+| 能力 | 状态 |
+|---|---|
+| typed setting、作用域与 catalog | 已实现 |
+| configuration snapshot 与原子 transaction | 已实现 |
+| extension owner、撤销与热替换 | 已实现 |
+| 用户 init、生命周期 hook 与错误隔离 | 已实现 |
+
 Soda 的配置是 Editor 实例拥有的运行时状态。Scheme 代码通过公开的 Editor API 注册
 setting、command、keymap、language、completion provider、minor mode 和 theme；
 TUI renderer 只读取已经提交的状态。

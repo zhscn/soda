@@ -1,5 +1,16 @@
 # 跳转图与位置列表
 
+## 实现状态
+
+| 能力 | 状态 |
+|---|---|
+| `EditorLocation`、per-View back/forward walk | 已实现 |
+| `LocationItem`、`LocationList` 与 next/previous navigation | 已实现 |
+| Scheme definition/reference/diagnostic producer | 已实现 |
+| Workbench 级语义 `JumpGraph` | 未实现 |
+| 可编辑 excerpt 组合视图 | 未实现 |
+| 通用跨 Buffer 原子事务与 group undo | 未实现 |
+
 ## 导航的两个层次
 
 导航同时维护语义图和每个 Window 的线性 walk：

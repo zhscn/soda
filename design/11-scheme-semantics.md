@@ -1,5 +1,16 @@
 # Scheme 语义索引
 
+## 实现状态
+
+| 能力 | 状态 |
+|---|---|
+| 文档 syntax view、scope/binding 与 diagnostics | 已实现 |
+| completion、signature/help、definition、references 与 rename | 已实现 |
+| 构建期 Soda API index 与 runtime catalog | 已实现 |
+| 显式 Scheme project session 与 interface artifact | 已实现 |
+| 任意用户宏的可执行展开与完整 phase 分析 | 未实现 |
+| 跨语言 server/session 接口 | 未实现 |
+
 ## 定位
 
 Scheme 语言服务由静态语义索引和运行时 session 两个来源组成：

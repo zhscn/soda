@@ -1,5 +1,15 @@
 # Workbench、Project 与 Window
 
+## 实现状态
+
+| 能力 | 状态 |
+|---|---|
+| Window tree、View 生命周期与基础 display 操作 | 已实现 |
+| Scheme 显式 project session 与 interface artifact | 已实现 |
+| 通用 Project identity、resource enumerator 与 settings layer | 未实现 |
+| Workbench scope、slot、provenance 与持久化 | 未实现 |
+| intent 驱动的统一 display placement policy | 部分实现 |
+
 ## 三个正交概念
 
 - **Buffer** 是全局文本对象，可同时显示在多个 view。

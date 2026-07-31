@@ -1,5 +1,15 @@
 # Text 与 Document
 
+## 实现状态
+
+| 能力 | 状态 |
+|---|---|
+| `Text`、snapshot、transaction、anchor 与 undo tree | 已实现 |
+| Buffer/View 集成和异步打开、保存、重新读取 | 已实现 |
+| 保存期间的 revision 跟踪与原子替换 | 已实现 |
+| 外部文件冲突检测与合并策略 | 未实现 |
+| 崩溃恢复、备份与自动保存 | 未实现 |
+
 ## 定位
 
 `Text` 是不可变文本值，`Document` 是可编辑文档。二者不依赖 parser、language

@@ -1,5 +1,15 @@
 # Decoration 与文本区间元数据
 
+## 实现状态
+
+| 能力 | 状态 |
+|---|---|
+| `AnnotationSet`、diagnostic 与 decoration interval query | 已实现 |
+| 虚拟文本、replacement、fold 与 `DisplayMap` | 已实现 |
+| renderer sweep 与 source inspection | 已实现 |
+| 通用 generated Buffer | 未实现 |
+| 可编辑多 Buffer projection | 未实现 |
+
 ## 三类数据
 
 Decoration 按生命周期分为三条通道：

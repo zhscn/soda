@@ -1,110 +1,58 @@
-# soda
+# Soda
 
-soda is a Scheme-first native editor distributed as one executable. Chez Scheme
-owns the command loop and editor policy. Statically linked native components
-provide persistent text values, transactional documents, incremental C++
-analysis, indentation mechanisms, asynchronous I/O, and terminal access.
+Soda 是一个 Scheme-first 的原生 TUI 编辑器。Chez Scheme 持有命令循环、编辑器状态
+和扩展策略；静态链接的 C/C++ 组件提供文本存储、增量语法分析、异步 I/O、终端访问
+和 Tree-sitter runtime。
 
-## Native core
+## 实现状态
 
-The native core is split by data ownership:
+| 能力 | 状态 |
+|---|---|
+| `Text`、`Document`、事务、anchor、undo tree | 已实现 |
+| Buffer、View、Window、文件读写与基础编辑命令 | 已实现 |
+| 终端输入、Kitty keyboard、增量渲染与主题 | 已实现 |
+| command、interactive reader、keymap、hook、advice、minor mode、setting | 已实现 |
+| minibuffer、补全、REPL、comint 与 continuation debugger | 已实现 |
+| C/C++ 专用分析、Scheme 语义服务、Tree-sitter major mode | 已实现 |
+| 通用 Project/Workbench 与跨语言语义会话 | 部分实现 |
+| 通用跨 Buffer 修改与组合结果视图 | 部分实现 |
+| Scheme 宏展开与完整 phase 语义 | 部分实现 |
+| soft wrap 与 visual-line 编辑 | 未实现 |
+| LSP client | 未实现 |
+| Buffer 承载的声明式 TUI application framework | 未实现 |
+| Scheme application 独立打包器 | 未实现 |
 
-- `soda_document` owns `Text`, immutable snapshots, edit transactions, anchors,
-  structural diff, and the undo tree. Its C ABI exposes opaque handles whose
-  layouts remain private to the native library.
-- `soda_cpp_lexer` derives a lossless token stream from a `Text` value.
-- `soda_cpp_analysis` derives and incrementally advances the C++ syntax tree
-  from snapshots and normalized change sets. Its C ABI owns the analysis cache
-  and exposes revision-scoped syntax nodes and structural editing queries.
-- `soda_indentation` computes indentation and implements atomic Enter and
-  typed-character editing mechanisms. Its C ABI exposes configurable style
-  values, explainable indentation decisions, and commands that return the
-  resulting caret and normalized document change.
-- `soda_tree_sitter` statically links the Tree-sitter runtime and loads language
-  grammars from shared modules. Major modes own parser sessions and query
-  policy.
-- `soda_runtime` owns libuv handles and exposes pull-based timer, descriptor
-  readiness, file I/O, and typed directory-scan completion events through a C
-  ABI.
-- `soda_native_core` is the aggregate static target for native consumers.
+各子系统的能力边界和细分状态见 [设计文档](design/README.md)。
 
-The parser consumes document values and change sets. It has no dependency on
-editor buffers, views, command registries, Scheme objects, or frontend state.
-Chez libraries retain opaque native handles and pass document snapshots and
-change sets directly to the analyzer without serializing text or syntax trees.
+## 架构
 
-## Scheme editor core
+```text
+terminal
+  -> libuv / terminal ABI
+  -> Chez command loop
+  -> Editor / Buffer / View / Window
+  -> native Text / Document / syntax services
+  -> Frame / ANSI presenter
+```
 
-The Scheme editor layer owns dynamic Buffer and View registries, command
-registries, keymap and language catalogs, typed messages, and the update loop.
-Commands receive an explicit context, mutate buffers through buffer
-transactions, update view state, and return effect values for registered outer
-runtime handlers to execute.
+编辑器只有一个状态所有者线程。native callback 不进入 Scheme；libuv 完成事件先
+转换为普通值，再由 command loop 串行应用。命令通过 Buffer transaction 修改文本，
+语言服务消费 revision-scoped snapshot 和 change set，renderer 只读取已经发布的
+高亮、decoration 和 display mapping 结果。
 
-Keymaps bind key sequences to command symbols and support explicit tombstones
-that shadow lower-priority bindings. Each View owns a stack of input states
-whose keymap layers and text policy describe transient editing behavior.
-Replacing a command procedure in the registry immediately affects existing
-bindings, which provides the indirection needed for interactive Scheme
-development. Command definitions associate ordinary Scheme procedures with
-typed interactive readers. Readers may suspend in the minibuffer and resume
-the same logical invocation without entering a recursive command loop.
-Named command hooks and advice compose around the resolved procedure call.
-Minor mode definitions contribute lifecycle callbacks, keymap layers, hooks,
-and modeline lighters from a shared catalog. Key, text, paste, and resize events enter the same update
-function; terminal frame rendering only reads the resulting editor state. The
-renderer reads visible document lines and uses terminal cells for tab
-expansion, wide-character clipping, and cursor placement. Each cell retains
-its semantic faces, resolved style, document position, and render sources; the
-frame retains the realized component tree and rectangles. Fixed and flexible
-layout extents place independent text and modeline components. The terminal
-presenter is the only layer that encodes the frame as ANSI.
+主要边界如下：
 
-An editor-owned Chez interaction session provides the persistent Scheme
-environment used by the REPL and source evaluation. Its transcript is an
-ordinary protected-prefix Buffer. Evaluation requests retain their source
-Buffer, resource, revision, and optional byte range; returned values, output,
-conditions, and queued editor commands re-enter through the command loop.
+- `soda_document`：持有 `Text`、`Document`、事务、anchor、snapshot 和 undo tree；
+- `soda_cpp_lexer`、`soda_cpp_analysis`、`soda_indentation`：提供 C/C++ lossless
+  token、增量语法树和缩进机制；
+- `soda_tree_sitter`：静态链接 Tree-sitter core，运行时加载语言 grammar；
+- `soda_runtime`：封装 libuv timer、文件、目录、进程和 descriptor readiness；
+- `(soda editor ...)`：持有 Buffer/View/Window、command、输入状态、语言模式、
+  minibuffer、交互会话和渲染策略。
 
-## Language modes
+## 构建与运行
 
-Chez major modes compose replaceable syntax and indentation providers. Common
-delimiter editing remains independent of any one parser, while the native C++
-analyzer and Tree-sitter sessions can provide progressively richer language
-capabilities. The mode, profile, and provider contracts are defined in
-[design/09-language-modes.md](design/09-language-modes.md). Scheme lexical
-scope, library indexing, completion, xref, and runtime-session integration are
-defined in [design/11-scheme-semantics.md](design/11-scheme-semantics.md).
-
-The complete architecture and subsystem specifications are indexed in
-[design/README.md](design/README.md).
-
-## Runtime boundary
-
-The editor has one state-owning thread. Chez Scheme runs the command loop on
-that thread and owns all mutable editor state. Document mutation, incremental
-analysis, command dispatch, and presentation execute serially on the same
-thread.
-
-libuv supplies terminal readiness, timers, signals, process transport, sockets,
-and asynchronous filesystem operations. The Scheme command loop calls a native
-poll operation and receives a batch of plain event values after libuv has
-processed ready handles. Native callbacks do not enter Scheme.
-
-Commands run to completion and keep their synchronous work bounded.
-Incremental text and syntax operations remain on the editor thread. Work that
-cannot finish within an interaction turn is expressed as a sequence of
-revision-tagged steps scheduled across event-loop turns.
-
-The editor does not create application worker threads or submit CPU work to the
-libuv thread pool. A libuv implementation may use internal threads to implement
-an asynchronous I/O operation; its completion is observed and applied on the
-editor thread.
-
-## TUI bootstrap
-
-Configure and build the executable, then start an empty buffer or open a UTF-8
-file:
+项目使用 `cmk`：
 
 ```sh
 cmk build -c Debug
@@ -112,111 +60,53 @@ cmk run -c Debug soda
 cmk run -c Debug soda -- path/to/file
 ```
 
-When the path does not exist, Soda starts an empty visiting buffer whose first
-save creates the file. Other startup read failures remain fatal.
-
-The `soda` ELF embeds the Chez runtime and compiled editor boot images. Its C
-entry point registers the statically linked native ABI, builds the Scheme heap,
-and transfers control to the editor command loop. Installation copies the
-executable, bundled language grammar modules, and Soda query bundles:
+安装可执行文件和语言运行时资源：
 
 ```sh
 cmk install -c Release --prefix ./dist
 ```
 
-Tree-sitter parser modules and query bundles form one Soda runtime package:
+启动器静态链接 native core 和 Chez kernel，并嵌入 Chez runtime boot 与编译后的
+editor boot。启动时由 C 入口注册 foreign ABI、建立 Scheme heap，然后进入编辑器
+command loop。
+
+## Tree-sitter 资源
+
+grammar 与 query 作为同一 runtime 包分发：
 
 ```text
 runtime/
-  grammars/
-    bash.so
-    go.so
-    json.so
-    python.so
-    rust.so
-    ...
-  queries/
-    <language>/
-      highlights.scm
-      indents.scm
-      textobjects.scm
+  grammars/<language>.<shared-library-extension>
+  queries/<language>/highlights.scm
+  queries/<language>/indents.scm
+  queries/<language>/textobjects.scm
+  queries/<language>/folds.scm
+  queries/<language>/injections.scm
 ```
 
-Parser modules use the platform shared-library extension and export
-`tree_sitter_<language>`. Hyphens in a parser name become underscores in the
-entry symbol. Soda resolves both parser modules and queries through the same
-ordered runtime roots:
+查找顺序为：
 
-1. `SODA_RUNTIME`, when set;
-2. `runtime` beside the executable;
-3. `<prefix>/share/soda/runtime`.
+1. `SODA_RUNTIME` 指定的 runtime root；
+2. 可执行文件旁的 `runtime`；
+3. 安装前缀下的 `share/soda/runtime`。
 
-```sh
-SODA_RUNTIME=/opt/soda/runtime soda file.json
-```
+发行资源包含 Bash、CSS、Go、HTML、JavaScript、JSON、Lua、Markdown、
+Markdown inline、Python、Rust、TOML、TypeScript、TSX 和 YAML。C、C++ 使用
+专用 native analyzer，Scheme 使用内建的 Scheme syntax 与语义服务。
 
-The runtime root is the unit of deployment and override. Parser and query
-resources do not have separate search-path or per-language environment
-overrides.
+## 基本操作
 
-The distributed runtime includes Bash, CSS, Go, HTML, JavaScript, JSON, Lua,
-Markdown, Markdown inline, Python, Rust, TOML, TypeScript, TSX, and YAML
-parsers. Each parser source is pinned by revision and archive digest in CMake.
-Soda-owned highlight queries are packaged for the same languages; JSON also
-provides fold queries. CSS, Go, HTML, JavaScript, JSON, Lua, Python, Rust,
-TypeScript, and TSX provide generic indentation and text-object queries. TSX
-composes the TypeScript query bundle with TSX-specific captures.
+默认按键以 Emacs 编辑词汇为基础：
 
-Language specs associate files, modes, parsers, editing policy, and owned query
-bundles:
+- `C-x C-f` 打开文件，`C-x C-s` 保存，`C-x C-c` 退出；
+- `C-x b` 切换 Buffer，`C-x 2` / `C-x 3` 切分 Window，`C-x o` 切换 Window；
+- `M-x` 调用命令，`C-g` 取消当前交互；
+- `C-s` / `C-r` 搜索，`M-%` 查询替换；
+- `C-SPC` 设置 mark，`C-w` / `M-w` / `C-y` 操作 region 与 kill ring；
+- `C-c C-z` 打开 Chez REPL；
+- `C-h c`、`C-h k`、`C-h x` 查看按键和命令，`C-x =` 查看 point 下的字符与 face。
 
-```scheme
-(make-tree-sitter-language-spec
-  'python
-  'python
-  'python-ts-mode
-  '(".py" ".pyi")
-  '((parent-mode . prog-mode)
-    (settings . ((indent-width . 4)))
-    (queries . (highlights indents textobjects))))
-```
+## 文档
 
-Specs are registered individually with
-`editor-register-tree-sitter-language-spec!` or as a list with
-`editor-register-tree-sitter-language-specs!`. Query inheritance is explicit
-through the `query-languages` option. A hidden spec has no major mode or file
-suffixes and makes a parser available only to injection layers.
-
-The convenience API associates suffixes with a parser name:
-
-```scheme
-(editor-register-tree-sitter-file-association!
-  *editor*
-  'python-files
-  '(".py" ".pyi")
-  'python)
-```
-
-This creates `python-ts-mode`, backed by the `python` grammar. An optional
-major-mode argument selects an existing Tree-sitter mode, and an optional final
-integer sets auto-mode priority. C, C++, and Scheme use their specialized syntax
-providers rather than Tree-sitter language specs.
-
-Printable input inserts text. The default keymap provides Emacs character,
-line, word, sentence, page, mark/region, kill-ring, undo, file, buffer, window,
-incremental-search, and help commands. `C-h c` and `C-h k` inspect key
-bindings, `C-h x` describes named commands, and `C-x =` describes the
-character and rendered faces at point. `C-c C-z` toggles the Chez REPL, and
-`C-x C-s` saves the active buffer. `C-x C-c` exits clean state,
-waits for an active save, and visits each modified buffer with `y` save,
-`n` discard, and `c`/`C-g` cancel choices. A pathless buffer enters the normal
-Save as workflow. Enter submits the editable input while the REPL transcript
-is active.
-File saves capture a document revision and undo node, atomically replace the
-target, and complete asynchronously; edits made while a save is in flight
-remain marked as modified.
-
-The TUI enables Kitty keyboard disambiguation and bracketed paste while it owns
-the alternate screen, then restores both terminal modes on exit. Its
-incremental decoder accepts Kitty `CSI u` events, legacy terminal sequences,
-UTF-8 characters, and paste payloads split across reads.
+- [设计文档索引](design/README.md)
+- [构建配置](cmk.yaml)
