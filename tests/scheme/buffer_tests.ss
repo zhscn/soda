@@ -30,6 +30,16 @@
       (vector (snapshot-revision snapshot) pending-edits))
     (lambda (view)
       (record! (list 'close-view (vector-ref view 0))))
+    #f
+    (lambda (session query-name start end)
+      (list
+        (make-syntax-capture
+          (if (eq? query-name 'fold) 'fold.region 'query.capture)
+          start
+          end
+          "test_node"
+          '((role . block))
+          0)))
     (lambda (session)
       (record! (list 'close (vector-ref session 0))))))
 
@@ -91,6 +101,17 @@
       '(context pair)))
   (error 'buffer-tests
          "major mode features or syntax capabilities did not resolve"))
+(let ([captures (syntax-query provider #f 'fold 1 3)])
+  (unless
+    (and
+      (= (length captures) 1)
+      (eq? (syntax-capture-name (car captures)) 'fold.region)
+      (= (syntax-capture-start (car captures)) 1)
+      (= (syntax-capture-end (car captures)) 3)
+      (equal?
+        (syntax-capture-properties (car captures))
+        '((role . block))))
+    (error 'buffer-tests "syntax capture query result differs")))
 
 (buffer-set-local-setting! buffer 'indent-width 6)
 (unless (= (buffer-setting-ref buffer 'indent-width) 6)

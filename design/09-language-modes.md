@@ -138,6 +138,22 @@ syntax view 是 immutable、revision-scoped 的查询面：
 - fold、indent 与 injection range；
 - 可选 debug projection。
 
+query set 统一返回 `SyntaxCapture`：
+
+```text
+SyntaxCapture {
+  name,
+  source_range,
+  node_kind?,
+  properties,
+  injection_depth
+}
+```
+
+highlight、fold、indent、text object、locals 与 injection 使用具名 query
+选择各自 capture 集合。provider 没有 query 能力时返回 unavailable；调用方按
+major mode 的 syntax capability 和 feature 选择回退实现。
+
 Buffer 在 commit、undo、redo 和显式接受 native change 后同步 session。若 provider
 不能接受 change chain，则从目标 snapshot 重建。View 借用 syntax view 时必须显式
 close；provider session 关闭前释放全部 view。

@@ -6,8 +6,17 @@
           syntax-sync!
           syntax-view
           syntax-highlights
+          syntax-query
           syntax-close-view!
           syntax-close!
+          make-syntax-capture
+          syntax-capture?
+          syntax-capture-name
+          syntax-capture-start
+          syntax-capture-end
+          syntax-capture-node-kind
+          syntax-capture-properties
+          syntax-capture-depth
           make-language-profile
           language-profile?
           language-profile-name
@@ -59,20 +68,62 @@
       (immutable view syntax-provider-view)
       (immutable close-view syntax-provider-close-view)
       (immutable highlights syntax-provider-highlights)
+      (immutable query syntax-provider-query)
       (immutable close syntax-provider-close)))
+
+  (define-record-type
+    (syntax-capture %make-syntax-capture syntax-capture?)
+    (fields name start end node-kind properties depth))
+
+  (define (exact-non-negative-integer? value)
+    (and (integer? value) (exact? value) (not (negative? value))))
+
+  (define (make-syntax-capture
+            name start end node-kind properties depth)
+    (unless
+      (and
+        (symbol? name)
+        (exact-non-negative-integer? start)
+        (exact-non-negative-integer? end)
+        (<= start end)
+        (or (not node-kind) (symbol? node-kind) (string? node-kind))
+        (list? properties)
+        (exact-non-negative-integer? depth))
+      (assertion-violation
+        'make-syntax-capture
+        "invalid syntax capture"
+        name start end node-kind properties depth))
+    (%make-syntax-capture name start end node-kind properties depth))
 
   (define make-syntax-provider
     (case-lambda
       [(capabilities open sync close)
        (make-syntax-provider
-         capabilities open sync #f #f #f close)]
+         capabilities open sync #f #f #f #f close)]
       [(capabilities open sync view close)
        (make-syntax-provider
-         capabilities open sync view #f #f close)]
+         capabilities open sync view #f #f #f close)]
       [(capabilities open sync view close-view close)
        (make-syntax-provider
-         capabilities open sync view close-view #f close)]
+         capabilities open sync view close-view #f #f close)]
       [(capabilities open sync view close-view highlights close)
+       (make-syntax-provider
+         capabilities
+         open
+         sync
+         view
+         close-view
+         highlights
+         #f
+         close)]
+      [(capabilities
+         open
+         sync
+         view
+         close-view
+         highlights
+         query
+         close)
        (unless (and (list? capabilities) (for-all symbol? capabilities))
          (assertion-violation
            'make-syntax-provider
@@ -97,6 +148,11 @@
            'make-syntax-provider
            "highlights must be a procedure or #f"
            highlights))
+       (unless (or (not query) (procedure? query))
+         (assertion-violation
+           'make-syntax-provider
+           "query must be a procedure or #f"
+           query))
        (unless (procedure? close)
          (assertion-violation 'make-syntax-provider "close must be a procedure" close))
        (%make-syntax-provider
@@ -106,6 +162,7 @@
          view
          close-view
          highlights
+         query
          close)]))
 
   (define (require-syntax-provider who provider)
@@ -154,6 +211,35 @@
                 "syntax provider returned invalid highlight runs"
                 runs))
             runs))))
+
+  (define (syntax-query provider session query-name start end)
+    (require-syntax-provider 'syntax-query provider)
+    (unless (symbol? query-name)
+      (assertion-violation
+        'syntax-query
+        "query name must be a symbol"
+        query-name))
+    (unless
+      (and
+        (exact-non-negative-integer? start)
+        (exact-non-negative-integer? end)
+        (<= start end))
+      (assertion-violation
+        'syntax-query
+        "invalid syntax query range"
+        start
+        end))
+    (let ([query (syntax-provider-query provider)])
+      (if (not query)
+          #f
+          (let ([captures (query session query-name start end)])
+            (unless
+              (and (list? captures) (for-all syntax-capture? captures))
+              (assertion-violation
+                'syntax-query
+                "syntax provider returned invalid captures"
+                captures))
+            captures))))
 
   (define (syntax-close-view! provider view)
     (require-syntax-provider 'syntax-close-view! provider)
