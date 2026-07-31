@@ -118,7 +118,7 @@ save creates the file. Other startup read failures remain fatal.
 The `soda` ELF embeds the Chez runtime and compiled editor boot images. Its C
 entry point registers the statically linked native ABI, builds the Scheme heap,
 and transfers control to the editor command loop. Installation copies the
-executable and the language grammar modules:
+executable, bundled language grammar modules, and Soda query bundles:
 
 ```sh
 cmk install -c Release --prefix ./dist
@@ -141,7 +141,35 @@ uppercased and hyphens become underscores:
 SODA_TREE_SITTER_JSON_LIBRARY=/work/grammars/libtree-sitter-json.so soda file.json
 ```
 
-Editor initialization associates suffixes with parser names through Scheme:
+Tree-sitter query bundles are separate from parser modules. Soda loads
+`queries/<language>/<kind>.scm` from the installed data directory, the
+executable directory, or a platform-separated `SODA_TREE_SITTER_QUERY_PATH`:
+
+```sh
+SODA_TREE_SITTER_QUERY_PATH=/opt/soda/queries:/work/soda-queries soda file.json
+```
+
+Language specs associate files, modes, parsers, editing policy, and owned query
+bundles:
+
+```scheme
+(make-tree-sitter-language-spec
+  'python
+  'python
+  'python-ts-mode
+  '(".py" ".pyi")
+  '((parent-mode . prog-mode)
+    (settings . ((indent-width . 4)))
+    (queries . (highlights folds textobjects))))
+```
+
+Specs are registered individually with
+`editor-register-tree-sitter-language-spec!` or as a list with
+`editor-register-tree-sitter-language-specs!`. Query inheritance is explicit
+through the `query-languages` option. A hidden spec has no major mode or file
+suffixes and makes a parser available only to injection layers.
+
+The convenience API associates suffixes with a parser name:
 
 ```scheme
 (editor-register-tree-sitter-file-association!
@@ -155,7 +183,8 @@ This creates `python-ts-mode`, backed by the `python` grammar. An optional
 major-mode argument selects an existing Tree-sitter mode, and an optional final
 integer sets auto-mode priority. `register-tree-sitter-language!` overrides the
 shared-library path or exported parser symbol when a grammar does not follow
-the default naming convention.
+the default naming convention. C, C++, and Scheme use their specialized syntax
+providers rather than Tree-sitter language specs.
 
 Printable input inserts text. The default keymap provides Emacs character,
 line, word, sentence, page, mark/region, kill-ring, undo, file, buffer, window,

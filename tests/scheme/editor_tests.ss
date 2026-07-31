@@ -7903,6 +7903,20 @@
 (define json-buffer
   (make-buffer 992 json-document "sample.json" 'fundamental-mode))
 (define json-editor (make-editor json-buffer))
+(define built-in-tree-sitter-names
+  (map
+    tree-sitter-language-spec-name
+    built-in-tree-sitter-language-specs))
+(unless
+  (and
+    (= (length built-in-tree-sitter-names) 71)
+    (memq 'python built-in-tree-sitter-names)
+    (memq 'markdown-inline built-in-tree-sitter-names)
+    (not (memq 'c built-in-tree-sitter-names))
+    (not (memq 'cpp built-in-tree-sitter-names))
+    (not (memq 'scheme built-in-tree-sitter-names)))
+  (error 'editor-tests
+         "built-in Tree-sitter parser catalog differs"))
 (buffer-set-file-path! json-buffer "/tmp/sample.json")
 (editor-select-buffer-major-mode!
   json-editor
@@ -7964,7 +7978,7 @@
     (eq?
       (language-profile-name
         (buffer-language-profile generic-json-buffer))
-      'json.tree-sitter)
+      'test-json-files)
     (buffer-language-session generic-json-buffer)
     (eq?
       (major-mode-feature-ref

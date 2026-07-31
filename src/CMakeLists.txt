@@ -60,6 +60,7 @@ target_include_directories(soda_tree_sitter PUBLIC
 target_compile_features(soda_tree_sitter PUBLIC cxx_std_23)
 target_compile_definitions(soda_tree_sitter PRIVATE
   SODA_TREE_SITTER_INSTALL_LIBDIR="${CMAKE_INSTALL_LIBDIR}"
+  SODA_TREE_SITTER_INSTALL_DATADIR="${CMAKE_INSTALL_DATADIR}"
 )
 target_link_libraries(soda_tree_sitter
   PUBLIC soda_document tree-sitter
@@ -175,6 +176,15 @@ soda_embed_chez_application(soda
   PROGRAM "soda/editor/main.ss"
   SOURCES ${SODA_SCHEME_SOURCES}
 )
+add_custom_target(soda_tree_sitter_queries ALL
+  COMMAND
+    "${CMAKE_COMMAND}" -E copy_directory
+    "${PROJECT_SOURCE_DIR}/queries"
+    "$<TARGET_FILE_DIR:soda>/queries"
+  COMMENT "Copying Soda Tree-sitter query bundles"
+  VERBATIM
+)
+add_dependencies(soda soda_tree_sitter_queries)
 
 if(BUILD_TESTING)
   add_test(
@@ -222,6 +232,7 @@ if(BUILD_TESTING)
   target_compile_features(soda_scheme_native_test PUBLIC cxx_std_23)
   target_compile_definitions(soda_scheme_native_test PRIVATE
     SODA_TREE_SITTER_INSTALL_LIBDIR="${CMAKE_INSTALL_LIBDIR}"
+    SODA_TREE_SITTER_INSTALL_DATADIR="${CMAKE_INSTALL_DATADIR}"
   )
   target_include_directories(soda_scheme_native_test PRIVATE
     "${tree_sitter_SOURCE_DIR}/lib/include"
@@ -235,4 +246,8 @@ endif()
 install(
   TARGETS soda_tree_sitter_json
   LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}/soda/grammars"
+)
+install(
+  DIRECTORY "${PROJECT_SOURCE_DIR}/queries/"
+  DESTINATION "${CMAKE_INSTALL_DATADIR}/soda/queries"
 )

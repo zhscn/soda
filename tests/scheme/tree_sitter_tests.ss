@@ -20,6 +20,10 @@
 (define parser (make-tree-sitter-parser 'json))
 
 (tree-sitter-parser-parse! parser snapshot)
+(define highlight-query
+  (make-tree-sitter-query
+    parser
+    (tree-sitter-query-source 'json 'highlights)))
 (unless
   (and
     (= (tree-sitter-parser-document-id parser) 81)
@@ -30,6 +34,18 @@
       '(0 . 25))
     (not (tree-sitter-parser-root-has-error? parser)))
   (error 'tree-sitter-tests "initial JSON tree differs"))
+
+(unless
+  (exists
+    (lambda (capture)
+      (eq? (tree-sitter-capture-name capture) 'property))
+    (tree-sitter-query-execute
+      highlight-query
+      parser
+      0
+      25))
+  (error 'tree-sitter-tests
+         "maintained JSON highlight query was not loaded"))
 
 (define strings
   (tree-sitter-parser-query
@@ -78,6 +94,19 @@
       '(11 . 15)))
   (error 'tree-sitter-tests "incremental JSON query differs"))
 
+(unless
+  (exists
+    (lambda (capture)
+      (eq? (tree-sitter-capture-name capture) 'constant))
+    (tree-sitter-query-execute
+      highlight-query
+      parser
+      0
+      16))
+  (error 'tree-sitter-tests
+         "compiled query was not reusable after an edit"))
+
+(tree-sitter-query-close! highlight-query)
 (tree-sitter-parser-close! parser)
 (snapshot-close! after)
 (change-close! change)

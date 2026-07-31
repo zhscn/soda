@@ -11,6 +11,11 @@
           tree-sitter-parser-root-kind
           tree-sitter-parser-root-range
           tree-sitter-parser-root-has-error?
+          tree-sitter-query-source
+          make-tree-sitter-query
+          tree-sitter-query?
+          tree-sitter-query-close!
+          tree-sitter-query-execute
           tree-sitter-parser-query
           tree-sitter-capture?
           tree-sitter-capture-name
@@ -72,6 +77,20 @@
   (define %parser-root-has-error
     (foreign-procedure
       __atomic "soda_ts_parser_root_has_error" (void*) int))
+  (define %query-source
+    (foreign-procedure
+      __atomic "soda_ts_query_source" (string string) string))
+  (define %query-compile
+    (foreign-procedure
+      __atomic "soda_ts_query_compile" (void* string) void*))
+  (define %query-destroy
+    (foreign-procedure
+      __atomic "soda_ts_query_destroy" (void*) void))
+  (define %query-execute
+    (foreign-procedure
+      __atomic "soda_ts_query_execute"
+      (void* void* unsigned-32 unsigned-32)
+      void*))
   (define %parser-query
     (foreign-procedure
       __atomic "soda_ts_parser_query"
@@ -122,6 +141,12 @@
       (assertion-violation who "expected a Tree-sitter parser" value))
     (unless (tree-sitter-parser-pointer value)
       (assertion-violation who "Tree-sitter parser is closed" value)))
+
+  (define (require-open-query who value)
+    (unless (tree-sitter-query? value)
+      (assertion-violation who "expected a Tree-sitter query" value))
+    (unless (tree-sitter-query-pointer value)
+      (assertion-violation who "Tree-sitter query is closed" value)))
 
   (define (require-snapshot who value)
     (unless (and (snapshot? value) (snapshot-pointer value))
@@ -267,6 +292,96 @@
       (check-status 'tree-sitter-parser-root-has-error? status)
       (not (zero? status))))
 
+  (define (tree-sitter-query-source language query-name)
+    (unless (symbol? language)
+      (assertion-violation
+        'tree-sitter-query-source
+        "language must be a symbol"
+        language))
+    (unless (symbol? query-name)
+      (assertion-violation
+        'tree-sitter-query-source
+        "query name must be a symbol"
+        query-name))
+    (let ([source
+            (%query-source
+              (symbol->string language)
+              (symbol->string query-name))])
+      (unless source
+        (native-error 'tree-sitter-query-source))
+      source))
+
+  (define (make-tree-sitter-query parser source)
+    (require-open 'make-tree-sitter-query parser)
+    (unless (string? source)
+      (assertion-violation
+        'make-tree-sitter-query
+        "query source must be a string"
+        source))
+    (let ([pointer
+            (%query-compile
+              (tree-sitter-parser-pointer parser)
+              source)])
+      (unless pointer
+        (native-error 'make-tree-sitter-query))
+      (%make-tree-sitter-query pointer)))
+
+  (define (tree-sitter-query-close! query)
+    (unless (tree-sitter-query? query)
+      (assertion-violation
+        'tree-sitter-query-close!
+        "expected a Tree-sitter query"
+        query))
+    (let ([pointer (tree-sitter-query-pointer query)])
+      (when pointer
+        (%query-destroy pointer)
+        (tree-sitter-query-pointer-set! query #f))))
+
+  (define (query-result->captures who result)
+    (unless result
+      (native-error who))
+    (dynamic-wind
+      (lambda () (void))
+      (lambda ()
+        (let loop ([index 0]
+                   [count (%query-result-count result)]
+                   [captures '()])
+          (if (= index count)
+              (reverse captures)
+              (let ([range
+                      (call-range
+                        who
+                        (lambda (range-start range-end)
+                          (%query-result-range
+                            result
+                            index
+                            range-start
+                            range-end)))])
+                (loop
+                  (+ index 1)
+                  count
+                  (cons
+                    (make-tree-sitter-capture
+                      (string->symbol
+                        (%query-result-name result index))
+                      (car range)
+                      (cdr range)
+                      (%query-result-node-kind result index)
+                      (%query-result-depth result index))
+                    captures))))))
+      (lambda () (%query-result-destroy result))))
+
+  (define (tree-sitter-query-execute query parser start end)
+    (require-open-query 'tree-sitter-query-execute query)
+    (require-open 'tree-sitter-query-execute parser)
+    (query-result->captures
+      'tree-sitter-query-execute
+      (%query-execute
+        (tree-sitter-parser-pointer parser)
+        (tree-sitter-query-pointer query)
+        start
+        end)))
+
   (define (tree-sitter-parser-query value source start end)
     (require-open 'tree-sitter-parser-query value)
     (unless (string? source)
@@ -274,42 +389,11 @@
         'tree-sitter-parser-query
         "query source must be a string"
         source))
-    (let ([result
-            (%parser-query
-              (tree-sitter-parser-pointer value)
-              source
-              start
-              end)])
-      (unless result
-        (native-error 'tree-sitter-parser-query))
-      (dynamic-wind
-        (lambda () (void))
-        (lambda ()
-          (let loop ([index 0]
-                     [count (%query-result-count result)]
-                     [captures '()])
-            (if (= index count)
-                (reverse captures)
-                (let ([range
-                        (call-range
-                          'tree-sitter-parser-query
-                          (lambda (range-start range-end)
-                            (%query-result-range
-                              result
-                              index
-                              range-start
-                              range-end)))])
-                  (loop
-                    (+ index 1)
-                    count
-                    (cons
-                      (make-tree-sitter-capture
-                        (string->symbol
-                          (%query-result-name result index))
-                        (car range)
-                        (cdr range)
-                        (%query-result-node-kind result index)
-                        (%query-result-depth result index))
-                      captures))))))
-        (lambda () (%query-result-destroy result)))))
+    (query-result->captures
+      'tree-sitter-parser-query
+      (%parser-query
+        (tree-sitter-parser-pointer value)
+        source
+        start
+        end)))
 )

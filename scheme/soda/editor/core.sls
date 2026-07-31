@@ -110,6 +110,26 @@
           editor-auto-mode-catalog
           editor-register-auto-mode-rule!
           editor-register-tree-sitter-file-association!
+          make-tree-sitter-query-bundle
+          tree-sitter-query-bundle?
+          tree-sitter-query-bundle-languages
+          tree-sitter-query-bundle-kinds
+          make-tree-sitter-language-spec
+          tree-sitter-language-spec?
+          tree-sitter-language-spec-name
+          tree-sitter-language-spec-parser
+          tree-sitter-language-spec-major-mode
+          tree-sitter-language-spec-parent-mode
+          tree-sitter-language-spec-suffixes
+          tree-sitter-language-spec-pairs
+          tree-sitter-language-spec-identifier-character?
+          tree-sitter-language-spec-settings
+          tree-sitter-language-spec-features
+          tree-sitter-language-spec-query-bundle
+          tree-sitter-language-spec-hidden?
+          editor-register-tree-sitter-language-spec!
+          editor-register-tree-sitter-language-specs!
+          built-in-tree-sitter-language-specs
           make-tree-sitter-syntax-provider
           make-tree-sitter-language-profile
           register-tree-sitter-language!
@@ -668,7 +688,6 @@
           (soda editor file)
           (soda editor input-state)
           (soda editor interaction)
-          (soda editor json-language)
           (soda editor kill)
           (soda editor location)
           (soda editor minor-mode)
@@ -696,6 +715,7 @@
           (soda editor theme)
           (soda editor themes catppuccin)
           (soda editor tree-sitter-language)
+          (soda editor tree-sitter-languages)
           (soda editor update)
           (soda editor window)
           (soda editor window-runtime))
@@ -842,13 +862,7 @@
         '(".c" ".cc" ".cpp" ".cxx"
           ".h" ".hh" ".hpp" ".hxx")
         'cpp-mode))
-    (editor-register-tree-sitter-file-association!
-      editor
-      'json-files
-      '(".json")
-      'json
-      'json-mode
-      0)
+    (install-built-in-tree-sitter-languages! editor)
     editor)
 
   (define (make-editor buffer)
@@ -857,7 +871,6 @@
              (install-scheme-xref-commands! editor)])
       (editor-set-evaluator! editor (make-chez-evaluator))
       (install-core-settings! editor)
-      (install-json-language! (editor-language-catalog editor))
       (when
         (and
           (string? (buffer-resource buffer))

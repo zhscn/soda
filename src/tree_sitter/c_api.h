@@ -19,6 +19,7 @@ extern "C" {
 #endif
 
 typedef struct soda_ts_parser soda_ts_parser;
+typedef struct soda_ts_query soda_ts_query;
 typedef struct soda_ts_query_result soda_ts_query_result;
 
 #define SODA_TREE_SITTER_ABI_VERSION 1U
@@ -44,6 +45,13 @@ SODA_TREE_SITTER_API int soda_ts_parser_root_range(soda_ts_parser* parser, uint3
                                                    uint32_t* end);
 SODA_TREE_SITTER_API int soda_ts_parser_root_has_error(soda_ts_parser* parser);
 
+SODA_TREE_SITTER_API const char* soda_ts_query_source(const char* language, const char* query_name);
+SODA_TREE_SITTER_API soda_ts_query* soda_ts_query_compile(soda_ts_parser* parser,
+                                                          const char* source);
+SODA_TREE_SITTER_API void soda_ts_query_destroy(soda_ts_query* query);
+SODA_TREE_SITTER_API soda_ts_query_result* soda_ts_query_execute(soda_ts_parser* parser,
+                                                                 const soda_ts_query* query,
+                                                                 uint32_t start, uint32_t end);
 SODA_TREE_SITTER_API soda_ts_query_result*
 soda_ts_parser_query(soda_ts_parser* parser, const char* source, uint32_t start, uint32_t end);
 SODA_TREE_SITTER_API void soda_ts_query_result_destroy(soda_ts_query_result* result);

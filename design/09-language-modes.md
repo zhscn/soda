@@ -118,12 +118,18 @@ session；普通 commit、undo 和 redo 使用 change 增量同步。native 编�
 apply。临时 transaction 的 syntax view 使用独立 analyzer 分析 speculative
 snapshot，关闭 view 时立即释放。
 
-内建 `json-mode` 覆盖 `.json` 资源并继承 `prog-mode`。JSON profile 使用动态加载
-的 Tree-sitter grammar，提供增量 parse、highlight、fold capture 和 text-object
-capture。grammar 可用时 `.json` auto-mode rule 才选择 `json-mode`；显式启用 mode
-时由 syntax provider 建立 parser。query capture 转换为统一的 `SyntaxCapture`；
-highlight capture 转换为 base-syntax decoration，renderer 不直接调用
-Tree-sitter。
+内建 Tree-sitter language spec catalog 声明 parser identity、major mode、文件名
+关联、delimiter、identifier policy、settings、feature 和 query bundle。面向用户的
+语言拥有 `<language>-ts-mode`；只作为 injection layer 使用的 grammar 以 hidden
+spec 注册，不参与 auto-mode 选择。C、C++ 和 Scheme 分别使用专用 provider，不注册
+Tree-sitter language spec。
+
+内建 `json-mode` 覆盖 `.json` 资源并继承 `prog-mode`。JSON spec 使用动态加载的
+Tree-sitter grammar 和 Soda 自有 query bundle，提供增量 parse、highlight、fold
+capture 和 text-object capture。grammar 可用时 `.json` auto-mode rule 才选择
+`json-mode`；显式启用 mode 时由 syntax provider 建立 parser。query capture 转换为
+统一的 `SyntaxCapture`；highlight capture 转换为 base-syntax decoration，
+renderer 不直接调用 Tree-sitter。
 
 ## Syntax provider
 
@@ -237,8 +243,12 @@ TSTreeHandle
 TSQueryHandle
 ```
 
-grammar registry 以 language symbol 为键，允许覆盖共享库路径与导出符号。默认约定
-使用 `libtree-sitter-<language>` 和 `tree_sitter_<language>`；加载器依次检查语言
+parser module 和 query bundle 是分别维护、版本化和分发的资源。parser module 只
+提供 `TSLanguage`；query bundle 属于 Soda 的 editor policy，不由共享库提供，也不
+从其他编辑器的运行时目录隐式发现。
+
+grammar registry 以 parser symbol 为键，允许覆盖共享库路径与导出符号。默认约定
+使用 `libtree-sitter-<parser>` 和 `tree_sitter_<parser>`；加载器依次检查语言
 专用的 `SODA_TREE_SITTER_<LANGUAGE>_LIBRARY`、由
 `SODA_TREE_SITTER_GRAMMAR_PATH` 提供的平台分隔目录列表、可执行文件同目录、安装
 目录和系统动态库路径。环境变量中的 language 名称转为大写并将连字符替换为下划线；
@@ -264,9 +274,59 @@ Document commit 的 normalized changes 转成 `TSInputEdit`，先 edit 旧 tree�
 新 snapshot 增量 parse。tree 与 query cursor 的 native 生命周期不暴露给 Scheme；
 Scheme 只获得 revision-scoped node/capture 值。
 
-query set 按用途分开：highlight、indent、fold、text object、locals、injection。
-query 文件合并和覆盖由 language profile 决定，provider 负责校验 node type 与
-capture name。
+query bundle 使用以下 Soda 资源布局：
+
+```text
+queries/
+  <language>/
+    highlights.scm
+    indents.scm
+    injections.scm
+    locals.scm
+    textobjects.scm
+    folds.scm
+    outline.scm
+    brackets.scm
+    overrides.scm
+```
+
+language spec 显式声明启用的 query kind 和组成 bundle 的 language 顺序。继承查询
+按声明顺序从 parent 到 child 拼接；provider 在 session 中按需编译每种 query 并
+缓存 handle。同一个 compiled query 可以跨增量 parse 后产生的新 tree 重复执行。
+关闭 session 时先释放 query handle，再释放 parser 和 grammar module。
+
+query loader 依次检查 `SODA_TREE_SITTER_QUERY_PATH` 的平台分隔目录列表、可执行文件
+同目录的 `queries`、安装数据目录的 `soda/queries`。每个根目录都必须使用上述布局。
+spec 声明的 query 是该 profile 的必需资源；缺失、语法错误或与 grammar 不兼容会使
+对应 session 建立失败并产生 editor condition。query 文件不承载 major mode、文件
+关联、缩进宽度或 completion policy。
+
+`TreeSitterLanguageSpec` 是可声明的数据：
+
+```text
+TreeSitterLanguageSpec {
+  name,
+  parser,
+  major_mode,
+  parent_mode,
+  suffixes,
+  delimiter_pairs,
+  identifier_policy,
+  settings,
+  features,
+  query_bundle,
+  hidden
+}
+
+TreeSitterQueryBundle {
+  languages,
+  kinds
+}
+```
+
+spec catalog 可以批量注册。注册创建或替换 major mode、language profile 和
+auto-mode rule，并只刷新使用相关 mode 的 Buffer。grammar availability 在文件规则
+匹配或 mode 建立 session 时查询，因此 catalog 安装不会加载全部 parser module。
 
 一个 Tree-sitter session 持有 layered syntax map：
 
@@ -298,10 +358,10 @@ injection query 返回宿主 ranges、目标 language 和 query configuration。
 创建、复用或释放对应 layer，并在宿主 edit 后只重新查询受影响的父 layer。嵌套深度、
 总 layer 数、单次 query 字节数和 capture 数由 profile 限制。
 
-highlight query 的 capture index 在 grammar/query set 加载时映射到稳定的语义
-`FaceId`。theme resolver 对 `FaceId` 使用层级 fallback；theme generation 改变时
-只重建 face 解析缓存，不改变 capture mapping，也不重新 parse tree。viewport 查询
-只执行与请求范围相交的 query，并返回按 host byte range 排序的 capture cursor。
+highlight query capture 名直接作为稳定的语义 `FaceId`。theme resolver 对
+`FaceId` 使用层级 fallback；theme generation 改变时只重建 face 解析缓存，不改变
+capture mapping，也不重新 parse tree。viewport 查询只执行与请求范围相交的 query，
+并返回按 host byte range 排序的 capture cursor。
 
 初次 parse 与增量 parse 都在 editor thread 执行。provider 为 parse、injection 和
 query 工作设置交互预算；超出一次 command-loop turn 的工作保留 revision-tagged

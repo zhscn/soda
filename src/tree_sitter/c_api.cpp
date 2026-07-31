@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
+#include <fstream>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -38,6 +39,10 @@
 #define SODA_TREE_SITTER_INSTALL_LIBDIR "lib"
 #endif
 
+#ifndef SODA_TREE_SITTER_INSTALL_DATADIR
+#define SODA_TREE_SITTER_INSTALL_DATADIR "share"
+#endif
+
 struct soda_ts_parser {
     TSParser* parser = nullptr;
     TSTree* tree = nullptr;
@@ -61,9 +66,16 @@ struct soda_ts_query_result {
     std::vector<soda_ts_capture> captures;
 };
 
+struct soda_ts_query {
+    TSQuery* query = nullptr;
+    const TSLanguage* language = nullptr;
+    std::thread::id owner = std::this_thread::get_id();
+};
+
 namespace {
 
 thread_local std::array<char, 512> last_error{};
+thread_local std::string last_query_source;
 
 void clear_error() noexcept {
     last_error.front() = '\0';
@@ -220,6 +232,12 @@ std::string language_environment_name(std::string_view language) {
     return result;
 }
 
+bool valid_component(std::string_view value) {
+    return !value.empty() && std::ranges::all_of(value, [](unsigned char character) {
+        return std::isalnum(character) != 0 || character == '_' || character == '-';
+    });
+}
+
 std::vector<std::filesystem::path> language_candidates(std::string_view language,
                                                        std::string_view override_library) {
     std::vector<std::filesystem::path> candidates;
@@ -275,9 +293,7 @@ struct LoadedLanguage {
 
 LoadedLanguage load_language(std::string_view name, std::string_view override_library,
                              std::string_view override_symbol) {
-    if (name.empty() || !std::ranges::all_of(name, [](unsigned char character) {
-            return std::isalnum(character) != 0 || character == '_' || character == '-';
-        })) {
+    if (!valid_component(name)) {
         throw std::invalid_argument("Tree-sitter language name is invalid");
     }
     std::string symbol =
@@ -315,6 +331,120 @@ LoadedLanguage load_language(std::string_view name, std::string_view override_li
     }
     throw std::runtime_error("unable to load Tree-sitter grammar " + std::string(name) +
                              (failures.empty() ? std::string{} : ": " + failures));
+}
+
+std::vector<std::filesystem::path> query_candidates(std::string_view language,
+                                                    std::string_view query_name) {
+    const std::filesystem::path relative =
+        std::filesystem::path(language) / (std::string(query_name) + ".scm");
+    std::vector<std::filesystem::path> candidates;
+    if (const char* search_path = std::getenv("SODA_TREE_SITTER_QUERY_PATH");
+        search_path != nullptr) {
+        std::string_view remaining(search_path);
+        while (!remaining.empty()) {
+            const auto separator = remaining.find(path_list_separator());
+            const std::string_view directory = remaining.substr(0, separator);
+            if (!directory.empty()) {
+                candidates.emplace_back(std::filesystem::path(directory) / relative);
+            }
+            if (separator == std::string_view::npos) {
+                break;
+            }
+            remaining.remove_prefix(separator + 1);
+        }
+    }
+    if (const auto executable = executable_path(); executable.has_value()) {
+        const auto directory = executable->parent_path();
+        candidates.emplace_back(directory / "queries" / relative);
+        candidates.emplace_back(directory.parent_path() / SODA_TREE_SITTER_INSTALL_DATADIR /
+                                "soda" / "queries" / relative);
+    }
+    return candidates;
+}
+
+std::string read_query_source(std::string_view language, std::string_view query_name) {
+    if (!valid_component(language) || !valid_component(query_name)) {
+        throw std::invalid_argument("Tree-sitter query resource name is invalid");
+    }
+    std::string searched;
+    for (const auto& candidate : query_candidates(language, query_name)) {
+        std::ifstream stream(candidate, std::ios::binary);
+        if (!stream) {
+            if (!searched.empty()) {
+                searched += ", ";
+            }
+            searched += candidate.string();
+            continue;
+        }
+        std::string source{std::istreambuf_iterator<char>(stream),
+                           std::istreambuf_iterator<char>()};
+        if (stream.bad()) {
+            throw std::runtime_error("cannot read Tree-sitter query " + candidate.string());
+        }
+        if (source.empty()) {
+            throw std::runtime_error("Tree-sitter query is empty: " + candidate.string());
+        }
+        return source;
+    }
+    throw std::runtime_error("unable to find Tree-sitter query " + std::string(language) + "/" +
+                             std::string(query_name) +
+                             (searched.empty() ? std::string{} : ": " + searched));
+}
+
+std::unique_ptr<TSQuery, decltype(&ts_query_delete)> compile_query(const soda_ts_parser& parser,
+                                                                   const char* source) {
+    if (source == nullptr) {
+        throw std::invalid_argument("Tree-sitter query source is null");
+    }
+    uint32_t error_offset = 0;
+    TSQueryError error_type = TSQueryErrorNone;
+    std::unique_ptr<TSQuery, decltype(&ts_query_delete)> query{
+        ts_query_new(parser.language, source,
+                     static_cast<std::uint32_t>(std::char_traits<char>::length(source)),
+                     &error_offset, &error_type),
+        ts_query_delete};
+    if (!query) {
+        throw std::invalid_argument("invalid Tree-sitter query at byte " +
+                                    std::to_string(error_offset) + " (error " +
+                                    std::to_string(static_cast<int>(error_type)) + ")");
+    }
+    return query;
+}
+
+TSNode root_node(soda_ts_parser& parser);
+std::uint32_t node_depth(TSNode node);
+
+soda_ts_query_result* execute_query(soda_ts_parser& parser, const TSQuery* query,
+                                    std::uint32_t start, std::uint32_t end) {
+    if (query == nullptr) {
+        throw std::invalid_argument("Tree-sitter query handle is null");
+    }
+    if (start > end || end > parser.text.size_bytes()) {
+        throw std::out_of_range("Tree-sitter query range is invalid");
+    }
+    std::unique_ptr<TSQueryCursor, decltype(&ts_query_cursor_delete)> cursor{
+        ts_query_cursor_new(), ts_query_cursor_delete};
+    if (!cursor) {
+        throw std::runtime_error("Tree-sitter query cursor allocation failed");
+    }
+    ts_query_cursor_set_byte_range(cursor.get(), start, end);
+    ts_query_cursor_exec(cursor.get(), query, root_node(parser));
+    auto result = std::make_unique<soda_ts_query_result>();
+    TSQueryMatch match{};
+    uint32_t capture_index = 0;
+    while (ts_query_cursor_next_capture(cursor.get(), &match, &capture_index)) {
+        const TSQueryCapture capture = match.captures[capture_index];
+        uint32_t name_length = 0;
+        const char* name = ts_query_capture_name_for_id(query, capture.index, &name_length);
+        result->captures.push_back(soda_ts_capture{
+            .name = std::string(name, name_length),
+            .node_kind = ts_node_type(capture.node),
+            .start = ts_node_start_byte(capture.node),
+            .end = ts_node_end_byte(capture.node),
+            .depth = node_depth(capture.node),
+        });
+    }
+    return result.release();
 }
 
 struct InputPayload {
@@ -546,52 +676,56 @@ int soda_ts_parser_root_has_error(soda_ts_parser* parser) {
     return guard(-1, [&] { return ts_node_has_error(root_node(parser_handle(parser))) ? 1 : 0; });
 }
 
+const char* soda_ts_query_source(const char* language, const char* query_name) {
+    return guard<const char*>(nullptr, [&] {
+        if (language == nullptr || query_name == nullptr) {
+            throw std::invalid_argument("Tree-sitter query resource name is null");
+        }
+        last_query_source = read_query_source(language, query_name);
+        return last_query_source.c_str();
+    });
+}
+
+soda_ts_query* soda_ts_query_compile(soda_ts_parser* parser, const char* source) {
+    return guard<soda_ts_query*>(nullptr, [&] {
+        auto& parser_value = parser_handle(parser);
+        auto query = compile_query(parser_value, source);
+        auto value = std::make_unique<soda_ts_query>();
+        value->query = query.release();
+        value->language = parser_value.language;
+        return value.release();
+    });
+}
+
+void soda_ts_query_destroy(soda_ts_query* query) {
+    if (query == nullptr) {
+        return;
+    }
+    ts_query_delete(query->query);
+    delete query;
+}
+
+soda_ts_query_result* soda_ts_query_execute(soda_ts_parser* parser, const soda_ts_query* query,
+                                            uint32_t start, uint32_t end) {
+    return guard<soda_ts_query_result*>(nullptr, [&] {
+        auto& parser_value = parser_handle(parser);
+        const auto& query_value = require_handle(query, "Tree-sitter query");
+        if (query_value.owner != std::this_thread::get_id()) {
+            throw std::logic_error("Tree-sitter query used from a non-owning thread");
+        }
+        if (query_value.language != parser_value.language) {
+            throw std::invalid_argument("Tree-sitter query language differs from parser");
+        }
+        return execute_query(parser_value, query_value.query, start, end);
+    });
+}
+
 soda_ts_query_result* soda_ts_parser_query(soda_ts_parser* parser, const char* source,
                                            uint32_t start, uint32_t end) {
     return guard<soda_ts_query_result*>(nullptr, [&] {
         auto& value = parser_handle(parser);
-        if (source == nullptr) {
-            throw std::invalid_argument("Tree-sitter query source is null");
-        }
-        if (start > end || end > value.text.size_bytes()) {
-            throw std::out_of_range("Tree-sitter query range is invalid");
-        }
-        uint32_t error_offset = 0;
-        TSQueryError error_type = TSQueryErrorNone;
-        std::unique_ptr<TSQuery, decltype(&ts_query_delete)> query{
-            ts_query_new(value.language, source,
-                         static_cast<std::uint32_t>(std::char_traits<char>::length(source)),
-                         &error_offset, &error_type),
-            ts_query_delete};
-        if (!query) {
-            throw std::invalid_argument("invalid Tree-sitter query at byte " +
-                                        std::to_string(error_offset) + " (error " +
-                                        std::to_string(static_cast<int>(error_type)) + ")");
-        }
-        std::unique_ptr<TSQueryCursor, decltype(&ts_query_cursor_delete)> cursor{
-            ts_query_cursor_new(), ts_query_cursor_delete};
-        if (!cursor) {
-            throw std::runtime_error("Tree-sitter query cursor allocation failed");
-        }
-        ts_query_cursor_set_byte_range(cursor.get(), start, end);
-        ts_query_cursor_exec(cursor.get(), query.get(), root_node(value));
-        auto result = std::make_unique<soda_ts_query_result>();
-        TSQueryMatch match{};
-        uint32_t capture_index = 0;
-        while (ts_query_cursor_next_capture(cursor.get(), &match, &capture_index)) {
-            const TSQueryCapture capture = match.captures[capture_index];
-            uint32_t name_length = 0;
-            const char* name =
-                ts_query_capture_name_for_id(query.get(), capture.index, &name_length);
-            result->captures.push_back(soda_ts_capture{
-                .name = std::string(name, name_length),
-                .node_kind = ts_node_type(capture.node),
-                .start = ts_node_start_byte(capture.node),
-                .end = ts_node_end_byte(capture.node),
-                .depth = node_depth(capture.node),
-            });
-        }
-        return result.release();
+        auto query = compile_query(value, source);
+        return execute_query(value, query.get(), start, end);
     });
 }
 
