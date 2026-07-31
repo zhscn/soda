@@ -22,6 +22,7 @@
 | `edit.reverse-region` | 已实现 |
 | `edit.delete-duplicate-lines` | 已实现 |
 | `edit.align-regexp` | 已实现 |
+| whitespace cleanup policy 与 command | 已实现 |
 
 本文只定义文本编辑器当前使用的输入路径。minibuffer 的读取与焦点规则由
 [12-minibuffer.md](12-minibuffer.md) 定义；command 与 interactive 参数由
@@ -199,6 +200,12 @@ universal prefix 还保留重复空行。命令只替换 region，并在一次 B
 `edit.align-regexp` 从 minibuffer 读取 regexp，把 active region 每一行的第一个匹配
 起点对齐到最右匹配列。没有匹配的行保持原样，边界外文本不参与变换，所有 padding
 作为一次 Buffer transaction 提交。
+
+`edit.whitespace-cleanup` 默认清理 active region；没有 active region 时清理整个
+Buffer，prefix argument 强制选择整个 Buffer。`whitespace-cleanup-trailing?` 控制行尾
+horizontal whitespace，`whitespace-cleanup-final-newline` 取 `preserve`、`ensure` 或
+`remove`，`whitespace-cleanup-max-final-blank-lines` 限制文件末尾空行。文件末尾策略只
+作用于 whole-buffer target，全部修改作为一次 Buffer transaction 提交。
 
 ## Search 与 query replace
 

@@ -645,6 +645,92 @@
               (buffer-replace-range! buffer start end replacement)))))
       '()))
 
+  (define (trim-line-trailing-whitespace line)
+    (let loop ([end (bytevector-length line)])
+      (if (and (positive? end)
+               (horizontal-space-byte?
+                 (bytevector-u8-ref line (- end 1))))
+          (loop (- end 1))
+          (bytevector-slice line 0 end))))
+
+  (define (trailing-newline-count value)
+    (let loop ([offset (bytevector-length value)] [count 0])
+      (if (and (positive? offset)
+               (= (bytevector-u8-ref value (- offset 1)) 10))
+          (loop (- offset 1) (+ count 1))
+          count)))
+
+  (define (normalize-final-newlines value policy maximum-blank-lines)
+    (let* ([old-count (trailing-newline-count value)]
+           [base-size (- (bytevector-length value) old-count)]
+           [requested
+             (case policy
+               [(remove) 0]
+               [(ensure) (max 1 old-count)]
+               [else old-count])]
+           [limit
+             (and maximum-blank-lines (+ maximum-blank-lines 1))]
+           [count (if limit (min requested limit) requested)])
+      (append-bytevectors
+        (bytevector-slice value 0 base-size)
+        (make-bytevector count 10))))
+
+  (define (whitespace-cleanup-target context)
+    (if (command-context-prefix context)
+        (command-context-buffer-target context)
+        (resolve-command-target
+          (make-command-target-selector
+            'prefer #f command-context-buffer-target)
+          context)))
+
+  (define whitespace-cleanup-target-reader
+    (make-interactive-reader
+      'whitespace-cleanup-target
+      (lambda (context)
+        (make-interactive-ready
+          (list (whitespace-cleanup-target context))))))
+
+  (define-command (whitespace-cleanup-command context target)
+    "Clean whitespace in the active region or current buffer."
+    (interactive whitespace-cleanup-target-reader)
+    (let* ([view (command-context-view context)]
+           [buffer (view-buffer view)]
+           [start (command-target-start target)]
+           [end (command-target-end target)]
+           [whole-buffer?
+             (eq? (command-target-source target) 'buffer)])
+      (unless (command-target-current? target buffer)
+        (editor-user-error
+          'edit.whitespace-cleanup
+          "The cleanup target is stale"))
+      (when (< start end)
+        (with-document-text
+          (buffer-document buffer)
+          (lambda (text)
+            (let* ([trailing-newline? (= (text-byte-at text (- end 1)) 10)]
+                   [lines (range-lines text start end)]
+                   [cleaned-lines
+                     (if (buffer-setting-ref
+                           buffer 'whitespace-cleanup-trailing? #t)
+                         (map trim-line-trailing-whitespace lines)
+                         lines)]
+                   [cleaned (join-lines cleaned-lines trailing-newline?)]
+                   [replacement
+                     (if whole-buffer?
+                         (normalize-final-newlines
+                           cleaned
+                           (buffer-setting-ref
+                             buffer
+                             'whitespace-cleanup-final-newline
+                             'ensure)
+                           (buffer-setting-ref
+                             buffer
+                             'whitespace-cleanup-max-final-blank-lines
+                             0))
+                         cleaned)])
+              (buffer-replace-range! buffer start end replacement)))))
+      '()))
+
   (define (word-transform-target context)
     (let* ([view (command-context-view context)]
            [buffer (view-buffer view)]
@@ -758,6 +844,10 @@
           'edit.align-regexp
           align-regexp-command
           "Align regexp matches in the active region.")
+        (list
+          'edit.whitespace-cleanup
+          whitespace-cleanup-command
+          "Clean whitespace in the region or current buffer.")
         (list
           'edit.upcase-word
           upcase-word-command

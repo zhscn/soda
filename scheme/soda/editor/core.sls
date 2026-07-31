@@ -1066,6 +1066,9 @@
   (define (search-case-policy? value)
     (memq value '(sensitive insensitive smart)))
 
+  (define (final-newline-policy? value)
+    (memq value '(preserve ensure remove)))
+
   (define (install-core-settings! editor)
     (for-each
       (lambda (definition)
@@ -1222,7 +1225,27 @@
           'smart
           search-case-policy?
           "Case policy for regexp search and replacement."
-          'chrome)))
+          'chrome)
+        (make-setting-definition
+          'whitespace-cleanup-trailing?
+          #t
+          boolean?
+          "Whether whitespace cleanup removes trailing horizontal whitespace."
+          'document)
+        (make-setting-definition
+          'whitespace-cleanup-final-newline
+          'ensure
+          final-newline-policy?
+          "Final newline policy used by whole-buffer whitespace cleanup."
+          'document)
+        (make-setting-definition
+          'whitespace-cleanup-max-final-blank-lines
+          0
+          (lambda (value)
+            (or (not value)
+                (and (integer? value) (exact? value) (not (negative? value)))))
+          "Maximum blank lines retained at end of file, or #f for no limit."
+          'document)))
     editor)
 
   (define (install-core-auto-modes! editor)

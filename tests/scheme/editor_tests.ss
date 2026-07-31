@@ -2885,6 +2885,57 @@
   (error 'editor-tests "align-regexp was not one transaction"))
 (editor-close! align-regexp-editor)
 
+(define whitespace-cleanup-buffer
+  (make-buffer
+    9768
+    (make-document "a  \nb  \n\n\n" 9768)
+    "*whitespace-cleanup*"
+    'fundamental-mode))
+(define whitespace-cleanup-editor
+  (make-editor whitespace-cleanup-buffer))
+(define whitespace-cleanup-view
+  (editor-active-view whitespace-cleanup-editor))
+(view-set-mark! whitespace-cleanup-view 0)
+(view-set-caret! whitespace-cleanup-view 4)
+(editor-update!
+  whitespace-cleanup-editor
+  (make-command-message 'edit.whitespace-cleanup #f))
+(unless
+  (bytevector=?
+    (buffer-bytes whitespace-cleanup-buffer)
+    (string->utf8 "a\nb  \n\n\n"))
+  (error 'editor-tests "whitespace cleanup did not restrict itself to the region"))
+(buffer-undo! whitespace-cleanup-buffer)
+(view-set-mark! whitespace-cleanup-view 0)
+(view-set-caret! whitespace-cleanup-view 4)
+(editor-update!
+  whitespace-cleanup-editor
+  (make-command-message
+    'edit.whitespace-cleanup
+    #f
+    (prefix-argument-universal #f)))
+(unless
+  (bytevector=?
+    (buffer-bytes whitespace-cleanup-buffer)
+    (string->utf8 "a\nb\n"))
+  (error 'editor-tests "whitespace cleanup did not apply whole-buffer policy"))
+(buffer-undo! whitespace-cleanup-buffer)
+(editor-set-buffer-setting!
+  whitespace-cleanup-editor
+  whitespace-cleanup-buffer
+  'whitespace-cleanup-final-newline
+  'remove)
+(view-deactivate-mark! whitespace-cleanup-view)
+(editor-update!
+  whitespace-cleanup-editor
+  (make-command-message 'edit.whitespace-cleanup #f))
+(unless
+  (bytevector=?
+    (buffer-bytes whitespace-cleanup-buffer)
+    (string->utf8 "a\nb"))
+  (error 'editor-tests "whitespace cleanup ignored final newline policy"))
+(editor-close! whitespace-cleanup-editor)
+
 (define yank-pop-document (make-document "" 977))
 (define yank-pop-buffer
   (make-buffer
