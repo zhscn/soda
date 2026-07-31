@@ -19,7 +19,8 @@
           (soda editor keymap)
           (soda editor scheme-indentation)
           (soda editor scheme-repl-indentation)
-          (soda editor state))
+          (soda editor state)
+          (soda editor window-runtime))
 
   (define repl-resource "*scheme-repl*")
   (define repl-prompt "> ")
@@ -194,8 +195,24 @@
                         (= (buffer-id (view-buffer view))
                            (interaction-session-buffer-id session))))
                     (reverse (editor-views editor)))])
+            (unless other
+              (let ([other-buffer
+                      (find
+                        (lambda (candidate)
+                          (not
+                            (= (buffer-id candidate)
+                               (interaction-session-buffer-id
+                                 session))))
+                        (editor-buffers editor))])
+                (when other-buffer
+                  (set! other
+                    (editor-open-view!
+                      editor
+                      (buffer-id other-buffer))))))
             (when other
-              (editor-set-active-view! editor (view-id other))))
+              (editor-display-view-other-window!
+                editor
+                (view-id other))))
           (editor-open-repl! editor)))
     '())
 

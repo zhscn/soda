@@ -103,6 +103,16 @@
             (cell-text (frame-cell-ref frame row column))
             parts)))))
 
+(define (frame-has-row-prefix? frame rows columns expected)
+  (let loop ([row 0])
+    (and
+      (< row rows)
+      (or
+        (string=?
+          (frame-row-prefix frame row columns)
+          expected)
+        (loop (+ row 1))))))
+
 (define document (make-document "" 501))
 (define buffer
   (make-buffer 500 document "*repl-test*" 'fundamental-mode))
@@ -160,6 +170,15 @@
        (eq? (interaction-session-state session) 'ready)
        (= (length (editor-buffers editor)) 2)
        (= (length (editor-views editor)) 2)
+       (= (length (editor-window-leaves editor)) 2)
+       (exists
+         (lambda (view)
+           (eq? (view-buffer view) buffer))
+         (editor-visible-views editor))
+       (exists
+         (lambda (view)
+           (eq? (view-buffer view) repl-buffer))
+         (editor-visible-views editor))
        (not (= (document-id (buffer-document buffer))
                (document-id (buffer-document repl-buffer))))
        (eq? (view-buffer (editor-active-view editor)) repl-buffer)
@@ -180,12 +199,10 @@
                  "Soda Chez Scheme REPL\n> ")
        (let ([frame (render-editor-frame editor 24 80)])
          (and
-           (string=?
-             (frame-row-prefix frame 0 21)
-             "Soda Chez Scheme REPL")
-           (string=?
-             (frame-row-prefix frame 1 2)
-             "> "))))
+           (frame-has-row-prefix?
+             frame 24 21 "Soda Chez Scheme REPL")
+           (frame-has-row-prefix?
+             frame 24 2 "> "))))
   (error 'repl-tests
          "opening the REPL did not create an editor-owned session"
          (editor-status-message editor)
@@ -275,6 +292,20 @@
           (bytevector-length (buffer-bytes repl-buffer))))
   (error 'repl-tests
          "REPL reactivation did not preserve and focus the draft input"))
+
+(editor-delete-other-windows! editor)
+(dispatch! (make-command-message 'scheme.open-repl #f))
+(unless
+  (and
+    (= (length (editor-window-leaves editor)) 2)
+    (eq? (view-buffer (editor-active-view editor)) buffer)
+    (exists
+      (lambda (view)
+        (eq? (view-buffer view) repl-buffer))
+      (editor-visible-views editor)))
+  (error 'repl-tests
+         "REPL toggle did not recreate a missing editor window"))
+(dispatch! (make-command-message 'scheme.open-repl #f))
 
 (define first-source-revision (buffer-revision repl-buffer))
 (dispatch!
@@ -791,6 +822,20 @@
   (and
     (= (buffer-id debugger-buffer)
        (debugger-session-buffer-id debugger))
+    (= (length (editor-window-leaves editor)) 2)
+    (exists
+      (lambda (view)
+        (eq? (view-buffer view) buffer))
+      (editor-visible-views editor))
+    (exists
+      (lambda (view)
+        (eq? (view-buffer view) debugger-buffer))
+      (editor-visible-views editor))
+    (not
+      (exists
+        (lambda (view)
+          (eq? (view-buffer view) repl-buffer))
+        (editor-visible-views editor)))
     (eq? (buffer-major-mode-name debugger-buffer)
          'debugger-mode)
     (string-contains?
@@ -1223,6 +1268,15 @@
 (unless
   (and (eq? (interaction-session-state session) 'failed)
        (interaction-session-debugger session)
+       (= (length (editor-window-leaves editor)) 2)
+       (exists
+         (lambda (view)
+           (eq? (view-buffer view) buffer))
+         (editor-visible-views editor))
+       (exists
+         (lambda (view)
+           (eq? (view-buffer view) repl-buffer))
+         (editor-visible-views editor))
        (= (buffer-id (view-buffer (editor-active-view editor)))
           (buffer-id repl-buffer))
        (not

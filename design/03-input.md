@@ -324,6 +324,12 @@ View 随后独立维护 point、selection、completion 和 location walk。选�
 negative prefix 可让 `other-window` 反向遍历。Window 删除时同时释放其 View 和
 per-View navigation anchors；直接关闭仍被 leaf 显示的 View 是生命周期错误。
 
+Buffer adapter 使用两种显式 display 操作组合工具窗口。`display-view-below` 优先
+激活已经显示目标 View 的 leaf；目标 View 尚未显示时，在 active leaf 下方建立
+vertical split。`display-view-other-window` 同样优先已有 leaf，否则复用一个非
+active leaf；只有单窗口布局才建立下方 split。display 操作移动 window focus，
+不通过 View swap 覆盖来源窗口。REPL、comint、debugger 和源码访问共享该契约。
+
 TUI renderer 递归映射 Window tree。每个 leaf rectangle 由 text 区和一行 modeline
 组成，只有 active leaf 设置终端 cursor。minibuffer 和 prompt completion 位于
 整棵 Window tree 下方；出现或消失时 resize 从根重新分配所有 leaf viewport。

@@ -14,9 +14,12 @@
         (soda editor repl)
         (soda runtime))
 
-  (define document (make-document "" 901))
+  (define debug-call-source
+    "(let ([x 1])\n  (soda-debug-inner x)\n  (* x 3))")
+  (define document
+    (make-document debug-call-source 901))
   (define buffer
-    (make-buffer 900 document "*evaluation-runtime-test*" 'scheme-mode))
+    (make-buffer 900 document "debug-call.ss" 'scheme-mode))
   (define editor (make-editor buffer))
   (define runtime (make-runtime))
   (define executor (make-effect-executor))
@@ -210,8 +213,6 @@
         debug-definition-request)))
   (run-until-evaluation-message!)
 
-  (define debug-call-source
-    "(let ([x 1])\n  (soda-debug-inner x)\n  (* x 3))")
   (define call-breakpoint
     (source-debug-controller-add-breakpoint!
       source-debugger
@@ -257,6 +258,50 @@
         '(continue step next finish retry edit-and-retry abort)))
     (error 'evaluation-runtime-tests
            "source breakpoint did not suspend with stepping actions"))
+
+  (execute!
+    (editor-update!
+      editor
+      (make-command-message 'scheme.debug-visit-source #f)))
+  (unless
+    (and
+      (eq?
+        (view-buffer (editor-active-view editor))
+        buffer)
+      (=
+        (view-caret (editor-active-view editor))
+        (source-location-start
+          (source-debug-stop-location breakpoint-stop)))
+      (exists
+        (lambda (visible)
+          (eq?
+            (buffer-major-mode-name
+              (view-buffer visible))
+            'debugger-mode))
+        (editor-visible-views editor)))
+    (error 'evaluation-runtime-tests
+           "source visit did not preserve the debugger window"
+           (buffer-resource
+             (view-buffer (editor-active-view editor)))
+           (view-caret (editor-active-view editor))
+           (map
+             (lambda (visible)
+               (list
+                 (buffer-resource (view-buffer visible))
+                 (buffer-major-mode-name
+                   (view-buffer visible))))
+             (editor-visible-views editor))))
+  (execute!
+    (editor-update!
+      editor
+      (make-command-message 'scheme.debug-open #f)))
+  (unless
+    (eq?
+      (buffer-major-mode-name
+        (view-buffer (editor-active-view editor)))
+      'debugger-mode)
+    (error 'evaluation-runtime-tests
+           "debug open did not return focus to the visible debugger"))
 
   (execute!
     (editor-update!

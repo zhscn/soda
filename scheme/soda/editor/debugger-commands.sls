@@ -21,7 +21,9 @@
           (soda editor language)
           (soda editor prompt)
           (soda editor source-debug)
-          (soda editor state))
+          (soda editor state)
+          (soda editor window)
+          (soda editor window-runtime))
 
   (define (debugger-resource debugger)
     (string-append
@@ -55,6 +57,27 @@
         (find
           (lambda (buffer) (= (buffer-id buffer) id))
           (editor-buffers editor)))))
+
+  (define (view-for-buffer editor target-buffer-id)
+    (or
+      (find
+        (lambda (view)
+          (and
+            (= (buffer-id (view-buffer view)) target-buffer-id)
+            (editor-window-for-view editor (view-id view))))
+        (editor-views editor))
+      (find
+        (lambda (view)
+          (= (buffer-id (view-buffer view)) target-buffer-id))
+        (editor-views editor))))
+
+  (define (visible-view-for-buffer editor target-buffer-id)
+    (find
+      (lambda (view)
+        (and
+          (= (buffer-id (view-buffer view)) target-buffer-id)
+          (editor-window-for-view editor (view-id view))))
+      (editor-views editor)))
 
   (define (refresh-debugger-buffer! editor debugger)
     (let ([buffer (debugger-buffer editor debugger)])
@@ -132,18 +155,56 @@
           (lambda (view)
             (when (= (buffer-id (view-buffer view))
                      (buffer-id buffer))
-              (when return-buffer
-                (editor-set-view-buffer!
-                  editor
-                  (view-id view)
-                  (buffer-id return-buffer))
-                (when (debugger-session-return-caret debugger)
-                  (view-set-caret!
-                    view
-                    (min
+              (let ([leaf
+                      (editor-window-for-view
+                        editor
+                        (view-id view))]
+                    [visible-return
+                      (and
+                        return-buffer
+                        (visible-view-for-buffer
+                          editor
+                          (buffer-id return-buffer)))])
+                (if
+                  (and
+                    leaf
+                    visible-return
+                    (> (length (editor-window-leaves editor)) 1))
+                  (begin
+                    (editor-set-active-window-id!
+                      editor
+                      (window-leaf-id leaf))
+                    (editor-set-active-view!
+                      editor
+                      (view-id view))
+                    (editor-delete-window! editor))
+                  (when return-buffer
+                    (editor-set-view-buffer!
+                      editor
+                      (view-id view)
+                      (buffer-id return-buffer))
+                    (when
                       (debugger-session-return-caret debugger)
-                      (buffer-size return-buffer)))))))
-          (editor-views editor))
+                      (view-set-caret!
+                        view
+                        (min
+                          (debugger-session-return-caret debugger)
+                          (buffer-size return-buffer)))))))))
+          (filter
+            (lambda (view)
+              (= (buffer-id (view-buffer view))
+                 (buffer-id buffer)))
+            (editor-views editor)))
+        (let ([return-view
+                (and
+                  return-buffer
+                  (visible-view-for-buffer
+                    editor
+                    (buffer-id return-buffer)))])
+          (when return-view
+            (editor-select-view-window!
+              editor
+              (view-id return-view))))
         (editor-remove-buffer! editor (buffer-id buffer))
         (debugger-session-set-buffer-id! debugger #f))))
 
@@ -162,7 +223,7 @@
       session
       (interaction-session-debugger session)))
 
-  (define (open-debugger! editor view debugger)
+  (define (open-debugger! editor debugger)
     (let ([buffer (debugger-buffer editor debugger)])
       (unless buffer
         (set! buffer
@@ -178,12 +239,53 @@
         (debugger-session-set-buffer-id!
           debugger
           (buffer-id buffer)))
-      (editor-set-view-buffer!
-        editor
-        (view-id view)
-        (buffer-id buffer))
+      (let* ([existing
+               (view-for-buffer
+                 editor
+                 (buffer-id buffer))]
+             [return-buffer-id
+               (debugger-session-return-buffer-id debugger)]
+             [return-view
+               (and
+                 return-buffer-id
+                 (view-for-buffer editor return-buffer-id))]
+             [interaction-return?
+               (and
+                 return-buffer-id
+                 (editor-interaction-for-buffer
+                   editor
+                   return-buffer-id))]
+             [target
+               (cond
+                 [existing
+                  (editor-display-view-below!
+                    editor
+                    (view-id existing))
+                  existing]
+                 [(and interaction-return? return-view)
+                  (editor-set-view-buffer!
+                    editor
+                    (view-id return-view)
+                    (buffer-id buffer))
+                  (or
+                    (editor-select-view-window!
+                      editor
+                      (view-id return-view))
+                    (editor-display-view-below!
+                      editor
+                      (view-id return-view)))
+                  return-view]
+                 [else
+                  (let ([created
+                          (editor-open-view!
+                            editor
+                            (buffer-id buffer))])
+                    (editor-display-view-below!
+                      editor
+                      (view-id created))
+                    created)])])
       (view-set-caret!
-        view
+        target
         (debugger-session-selected-frame-byte-offset debugger))
       (editor-set-status-message!
         editor
@@ -194,7 +296,7 @@
               (debugger-session-condition debugger)))
           "Debugger: c continue, r action, q abort, k continuation"
           "Debugger: n/p frame, e eval, i condition, l local, d/u inspect"))
-      buffer))
+      buffer)))
 
   (define (editor-capture-condition! editor label condition)
     (guard
@@ -222,7 +324,7 @@
         (editor-set-debugger! editor debugger)
         (initialize-debugger!
           editor #f debugger)
-        (open-debugger! editor view debugger)
+        (open-debugger! editor debugger)
         debugger)))
 
   (define (interaction-attach-debugger-result!
@@ -251,7 +353,6 @@
               (begin
                 (open-debugger!
                   editor
-                  (editor-active-view editor)
                   debugger)
                 (editor-set-status-message!
                   editor
@@ -271,6 +372,14 @@
           (debugger-session-return-buffer-id debugger)
           buffer-id))))
 
+  (define (debugger-visible? editor debugger)
+    (let ([buffer-id
+            (and debugger
+                 (debugger-session-buffer-id debugger))])
+      (and
+        buffer-id
+        (visible-view-for-buffer editor buffer-id))))
+
   (define (active-debug-target editor view)
     (let* ([buffer-id (buffer-id (view-buffer view))]
            [interaction
@@ -287,6 +396,17 @@
              (debugger-matches-buffer?
                (interaction-session-debugger session)
                buffer-id))
+           (editor-interactions editor))
+         =>
+         (lambda (session)
+           (list
+             session
+             (interaction-session-debugger session)))]
+        [(find
+           (lambda (session)
+             (debugger-visible?
+               editor
+               (interaction-session-debugger session)))
            (editor-interactions editor))
          =>
          (lambda (session)
@@ -313,6 +433,36 @@
           "active buffer has no saved debugger"))
       target))
 
+  (define (source-display-view editor debugger)
+    (let* ([active (editor-active-view editor)]
+           [other
+             (find
+               (lambda (candidate)
+                 (and
+                   (not (= (view-id candidate)
+                           (view-id active)))
+                   (editor-window-for-view
+                     editor
+                     (view-id candidate))))
+               (editor-views editor))]
+           [return-buffer-id
+             (debugger-session-return-buffer-id debugger)]
+           [return-view
+             (and
+               return-buffer-id
+               (view-for-buffer editor return-buffer-id))]
+           [target
+             (or
+               other
+               return-view
+               (editor-open-view!
+                 editor
+                 (buffer-id (view-buffer active))))])
+      (editor-display-view-other-window!
+        editor
+        (view-id target))
+      target))
+
   (define (require-debugger-action who target id)
     (let ([action
             (debugger-session-action
@@ -336,7 +486,6 @@
            [debugger (cadr target)])
       (open-debugger!
         editor
-        (command-context-view context)
         debugger)
       '()))
 
@@ -383,54 +532,73 @@
                   (editor-buffer-for-resource
                     editor
                     stop-resource))]
+           [source-view
+             (and
+               source-buffer
+               (view-for-buffer
+                 editor
+                 (buffer-id source-buffer)))]
            [frame
              (debugger-session-selected-frame
                debugger)])
       (cond
         [source-buffer
-         (editor-set-view-buffer!
-           editor
-           (view-id (command-context-view context))
-           (buffer-id source-buffer))
+         (let ([target
+                 (or
+                   source-view
+                   (editor-open-view!
+                     editor
+                     (buffer-id source-buffer)))])
+           (editor-display-view-other-window!
+             editor
+             (view-id target))
          (view-set-caret!
-           (command-context-view context)
+             target
            (min
              (source-location-start stop-location)
-             (buffer-size source-buffer)))
+               (buffer-size source-buffer))))
          '()]
         [(and stop-location (string? stop-resource))
-         (editor-set-status-message!
-           editor
-           (string-append "Reading " stop-resource))
-         (list
-           (make-command-effect
-             'file.read
-             (make-open-request
-               (view-id (command-context-view context))
-               stop-resource
-               (source-location-start stop-location))))]
+         (let ([target
+                 (source-display-view
+                   editor
+                   debugger)])
+           (editor-set-status-message!
+             editor
+             (string-append "Reading " stop-resource))
+           (list
+             (make-command-effect
+               'file.read
+               (make-open-request
+                 (view-id target)
+                 stop-resource
+                 (source-location-start stop-location)))))]
         [(and
            frame
            (string? (debugger-frame-source-path frame))
            (integer? (debugger-frame-source-line frame))
            (exact? (debugger-frame-source-line frame))
            (not (negative? (debugger-frame-source-line frame))))
-         (editor-set-status-message!
-           editor
-           (string-append
-             "Reading "
-             (debugger-frame-source-path frame)))
-         (list
-           (make-command-effect
-             'file.read
-             (make-open-request
-               (view-id (command-context-view context))
-               (debugger-frame-source-path frame)
-               (make-file-source-position
-                 (debugger-frame-source-line frame)
-                 (or
-                   (debugger-frame-source-character frame)
-                   0)))))]
+         (let ([target
+                 (source-display-view
+                   editor
+                   debugger)])
+           (editor-set-status-message!
+             editor
+             (string-append
+               "Reading "
+               (debugger-frame-source-path frame)))
+           (list
+             (make-command-effect
+               'file.read
+               (make-open-request
+                 (view-id target)
+                 (debugger-frame-source-path frame)
+                 (make-file-source-position
+                   (debugger-frame-source-line frame)
+                   (or
+                     (debugger-frame-source-character frame)
+                     0))))))]
         [else
          (editor-user-error
            'scheme.debug-visit-source

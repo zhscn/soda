@@ -481,7 +481,12 @@
     (eq?
       (buffer-major-mode-name
         (view-buffer (editor-active-view editor)))
-      'debugger-mode))
+      'debugger-mode)
+    (= (length (editor-window-leaves editor)) 2)
+    (exists
+      (lambda (view)
+        (eq? (view-buffer view) buffer))
+      (editor-visible-views editor)))
   (error 'editor-tests
          "interactive command failure did not open the debugger"))
 (define command-debugger (editor-debugger editor))
@@ -575,7 +580,8 @@
   (and
     (not (editor-debugger editor))
     (eq? (view-buffer (editor-active-view editor)) buffer)
-    (= (view-caret (editor-active-view editor)) 2))
+    (= (view-caret (editor-active-view editor)) 2)
+    (= (length (editor-window-leaves editor)) 1))
   (error 'editor-tests
          "discarding a command debugger did not restore its view"))
 (editor-update!

@@ -20,6 +20,12 @@ stdin 由 TUI input decoder 持有，Scheme 求值不会启动第二个终端 RE
 session 不以 Buffer 作为 namespace。关闭 transcript 需要先关闭所属 session；
 同一个 session 的视图可以重新创建，求值环境与 request identity 保持独立。
 
+首次激活 interaction transcript 时，adapter 在当前源码窗口下方显示其 View；
+已有 transcript View 则直接选择所属 window。`scheme.open-repl` 在 transcript
+window 与另一个可见编辑 window 之间切换 focus，两个 View 保持同时显示。源码
+求值因此可以把结果写入下方 transcript，而来源 Buffer、point 和 viewport 保留在
+原 window。
+
 通用 comint 层负责激活 transcript View、提交和替换当前输入、追加输出、浏览历史
 以及维护 caret 可见性。Scheme REPL 层负责 Chez reader 完整性判断、构造求值
 request、格式化 result 和提供 debugger command。其他 interaction mode 可以复用
@@ -228,6 +234,14 @@ Chez condition 和可用的 continuation；transcript 只显示 condition 的文
 Editor command 或 effect handler 失败则创建 Editor 所有的 debugger，并立即把
 触发异常的 View 切换到 debugger Buffer。两类 debugger 使用相同的数据模型和
 命令，不创建递归 REPL 或第二个事件循环。
+
+evaluation debugger 占用对应 interaction window，并在关闭、重试、继续或丢弃时
+恢复 transcript View。Editor command debugger 在来源 window 下方建立临时
+debugger window；关闭 debugger 时若来源 Buffer 已在另一 window 可见，则删除该
+临时 window 并选择来源 View。`scheme.debug-visit-source` 在另一个 window 显示
+源码并保留 debugger window；`scheme.debug-open` 从源码 window 重新选择仍可见的
+debugger。该布局让 frame/Inspector 操作、源码查看和 transcript 保持在同一
+command loop 中切换 focus。
 
 evaluator 在编译和执行 request 时保留 Chez inspector information，并为交互式
 求值关闭 CP0 源级优化。该编译策略保留异常点之后的 continuation 结构，使

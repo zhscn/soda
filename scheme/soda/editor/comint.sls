@@ -27,7 +27,8 @@
           (soda editor display)
           (soda editor interaction)
           (soda editor interaction-transcript)
-          (soda editor state))
+          (soda editor state)
+          (soda editor window-runtime))
 
   (define (buffer-size buffer)
     (let ([snapshot (document-snapshot (buffer-document buffer))])
@@ -42,10 +43,17 @@
         (lambda () (snapshot-close! snapshot)))))
 
   (define (view-for-buffer editor target-buffer-id)
-    (find
-      (lambda (view)
-        (= (buffer-id (view-buffer view)) target-buffer-id))
-      (editor-views editor)))
+    (or
+      (find
+        (lambda (view)
+          (and
+            (= (buffer-id (view-buffer view)) target-buffer-id)
+            (editor-window-for-view editor (view-id view))))
+        (editor-views editor))
+      (find
+        (lambda (view)
+          (= (buffer-id (view-buffer view)) target-buffer-id))
+        (editor-views editor))))
 
   (define (buffer-end-viewport-minimum buffer)
     (let ([snapshot
@@ -103,7 +111,9 @@
       (view-set-keymap-layers! view keymap-layers)
       (view-set-caret! view (buffer-size (view-buffer view)))
       (ensure-view-visible! view)
-      (editor-set-active-view! editor (view-id view))
+      (editor-display-view-below!
+        editor
+        (view-id view))
       view))
 
   (define (comint-session-buffer editor session)

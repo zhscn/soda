@@ -27,6 +27,10 @@
           editor-window-leaves
           editor-active-window
           editor-visible-views
+          editor-window-for-view
+          editor-select-view-window!
+          editor-display-view-below!
+          editor-display-view-other-window!
           editor-split-window!
           editor-delete-window!
           editor-delete-other-windows!
