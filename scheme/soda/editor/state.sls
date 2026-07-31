@@ -91,6 +91,12 @@
           editor-set-global-minor-modes!
           editor-keymap-catalog
           editor-language-catalog
+          editor-language-session-registry
+          editor-ensure-language-session!
+          editor-attach-language-session!
+          editor-buffer-language-attachments
+          editor-set-view-language-attachment!
+          editor-view-language-attachment
           editor-auto-mode-catalog
           editor-register-auto-mode-rule!
           editor-major-mode-for-path
@@ -267,6 +273,7 @@
           (soda editor interaction)
           (soda editor keymap)
           (soda editor language)
+          (soda editor language-session)
           (soda editor location)
           (soda editor minor-mode)
           (soda editor prefix)
@@ -384,6 +391,7 @@
       (immutable hooks editor-hook-registry)
       (immutable keymaps editor-keymap-catalog)
       (immutable languages editor-language-catalog)
+      (immutable language-sessions editor-language-session-registry)
       (immutable auto-modes editor-auto-mode-catalog)
       (immutable projects editor-project-catalog)
       (immutable project-resource-snapshots
@@ -1306,6 +1314,9 @@
       (editor-clear-buffer-global-marks! value buffer)
       (editor-clear-buffer-changes! value buffer)
       (editor-detach-buffer-bookmarks! value buffer)
+      (language-session-registry-detach-buffer!
+        (editor-language-session-registry value)
+        id)
       (hashtable-delete! (editor-buffer-table value) id)
       (let ([resource (buffer-resource buffer)])
         (when
@@ -1482,6 +1493,117 @@
       project
       (resource-context-language-context context)))
 
+  (define (editor-ensure-language-session! value key)
+    (require-open-editor 'editor-ensure-language-session! value)
+    (language-session-registry-ensure!
+      (editor-language-session-registry value)
+      key))
+
+  (define (editor-attach-language-session!
+            value buffer-id session provenance origin-view-id)
+    (require-open-editor 'editor-attach-language-session! value)
+    (let ([buffer (editor-buffer-ref value buffer-id)])
+      (unless (language-session? session)
+        (assertion-violation
+          'editor-attach-language-session!
+          "expected a LanguageSession"
+          session))
+      (let ([registered
+              (language-session-registry-session-ref
+                (editor-language-session-registry value)
+                (language-session-id session))])
+        (unless (eq? registered session)
+          (assertion-violation
+            'editor-attach-language-session!
+            "LanguageSession belongs to another editor"
+            session)))
+      (language-session-registry-attach!
+        (editor-language-session-registry value)
+        buffer-id
+        (language-session-id session)
+        provenance
+        origin-view-id
+        (buffer-revision buffer))))
+
+  (define (editor-buffer-language-attachments value buffer-id)
+    (require-open-editor 'editor-buffer-language-attachments value)
+    (editor-buffer-ref value buffer-id)
+    (language-session-registry-buffer-attachments
+      (editor-language-session-registry value)
+      buffer-id))
+
+  (define (editor-view-language-attachment value view-id)
+    (require-open-editor 'editor-view-language-attachment value)
+    (let* ([context
+             (view-resource-context (editor-view-ref value view-id))]
+           [language-context
+             (resource-context-language-context context)])
+      (and
+        (view-language-context? language-context)
+        (language-session-registry-attachment-ref
+          (editor-language-session-registry value)
+          (view-language-context-attachment-id language-context)))))
+
+  (define (editor-set-view-language-attachment!
+            value view-id attachment)
+    (require-open-editor 'editor-set-view-language-attachment! value)
+    (let ([view (editor-view-ref value view-id)])
+      (when attachment
+        (unless (language-attachment? attachment)
+          (assertion-violation
+            'editor-set-view-language-attachment!
+            "expected a LanguageAttachment or #f"
+            attachment))
+        (let ([registered
+                (language-session-registry-attachment-ref
+                  (editor-language-session-registry value)
+                  (language-attachment-id attachment))])
+          (unless
+            (and
+              (eq? registered attachment)
+              (= (language-attachment-buffer-id attachment)
+                 (buffer-id (view-buffer view))))
+            (assertion-violation
+              'editor-set-view-language-attachment!
+              "attachment does not belong to the View Buffer"
+              attachment))))
+      (view-resource-context-set!
+        view
+        (resource-context-with-language-context
+          (view-resource-context view)
+          (and
+            attachment
+            (make-view-language-context
+              (language-attachment-id attachment)))))
+      (editor-invalidate! value 'configuration)
+      attachment))
+
+  (define (adapt-language-context-to-buffer value context buffer)
+    (let ([language-context
+            (resource-context-language-context context)])
+      (if (not (view-language-context? language-context))
+          context
+          (let* ([registry (editor-language-session-registry value)]
+                 [source
+                   (language-session-registry-attachment-ref
+                     registry
+                     (view-language-context-attachment-id language-context))])
+            (if (= (language-attachment-buffer-id source)
+                   (buffer-id buffer))
+                context
+                (let ([target
+                        (language-session-registry-attach!
+                          registry
+                          (buffer-id buffer)
+                          (language-attachment-session-id source)
+                          'inherited
+                          (resource-context-origin-view-id context)
+                          (buffer-revision buffer))])
+                  (resource-context-with-language-context
+                    context
+                    (make-view-language-context
+                      (language-attachment-id target)))))))))
+
   (define (editor-view-resource-context value view-id)
     (require-open-editor 'editor-view-resource-context value)
     (let* ([view (editor-view-ref value view-id)]
@@ -1537,7 +1659,10 @@
     (let ([view (editor-view-ref value view-id)])
       (view-resource-context-set!
         view
-        (resource-context-with-origin context view-id))
+        (resource-context-with-origin
+          (adapt-language-context-to-buffer
+            value context (view-buffer view))
+          view-id))
       (editor-invalidate! value 'configuration)
       (view-resource-context view)))
 
@@ -1561,7 +1686,8 @@
               [id (editor-next-view-id value)]
               [context
                 (resource-context-with-origin
-                  source-context
+                  (adapt-language-context-to-buffer
+                    value source-context buffer)
                   id)]
            [view
              (%make-view
@@ -1926,7 +2052,16 @@
         (view-mark-anchor-set! view #f)
         (view-mark-active?-set! view #f)
         (view-mark-ring-anchors-set! view '())
-        (view-display-map-set! view #f))
+        (view-display-map-set! view #f)
+        (when
+          (view-language-context?
+            (resource-context-language-context
+              (view-resource-context view)))
+          (view-resource-context-set!
+            view
+            (resource-context-with-language-context
+              (view-resource-context view)
+              #f))))
       (view-first-line-set! view 0)
       (view-first-visual-row-set! view 0)
       (view-first-column-set! view 0)
@@ -5592,6 +5727,7 @@
                (make-hook-registry)
                keymaps
                (buffer-language-catalog buffer)
+               (make-language-session-registry)
                (make-auto-mode-catalog)
                (make-project-catalog)
                (make-hashtable equal-hash equal?)

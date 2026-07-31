@@ -197,6 +197,34 @@
           editor-global-minor-modes
           editor-keymap-catalog
           editor-language-catalog
+          make-language-session-key
+          language-session-key?
+          language-session-key-language
+          language-session-key-provider
+          language-session-key-workspace-folders
+          language-session-key-configuration
+          language-session-key-environment-fingerprint
+          language-session-key-client-capabilities
+          language-session?
+          language-session-id
+          language-session-identity
+          language-session-generation
+          language-session-bump-generation!
+          language-attachment?
+          language-attachment-id
+          language-attachment-buffer-id
+          language-attachment-session-id
+          language-attachment-provenance
+          language-attachment-origin-view-id
+          language-attachment-opened-revision
+          view-language-context?
+          view-language-context-attachment-id
+          editor-language-session-registry
+          editor-ensure-language-session!
+          editor-attach-language-session!
+          editor-buffer-language-attachments
+          editor-set-view-language-attachment!
+          editor-view-language-attachment
           make-auto-mode-rule
           make-file-suffix-auto-mode-rule
           auto-mode-rule?
@@ -345,6 +373,7 @@
           resource-context-language-context
           resource-context-with-origin
           resource-context-with-base-resource
+          resource-context-with-language-context
           resource-context-resolve
           editor-view-resource-context
           editor-set-view-resource-context!
@@ -1122,6 +1151,7 @@
           (soda editor interaction)
           (soda editor inspector)
           (soda editor kill)
+          (soda editor language-session)
           (soda editor location)
           (soda editor managed-process)
           (soda editor minor-mode)
