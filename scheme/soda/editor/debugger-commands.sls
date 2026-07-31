@@ -13,6 +13,7 @@
           (soda editor condition)
           (soda editor debugger)
           (soda editor debugger-action)
+          (soda editor display-placement)
           (soda editor edit)
           (soda editor file)
           (soda editor interaction)
@@ -57,19 +58,6 @@
         (find
           (lambda (buffer) (= (buffer-id buffer) id))
           (editor-buffers editor)))))
-
-  (define (view-for-buffer editor target-buffer-id)
-    (or
-      (find
-        (lambda (view)
-          (and
-            (= (buffer-id (view-buffer view)) target-buffer-id)
-            (editor-window-for-view editor (view-id view))))
-        (editor-views editor))
-      (find
-        (lambda (view)
-          (= (buffer-id (view-buffer view)) target-buffer-id))
-        (editor-views editor))))
 
   (define (visible-view-for-buffer editor target-buffer-id)
     (find
@@ -239,51 +227,25 @@
         (debugger-session-set-buffer-id!
           debugger
           (buffer-id buffer)))
-      (let* ([existing
-               (view-for-buffer
-                 editor
-                 (buffer-id buffer))]
-             [return-buffer-id
+      (let* ([return-buffer-id
                (debugger-session-return-buffer-id debugger)]
              [return-view
                (and
                  return-buffer-id
-                 (view-for-buffer editor return-buffer-id))]
-             [interaction-return?
-               (and
-                 return-buffer-id
-                 (editor-interaction-for-buffer
-                   editor
-                   return-buffer-id))]
+                 (visible-view-for-buffer editor return-buffer-id))]
+             [origin-view
+               (or return-view (editor-active-view editor))]
              [target
-               (cond
-                 [existing
-                  (editor-display-view-below!
-                    editor
-                    (view-id existing))
-                  existing]
-                 [(and interaction-return? return-view)
-                  (editor-set-view-buffer!
-                    editor
-                    (view-id return-view)
-                    (buffer-id buffer))
-                  (or
-                    (editor-select-view-window!
-                      editor
-                      (view-id return-view))
-                    (editor-display-view-below!
-                      editor
-                      (view-id return-view)))
-                  return-view]
-                 [else
-                  (let ([created
-                          (editor-open-view!
-                            editor
-                            (buffer-id buffer))])
-                    (editor-display-view-below!
-                      editor
-                      (view-id created))
-                    created)])])
+               (editor-display-buffer!
+                 editor
+                 (make-display-request
+                   (buffer-id buffer)
+                   'tools
+                   (view-id origin-view)
+                   #f
+                   (editor-view-resource-context
+                     editor
+                     (view-id origin-view))))])
       (view-set-caret!
         target
         (debugger-session-selected-frame-byte-offset debugger))
@@ -435,33 +397,25 @@
 
   (define (source-display-view editor debugger)
     (let* ([active (editor-active-view editor)]
-           [other
-             (find
-               (lambda (candidate)
-                 (and
-                   (not (= (view-id candidate)
-                           (view-id active)))
-                   (editor-window-for-view
-                     editor
-                     (view-id candidate))))
-               (editor-views editor))]
            [return-buffer-id
              (debugger-session-return-buffer-id debugger)]
-           [return-view
+           [return-buffer
              (and
                return-buffer-id
-               (view-for-buffer editor return-buffer-id))]
-           [target
-             (or
-               other
-               return-view
-               (editor-open-view!
-                 editor
-                 (buffer-id (view-buffer active))))])
-      (editor-display-view-other-window!
+               (buffer-with-id editor return-buffer-id))]
+           [buffer
+             (or return-buffer (view-buffer active))]
+           [intent (if return-buffer 'jump 'pop)])
+      (editor-display-buffer!
         editor
-        (view-id target))
-      target))
+        (make-display-request
+          (buffer-id buffer)
+          intent
+          (view-id active)
+          #f
+          (editor-view-resource-context
+            editor
+            (view-id active))))))
 
   (define (require-debugger-action who target id)
     (let ([action
@@ -532,30 +486,27 @@
                   (editor-buffer-for-resource
                     editor
                     stop-resource))]
-           [source-view
-             (and
-               source-buffer
-               (view-for-buffer
-                 editor
-                 (buffer-id source-buffer)))]
            [frame
              (debugger-session-selected-frame
                debugger)])
       (cond
         [source-buffer
          (let ([target
-                 (or
-                   source-view
-                   (editor-open-view!
-                     editor
-                     (buffer-id source-buffer)))])
-           (editor-display-view-other-window!
-             editor
-             (view-id target))
-         (view-set-caret!
+                 (editor-display-buffer!
+                   editor
+                   (make-display-request
+                     (buffer-id source-buffer)
+                     'jump
+                     (view-id (command-context-view context))
+                     #f
+                     (editor-view-resource-context
+                       editor
+                       (view-id
+                         (command-context-view context)))))])
+           (view-set-caret!
              target
-           (min
-             (source-location-start stop-location)
+             (min
+               (source-location-start stop-location)
                (buffer-size source-buffer))))
          '()]
         [(and stop-location (string? stop-resource))

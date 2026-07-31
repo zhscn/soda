@@ -4,8 +4,6 @@
           editor-visible-views
           editor-window-for-view
           editor-select-view-window!
-          editor-display-view-below!
-          editor-display-view-other-window!
           editor-split-window!
           editor-delete-window!
           editor-delete-other-windows!
@@ -136,61 +134,6 @@
       (and leaf
            (activate-window! editor leaf)
            #t)))
-
-  (define (split-with-view-below! editor view-id)
-    (let* ([window (editor-active-window editor)]
-           [leaf
-             (make-window-leaf
-               (editor-allocate-window-id! editor)
-               view-id)]
-           [split
-             (make-window-split
-               (editor-allocate-window-id! editor)
-               'vertical
-               (list window leaf))])
-      (editor-set-window-root!
-        editor
-        (window-node-replace
-          (editor-window-root editor)
-          (window-leaf-id window)
-          split))
-      (activate-window! editor leaf)
-      leaf))
-
-  (define (editor-display-view-below! editor view-id)
-    (require-open-editor 'editor-display-view-below! editor)
-    (editor-view-ref editor view-id)
-    (require-window-command-available
-      'editor-display-view-below!
-      editor)
-    (or
-      (and
-        (editor-select-view-window! editor view-id)
-        (editor-window-for-view editor view-id))
-      (split-with-view-below! editor view-id)))
-
-  (define (editor-display-view-other-window! editor view-id)
-    (require-open-editor 'editor-display-view-other-window! editor)
-    (editor-view-ref editor view-id)
-    (require-window-command-available
-      'editor-display-view-other-window!
-      editor)
-    (or
-      (and
-        (editor-select-view-window! editor view-id)
-        (editor-window-for-view editor view-id))
-      (let ([other
-              (find
-                (lambda (leaf)
-                  (not
-                    (= (window-leaf-id leaf)
-                       (editor-active-window-id editor))))
-                (editor-window-leaves editor))])
-        (if other
-            (begin
-              (window-leaf-set-view-id! other view-id)
-              (activate-window! editor other))
-            (split-with-view-below! editor view-id)))))
 
   (define (editor-other-window! editor count)
     (require-open-editor 'editor-other-window! editor)

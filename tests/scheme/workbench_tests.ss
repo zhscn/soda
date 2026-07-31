@@ -2,6 +2,7 @@
 (import (rnrs)
         (soda document)
         (soda editor buffer)
+        (soda editor display-placement)
         (soda editor project)
         (soda editor state)
         (soda editor window)
@@ -64,9 +65,61 @@
     (= (length (editor-window-leaves editor)) 1))
   "switch must restore the target layout without changing another layout")
 
+(define origin-view-id
+  (window-leaf-view-id
+    (window-node-find
+      (workbench-layout secondary)
+      (workbench-active-window-id secondary))))
+(define tool-document-a (make-document "tool-a" 9111))
+(define tool-buffer-a
+  (make-buffer 9112 tool-document-a "*tool-a*" 'fundamental-mode))
+(define tool-document-b (make-document "tool-b" 9121))
+(define tool-buffer-b
+  (make-buffer 9122 tool-document-b "*tool-b*" 'fundamental-mode))
+(define tool-document-c (make-document "tool-c" 9131))
+(define tool-buffer-c
+  (make-buffer 9132 tool-document-c "*tool-c*" 'fundamental-mode))
+(for-each
+  (lambda (value) (editor-add-buffer! editor value))
+  (list tool-buffer-a tool-buffer-b tool-buffer-c))
+
+(editor-display-buffer!
+  editor
+  (make-display-request
+    9112 'tools origin-view-id #f #f))
+(define tools-window-id
+  (workbench-slot-window-id secondary 'tools))
+(check
+  (and
+    tools-window-id
+    (eq? (editor-active-workbench editor) primary)
+    (= (length (window-node-leaves (workbench-layout secondary))) 3))
+  "origin placement must update an inactive Workbench without selecting it")
+
+(editor-display-buffer!
+  editor
+  (make-display-request
+    9122 'tools origin-view-id #f #f))
+(check
+  (and
+    (= (workbench-slot-window-id secondary 'tools) tools-window-id)
+    (= (length (window-node-leaves (workbench-layout secondary))) 3))
+  "a named slot must reuse its Window for the next matching intent")
+
+(workbench-pin-window! secondary tools-window-id)
+(editor-display-buffer!
+  editor
+  (make-display-request
+    9132 'tools origin-view-id #f #f))
+(check
+  (and
+    (= (workbench-slot-window-id secondary 'tools) tools-window-id)
+    (= (length (window-node-leaves (workbench-layout secondary))) 4))
+  "ordinary placement must preserve a pinned slot and use a fallback split")
+
 (editor-switch-workbench! editor (workbench-id secondary))
 (check
-  (= (length (editor-window-leaves editor)) 2)
+  (= (length (editor-window-leaves editor)) 4)
   "switching back must preserve the inactive workbench layout")
 
 (editor-close-workbench! editor (workbench-id secondary))

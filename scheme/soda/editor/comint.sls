@@ -25,10 +25,10 @@
           (soda editor command)
           (soda editor command-runtime)
           (soda editor display)
+          (soda editor display-placement)
           (soda editor interaction)
           (soda editor interaction-transcript)
-          (soda editor state)
-          (soda editor window-runtime))
+          (soda editor state))
 
   (define (buffer-size buffer)
     (let ([snapshot (document-snapshot (buffer-document buffer))])
@@ -41,19 +41,6 @@
               (lambda () (text-size text))
               (lambda () (text-close! text)))))
         (lambda () (snapshot-close! snapshot)))))
-
-  (define (view-for-buffer editor target-buffer-id)
-    (or
-      (find
-        (lambda (view)
-          (and
-            (= (buffer-id (view-buffer view)) target-buffer-id)
-            (editor-window-for-view editor (view-id view))))
-        (editor-views editor))
-      (find
-        (lambda (view)
-          (= (buffer-id (view-buffer view)) target-buffer-id))
-        (editor-views editor))))
 
   (define (buffer-end-viewport-minimum buffer)
     (let ([snapshot
@@ -88,13 +75,21 @@
 
   (define (activate-interaction-view! editor session keymap-layers)
     (let* ([buffer-id (interaction-session-buffer-id session)]
-           [existing (view-for-buffer editor buffer-id)]
            [reference (editor-base-view editor)]
+           [origin-view-id (view-id (editor-active-view editor))]
+           [request
+             (make-display-request
+               buffer-id
+               'tools
+               origin-view-id
+               #f
+               (editor-view-resource-context
+                 editor
+                 origin-view-id))]
+           [plan (editor-plan-display editor request)]
            [view
-             (or
-               existing
-               (editor-open-view! editor buffer-id))])
-      (unless existing
+             (editor-display-buffer! editor request)])
+      (unless (eq? (display-plan-action plan) 'reuse)
         (let ([minimum
                 (buffer-end-viewport-minimum
                   (view-buffer view))])
@@ -111,9 +106,6 @@
       (view-set-keymap-layers! view keymap-layers)
       (view-set-caret! view (buffer-size (view-buffer view)))
       (ensure-view-visible! view)
-      (editor-display-view-below!
-        editor
-        (view-id view))
       view))
 
   (define (comint-session-buffer editor session)

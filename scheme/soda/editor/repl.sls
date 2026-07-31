@@ -12,6 +12,7 @@
           (soda editor comint)
           (soda editor condition)
           (soda editor debugger-commands)
+          (soda editor display-placement)
           (soda editor display-map)
           (soda editor effect)
           (soda editor evaluator)
@@ -21,8 +22,7 @@
           (soda editor keymap)
           (soda editor scheme-indentation)
           (soda editor scheme-repl-indentation)
-          (soda editor state)
-          (soda editor window-runtime))
+          (soda editor state))
 
   (define repl-resource "*scheme-repl*")
   (define repl-prompt "> ")
@@ -259,31 +259,39 @@
       (if (and session
                (= (buffer-id active-buffer)
                   (interaction-session-buffer-id session)))
-          (let ([other
+          (let ([other-buffer
                   (find
-                    (lambda (view)
+                    (lambda (candidate)
                       (not
-                        (= (buffer-id (view-buffer view))
+                        (= (buffer-id candidate)
                            (interaction-session-buffer-id session))))
-                    (reverse (editor-views editor)))])
-            (unless other
-              (let ([other-buffer
-                      (find
-                        (lambda (candidate)
-                          (not
-                            (= (buffer-id candidate)
-                               (interaction-session-buffer-id
-                                 session))))
-                        (editor-buffers editor))])
-                (when other-buffer
-                  (set! other
-                    (editor-open-view!
+                    (editor-buffers editor))])
+            (when other-buffer
+              (let* ([origin-view-id
+                       (view-id (editor-active-view editor))]
+                     [existing-view
+                       (find
+                         (lambda (view)
+                           (and
+                             (= (buffer-id (view-buffer view))
+                                (buffer-id other-buffer))
+                             (eq?
+                               (editor-workbench-for-view
+                                 editor
+                                 (view-id view))
+                               (editor-active-workbench editor))))
+                         (editor-views editor))]
+                     [intent (if existing-view 'edit 'pop)])
+                (editor-display-buffer!
+                  editor
+                  (make-display-request
+                    (buffer-id other-buffer)
+                    intent
+                    origin-view-id
+                    #f
+                    (editor-view-resource-context
                       editor
-                      (buffer-id other-buffer))))))
-            (when other
-              (editor-display-view-other-window!
-                editor
-                (view-id other))))
+                      origin-view-id))))))
           (editor-open-repl! editor)))
     '())
 

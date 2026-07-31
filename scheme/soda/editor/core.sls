@@ -29,8 +29,20 @@
           editor-visible-views
           editor-window-for-view
           editor-select-view-window!
-          editor-display-view-below!
-          editor-display-view-other-window!
+          make-display-request
+          display-request?
+          display-request-buffer-id
+          display-request-intent
+          display-request-origin-view-id
+          display-request-target-window-id
+          display-request-resource-context
+          display-plan?
+          display-plan-workbench-id
+          display-plan-window-id
+          display-plan-action
+          display-plan-role
+          editor-plan-display
+          editor-display-buffer!
           editor-split-window!
           editor-delete-window!
           editor-delete-other-windows!
@@ -1081,6 +1093,7 @@
           (soda editor cpp-commands)
           (soda editor debugger)
           (soda editor debugger-action)
+          (soda editor display-placement)
           (soda editor decoration)
           (soda editor display-map)
           (soda editor diagnostics)

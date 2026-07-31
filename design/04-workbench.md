@@ -137,7 +137,8 @@ Workbench {
   layout: WindowLayout,
   active_window,
   mru: BufferId list,
-  slots: intent -> WindowId
+  slots: intent -> WindowId,
+  pinned_windows: WindowId set
 }
 ```
 

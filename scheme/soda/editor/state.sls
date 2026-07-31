@@ -1477,16 +1477,28 @@
       (editor-invalidate! value 'configuration)
       (view-resource-context view)))
 
-  (define (editor-open-view! value buffer-id)
-    (require-open-editor 'editor-open-view! value)
-    (let* ([buffer (editor-buffer-ref value buffer-id)]
-           [id (editor-next-view-id value)]
-           [context
-             (resource-context-with-origin
-               (editor-view-resource-context
-                 value
-                 (view-id (editor-active-view value)))
-               id)]
+  (define editor-open-view!
+    (case-lambda
+      [(value buffer-id)
+       (editor-open-view!
+         value
+         buffer-id
+         (editor-view-resource-context
+           value
+           (view-id (editor-active-view value))))]
+      [(value buffer-id source-context)
+       (require-open-editor 'editor-open-view! value)
+       (unless (resource-context? source-context)
+         (assertion-violation
+           'editor-open-view!
+           "expected a resource context"
+           source-context))
+       (let* ([buffer (editor-buffer-ref value buffer-id)]
+              [id (editor-next-view-id value)]
+              [context
+                (resource-context-with-origin
+                  source-context
+                  id)]
            [view
              (%make-view
                id
@@ -1523,7 +1535,7 @@
         value
         (append (editor-view-ids value) (list id)))
       (editor-next-view-id-set! value (+ id 1))
-      view))
+      view)]))
 
   (define (prompt-for-view value id)
     (find
