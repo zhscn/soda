@@ -8595,6 +8595,170 @@
            "M-x row did not include binding and documentation columns")))
 (editor-close! binding-editor)
 
+(define soft-wrap-source "one two\nab界cd\tz\n\n")
+(define soft-wrap-document (make-document soft-wrap-source 9904))
+(define soft-wrap-buffer
+  (make-buffer
+    9904
+    soft-wrap-document
+    "*soft-wrap*"
+    'fundamental-mode))
+(define soft-wrap-editor (make-editor soft-wrap-buffer))
+(define soft-wrap-view (editor-active-view soft-wrap-editor))
+(define (visual-line-text line)
+  (apply
+    string-append
+    (map display-chunk-text (visual-line-chunks line))))
+(let* ([snapshot (document-snapshot soft-wrap-document)]
+       [text (snapshot-text snapshot)]
+       [lines
+         (display-map-visual-lines
+           #f text 0 20 4 4 #f #t #f 0)])
+  (unless
+    (and
+      (equal?
+        (map visual-line-text lines)
+        '("one " "two" "ab界" "cd\t" "z" "" ""))
+      (not (visual-line-continuation? (car lines)))
+      (visual-line-continuation? (cadr lines))
+      (= (visual-line-physical-line (cadr lines)) 0)
+      (= (visual-line-physical-line (list-ref lines 6)) 3)
+      (visual-line-final? (list-ref lines 6)))
+    (error
+      'editor-tests
+      "soft-wrap visual line segmentation differs"
+      (map visual-line-text lines)))
+  (let ([truncated
+          (display-map-visual-lines
+            #f text 0 20 4 4 #t #t #f 0)])
+    (unless
+      (equal?
+        (map visual-line-text truncated)
+        '("one two" "ab界cd\tz" "" ""))
+      (error 'editor-tests "truncate-lines did not bypass soft wrap")))
+  (let ([hard-wrap
+          (display-map-visual-lines
+            #f text 0 2 4 4 #f #f #f 0)])
+    (unless
+      (equal? (map visual-line-text hard-wrap) '("one " "two"))
+      (error 'editor-tests "hard soft-wrap boundary differs")))
+  (text-close! text)
+  (snapshot-close! snapshot))
+(define soft-wrap-map
+  (make-display-map
+    (document-id soft-wrap-document)
+    (buffer-revision soft-wrap-buffer)
+    (list
+      (make-virtual-display-run
+        3 "+" 'after '(warning) 'test.virtual 'wrap)
+      (make-replacement-display-run
+        4 7 "…" 'before '(comment) 'test.fold 'wrap))))
+(let* ([snapshot (document-snapshot soft-wrap-document)]
+       [text (snapshot-text snapshot)]
+       [lines
+         (display-map-visual-lines
+           soft-wrap-map text 0 2 4 4 #f #f #f 0)]
+       [owners
+         (apply
+           append
+           (map
+             (lambda (line)
+               (map display-chunk-owner (visual-line-chunks line)))
+             lines))])
+  (unless
+    (and
+      (equal? (map visual-line-text lines) '("one+" " …"))
+      (memq 'test.virtual owners)
+      (memq 'test.fold owners))
+    (error 'editor-tests
+           "soft wrap did not preserve DisplayMap runs"))
+  (text-close! text)
+  (snapshot-close! snapshot))
+(editor-set-view-display-map!
+  soft-wrap-editor
+  (view-id soft-wrap-view)
+  soft-wrap-map)
+(editor-set-buffer-setting!
+  soft-wrap-editor soft-wrap-buffer 'truncate-lines #f)
+(editor-set-buffer-setting!
+  soft-wrap-editor soft-wrap-buffer 'word-wrap #t)
+(editor-set-buffer-setting!
+  soft-wrap-editor soft-wrap-buffer 'tab-width 4)
+(editor-set-buffer-setting!
+  soft-wrap-editor soft-wrap-buffer 'wrap-column 4)
+(view-set-mark! soft-wrap-view 0)
+(view-set-caret! soft-wrap-view 7)
+(let ([frame (render-editor-frame soft-wrap-editor 8 8)])
+  (unless
+    (and
+      (string=? (substring (frame-row-text frame 0) 0 4) "one+")
+      (string=? (substring (frame-row-text frame 1) 0 2) " …")
+      (= (cell-document-position (frame-cell-ref frame 1 1)) 4)
+      (memq 'selection (cell-faces (frame-cell-ref frame 0 0)))
+      (= (frame-cursor-row frame) 1))
+    (error 'editor-tests
+           "renderer did not consume soft-wrap DisplayMap projection"
+           (frame-row-text frame 0)
+           (frame-row-text frame 1))))
+(editor-clear-view-display-map!
+  soft-wrap-editor
+  (view-id soft-wrap-view))
+(view-deactivate-mark! soft-wrap-view)
+(view-set-caret! soft-wrap-view 0)
+(editor-set-buffer-setting!
+  soft-wrap-editor soft-wrap-buffer 'wrap-column #f)
+(view-set-first-line! soft-wrap-view 0)
+(view-set-caret!
+  soft-wrap-view
+  (bytevector-length
+    (string->utf8
+      (substring
+        soft-wrap-source
+        0
+        (+ (substring-position soft-wrap-source "z") 1)))))
+(editor-update! soft-wrap-editor (make-resize-message 3 4))
+(when (editor-debugger soft-wrap-editor)
+  (error
+    'editor-tests
+    "soft-wrap resize entered the debugger"
+    (condition-message
+      (debugger-session-condition
+        (editor-debugger soft-wrap-editor)))))
+(let ([frame (render-editor-frame soft-wrap-editor 3 4)])
+  (unless
+    (and
+      (= (view-first-line soft-wrap-view) 1)
+      (= (view-first-visual-row soft-wrap-view) 1)
+      (string=? (substring (frame-row-text frame 0) 0 2) "cd")
+      (string=? (substring (frame-row-text frame 1) 0 1) "z")
+      (= (frame-cursor-row frame) 1))
+    (error 'editor-tests
+           "soft-wrap viewport did not keep the caret visible"
+           (list
+             (view-first-line soft-wrap-view)
+             (view-first-visual-row soft-wrap-view)
+             (frame-row-text frame 0)
+             (frame-row-text frame 1)
+             (frame-cursor-row frame)
+             (frame-cursor-column frame)
+             (view-viewport-columns soft-wrap-view)
+             (buffer-setting-ref
+               soft-wrap-buffer 'show-line-numbers? 'missing)
+             (buffer-setting-ref
+               soft-wrap-buffer 'tab-width 'missing)))))
+(view-set-caret! soft-wrap-view 0)
+(view-set-first-line! soft-wrap-view 0)
+(let ([narrow (render-editor-frame soft-wrap-editor 8 4)]
+      [wide (render-editor-frame soft-wrap-editor 8 8)])
+  (unless
+    (and
+      (string=? (frame-row-text narrow 0) "one ")
+      (string=? (substring (frame-row-text narrow 1) 0 3) "two")
+      (string=? (substring (frame-row-text wide 0) 0 7) "one two"))
+    (error 'editor-tests
+           "soft-wrap projection did not follow viewport resize")))
+(editor-close! soft-wrap-editor)
+
 (define mapped-document (make-document "alpha beta\n" 991))
 (define mapped-buffer
   (make-buffer 991 mapped-document "*display-map*" 'fundamental-mode))

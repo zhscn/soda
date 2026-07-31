@@ -52,6 +52,9 @@
         (unless (view-mark-active? source)
           (view-deactivate-mark! target))))
     (view-set-first-line! target (view-first-line source))
+    (view-set-first-visual-row!
+      target
+      (view-first-visual-row source))
     (view-set-first-column! target (view-first-column source))
     (view-set-viewport!
       target

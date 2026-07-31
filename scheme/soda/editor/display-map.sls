@@ -20,6 +20,15 @@
           display-map-normalize-line
           display-map-project-line
           display-map-line-chunks
+          display-map-visual-lines
+          visual-line?
+          visual-line-physical-line
+          visual-line-next-physical-line
+          visual-line-chunks
+          visual-line-start
+          visual-line-end
+          visual-line-continuation?
+          visual-line-final?
           display-chunk?
           display-chunk-kind
           display-chunk-text
@@ -31,7 +40,8 @@
           display-chunk-owner
           display-chunk-detail)
   (import (rnrs)
-          (soda document))
+          (soda document)
+          (soda editor display))
 
   (define-record-type
     (display-run %make-display-run display-run?)
@@ -51,6 +61,15 @@
             faces
             owner
             detail))
+
+  (define-record-type visual-line
+    (fields physical-line
+            next-physical-line
+            chunks
+            start
+            end
+            continuation?
+            final?))
 
   (define (exact-non-negative-integer? value)
     (and (integer? value) (exact? value) (not (negative? value))))
@@ -369,4 +388,227 @@
                     run-end
                     (max position run-start))
                 (cons (run-chunk run) result)))))))
+
+  (define (character-byte-length character)
+    (bytevector-length (string->utf8 (string character))))
+
+  (define (chunk-atoms chunk)
+    (let ([value (display-chunk-text chunk)]
+          [transformed?
+            (not (eq? (display-chunk-kind chunk) 'text))])
+      (let loop ([index 0]
+                 [position (display-chunk-start chunk)]
+                 [result '()])
+        (if (= index (string-length value))
+            (reverse result)
+            (let* ([character (string-ref value index)]
+                   [size (character-byte-length character)]
+                   [next-position
+                     (if transformed? position (+ position size))])
+              (loop
+                (+ index 1)
+                next-position
+                (cons
+                  (make-display-chunk
+                    (display-chunk-kind chunk)
+                    (string character)
+                    (if transformed?
+                        (display-chunk-start chunk)
+                        position)
+                    (if transformed?
+                        (display-chunk-end chunk)
+                        next-position)
+                    (display-chunk-position chunk)
+                    (display-chunk-affinity chunk)
+                    (display-chunk-faces chunk)
+                    (display-chunk-owner chunk)
+                    (display-chunk-detail chunk))
+                  result)))))))
+
+  (define (chunks->atoms chunks)
+    (fold-left
+      (lambda (result chunk)
+        (append result (chunk-atoms chunk)))
+      '()
+      chunks))
+
+  (define (atom-character atom)
+    (string-ref (display-chunk-text atom) 0))
+
+  (define (atom-next-column atom column tab-width)
+    (let ([character (atom-character atom)])
+      (if (char=? character #\tab)
+          (next-tab-stop column tab-width)
+          (+ column (character-cell-width character)))))
+
+  (define (segment-end-index atoms start width tab-width word-wrap?)
+    (let ([size (vector-length atoms)])
+      (let loop ([index start] [column 0] [word-break #f])
+        (if (= index size)
+            size
+            (let* ([atom (vector-ref atoms index)]
+                   [character (atom-character atom)]
+                   [next-column
+                     (atom-next-column atom column tab-width)])
+              (if (or (<= next-column width) (= index start))
+                  (loop
+                    (+ index 1)
+                    next-column
+                    (if (char-whitespace? character)
+                        (+ index 1)
+                        word-break))
+                  (if (and word-wrap?
+                           word-break
+                           (> word-break start))
+                      word-break
+                      index)))))))
+
+  (define (vector-slice->list values start end)
+    (let loop ([index start] [result '()])
+      (if (= index end)
+          (reverse result)
+          (loop (+ index 1) (cons (vector-ref values index) result)))))
+
+  (define (wrap-chunks chunks width tab-width word-wrap?)
+    (let* ([atoms (list->vector (chunks->atoms chunks))]
+           [size (vector-length atoms)])
+      (if (zero? size)
+          (list '())
+          (let loop ([start 0] [result '()])
+            (if (= start size)
+                (reverse result)
+                (let ([end
+                        (segment-end-index
+                          atoms start width tab-width word-wrap?)])
+                  (loop
+                    end
+                    (cons
+                      (vector-slice->list atoms start end)
+                      result))))))))
+
+  (define (segment-range chunks fallback)
+    (if (null? chunks)
+        (cons fallback fallback)
+        (cons
+          (display-chunk-start (car chunks))
+          (fold-left
+            (lambda (end chunk)
+              (max end (display-chunk-end chunk)))
+            (display-chunk-end (car chunks))
+            (cdr chunks)))))
+
+  (define (logical-line-projection display-map text line)
+    (if display-map
+        (call-with-values
+          (lambda ()
+            (display-map-project-line display-map text line))
+          (lambda (chunks next-line line-end)
+            (list chunks next-line line-end)))
+        (let ([start (text-line-start text line)]
+              [end (text-line-content-end text line)])
+          (list
+            (if (< start end)
+                (list (real-chunk text start end))
+                '())
+            (+ line 1)
+            end))))
+
+  (define (display-map-visual-lines
+            display-map
+            text
+            first-line
+            row-count
+            viewport-width
+            tab-width
+            truncate-lines?
+            word-wrap?
+            wrap-column
+            first-visual-row)
+    (unless (or (not display-map) (display-map? display-map))
+      (assertion-violation
+        'display-map-visual-lines
+        "expected a display map or #f"
+        display-map))
+    (unless (text? text)
+      (assertion-violation
+        'display-map-visual-lines
+        "expected text"
+        text))
+    (unless
+      (and (exact-non-negative-integer? first-line)
+           (exact-non-negative-integer? row-count)
+           (exact-non-negative-integer? viewport-width)
+           (positive? viewport-width)
+           (exact-non-negative-integer? tab-width)
+           (positive? tab-width)
+           (boolean? truncate-lines?)
+           (boolean? word-wrap?)
+           (exact-non-negative-integer? first-visual-row)
+           (or (not wrap-column)
+               (and (exact-non-negative-integer? wrap-column)
+                    (positive? wrap-column))))
+      (assertion-violation
+        'display-map-visual-lines
+        "invalid visual-line projection policy"))
+    (let* ([line-count (text-line-count text)]
+           [width
+             (if wrap-column
+                 (min viewport-width wrap-column)
+                 viewport-width)]
+           [initial-line
+             (if (and display-map (< first-line line-count))
+                 (display-map-normalize-line
+                   display-map text first-line)
+                 first-line)])
+      (let loop-lines
+        ([line initial-line] [remaining row-count] [result '()])
+        (if (or (zero? remaining) (>= line line-count))
+            (reverse result)
+            (let* ([projection
+                     (logical-line-projection display-map text line)]
+                   [chunks (car projection)]
+                   [next-line (cadr projection)]
+                   [line-end (caddr projection)]
+                   [segments
+                     (if truncate-lines?
+                         (list chunks)
+                         (wrap-chunks
+                           chunks width tab-width word-wrap?))]
+                   [segments
+                     (if (= line initial-line)
+                         (let ([skip
+                                 (min
+                                   first-visual-row
+                                   (max 0 (- (length segments) 1)))])
+                           (list-tail segments skip))
+                         segments)])
+              (let loop-segments
+                ([segments segments]
+                 [continuation? #f]
+                 [remaining remaining]
+                 [result result])
+                (cond
+                  [(or (zero? remaining) (null? segments))
+                   (if (zero? remaining)
+                       (reverse result)
+                       (loop-lines next-line remaining result))]
+                  [else
+                   (let* ([segment (car segments)]
+                          [final? (null? (cdr segments))]
+                          [range
+                            (segment-range segment line-end)])
+                     (loop-segments
+                       (cdr segments)
+                       #t
+                       (- remaining 1)
+                       (cons
+                         (make-visual-line
+                           line
+                           (if final? next-line line)
+                           segment
+                           (car range)
+                           (cdr range)
+                           continuation?
+                           final?)
+                         result)))])))))))
 )

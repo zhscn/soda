@@ -9,7 +9,8 @@
 | semantic face、Catppuccin theme 与主题切换 | 已实现 |
 | dirty reason、Frame diff、row span presenter 与输出合并 | 已实现 |
 | modeline、component tree 与 cell source inspection | 已实现 |
-| soft wrap、visual-line motion 与 continuation gutter | 未实现 |
+| soft wrap 与 continuation gutter | 已实现 |
+| visual-line motion | 未实现 |
 
 ## 职责边界
 
@@ -347,9 +348,17 @@ Buffer 当前 revision 一致；Buffer 推进到新 revision 后，renderer 使�
 View 的旧映射。display cell 的 source 同时记录 transform owner 与 detail，使
 `describe-char` 可以追溯 virtual text、replacement 和 fold provider。
 
-没有 fold、virtual text 或 soft wrap 的 View 使用 identity transform；tab 展开
-仍在 cell 生成阶段按显示列处理。新增 display feature 通过独立 transform 接入，
-不会在 renderer 中增加按 feature 类型分派的绘制路径。
+没有 fold 或 virtual text 的 View 使用 identity transform。`DisplayMap` 的逻辑行
+投影完成后，visual-line provider 根据 View 文本区域宽度、buffer-local tab width、
+Unicode cell width 与换行策略将 display chunks 划分为屏幕行。`truncate-lines` 保持
+逻辑行不换行；启用换行时，`word-wrap` 优先在空白边界分段，`wrap-column` 可以把
+有效宽度限制为终端文本区域与指定列数中的较小值。continuation 行使用空 gutter。
+
+View 保存 viewport 起始逻辑行及该行内的 visual-row offset。resize、theme 导致的
+文本区域宽度变化和 DisplayMap revision 变化都会使用当前策略重新投影；caret 可见性
+计算与 renderer 消费相同的 visual-line 数据。tab 展开仍在 cell 生成阶段按显示列
+处理。新增 display feature 通过独立 transform 接入，不会在 renderer 中增加按
+feature 类型分派的绘制路径。
 
 ## Frame 与 presenter
 

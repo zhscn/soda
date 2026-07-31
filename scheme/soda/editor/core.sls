@@ -537,6 +537,7 @@
           view-clear-mark!
           view-region
           view-first-line
+          view-first-visual-row
           view-first-column
           view-viewport-rows
           view-viewport-columns
@@ -556,6 +557,7 @@
           view-pop-input-state!
           view-reset-input-states!
           view-set-first-line!
+          view-set-first-visual-row!
           view-set-keymap-layers!
           make-input-state
           input-state?
@@ -898,6 +900,15 @@
           display-map-normalize-line
           display-map-project-line
           display-map-line-chunks
+          display-map-visual-lines
+          visual-line?
+          visual-line-physical-line
+          visual-line-next-physical-line
+          visual-line-chunks
+          visual-line-start
+          visual-line-end
+          visual-line-continuation?
+          visual-line-final?
           display-chunk?
           display-chunk-kind
           display-chunk-text
@@ -1019,6 +1030,25 @@
           positive-exact-integer?
           "Display width of a tab character."
           'document)
+        (make-setting-definition
+          'truncate-lines
+          #t
+          boolean?
+          "Whether long logical lines are truncated instead of wrapped."
+          'chrome)
+        (make-setting-definition
+          'word-wrap
+          #t
+          boolean?
+          "Whether soft wrapping prefers whitespace boundaries."
+          'chrome)
+        (make-setting-definition
+          'wrap-column
+          #f
+          (lambda (value)
+            (or (not value) (positive-exact-integer? value)))
+          "Optional maximum display column used for soft wrapping."
+          'chrome)
         (make-setting-definition
           'indent-width
           2

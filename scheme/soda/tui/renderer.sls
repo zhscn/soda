@@ -438,9 +438,15 @@
                    column
                    tab-width))])))))
 
-  (define (make-line-projection
-            line next-line chunks line-end)
-    (vector line next-line chunks line-end))
+  (define (make-line-projection visual-line)
+    (vector
+      (visual-line-physical-line visual-line)
+      (visual-line-next-physical-line visual-line)
+      (visual-line-chunks visual-line)
+      (visual-line-end visual-line)
+      (visual-line-start visual-line)
+      (visual-line-continuation? visual-line)
+      (visual-line-final? visual-line)))
 
   (define (line-projection-line projection)
     (vector-ref projection 0))
@@ -454,54 +460,45 @@
   (define (line-projection-end projection)
     (vector-ref projection 3))
 
-  (define (visible-line-projections
-            display-map text first-line rows line-count)
-    (let loop
-      ([line
-         (if
-           (and display-map (< first-line line-count))
-           (display-map-normalize-line
-             display-map text first-line)
-           first-line)]
-       [remaining rows]
-       [result '()])
-      (if
-        (or (zero? remaining) (>= line line-count))
-        (reverse result)
-        (if display-map
-            (call-with-values
-              (lambda ()
-                (display-map-project-line
-                  display-map text line))
-              (lambda (chunks next-line line-end)
-                (loop
-                  next-line
-                  (- remaining 1)
-                  (cons
-                    (make-line-projection
-                      line next-line chunks line-end)
-                    result))))
-            (loop
-              (+ line 1)
-              (- remaining 1)
-              (cons
-                (make-line-projection
-                  line
-                  (+ line 1)
-                  #f
-                  (text-line-content-end text line))
-                result))))))
+  (define (line-projection-start projection)
+    (vector-ref projection 4))
 
-  (define (projection-row-at projections line)
+  (define (line-projection-continuation? projection)
+    (vector-ref projection 5))
+
+  (define (line-projection-final? projection)
+    (vector-ref projection 6))
+
+  (define (visible-line-projections
+            display-map text first-line rows width tab-width
+            truncate-lines? word-wrap? wrap-column first-visual-row)
+    (map
+      make-line-projection
+      (display-map-visual-lines
+        display-map
+        text
+        first-line
+        rows
+        width
+        tab-width
+        truncate-lines?
+        word-wrap?
+        wrap-column
+        first-visual-row)))
+
+  (define (projection-row-at projections position)
     (let loop ([remaining projections] [row 0])
       (and
         (pair? remaining)
         (let ([projection (car remaining)])
           (if
             (and
-              (<= (line-projection-line projection) line)
-              (< line
-                 (line-projection-next-line projection)))
+              (<= (line-projection-start projection) position)
+              (or
+                (< position (line-projection-end projection))
+                (and
+                  (line-projection-final? projection)
+                  (= position (line-projection-end projection)))))
             (cons row projection)
             (loop (cdr remaining) (+ row 1)))))))
 
@@ -887,13 +884,12 @@
            [text (editor-render-context-text context)]
            [display-map
              (view-effective-display-map view)]
-           [projections
-             (visible-line-projections
-               display-map
-               text
-               (editor-render-context-first-line context)
-               (rect-rows rectangle)
-               (editor-render-context-line-count context))]
+           [truncate-lines?
+             (buffer-setting-ref buffer 'truncate-lines #t)]
+           [word-wrap?
+             (buffer-setting-ref buffer 'word-wrap #t)]
+           [wrap-column
+             (buffer-setting-ref buffer 'wrap-column #f)]
            [gutter-width
              (render-context-gutter-width
                context
@@ -904,6 +900,22 @@
                (+ (rect-column rectangle) gutter-width)
                (rect-rows rectangle)
                (- (rect-columns rectangle) gutter-width))]
+           [first-column
+             (if truncate-lines?
+                 (editor-render-context-first-column context)
+                 0)]
+           [projections
+             (visible-line-projections
+               display-map
+               text
+               (editor-render-context-first-line context)
+               (rect-rows rectangle)
+               (rect-columns text-rectangle)
+               (editor-render-context-tab-width context)
+               truncate-lines?
+               word-wrap?
+               wrap-column
+               (view-first-visual-row view))]
            [component-id 'editor.text]
            [background-source
              (make-cell-source 'view (view-id view) 'background)]
@@ -916,21 +928,13 @@
            [selection-end (and region (cdr region))]
            [visible-start
              (if (pair? projections)
-               (text-line-start
-                 text
-                 (line-projection-line
-                   (car projections)))
+               (line-projection-start (car projections))
                (text-size text))]
            [visible-end
              (if (null? projections)
                  visible-start
-                 (let ([next-line
-                         (line-projection-next-line
-                           (car (reverse projections)))])
-                   (if (= next-line
-                          (editor-render-context-line-count context))
-                     (text-size text)
-                     (text-line-start text next-line))))]
+                 (line-projection-end
+                   (car (reverse projections))))]
            [syntax-decorations
              (buffer-highlight-runs
                buffer
@@ -992,7 +996,7 @@
             [caret-projection
               (projection-row-at
                 projections
-                (editor-render-context-caret-line context))]
+                (view-caret view))]
             [cursorline?
               (and
                 (editor-render-context-focused? context)
@@ -1023,10 +1027,8 @@
                      [line-end (line-projection-end projection)]
                      [caret-row?
                        (and
-                         (<= line caret-line)
-                         (< caret-line
-                            (line-projection-next-line
-                              projection))
+                         caret-projection
+                         (= row-offset (car caret-projection))
                          (editor-render-context-focused? context))]
                      [gutter-faces
                        (cond
@@ -1045,7 +1047,9 @@
                     (+ (rect-row rectangle) row-offset)
                     (rect-column rectangle)
                     gutter-width
-                    (line-number-text line gutter-width)
+                    (if (line-projection-continuation? projection)
+                        (make-string gutter-width #\space)
+                        (line-number-text line gutter-width))
                     gutter-faces
                     (resolve-faces theme gutter-faces)
                     (list
@@ -1054,44 +1058,26 @@
                         'line-number
                         line)
                       (component-source component-id))))
-                (if display-map
-                    (draw-display-line!
-                      frame
-                      text-rectangle
-                      (+ (rect-row rectangle) row-offset)
-                      (line-projection-chunks projection)
-                      line-end
-                      (editor-render-context-tab-width context)
-                      (editor-render-context-first-column context)
-                      (buffer-id buffer)
-                      component-id
-                      line-faces
-                      theme
-                      styled-chunks)
-                    (draw-document-line!
-                      frame
-                      text-rectangle
-                      (+ (rect-row rectangle) row-offset)
-                      (text-subbytevector
-                        text
-                        line-start
-                        line-end)
-                      line-start
-                      line-end
-                      (editor-render-context-tab-width context)
-                      (editor-render-context-first-column context)
-                      (buffer-id buffer)
-                      component-id
-                      line-faces
-                      theme
-                      styled-chunks))
+                (draw-display-line!
+                  frame
+                  text-rectangle
+                  (+ (rect-row rectangle) row-offset)
+                  (line-projection-chunks projection)
+                  line-end
+                  (editor-render-context-tab-width context)
+                  first-column
+                  (buffer-id buffer)
+                  component-id
+                  line-faces
+                  theme
+                  styled-chunks)
                 (draw-projections
                   (cdr remaining)
                   (+ row-offset 1)))))))
-      (let* ([caret-projection
+       (let* ([caret-projection
                (projection-row-at
                  projections
-                 (editor-render-context-caret-line context))]
+                 (view-caret view))]
              [cursor-row
               (and
                 caret-projection
@@ -1102,17 +1088,13 @@
                 caret-projection
                 (+ (rect-column text-rectangle)
                    (-
-                     (if display-map
-                         (display-chunks-column-at
-                           (line-projection-chunks
-                             (cdr caret-projection))
-                           (view-caret view)
-                           (editor-render-context-tab-width
-                             context))
-                         (editor-render-context-caret-column
-                           context))
-                     (editor-render-context-first-column
-                       context))))])
+                     (display-chunks-column-at
+                       (line-projection-chunks
+                         (cdr caret-projection))
+                       (view-caret view)
+                       (editor-render-context-tab-width
+                         context))
+                     first-column)))])
         (if (and (editor-render-context-focused? context)
                  cursor-row
                  cursor-column

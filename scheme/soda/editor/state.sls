@@ -163,6 +163,7 @@
           view-region
           view-preferred-column
           view-first-line
+          view-first-visual-row
           view-first-column
           view-viewport-rows
           view-viewport-columns
@@ -181,6 +182,7 @@
           view-set-caret!
           view-set-vertical-caret!
           view-set-first-line!
+          view-set-first-visual-row!
           view-set-first-column!
           view-set-viewport!
           view-set-keymap-layers!
@@ -226,6 +228,9 @@
                view-preferred-column
                view-preferred-column-set!)
       (mutable first-line view-first-line view-first-line-set!)
+      (mutable first-visual-row
+               view-first-visual-row
+               view-first-visual-row-set!)
       (mutable first-column view-first-column view-first-column-set!)
       (mutable viewport-rows
                view-viewport-rows
@@ -1319,6 +1324,7 @@
                #f
                0
                0
+               0
                1
                1
                '()
@@ -1502,6 +1508,7 @@
         (view-mark-ring-anchors-set! view '())
         (view-display-map-set! view #f))
       (view-first-line-set! view 0)
+      (view-first-visual-row-set! view 0)
       (view-first-column-set! view 0)
       (view-reset-input-states! view)
       (view-pending-keys-set! view '())))
@@ -4039,7 +4046,21 @@
         'view-set-first-line!
         "line must be a non-negative exact integer"
         line))
-    (view-first-line-set! value line))
+    (view-first-line-set! value line)
+    (view-first-visual-row-set! value 0))
+
+  (define (view-set-first-visual-row! value row)
+    (unless (view? value)
+      (assertion-violation
+        'view-set-first-visual-row!
+        "expected a view"
+        value))
+    (unless (exact-non-negative-integer? row)
+      (assertion-violation
+        'view-set-first-visual-row!
+        "row must be a non-negative exact integer"
+        row))
+    (view-first-visual-row-set! value row))
 
   (define (view-set-first-column! value column)
     (unless (view? value)
@@ -4153,6 +4174,34 @@
               (lambda () (text-close! text)))))
         (lambda () (snapshot-close! snapshot)))))
 
+  (define (visual-line-contains-position? line position)
+    (and
+      (<= (visual-line-start line) position)
+      (or
+        (< position (visual-line-end line))
+        (and
+          (visual-line-final? line)
+          (= position (visual-line-end line))))))
+
+  (define (visual-line-index-at lines position)
+    (let loop ([remaining lines] [index 0])
+      (and
+        (pair? remaining)
+        (if (visual-line-contains-position?
+              (car remaining) position)
+            index
+            (loop (cdr remaining) (+ index 1))))))
+
+  (define (valid-view-display-map view buffer)
+    (let ([display-map (view-display-map view)])
+      (and
+        display-map
+        (display-map-valid-for?
+          display-map
+          (document-id (buffer-document buffer))
+          (buffer-revision buffer))
+        display-map)))
+
   (define (ensure-view-visible! view)
     (unless (view? view)
       (assertion-violation
@@ -4168,51 +4217,157 @@
                         (positive? setting))
                    setting
                    8))]
-           [caret-position
+           [view-state
              (with-document-text
                document
                (lambda (text)
-                 (list
-                   (car (text-position text (view-caret view)))
-                   (text-cell-column
-                     text
-                     (view-caret view)
-                     tab-width)
-                   (text-line-count text))))]
-           [caret-line (car caret-position)]
-           [caret-column (cadr caret-position)]
-           [line-count (caddr caret-position)]
+                 (let* ([caret (view-caret view)]
+                        [caret-position (text-position text caret)]
+                        [caret-line (car caret-position)]
+                        [line-count (text-line-count text)]
+                        [viewport-columns
+                          (max 1 (view-viewport-columns view))]
+                        [columns
+                          (if
+                            (buffer-setting-ref
+                              buffer
+                              'show-line-numbers?
+                              #f)
+                            (max
+                              1
+                              (-
+                                viewport-columns
+                                (min
+                                  (line-number-gutter-width line-count)
+                                  (max
+                                    0
+                                    (- viewport-columns 1)))))
+                            viewport-columns)]
+                        [truncate-lines?
+                          (buffer-setting-ref
+                            buffer 'truncate-lines #t)]
+                        [word-wrap?
+                          (buffer-setting-ref buffer 'word-wrap #t)]
+                        [wrap-column
+                          (buffer-setting-ref buffer 'wrap-column #f)])
+                   (if truncate-lines?
+                       (list
+                         caret-line
+                         (text-cell-column text caret tab-width)
+                         line-count
+                         columns
+                         #f
+                         #f)
+                       (let* ([display-map
+                                (valid-view-display-map view buffer)]
+                              [line-size
+                                (-
+                                  (text-line-content-end text caret-line)
+                                  (text-line-start text caret-line))]
+                              [caret-lines
+                                (display-map-visual-lines
+                                  display-map
+                                  text
+                                  caret-line
+                                  (max 1 (+ line-size 1))
+                                  columns
+                                  tab-width
+                                  #f
+                                  word-wrap?
+                                  wrap-column
+                                  0)]
+                              [caret-row
+                                (or
+                                  (visual-line-index-at
+                                    caret-lines caret)
+                                  0)]
+                              [first-line (view-first-line view)]
+                              [relative-row
+                                (and
+                                  (> caret-line first-line)
+                                  (let* ([span
+                                           (-
+                                             (text-line-content-end
+                                               text caret-line)
+                                             (text-line-start
+                                               text first-line))]
+                                         [lines
+                                           (display-map-visual-lines
+                                             display-map
+                                             text
+                                             first-line
+                                             (max
+                                               (view-viewport-rows view)
+                                               (+ span 1))
+                                             columns
+                                             tab-width
+                                             #f
+                                             word-wrap?
+                                             wrap-column
+                                             (view-first-visual-row
+                                               view))])
+                                    (visual-line-index-at
+                                      lines caret)))])
+                         (list
+                           caret-line
+                           0
+                           line-count
+                           columns
+                           caret-row
+                           relative-row))))))]
+           [caret-line (car view-state)]
+           [caret-column (cadr view-state)]
+           [line-count (caddr view-state)]
+           [columns (cadddr view-state)]
+           [caret-visual-row (list-ref view-state 4)]
+           [relative-visual-row (list-ref view-state 5)]
            [first-line (view-first-line view)]
            [rows (max 1 (view-viewport-rows view))]
            [first-column (view-first-column view)]
-           [viewport-columns
-             (max 1 (view-viewport-columns view))]
-           [columns
-             (if
-               (buffer-setting-ref
-                 buffer
-                 'show-line-numbers?
-                 #f)
-               (max
-                 1
-                 (-
-                   viewport-columns
-                   (min
-                     (line-number-gutter-width line-count)
-                     (max 0 (- viewport-columns 1)))))
-               viewport-columns)])
-      (cond
-        [(< caret-line first-line)
-         (view-first-line-set! view caret-line)]
-        [(>= caret-line (+ first-line rows))
-         (view-first-line-set! view (- caret-line (- rows 1)))])
-      (cond
-        [(< caret-column first-column)
-         (view-first-column-set! view caret-column)]
-        [(>= caret-column (+ first-column columns))
-         (view-first-column-set!
-           view
-           (- caret-column (- columns 1)))])))
+           [first-visual-row (view-first-visual-row view)])
+      (if caret-visual-row
+          (begin
+            (view-first-column-set! view 0)
+            (cond
+              [(< caret-line first-line)
+               (view-first-line-set! view caret-line)
+               (view-first-visual-row-set!
+                 view
+                 (max 0 (- caret-visual-row (- rows 1))))]
+              [(= caret-line first-line)
+               (cond
+                 [(< caret-visual-row first-visual-row)
+                  (view-first-visual-row-set! view caret-visual-row)]
+                 [(>= caret-visual-row
+                      (+ first-visual-row rows))
+                  (view-first-visual-row-set!
+                    view
+                    (- caret-visual-row (- rows 1)))])]
+              [else
+               (let ([relative relative-visual-row])
+                 (when (or (not relative) (>= relative rows))
+                   (view-first-line-set! view caret-line)
+                   (view-first-visual-row-set!
+                     view
+                     (max
+                       0
+                       (- caret-visual-row (- rows 1))))))]))
+          (begin
+            (view-first-visual-row-set! view 0)
+            (cond
+              [(< caret-line first-line)
+               (view-first-line-set! view caret-line)]
+              [(>= caret-line (+ first-line rows))
+               (view-first-line-set!
+                 view
+                 (- caret-line (- rows 1)))])
+            (cond
+              [(< caret-column first-column)
+               (view-first-column-set! view caret-column)]
+              [(>= caret-column (+ first-column columns))
+               (view-first-column-set!
+                 view
+                 (- caret-column (- columns 1)))])))))
 
   (define (make-editor-state buffer)
     (unless (buffer? buffer)
@@ -4242,6 +4397,7 @@
                #f
                '()
                #f
+               0
                0
                0
                1
