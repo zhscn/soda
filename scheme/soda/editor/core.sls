@@ -592,6 +592,12 @@
           debugger-session-frames
           debugger-session-selected-index
           debugger-session-selected-frame
+          debugger-session-inspection-node
+          debugger-session-inspection-capabilities
+          debugger-session-inspection-top!
+          debugger-session-set-inspected-value!
+          debugger-session-apply-inspected
+          debugger-session-set-local-value!
           debugger-frame?
           debugger-frame-index
           debugger-frame-name
@@ -603,6 +609,22 @@
           debugger-variable-index
           debugger-variable-name
           debugger-variable-preview
+          make-inspector-node
+          inspector-node?
+          inspector-node-label
+          inspector-node-type
+          inspector-node-preview
+          inspector-node-capabilities
+          inspector-node-has-capability?
+          inspector-node-children
+          inspector-node-value
+          inspector-node-evaluate
+          inspector-node-set-value!
+          inspector-node-apply
+          inspector-child?
+          inspector-child-label
+          inspector-child-node
+          inspector-child-role
           make-prompt-request
           make-completing-prompt-request
           prompt-request?
@@ -824,6 +846,7 @@
           (soda editor indentation-protocol)
           (soda editor indentation-runtime)
           (soda editor interaction)
+          (soda editor inspector)
           (soda editor kill)
           (soda editor location)
           (soda editor managed-process)
