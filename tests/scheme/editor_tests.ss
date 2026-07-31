@@ -38,6 +38,7 @@
         (soda editor scheme-xref)
         (only (soda editor state)
               editor-refresh-completion-after-command!
+              ensure-view-visible!
               view-caret-display-affinity
               view-clear-mark!
               view-preferred-column
@@ -45,6 +46,7 @@
               view-set-first-column!
               view-set-first-line!
               view-set-first-visual-row!
+              view-set-viewport!
               view-set-mark!)
         (soda tui commands)
         (soda tui clipboard)
@@ -9948,6 +9950,64 @@
 (unless (not (view-display-map mapped-view))
   (error 'editor-tests "view did not clear its display map"))
 (editor-close! mapped-editor)
+
+(define projection-cache-document
+  (make-document "one two three\nfour\n" 1010))
+(define projection-cache-buffer
+  (make-buffer
+    1010
+    projection-cache-document
+    "*projection-cache*"
+    'fundamental-mode))
+(define projection-cache-editor (make-editor projection-cache-buffer))
+(define projection-cache-view
+  (editor-active-view projection-cache-editor))
+(define projection-provider-calls 0)
+(buffer-set-local-setting!
+  projection-cache-buffer
+  'display-run-providers
+  (list
+    (lambda (buffer text)
+      (set! projection-provider-calls (+ projection-provider-calls 1))
+      (list
+        (make-virtual-display-run
+          3 "+" 'after '() 'test.projection-cache #f)))))
+(view-effective-display-map projection-cache-view)
+(view-effective-display-map projection-cache-view)
+(let* ([snapshot (document-snapshot projection-cache-document)]
+       [text (snapshot-text snapshot)]
+       [first
+         (view-visible-visual-lines
+           projection-cache-view text 0 4 8 8 #f #t #f 0)]
+       [second
+         (view-visible-visual-lines
+           projection-cache-view text 0 4 8 8 #f #t #f 0)])
+  (unless (eq? first second)
+    (error 'editor-tests "visible projection was not cached"))
+  (text-close! text)
+  (snapshot-close! snapshot))
+(unless (= projection-provider-calls 1)
+  (error 'editor-tests "DisplayMap provider reran for one revision"))
+(buffer-replace-range!
+  projection-cache-buffer 0 0 (string->utf8 "!"))
+(view-effective-display-map projection-cache-view)
+(unless (= projection-provider-calls 2)
+  (error 'editor-tests "DisplayMap cache survived a document revision"))
+(let ([large-text (make-string 10000 #\newline)])
+  (buffer-replace-range!
+    projection-cache-buffer
+    0
+    (bytevector-length (buffer-bytes projection-cache-buffer))
+    (string->utf8 large-text)))
+(view-set-first-line! projection-cache-view 0)
+(view-set-caret!
+  projection-cache-view
+  (bytevector-length (buffer-bytes projection-cache-buffer)))
+(view-set-viewport! projection-cache-view 20 80)
+(ensure-view-visible! projection-cache-view)
+(unless (> (view-first-line projection-cache-view) 9000)
+  (error 'editor-tests "far jump did not reposition the viewport directly"))
+(editor-close! projection-cache-editor)
 
 (define folded-source
   "head {\n  hidden\n  tail\n} done\nnext\n")

@@ -590,6 +590,7 @@
           fold-start
           fold-end
           view-effective-display-map
+          view-visible-visual-lines
           view-completion
           view-current-input-state
           view-push-input-state!

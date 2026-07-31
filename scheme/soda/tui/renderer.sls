@@ -474,12 +474,12 @@
     (vector-ref projection 7))
 
   (define (visible-line-projections
-            display-map text first-line rows width tab-width
+            view text first-line rows width tab-width
             truncate-lines? word-wrap? wrap-column first-visual-row)
     (map
       make-line-projection
-      (display-map-visual-lines
-        display-map
+      (view-visible-visual-lines
+        view
         text
         first-line
         rows
@@ -888,8 +888,6 @@
                (editor-render-context-editor context))]
            [buffer (editor-render-context-buffer context)]
            [text (editor-render-context-text context)]
-           [display-map
-             (view-effective-display-map view)]
            [truncate-lines?
              (buffer-setting-ref buffer 'truncate-lines #t)]
            [word-wrap?
@@ -912,7 +910,7 @@
                  0)]
            [projections
              (visible-line-projections
-               display-map
+               view
                text
                (editor-render-context-first-line context)
                (rect-rows rectangle)

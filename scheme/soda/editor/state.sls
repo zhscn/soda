@@ -205,6 +205,7 @@
           view-input-states
           view-display-map
           view-effective-display-map
+          view-visible-visual-lines
           view-folds
           editor-replace-view-folds!
           editor-clear-view-folds!
@@ -283,7 +284,17 @@
       (mutable pending-keys view-pending-keys view-pending-keys-set!)
       (mutable display-map view-display-map view-display-map-set!)
       (mutable folds view-folds view-folds-set!)
+      (mutable projection-cache
+               view-projection-cache
+               view-projection-cache-set!)
       (immutable navigation-walk view-navigation-walk)))
+
+  (define-record-type
+    (projection-cache %make-projection-cache projection-cache?)
+    (fields map-key
+            display-map
+            (mutable visual-key)
+            (mutable visual-lines)))
 
   (define-record-type (editor %make-editor editor?)
     (fields
@@ -1419,6 +1430,7 @@
                '()
                #f
                '()
+               #f
                (make-navigation-walk))])
       (hashtable-set! (editor-view-table value) id view)
       (editor-view-ids-set!
@@ -4784,39 +4796,81 @@
                  (display-map-runs base)
                  '())]
            [providers
-             (buffer-setting-ref buffer 'display-run-providers '())])
-      (if (and (null? (view-folds view)) (null? providers))
-          (and base
-               (display-map-valid-for? base document-id revision)
-               (not (display-map-identity? base))
-               base)
-          (with-document-text
-            document
-            (lambda (text)
-              (let* ([provider-runs
-                       (fold-left
-                         (lambda (runs provider)
-                           (append runs (provider buffer text)))
-                         '()
-                         providers)]
-                     [fold-runs
-                       (filter
-                         (lambda (run) run)
-                         (map
-                           (lambda (fold) (fold-display-run fold text))
-                           (view-folds view)))]
-                     [visible-base
-                       (filter
-                         (lambda (run)
-                           (not
-                             (exists
-                               (lambda (fold-run)
-                                 (display-runs-overlap? run fold-run))
-                               fold-runs)))
-                         (append base-runs provider-runs))]
-                     [runs (append visible-base fold-runs)])
-                (and (pair? runs)
-                     (make-display-map document-id revision runs))))))))
+             (buffer-setting-ref buffer 'display-run-providers '())]
+           [key
+             (list
+               document-id
+               revision
+               base
+               providers
+               (buffer-setting-ref buffer 'display-run-generation 0)
+               (view-folds view))]
+           [cached (view-projection-cache view)])
+      (if (and cached (equal? key (projection-cache-map-key cached)))
+          (projection-cache-display-map cached)
+          (let ([effective
+                  (if (and (null? (view-folds view)) (null? providers))
+                      (and base
+                           (display-map-valid-for? base document-id revision)
+                           (not (display-map-identity? base))
+                           base)
+                      (with-document-text
+                        document
+                        (lambda (text)
+                          (let* ([provider-runs
+                                   (fold-left
+                                     (lambda (runs provider)
+                                       (append runs (provider buffer text)))
+                                     '()
+                                     providers)]
+                                 [fold-runs
+                                   (filter
+                                     (lambda (run) run)
+                                     (map
+                                       (lambda (fold)
+                                         (fold-display-run fold text))
+                                       (view-folds view)))]
+                                 [visible-base
+                                   (filter
+                                     (lambda (run)
+                                       (not
+                                         (exists
+                                           (lambda (fold-run)
+                                             (display-runs-overlap?
+                                               run fold-run))
+                                           fold-runs)))
+                                     (append base-runs provider-runs))]
+                                 [runs (append visible-base fold-runs)])
+                            (and (pair? runs)
+                                 (make-display-map
+                                   document-id revision runs))))))])
+            (view-projection-cache-set!
+              view (%make-projection-cache key effective #f '()))
+            effective))))
+
+  (define (view-visible-visual-lines
+            view text first-line rows width tab-width
+            truncate-lines? word-wrap? wrap-column first-visual-row)
+    (unless (and (view? view) (text? text))
+      (assertion-violation
+        'view-visible-visual-lines "expected a view and Text" view text))
+    (let* ([display-map (view-effective-display-map view)]
+           [key
+             (list
+               (buffer-revision (view-buffer view))
+               display-map
+               first-line rows width tab-width
+               truncate-lines? word-wrap? wrap-column first-visual-row)]
+           [cache (view-projection-cache view)])
+      (if (and cache (equal? key (projection-cache-visual-key cache)))
+          (projection-cache-visual-lines cache)
+          (let ([lines
+                  (display-map-visual-lines
+                    display-map text first-line rows width tab-width
+                    truncate-lines? word-wrap? wrap-column first-visual-row)])
+            (projection-cache-visual-key-set! cache key)
+            (projection-cache-visual-lines-set! cache lines)
+            lines))))
 
   (define (ensure-view-visible! view)
     (unless (view? view)
@@ -4881,8 +4935,8 @@
                                   (text-line-content-end text caret-line)
                                   (text-line-start text caret-line))]
                               [caret-lines
-                                (display-map-visual-lines
-                                  display-map
+                                (view-visible-visual-lines
+                                  view
                                   text
                                   caret-line
                                   (max 1 (+ line-size 1))
@@ -4903,15 +4957,17 @@
                               [relative-row
                                 (and
                                   (> caret-line first-line)
+                                  (< (- caret-line first-line)
+                                     (max 1 (view-viewport-rows view)))
                                   (let* ([span
                                            (-
                                              (text-line-content-end
                                                text caret-line)
                                              (text-line-start
                                                text first-line))]
-                                         [lines
-                                           (display-map-visual-lines
-                                             display-map
+                                           [lines
+                                           (view-visible-visual-lines
+                                             view
                                              text
                                              first-line
                                              (max
@@ -5033,6 +5089,7 @@
                '()
                #f
                '()
+               #f
                (make-navigation-walk))]
            [value
              (%make-editor
