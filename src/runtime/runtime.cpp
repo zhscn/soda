@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cerrno>
 #include <csignal>
 #include <cstddef>
 #include <cstdint>
@@ -16,6 +17,11 @@
 #include <string>
 #include <string_view>
 #include <sys/stat.h>
+#if !defined(_WIN32)
+#include <pty.h>
+#include <sys/ioctl.h>
+#include <unistd.h>
+#endif
 #include <system_error>
 #include <thread>
 #include <unordered_map>
@@ -140,6 +146,7 @@ struct Runtime::Impl {
         Input standard_input;
         Output standard_output;
         Output standard_error;
+        Output terminal;
         std::vector<std::string> arguments;
         std::vector<char*> argument_pointers;
         std::string working_directory;
@@ -150,6 +157,7 @@ struct Runtime::Impl {
         bool exited = false;
         bool process_closing = false;
         bool process_closed = false;
+        bool terminal_mode = false;
     };
 
     Impl() : owner_thread(std::this_thread::get_id()) {
@@ -542,6 +550,124 @@ struct Runtime::Impl {
         return id;
     }
 
+    SourceId spawn_terminal_process(std::vector<std::string> arguments,
+                                    std::string working_directory, std::uint32_t rows,
+                                    std::uint32_t columns) {
+#if defined(_WIN32)
+        (void)arguments;
+        (void)working_directory;
+        (void)rows;
+        (void)columns;
+        throw std::logic_error("pseudo-terminal processes are unavailable on Windows");
+#else
+        require_owner_thread();
+        if (arguments.empty() || arguments.front().empty()) {
+            throw std::invalid_argument("process executable is empty");
+        }
+        if (rows == 0 || columns == 0 ||
+            rows > std::numeric_limits<unsigned short>::max() ||
+            columns > std::numeric_limits<unsigned short>::max()) {
+            throw std::invalid_argument("terminal process size is invalid");
+        }
+        if (std::ranges::any_of(arguments,
+                                [](const std::string& argument) {
+                                    return argument.find('\0') != std::string::npos;
+                                }) ||
+            working_directory.find('\0') != std::string::npos) {
+            throw std::invalid_argument("process path or argument contains a null byte");
+        }
+
+        auto process = std::make_unique<Process>();
+        process->owner = this;
+        process->id = allocate_id();
+        process->arguments = std::move(arguments);
+        process->working_directory = std::move(working_directory);
+        process->terminal_mode = true;
+        process->standard_input.closed = true;
+        process->standard_output.closed = true;
+        process->standard_error.closed = true;
+        process->terminal.process = process.get();
+        process->terminal.flag = 4U;
+        process->handle.data = process.get();
+        const SourceId id = process->id;
+
+        process->argument_pointers.reserve(process->arguments.size() + 1);
+        for (std::string& argument : process->arguments) {
+            process->argument_pointers.push_back(argument.data());
+        }
+        process->argument_pointers.push_back(nullptr);
+
+        processes.emplace(id.value, std::move(process));
+        Process& operation = *processes.at(id.value);
+        winsize size{
+            .ws_row = static_cast<unsigned short>(rows),
+            .ws_col = static_cast<unsigned short>(columns),
+            .ws_xpixel = 0,
+            .ws_ypixel = 0,
+        };
+        int master = -1;
+        int slave = -1;
+        if (openpty(&master, &slave, nullptr, nullptr, &size) != 0) {
+            operation.spawn_status = uv_translate_sys_error(errno);
+            operation.exited = true;
+            operation.process_closed = true;
+            operation.terminal.closed = true;
+            finish_process_if_closed(operation);
+            return id;
+        }
+
+        const int terminal_status = uv_pipe_init(&loop, &operation.terminal.handle, 0);
+        if (terminal_status < 0) {
+            (void)close(master);
+            (void)close(slave);
+            operation.spawn_status = terminal_status;
+            operation.exited = true;
+            operation.process_closed = true;
+            operation.terminal.closed = true;
+            finish_process_if_closed(operation);
+            return id;
+        }
+        operation.terminal.handle.data = &operation.terminal;
+        const int open_status = uv_pipe_open(&operation.terminal.handle, master);
+        if (open_status < 0) {
+            (void)close(master);
+            (void)close(slave);
+            operation.spawn_status = open_status;
+            operation.exited = true;
+            operation.process_closed = true;
+            close_process_output(operation.terminal);
+            return id;
+        }
+
+        std::array<uv_stdio_container_t, 3> stdio{};
+        for (auto& entry : stdio) {
+            entry.flags = UV_INHERIT_FD;
+            entry.data.fd = slave;
+        }
+        uv_process_options_t options{};
+        options.exit_cb = on_process_exit;
+        options.file = operation.arguments.front().c_str();
+        options.args = operation.argument_pointers.data();
+        options.cwd =
+            operation.working_directory.empty() ? nullptr : operation.working_directory.c_str();
+        options.stdio_count = static_cast<int>(stdio.size());
+        options.stdio = stdio.data();
+
+        const int status = uv_spawn(&loop, &operation.handle, &options);
+        (void)close(slave);
+        if (status < 0) {
+            operation.spawn_status = status;
+            operation.exited = true;
+            close_process_handle(operation);
+            close_process_output(operation.terminal);
+            return id;
+        }
+        operation.spawned = true;
+        start_process_output(operation.terminal);
+        return id;
+#endif
+    }
+
     void write_process(SourceId source, std::vector<std::byte> data) {
         require_owner_thread();
         const auto found = processes.find(source.value);
@@ -549,8 +675,11 @@ struct Runtime::Impl {
             throw std::invalid_argument("unknown process source");
         }
         Process& process = *found->second;
-        if (!process.spawned || process.exited || process.standard_input.closing ||
-            process.standard_input.closed) {
+        const bool input_closed =
+            process.terminal_mode
+                ? (process.terminal.closing || process.terminal.closed)
+                : (process.standard_input.closing || process.standard_input.closed);
+        if (!process.spawned || process.exited || input_closed) {
             throw std::logic_error("process input is closed");
         }
         if (data.empty()) {
@@ -567,10 +696,12 @@ struct Runtime::Impl {
         const uv_buf_t buffer =
             uv_buf_init(reinterpret_cast<char*>(write->data.data()),
                         static_cast<unsigned int>(write->data.size()));
+        uv_stream_t* stream =
+            process.terminal_mode
+                ? reinterpret_cast<uv_stream_t*>(&process.terminal.handle)
+                : reinterpret_cast<uv_stream_t*>(&process.standard_input.handle);
         const int status =
-            uv_write(&write->request,
-                     reinterpret_cast<uv_stream_t*>(&process.standard_input.handle), &buffer, 1,
-                     on_process_input_written);
+            uv_write(&write->request, stream, &buffer, 1, on_process_input_written);
         if (status < 0) {
             throw uv_error(status, "cannot write process input");
         }
@@ -583,7 +714,50 @@ struct Runtime::Impl {
         if (found == processes.end()) {
             throw std::invalid_argument("unknown process source");
         }
+        if (found->second->terminal_mode) {
+            throw std::logic_error("pseudo-terminal input cannot be half-closed");
+        }
         close_process_input(*found->second);
+    }
+
+    void resize_process_terminal(SourceId source, std::uint32_t rows,
+                                 std::uint32_t columns) {
+#if defined(_WIN32)
+        (void)source;
+        (void)rows;
+        (void)columns;
+        throw std::logic_error("pseudo-terminal processes are unavailable on Windows");
+#else
+        require_owner_thread();
+        const auto found = processes.find(source.value);
+        if (found == processes.end()) {
+            throw std::invalid_argument("unknown process source");
+        }
+        Process& process = *found->second;
+        if (!process.terminal_mode || process.terminal.closing || process.terminal.closed) {
+            throw std::logic_error("process has no open pseudo-terminal");
+        }
+        if (rows == 0 || columns == 0 ||
+            rows > std::numeric_limits<unsigned short>::max() ||
+            columns > std::numeric_limits<unsigned short>::max()) {
+            throw std::invalid_argument("terminal process size is invalid");
+        }
+        uv_os_fd_t descriptor{};
+        const int descriptor_status =
+            uv_fileno(reinterpret_cast<uv_handle_t*>(&process.terminal.handle), &descriptor);
+        if (descriptor_status < 0) {
+            throw uv_error(descriptor_status, "cannot obtain pseudo-terminal descriptor");
+        }
+        winsize size{
+            .ws_row = static_cast<unsigned short>(rows),
+            .ws_col = static_cast<unsigned short>(columns),
+            .ws_xpixel = 0,
+            .ws_ypixel = 0,
+        };
+        if (ioctl(static_cast<int>(descriptor), TIOCSWINSZ, &size) != 0) {
+            throw uv_error(uv_translate_sys_error(errno), "cannot resize pseudo-terminal");
+        }
+#endif
     }
 
     void signal_process(SourceId source, int signal) {
@@ -743,9 +917,12 @@ struct Runtime::Impl {
     }
 
     void finish_process_if_closed(Process& process) {
-        if (!process.exited || !process.process_closed || !process.standard_input.closed ||
-            !process.standard_output.closed ||
-            !process.standard_error.closed) {
+        const bool streams_closed =
+            process.terminal_mode
+                ? process.terminal.closed
+                : (process.standard_input.closed && process.standard_output.closed &&
+                   process.standard_error.closed);
+        if (!process.exited || !process.process_closed || !streams_closed) {
             return;
         }
         const auto id = process.id.value;
@@ -1083,7 +1260,8 @@ struct Runtime::Impl {
                     .data = std::move(data),
                 });
             } else if (size < 0) {
-                if (size != UV_EOF && !owner.shutting_down) {
+                const bool terminal_end = process.terminal_mode && size == UV_EIO;
+                if (size != UV_EOF && !terminal_end && !owner.shutting_down) {
                     owner.events.push_back({
                         .kind = EventKind::ProcessOutput,
                         .source = process.id,
@@ -1113,7 +1291,11 @@ struct Runtime::Impl {
             process.exited = true;
             process.exit_status = exit_status;
             process.termination_signal = termination_signal;
-            process.owner->close_process_input(process);
+            if (process.terminal_mode) {
+                process.owner->close_process_output(process.terminal);
+            } else {
+                process.owner->close_process_input(process);
+            }
             process.owner->close_process_handle(process);
         });
     }
@@ -1382,12 +1564,24 @@ SourceId Runtime::spawn_process(std::vector<std::string> arguments, std::string 
     return impl_->spawn_process(std::move(arguments), std::move(working_directory));
 }
 
+SourceId Runtime::spawn_terminal_process(std::vector<std::string> arguments,
+                                         std::string working_directory, std::uint32_t rows,
+                                         std::uint32_t columns) {
+    return impl_->spawn_terminal_process(std::move(arguments), std::move(working_directory),
+                                         rows, columns);
+}
+
 void Runtime::write_process(SourceId source, std::vector<std::byte> data) {
     impl_->write_process(source, std::move(data));
 }
 
 void Runtime::close_process_input(SourceId source) {
     impl_->close_process_input(source);
+}
+
+void Runtime::resize_process_terminal(SourceId source, std::uint32_t rows,
+                                      std::uint32_t columns) {
+    impl_->resize_process_terminal(source, rows, columns);
 }
 
 void Runtime::signal_process(SourceId source, int signal) {

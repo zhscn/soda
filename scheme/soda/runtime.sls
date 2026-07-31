@@ -12,8 +12,10 @@
           runtime-stat-path!
           runtime-watch-path!
           runtime-spawn-process!
+          runtime-spawn-terminal-process!
           runtime-write-process!
           runtime-close-process-input!
+          runtime-resize-process-terminal!
           runtime-signal-process!
           runtime-cancel!
           runtime-status-name
@@ -38,7 +40,8 @@
           path-rename
           path-change
           process-stdout
-          process-stderr)
+          process-stderr
+          process-terminal)
   (import (chezscheme)
           (soda native))
 
@@ -49,7 +52,7 @@
     (foreign-procedure __atomic "soda_runtime_abi_version" () unsigned-32))
 
   (define abi-version-checked
-    (unless (= (%abi-version) 9)
+    (unless (= (%abi-version) 10)
       (error 'soda-runtime "unsupported native runtime ABI version")))
 
   (define %runtime-create
@@ -86,6 +89,10 @@
     (foreign-procedure __atomic "soda_runtime_spawn_process"
                        (void* string u8* size_t)
                        unsigned-64))
+  (define %spawn-terminal-process
+    (foreign-procedure __atomic "soda_runtime_spawn_terminal_process"
+                       (void* string u8* size_t unsigned-32 unsigned-32)
+                       unsigned-64))
   (define %write-process
     (foreign-procedure __atomic "soda_runtime_write_process"
                        (void* unsigned-64 u8* size_t)
@@ -93,6 +100,10 @@
   (define %close-process-input
     (foreign-procedure __atomic "soda_runtime_close_process_input"
                        (void* unsigned-64)
+                       int))
+  (define %resize-process-terminal
+    (foreign-procedure __atomic "soda_runtime_resize_process_terminal"
+                       (void* unsigned-64 unsigned-32 unsigned-32)
                        int))
   (define %signal-process
     (foreign-procedure __atomic "soda_runtime_signal_process"
@@ -166,6 +177,7 @@
   (define path-change #x2)
   (define process-stdout #x1)
   (define process-stderr #x2)
+  (define process-terminal #x4)
 
   (define (require-runtime who value)
     (unless (runtime? value)
@@ -358,6 +370,35 @@
              (native-error 'runtime-spawn-process! runtime)
              source))]))
 
+  (define (runtime-spawn-terminal-process!
+            runtime arguments working-directory rows columns)
+    (require-runtime 'runtime-spawn-terminal-process! runtime)
+    (unless (string? working-directory)
+      (assertion-violation
+        'runtime-spawn-terminal-process!
+        "working directory must be a string"
+        working-directory))
+    (unless
+      (and
+        (integer? rows) (exact? rows) (positive? rows)
+        (integer? columns) (exact? columns) (positive? columns))
+      (assertion-violation
+        'runtime-spawn-terminal-process!
+        "rows and columns must be positive exact integers"
+        rows columns))
+    (let* ([encoded (encode-process-arguments arguments)]
+           [source
+             (%spawn-terminal-process
+               (runtime-pointer runtime)
+               working-directory
+               encoded
+               (bytevector-length encoded)
+               rows
+               columns)])
+      (if (zero? source)
+          (native-error 'runtime-spawn-terminal-process! runtime)
+          source)))
+
   (define (runtime-write-process! runtime source data)
     (require-runtime 'runtime-write-process! runtime)
     (unless
@@ -400,6 +441,23 @@
               source)])
       (when (negative? status)
         (native-error 'runtime-close-process-input! runtime))))
+
+  (define (runtime-resize-process-terminal! runtime source rows columns)
+    (require-runtime 'runtime-resize-process-terminal! runtime)
+    (unless
+      (and
+        (integer? source) (exact? source) (positive? source)
+        (integer? rows) (exact? rows) (positive? rows)
+        (integer? columns) (exact? columns) (positive? columns))
+      (assertion-violation
+        'runtime-resize-process-terminal!
+        "source, rows, and columns must be positive exact integers"
+        source rows columns))
+    (let ([status
+            (%resize-process-terminal
+              (runtime-pointer runtime) source rows columns)])
+      (when (negative? status)
+        (native-error 'runtime-resize-process-terminal! runtime))))
 
   (define (runtime-signal-process! runtime source signal)
     (require-runtime 'runtime-signal-process! runtime)

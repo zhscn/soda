@@ -185,6 +185,21 @@ uint64_t soda_runtime_spawn_process(soda_runtime* runtime, const char* working_d
     });
 }
 
+uint64_t soda_runtime_spawn_terminal_process(soda_runtime* runtime,
+                                             const char* working_directory,
+                                             const uint8_t* arguments,
+                                             size_t arguments_size, uint32_t rows,
+                                             uint32_t columns) {
+    return guard(runtime, uint64_t{0}, [&] {
+        const std::string directory =
+            working_directory == nullptr ? std::string{} : std::string{working_directory};
+        return runtime->runtime
+            .spawn_terminal_process(decode_process_arguments(arguments, arguments_size),
+                                    directory, rows, columns)
+            .value;
+    });
+}
+
 int soda_runtime_write_process(soda_runtime* runtime, uint64_t source, const uint8_t* data,
                                size_t size) {
     return guard(runtime, -1, [&] {
@@ -204,6 +219,15 @@ int soda_runtime_write_process(soda_runtime* runtime, uint64_t source, const uin
 int soda_runtime_close_process_input(soda_runtime* runtime, uint64_t source) {
     return guard(runtime, -1, [&] {
         runtime->runtime.close_process_input(soda::runtime::SourceId{source});
+        return 0;
+    });
+}
+
+int soda_runtime_resize_process_terminal(soda_runtime* runtime, uint64_t source,
+                                         uint32_t rows, uint32_t columns) {
+    return guard(runtime, -1, [&] {
+        runtime->runtime.resize_process_terminal(soda::runtime::SourceId{source}, rows,
+                                                 columns);
         return 0;
     });
 }

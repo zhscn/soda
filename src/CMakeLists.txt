@@ -154,6 +154,9 @@ add_library(soda_runtime STATIC
 target_include_directories(soda_runtime PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 target_compile_features(soda_runtime PUBLIC cxx_std_23)
 target_link_libraries(soda_runtime PUBLIC uv_a)
+if(UNIX AND NOT APPLE)
+  target_link_libraries(soda_runtime PRIVATE util)
+endif()
 set_target_properties(soda_runtime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 soda_target_warnings(soda_runtime)
 

@@ -35,8 +35,13 @@ public:
     [[nodiscard]] SourceId watch_path(std::string path);
     [[nodiscard]] SourceId spawn_process(std::vector<std::string> arguments,
                                          std::string working_directory = {});
+    [[nodiscard]] SourceId spawn_terminal_process(std::vector<std::string> arguments,
+                                                  std::string working_directory,
+                                                  std::uint32_t rows,
+                                                  std::uint32_t columns);
     void write_process(SourceId source, std::vector<std::byte> data);
     void close_process_input(SourceId source);
+    void resize_process_terminal(SourceId source, std::uint32_t rows, std::uint32_t columns);
     void signal_process(SourceId source, int signal);
     bool cancel(SourceId source);
 
