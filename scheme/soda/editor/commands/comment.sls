@@ -142,12 +142,44 @@
          (let* ([start (command-target-start target)]
                 [end (command-target-end target)]
                 [open (string->utf8 block-start)]
-                [close (string->utf8 block-end)])
-           (commit-replacements!
-             buffer
-             (list
-               (list end end close)
-               (list start start open))))]
+                [close (string->utf8 block-end)]
+                [snapshot (document-snapshot (buffer-document buffer))])
+           (dynamic-wind
+             (lambda () #f)
+             (lambda ()
+               (let ([text (snapshot-text snapshot)])
+                 (dynamic-wind
+                   (lambda () #f)
+                   (lambda ()
+                     (let ([commented?
+                             (and
+                               (bytevector-prefix-at?
+                                 text start block-start)
+                               (<= (+ start
+                                      (bytevector-length open)
+                                      (bytevector-length close))
+                                   end)
+                               (bytevector-prefix-at?
+                                 text
+                                 (- end (bytevector-length close))
+                                 block-end))])
+                       (commit-replacements!
+                         buffer
+                         (if commented?
+                             (list
+                               (list
+                                 (- end (bytevector-length close))
+                                 end
+                                 (make-bytevector 0))
+                               (list
+                                 start
+                                 (+ start (bytevector-length open))
+                                 (make-bytevector 0)))
+                             (list
+                               (list end end close)
+                               (list start start open))))))
+                   (lambda () (text-close! text)))))
+             (lambda () (snapshot-close! snapshot))))]
         [else
          (editor-user-error
            'edit.comment-dwim
