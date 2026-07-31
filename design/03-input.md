@@ -18,6 +18,7 @@
 | `edit.transpose-lines` | 已实现 |
 | `edit.join-line` | 已实现 |
 | `edit.delete-blank-lines` | 已实现 |
+| `edit.sort-lines` | 已实现 |
 
 本文只定义文本编辑器当前使用的输入路径。minibuffer 的读取与焦点规则由
 [12-minibuffer.md](12-minibuffer.md) 定义；command 与 interactive 参数由
@@ -179,6 +180,10 @@ newline，并以一次 Buffer transaction 提交整个旋转。
 该行；point 位于非空行时删除紧随其后的连续空行。仅含 horizontal whitespace 的行
 属于空行，文件末尾 newline 产生的空逻辑行不参与操作。删除作为一次 Buffer
 transaction 提交。
+
+`edit.sort-lines` 按 UTF-8 code-unit 的字典序排列 active region 内的行；prefix argument
+选择降序。region 的起止位置是替换边界，边界外文本不参与排序；命令保留 region 是否
+以 newline 结束，并以一次 Buffer transaction 替换排序结果。
 
 ## Search 与 query replace
 

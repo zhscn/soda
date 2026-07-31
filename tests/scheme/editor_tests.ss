@@ -2713,6 +2713,46 @@
   (error 'editor-tests "delete-blank-lines treated the EOF sentinel as a line"))
 (editor-close! delete-blank-lines-editor)
 
+(define sort-lines-buffer
+  (make-buffer
+    9764
+    (make-document "prefix c\na\nb\n suffix" 9764)
+    "*sort-lines*"
+    'fundamental-mode))
+(define sort-lines-editor (make-editor sort-lines-buffer))
+(define sort-lines-view (editor-active-view sort-lines-editor))
+(view-set-mark! sort-lines-view 7)
+(view-set-caret! sort-lines-view 13)
+(editor-update!
+  sort-lines-editor
+  (make-command-message 'edit.sort-lines #f))
+(unless
+  (bytevector=?
+    (buffer-bytes sort-lines-buffer)
+    (string->utf8 "prefix a\nb\nc\n suffix"))
+  (error 'editor-tests "sort-lines did not sort the exact region"))
+(buffer-undo! sort-lines-buffer)
+(view-set-mark! sort-lines-view 7)
+(view-set-caret! sort-lines-view 13)
+(editor-update!
+  sort-lines-editor
+  (make-command-message
+    'edit.sort-lines
+    #f
+    (prefix-argument-universal #f)))
+(unless
+  (bytevector=?
+    (buffer-bytes sort-lines-buffer)
+    (string->utf8 "prefix c\nb\na\n suffix"))
+  (error 'editor-tests "sort-lines prefix did not reverse the ordering"))
+(buffer-undo! sort-lines-buffer)
+(unless
+  (bytevector=?
+    (buffer-bytes sort-lines-buffer)
+    (string->utf8 "prefix c\na\nb\n suffix"))
+  (error 'editor-tests "sort-lines was not one transaction"))
+(editor-close! sort-lines-editor)
+
 (define yank-pop-document (make-document "" 977))
 (define yank-pop-buffer
   (make-buffer

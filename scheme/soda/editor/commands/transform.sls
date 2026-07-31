@@ -378,6 +378,71 @@
                   (view-set-caret! view caret)))))))
       '()))
 
+  (define (bytevector-lexicographic<? left right)
+    (let ([left-size (bytevector-length left)]
+          [right-size (bytevector-length right)])
+      (let loop ([offset 0])
+        (cond
+          [(= offset left-size) (< left-size right-size)]
+          [(= offset right-size) #f]
+          [(< (bytevector-u8-ref left offset)
+              (bytevector-u8-ref right offset))
+           #t]
+          [(> (bytevector-u8-ref left offset)
+              (bytevector-u8-ref right offset))
+           #f]
+          [else (loop (+ offset 1))]))))
+
+  (define (range-lines text start end)
+    (let loop ([offset start] [line-start start] [result '()])
+      (cond
+        [(= offset end)
+         (reverse
+           (if (< line-start end)
+               (cons (text-subbytevector text line-start end) result)
+               result))]
+        [(= (text-byte-at text offset) 10)
+         (loop
+           (+ offset 1)
+           (+ offset 1)
+           (cons
+             (text-subbytevector text line-start offset)
+             result))]
+        [else (loop (+ offset 1) line-start result)])))
+
+  (define region-transform-target-reader
+    (make-command-target-reader
+      'region-transform-target
+      (make-command-target-selector 'require #f #f)))
+
+  (define-command (sort-lines-command context target)
+    "Sort lines in the active region."
+    (interactive region-transform-target-reader)
+    (let* ([view (command-context-view context)]
+           [buffer (view-buffer view)]
+           [start (command-target-start target)]
+           [end (command-target-end target)])
+      (unless (command-target-current? target buffer)
+        (editor-user-error 'edit.sort-lines "The region target is stale"))
+      (when (< start end)
+        (let ([replacement
+                (with-document-text
+                  (buffer-document buffer)
+                  (lambda (text)
+                    (let* ([trailing-newline?
+                             (= (text-byte-at text (- end 1)) 10)]
+                           [lines (range-lines text start end)]
+                           [ordered
+                             (list-sort
+                               (if (command-context-prefix context)
+                                   (lambda (left right)
+                                     (bytevector-lexicographic<? right left))
+                                   bytevector-lexicographic<?)
+                               lines)])
+                      (join-lines ordered trailing-newline?))))])
+          (buffer-replace-range! buffer start end replacement)))
+      '()))
+
   (define (word-transform-target context)
     (let* ([view (command-context-view context)]
            [buffer (view-buffer view)]
@@ -475,6 +540,10 @@
           'edit.delete-blank-lines
           delete-blank-lines-command
           "Delete blank lines around or following point.")
+        (list
+          'edit.sort-lines
+          sort-lines-command
+          "Sort lines in the active region.")
         (list
           'edit.upcase-word
           upcase-word-command
