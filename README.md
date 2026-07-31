@@ -141,6 +141,22 @@ uppercased and hyphens become underscores:
 SODA_TREE_SITTER_JSON_LIBRARY=/work/grammars/libtree-sitter-json.so soda file.json
 ```
 
+Editor initialization associates suffixes with parser names through Scheme:
+
+```scheme
+(editor-register-tree-sitter-file-association!
+  *editor*
+  'python-files
+  '(".py" ".pyi")
+  'python)
+```
+
+This creates `python-ts-mode`, backed by the `python` grammar. An optional
+major-mode argument selects an existing Tree-sitter mode, and an optional final
+integer sets auto-mode priority. `register-tree-sitter-language!` overrides the
+shared-library path or exported parser symbol when a grammar does not follow
+the default naming convention.
+
 Printable input inserts text. The default keymap provides Emacs character,
 line, word, sentence, page, mark/region, kill-ring, undo, file, buffer, window,
 incremental-search, and help commands. `C-h c` and `C-h k` inspect key

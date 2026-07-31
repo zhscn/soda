@@ -7939,4 +7939,40 @@
         "object"))
     (error 'editor-tests
            "JSON Tree-sitter highlights or fold captures differ")))
+(editor-register-tree-sitter-file-association!
+  json-editor
+  'test-json-files
+  '(".sjson")
+  'json)
+(define generic-json-buffer
+  (make-buffer
+    993
+    (make-document "{\"generic\":true}" 993)
+    "sample.sjson"
+    'fundamental-mode))
+(editor-add-buffer! json-editor generic-json-buffer)
+(buffer-set-file-path! generic-json-buffer "/tmp/sample.sjson")
+(editor-select-buffer-major-mode!
+  json-editor
+  generic-json-buffer
+  "/tmp/sample.sjson")
+(unless
+  (and
+    (eq?
+      (buffer-major-mode-name generic-json-buffer)
+      'json-ts-mode)
+    (eq?
+      (language-profile-name
+        (buffer-language-profile generic-json-buffer))
+      'json.tree-sitter)
+    (buffer-language-session generic-json-buffer)
+    (eq?
+      (major-mode-feature-ref
+        (editor-language-catalog json-editor)
+        'json-ts-mode
+        'tree-sitter-language
+        #f)
+      'json))
+  (error 'editor-tests
+         "Tree-sitter file association did not select its parser mode"))
 (editor-close! json-editor)

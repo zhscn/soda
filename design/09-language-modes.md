@@ -248,6 +248,13 @@ grammar registry 以 language symbol 为键，允许覆盖共享库路径与导�
 identity 与 parser identity 相互独立，为同语言多个 parser 和 injection layer
 保留空间。
 
+Tree-sitter file association 由 rule name、suffix 集合、parser language、major mode
+和 priority 组成。注册关联时，已有的专用 major mode 保留自己的 language profile；
+其 `tree-sitter-language` feature 声明 parser identity。没有专用 mode 时，系统创建
+`<language>-ts-mode` 与只维护增量 parse session 的通用 profile。grammar 不可用时
+对应 auto-mode rule 不接管文件。专用 profile 可以在相同 mode identity 下提供
+highlight、indent、navigation 和结构 query。
+
 major mode 保存 highlight、indent、navigation、outline 等 provider/query policy，
 grammar 模块只提供 `TSLanguage`。mode setup 根据已声明能力装配这些功能，不从
 grammar 文件推断 editor policy。

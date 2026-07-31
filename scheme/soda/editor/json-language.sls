@@ -1,6 +1,5 @@
 (library (soda editor json-language)
-  (export install-json-language!
-          json-language-ready?)
+  (export install-json-language!)
   (import (rnrs)
           (soda document)
           (soda editor decoration)
@@ -160,9 +159,6 @@
       json-query
       close-json-session!))
 
-  (define (json-language-ready?)
-    (tree-sitter-language-available? 'json))
-
   (define (json-identifier-character? character)
     (or
       (char-alphabetic? character)
@@ -195,7 +191,8 @@
         'editing
         #f
         '((indent-width . 2))
-        '((syntax-backend . tree-sitter))))
+        '((syntax-backend . tree-sitter)
+          (tree-sitter-language . json))))
     catalog)
 
   (install-json-language! default-language-catalog))

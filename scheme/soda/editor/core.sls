@@ -109,6 +109,11 @@
           auto-mode-catalog-rules
           editor-auto-mode-catalog
           editor-register-auto-mode-rule!
+          editor-register-tree-sitter-file-association!
+          make-tree-sitter-syntax-provider
+          make-tree-sitter-language-profile
+          register-tree-sitter-language!
+          tree-sitter-language-available?
           editor-major-mode-for-path
           editor-select-buffer-major-mode!
           make-setting-definition
@@ -690,6 +695,7 @@
           (soda editor state)
           (soda editor theme)
           (soda editor themes catppuccin)
+          (soda editor tree-sitter-language)
           (soda editor update)
           (soda editor window)
           (soda editor window-runtime))
@@ -836,22 +842,13 @@
         '(".c" ".cc" ".cpp" ".cxx"
           ".h" ".hh" ".hpp" ".hxx")
         'cpp-mode))
-    (let ([suffix-rule
-            (make-file-suffix-auto-mode-rule
-              'json-files.suffix
-              0
-              '(".json")
-              'json-mode)])
-      (editor-register-auto-mode-rule!
-        editor
-        (make-auto-mode-rule
-          'json-files
-          0
-          (lambda (path)
-            (and
-              (json-language-ready?)
-              ((auto-mode-rule-matcher suffix-rule) path)))
-          'json-mode)))
+    (editor-register-tree-sitter-file-association!
+      editor
+      'json-files
+      '(".json")
+      'json
+      'json-mode
+      0)
     editor)
 
   (define (make-editor buffer)
