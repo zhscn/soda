@@ -207,8 +207,9 @@ structural target 缩进只产生一个 revision 和一个 undo entry。provider
 Scheme provider 为 snapshot 建立规范化逐行缩进表，按未闭合 delimiter、operator 和
 第二个 datum 的位置计算列宽。批量查询共享同一张表，因此后一行不依赖原文中前一行的
 错误 indentation。字符串、quoted symbol、字符字面量和注释中的 delimiter 不参与
-结构缩进。C++ provider 持有 native indent style，并通过 Buffer 的增量 analyzer
-计算每行结果。
+结构缩进。Tree-sitter provider 把 `@indent.begin`、`@indent.end`、
+`@indent.branch` 和 `@indent.ignore` capture 解释为逐行 indentation event。
+C++ provider 持有 native indent style，并通过 Buffer 的增量 analyzer 计算每行结果。
 
 `edit.indent-region` 使用 `CommandTarget` 要求 active region，并由 profile provider
 执行语义缩进；`C-M-\` 调用该命令。`edit.indent-sexp` 优先缩进 active region，
@@ -268,9 +269,9 @@ root；loader 不提供单独的 grammar/query search path 或单语言动态库
 内建 runtime package 分发 Bash、CSS、Go、HTML、JavaScript、JSON、Lua、Markdown、
 Markdown inline、Python、Rust、TOML、TypeScript、TSX 和 YAML parser。每个 parser
 source 由构建配置固定 revision 与 archive digest，生成的模块与 Soda 自有 query
-一起安装。所有这些语言提供 highlight query；JSON 还提供 fold 与 text-object
-query。TSX 的 query bundle 依次组合 TypeScript 与 TSX query，使通用语言规则与
-嵌入语法规则保持独立。
+一起安装。所有这些语言提供 highlight query；JSON 还提供 fold、indent 与
+text-object query。TSX 的 query bundle 依次组合 TypeScript 与 TSX query，使通用
+语言规则与嵌入语法规则保持独立。
 
 Tree-sitter file association 由 rule name、suffix 集合、parser language、major mode
 和 priority 组成。注册关联时，已有的专用 major mode 保留自己的 language profile；

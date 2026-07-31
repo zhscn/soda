@@ -111,7 +111,7 @@
                    (char-numeric? character)
                    (memv character '(#\_ #\-)))))
           (settings . ((indent-width . 2)))
-          (queries . (highlights folds textobjects))))
+          (queries . (highlights folds indents textobjects))))
       (language-spec 'julia '(".jl"))
       (language-spec 'kotlin '(".kt" ".kts"))
       (language-spec 'latex '(".tex" ".sty" ".cls"))

@@ -27,6 +27,7 @@
           (soda editor auto-mode)
           (soda editor buffer)
           (soda editor decoration)
+          (soda editor indentation-protocol)
           (soda editor language)
           (soda editor state)
           (soda editor structure)
@@ -278,7 +279,9 @@
   (define (query-resource-name query-name)
     (case query-name
       [(fold) 'folds]
+      [(indent) 'indents]
       [(text-object) 'textobjects]
+      [(injection) 'injections]
       [else query-name]))
 
   (define (query-capabilities kinds)
@@ -287,7 +290,142 @@
       (if (memq 'highlights kinds) '(highlight) '())
       (if (null? kinds) '() '(query))
       (if (memq 'folds kinds) '(fold) '())
-      (if (memq 'textobjects kinds) '(text-object) '())))
+      (if (memq 'indents kinds) '(indentation) '())
+      (if (memq 'textobjects kinds) '(text-object) '())
+      (if (memq 'injections kinds) '(injection) '())))
+
+  (define-record-type tree-sitter-indent-context
+    (fields
+      width
+      syntax
+      (mutable revision)
+      (mutable captures)))
+
+  (define (capture-name=? capture name)
+    (eq? (syntax-capture-name capture) name))
+
+  (define (capture-before-line? capture line-start)
+    (< (syntax-capture-start capture) line-start))
+
+  (define (indent-depth-before-line captures line-start)
+    (fold-left
+      (lambda (depth capture)
+        (if
+          (not (capture-before-line? capture line-start))
+          depth
+          (cond
+            [(capture-name=? capture 'indent.begin)
+             (+ depth 1)]
+            [(capture-name=? capture 'indent.end)
+             (max 0 (- depth 1))]
+            [else depth])))
+      0
+      captures))
+
+  (define (capture-starts-at? capture offset name)
+    (and
+      (capture-name=? capture name)
+      (= (syntax-capture-start capture) offset)))
+
+  (define (line-preserved? captures start end)
+    (exists
+      (lambda (capture)
+        (and
+          (capture-name=? capture 'indent.ignore)
+          (< (syntax-capture-start capture) end)
+          (< start (syntax-capture-end capture))))
+      captures))
+
+  (define (line-leading-end text line)
+    (let ([end (text-line-content-end text line)])
+      (let loop ([offset (text-line-start text line)])
+        (if
+          (and
+            (< offset end)
+            (memv (text-byte-at text offset) '(9 32)))
+          (loop (+ offset 1))
+          offset))))
+
+  (define (ensure-indent-captures! context session snapshot)
+    (unless
+      (and
+        (tree-sitter-indent-context-revision context)
+        (=
+          (tree-sitter-indent-context-revision context)
+          (snapshot-revision snapshot)))
+      (tree-sitter-indent-context-captures-set!
+        context
+        (syntax-query
+          (tree-sitter-indent-context-syntax context)
+          session
+          'indent
+          0
+          (snapshot-size snapshot)))
+      (tree-sitter-indent-context-revision-set!
+        context
+        (snapshot-revision snapshot))))
+
+  (define (make-tree-sitter-indentation-provider syntax)
+    (make-indentation-provider
+      (lambda (setting-ref)
+        (let ([width (setting-ref 'indent-width 2)])
+          (make-tree-sitter-indent-context
+            (if
+              (and
+                (integer? width)
+                (exact? width)
+                (positive? width))
+              width
+              2)
+            syntax
+            #f
+            '())))
+      (lambda (context session snapshot line)
+        (ensure-indent-captures! context session snapshot)
+        (let ([text (snapshot-text snapshot)])
+          (dynamic-wind
+            (lambda () #f)
+            (lambda ()
+              (if (>= line (text-line-count text))
+                  #f
+                  (let* ([start (text-line-start text line)]
+                         [end (text-line-content-end text line)]
+                         [content (line-leading-end text line)]
+                         [captures
+                           (tree-sitter-indent-context-captures
+                             context)])
+                    (if
+                      (line-preserved? captures start end)
+                      #f
+                      (let* ([depth
+                               (indent-depth-before-line
+                                 captures
+                                 start)]
+                             [dedent?
+                               (exists
+                                 (lambda (capture)
+                                   (or
+                                     (capture-starts-at?
+                                       capture
+                                       content
+                                       'indent.end)
+                                     (capture-starts-at?
+                                       capture
+                                       content
+                                       'indent.branch)))
+                                 captures)]
+                             [column
+                               (*
+                                 (max
+                                   0
+                                   (if dedent?
+                                       (- depth 1)
+                                       depth))
+                                 (tree-sitter-indent-context-width
+                                   context))])
+                        (make-bytevector column 32))))))
+            (lambda () (text-close! text)))))
+      (lambda (context) #f)))
 
   (define (string-contains? value needle)
     (let ([limit
@@ -497,11 +635,17 @@
                    (make-tree-sitter-structure-index
                      syntax
                      session
-                     snapshot))))])
+                     snapshot))))]
+           [indentation
+             (and
+               (memq
+                 'indents
+                 (tree-sitter-query-bundle-kinds bundle))
+               (make-tree-sitter-indentation-provider syntax))])
       (make-language-profile
         (tree-sitter-language-spec-name spec)
         syntax
-        #f
+        indentation
         (tree-sitter-language-spec-pairs spec)
         (tree-sitter-language-spec-identifier-character? spec)
         structure

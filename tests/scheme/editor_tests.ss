@@ -8214,6 +8214,11 @@
       'fold
       (major-mode-syntax-capabilities
         (editor-language-catalog json-editor)
+        'json-mode))
+    (memq
+      'indentation
+      (major-mode-syntax-capabilities
+        (editor-language-catalog json-editor)
         'json-mode)))
   (error 'editor-tests "JSON auto mode did not select Tree-sitter"))
 (let* ([frame (render-editor-frame json-editor 3 40)]
@@ -8254,6 +8259,39 @@
            (map
              structural-thing-properties
              objects))))
+(define json-indent-source
+  "{\n\"items\": [\n{\n\"name\": \"soda\"\n}\n]\n}\n")
+(define json-indent-expected
+  "{\n  \"items\": [\n    {\n      \"name\": \"soda\"\n    }\n  ]\n}\n")
+(define json-indent-buffer
+  (make-buffer
+    1008
+    (make-document json-indent-source 1008)
+    "indent.json"
+    'fundamental-mode))
+(editor-add-buffer! json-editor json-indent-buffer)
+(buffer-set-file-path! json-indent-buffer "/tmp/indent.json")
+(editor-select-buffer-major-mode!
+  json-editor
+  json-indent-buffer
+  "/tmp/indent.json")
+(editor-set-view-buffer!
+  json-editor
+  (view-id (editor-active-view json-editor))
+  (buffer-id json-indent-buffer))
+(let ([view (editor-active-view json-editor)])
+  (view-set-mark! view 0)
+  (view-set-caret! view (string-length json-indent-source)))
+(editor-update!
+  json-editor
+  (make-command-message 'edit.indent-region #f))
+(unless
+  (bytevector=?
+    (buffer-bytes json-indent-buffer)
+    (string->utf8 json-indent-expected))
+  (error 'editor-tests
+         "Tree-sitter indent captures did not drive region indentation"
+         (utf8->string (buffer-bytes json-indent-buffer))))
 (editor-register-tree-sitter-file-association!
   json-editor
   'test-json-files
