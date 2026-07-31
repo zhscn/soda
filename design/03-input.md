@@ -14,7 +14,7 @@
 | 基础 motion、editing、search、replace 与 window command | 已实现 |
 | Unicode regexp matcher、编号 capture 与双向搜索 | 已实现 |
 | regexp capture replacement 与大小写转换 | 已实现 |
-| search case policy | 未实现 |
+| literal/regexp search case policy 与 smart-case | 已实现 |
 
 本文只定义文本编辑器当前使用的输入路径。minibuffer 的读取与焦点规则由
 [12-minibuffer.md](12-minibuffer.md) 定义；command 与 interactive 参数由
@@ -193,6 +193,13 @@ replacement preview 与最终 transaction 保存并消费同一个展开结果�
 query replace 的 scan position 始终位于 UTF-8 character boundary。消费非空匹配后
 从 replacement 末尾继续；零长度匹配在 replacement 末尾再推进一个完整字符，位于
 EOF 时进入显式终止位置，因此 skip、逐项 replace 和 replace-all 都单调前进。
+
+`search-literal-case-policy` 与 `search-regexp-case-policy` 分别接受 `sensitive`、
+`insensitive` 或 `smart`，默认值为 `smart`。smart-case 在 query 不含有意的大写字符时
+启用 Unicode case-fold；regexp 的 `\W`、`\D`、`\S`、`\B` 等语法 escape 不计为
+大写意图。每个 incremental search 或 query-replace session 在创建时冻结 setting
+值，query 改变只重新计算该 policy 下的有效 case-fold。状态区和 replacement preview
+显示 `case-fold` 或 `case-sensitive`，使当前匹配模式可见。
 
 ## View 边界
 

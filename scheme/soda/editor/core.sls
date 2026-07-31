@@ -1063,6 +1063,9 @@
   (define (symbol-list? value)
     (and (list? value) (for-all symbol? value)))
 
+  (define (search-case-policy? value)
+    (memq value '(sensitive insensitive smart)))
+
   (define (install-core-settings! editor)
     (for-each
       (lambda (definition)
@@ -1207,7 +1210,19 @@
           #f
           (lambda (value) (or (not value) (word-motion? value)))
           "Mode-specific word motion protocol."
-          'cursor)))
+          'cursor)
+        (make-setting-definition
+          'search-literal-case-policy
+          'smart
+          search-case-policy?
+          "Case policy for literal search and replacement."
+          'chrome)
+        (make-setting-definition
+          'search-regexp-case-policy
+          'smart
+          search-case-policy?
+          "Case policy for regexp search and replacement."
+          'chrome)))
     editor)
 
   (define (install-core-auto-modes! editor)

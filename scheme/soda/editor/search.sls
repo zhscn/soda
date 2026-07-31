@@ -20,6 +20,7 @@
       origin
       (mutable direction)
       regexp?
+      case-policy
       (mutable query)
       (mutable match-start)
       (mutable match-end)
@@ -30,6 +31,7 @@
       origin-view-id
       origin
       regexp?
+      case-policy
       (mutable query)
       (mutable replacement)
       (mutable phase)
@@ -40,31 +42,69 @@
       (mutable expanded-replacement)
       (mutable count)))
 
-  (define (text-matches-at? text query offset)
-    (let ([length (bytevector-length query)])
-      (and (<= (+ offset length) (text-size text))
-           (let loop ([index 0])
-             (or (= index length)
-                 (and
-                   (= (text-byte-at text (+ offset index))
-                      (bytevector-u8-ref query index))
-                   (loop (+ index 1))))))))
+  (define (regexp-quote value)
+    (let-values ([(port extract) (open-string-output-port)])
+      (for-each
+        (lambda (character)
+          (when (memv character
+                      '(#\\ #\. #\^ #\$ #\[ #\]
+                        #\( #\) #\| #\* #\+ #\?))
+            (put-char port #\\))
+          (put-char port character))
+        (string->list value))
+      (extract)))
 
-  (define (find-forward text query start end)
-    (let ([length (bytevector-length query)])
-      (let loop ([offset start])
-        (cond
-          [(> (+ offset length) end) #f]
-          [(text-matches-at? text query offset) offset]
-          [else (loop (+ offset 1))]))))
+  (define (regexp-query-has-uppercase? query)
+    (let ([size (string-length query)])
+      (let loop ([index 0])
+        (and
+          (< index size)
+          (let ([character (string-ref query index)])
+            (if (and (char=? character #\\) (< (+ index 1) size))
+                (let ([escaped (string-ref query (+ index 1))])
+                  (or
+                    (and
+                      (not (memv escaped
+                                 '(#\d #\D #\w #\W #\s #\S
+                                   #\b #\B #\n #\t #\r)))
+                      (char-upper-case? escaped))
+                    (loop (+ index 2))))
+                (or
+                  (char-upper-case? character)
+                  (loop (+ index 1)))))))))
 
-  (define (find-backward text query start lower-bound)
-    (let ([length (bytevector-length query)])
-      (let loop ([offset (min start (- (text-size text) length))])
-        (cond
-          [(< offset lower-bound) #f]
-          [(text-matches-at? text query offset) offset]
-          [else (loop (- offset 1))]))))
+  (define (smart-case-fold? query regexp?)
+    (not
+      (if regexp?
+          (regexp-query-has-uppercase? query)
+          (exists char-upper-case? (string->list query)))))
+
+  (define (case-fold-for-query policy query regexp?)
+    (case policy
+      [(sensitive) #f]
+      [(insensitive) #t]
+      [(smart) (smart-case-fold? query regexp?)]
+      [else
+       (assertion-violation
+         'case-fold-for-query "invalid search case policy" policy)]))
+
+  (define (search-case-policy editor buffer regexp?)
+    (editor-setting-ref
+      editor
+      buffer
+      (if regexp?
+          'search-regexp-case-policy
+          'search-literal-case-policy)))
+
+  (define (case-mode-label case-fold?)
+    (if case-fold? "case-fold" "case-sensitive"))
+
+  (define (literal-match text query start end backward? case-fold?)
+    (let ([value (utf8->string (text->bytevector text))]
+          [pattern (regexp-quote query)])
+      (if backward?
+          (regexp-find-backward pattern value start end case-fold?)
+          (regexp-find-forward pattern value start end case-fold?))))
 
   (define (next-character-offset text offset)
     (let ([size (text-size text)])
@@ -79,17 +119,18 @@
                      [else 4])])
             (min size (+ offset width))))))
 
-  (define (regexp-match text pattern start end backward?)
+  (define (regexp-match text pattern start end backward? case-fold?)
     (let ([value (utf8->string (text->bytevector text))])
       (if backward?
-          (regexp-find-backward pattern value start end)
-          (regexp-find-forward pattern value start end))))
+          (regexp-find-backward pattern value start end case-fold?)
+          (regexp-find-forward pattern value start end case-fold?))))
 
-  (define (regexp-match-result text pattern start end backward?)
+  (define (regexp-match-result
+            text pattern start end backward? case-fold?)
     (let ([value (utf8->string (text->bytevector text))])
       (if backward?
-          (regexp-search-backward pattern value start end)
-          (regexp-search-forward pattern value start end))))
+          (regexp-search-backward pattern value start end case-fold?)
+          (regexp-search-forward pattern value start end case-fold?))))
 
   (define (with-buffer-text buffer procedure)
     (let ([snapshot (document-snapshot (buffer-document buffer))])
@@ -144,7 +185,12 @@
       (ensure-view-visible! view)))
 
   (define (show-match! editor session start end wrapped?)
-    (let ([view (origin-view editor session)])
+    (let ([view (origin-view editor session)]
+          [case-fold?
+            (case-fold-for-query
+              (search-session-case-policy session)
+              (search-session-query session)
+              (search-session-regexp? session))])
       (view-set-mark!
         view
         (if (eq? (search-session-direction session) 'forward)
@@ -161,13 +207,22 @@
       (ensure-view-visible! view)
       (editor-set-status-message!
         editor
-        (and wrapped? "Search wrapped"))))
+        (string-append
+          "Search ["
+          (case-mode-label case-fold?)
+          "]"
+          (if wrapped? " wrapped" "")))))
 
   (define (search-from! editor session query repeat?)
     (let* ([view (origin-view editor session)]
            [buffer (view-buffer view)]
            [bytes (string->utf8 query)]
            [length (bytevector-length bytes)]
+           [case-fold?
+             (case-fold-for-query
+               (search-session-case-policy session)
+               query
+               (search-session-regexp? session))]
            [origin-offset
              (editor-location-offset
                (search-session-origin session))])
@@ -204,31 +259,38 @@
                     [first
                       (if (search-session-regexp? session)
                           (if (eq? direction 'forward)
-                              (regexp-match text query start size #f)
-                              (regexp-match text query 0 start #t))
-                          (let ([match
-                                  (if (eq? direction 'forward)
-                                      (find-forward text bytes start size)
-                                      (find-backward text bytes start 0))])
-                            (and match (cons match (+ match length)))))]
+                              (regexp-match
+                                text query start size #f case-fold?)
+                              (regexp-match
+                                text query 0 start #t case-fold?))
+                          (literal-match
+                            text
+                            query
+                            (if (eq? direction 'forward) start 0)
+                            (if (eq? direction 'forward) size start)
+                            (eq? direction 'backward)
+                            case-fold?))]
                     [wrapped
                       (and
                         (not first)
                         (if (search-session-regexp? session)
                             (if (eq? direction 'forward)
-                                (regexp-match text query 0 (min start size) #f)
+                                (regexp-match
+                                  text query 0 (min start size) #f case-fold?)
                                 (regexp-match text query
-                                              (max 0 (+ start 1)) size #t))
-                            (let ([match
-                                    (if (eq? direction 'forward)
-                                        (find-forward
-                                          text bytes 0 (min start size))
-                                        (find-backward
-                                          text bytes
-                                          (- size length)
-                                          (max 0 (+ start 1))))])
-                              (and match
-                                   (cons match (+ match length))))))]
+                                              (max 0 (+ start 1)) size #t
+                                              case-fold?))
+                            (literal-match
+                              text
+                              query
+                              (if (eq? direction 'forward)
+                                  0
+                                  (max 0 (+ start 1)))
+                              (if (eq? direction 'forward)
+                                  (min start size)
+                                  size)
+                              (eq? direction 'backward)
+                              case-fold?)))]
                     [match (or first wrapped)])
                (if match
                    (show-match!
@@ -240,7 +302,9 @@
                    (editor-set-status-message!
                      editor
                      (string-append
-                       "Failing search: "
+                       "Failing search ["
+                       (case-mode-label case-fold?)
+                       "]: "
                        query))))))])))
 
   (define (start-search! context direction regexp?)
@@ -263,6 +327,8 @@
                        (view-caret view))
                      direction
                      regexp?
+                     (search-case-policy
+                       editor (view-buffer view) regexp?)
                      ""
                      #f
                      #f
@@ -359,8 +425,12 @@
 
   (define (query-replace-show-next! editor session)
     (let* ([buffer (query-replace-buffer editor session)]
-           [query (string->utf8 (query-replace-session-query session))]
-           [length (bytevector-length query)]
+           [query (query-replace-session-query session)]
+           [case-fold?
+             (case-fold-for-query
+               (query-replace-session-case-policy session)
+               query
+               (query-replace-session-regexp? session))]
            [match-range
              (with-buffer-text
                buffer
@@ -377,18 +447,23 @@
                                      (query-replace-session-query session)
                                      scan
                                      size
-                                     #f)])
+                                     #f
+                                     case-fold?)])
                              (query-replace-session-match-result-set!
                                session result)
                              (and result
                                   (regexp-match-group result 0)))
                            (let ([match
-                                   (find-forward
-                                     text query scan size)])
+                                   (literal-match
+                                     text
+                                     query
+                                     scan
+                                     size
+                                     #f
+                                     case-fold?)])
                              (query-replace-session-match-result-set!
                                session #f)
-                             (and match
-                                  (cons match (+ match length)))))))))])
+                             match))))))])
       (if (not match-range)
           (begin
             (query-replace-session-match-result-set! session #f)
@@ -413,7 +488,10 @@
               (string-append
                 "Replacement: "
                 (written-string
-                  (query-replace-session-expanded-replacement session))))
+                  (query-replace-session-expanded-replacement session))
+                " ["
+                (case-mode-label case-fold?)
+                "]"))
             (view-set-mark! view match)
             (view-set-caret! view end)
             (query-replace-session-match-start-set! session match)
@@ -444,6 +522,8 @@
                  (view-buffer view)
                  (view-caret view))
                regexp?
+               (search-case-policy
+                 editor (view-buffer view) regexp?)
                #f
                #f
                'query

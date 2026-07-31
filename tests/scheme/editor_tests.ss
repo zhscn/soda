@@ -2754,13 +2754,39 @@
           (make-input-message event))))
     (decode search-decoder input)))
 
+(editor-set-buffer-setting!
+  search-editor
+  search-buffer
+  'search-literal-case-policy
+  'insensitive)
+(search-send! (bytes 19))
+(editor-set-buffer-setting!
+  search-editor
+  search-buffer
+  'search-literal-case-policy
+  'sensitive)
+(search-send! (string->utf8 "ALPHA"))
+(unless
+  (and
+    (equal? (view-region search-view) '(0 . 5))
+    (string-contains?
+      (editor-status-message search-editor)
+      "case-fold"))
+  (error 'editor-tests "search did not freeze its case policy snapshot"))
+(search-send! (bytes 7))
+(editor-clear-buffer-setting!
+  search-editor search-buffer 'search-literal-case-policy)
+
 (search-send! (bytes 19))
 (search-send! (string->utf8 "alpha"))
 (unless
   (and
     (editor-active-prompt search-editor)
     (= (view-caret search-view) 5)
-    (equal? (view-region search-view) (cons 0 5)))
+    (equal? (view-region search-view) (cons 0 5))
+    (string-contains?
+      (editor-status-message search-editor)
+      "case-fold"))
   (error 'editor-tests "incremental search did not update on prompt edits"))
 (search-send! (bytes 19))
 (unless
@@ -2772,7 +2798,9 @@
 (unless
   (and
     (= (view-caret search-view) 5)
-    (string=? (editor-status-message search-editor) "Search wrapped"))
+    (string-contains?
+      (editor-status-message search-editor)
+      "wrapped"))
   (error 'editor-tests "incremental search did not wrap"))
 (search-send! (bytes 13))
 (unless
@@ -2800,6 +2828,19 @@
     (= (view-caret search-view) 0)
     (not (view-mark-active? search-view)))
   (error 'editor-tests "aborted search did not restore its origin"))
+
+(search-send! (bytes 19))
+(search-send! (string->utf8 "ALPHA"))
+(unless
+  (and
+    (string-contains?
+      (editor-status-message search-editor)
+      "case-sensitive")
+    (string-contains?
+      (editor-status-message search-editor)
+      "Failing search"))
+  (error 'editor-tests "smart-case did not preserve uppercase intent"))
+(search-send! (bytes 7))
 
 (editor-update!
   search-editor
@@ -2854,10 +2895,10 @@
     (not (editor-active-prompt search-editor))
     (bytevector=?
       (buffer-bytes search-buffer)
-      (string->utf8 "xlphx betx A"))
+      (string->utf8 "xlphx betx x"))
     (string-contains?
       (editor-status-message search-editor)
-      "Replaced 3"))
+      "Replaced 4"))
   (error 'editor-tests "query-replace all did not replace remaining matches"))
 
 (buffer-replace-range!
@@ -2865,6 +2906,37 @@
   0
   (bytevector-length (buffer-bytes search-buffer))
   (string->utf8 "foo12 bar foo345"))
+(view-set-caret! search-view 0)
+(editor-set-buffer-setting!
+  search-editor
+  search-buffer
+  'search-regexp-case-policy
+  'insensitive)
+(editor-update!
+  search-editor
+  (make-command-message 'search.forward-regexp #f))
+(search-send! (string->utf8 "FOO[0-9]+"))
+(unless
+  (and
+    (equal? (view-region search-view) '(0 . 5))
+    (string-contains?
+      (editor-status-message search-editor)
+      "case-fold"))
+  (error 'editor-tests "regexp case policy was not applied"))
+(search-send! (bytes 7))
+(editor-clear-buffer-setting!
+  search-editor search-buffer 'search-regexp-case-policy)
+(view-set-caret! search-view 0)
+(editor-update!
+  search-editor
+  (make-command-message 'search.forward-regexp #f))
+(search-send! (string->utf8 "\\W"))
+(unless
+  (string-contains?
+    (editor-status-message search-editor)
+    "case-fold")
+  (error 'editor-tests "regexp syntax affected smart-case intent"))
+(search-send! (bytes 7))
 (view-set-caret! search-view 0)
 (editor-update!
   search-editor
