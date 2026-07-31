@@ -3,6 +3,7 @@
         (soda document)
         (soda editor buffer)
         (soda editor display-placement)
+        (soda editor language)
         (soda editor language-session)
         (soda editor location)
         (soda editor navigation)
@@ -110,17 +111,50 @@
   (not (editor-view-language-attachment editor (view-id independent)))
   "attachment selection must remain per View")
 
-(editor-attach-language-session!
-  editor
-  (buffer-id buffer-c)
-  session
-  'home
-  #f)
+(register-language-profile!
+  (editor-language-catalog editor)
+  (make-language-profile
+    'bootstrap-test
+    #f
+    #f
+    '()
+    #f
+    #f
+    #f
+    '()
+    #f
+    (lambda (owner buffer context) key)))
+(register-major-mode!
+  (editor-language-catalog editor)
+  (make-major-mode
+    'bootstrap-test-mode
+    'fundamental-mode
+    'bootstrap-test
+    'editing
+    #f
+    '()))
+(buffer-set-major-mode! buffer-c 'bootstrap-test-mode)
+(define bootstrap-view
+  (editor-open-view!
+    editor
+    (buffer-id buffer-c)
+    (make-resource-context "/workspace")))
+(define bootstrapped
+  (editor-bootstrap-view-language-session!
+    editor
+    (view-id bootstrap-view)))
 (check
-  (= (length
-       (editor-buffer-language-attachments editor (buffer-id buffer-c)))
-     1)
-  "Buffer must expose all of its LanguageAttachments")
+  (and
+    bootstrapped
+    (eq? (language-attachment-provenance bootstrapped) 'home)
+    (= (language-attachment-session-id bootstrapped)
+       (language-session-id session))
+    (eq? bootstrapped
+         (editor-view-language-attachment
+           editor
+           (view-id bootstrap-view))))
+  "a language profile must bootstrap and select a home attachment")
+(editor-close-view! editor (view-id bootstrap-view))
 (editor-remove-buffer! editor (buffer-id buffer-c))
 (check
   (null?

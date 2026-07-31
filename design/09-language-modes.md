@@ -10,7 +10,8 @@
 | C/C++ 和 Scheme 专用 provider | 已实现 |
 | 各分发语言的 query 覆盖 | 部分实现 |
 | LanguageSession registry、per-View attachment 与 provenance 路由 | 已实现 |
-| provider-specific session bootstrap 与 transport lifecycle | 未实现 |
+| LanguageProfile bootstrap hook 与 home attachment 选择 | 已实现 |
+| provider-specific session transport lifecycle | 未实现 |
 
 ## 分层
 

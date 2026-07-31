@@ -28,6 +28,7 @@
           language-profile-structure
           language-profile-electric
           language-profile-enter
+          language-profile-bootstrap
           make-language-catalog
           language-catalog?
           language-catalog-snapshot
@@ -266,17 +267,30 @@
       (immutable word-motion language-profile-word-motion)
       (immutable structure language-profile-structure)
       (immutable electric language-profile-electric)
-      (immutable enter language-profile-enter)))
+      (immutable enter language-profile-enter)
+      (immutable bootstrap language-profile-bootstrap)))
 
   (define make-language-profile
     (case-lambda
       [(name syntax)
        (make-language-profile
-         name syntax #f '() #f #f #f '() #f)]
+         name syntax #f '() #f #f #f '() #f #f)]
       [(name syntax indent pairs lexical structure electric enter)
        (make-language-profile
-         name syntax indent pairs lexical #f structure electric enter)]
+         name syntax indent pairs lexical #f structure electric enter #f)]
       [(name syntax indent pairs lexical word-motion structure electric enter)
+       (make-language-profile
+         name syntax indent pairs lexical word-motion structure electric enter #f)]
+      [(name
+         syntax
+         indent
+         pairs
+         lexical
+         word-motion
+         structure
+         electric
+         enter
+         bootstrap)
        (unless (symbol? name)
          (assertion-violation
            'make-language-profile
@@ -321,6 +335,11 @@
            'make-language-profile
            "enter must be a procedure or #f"
            enter))
+       (unless (or (not bootstrap) (procedure? bootstrap))
+         (assertion-violation
+           'make-language-profile
+           "bootstrap must be a procedure or #f"
+           bootstrap))
        (%make-language-profile
          name
          syntax
@@ -330,7 +349,8 @@
          word-motion
          structure
          electric
-         enter)]))
+         enter
+         bootstrap)]))
 
   (define-record-type (major-mode %make-major-mode major-mode?)
     (fields

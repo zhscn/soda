@@ -97,6 +97,7 @@
           editor-buffer-language-attachments
           editor-set-view-language-attachment!
           editor-view-language-attachment
+          editor-bootstrap-view-language-session!
           editor-auto-mode-catalog
           editor-register-auto-mode-rule!
           editor-major-mode-for-path
@@ -1577,6 +1578,56 @@
               (language-attachment-id attachment)))))
       (editor-invalidate! value 'configuration)
       attachment))
+
+  (define (editor-bootstrap-view-language-session! value view-id)
+    (require-open-editor 'editor-bootstrap-view-language-session! value)
+    (let* ([view (editor-view-ref value view-id)]
+           [selected (editor-view-language-attachment value view-id)])
+      (or
+        selected
+        (let* ([buffer (view-buffer view)]
+               [home
+                 (filter
+                   (lambda (attachment)
+                     (eq? (language-attachment-provenance attachment) 'home))
+                   (editor-buffer-language-attachments
+                     value
+                     (buffer-id buffer)))])
+          (cond
+            [(= (length home) 1)
+             (editor-set-view-language-attachment!
+               value view-id (car home))]
+            [(pair? home) #f]
+            [else
+             (let* ([profile (buffer-language-profile buffer)]
+                    [bootstrap
+                      (and profile (language-profile-bootstrap profile))]
+                    [key
+                      (and
+                        bootstrap
+                        (bootstrap
+                          value
+                          buffer
+                          (editor-view-resource-context value view-id)))])
+               (if (not key)
+                   #f
+                   (begin
+                     (unless (language-session-key? key)
+                       (assertion-violation
+                         'editor-bootstrap-view-language-session!
+                         "bootstrap policy must return a LanguageSession key or #f"
+                         key))
+                     (let* ([session
+                              (editor-ensure-language-session! value key)]
+                            [attachment
+                              (editor-attach-language-session!
+                                value
+                                (buffer-id buffer)
+                                session
+                                'home
+                                view-id)])
+                       (editor-set-view-language-attachment!
+                         value view-id attachment)))))])))))
 
   (define (adapt-language-context-to-buffer value context buffer)
     (let ([language-context

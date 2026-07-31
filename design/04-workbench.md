@@ -16,7 +16,8 @@
 | generated/tool Buffer 创建 provenance | 已实现 |
 | intent 驱动的统一 display placement policy | 已实现 |
 | LanguageSession registry、attachment 与 display provenance 路由 | 已实现 |
-| provider-specific LanguageSession bootstrap policy | 未实现 |
+| LanguageProfile bootstrap hook 与 home attachment 选择 | 已实现 |
+| provider-specific LanguageSession transport lifecycle | 未实现 |
 
 ## 正交概念
 

@@ -225,6 +225,7 @@
           editor-buffer-language-attachments
           editor-set-view-language-attachment!
           editor-view-language-attachment
+          editor-bootstrap-view-language-session!
           make-auto-mode-rule
           make-file-suffix-auto-mode-rule
           auto-mode-rule?
