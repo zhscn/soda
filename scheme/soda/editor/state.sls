@@ -2163,6 +2163,31 @@
         (editor-set-status-message! value "No completions"))
       accepted?))
 
+  (define (validated-choice-source-boundaries
+            who
+            source
+            input
+            point)
+    (let ([range
+            (or
+              (choice-source-boundaries source input point)
+              (cons 0 (string-length input)))])
+      (unless
+        (and
+          (pair? range)
+          (exact-non-negative-integer? (car range))
+          (exact-non-negative-integer? (cdr range))
+          (<= (car range) point)
+          (<= point (cdr range))
+          (<= (cdr range) (string-length input)))
+        (editor-user-error
+          who
+          "completion boundaries must contain point"
+          range
+          point
+          input))
+      range))
+
   (define (compute-prompt-completion-context value completion)
     (let* ([session
              (active-prompt-session
@@ -2193,24 +2218,11 @@
                            (text-subbytevector text 0 caret))]
                        [point (string-length prefix)]
                        [range
-                         (or
-                           (choice-source-boundaries
-                             source input point)
-                           (cons 0 (string-length input)))])
-                  (unless
-                    (and
-                      (pair? range)
-                      (exact-non-negative-integer? (car range))
-                      (exact-non-negative-integer? (cdr range))
-                      (<= (car range) point)
-                      (<= point (cdr range))
-                      (<= (cdr range) (string-length input)))
-                    (assertion-violation
-                      'editor-refresh-prompt-completion!
-                      "completion boundaries must contain point"
-                      range
-                      point
-                      input))
+                         (validated-choice-source-boundaries
+                           'editor-refresh-prompt-completion!
+                           source
+                           input
+                           point)])
                   (let ([start
                           (bytevector-length
                             (string->utf8
@@ -2301,7 +2313,16 @@
         'editor-open-prompt!
         "abort responder is not a registered command"
         (prompt-request-abort-command request)))
-    (let* ([id (editor-next-prompt-id value)]
+    (let* ([source
+             (prompt-request-completion-source request)]
+           [initial (prompt-request-initial request)])
+      (when source
+        (validated-choice-source-boundaries
+          'editor-open-prompt!
+          source
+          initial
+          (string-length initial)))
+      (let* ([id (editor-next-prompt-id value)]
            [completion-id (editor-next-completion-id value)]
            [origin-view-id (editor-active-view-id value)]
            [origin-view (editor-active-view value)]
@@ -2313,13 +2334,12 @@
                  (number->string id)
                  "*")
                'fundamental-mode
-               (prompt-request-initial request))]
+               initial)]
            [view (editor-open-view! value (buffer-id buffer))]
            [completion
              (and
-               (prompt-request-completion-source request)
-               (let ([source
-                       (prompt-request-completion-source request)])
+               source
+               (let ()
                  (make-completion-session
                    completion-id
                    (make-prompt-completion-target
@@ -2370,7 +2390,7 @@
       (editor-active-view-id-set! value (view-id view))
       (editor-set-status-message! value #f)
       (editor-refresh-prompt-completion! value)
-      session))
+      session)))
 
   (define (history-for value id create?)
     (and

@@ -4166,6 +4166,46 @@
     (lambda (value) (string=? value "root/usr/bin"))
     (lambda (generation) #f)))
 
+(let ([buffer-count (length (editor-buffers prompt-editor))]
+      [view-count (length (editor-views prompt-editor))]
+      [prompt-count (length (editor-prompts prompt-editor))]
+      [active-view (editor-active-view prompt-editor)]
+      [invalid-source
+        (make-choice-source
+          'invalid-boundaries
+          '()
+          (lambda (input point) (cons (+ point 1) point))
+          (lambda (query) '())
+          (lambda (value) #f)
+          (lambda (generation) #f))])
+  (unless
+    (guard
+      (condition
+        [(editor-user-error-condition? condition) #t]
+        [else (raise condition)])
+      (editor-open-prompt!
+        prompt-editor
+        (make-completing-prompt-request
+          "Invalid: "
+          ""
+          #f
+          #f
+          'free
+          invalid-source
+          'test.capture-prompt
+          #f))
+      #f)
+    (error 'editor-tests
+           "invalid initial completion boundaries were accepted"))
+  (unless
+    (and
+      (= (length (editor-buffers prompt-editor)) buffer-count)
+      (= (length (editor-views prompt-editor)) view-count)
+      (= (length (editor-prompts prompt-editor)) prompt-count)
+      (eq? (editor-active-view prompt-editor) active-view))
+    (error 'editor-tests
+           "invalid initial completion boundaries leaked prompt state")))
+
 (editor-open-prompt!
   prompt-editor
   (make-completing-prompt-request
