@@ -27,6 +27,7 @@
         (soda editor scheme-workspace)
         (soda editor scheme-xref)
         (only (soda editor state)
+              editor-refresh-completion-after-command!
               view-clear-mark!
               view-set-caret!
               view-set-mark!)
@@ -4652,6 +4653,68 @@
     (error 'editor-tests
            "current async response was not refiltered and merged")))
 
+(let* ([completion (editor-active-completion completion-editor)]
+       [generation (completion-session-generation completion)]
+       [revision (buffer-revision completion-buffer)])
+  (buffer-replace-range!
+    completion-buffer
+    0
+    0
+    (string->utf8 "!"))
+  (editor-refresh-completion-after-command! completion-editor)
+  (unless
+    (and
+      (= (buffer-revision completion-buffer) (+ revision 1))
+      (= (completion-session-generation completion) (+ generation 1))
+      (completion-session-pending? completion))
+    (error 'editor-tests
+           "revision-only completion refresh did not advance generation"))
+  (let ([queued-effects
+          (editor-take-completion-effects! completion-editor)])
+    (unless
+      (and
+        (= (length queued-effects) 1)
+        (eq? (command-effect-kind (car queued-effects))
+             'completion.request)
+        (=
+          (completion-request-target-revision
+            (command-effect-payload (car queued-effects)))
+          (buffer-revision completion-buffer)))
+      (error
+        'editor-tests
+        "revision-only completion refresh did not replace provider work"))
+    (let* ([result
+             (execute-effects!
+               completion-executor
+               queued-effects)]
+           [messages (effect-result-messages result)])
+      (unless (= (length messages) 1)
+        (error
+          'editor-tests
+          "revision refresh provider did not return one response"
+          messages))
+      (unless
+        (completion-response-message-complete? (car messages))
+        (error
+          'editor-tests
+          "revision refresh provider returned an incomplete response"
+          (completion-response-message-target-revision (car messages))))
+      (for-each
+        (lambda (message)
+          (unless
+            (editor-apply-completion-response!
+              completion-editor
+              message)
+            (error
+              'editor-tests
+              "revision refresh response was rejected"
+              message)))
+        messages)))
+  (unless (not (completion-session-pending? completion))
+    (error 'editor-tests
+           "replacement response did not retire revision refresh request"
+           (completion-session-generation completion))))
+
 (send! completion-editor completion-decoder (bytes 9))
 (define completion-accept-effects
   (send! completion-editor completion-decoder (bytes 13)))
@@ -4661,11 +4724,11 @@
 (unless
   (and
     (not (editor-active-completion completion-editor))
-    (= semantic-start-count 2)
+    (= semantic-start-count 3)
     (= semantic-cancel-count 0)
     (bytevector=?
       (buffer-bytes completion-buffer)
-      (string->utf8 "alpha alpine beta alpine")))
+      (string->utf8 "!alpha alpine beta alpine")))
   (error 'editor-tests
          "accepting document completion did not apply one replacement"))
 (editor-close! completion-editor)

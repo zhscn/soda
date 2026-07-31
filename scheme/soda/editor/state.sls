@@ -1573,15 +1573,25 @@
                   completion
                   allow-revision-change?)])
           (if query+target
-              (let ([generation
-                      (completion-session-generation completion)])
+              (let* ([generation
+                       (completion-session-generation completion)]
+                     [target (cdr query+target)]
+                     [revision
+                       (buffer-revision (view-buffer view))]
+                     [revision-changed?
+                       (not
+                         (= revision
+                            (document-completion-target-revision
+                              target)))])
                 (document-completion-target-refresh!
-                  (cdr query+target)
-                  (buffer-revision (view-buffer view))
+                  target
+                  revision
                   (view-caret view))
                 (completion-session-refresh!
                   completion
-                  (car query+target))
+                  (car query+target)
+                  #f
+                  revision-changed?)
                 (unless
                   (= generation
                      (completion-session-generation completion))

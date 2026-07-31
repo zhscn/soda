@@ -1313,8 +1313,10 @@
   (define completion-session-refresh!
     (case-lambda
       [(session query)
-       (completion-session-refresh! session query #f)]
+       (completion-session-refresh! session query #f #f)]
       [(session query context)
+       (completion-session-refresh! session query context #f)]
+      [(session query context force?)
        (unless (completion-session? session)
          (assertion-violation
            'completion-session-refresh!
@@ -1326,12 +1328,21 @@
            "query must be a string"
            query))
        (unless
-         (and
-           (string? (completion-session-query session))
-           (string=? query (completion-session-query session))
-           (completion-context=?
-             context
-             (completion-session-context session)))
+         (boolean? force?)
+         (assertion-violation
+           'completion-session-refresh!
+           "force flag must be a boolean"
+           force?))
+       (when
+         (or
+           force?
+           (not
+             (and
+               (string? (completion-session-query session))
+               (string=? query (completion-session-query session))
+               (completion-context=?
+                 context
+                 (completion-session-context session)))))
          (let* ([generation
                   (+ (completion-session-generation session) 1)]
                 [source (completion-session-source session)]
