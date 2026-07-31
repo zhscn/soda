@@ -96,8 +96,8 @@
            editor (string-append "Bookmark: " name))
          '()]
         [(and entry (bookmark-resource entry))
-         (editor-jump-to-buffer!
-           editor (view-buffer view) (view-caret view) 'bookmark)
+         (editor-begin-async-jump!
+           editor view (bookmark-resource entry) 'bookmark)
          (list
            (make-command-effect
              'file.read

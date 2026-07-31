@@ -1,6 +1,9 @@
 (library (soda editor navigation)
   (export editor-jump-to-location!
           editor-jump-to-buffer!
+          editor-begin-async-jump!
+          editor-complete-async-jump!
+          editor-cancel-async-jump!
           editor-jump-history
           editor-jump-back!
           editor-jump-forward!
@@ -14,6 +17,15 @@
           (soda editor state))
 
   (define walk-limit 100)
+
+  (define-record-type
+    (pending-jump make-pending-jump pending-jump?)
+    (fields resource
+            kind
+            placeholder
+            entry-count
+            jump-count
+            cursor))
 
   (define (replace-at values index replacement)
     (let loop ([values values] [index index])
@@ -40,6 +52,36 @@
 
   (define (close-locations! values)
     (for-each editor-location-close! values))
+
+  (define (drop-last values)
+    (reverse (cdr (reverse values))))
+
+  (define (pending-current? walk pending)
+    (let ([cursor (navigation-walk-cursor walk)]
+          [entries (navigation-walk-entries walk)])
+      (and cursor
+           (= cursor (- (length entries) 1))
+           (eq? (list-ref entries cursor)
+                (pending-jump-placeholder pending)))))
+
+  (define (cancel-pending-walk! walk)
+    (let ([pending (navigation-walk-pending walk)])
+      (when pending
+        (when (pending-current? walk pending)
+          (let* ([entry-count (pending-jump-entry-count pending)]
+                 [entries (navigation-walk-entries walk)]
+                 [discarded (drop entries entry-count)])
+            (navigation-walk-replace-entries!
+              walk (take entries entry-count))
+            (navigation-walk-replace-jumps!
+              walk
+              (take
+                (navigation-walk-jumps walk)
+                (pending-jump-jump-count pending)))
+            (navigation-walk-cursor-set!
+              walk (pending-jump-cursor pending))
+            (close-locations! discarded)))
+        (navigation-walk-pending-set! walk #f))))
 
   (define (current-location view)
     (make-buffer-location
@@ -116,11 +158,7 @@
     (navigation-walk-jumps
       (view-navigation-walk (editor-active-view editor))))
 
-  (define editor-jump-to-location!
-    (case-lambda
-      [(editor location)
-       (editor-jump-to-location! editor location 'explicit)]
-      [(editor location kind)
+  (define (jump-view-to-location! editor view location kind)
        (require-open-editor 'editor-jump-to-location! editor)
        (unless (and (editor-location? location) (symbol? kind))
          (assertion-violation
@@ -133,8 +171,8 @@
            'editor-jump-to-location!
            "jump target is stale or unavailable"
            (editor-location-buffer-id location)))
-       (let* ([view (editor-active-view editor)]
-              [walk (view-navigation-walk view)]
+       (let* ([walk (view-navigation-walk view)]
+              [ignored (cancel-pending-walk! walk)]
               [current (current-location view)]
               [cursor (navigation-walk-cursor walk)]
               [branched?
@@ -186,7 +224,84 @@
            walk
            (- (length (navigation-walk-entries walk)) 1))
          (trim-walk! walk)
-         (activate-location! editor view location))]))
+         (activate-location! editor view location)))
+
+  (define editor-jump-to-location!
+    (case-lambda
+      [(editor location)
+       (editor-jump-to-location! editor location 'explicit)]
+      [(editor location kind)
+       (jump-view-to-location!
+         editor (editor-active-view editor) location kind)]))
+
+  (define (editor-begin-async-jump! editor view resource kind)
+    (require-open-editor 'editor-begin-async-jump! editor)
+    (unless (and (view? view) (string? resource) (symbol? kind))
+      (assertion-violation
+        'editor-begin-async-jump!
+        "expected a view, resource, and jump kind"
+        view resource kind))
+    (let ([walk (view-navigation-walk view)])
+      (cancel-pending-walk! walk)
+      (let ([entry-count (length (navigation-walk-entries walk))]
+            [jump-count (length (navigation-walk-jumps walk))]
+            [cursor (navigation-walk-cursor walk)])
+        (jump-view-to-location!
+          editor
+          view
+          (make-buffer-location (view-buffer view) (view-caret view))
+          kind)
+        (navigation-walk-pending-set!
+          walk
+          (make-pending-jump
+            resource
+            kind
+            (list-ref
+              (navigation-walk-entries walk)
+              (navigation-walk-cursor walk))
+            entry-count
+            jump-count
+            cursor)))))
+
+  (define (editor-complete-async-jump!
+            editor view buffer offset resource)
+    (require-open-editor 'editor-complete-async-jump! editor)
+    (let* ([walk (view-navigation-walk view)]
+           [pending (navigation-walk-pending walk)])
+      (and
+        pending
+        (string=? resource (pending-jump-resource pending))
+        (pending-current? walk pending)
+        (let* ([target (make-buffer-location buffer offset)]
+               [entries (navigation-walk-entries walk)]
+               [jumps (navigation-walk-jumps walk)]
+               [jump (car (reverse jumps))]
+               [placeholder (pending-jump-placeholder pending)])
+          (navigation-walk-replace-entries!
+            walk (append (drop-last entries) (list target)))
+          (navigation-walk-replace-jumps!
+            walk
+            (append
+              (drop-last jumps)
+              (list
+                (make-jump-history-entry
+                  (pending-jump-kind pending)
+                  (jump-history-entry-source jump)
+                  (editor-location->item
+                    target 'target (pending-jump-kind pending))))))
+          (navigation-walk-pending-set! walk #f)
+          (editor-location-close! placeholder)
+          (activate-location! editor view target)
+          #t))))
+
+  (define (editor-cancel-async-jump! editor view resource)
+    (require-open-editor 'editor-cancel-async-jump! editor)
+    (let* ([walk (view-navigation-walk view)]
+           [pending (navigation-walk-pending walk)])
+      (when (and pending
+                 (or (not resource)
+                     (string=? resource (pending-jump-resource pending))))
+        (cancel-pending-walk! walk))))
 
   (define editor-jump-to-buffer!
     (case-lambda

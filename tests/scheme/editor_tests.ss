@@ -24,6 +24,10 @@
         (soda editor minor-mode)
         (soda editor modeline)
         (soda editor motion)
+        (only (soda editor navigation)
+              editor-begin-async-jump!
+              editor-complete-async-jump!
+              editor-cancel-async-jump!)
         (soda editor prompt)
         (soda editor repl)
         (soda editor save-place-store)
@@ -943,6 +947,71 @@
 (unless (editor-delete-bookmark! bookmark-editor "renamed")
   (error 'editor-tests "bookmark delete failed"))
 (editor-close! bookmark-editor)
+
+(define async-jump-source
+  (make-buffer
+    7405
+    (make-document "source" 7405)
+    "/tmp/soda-async-source.scm"
+    'scheme-mode))
+(define async-jump-editor (make-editor async-jump-source))
+(define async-jump-target
+  (editor-create-buffer!
+    async-jump-editor "/tmp/soda-async-target.scm" 'scheme-mode "target"))
+(define async-jump-view (editor-active-view async-jump-editor))
+(editor-set-view-buffer!
+  async-jump-editor
+  (view-id async-jump-view)
+  (buffer-id async-jump-source))
+(view-set-caret! async-jump-view 2)
+(editor-begin-async-jump!
+  async-jump-editor
+  async-jump-view
+  "/tmp/soda-async-target.scm"
+  'definition)
+(unless
+  (editor-complete-async-jump!
+    async-jump-editor
+    async-jump-view
+    async-jump-target
+    4
+    "/tmp/soda-async-target.scm")
+  (error 'editor-tests "asynchronous jump did not commit"))
+(let* ([history (editor-jump-history async-jump-editor)]
+       [jump (and (pair? history) (car (reverse history)))])
+  (unless
+    (and
+      jump
+      (= (location-item-buffer-id (jump-history-entry-source jump))
+         (buffer-id async-jump-source))
+      (= (location-item-start (jump-history-entry-source jump)) 2)
+      (= (location-item-buffer-id (jump-history-entry-target jump))
+         (buffer-id async-jump-target))
+      (= (location-item-start (jump-history-entry-target jump)) 4)
+      (eq? (view-buffer async-jump-view) async-jump-target)
+      (= (view-caret async-jump-view) 4)
+      (editor-jump-back! async-jump-editor)
+      (eq? (view-buffer async-jump-view) async-jump-source)
+      (= (view-caret async-jump-view) 2)
+      (editor-jump-forward! async-jump-editor)
+      (eq? (view-buffer async-jump-view) async-jump-target)
+      (= (view-caret async-jump-view) 4))
+    (error 'editor-tests
+           "asynchronous jump history did not preserve source and target")))
+(editor-jump-back! async-jump-editor)
+(editor-begin-async-jump!
+  async-jump-editor
+  async-jump-view
+  "/tmp/soda-missing-target.scm"
+  'definition)
+(editor-cancel-async-jump!
+  async-jump-editor async-jump-view "/tmp/soda-missing-target.scm")
+(unless
+  (and
+    (eq? (view-buffer async-jump-view) async-jump-source)
+    (= (length (editor-jump-history async-jump-editor)) 1))
+  (error 'editor-tests "cancelled asynchronous jump left placeholder history"))
+(editor-close! async-jump-editor)
 
 (define save-place-buffer
   (make-buffer

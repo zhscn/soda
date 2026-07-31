@@ -395,11 +395,8 @@
             (string? resource)
             (let ([view
                     (command-context-view context)])
-              (editor-jump-to-buffer!
-                editor
-                (view-buffer view)
-                (view-caret view)
-                'diagnostic)
+              (editor-begin-async-jump!
+                editor view resource 'diagnostic)
               (make-command-effect
                 'file.read
                 (make-open-request

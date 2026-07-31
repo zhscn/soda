@@ -97,13 +97,11 @@
         definition
         (let* ([editor (command-context-editor context)]
                [view (command-context-view context)])
-          ;; Reserve the current navigation entry before the asynchronous
-          ;; resource switch.  jump-back replaces this entry with the opened
-          ;; definition location and returns to the origin.
-          (editor-jump-to-buffer!
+          (editor-begin-async-jump!
             editor
-            (view-buffer view)
-            (view-caret view)
+            view
+            (scheme-definition-id-document-id
+              (scheme-definition-id definition))
             'definition)
           (make-command-effect
             'file.read
@@ -151,11 +149,8 @@
           (and
             (string? resource)
             (let ([view (command-context-view context)])
-              (editor-jump-to-buffer!
-                editor
-                (view-buffer view)
-                (view-caret view)
-                kind)
+              (editor-begin-async-jump!
+                editor view resource kind)
               (make-command-effect
                 'file.read
                 (make-open-request
@@ -488,11 +483,8 @@
              (string? resource)
              (exact-non-negative-integer? start)
              (let ([view (command-context-view context)])
-               (editor-jump-to-buffer!
-                 editor
-                 (view-buffer view)
-                 (view-caret view)
-                 'xref)
+               (editor-begin-async-jump!
+                 editor view resource 'xref)
                (make-command-effect
                  'file.read
                  (make-open-request

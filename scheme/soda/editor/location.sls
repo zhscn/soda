@@ -36,6 +36,8 @@
           navigation-walk-cursor
           navigation-walk-cursor-set!
           navigation-walk-jumps
+          navigation-walk-pending
+          navigation-walk-pending-set!
           navigation-walk-replace-entries!
           navigation-walk-replace-jumps!
           navigation-walk-detach-buffer!
@@ -59,7 +61,8 @@
     (fields
       (mutable entries)
       (mutable cursor)
-      (mutable jumps)))
+      (mutable jumps)
+      (mutable pending)))
 
   (define-record-type
     (jump-history-entry %make-jump-history-entry jump-history-entry?)
@@ -279,7 +282,7 @@
       (editor-location-anchor-set! location #f)))
 
   (define (make-navigation-walk)
-    (%make-navigation-walk '() #f '()))
+    (%make-navigation-walk '() #f '() #f))
 
   (define (navigation-walk-replace-entries! walk entries)
     (unless (navigation-walk? walk)
@@ -313,7 +316,8 @@
       (for-each editor-location-close! (navigation-walk-entries walk))
       (navigation-walk-entries-set! walk '())
       (navigation-walk-cursor-set! walk #f)
-      (navigation-walk-jumps-set! walk '())))
+      (navigation-walk-jumps-set! walk '())
+      (navigation-walk-pending-set! walk #f)))
 
   (define (navigation-walk-detach-buffer! walk buffer-id)
     (when (navigation-walk? walk)

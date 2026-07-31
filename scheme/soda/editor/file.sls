@@ -94,6 +94,7 @@
           (soda editor edit)
           (soda editor event)
           (soda editor keymap)
+          (soda editor navigation)
           (soda editor prompt)
           (soda editor state)
           (soda vfs))
@@ -949,19 +950,35 @@
         #f))
 
   (define (activate-open-target! editor result buffer view-id)
-    (and
-      (activate-buffer! editor view-id buffer)
-      (begin
-        (let ([offset
-                (open-target-offset
-                  buffer
-                  (open-result-offset-for-view result view-id))]
-              [view (find-view-by-id editor view-id)])
-          (when (and offset view)
-            (view-set-caret!
-              view
-              (min offset (buffer-byte-length buffer)))))
-        #t)))
+    (let* ([view (find-view-by-id editor view-id)]
+           [offset
+             (open-target-offset
+               buffer
+               (open-result-offset-for-view result view-id))]
+           [target-offset
+             (and offset (min offset (buffer-byte-length buffer)))])
+      (and
+        view
+        (or
+          (and target-offset
+               (editor-complete-async-jump!
+                 editor view buffer target-offset (open-result-path result)))
+          (and
+            (activate-buffer! editor view-id buffer)
+            (begin
+              (editor-cancel-async-jump! editor view #f)
+              (when target-offset
+                (view-set-caret! view target-offset))
+              #t))))))
+
+  (define (cancel-open-jumps! editor result)
+    (for-each
+      (lambda (view-id)
+        (let ([view (find-view-by-id editor view-id)])
+          (when view
+            (editor-cancel-async-jump!
+              editor view (open-result-path result)))))
+      (open-result-view-ids result)))
 
   (define (view-default-directory editor view-id)
     (let ([view (find-view-by-id editor view-id)])
@@ -1305,6 +1322,7 @@
           result))
       (cond
         [(eq? (open-result-kind result) 'directory)
+         (cancel-open-jumps! editor result)
          (let ([view
                  (let loop ([view-ids (open-result-view-ids result)])
                    (and
@@ -1338,6 +1356,7 @@
          (create-open-result-buffer! editor result #t)
          '()]
         [(not (zero? (open-result-status result)))
+         (cancel-open-jumps! editor result)
          (editor-set-status-message!
            editor
            (string-append
