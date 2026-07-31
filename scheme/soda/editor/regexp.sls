@@ -5,6 +5,16 @@
           regexp-match-group-count
           regexp-match-group
           regexp-expand-replacement
+          compile-regexp
+          regexp-program?
+          make-regexp-source
+          regexp-source?
+          regexp-source-value
+          regexp-source-byte-length
+          regexp-program-search-forward
+          regexp-program-search-backward
+          regexp-program-find-forward
+          regexp-program-find-backward
           regexp-search-forward
           regexp-search-backward
           regexp-find-forward
@@ -14,6 +24,14 @@
   (define-record-type
     (regexp-match %make-regexp-match regexp-match?)
     (fields start end groups))
+
+  (define-record-type
+    (regexp-program %make-regexp-program regexp-program?)
+    (fields pattern ast group-count))
+
+  (define-record-type
+    (regexp-source %make-regexp-source regexp-source?)
+    (fields value characters offsets byte-length))
 
   (define (regexp-match-group-count match)
     (unless (regexp-match? match)
@@ -500,6 +518,24 @@
                    (string->utf8
                      (string (string-ref value index))))))))))
 
+  (define (compile-regexp pattern)
+    (unless (string? pattern)
+      (assertion-violation
+        'compile-regexp "expected a regexp string" pattern))
+    (let ([parsed (parse-regexp pattern)])
+      (%make-regexp-program pattern (car parsed) (cdr parsed))))
+
+  (define (make-regexp-source value)
+    (unless (string? value)
+      (assertion-violation
+        'make-regexp-source "expected a source string" value))
+    (let ([offsets (string-byte-offsets value)])
+      (%make-regexp-source
+        value
+        (list->vector (string->list value))
+        offsets
+        (vector-ref offsets (- (vector-length offsets) 1)))))
+
   (define (byte->character-ceiling offsets byte-offset)
     (let loop ([index 0])
       (if (or (= index (- (vector-length offsets) 1))
@@ -555,21 +591,23 @@
           (vector-set! byte-groups 0 (cons start-byte end-byte))
           (%make-regexp-match start-byte end-byte byte-groups)))))
 
-  (define (search pattern value byte-start byte-end backward? case-fold?)
-    (unless (and (string? value)
+  (define (program-search
+            program source byte-start byte-end backward? case-fold?)
+    (unless (and (regexp-program? program)
+                 (regexp-source? source)
                  (integer? byte-start)
                  (exact? byte-start)
                  (integer? byte-end)
                  (exact? byte-end)
                  (<= 0 byte-start byte-end)
-                 (<= byte-end (bytevector-length (string->utf8 value))))
-      (assertion-violation
-        'regexp-search "invalid value or byte range" value byte-start byte-end))
-    (let* ([parsed (parse-regexp pattern)]
-           [ast (car parsed)]
-           [group-count (cdr parsed)]
-           [characters (list->vector (string->list value))]
-           [offsets (string-byte-offsets value)]
+                 (<= byte-end (regexp-source-byte-length source)))
+      (assertion-violation 'regexp-search
+        "invalid program, source, or byte range"
+        program source byte-start byte-end))
+    (let* ([ast (regexp-program-ast program)]
+           [group-count (regexp-program-group-count program)]
+           [characters (regexp-source-characters source)]
+           [offsets (regexp-source-offsets source)]
            [start (byte->character-ceiling offsets byte-start)]
            [end (byte->character-floor offsets byte-end)])
       (if backward?
@@ -615,19 +653,65 @@
                   case-fold?)
                 (loop (+ position 1))))))))
 
+  (define regexp-program-search-forward
+    (case-lambda
+      [(program source start end)
+       (program-search program source start end #f #f)]
+      [(program source start end case-fold?)
+       (program-search program source start end #f case-fold?)]))
+
+  (define regexp-program-search-backward
+    (case-lambda
+      [(program source start end)
+       (program-search program source start end #t #f)]
+      [(program source start end case-fold?)
+       (program-search program source start end #t case-fold?)]))
+
+  (define regexp-program-find-forward
+    (case-lambda
+      [(program source start end)
+       (let ([match
+               (regexp-program-search-forward program source start end)])
+         (and match (regexp-match-group match 0)))]
+      [(program source start end case-fold?)
+       (let ([match
+               (regexp-program-search-forward
+                 program source start end case-fold?)])
+         (and match (regexp-match-group match 0)))]))
+
+  (define regexp-program-find-backward
+    (case-lambda
+      [(program source start end)
+       (let ([match
+               (regexp-program-search-backward program source start end)])
+         (and match (regexp-match-group match 0)))]
+      [(program source start end case-fold?)
+       (let ([match
+               (regexp-program-search-backward
+                 program source start end case-fold?)])
+         (and match (regexp-match-group match 0)))]))
+
   (define regexp-search-forward
     (case-lambda
       [(pattern value start end)
-       (search pattern value start end #f #f)]
+       (regexp-program-search-forward
+         (compile-regexp pattern) (make-regexp-source value) start end)]
       [(pattern value start end case-fold?)
-       (search pattern value start end #f case-fold?)]))
+       (regexp-program-search-forward
+         (compile-regexp pattern)
+         (make-regexp-source value)
+         start end case-fold?)]))
 
   (define regexp-search-backward
     (case-lambda
       [(pattern value start end)
-       (search pattern value start end #t #f)]
+       (regexp-program-search-backward
+         (compile-regexp pattern) (make-regexp-source value) start end)]
       [(pattern value start end case-fold?)
-       (search pattern value start end #t case-fold?)]))
+       (regexp-program-search-backward
+         (compile-regexp pattern)
+         (make-regexp-source value)
+         start end case-fold?)]))
 
   (define regexp-find-forward
     (case-lambda

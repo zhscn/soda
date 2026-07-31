@@ -87,4 +87,23 @@
     (equal? (regexp-match-group unicode 1) '(5 . 7)))
   (error 'regexp-tests "Unicode byte offsets differ"))
 
+(define compiled (compile-regexp "item-[0-9]+"))
+(define compiled-source
+  (make-regexp-source "item-1 item-22 item-333"))
+(unless
+  (and
+    (regexp-program? compiled)
+    (regexp-source? compiled-source)
+    (= (regexp-source-byte-length compiled-source) 23)
+    (equal?
+      (regexp-program-find-forward compiled compiled-source 0 23)
+      '(0 . 6))
+    (equal?
+      (regexp-program-find-forward compiled compiled-source 6 23)
+      '(7 . 14))
+    (equal?
+      (regexp-program-find-backward compiled compiled-source 0 23)
+      '(15 . 23)))
+  (error 'regexp-tests "compiled regexp/source search contract differs"))
+
 (display "regexp tests passed\n")

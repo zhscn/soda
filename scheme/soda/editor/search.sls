@@ -22,6 +22,11 @@
       regexp?
       case-policy
       (mutable query)
+      (mutable compiled-query)
+      (mutable program)
+      (mutable source-buffer-id)
+      (mutable source-revision)
+      (mutable source)
       (mutable match-start)
       (mutable match-end)
       (mutable wrapped?)))
@@ -34,6 +39,10 @@
       case-policy
       (mutable query)
       (mutable replacement)
+      (mutable program)
+      (mutable source-buffer-id)
+      (mutable source-revision)
+      (mutable source)
       (mutable phase)
       (mutable scan-position)
       (mutable match-start)
@@ -99,12 +108,12 @@
   (define (case-mode-label case-fold?)
     (if case-fold? "case-fold" "case-sensitive"))
 
-  (define (literal-match text query start end backward? case-fold?)
-    (let ([value (utf8->string (text->bytevector text))]
-          [pattern (regexp-quote query)])
-      (if backward?
-          (regexp-find-backward pattern value start end case-fold?)
-          (regexp-find-forward pattern value start end case-fold?))))
+  (define (program-match program source start end backward? case-fold?)
+    (if backward?
+        (regexp-program-find-backward
+          program source start end case-fold?)
+        (regexp-program-find-forward
+          program source start end case-fold?)))
 
   (define (next-character-offset text offset)
     (let ([size (text-size text)])
@@ -119,18 +128,12 @@
                      [else 4])])
             (min size (+ offset width))))))
 
-  (define (regexp-match text pattern start end backward? case-fold?)
-    (let ([value (utf8->string (text->bytevector text))])
-      (if backward?
-          (regexp-find-backward pattern value start end case-fold?)
-          (regexp-find-forward pattern value start end case-fold?))))
-
-  (define (regexp-match-result
-            text pattern start end backward? case-fold?)
-    (let ([value (utf8->string (text->bytevector text))])
-      (if backward?
-          (regexp-search-backward pattern value start end case-fold?)
-          (regexp-search-forward pattern value start end case-fold?))))
+  (define (buffer-regexp-source buffer)
+    (with-buffer-text
+      buffer
+      (lambda (text)
+        (make-regexp-source
+          (utf8->string (text->bytevector text))))))
 
   (define (with-buffer-text buffer procedure)
     (let ([snapshot (document-snapshot (buffer-document buffer))])
@@ -143,6 +146,63 @@
               (lambda () (procedure text))
               (lambda () (text-close! text)))))
         (lambda () (snapshot-close! snapshot)))))
+
+  (define (search-session-program! session query)
+    (if (and
+          (search-session-program session)
+          (string? (search-session-compiled-query session))
+          (string=? query (search-session-compiled-query session)))
+        (search-session-program session)
+        (let ([program
+                (compile-regexp
+                  (if (search-session-regexp? session)
+                      query
+                      (regexp-quote query)))])
+          (search-session-compiled-query-set! session query)
+          (search-session-program-set! session program)
+          program)))
+
+  (define (search-session-source! session buffer)
+    (let ([revision (buffer-revision buffer)])
+      (if (and
+            (search-session-source session)
+            (= (buffer-id buffer)
+               (search-session-source-buffer-id session))
+            (= revision (search-session-source-revision session)))
+          (search-session-source session)
+          (let ([source (buffer-regexp-source buffer)])
+            (search-session-source-buffer-id-set!
+              session (buffer-id buffer))
+            (search-session-source-revision-set! session revision)
+            (search-session-source-set! session source)
+            source))))
+
+  (define (query-replace-program! session)
+    (or
+      (query-replace-session-program session)
+      (let ([program
+              (compile-regexp
+                (if (query-replace-session-regexp? session)
+                    (query-replace-session-query session)
+                    (regexp-quote
+                      (query-replace-session-query session))))])
+        (query-replace-session-program-set! session program)
+        program)))
+
+  (define (query-replace-source! session buffer)
+    (let ([revision (buffer-revision buffer)])
+      (if (and
+            (query-replace-session-source session)
+            (= (buffer-id buffer)
+               (query-replace-session-source-buffer-id session))
+            (= revision (query-replace-session-source-revision session)))
+          (query-replace-session-source session)
+          (let ([source (buffer-regexp-source buffer)])
+            (query-replace-session-source-buffer-id-set!
+              session (buffer-id buffer))
+            (query-replace-session-source-revision-set! session revision)
+            (query-replace-session-source-set! session source)
+            source))))
 
   (define (written-string value)
     (let-values ([(port extract) (open-string-output-port)])
@@ -235,77 +295,59 @@
          (search-session-wrapped?-set! session #f)
          (editor-set-status-message! editor #f)]
         [else
-         (with-buffer-text
-           buffer
-           (lambda (text)
-             (let* ([size (text-size text)]
-                    [direction (search-session-direction session)]
-                    [start
-                      (if repeat?
-                          (if (eq? direction 'forward)
-                              (min
-                                size
-                                (+
-                                  (or
-                                    (search-session-match-start session)
-                                    origin-offset)
-                                  1))
-                              (-
-                                (or
-                                  (search-session-match-start session)
-                                  origin-offset)
-                                1))
-                          origin-offset)]
-                    [first
-                      (if (search-session-regexp? session)
-                          (if (eq? direction 'forward)
-                              (regexp-match
-                                text query start size #f case-fold?)
-                              (regexp-match
-                                text query 0 start #t case-fold?))
-                          (literal-match
-                            text
-                            query
-                            (if (eq? direction 'forward) start 0)
-                            (if (eq? direction 'forward) size start)
-                            (eq? direction 'backward)
-                            case-fold?))]
-                    [wrapped
-                      (and
-                        (not first)
-                        (if (search-session-regexp? session)
-                            (if (eq? direction 'forward)
-                                (regexp-match
-                                  text query 0 (min start size) #f case-fold?)
-                                (regexp-match text query
-                                              (max 0 (+ start 1)) size #t
-                                              case-fold?))
-                            (literal-match
-                              text
-                              query
-                              (if (eq? direction 'forward)
-                                  0
-                                  (max 0 (+ start 1)))
-                              (if (eq? direction 'forward)
-                                  (min start size)
-                                  size)
-                              (eq? direction 'backward)
-                              case-fold?)))]
-                    [match (or first wrapped)])
-               (if match
-                   (show-match!
-                     editor
-                     session
-                     (car match)
-                     (cdr match)
-                     (and wrapped #t))
-                   (editor-set-status-message!
-                     editor
-                     (string-append
-                       "Failing search ["
-                       (case-mode-label case-fold?)
-                       "]: "
-                       query))))))])))
+         (let* ([program (search-session-program! session query)]
+                [source (search-session-source! session buffer)]
+                [size (regexp-source-byte-length source)]
+                [direction (search-session-direction session)]
+                [start
+                  (if repeat?
+                      (if (eq? direction 'forward)
+                          (min
+                            size
+                            (+
+                              (or
+                                (search-session-match-start session)
+                                origin-offset)
+                              1))
+                          (-
+                            (or
+                              (search-session-match-start session)
+                              origin-offset)
+                            1))
+                      origin-offset)]
+                [first
+                  (program-match
+                    program
+                    source
+                    (if (eq? direction 'forward) start 0)
+                    (if (eq? direction 'forward) size start)
+                    (eq? direction 'backward)
+                    case-fold?)]
+                [wrapped
+                  (and
+                    (not first)
+                    (program-match
+                      program
+                      source
+                      (if (eq? direction 'forward)
+                          0
+                          (max 0 (+ start 1)))
+                      (if (eq? direction 'forward)
+                          (min start size)
+                          size)
+                      (eq? direction 'backward)
+                      case-fold?))]
+                [match (or first wrapped)])
+           (if match
+               (show-match!
+                 editor session (car match) (cdr match) (and wrapped #t))
+               (editor-set-status-message!
+                 editor
+                 (string-append
+                   "Failing search ["
+                   (case-mode-label case-fold?)
+                   "]: "
+                   query))))])))
 
   (define (start-search! context direction regexp?)
     (let* ([editor (command-context-editor context)]
@@ -330,6 +372,11 @@
                      (search-case-policy
                        editor (view-buffer view) regexp?)
                      ""
+                     #f
+                     #f
+                     #f
+                     #f
+                     #f
                      #f
                      #f
                      #f)])
@@ -431,39 +478,20 @@
                (query-replace-session-case-policy session)
                query
                (query-replace-session-regexp? session))]
+           [source (query-replace-source! session buffer)]
+           [program (query-replace-program! session)]
+           [scan (query-replace-session-scan-position session)]
+           [size (regexp-source-byte-length source)]
+           [result
+             (and
+               (<= scan size)
+               (regexp-program-search-forward
+                 program source scan size case-fold?))]
            [match-range
-             (with-buffer-text
-               buffer
-               (lambda (text)
-                 (let ([scan
-                         (query-replace-session-scan-position session)]
-                       [size (text-size text)])
-                   (if (> scan size)
-                       #f
-                       (if (query-replace-session-regexp? session)
-                           (let ([result
-                                   (regexp-match-result
-                                     text
-                                     (query-replace-session-query session)
-                                     scan
-                                     size
-                                     #f
-                                     case-fold?)])
-                             (query-replace-session-match-result-set!
-                               session result)
-                             (and result
-                                  (regexp-match-group result 0)))
-                           (let ([match
-                                   (literal-match
-                                     text
-                                     query
-                                     scan
-                                     size
-                                     #f
-                                     case-fold?)])
-                             (query-replace-session-match-result-set!
-                               session #f)
-                             match))))))])
+             (and result (regexp-match-group result 0))])
+      (query-replace-session-match-result-set!
+        session
+        (and (query-replace-session-regexp? session) result))
       (if (not match-range)
           (begin
             (query-replace-session-match-result-set! session #f)
@@ -475,13 +503,10 @@
             (query-replace-session-expanded-replacement-set!
               session
               (if (query-replace-session-regexp? session)
-                  (with-buffer-text
-                    buffer
-                    (lambda (text)
-                      (regexp-expand-replacement
-                        (query-replace-session-replacement session)
-                        (utf8->string (text->bytevector text))
-                        (query-replace-session-match-result session))))
+                  (regexp-expand-replacement
+                    (query-replace-session-replacement session)
+                    (regexp-source-value source)
+                    (query-replace-session-match-result session))
                   (query-replace-session-replacement session)))
             (editor-set-status-message!
               editor
@@ -524,6 +549,10 @@
                regexp?
                (search-case-policy
                  editor (view-buffer view) regexp?)
+               #f
+               #f
+               #f
+               #f
                #f
                #f
                'query
@@ -569,7 +598,7 @@
                       (query-replace-session-regexp? session)))
                (guard
                  (condition [else #f])
-                 (regexp-find-forward (or query "") "" 0 0)
+                 (compile-regexp (or query ""))
                  #t))])
       (when (query-replace-session? session)
         (if (or (not query)
@@ -585,6 +614,7 @@
                     "Invalid regexp")))
             (begin
               (query-replace-session-query-set! session query)
+              (query-replace-session-program-set! session #f)
               (query-replace-session-phase-set! session 'replacement)
               (editor-open-prompt!
                 editor
