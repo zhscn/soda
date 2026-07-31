@@ -140,6 +140,42 @@ TEST_CASE("process output streams precede its exit event") {
     CHECK_FALSE(runtime.alive());
 }
 
+TEST_CASE("process input is written asynchronously and can be closed") {
+    Runtime runtime;
+    const SourceId process = runtime.spawn_process({"/bin/cat"});
+    const std::string input = "first line\nsecond line\n";
+    std::vector<std::byte> bytes(input.size());
+    std::ranges::copy_n(reinterpret_cast<const std::byte*>(input.data()),
+                        static_cast<std::ptrdiff_t>(input.size()), bytes.begin());
+    runtime.write_process(process, std::move(bytes));
+    runtime.close_process_input(process);
+
+    std::string output;
+    bool exited = false;
+    while (!exited) {
+        if (runtime.pending_events() == 0) {
+            (void)runtime.poll(PollMode::Once);
+        }
+        while (const auto event = runtime.next_event()) {
+            REQUIRE(event->source == process);
+            if (event->kind == EventKind::ProcessOutput) {
+                REQUIRE(event->status == 0);
+                REQUIRE(event->flags == SODA_PROCESS_STDOUT);
+                output.append(reinterpret_cast<const char*>(event->data.data()),
+                              event->data.size());
+            } else {
+                REQUIRE(event->kind == EventKind::ProcessExit);
+                CHECK(event->status == 0);
+                CHECK(event->flags == 0);
+                exited = true;
+            }
+        }
+    }
+
+    CHECK(output == input);
+    CHECK_FALSE(runtime.alive());
+}
+
 TEST_CASE("process spawn failures are asynchronous exit events") {
     Runtime runtime;
     const SourceId process = runtime.spawn_process({"/soda/program/that/does/not/exist"});

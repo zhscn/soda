@@ -112,6 +112,13 @@ struct Runtime::Impl {
     };
 
     struct Process {
+        struct Input {
+            Process* process = nullptr;
+            uv_pipe_t handle{};
+            bool closing = false;
+            bool closed = false;
+        };
+
         struct Output {
             Process* process = nullptr;
             uv_pipe_t handle{};
@@ -121,9 +128,16 @@ struct Runtime::Impl {
             bool closed = false;
         };
 
+        struct Write {
+            Process* process = nullptr;
+            uv_write_t request{};
+            std::vector<std::byte> data;
+        };
+
         Impl* owner = nullptr;
         SourceId id;
         uv_process_t handle{};
+        Input standard_input;
         Output standard_output;
         Output standard_error;
         std::vector<std::string> arguments;
@@ -434,6 +448,7 @@ struct Runtime::Impl {
         process->id = allocate_id();
         process->arguments = std::move(arguments);
         process->working_directory = std::move(working_directory);
+        process->standard_input.process = process.get();
         process->standard_output.process = process.get();
         process->standard_output.flag = 1U;
         process->standard_error.process = process.get();
@@ -449,6 +464,19 @@ struct Runtime::Impl {
 
         processes.emplace(id.value, std::move(process));
         Process& operation = *processes.at(id.value);
+        const int stdin_status = uv_pipe_init(&loop, &operation.standard_input.handle, 0);
+        if (stdin_status < 0) {
+            operation.spawn_status = stdin_status;
+            operation.exited = true;
+            operation.process_closed = true;
+            operation.standard_input.closed = true;
+            operation.standard_output.closed = true;
+            operation.standard_error.closed = true;
+            finish_process_if_closed(operation);
+            return id;
+        }
+        operation.standard_input.handle.data = &operation.standard_input;
+
         const int stdout_status = uv_pipe_init(&loop, &operation.standard_output.handle, 0);
         if (stdout_status < 0) {
             operation.spawn_status = stdout_status;
@@ -456,7 +484,7 @@ struct Runtime::Impl {
             operation.process_closed = true;
             operation.standard_output.closed = true;
             operation.standard_error.closed = true;
-            finish_process_if_closed(operation);
+            close_process_input(operation);
             return id;
         }
         operation.standard_output.handle.data = &operation.standard_output;
@@ -467,13 +495,18 @@ struct Runtime::Impl {
             operation.exited = true;
             operation.process_closed = true;
             operation.standard_error.closed = true;
+            close_process_input(operation);
             close_process_output(operation.standard_output);
             return id;
         }
         operation.standard_error.handle.data = &operation.standard_error;
 
         std::array<uv_stdio_container_t, 3> stdio{};
-        stdio[0].flags = UV_IGNORE;
+        stdio[0].flags =
+            static_cast<uv_stdio_flags>( // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange)
+                UV_CREATE_PIPE | UV_READABLE_PIPE);
+        stdio[0].data.stream =
+            reinterpret_cast<uv_stream_t*>(&operation.standard_input.handle);
         stdio[1].flags =
             static_cast<uv_stdio_flags>( // NOLINT(clang-analyzer-optin.core.EnumCastOutOfRange)
                 UV_CREATE_PIPE | UV_WRITABLE_PIPE);
@@ -497,6 +530,7 @@ struct Runtime::Impl {
             operation.spawn_status = status;
             operation.exited = true;
             close_process_handle(operation);
+            close_process_input(operation);
             close_process_output(operation.standard_output);
             close_process_output(operation.standard_error);
             return id;
@@ -506,6 +540,47 @@ struct Runtime::Impl {
         start_process_output(operation.standard_output);
         start_process_output(operation.standard_error);
         return id;
+    }
+
+    void write_process(SourceId source, std::vector<std::byte> data) {
+        require_owner_thread();
+        const auto found = processes.find(source.value);
+        if (found == processes.end()) {
+            throw std::invalid_argument("unknown process source");
+        }
+        Process& process = *found->second;
+        if (!process.spawned || process.exited || process.standard_input.closing ||
+            process.standard_input.closed) {
+            throw std::logic_error("process input is closed");
+        }
+        if (data.empty()) {
+            return;
+        }
+
+        auto write = std::make_unique<Process::Write>();
+        write->process = &process;
+        write->data = std::move(data);
+        write->request.data = write.get();
+        const uv_buf_t buffer =
+            uv_buf_init(reinterpret_cast<char*>(write->data.data()),
+                        static_cast<unsigned int>(write->data.size()));
+        const int status =
+            uv_write(&write->request,
+                     reinterpret_cast<uv_stream_t*>(&process.standard_input.handle), &buffer, 1,
+                     on_process_input_written);
+        if (status < 0) {
+            throw uv_error(status, "cannot write process input");
+        }
+        (void)write.release();
+    }
+
+    void close_process_input(SourceId source) {
+        require_owner_thread();
+        const auto found = processes.find(source.value);
+        if (found == processes.end()) {
+            throw std::invalid_argument("unknown process source");
+        }
+        close_process_input(*found->second);
     }
 
     bool cancel(SourceId source) {
@@ -622,6 +697,15 @@ struct Runtime::Impl {
         }
     }
 
+    void close_process_input(Process& process) {
+        Process::Input& input = process.standard_input;
+        if (input.closing || input.closed) {
+            return;
+        }
+        input.closing = true;
+        uv_close(reinterpret_cast<uv_handle_t*>(&input.handle), on_process_input_closed);
+    }
+
     void close_process_output(Process::Output& output) {
         if (output.closing || output.closed) {
             return;
@@ -640,7 +724,8 @@ struct Runtime::Impl {
     }
 
     void finish_process_if_closed(Process& process) {
-        if (!process.exited || !process.process_closed || !process.standard_output.closed ||
+        if (!process.exited || !process.process_closed || !process.standard_input.closed ||
+            !process.standard_output.closed ||
             !process.standard_error.closed) {
             return;
         }
@@ -935,6 +1020,31 @@ struct Runtime::Impl {
         *buffer = uv_buf_init(output.chunk.data(), static_cast<unsigned int>(output.chunk.size()));
     }
 
+    static void on_process_input_written(uv_write_t* request, int status) noexcept {
+        guard_callback([&] {
+            std::unique_ptr<Process::Write> write(
+                static_cast<Process::Write*>(request->data));
+            if (status < 0 && !write->process->owner->shutting_down) {
+                write->process->owner->events.push_back({
+                    .kind = EventKind::ProcessOutput,
+                    .source = write->process->id,
+                    .status = status,
+                    .flags = 0,
+                    .data = {},
+                });
+            }
+        });
+    }
+
+    static void on_process_input_closed(uv_handle_t* handle) noexcept {
+        guard_callback([&] {
+            auto& input = *static_cast<Process::Input*>(handle->data);
+            Process& process = *input.process;
+            input.closed = true;
+            process.owner->finish_process_if_closed(process);
+        });
+    }
+
     static void on_process_output(uv_stream_t* stream, ssize_t size,
                                   const uv_buf_t* buffer) noexcept {
         guard_callback([&] {
@@ -984,6 +1094,7 @@ struct Runtime::Impl {
             process.exited = true;
             process.exit_status = exit_status;
             process.termination_signal = termination_signal;
+            process.owner->close_process_input(process);
             process.owner->close_process_handle(process);
         });
     }
@@ -1250,6 +1361,14 @@ SourceId Runtime::watch_path(std::string path) {
 
 SourceId Runtime::spawn_process(std::vector<std::string> arguments, std::string working_directory) {
     return impl_->spawn_process(std::move(arguments), std::move(working_directory));
+}
+
+void Runtime::write_process(SourceId source, std::vector<std::byte> data) {
+    impl_->write_process(source, std::move(data));
+}
+
+void Runtime::close_process_input(SourceId source) {
+    impl_->close_process_input(source);
 }
 
 bool Runtime::cancel(SourceId source) {

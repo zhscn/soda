@@ -35,6 +35,8 @@ public:
     [[nodiscard]] SourceId watch_path(std::string path);
     [[nodiscard]] SourceId spawn_process(std::vector<std::string> arguments,
                                          std::string working_directory = {});
+    void write_process(SourceId source, std::vector<std::byte> data);
+    void close_process_input(SourceId source);
     bool cancel(SourceId source);
 
     std::size_t poll(PollMode mode);

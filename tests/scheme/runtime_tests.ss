@@ -200,5 +200,54 @@
          standard-output
          standard-error))
 
+(define cat-process
+  (runtime-spawn-process! runtime '("/bin/cat")))
+(runtime-write-process!
+  runtime
+  cat-process
+  (string->utf8 "scheme process input\n"))
+(runtime-close-process-input! runtime cat-process)
+(define cat-output "")
+(let loop ()
+  (let ([exited? #f])
+    (for-each
+      (lambda (event)
+        (unless (= (event-source event) cat-process)
+          (error 'runtime-tests
+                 "cat event has the wrong source"
+                 event))
+        (case (event-kind event)
+          [(process-output)
+           (unless
+             (and
+               (zero? (event-status event))
+               (= (event-flags event) process-stdout))
+             (error 'runtime-tests
+                    "cat process output failed"
+                    event))
+           (set! cat-output
+             (string-append
+               cat-output
+               (utf8->string (event-data event))))]
+          [(process-exit)
+           (unless
+             (and
+               (zero? (event-status event))
+               (zero? (event-flags event)))
+             (error 'runtime-tests
+                    "cat process exit metadata differs"
+                    event))
+           (set! exited? #t)]
+          [else
+           (error 'runtime-tests
+                  "unexpected cat process event"
+                  event)]))
+      (runtime-poll! runtime))
+    (unless exited? (loop))))
+(unless (string=? cat-output "scheme process input\n")
+  (error 'runtime-tests
+         "cat process did not echo Scheme input"
+         cat-output))
+
 (runtime-close! runtime)
 (runtime-close! runtime)

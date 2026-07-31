@@ -12,6 +12,8 @@
           runtime-stat-path!
           runtime-watch-path!
           runtime-spawn-process!
+          runtime-write-process!
+          runtime-close-process-input!
           runtime-cancel!
           runtime-status-name
           runtime-status-message
@@ -46,7 +48,7 @@
     (foreign-procedure __atomic "soda_runtime_abi_version" () unsigned-32))
 
   (define abi-version-checked
-    (unless (= (%abi-version) 7)
+    (unless (= (%abi-version) 8)
       (error 'soda-runtime "unsupported native runtime ABI version")))
 
   (define %runtime-create
@@ -83,6 +85,14 @@
     (foreign-procedure __atomic "soda_runtime_spawn_process"
                        (void* string u8* size_t)
                        unsigned-64))
+  (define %write-process
+    (foreign-procedure __atomic "soda_runtime_write_process"
+                       (void* unsigned-64 u8* size_t)
+                       int))
+  (define %close-process-input
+    (foreign-procedure __atomic "soda_runtime_close_process_input"
+                       (void* unsigned-64)
+                       int))
   (define %cancel
     (foreign-procedure __atomic "soda_runtime_cancel" (void* unsigned-64) int))
   (define %poll
@@ -342,6 +352,49 @@
          (if (zero? source)
              (native-error 'runtime-spawn-process! runtime)
              source))]))
+
+  (define (runtime-write-process! runtime source data)
+    (require-runtime 'runtime-write-process! runtime)
+    (unless
+      (and
+        (integer? source)
+        (exact? source)
+        (positive? source))
+      (assertion-violation
+        'runtime-write-process!
+        "source must be a positive exact integer"
+        source))
+    (unless (bytevector? data)
+      (assertion-violation
+        'runtime-write-process!
+        "data must be a bytevector"
+        data))
+    (let ([status
+            (%write-process
+              (runtime-pointer runtime)
+              source
+              data
+              (bytevector-length data))])
+      (when (negative? status)
+        (native-error 'runtime-write-process! runtime))))
+
+  (define (runtime-close-process-input! runtime source)
+    (require-runtime 'runtime-close-process-input! runtime)
+    (unless
+      (and
+        (integer? source)
+        (exact? source)
+        (positive? source))
+      (assertion-violation
+        'runtime-close-process-input!
+        "source must be a positive exact integer"
+        source))
+    (let ([status
+            (%close-process-input
+              (runtime-pointer runtime)
+              source)])
+      (when (negative? status)
+        (native-error 'runtime-close-process-input! runtime))))
 
   (define (runtime-cancel! runtime source)
     (require-runtime 'runtime-cancel! runtime)

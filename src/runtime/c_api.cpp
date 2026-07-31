@@ -185,6 +185,29 @@ uint64_t soda_runtime_spawn_process(soda_runtime* runtime, const char* working_d
     });
 }
 
+int soda_runtime_write_process(soda_runtime* runtime, uint64_t source, const uint8_t* data,
+                               size_t size) {
+    return guard(runtime, -1, [&] {
+        if (data == nullptr && size != 0) {
+            throw std::invalid_argument("process input is null");
+        }
+        std::vector<std::byte> bytes(size);
+        if (size != 0) {
+            std::ranges::copy_n(reinterpret_cast<const std::byte*>(data),
+                                static_cast<std::ptrdiff_t>(size), bytes.begin());
+        }
+        runtime->runtime.write_process(soda::runtime::SourceId{source}, std::move(bytes));
+        return 0;
+    });
+}
+
+int soda_runtime_close_process_input(soda_runtime* runtime, uint64_t source) {
+    return guard(runtime, -1, [&] {
+        runtime->runtime.close_process_input(soda::runtime::SourceId{source});
+        return 0;
+    });
+}
+
 int soda_runtime_cancel(soda_runtime* runtime, uint64_t source) {
     return guard(runtime, -1,
                  [&] { return runtime->runtime.cancel(soda::runtime::SourceId{source}) ? 1 : 0; });
