@@ -2408,6 +2408,21 @@
                        (string=?
                          input
                          (car (prompt-history-entries history))))))
+        (for-each
+          (lambda (other)
+            (let ([index (prompt-session-history-index other)])
+              (when
+                (and
+                  (not (eq? other session))
+                  (eq?
+                    history-id
+                    (prompt-request-history-id
+                      (prompt-session-request other)))
+                  index)
+                (prompt-session-history-index-set!
+                  other
+                  (+ index 1)))))
+          (editor-prompts value))
         (prompt-history-entries-set!
           history
           (cons input (prompt-history-entries history))))))

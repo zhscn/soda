@@ -4430,6 +4430,63 @@
              (= (length (editor-views prompt-editor)) 1))
   (error 'editor-tests "closing the prompt stack leaked transient state"))
 
+(editor-open-prompt!
+  prompt-editor
+  (make-prompt-request
+    "Seed: "
+    "older"
+    'nested-history
+    #f
+    'free
+    #f
+    'test.capture-prompt
+    #f))
+(editor-accept-prompt-input! prompt-editor)
+(define history-outer-prompt
+  (editor-open-prompt!
+    prompt-editor
+    (make-prompt-request
+      "Outer history: "
+      "draft"
+      'nested-history
+      #f
+      'free
+      #f
+      'test.capture-prompt
+      #f)))
+(editor-prompt-history-previous! prompt-editor)
+(unless
+  (string=? (editor-active-prompt-input prompt-editor) "older")
+  (error 'editor-tests
+         "outer prompt did not enter shared history"))
+(editor-open-prompt!
+  prompt-editor
+  (make-prompt-request
+    "Inner history: "
+    "newer"
+    'nested-history
+    #f
+    'free
+    #f
+    'test.capture-prompt
+    #f))
+(editor-accept-prompt-input! prompt-editor)
+(unless (eq? (editor-active-prompt prompt-editor)
+             history-outer-prompt)
+  (error 'editor-tests
+         "accepting nested history prompt did not restore its parent"))
+(editor-prompt-history-next! prompt-editor)
+(unless
+  (string=? (editor-active-prompt-input prompt-editor) "newer")
+  (error 'editor-tests
+         "shared history insertion shifted the outer prompt cursor"))
+(editor-prompt-history-next! prompt-editor)
+(unless
+  (string=? (editor-active-prompt-input prompt-editor) "draft")
+  (error 'editor-tests
+         "outer prompt history did not restore its draft"))
+(editor-abort-prompt! prompt-editor)
+
 (send! prompt-editor prompt-decoder (bytes 27 120))
 (send!
   prompt-editor
