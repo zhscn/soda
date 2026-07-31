@@ -1625,13 +1625,29 @@
                             (max
                               1
                               (div
-                                (* visible-rows visible-rows)
+                                (+
+                                  (* visible-rows visible-rows)
+                                  total
+                                  -1)
                                 total)))]
                      [thumb-start
                        (and scrollbar?
-                            (min
-                              (- visible-rows thumb-rows)
-                              (div (* start visible-rows) total)))])
+                            (let ([track-range
+                                    (- visible-rows thumb-rows)]
+                                  [scroll-range
+                                    (- total visible-rows)])
+                              (if (or (zero? start)
+                                      (zero? track-range)
+                                      (zero? scroll-range))
+                                  0
+                                  (min
+                                    track-range
+                                    (div
+                                      (+
+                                        (* start track-range)
+                                        scroll-range
+                                        -1)
+                                      scroll-range)))))])
                 (do ([row 0 (+ row 1)])
                     ((= row visible-rows))
                   (let* ([item (list-ref visible row)]

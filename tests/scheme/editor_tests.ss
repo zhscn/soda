@@ -5127,6 +5127,32 @@
       (= (completion-session-viewport-start completion) 1))
     (error 'editor-tests
            "completion navigation did not scroll at the lower edge"))
+  (let* ([frame (render-editor-frame prompt-editor 10 40)]
+         [node
+           (component-node-find
+             (frame-layout frame)
+             'editor.completions)]
+         [rectangle (component-node-rect node)]
+         [scrollbar-column
+           (+ (rect-column rectangle) (rect-columns rectangle) -1)]
+         [thumb-row
+           (let loop ([row 0])
+             (cond
+               [(= row (rect-rows rectangle)) #f]
+               [(memq
+                  'popup.scrollbar
+                  (cell-faces
+                    (frame-cell-ref
+                      frame
+                      (+ (rect-row rectangle) row)
+                      scrollbar-column)))
+                row]
+               [else (loop (+ row 1))]))])
+    (unless (and thumb-row (= thumb-row 1))
+      (error 'editor-tests
+             "completion scrollbar did not follow the viewport"
+             thumb-row
+             (completion-session-viewport-start completion))))
   (editor-prompt-completion-previous! prompt-editor)
   (let* ([frame (render-editor-frame prompt-editor 10 40)]
          [node
