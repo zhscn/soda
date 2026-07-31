@@ -309,6 +309,9 @@
           catppuccin-themes
           default-theme
           editor-kill-ring
+          editor-global-mark-ring
+          editor-push-global-mark!
+          editor-pop-global-mark!
           editor-push-kill!
           editor-record-kill!
           editor-current-kill

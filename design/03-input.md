@@ -8,7 +8,8 @@
 | 增量 decoder 与规范 `InputEvent` | 已实现 |
 | 分层 keymap、prefix map、tombstone 与内省 | 已实现 |
 | per-View `InputState`、文本策略与单键捕获 | 已实现 |
-| prefix argument、selection、mark ring 与 kill ring | 已实现 |
+| prefix argument、selection、View-local mark ring 与 kill ring | 已实现 |
+| Editor-global mark ring | 已实现 |
 | 基础 motion、editing、search、replace 与 window command | 已实现 |
 
 本文只定义文本编辑器当前使用的输入路径。minibuffer 的读取与焦点规则由
@@ -131,9 +132,11 @@ PrefixArgument {
 
 ## Selection 与编辑原语
 
-View 的 point、mark 和 mark ring 使用 `DocumentAnchor`。Editor 持有 kill ring；
-连续 kill 依据方向追加或前置，yank-pop 只在紧随 yank 且 Buffer revision 与范围
-仍匹配时替换上一条 yank。
+View 的 point、mark 和 local mark ring 使用 `DocumentAnchor`。Editor-global mark
+ring 的 entry 保存 Buffer identity 和该 Buffer 中的 anchor，可通过独立命令跨 Buffer
+push/pop；Buffer 关闭时释放对应 entry。Editor 持有 kill ring；连续 kill 依据方向
+追加或前置，yank-pop 只在紧随 yank 且 Buffer revision 与范围仍匹配时替换上一条
+yank。
 
 motion 从 snapshot 和当前位置计算目标，不直接修改 Document。thing 解析 word、
 sentence、paragraph、delimiter、sexp、defun 或 language text object 的范围。编辑命令

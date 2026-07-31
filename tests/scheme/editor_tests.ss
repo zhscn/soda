@@ -703,6 +703,64 @@
          "document edits left another view caret out of range"))
 (editor-close! anchor-editor)
 
+(define global-mark-document (make-document "abcd" 7401))
+(define global-mark-buffer
+  (make-buffer
+    7401
+    global-mark-document
+    "*global-mark-a*"
+    'fundamental-mode))
+(define global-mark-editor (make-editor global-mark-buffer))
+(define global-mark-view (editor-active-view global-mark-editor))
+(define global-mark-other
+  (editor-create-buffer!
+    global-mark-editor
+    "*global-mark-b*"
+    'fundamental-mode
+    "xy"))
+(view-set-caret! global-mark-view 2)
+(view-push-mark! global-mark-view 1)
+(editor-update!
+  global-mark-editor
+  (make-command-message 'mark.push-global #f))
+(buffer-replace-range!
+  global-mark-buffer 0 0 (string->utf8 "!"))
+(unless
+  (and
+    (equal?
+      (editor-global-mark-ring global-mark-editor)
+      (list (cons (buffer-id global-mark-buffer) 3)))
+    (equal? (view-mark-ring global-mark-view) '(2)))
+  (error 'editor-tests
+         "global mark did not track edits independently of the View ring"))
+(editor-set-view-buffer!
+  global-mark-editor
+  (view-id global-mark-view)
+  (buffer-id global-mark-other))
+(editor-update!
+  global-mark-editor
+  (make-command-message 'mark.pop-global #f))
+(unless
+  (and
+    (eq? (view-buffer global-mark-view) global-mark-buffer)
+    (= (view-caret global-mark-view) 3)
+    (null? (editor-global-mark-ring global-mark-editor)))
+  (error 'editor-tests "global mark pop did not cross buffers"))
+(editor-update!
+  global-mark-editor
+  (make-command-message 'mark.push-global #f))
+(editor-set-view-buffer!
+  global-mark-editor
+  (view-id global-mark-view)
+  (buffer-id global-mark-other))
+(editor-remove-buffer!
+  global-mark-editor
+  (buffer-id global-mark-buffer))
+(unless (null? (editor-global-mark-ring global-mark-editor))
+  (error 'editor-tests
+         "removing a buffer retained its global mark anchors"))
+(editor-close! global-mark-editor)
+
 (define unicode-document (make-document "a\néx\n" 74))
 (define unicode-buffer
   (make-buffer 20 unicode-document "*unicode*" 'fundamental-mode))

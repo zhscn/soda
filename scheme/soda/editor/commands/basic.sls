@@ -1415,6 +1415,33 @@
       (editor-set-status-message! editor "Buffer marked")
       '()))
 
+  (define (push-global-mark-command context)
+    (let* ([editor (command-context-editor context)]
+           [view (context-view context)])
+      (editor-push-global-mark!
+        editor
+        (view-buffer view)
+        (view-caret view))
+      (editor-set-status-message! editor "Global mark pushed")
+      '()))
+
+  (define (pop-global-mark-command context)
+    (let* ([editor (command-context-editor context)]
+           [view (context-view context)]
+           [location (editor-pop-global-mark! editor)])
+      (if location
+          (let ([buffer (editor-buffer-ref editor (car location))])
+            (unless (eq? buffer (view-buffer view))
+              (editor-set-view-buffer!
+                editor
+                (view-id view)
+                (buffer-id buffer)))
+            (view-set-caret! view (cdr location))
+            (view-deactivate-mark! view)
+            (editor-set-status-message! editor "Global mark popped"))
+          (editor-set-status-message! editor "Global mark ring is empty"))
+      '()))
+
   (define (exchange-point-and-mark-command context)
     (let* ([editor (command-context-editor context)]
            [view (context-view context)]
@@ -2039,6 +2066,14 @@
           mark-whole-buffer-command
           "Mark the whole buffer.")
         (list
+          'mark.push-global
+          push-global-mark-command
+          "Push point onto the Editor-global mark ring.")
+        (list
+          'mark.pop-global
+          pop-global-mark-command
+          "Pop and visit the newest Editor-global mark.")
+        (list
           'mark.exchange-point-and-mark
           exchange-point-and-mark-command
           "Exchange point and mark.")
@@ -2248,6 +2283,12 @@
         (stroke 'character (char->integer #\x) 4)
         (stroke 'character (char->integer #\h) 0))
       'mark.whole-buffer)
+    (editor-bind-key!
+      editor
+      (list
+        (stroke 'character (char->integer #\x) 4)
+        (stroke 'character (char->integer #\space) 4))
+      'mark.pop-global)
     (let ([keymap (make-keymap)])
       (for-each
         (lambda (entry)

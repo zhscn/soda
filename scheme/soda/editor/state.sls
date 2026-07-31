@@ -125,6 +125,9 @@
           editor-take-dirty-reasons!
           editor-kill-ring
           editor-set-kill-ring!
+          editor-global-mark-ring
+          editor-push-global-mark!
+          editor-pop-global-mark!
           editor-last-yank
           editor-set-last-yank!
           editor-current-location-list
@@ -310,6 +313,9 @@
                %editor-status-message
                %editor-status-message-set!)
       (mutable kill-ring editor-kill-ring editor-kill-ring-set!)
+      (mutable global-mark-ring-entries
+               editor-global-mark-ring-entries
+               editor-global-mark-ring-entries-set!)
       (mutable last-yank editor-last-yank editor-last-yank-set!)
       (mutable current-location-list
                editor-current-location-list
@@ -364,6 +370,9 @@
                editor-configuration-transaction-depth
                editor-configuration-transaction-depth-set!)
       (mutable closed? editor-closed? editor-closed?-set!)))
+
+  (define-record-type global-mark-entry
+    (fields buffer-id anchor))
 
   (define-record-type
     (editor-buffer-configuration-state
@@ -1164,6 +1173,7 @@
         value
         'before-buffer-removed
         buffer)
+      (editor-clear-buffer-global-marks! value buffer)
       (hashtable-delete! (editor-buffer-table value) id)
       (let ([resource (buffer-resource buffer)])
         (when
@@ -4005,6 +4015,92 @@
         entries))
     (editor-kill-ring-set! value entries))
 
+  (define (global-mark-entry-location editor entry)
+    (let* ([buffer
+             (editor-buffer-ref
+               editor
+               (global-mark-entry-buffer-id entry))]
+           [offset
+             (document-anchor-offset
+               (buffer-document buffer)
+               (global-mark-entry-anchor entry))])
+      (cons (buffer-id buffer) offset)))
+
+  (define (editor-global-mark-ring value)
+    (require-open-editor 'editor-global-mark-ring value)
+    (map
+      (lambda (entry) (global-mark-entry-location value entry))
+      (editor-global-mark-ring-entries value)))
+
+  (define (close-global-mark-entry! editor entry)
+    (let ([buffer
+            (hashtable-ref
+              (editor-buffer-table editor)
+              (global-mark-entry-buffer-id entry)
+              #f)])
+      (when buffer
+        (document-remove-anchor!
+          (buffer-document buffer)
+          (global-mark-entry-anchor entry)))))
+
+  (define (editor-push-global-mark! value buffer offset)
+    (require-open-editor 'editor-push-global-mark! value)
+    (unless (and (buffer? buffer)
+                 (eq? buffer
+                      (hashtable-ref
+                        (editor-buffer-table value)
+                        (buffer-id buffer)
+                        #f)))
+      (assertion-violation
+        'editor-push-global-mark!
+        "buffer does not belong to the editor"
+        buffer))
+    (unless (exact-non-negative-integer? offset)
+      (assertion-violation
+        'editor-push-global-mark!
+        "offset must be a non-negative exact integer"
+        offset))
+    (let* ([entry
+             (make-global-mark-entry
+               (buffer-id buffer)
+               (document-create-anchor!
+                 (buffer-document buffer)
+                 offset
+                 anchor-before-insertion))]
+           [ring
+             (cons entry (editor-global-mark-ring-entries value))])
+      (call-with-values
+        (lambda () (split-mark-ring ring 16))
+        (lambda (kept discarded)
+          (for-each
+            (lambda (old) (close-global-mark-entry! value old))
+            discarded)
+          (editor-global-mark-ring-entries-set! value kept))))
+    offset)
+
+  (define (editor-pop-global-mark! value)
+    (require-open-editor 'editor-pop-global-mark! value)
+    (let ([ring (editor-global-mark-ring-entries value)])
+      (and
+        (pair? ring)
+        (let* ([entry (car ring)]
+               [location (global-mark-entry-location value entry)])
+          (close-global-mark-entry! value entry)
+          (editor-global-mark-ring-entries-set! value (cdr ring))
+          location))))
+
+  (define (editor-clear-buffer-global-marks! value buffer)
+    (let-values ([(removed kept)
+                  (partition
+                    (lambda (entry)
+                      (= (global-mark-entry-buffer-id entry)
+                         (buffer-id buffer)))
+                    (editor-global-mark-ring-entries value))])
+      (for-each
+        (lambda (entry) (close-global-mark-entry! value entry))
+        removed)
+      (editor-global-mark-ring-entries-set! value kept)))
+
   (define (replace-view-caret-anchor! value offset)
     (let* ([document (buffer-document (view-buffer value))]
            [anchor
@@ -4537,6 +4633,7 @@
                '()
                #f
                '()
+               '()
                #f
                #f
                '()
@@ -4662,6 +4759,10 @@
         annotation-set-close!
         (editor-annotation-sets value))
       (editor-annotation-sets-set! value '())
+      (for-each
+        (lambda (entry) (close-global-mark-entry! value entry))
+        (editor-global-mark-ring-entries value))
+      (editor-global-mark-ring-entries-set! value '())
       (for-each
         (lambda (view)
           (when (view-completion view)
