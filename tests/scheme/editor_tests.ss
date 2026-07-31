@@ -2709,10 +2709,10 @@
 (define comment-cell (frame-cell-ref highlight-frame 0 22))
 (unless
   (and
-    (memq 'syntax-keyword (cell-faces keyword-cell))
-    (memq 'syntax-definition (cell-faces definition-cell))
-    (memq 'syntax-string (cell-faces string-cell))
-    (memq 'syntax-comment (cell-faces comment-cell))
+    (memq 'keyword (cell-faces keyword-cell))
+    (memq 'definition (cell-faces definition-cell))
+    (memq 'string (cell-faces string-cell))
+    (memq 'comment (cell-faces comment-cell))
     (exists
       (lambda (source)
         (and
@@ -2730,7 +2730,7 @@
           (render-editor-frame highlight-editor 4 50))])
   (unless
     (and
-      (memq 'syntax-keyword
+      (memq 'keyword
             (character-description-faces description))
       (exists
         (lambda (source)
@@ -2752,7 +2752,7 @@
   (unless
     (and
       (equal? (cell-faces selected-keyword)
-              '(default syntax-keyword selection))
+              '(default keyword selection))
       (equal?
         (style-background (cell-style selected-keyword))
         (vector #x58 #x5b #x70)))
@@ -2815,7 +2815,7 @@
     (and
       (equal?
         (cell-faces cell)
-        '(default syntax-definition diagnostic-error))
+        '(default definition diagnostic-error))
       (memq 'underline
             (style-attributes (cell-style cell)))
       (exists
@@ -3014,7 +3014,7 @@
         'default
         (make-face-spec 'default 'default '() '()))
       (cons
-        'syntax-comment
+        'comment
         (make-face-spec 33 'inherit '(italic) '()))
       (cons
         'syntax.comment
@@ -3207,10 +3207,10 @@
        [comment-cell (frame-cell-ref frame 0 23)])
   (unless
     (and
-      (memq 'syntax-keyword (cell-faces keyword-cell))
-      (memq 'syntax-type (cell-faces type-cell))
-      (memq 'syntax-number (cell-faces number-cell))
-      (memq 'syntax-comment (cell-faces comment-cell))
+      (memq 'keyword (cell-faces keyword-cell))
+      (memq 'type (cell-faces type-cell))
+      (memq 'number (cell-faces number-cell))
+      (memq 'comment (cell-faces comment-cell))
       (exists
         (lambda (source)
           (and
@@ -3229,10 +3229,10 @@
   (unless
     (and
       (memq
-        'syntax-number
+        'number
         (cell-faces (frame-cell-ref frame 0 19)))
       (memq
-        'syntax-comment
+        'comment
         (cell-faces (frame-cell-ref frame 0 22)))
       (= (cpp-analyzer-revision
            (cpp-language-session-analyzer
@@ -3265,19 +3265,19 @@
           90)])
   (unless
     (and
-      (memq 'syntax-type
+      (memq 'type
             (cell-faces (frame-cell-ref frame 0 7)))
-      (memq 'syntax-property
+      (memq 'property
             (cell-faces (frame-cell-ref frame 0 20)))
-      (memq 'syntax-function
+      (memq 'function
             (cell-faces (frame-cell-ref frame 1 4)))
-      (memq 'syntax-variable
+      (memq 'variable
             (cell-faces (frame-cell-ref frame 1 12)))
-      (memq 'syntax-operator
+      (memq 'operator
             (cell-faces (frame-cell-ref frame 1 34)))
-      (memq 'syntax-function-call
+      (memq 'function.call
             (cell-faces (frame-cell-ref frame 1 36)))
-      (memq 'syntax-bracket
+      (memq 'punctuation.bracket
             (cell-faces (frame-cell-ref frame 1 7))))
     (error 'editor-tests
            "C++ declaration faces did not reach the rendered frame")))

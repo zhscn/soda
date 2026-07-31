@@ -79,27 +79,27 @@
              (scheme-lexical-token-start token)
              #f)
            (scheme-lexical-token-end token))
-         'syntax-definition]
-        [(string->number value) 'syntax-number]
+         'definition]
+        [(string->number value) 'number]
         [else
          (case
            (hashtable-ref
              kinds-by-start
              (scheme-lexical-token-start token)
              #f)
-           [(syntax) 'syntax-keyword]
+           [(syntax) 'keyword]
            [(procedure constructor predicate accessor mutator)
-            'syntax-builtin]
-           [(record) 'syntax-type]
+            'function.builtin]
+           [(record) 'type]
            [else #f])])))
 
   (define (token-face definition-starts kinds-by-start token)
     (case (scheme-lexical-token-kind token)
-      [(comment) 'syntax-comment]
-      [(string) 'syntax-string]
-      [(character) 'syntax-constant]
+      [(comment) 'comment]
+      [(string) 'string]
+      [(character) 'constant]
       [(open close prefix syntax-prefix datum-comment)
-       'syntax-delimiter]
+       'punctuation.delimiter]
       [(symbol) (symbol-face definition-starts kinds-by-start token)]
       [else #f]))
 

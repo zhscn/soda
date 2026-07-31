@@ -72,9 +72,11 @@ FaceSpec {
 }
 ```
 
-base syntax 使用稳定的语义 face 词汇，包括 comment、doc-comment、string、
-constant、number、keyword、builtin、type、function、function-call、variable、
-property、label、operator、bracket、delimiter、preprocessor 与 invalid。producer
+base syntax 使用稳定的层级 face 词汇，包括 `comment`、
+`comment.documentation`、`string`、`constant`、`number`、`keyword`、
+`function.builtin`、`type`、`function`、`function.call`、`variable`、
+`property`、`label`、`operator`、`punctuation.bracket`、
+`punctuation.delimiter`、`preprocessor` 与 `invalid`。producer
 选择能够可靠判断的最具体 face；无法区分声明和引用的 identifier 保持 default，
 由 semantic refinement layer 在具备 symbol 信息时继续细化。
 
@@ -91,14 +93,23 @@ comment.documentation
 string
 keyword
 function
+function.builtin
+function.call
 function.method
+definition
 type
 variable
 variable.parameter
+property
 constant
 number
+label
+operator
 punctuation
 punctuation.bracket
+punctuation.delimiter
+preprocessor
+invalid
 ```
 
 查找具体 face 时按名称层级回退，最终回退到 `default`。例如

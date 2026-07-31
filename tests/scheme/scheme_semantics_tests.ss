@@ -755,7 +755,7 @@
       (= (decoration-run-end prefix) 2)
       (eq?
         (decoration-run-face prefix)
-        'syntax-delimiter))
+        'punctuation.delimiter))
     (error
       'scheme-semantics-tests
       "syntax abbreviation did not retain delimiter highlighting"
@@ -1900,11 +1900,11 @@
 
 (unless
   (and
-    (eq? (highlight-face-at 1) 'syntax-builtin)
+    (eq? (highlight-face-at 1) 'function.builtin)
     (not (highlight-face-at local-map-offset))
     (eq?
       (highlight-face-at final-map-offset)
-      'syntax-builtin))
+      'function.builtin))
   (error 'scheme-semantics-tests
          "Scheme highlighting ignored lexical shadowing"))
 
