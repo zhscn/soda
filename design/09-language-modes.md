@@ -270,6 +270,13 @@ parser 和 query 共享同一组 runtime roots，依次为 `SODA_RUNTIME`、可�
 root；loader 不提供单独的 grammar/query search path 或单语言动态库覆盖。构建目录
 和安装目录都生成相同布局，因此 portable distribution 与系统安装使用同一 resolver。
 
+内建 runtime package 分发 Bash、CSS、Go、HTML、JavaScript、JSON、Lua、Markdown、
+Markdown inline、Python、Rust、TOML、TypeScript、TSX 和 YAML parser。每个 parser
+source 由构建配置固定 revision 与 archive digest，生成的模块与 Soda 自有 query
+一起安装。所有这些语言提供 highlight query；JSON 还提供 fold 与 text-object
+query。TSX 的 query bundle 依次组合 TypeScript 与 TSX query，使通用语言规则与
+嵌入语法规则保持独立。
+
 Tree-sitter file association 由 rule name、suffix 集合、parser language、major mode
 和 priority 组成。注册关联时，已有的专用 major mode 保留自己的 language profile；
 其 `tree-sitter-language` feature 声明 parser identity。没有专用 mode 时，系统创建

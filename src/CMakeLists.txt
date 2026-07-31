@@ -68,19 +68,82 @@ target_link_libraries(soda_tree_sitter
 set_target_properties(soda_tree_sitter PROPERTIES POSITION_INDEPENDENT_CODE ON)
 soda_target_warnings(soda_tree_sitter)
 
-add_library(soda_tree_sitter_json MODULE
-  "${tree_sitter_json_SOURCE_DIR}/src/parser.c"
+set(SODA_TREE_SITTER_GRAMMAR_TARGETS)
+
+function(soda_add_tree_sitter_grammar language source_dir)
+  string(REPLACE "-" "_" target_suffix "${language}")
+  set(target "soda_tree_sitter_${target_suffix}")
+  set(grammar_sources "${source_dir}/parser.c")
+  foreach(scanner_name IN ITEMS scanner.c scanner.cc scanner.cpp)
+    if(EXISTS "${source_dir}/${scanner_name}")
+      list(APPEND grammar_sources "${source_dir}/${scanner_name}")
+    endif()
+  endforeach()
+
+  add_library(${target} MODULE ${grammar_sources})
+  target_include_directories(${target} PRIVATE
+    "${source_dir}"
+    "${tree_sitter_SOURCE_DIR}/lib/include"
+  )
+  set_target_properties(${target} PROPERTIES
+    PREFIX ""
+    OUTPUT_NAME "${language}"
+    LIBRARY_OUTPUT_DIRECTORY
+      "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/runtime/grammars"
+    RUNTIME_OUTPUT_DIRECTORY
+      "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/runtime/grammars"
+  )
+  set(SODA_TREE_SITTER_GRAMMAR_TARGETS
+    ${SODA_TREE_SITTER_GRAMMAR_TARGETS}
+    ${target}
+    PARENT_SCOPE
+  )
+endfunction()
+
+soda_add_tree_sitter_grammar(json
+  "${tree_sitter_json_SOURCE_DIR}/src"
 )
-target_include_directories(soda_tree_sitter_json PRIVATE
-  "${tree_sitter_SOURCE_DIR}/lib/include"
+soda_add_tree_sitter_grammar(bash
+  "${tree_sitter_bash_SOURCE_DIR}/src"
 )
-set_target_properties(soda_tree_sitter_json PROPERTIES
-  PREFIX ""
-  OUTPUT_NAME "json"
-  LIBRARY_OUTPUT_DIRECTORY
-    "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/runtime/grammars"
-  RUNTIME_OUTPUT_DIRECTORY
-    "${CMAKE_CURRENT_BINARY_DIR}/$<CONFIG>/runtime/grammars"
+soda_add_tree_sitter_grammar(css
+  "${tree_sitter_css_SOURCE_DIR}/src"
+)
+soda_add_tree_sitter_grammar(go
+  "${tree_sitter_go_SOURCE_DIR}/src"
+)
+soda_add_tree_sitter_grammar(html
+  "${tree_sitter_html_SOURCE_DIR}/src"
+)
+soda_add_tree_sitter_grammar(javascript
+  "${tree_sitter_javascript_SOURCE_DIR}/src"
+)
+soda_add_tree_sitter_grammar(lua
+  "${tree_sitter_lua_SOURCE_DIR}/src"
+)
+soda_add_tree_sitter_grammar(markdown
+  "${tree_sitter_markdown_SOURCE_DIR}/tree-sitter-markdown/src"
+)
+soda_add_tree_sitter_grammar(markdown-inline
+  "${tree_sitter_markdown_SOURCE_DIR}/tree-sitter-markdown-inline/src"
+)
+soda_add_tree_sitter_grammar(python
+  "${tree_sitter_python_SOURCE_DIR}/src"
+)
+soda_add_tree_sitter_grammar(rust
+  "${tree_sitter_rust_SOURCE_DIR}/src"
+)
+soda_add_tree_sitter_grammar(toml
+  "${tree_sitter_toml_SOURCE_DIR}/src"
+)
+soda_add_tree_sitter_grammar(typescript
+  "${tree_sitter_typescript_SOURCE_DIR}/typescript/src"
+)
+soda_add_tree_sitter_grammar(tsx
+  "${tree_sitter_typescript_SOURCE_DIR}/tsx/src"
+)
+soda_add_tree_sitter_grammar(yaml
+  "${tree_sitter_yaml_SOURCE_DIR}/src"
 )
 
 add_library(soda_runtime STATIC
@@ -187,7 +250,9 @@ add_custom_target(soda_tree_sitter_runtime ALL
   COMMENT "Assembling the Soda Tree-sitter runtime"
   VERBATIM
 )
-add_dependencies(soda_tree_sitter_runtime soda_tree_sitter_json)
+add_dependencies(soda_tree_sitter_runtime
+  ${SODA_TREE_SITTER_GRAMMAR_TARGETS}
+)
 add_dependencies(soda soda_tree_sitter_runtime)
 
 if(BUILD_TESTING)
@@ -247,7 +312,7 @@ if(BUILD_TESTING)
 endif()
 
 install(
-  TARGETS soda_tree_sitter_json
+  TARGETS ${SODA_TREE_SITTER_GRAMMAR_TARGETS}
   LIBRARY DESTINATION "${CMAKE_INSTALL_DATADIR}/soda/runtime/grammars"
   RUNTIME DESTINATION "${CMAKE_INSTALL_DATADIR}/soda/runtime/grammars"
 )

@@ -7907,6 +7907,13 @@
   (map
     tree-sitter-language-spec-name
     built-in-tree-sitter-language-specs))
+(define (built-in-tree-sitter-spec name)
+  (find
+    (lambda (spec)
+      (eq?
+        (tree-sitter-language-spec-name spec)
+        name))
+    built-in-tree-sitter-language-specs))
 (unless
   (and
     (= (length built-in-tree-sitter-names) 71)
@@ -7917,6 +7924,20 @@
     (not (memq 'scheme built-in-tree-sitter-names)))
   (error 'editor-tests
          "built-in Tree-sitter parser catalog differs"))
+(unless
+  (and
+    (memq
+      'highlights
+      (tree-sitter-query-bundle-kinds
+        (tree-sitter-language-spec-query-bundle
+          (built-in-tree-sitter-spec 'python))))
+    (equal?
+      (tree-sitter-query-bundle-languages
+        (tree-sitter-language-spec-query-bundle
+          (built-in-tree-sitter-spec 'tsx)))
+      '(typescript tsx)))
+  (error 'editor-tests
+         "distributed Tree-sitter query profiles differ"))
 (buffer-set-file-path! json-buffer "/tmp/sample.json")
 (editor-select-buffer-major-mode!
   json-editor

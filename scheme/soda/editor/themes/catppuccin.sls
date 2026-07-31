@@ -92,8 +92,19 @@
         (cons 'function.call (pface 'blue 'inherit '()))
         (cons 'variable (pface 'rosewater 'inherit '()))
         (cons 'property (pface 'teal 'inherit '()))
+        (cons 'attribute (pface 'teal 'inherit '()))
+        (cons 'tag (pface 'blue 'inherit '(bold)))
         (cons 'label (pface 'peach 'inherit '(bold)))
         (cons 'type (pface 'yellow 'inherit '()))
+        (cons 'markup.heading (pface 'mauve 'inherit '(bold)))
+        (cons 'markup.bold (pface 'inherit 'inherit '(bold)))
+        (cons 'markup.italic (pface 'inherit 'inherit '(italic)))
+        (cons 'markup.strikethrough
+              (pface 'inherit 'inherit '(strike)))
+        (cons 'markup.raw (pface 'green 'inherit '()))
+        (cons 'markup.link (pface 'blue 'inherit '(underline)))
+        (cons 'markup.quote (pface 'overlay1 'inherit '(italic)))
+        (cons 'markup.list (pface 'peach 'inherit '()))
         (cons 'punctuation.delimiter
               (pface 'overlay2 'inherit '()))
         (cons 'punctuation.bracket

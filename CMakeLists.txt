@@ -35,14 +35,7 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(tree_sitter)
 
-FetchContent_Declare(
-  tree_sitter_json
-  URL https://github.com/tree-sitter/tree-sitter-json/archive/refs/tags/v0.24.8.tar.gz
-  URL_HASH SHA256=acf6e8362457e819ed8b613f2ad9a0e1b621a77556c296f3abea58f7880a9213
-  DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-  EXCLUDE_FROM_ALL
-)
-FetchContent_MakeAvailable(tree_sitter_json)
+include(SodaTreeSitterGrammars)
 
 find_package(Threads REQUIRED)
 find_package(ZLIB REQUIRED)

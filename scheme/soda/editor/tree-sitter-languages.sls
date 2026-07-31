@@ -25,13 +25,20 @@
         `((pairs . ,common-pairs))
         options)))
 
-  (define (hidden-language-spec language)
+  (define (highlight-language-spec language suffixes . options)
+    (apply
+      language-spec
+      language
+      suffixes
+      (cons '(queries . (highlights)) options)))
+
+  (define (hidden-language-spec language . options)
     (make-tree-sitter-language-spec
       language
       language
       #f
       '()
-      '((hidden? . #t))))
+      (cons '(hidden? . #t) options)))
 
   (define built-in-tree-sitter-language-specs
     (list
@@ -40,7 +47,7 @@
         '(settings . ((indent-width . 2))))
       (language-spec 'awk '(".awk" ".gawk" ".nawk" ".mawk")
         '(settings . ((indent-width . 2))))
-      (language-spec
+      (highlight-language-spec
         'bash
         '(".sh" ".bash" ".bashrc" ".bash_profile" ".profile")
         '(settings . ((indent-width . 2))))
@@ -54,7 +61,7 @@
         '(settings . ((indent-width . 2))))
       (language-spec 'commonlisp '(".lisp" ".lsp" ".cl")
         '(settings . ((indent-width . 2))))
-      (language-spec 'css '(".css")
+      (highlight-language-spec 'css '(".css")
         '(settings . ((indent-width . 2))))
       (language-spec 'cylc '(".cylc")
         '(settings . ((indent-width . 4))))
@@ -74,7 +81,7 @@
       (language-spec
         'glsl
         '(".glsl" ".vert" ".frag" ".geom" ".tesc" ".tese" ".comp"))
-      (language-spec 'go '(".go"))
+      (highlight-language-spec 'go '(".go"))
       (language-spec 'gomod '("go.mod")
         '(settings . ((indent-width . 2))))
       (language-spec 'gowork '("go.work")
@@ -83,12 +90,12 @@
       (language-spec 'haskell '(".hs" ".lhs"))
       (language-spec 'heex '(".heex" ".leex")
         '(settings . ((indent-width . 2))))
-      (language-spec 'html '(".html" ".htm" ".shtml")
+      (highlight-language-spec 'html '(".html" ".htm" ".shtml")
         '(settings . ((indent-width . 2))))
       (language-spec 'janet-simple '(".janet")
         '(settings . ((indent-width . 2))))
       (language-spec 'java '(".java"))
-      (language-spec 'javascript '(".js" ".jsx" ".mjs" ".cjs")
+      (highlight-language-spec 'javascript '(".js" ".jsx" ".mjs" ".cjs")
         '(settings . ((indent-width . 2))))
       (hidden-language-spec 'jsdoc)
       (make-tree-sitter-language-spec
@@ -108,14 +115,16 @@
       (language-spec 'julia '(".jl"))
       (language-spec 'kotlin '(".kt" ".kts"))
       (language-spec 'latex '(".tex" ".sty" ".cls"))
-      (language-spec 'lua '(".lua")
+      (highlight-language-spec 'lua '(".lua")
         '(settings . ((indent-width . 2))))
       (language-spec 'magik '(".magik"))
       (language-spec
         'make
         '("Makefile" "makefile" "GNUmakefile" ".mk" ".mak"))
-      (language-spec 'markdown '(".md" ".markdown" ".mdown"))
-      (hidden-language-spec 'markdown-inline)
+      (highlight-language-spec 'markdown '(".md" ".markdown" ".mdown"))
+      (hidden-language-spec
+        'markdown-inline
+        '(queries . (highlights)))
       (language-spec 'nix '(".nix")
         '(settings . ((indent-width . 2))))
       (language-spec 'nu '(".nu")
@@ -126,14 +135,14 @@
       (language-spec 'php '(".php" ".phtml" ".php3" ".php4" ".php5"))
       (language-spec 'proto '(".proto")
         '(settings . ((indent-width . 2))))
-      (language-spec
+      (highlight-language-spec
         'python
         '(".py" ".pyi" ".pyw" "SConstruct" "SConscript"))
       (language-spec 'r '(".r" ".R"))
       (language-spec
         'ruby
         '(".rb" ".rake" ".gemspec" "Gemfile" "Rakefile"))
-      (language-spec 'rust '(".rs"))
+      (highlight-language-spec 'rust '(".rs"))
       (language-spec 'scala '(".scala" ".sc")
         '(settings . ((indent-width . 2))))
       (language-spec 'scss '(".scss")
@@ -147,11 +156,12 @@
         '(settings . ((indent-width . 2))))
       (language-spec 'svelte '(".svelte")
         '(settings . ((indent-width . 2))))
-      (language-spec 'toml '(".toml" "Cargo.lock" "Pipfile")
+      (highlight-language-spec 'toml '(".toml" "Cargo.lock" "Pipfile")
         '(settings . ((indent-width . 2))))
-      (language-spec 'tsx '(".tsx")
+      (highlight-language-spec 'tsx '(".tsx")
+        '(query-languages . (typescript tsx))
         '(settings . ((indent-width . 2))))
-      (language-spec 'typescript '(".ts" ".mts" ".cts")
+      (highlight-language-spec 'typescript '(".ts" ".mts" ".cts")
         '(settings . ((indent-width . 2))))
       (language-spec 'typst '(".typ")
         '(settings . ((indent-width . 2))))
@@ -162,7 +172,7 @@
       (language-spec 'wat '(".wat"))
       (language-spec 'wgsl '(".wgsl")
         '(settings . ((indent-width . 2))))
-      (language-spec 'yaml '(".yaml" ".yml")
+      (highlight-language-spec 'yaml '(".yaml" ".yml")
         '(settings . ((indent-width . 2))))
       (language-spec 'zig '(".zig"))))
 

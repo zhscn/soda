@@ -129,12 +129,15 @@ Tree-sitter parser modules and query bundles form one Soda runtime package:
 ```text
 runtime/
   grammars/
+    bash.so
+    go.so
     json.so
+    python.so
+    rust.so
+    ...
   queries/
-    json/
+    <language>/
       highlights.scm
-      folds.scm
-      textobjects.scm
 ```
 
 Parser modules use the platform shared-library extension and export
@@ -153,6 +156,13 @@ SODA_RUNTIME=/opt/soda/runtime soda file.json
 The runtime root is the unit of deployment and override. Parser and query
 resources do not have separate search-path or per-language environment
 overrides.
+
+The distributed runtime includes Bash, CSS, Go, HTML, JavaScript, JSON, Lua,
+Markdown, Markdown inline, Python, Rust, TOML, TypeScript, TSX, and YAML
+parsers. Each parser source is pinned by revision and archive digest in CMake.
+Soda-owned highlight queries are packaged for the same languages; JSON also
+provides fold and text-object queries. TSX composes the TypeScript query bundle
+with TSX-specific captures.
 
 Language specs associate files, modes, parsers, editing policy, and owned query
 bundles:
