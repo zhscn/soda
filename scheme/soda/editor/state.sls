@@ -145,6 +145,19 @@
           editor-rename-bookmark!
           editor-delete-bookmark!
           bookmark-offset-for-buffer
+          make-save-place
+          save-place?
+          save-place-resource
+          save-place-point
+          save-place-first-line
+          save-place-first-visual-row
+          save-place-first-column
+          save-place-mark
+          editor-save-places
+          editor-replace-save-places!
+          editor-capture-view-place!
+          editor-restore-view-place!
+          editor-capture-save-places!
           editor-last-yank
           editor-set-last-yank!
           editor-current-location-list
@@ -340,6 +353,7 @@
                editor-change-ring-index
                editor-change-ring-index-set!)
       (mutable bookmarks editor-bookmarks editor-bookmarks-set!)
+      (mutable save-places editor-save-places editor-save-places-set!)
       (mutable last-yank editor-last-yank editor-last-yank-set!)
       (mutable current-location-list
                editor-current-location-list
@@ -413,6 +427,14 @@
       line
       column
       annotation))
+
+  (define-record-type save-place
+    (fields resource
+            point
+            first-line
+            first-visual-row
+            first-column
+            mark))
 
   (define-record-type
     (editor-buffer-configuration-state
@@ -1541,6 +1563,7 @@
         view-id))
     (let ([view (editor-view-ref value view-id)]
           [buffer (editor-buffer-ref value buffer-id)])
+      (editor-capture-view-place! value view)
       (cancel-view-completion! value view)
       (for-each fold-close! (view-folds view))
       (view-folds-set! view '())
@@ -1572,7 +1595,8 @@
       (view-first-column-set! view 0)
       (view-caret-display-affinity-set! view #f)
       (view-reset-input-states! view)
-      (view-pending-keys-set! view '())))
+      (view-pending-keys-set! view '())
+      (editor-restore-view-place! value view)))
 
   (define (editor-set-view-display-map! value view-id display-map)
     (require-open-editor 'editor-set-view-display-map! value)
@@ -4388,6 +4412,131 @@
           (close-bookmark! entry)))
       (editor-bookmarks editor)))
 
+  (define (valid-save-place? value)
+    (and
+      (save-place? value)
+      (string? (save-place-resource value))
+      (positive? (string-length (save-place-resource value)))
+      (exact-non-negative-integer? (save-place-point value))
+      (exact-non-negative-integer? (save-place-first-line value))
+      (exact-non-negative-integer?
+        (save-place-first-visual-row value))
+      (exact-non-negative-integer? (save-place-first-column value))
+      (or (not (save-place-mark value))
+          (exact-non-negative-integer? (save-place-mark value)))))
+
+  (define (editor-replace-save-places! editor places)
+    (require-open-editor 'editor-replace-save-places! editor)
+    (unless (and (list? places) (for-all valid-save-place? places))
+      (assertion-violation
+        'editor-replace-save-places!
+        "expected valid save-place entries"
+        places))
+    (let loop ([remaining places] [seen '()] [kept '()])
+      (if (null? remaining)
+          (editor-save-places-set! editor (reverse kept))
+          (let* ([entry (car remaining)]
+                 [resource (save-place-resource entry)])
+            (if (member resource seen)
+                (loop (cdr remaining) seen kept)
+                (loop
+                  (cdr remaining)
+                  (cons resource seen)
+                  (cons entry kept))))))
+    (editor-save-places editor))
+
+  (define (save-place-for-resource editor resource)
+    (and
+      resource
+      (find
+        (lambda (entry)
+          (string=? (save-place-resource entry) resource))
+        (editor-save-places editor))))
+
+  (define (editor-capture-view-place! editor view)
+    (require-open-editor 'editor-capture-view-place! editor)
+    (unless (and (view? view)
+                 (exists
+                   (lambda (candidate) (eq? candidate view))
+                   (editor-views editor)))
+      (assertion-violation
+        'editor-capture-view-place!
+        "view does not belong to editor"
+        view))
+    (let* ([buffer (view-buffer view)]
+           [resource (buffer-file-path buffer)])
+      (and
+        resource
+        (let ([entry
+                (make-save-place
+                  resource
+                  (view-caret view)
+                  (view-first-line view)
+                  (view-first-visual-row view)
+                  (view-first-column view)
+                  (view-mark view))])
+          (editor-save-places-set!
+            editor
+            (cons
+              entry
+              (filter
+                (lambda (candidate)
+                  (not
+                    (string=?
+                      resource
+                      (save-place-resource candidate))))
+                (editor-save-places editor))))
+          entry))))
+
+  (define (editor-capture-save-places! editor)
+    (require-open-editor 'editor-capture-save-places! editor)
+    (for-each
+      (lambda (view) (editor-capture-view-place! editor view))
+      (editor-views editor))
+    (editor-save-places editor))
+
+  (define (editor-restore-view-place! editor view)
+    (require-open-editor 'editor-restore-view-place! editor)
+    (unless (and (view? view)
+                 (exists
+                   (lambda (candidate) (eq? candidate view))
+                   (editor-views editor)))
+      (assertion-violation
+        'editor-restore-view-place!
+        "view does not belong to editor"
+        view))
+    (let* ([buffer (view-buffer view)]
+           [entry
+             (save-place-for-resource
+               editor
+               (buffer-file-path buffer))])
+      (and
+        entry
+        (with-document-text
+          (buffer-document buffer)
+          (lambda (text)
+            (let* ([size (text-size text)]
+                   [last-line (- (text-line-count text) 1)]
+                   [point (min size (save-place-point entry))]
+                   [line (min last-line (save-place-first-line entry))]
+                   [visual-row
+                     (if (> (save-place-first-line entry) last-line)
+                         0
+                         (save-place-first-visual-row entry))]
+                   [mark (save-place-mark entry)])
+              (view-set-caret! view point)
+              (view-set-first-line! view line)
+              (view-set-first-visual-row!
+                view
+                visual-row)
+              (view-set-first-column!
+                view
+                (save-place-first-column entry))
+              (when mark
+                (view-set-mark! view (min size mark))
+                (view-deactivate-mark! view))
+              entry))))))
+
   (define (replace-view-caret-anchor! value offset)
     (let* ([document (buffer-document (view-buffer value))]
            [anchor
@@ -4923,6 +5072,7 @@
                '()
                '()
                -1
+               '()
                '()
                #f
                #f

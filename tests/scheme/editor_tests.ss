@@ -26,6 +26,7 @@
         (soda editor motion)
         (soda editor prompt)
         (soda editor repl)
+        (soda editor save-place-store)
         (soda editor scheme-interface-index)
         (soda editor scheme-semantics)
         (soda editor scheme-document-highlight)
@@ -37,6 +38,9 @@
               view-clear-mark!
               view-preferred-column
               view-set-caret!
+              view-set-first-column!
+              view-set-first-line!
+              view-set-first-visual-row!
               view-set-mark!)
         (soda tui commands)
         (soda tui component)
@@ -938,6 +942,76 @@
 (unless (editor-delete-bookmark! bookmark-editor "renamed")
   (error 'editor-tests "bookmark delete failed"))
 (editor-close! bookmark-editor)
+
+(define save-place-buffer
+  (make-buffer
+    7404
+    (make-document "zero\none\ntwo\n" 7404)
+    "/tmp/soda-save-place-a.scm"
+    'fundamental-mode))
+(buffer-set-file-path! save-place-buffer "/tmp/soda-save-place-a.scm")
+(define save-place-editor (make-editor save-place-buffer))
+(define save-place-view (editor-active-view save-place-editor))
+(view-set-caret! save-place-view 10)
+(view-set-mark! save-place-view 5)
+(view-deactivate-mark! save-place-view)
+(view-set-first-line! save-place-view 2)
+(view-set-first-visual-row! save-place-view 3)
+(view-set-first-column! save-place-view 4)
+(define save-place-other
+  (editor-create-buffer!
+    save-place-editor
+    "/tmp/soda-save-place-b.scm"
+    'fundamental-mode
+    "other\n"))
+(buffer-set-file-path! save-place-other "/tmp/soda-save-place-b.scm")
+(editor-set-view-buffer!
+  save-place-editor
+  (view-id save-place-view)
+  (buffer-id save-place-other))
+(unless
+  (let ([entry (car (editor-save-places save-place-editor))])
+    (and
+      (string=?
+        (save-place-resource entry)
+        "/tmp/soda-save-place-a.scm")
+      (= (save-place-point entry) 10)
+      (= (save-place-first-line entry) 2)
+      (= (save-place-first-visual-row entry) 3)
+      (= (save-place-first-column entry) 4)
+      (= (save-place-mark entry) 5)))
+  (error 'editor-tests "save-place did not capture the departing view"))
+(buffer-replace-range! save-place-buffer 0 13 (string->utf8 "x\n"))
+(editor-set-view-buffer!
+  save-place-editor
+  (view-id save-place-view)
+  (buffer-id save-place-buffer))
+(unless
+  (and
+    (= (view-caret save-place-view) 2)
+    (= (view-mark save-place-view) 2)
+    (not (view-mark-active? save-place-view))
+    (= (view-first-line save-place-view) 1)
+    (= (view-first-visual-row save-place-view) 0)
+    (= (view-first-column save-place-view) 4))
+  (error 'editor-tests "save-place restore did not clamp stale positions"))
+(define save-place-bytes
+  (save-place-state-encode (editor-save-places save-place-editor)))
+(define decoded-save-places
+  (save-place-state-decode save-place-bytes))
+(unless
+  (and
+    (= (length decoded-save-places) 2)
+    (exists
+      (lambda (entry)
+        (and
+          (string=?
+            (save-place-resource entry)
+            "/tmp/soda-save-place-a.scm")
+          (= (save-place-point entry) 10)))
+      decoded-save-places))
+  (error 'editor-tests "save-place state did not round trip"))
+(editor-close! save-place-editor)
 
 (define unicode-document (make-document "a\néx\n" 74))
 (define unicode-buffer

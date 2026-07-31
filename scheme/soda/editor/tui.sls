@@ -17,6 +17,7 @@
           (soda editor managed-process)
           (soda editor process-comint)
           (soda editor repl)
+          (soda editor save-place-store)
           (soda editor scheme-interface-runtime)
           (soda editor scheme-project-build-runtime)
           (soda editor vfs-runtime)
@@ -143,6 +144,31 @@
           (when terminal
             (guard (condition [else #f])
               (terminal-close! terminal)))))))
+
+  (define (persist-save-places! runtime editor path)
+    (when path
+      (editor-capture-save-places! editor)
+      (ensure-save-place-directory! path)
+      (let ([source
+              (runtime-write-file!
+                runtime
+                path
+                (save-place-state-encode
+                  (editor-save-places editor)))])
+        (let wait ()
+          (let find ([events (runtime-poll! runtime)])
+            (cond
+              [(null? events) (wait)]
+              [(and (= (event-source (car events)) source)
+                    (eq? (event-kind (car events)) 'file-write))
+               (unless (zero? (event-status (car events)))
+                 (error
+                   'persist-save-places!
+                   "cannot write save-place state"
+                   path
+                   (runtime-status-message
+                     (event-status (car events)))))]
+              [else (find (cdr events))]))))))
 
   (define (call-with-editor
             bytes
@@ -559,30 +585,40 @@
                     (vfs-directory-path (current-directory))
                     path))])
           (call-with-values
-          (lambda () (load-bytes runtime resource))
-          (lambda (bytes new-file? observed-state)
-            (call-with-editor
-              bytes
-              (or resource "*scratch*")
-              resource
-              new-file?
-              (lambda (editor)
-                (editor-set-global-setting!
-                  editor
-                  'show-line-numbers?
-                  #t)
-                (editor-set-global-setting!
-                  editor
-                  'show-cursorline?
-                  #t)
-                (when observed-state
-                  (buffer-set-local-setting!
-                    (view-buffer (editor-active-view editor))
-                    'file-observed-state
-                    observed-state))
-                (call-with-terminal
-                  (lambda (terminal)
-                    (run-editor-session
-                      runtime
-                      terminal
-                      editor))))))))))))
+            (lambda () (load-bytes runtime resource))
+            (lambda (bytes new-file? observed-state)
+              (call-with-editor
+                bytes
+                (or resource "*scratch*")
+                resource
+                new-file?
+                (lambda (editor)
+                  (let ([save-place-path (default-save-place-path)])
+                    (editor-replace-save-places!
+                      editor
+                      (load-save-place-file save-place-path))
+                    (editor-restore-view-place!
+                      editor
+                      (editor-active-view editor))
+                    (editor-set-global-setting!
+                      editor
+                      'show-line-numbers?
+                      #t)
+                    (editor-set-global-setting!
+                      editor
+                      'show-cursorline?
+                      #t)
+                    (when observed-state
+                      (buffer-set-local-setting!
+                        (view-buffer (editor-active-view editor))
+                        'file-observed-state
+                        observed-state))
+                    (call-with-terminal
+                      (lambda (terminal)
+                        (run-editor-session
+                          runtime
+                          terminal
+                          editor)))
+                    (guard (condition [else #f])
+                      (persist-save-places!
+                        runtime editor save-place-path))))))))))))

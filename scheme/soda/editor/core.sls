@@ -329,6 +329,19 @@
           editor-rename-bookmark!
           editor-delete-bookmark!
           bookmark-offset-for-buffer
+          make-save-place
+          save-place?
+          save-place-resource
+          save-place-point
+          save-place-first-line
+          save-place-first-visual-row
+          save-place-first-column
+          save-place-mark
+          editor-save-places
+          editor-replace-save-places!
+          editor-capture-view-place!
+          editor-restore-view-place!
+          editor-capture-save-places!
           editor-push-kill!
           editor-record-kill!
           editor-current-kill

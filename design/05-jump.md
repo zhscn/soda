@@ -7,6 +7,7 @@
 | `EditorLocation`、per-View back/forward walk | 已实现 |
 | source/target `LocationItem` jump history entry | 已实现 |
 | anchor-backed bookmark 与列表 Buffer | 已实现 |
+| 文件 Buffer 的 save-place 恢复与持久化 | 已实现 |
 | `LocationItem`、`LocationList` 与 next/previous navigation | 已实现 |
 | Scheme definition/reference/diagnostic producer | 已实现 |
 | Workbench 级语义 `JumpGraph` | 未实现 |
@@ -59,6 +60,17 @@ bookmark catalog 由 Editor 持有。每个 bookmark 保存名称、resource、s
 活 Buffer anchor、行列 fallback 和可选 annotation。覆盖、重命名和删除会结算旧 anchor；
 Buffer 移除时 bookmark 保留 resource 与 fallback，重新打开资源后按夹取后的行列恢复。
 bookmark jump 写入普通 jump history，bookmark list 则物化为只读工具 Buffer。
+
+save-place catalog 同样由 Editor 持有，以规范文件路径为 key，保存 point、逻辑
+viewport、visual-row/column viewport 偏移和可选 mark。View 离开文件 Buffer 时更新
+entry，重新显示该文件时恢复；超过当前文档范围的 point、mark 和首行会夹取到有效
+边界。显式文件跳转提供的 source position 在恢复后应用，因此仍拥有最终落点控制权。
+
+TUI 从 `$SODA_SAVE_PLACE_FILE`，或 `$XDG_STATE_HOME/soda/places.ss`，或
+`$HOME/.local/state/soda/places.ss` 读取 catalog。文件是带 schema 名称和版本号的
+Scheme datum，只包含可序列化的位置字段；损坏或不支持的文件按空 catalog 处理。
+退出时先生成不可变 bytevector，再通过 runtime 的临时文件、fsync 和 rename 工作流
+原子替换状态文件。空的 `SODA_SAVE_PLACE_FILE` 关闭磁盘持久化。
 
 显式 jump 在 walk 尾部追加 target。用户从历史中间发起新 jump 时，walk 先追加
 当前位置的 revisit，再追加新 target，因此 back 能回到分叉点，继续 back 仍可
