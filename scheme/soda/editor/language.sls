@@ -868,6 +868,7 @@
       'editing
       'scheme-mode-map
       (list
+        (cons 'comment-line-prefix ";;")
         (cons
           'completion-providers
           '(scheme-static scheme-runtime))

@@ -1987,6 +1987,44 @@
          "revision-scoped command target survived a document edit"))
 (editor-close! target-editor)
 
+(define comment-source "  alpha\n beta\n")
+(define comment-buffer
+  (make-buffer
+    1011
+    (make-document comment-source 1011)
+    "comment.scm"
+    'scheme-mode))
+(define comment-editor (make-editor comment-buffer))
+(define comment-view (editor-active-view comment-editor))
+(view-set-mark! comment-view 0)
+(view-set-caret! comment-view (string-length comment-source))
+(editor-update!
+  comment-editor
+  (make-command-message 'edit.comment-dwim #f))
+(unless
+  (bytevector=?
+    (buffer-bytes comment-buffer)
+    (string->utf8 "  ;;alpha\n ;;beta\n"))
+  (error 'editor-tests "comment-dwim did not comment Scheme lines"))
+(editor-update!
+  comment-editor
+  (make-command-message 'edit.undo #f))
+(unless
+  (bytevector=? (buffer-bytes comment-buffer) (string->utf8 comment-source))
+  (error 'editor-tests "comment-dwim was not one undo transaction"))
+(view-set-mark! comment-view 0)
+(view-set-caret! comment-view (string-length comment-source))
+(editor-update! comment-editor (make-command-message 'edit.comment-dwim #f))
+(view-set-mark! comment-view 0)
+(view-set-caret!
+  comment-view
+  (bytevector-length (buffer-bytes comment-buffer)))
+(editor-update! comment-editor (make-command-message 'edit.comment-dwim #f))
+(unless
+  (bytevector=? (buffer-bytes comment-buffer) (string->utf8 comment-source))
+  (error 'editor-tests "comment-dwim did not uncomment Scheme lines"))
+(editor-close! comment-editor)
+
 (define structural-source
   "(define (f x)\n  (list x '(a b)))\n\n(g 1 2)")
 (define structural-document

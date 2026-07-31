@@ -280,6 +280,9 @@
         'editing
         'cpp-mode-map
         '((indent-width . 4)
+          (comment-line-prefix . "//")
+          (comment-block-start . "/*")
+          (comment-block-end . "*/")
           (continuation-indent . 4)
           (tab-width . 8)
           (use-tabs? . #f))))

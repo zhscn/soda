@@ -9,6 +9,57 @@
       (#\[ . #\])
       (#\{ . #\})))
 
+  (define line-comment-prefixes
+    '((ada . "--") (awk . "#") (bash . "#")
+      (c-sharp . "//") (c3 . "//") (clojure . ";;")
+      (cmake . "#") (commonlisp . ";;") (dart . "//")
+      (dockerfile . "#") (elisp . ";;") (elixir . "#")
+      (erlang . "%") (gdscript . "#") (glsl . "//")
+      (go . "//") (gomod . "//") (gowork . "//")
+      (java . "//") (javascript . "//") (kotlin . "//")
+      (lua . "--") (nix . "#") (nu . "#") (perl . "#")
+      (php . "//") (proto . "//") (python . "#")
+      (r . "#") (ruby . "#") (rust . "//")
+      (scala . "//") (sql . "--") (toml . "#")
+      (typescript . "//") (tsx . "//") (typst . "//")
+      (yaml . "#")))
+
+  (define block-comment-delimiters
+    '((css "/*" "*/") (html "<!--" "-->")
+      (javascript "/*" "*/") (typescript "/*" "*/")
+      (tsx "{/*" "*/}") (go "/*" "*/")
+      (rust "/*" "*/") (java "/*" "*/")
+      (c-sharp "/*" "*/") (kotlin "/*" "*/")
+      (glsl "/*" "*/")))
+
+  (define (language-comment-settings language)
+    (let ([line (assq language line-comment-prefixes)]
+          [block (assq language block-comment-delimiters)])
+      (append
+        (if line
+            (list (cons 'comment-line-prefix (cdr line)))
+            '())
+        (if block
+            (list
+              (cons 'comment-block-start (cadr block))
+              (cons 'comment-block-end (caddr block)))
+            '()))))
+
+  (define (with-comment-settings language options)
+    (let ([comments (language-comment-settings language)])
+      (if
+        (null? comments)
+        options
+        (let ([settings (assq 'settings options)])
+          (if settings
+              (map
+                (lambda (entry)
+                  (if (eq? (car entry) 'settings)
+                      (cons 'settings (append (cdr entry) comments))
+                      entry))
+                options)
+              (append options (list (cons 'settings comments))))))))
+
   (define (mode-name language)
     (string->symbol
       (string-append
@@ -23,7 +74,7 @@
       suffixes
       (append
         `((pairs . ,common-pairs))
-        options)))
+        (with-comment-settings language options))))
 
   (define (highlight-language-spec language suffixes . options)
     (apply

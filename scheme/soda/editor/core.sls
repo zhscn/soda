@@ -914,6 +914,7 @@
           (soda editor command-target)
           (soda editor commands basic)
           (soda editor commands buffer)
+          (soda editor commands comment)
           (soda editor commands configuration)
           (soda editor commands theme)
           (soda editor commands transform)
@@ -1033,6 +1034,24 @@
           "Whether indentation commands may insert tab characters."
           'document)
         (make-setting-definition
+          'comment-line-prefix
+          #f
+          (lambda (value) (or (not value) (string? value)))
+          "Line comment prefix used by comment commands."
+          'document)
+        (make-setting-definition
+          'comment-block-start
+          #f
+          (lambda (value) (or (not value) (string? value)))
+          "Opening delimiter used by block comment commands."
+          'document)
+        (make-setting-definition
+          'comment-block-end
+          #f
+          (lambda (value) (or (not value) (string? value)))
+          "Closing delimiter used by block comment commands."
+          'document)
+        (make-setting-definition
           'read-only?
           #f
           boolean?
@@ -1149,6 +1168,7 @@
       (install-command-runtime-commands! editor)
       (install-prefix-commands! editor)
       (install-basic-commands! editor)
+      (install-comment-commands! editor)
       (install-structural-commands! editor)
       (install-fold-commands! editor)
       (install-transform-commands! editor)
