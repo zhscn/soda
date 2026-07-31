@@ -14,6 +14,7 @@
           (soda editor evaluation-runtime)
           (soda editor file)
           (soda editor file-runtime)
+          (soda editor managed-process)
           (soda editor process-comint)
           (soda editor repl)
           (soda editor scheme-interface-runtime)
@@ -237,7 +238,7 @@
           [file-adapter #f]
           [scheme-interface-adapter #f]
           [scheme-project-build-adapter #f]
-          [process-comint-adapter #f]
+          [managed-process-adapter #f]
           [vfs-adapter #f])
       (define (cancel-flush-timer!)
         (when flush-timer
@@ -392,8 +393,8 @@
       (set! scheme-project-build-adapter
         (install-scheme-project-build-runtime!
           executor runtime))
-      (set! process-comint-adapter
-        (install-process-comint-runtime!
+      (set! managed-process-adapter
+        (install-managed-process-runtime!
           executor runtime))
       (set! vfs-adapter
         (install-vfs-runtime! editor runtime))
@@ -505,8 +506,8 @@
                              scheme-project-build-adapter
                              (car events))]
                          [comint-message
-                           (process-comint-runtime-handle-event
-                             process-comint-adapter
+                           (managed-process-runtime-handle-event
+                             managed-process-adapter
                              (car events))])
                      (process
                        (cdr events)

@@ -154,6 +154,19 @@ source 与上层 request 的关联，不允许 callback 进入 Scheme 或持有 
 entry name，flags 保存 rename/change 分类；取消 source 会停止 handle，并在 close
 callback 后释放 native 所有权。
 
+Scheme 的 `ManagedProcess` 在 native source 之上提供逻辑进程身份。它保存
+argument vector、工作目录、owner、generation、stdin 状态、退出状态以及 output/
+exit command。start、write、close-input、signal 和 restart 都是 effect；runtime
+adapter 将 native source 映射回逻辑进程，并把每个 output/exit event 包装成带
+generation 的 internal command message。该层不依赖 Buffer、InteractionSession
+或具体 wire protocol。
+
+重启保留 `ManagedProcess` identity 并递增 generation。运行中的重启先发送
+SIGTERM，收到旧 generation 的 exit 后再创建新 native source；exit event 标记
+是否已经重启。consumer 使用 event generation 丢弃过期协议数据。comint、build
+工具和 language server 可以拥有不同的 process owner 与 command handler；LSP
+adapter 在 owner command 中维护 `Content-Length` framing 和 JSON-RPC 状态。
+
 子进程使用 `uv_spawn`，参数以长度前缀的 UTF-8 argument vector 跨 ABI 传递，不经
 shell 重新解释。工作目录是每个 spawn request 的显式字段，环境继承 Editor 进程。
 stdout 和 stderr 分别连接到 libuv pipe，并以带 stream flag 的增量

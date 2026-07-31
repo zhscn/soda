@@ -8,6 +8,7 @@
         (soda editor event)
         (soda editor interaction)
         (soda editor interaction-transcript)
+        (soda editor managed-process)
         (soda editor process-comint)
         (soda runtime))
 
@@ -49,7 +50,7 @@
   (define runtime (make-runtime))
   (define executor (make-effect-executor))
   (define adapter
-    (install-process-comint-runtime! executor runtime))
+    (install-managed-process-runtime! executor runtime))
 
   (define (dispatch! message)
     (let loop ([messages (list message)])
@@ -68,7 +69,7 @@
     (for-each
       (lambda (event)
         (let ([message
-                (process-comint-runtime-handle-event
+                (managed-process-runtime-handle-event
                   adapter
                   event)])
           (when message (dispatch! message))))
@@ -178,6 +179,25 @@
         '("draft")))
     (error 'process-comint-tests
            "process exit sentinel or history differs"))
+
+  (define first-generation
+    (managed-process-generation
+      (process-comint-managed-process process)))
+  (dispatch!
+    (make-command-message 'process.restart #f))
+  (unless
+    (and
+      (process-comint-running? process)
+      (= (managed-process-generation
+           (process-comint-managed-process process))
+         (+ first-generation 1)))
+    (error 'process-comint-tests
+           "process restart command did not start a new generation"))
+  (dispatch!
+    (make-command-message 'process.terminate #f))
+  (wait-until
+    (lambda ()
+      (not (process-comint-running? process))))
 
   (editor-close! editor)
   (runtime-close! runtime)

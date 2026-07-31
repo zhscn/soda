@@ -9,9 +9,7 @@
           process-comint-source
           process-comint-running?
           install-process-comint-commands!
-          install-process-comint-runtime!
-          process-comint-runtime?
-          process-comint-runtime-handle-event)
+          process-comint-managed-process)
   (import (rnrs)
           (soda document)
           (soda editor buffer)
@@ -22,6 +20,7 @@
           (soda editor event)
           (soda editor interaction)
           (soda editor keymap)
+          (soda editor managed-process)
           (soda editor state)
           (soda runtime))
 
@@ -43,33 +42,20 @@
     (fields
       (immutable profile process-comint-spec)
       session-id
-      (mutable source
-               process-comint-source
-               process-comint-source-set!)
-      (mutable running?
-               process-comint-running?
-               process-comint-running?-set!)
+      (mutable managed-process
+               process-comint-managed-process
+               process-comint-managed-process-set!)
       (mutable pending-output
                process-comint-pending-output
                process-comint-pending-output-set!)))
 
-  (define-record-type process-start-request
-    (fields process))
+  (define (process-comint-source process)
+    (managed-process-source
+      (process-comint-managed-process process)))
 
-  (define-record-type process-write-request
-    (fields process data))
-
-  (define-record-type process-signal-request
-    (fields process signal))
-
-  (define-record-type process-comint-event
-    (fields session-id kind status flags data))
-
-  (define-record-type
-    (process-comint-runtime
-      %make-process-comint-runtime
-      process-comint-runtime?)
-    (fields runtime processes))
+  (define (process-comint-running? process)
+    (managed-process-running?
+      (process-comint-managed-process process)))
 
   (define (default-input-sender input)
     (string->utf8 (string-append input "\n")))
@@ -206,10 +192,11 @@
     (unless
       (and
         (process-comint-running? process)
-        (process-comint-source process))
+        (managed-process-input-open?
+          (process-comint-managed-process process)))
       (assertion-violation
         who
-        "process is not running"))
+        "process is not accepting input"))
     process)
 
   (define (open-process-session! editor profile)
@@ -248,8 +235,16 @@
                  profile
                  (interaction-session-id session)
                  #f
-                 #f
                  (make-bytevector 0))])
+        (process-comint-managed-process-set!
+          process
+          (make-managed-process
+            (process-comint-profile-name profile)
+            (process-comint-profile-arguments profile)
+            (process-comint-profile-working-directory profile)
+            process
+            'process.apply-output
+            'process.apply-exit))
         (interaction-session-set-evaluator! session process)
         (buffer-set-local-setting! buffer 'track-modified? #f)
         (document-set-editable-start!
@@ -261,7 +256,7 @@
           '(process-comint))
         (values
           session
-          (make-process-start-request process)))))
+          (process-comint-managed-process process)))))
 
   (define-command (run-process-command context command)
     "Run a shell command in a process interaction buffer."
@@ -281,7 +276,7 @@
       (lambda (session request)
         (list
           (make-command-effect
-            'process.spawn
+            'managed-process.start
             request)))))
 
   (define-command (start-process-command context profile)
@@ -300,7 +295,7 @@
       (lambda (session request)
         (list
           (make-command-effect
-            'process.spawn
+            'managed-process.start
             request)))))
 
   (define (process-send-input-command context)
@@ -324,8 +319,10 @@
           (comint-commit-input! editor session)
           (list
             (make-command-effect
-              'process.write
-              (make-process-write-request process data)))))))
+              'managed-process.write
+              (make-managed-process-write-request
+                (process-comint-managed-process process)
+                data)))))))
 
   (define (process-send-eof-command context)
     (call-with-values
@@ -335,8 +332,8 @@
         (require-running-process 'process.send-eof process)
         (list
           (make-command-effect
-            'process.close-input
-            process)))))
+            'managed-process.close-input
+            (process-comint-managed-process process))))))
 
   (define (process-interrupt-command context)
     (call-with-values
@@ -346,8 +343,58 @@
         (require-running-process 'process.interrupt process)
         (list
           (make-command-effect
-            'process.signal
-            (make-process-signal-request process 2))))))
+            'managed-process.signal
+            (make-managed-process-signal-request
+              (process-comint-managed-process process)
+              2))))))
+
+  (define (process-terminate-command context)
+    (call-with-values
+      (lambda ()
+        (active-process 'process.terminate context))
+      (lambda (session process)
+        (let ([managed
+                (process-comint-managed-process process)])
+          (unless (eq? (managed-process-state managed) 'running)
+            (assertion-violation
+              'process.terminate
+              "process is not running"))
+          (list
+            (make-command-effect
+              'managed-process.signal
+              (make-managed-process-signal-request
+                managed
+                15)))))))
+
+  (define (process-kill-command context)
+    (call-with-values
+      (lambda ()
+        (active-process 'process.kill context))
+      (lambda (session process)
+        (let ([managed
+                (process-comint-managed-process process)])
+          (unless (memq
+                    (managed-process-state managed)
+                    '(running stopping))
+            (assertion-violation
+              'process.kill
+              "process is not running"))
+          (list
+            (make-command-effect
+              'managed-process.signal
+              (make-managed-process-signal-request
+                managed
+                9)))))))
+
+  (define (process-restart-command context)
+    (call-with-values
+      (lambda ()
+        (active-process 'process.restart context))
+      (lambda (session process)
+        (list
+          (make-command-effect
+            'managed-process.restart
+            (process-comint-managed-process process))))))
 
   (define (bytevector-append left right)
     (let* ([left-size (bytevector-length left)]
@@ -465,15 +512,27 @@
   (define (apply-process-output-command context)
     (let* ([editor (command-context-editor context)]
            [event (command-context-argument context)]
+           [managed
+             (and
+               (managed-process-event? event)
+               (managed-process-event-process event))]
+           [process
+             (and managed (managed-process-owner managed))]
            [session
              (editor-interaction-ref
                editor
-               (process-comint-event-session-id event))]
-           [process
-             (session-process
-               'process.apply-output
-               session)])
-      (if (negative? (process-comint-event-status event))
+               (process-comint-session-id process))])
+      (unless
+        (and
+          (process-comint? process)
+          (eq? process
+               (session-process
+                 'process.apply-output
+                 session)))
+        (assertion-violation
+          'process.apply-output
+          "managed process is not owned by the interaction"))
+      (if (negative? (managed-process-event-status event))
           (insert-filtered-output!
             editor
             session
@@ -482,14 +541,14 @@
               (string-append
                 "\nProcess I/O error: "
                 (runtime-status-message
-                  (process-comint-event-status event))
+                  (managed-process-event-status event))
                 "\n")))
           (let* ([stream
                    (cond
-                     [(= (process-comint-event-flags event)
+                     [(= (managed-process-event-flags event)
                          process-stdout)
                       'stdout]
-                     [(= (process-comint-event-flags event)
+                     [(= (managed-process-event-flags event)
                          process-stderr)
                       'stderr]
                      [else 'unknown])]
@@ -497,7 +556,7 @@
                    ((process-comint-profile-output-filter
                       (process-comint-spec process))
                     stream
-                    (process-comint-event-data event))])
+                    (managed-process-event-data event))])
             (unless
               (or
                 (not filtered)
@@ -521,22 +580,32 @@
   (define (apply-process-exit-command context)
     (let* ([editor (command-context-editor context)]
            [event (command-context-argument context)]
+           [managed
+             (and
+               (managed-process-event? event)
+               (managed-process-event-process event))]
+           [process
+             (and managed (managed-process-owner managed))]
            [session
              (editor-interaction-ref
                editor
-               (process-comint-event-session-id event))]
-           [process
-             (session-process
-               'process.apply-exit
-               session)]
+               (process-comint-session-id process))]
            [pending (process-comint-pending-output process)]
            [sentinel
              ((process-comint-profile-sentinel
                 (process-comint-spec process))
               (process-comint-profile-name
                 (process-comint-spec process))
-              (process-comint-event-status event)
-              (process-comint-event-flags event))])
+              (managed-process-event-status event)
+              (managed-process-event-flags event))])
+      (unless
+        (eq? process
+             (session-process
+               'process.apply-exit
+               session))
+        (assertion-violation
+          'process.apply-exit
+          "managed process is not owned by the interaction"))
       (process-comint-pending-output-set!
         process
         (make-bytevector 0))
@@ -553,7 +622,16 @@
           sentinel))
       (when sentinel
         (comint-insert-output! editor session sentinel 0))
-      (process-comint-running?-set! process #f)
+      (when (managed-process-event-restarted? event)
+        (comint-insert-output!
+          editor
+          session
+          (string-append
+            "Restarted process "
+            (process-comint-profile-name
+              (process-comint-spec process))
+            "\n")
+          0))
       (editor-set-status-message!
         editor
         (string-append
@@ -594,7 +672,19 @@
         (list
           'process.interrupt
           process-interrupt-command
-          "Send SIGINT to the child process.")))
+          "Send SIGINT to the child process.")
+        (list
+          'process.terminate
+          process-terminate-command
+          "Request process termination with SIGTERM.")
+        (list
+          'process.kill
+          process-kill-command
+          "Kill the child process with SIGKILL.")
+        (list
+          'process.restart
+          process-restart-command
+          "Restart the child process with the same profile.")))
     (for-each
       (lambda (entry)
         (editor-register-internal-command!
@@ -646,6 +736,18 @@
         (list
           (make-key-stroke
             'character
+            (char->integer #\c)
+            4)
+          (make-key-stroke
+            'character
+            (char->integer #\r)
+            4))
+        'process.restart)
+      (keymap-bind!
+        keymap
+        (list
+          (make-key-stroke
+            'character
             (char->integer #\a)
             4))
         'interaction.line-start)
@@ -667,132 +769,4 @@
         keymap))
     editor)
 
-  (define (install-process-comint-runtime!
-            executor
-            runtime)
-    (unless (effect-executor? executor)
-      (assertion-violation
-        'install-process-comint-runtime!
-        "expected an effect executor"
-        executor))
-    (unless (runtime? runtime)
-      (assertion-violation
-        'install-process-comint-runtime!
-        "expected a runtime"
-        runtime))
-    (let ([adapter
-            (%make-process-comint-runtime
-              runtime
-              (make-eqv-hashtable))])
-      (register-effect-handler!
-        executor
-        'process.spawn
-        (lambda (request)
-          (unless (process-start-request? request)
-            (assertion-violation
-              'process.spawn
-              "expected a process start request"
-              request))
-          (let* ([process (process-start-request-process request)]
-                 [profile (process-comint-spec process)]
-                 [source
-                   (runtime-spawn-process!
-                     runtime
-                     (process-comint-profile-arguments profile)
-                     (process-comint-profile-working-directory profile))])
-            (process-comint-source-set! process source)
-            (process-comint-running?-set! process #t)
-            (hashtable-set!
-              (process-comint-runtime-processes adapter)
-              source
-              process)
-            (make-effect-result #t '()))))
-      (register-effect-handler!
-        executor
-        'process.write
-        (lambda (request)
-          (unless (process-write-request? request)
-            (assertion-violation
-              'process.write
-              "expected a process write request"
-              request))
-          (let ([process
-                  (require-running-process
-                    'process.write
-                    (process-write-request-process request))])
-            (runtime-write-process!
-              runtime
-              (process-comint-source process)
-              (process-write-request-data request))
-            (make-effect-result #t '()))))
-      (register-effect-handler!
-        executor
-        'process.close-input
-        (lambda (process)
-          (require-running-process 'process.close-input process)
-          (runtime-close-process-input!
-            runtime
-            (process-comint-source process))
-          (make-effect-result #t '())))
-      (register-effect-handler!
-        executor
-        'process.signal
-        (lambda (request)
-          (unless (process-signal-request? request)
-            (assertion-violation
-              'process.signal
-              "expected a process signal request"
-              request))
-          (let ([process
-                  (require-running-process
-                    'process.signal
-                    (process-signal-request-process request))])
-            (runtime-signal-process!
-              runtime
-              (process-comint-source process)
-              (process-signal-request-signal request))
-            (make-effect-result #t '()))))
-      adapter))
-
-  (define (process-comint-runtime-handle-event adapter event)
-    (unless (process-comint-runtime? adapter)
-      (assertion-violation
-        'process-comint-runtime-handle-event
-        "expected a process comint runtime"
-        adapter))
-    (unless (event? event)
-      (assertion-violation
-        'process-comint-runtime-handle-event
-        "expected a runtime event"
-        event))
-    (let ([process
-            (hashtable-ref
-              (process-comint-runtime-processes adapter)
-              (event-source event)
-              #f)])
-      (and
-        process
-        (case (event-kind event)
-          [(process-output)
-           (make-internal-command-message
-             'process.apply-output
-             (make-process-comint-event
-               (process-comint-session-id process)
-               'output
-               (event-status event)
-               (event-flags event)
-               (event-data event)))]
-          [(process-exit)
-           (hashtable-delete!
-             (process-comint-runtime-processes adapter)
-             (event-source event))
-           (make-internal-command-message
-             'process.apply-exit
-             (make-process-comint-event
-               (process-comint-session-id process)
-               'exit
-               (event-status event)
-               (event-flags event)
-               (event-data event)))]
-          [else #f]))))
 )

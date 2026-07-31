@@ -76,6 +76,30 @@
           process-comint?
           process-comint-source
           process-comint-running?
+          process-comint-managed-process
+          make-managed-process
+          managed-process?
+          managed-process-name
+          managed-process-arguments
+          managed-process-working-directory
+          managed-process-owner
+          managed-process-state
+          managed-process-generation
+          managed-process-source
+          managed-process-input-open?
+          managed-process-exit-status
+          managed-process-termination-signal
+          managed-process-running?
+          managed-process-event?
+          managed-process-event-process
+          managed-process-event-generation
+          managed-process-event-kind
+          managed-process-event-status
+          managed-process-event-flags
+          managed-process-event-data
+          managed-process-event-restarted?
+          make-managed-process-write-request
+          make-managed-process-signal-request
           editor-evaluator
           editor-debugger
           editor-set-debugger!
@@ -795,6 +819,7 @@
           (soda editor interaction)
           (soda editor kill)
           (soda editor location)
+          (soda editor managed-process)
           (soda editor minor-mode)
           (soda editor minor-mode-runtime)
           (soda editor mode-runtime)
