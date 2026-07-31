@@ -529,6 +529,9 @@
           view-caret
           view-mark
           view-mark-active?
+          view-mark-ring
+          view-push-mark!
+          view-pop-mark!
           view-set-mark!
           view-deactivate-mark!
           view-clear-mark!

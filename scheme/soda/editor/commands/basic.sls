@@ -1183,8 +1183,33 @@
     (let* ([editor (command-context-editor context)]
            [view (context-view context)]
            [caret (view-caret view)])
-      (view-set-mark! view caret)
-      (editor-set-status-message! editor "Mark set")
+      (if
+        (command-context-prefix context)
+        (let ([target (view-pop-mark! view)])
+          (if target
+              (begin
+                (view-set-caret! view target)
+                (view-deactivate-mark! view)
+                (editor-set-status-message! editor "Mark popped"))
+              (editor-set-status-message! editor "Mark ring is empty")))
+        (begin
+          (view-push-mark! view caret)
+          (view-set-mark! view caret)
+          (editor-set-status-message! editor "Mark set")))
+      '()))
+
+  (define (mark-whole-buffer-command context)
+    (let* ([editor (command-context-editor context)]
+           [view (context-view context)]
+           [buffer (view-buffer view)])
+      (view-push-mark! view (view-caret view))
+      (view-set-caret! view 0)
+      (view-set-mark!
+        view
+        (with-document-text
+          (buffer-document buffer)
+          text-size))
+      (editor-set-status-message! editor "Buffer marked")
       '()))
 
   (define (exchange-point-and-mark-command context)
@@ -1791,6 +1816,10 @@
         (list 'edit.redo redo-command "Redo the next buffer change.")
         (list 'mark.set set-mark-command "Set the mark at point.")
         (list
+          'mark.whole-buffer
+          mark-whole-buffer-command
+          "Mark the whole buffer.")
+        (list
           'mark.exchange-point-and-mark
           exchange-point-and-mark-command
           "Exchange point and mark.")
@@ -1994,6 +2023,12 @@
         (stroke 'character (char->integer #\x) 4)
         (stroke 'character (char->integer #\x) 4))
       'mark.exchange-point-and-mark)
+    (editor-bind-key!
+      editor
+      (list
+        (stroke 'character (char->integer #\x) 4)
+        (stroke 'character (char->integer #\h) 0))
+      'mark.whole-buffer)
     (keymap-bind!
       (keymap-catalog-ref
         (editor-keymap-catalog editor)

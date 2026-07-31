@@ -2093,6 +2093,33 @@
   (error 'editor-tests
          "Scheme mode did not publish a revision-scoped structure index"))
 
+(view-set-caret! structural-view 5)
+(editor-update!
+  structural-editor
+  (make-command-message 'mark.whole-buffer #f))
+(unless
+  (and
+    (equal?
+      (view-region structural-view)
+      (cons 0 (string-length structural-source)))
+    (equal? (view-mark-ring structural-view) '(5)))
+  (error 'editor-tests
+         "mark-whole-buffer did not preserve point in the mark ring"))
+(view-clear-mark! structural-view)
+(view-set-caret! structural-view 10)
+(editor-update!
+  structural-editor
+  (make-command-message 'mark.defun #f))
+(unless
+  (equal?
+    (view-region structural-view)
+    (cons 0 (structural-thing-end (car structural-defuns))))
+  (error 'editor-tests "mark-defun did not select the enclosing definition"))
+(unless (= (view-pop-mark! structural-view) 10)
+  (error 'editor-tests "mark ring did not return its newest anchored mark"))
+(view-clear-mark! structural-view)
+(view-set-caret! structural-view 0)
+
 (define first-form-end
   (structural-thing-end (car structural-defuns)))
 (editor-update!

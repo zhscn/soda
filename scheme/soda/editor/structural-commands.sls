@@ -462,6 +462,22 @@
   (define (end-of-defun-command context)
     (move-defun-command context 'forward))
 
+  (define (mark-defun-command context)
+    (let* ([editor (command-context-editor context)]
+           [view (context-view context)]
+           [thing
+             (defun-at-or-near
+               (structure-index context)
+               (view-caret view)
+               'forward)])
+      (unless thing
+        (editor-user-error 'mark.defun "No function definition"))
+      (view-push-mark! view (view-caret view))
+      (view-set-caret! view (structural-thing-start thing))
+      (view-set-mark! view (structural-thing-end thing))
+      (editor-set-status-message! editor "Function marked")
+      '()))
+
   (define (stroke character)
     (make-key-stroke
       'character
@@ -519,6 +535,11 @@
           "Mark expressions, extending the mark when repeated."
           'mark)
         (list
+          'mark.defun
+          mark-defun-command
+          "Mark the function definition at or following point."
+          'mark)
+        (list
           'edit.kill-sexp
           kill-sexp-command
           "Kill balanced expressions."
@@ -545,6 +566,7 @@
         (cons #\a 'move.beginning-of-defun)
         (cons #\e 'move.end-of-defun)
         (cons #\space 'mark.sexp)
+        (cons #\h 'mark.defun)
         (cons #\k 'edit.kill-sexp)
         (cons #\t 'edit.transpose-sexps)
         (cons #\q 'edit.indent-sexp)))

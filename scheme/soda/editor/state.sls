@@ -154,6 +154,9 @@
           view-caret
           view-mark
           view-mark-active?
+          view-mark-ring
+          view-push-mark!
+          view-pop-mark!
           view-set-mark!
           view-deactivate-mark!
           view-clear-mark!
@@ -218,6 +221,7 @@
       (mutable caret-anchor view-caret-anchor view-caret-anchor-set!)
       (mutable mark-anchor view-mark-anchor view-mark-anchor-set!)
       (mutable mark-active? view-mark-active? view-mark-active?-set!)
+      (mutable mark-ring view-mark-ring-anchors view-mark-ring-anchors-set!)
       (mutable preferred-column
                view-preferred-column
                view-preferred-column-set!)
@@ -1311,6 +1315,7 @@
                  anchor-after-insertion)
                #f
                #f
+               '()
                #f
                0
                0
@@ -1364,6 +1369,11 @@
         (document-remove-anchor!
           (buffer-document (view-buffer view))
           (view-mark-anchor view)))
+      (for-each
+        (lambda (anchor)
+          (document-remove-anchor!
+            (buffer-document (view-buffer view)) anchor))
+        (view-mark-ring-anchors view))
       (document-remove-anchor!
         (buffer-document (view-buffer view))
         (view-caret-anchor view))
@@ -1480,10 +1490,16 @@
           (document-remove-anchor!
             (buffer-document (view-buffer view))
             (view-mark-anchor view)))
+        (for-each
+          (lambda (anchor)
+            (document-remove-anchor!
+              (buffer-document (view-buffer view)) anchor))
+          (view-mark-ring-anchors view))
         (view-buffer-set! view buffer)
         (view-caret-anchor-set! view anchor)
         (view-mark-anchor-set! view #f)
         (view-mark-active?-set! view #f)
+        (view-mark-ring-anchors-set! view '())
         (view-display-map-set! view #f))
       (view-first-line-set! view 0)
       (view-first-column-set! view 0)
@@ -3878,6 +3894,58 @@
       (view-mark-active?-set! value #t))
     offset)
 
+  (define (view-mark-ring value)
+    (unless (view? value)
+      (assertion-violation 'view-mark-ring "expected a view" value))
+    (map
+      (lambda (anchor)
+        (document-anchor-offset
+          (buffer-document (view-buffer value)) anchor))
+      (view-mark-ring-anchors value)))
+
+  (define (split-mark-ring ring limit)
+    (let loop ([remaining ring] [count 0] [kept '()])
+      (if
+        (or (null? remaining) (= count limit))
+        (values (reverse kept) remaining)
+        (loop (cdr remaining) (+ count 1)
+              (cons (car remaining) kept)))))
+
+  (define (view-push-mark! value offset)
+    (unless (view? value)
+      (assertion-violation 'view-push-mark! "expected a view" value))
+    (unless (exact-non-negative-integer? offset)
+      (assertion-violation
+        'view-push-mark!
+        "offset must be a non-negative exact integer"
+        offset))
+    (let* ([document (buffer-document (view-buffer value))]
+           [anchor
+             (document-create-anchor!
+               document offset anchor-before-insertion)]
+           [ring (cons anchor (view-mark-ring-anchors value))])
+      (call-with-values
+        (lambda () (split-mark-ring ring 16))
+        (lambda (kept discarded)
+          (for-each
+            (lambda (old) (document-remove-anchor! document old))
+            discarded)
+          (view-mark-ring-anchors-set! value kept))))
+    offset)
+
+  (define (view-pop-mark! value)
+    (unless (view? value)
+      (assertion-violation 'view-pop-mark! "expected a view" value))
+    (let ([ring (view-mark-ring-anchors value)])
+      (and
+        (pair? ring)
+        (let* ([document (buffer-document (view-buffer value))]
+               [anchor (car ring)]
+               [offset (document-anchor-offset document anchor)])
+          (document-remove-anchor! document anchor)
+          (view-mark-ring-anchors-set! value (cdr ring))
+          offset))))
+
   (define (view-deactivate-mark! value)
     (unless (view? value)
       (assertion-violation
@@ -4172,6 +4240,7 @@
                  anchor-after-insertion)
                #f
                #f
+               '()
                #f
                0
                0
@@ -4368,6 +4437,12 @@
               (buffer-document (view-buffer view))
               (view-mark-anchor view))
             (view-mark-anchor-set! view #f))
+          (for-each
+            (lambda (anchor)
+              (document-remove-anchor!
+                (buffer-document (view-buffer view)) anchor))
+            (view-mark-ring-anchors view))
+          (view-mark-ring-anchors-set! view '())
           (document-remove-anchor!
             (buffer-document (view-buffer view))
             (view-caret-anchor view))
