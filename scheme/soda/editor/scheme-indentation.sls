@@ -1,5 +1,7 @@
 (library (soda editor scheme-indentation)
-  (export scheme-continuation-indent)
+  (export scheme-continuation-indent
+          scheme-line-indent
+          scheme-reindent-entry)
   (import (rnrs))
 
   (define-record-type
@@ -67,7 +69,7 @@
                  [comment-depth 0])
         (if
           (= index limit)
-          stack
+          (values stack state)
           (let ([character (string-ref source index)])
             (case state
               [(line-comment)
@@ -306,23 +308,130 @@
         [else
          (+ (indent-frame-column frame) standard-indent)])))
 
-  (define (scheme-continuation-indent source standard-indent)
-    (unless (string? source)
-      (assertion-violation
-        'scheme-continuation-indent
-        "source must be a string"
-        source))
+  (define (require-standard-indent who standard-indent)
     (unless
       (and
         (integer? standard-indent)
         (exact? standard-indent)
         (not (negative? standard-indent)))
       (assertion-violation
-        'scheme-continuation-indent
+        who
         "standard indent must be a non-negative exact integer"
-        standard-indent))
-    (let ([stack (scan source)])
+        standard-indent)))
+
+  (define (context-indent stack standard-indent)
+    (if
+      (null? stack)
+      0
+      (frame-indent (car stack) standard-indent)))
+
+  (define (current-line-leading-width source)
+    (let ([length (string-length source)])
+      (let find-start ([index length])
+        (if
+          (and
+            (positive? index)
+            (not
+              (char=?
+                (string-ref source (- index 1))
+                #\newline)))
+          (find-start (- index 1))
+          (let count ([index index] [width 0])
+            (if
+              (and
+                (< index length)
+                (memv (string-ref source index) '(#\space #\tab)))
+              (count (+ index 1) (+ width 1))
+              width))))))
+
+  (define (scheme-continuation-indent source standard-indent)
+    (unless (string? source)
+      (assertion-violation
+        'scheme-continuation-indent
+        "source must be a string"
+        source))
+    (require-standard-indent
+      'scheme-continuation-indent
+      standard-indent)
+    (call-with-values
+      (lambda () (scan source))
+      (lambda (stack state)
+        (if
+          (memq state '(normal line-comment))
+          (context-indent stack standard-indent)
+          (current-line-leading-width source)))))
+
+  (define (scheme-line-indent source standard-indent)
+    (unless (string? source)
+      (assertion-violation
+        'scheme-line-indent
+        "source prefix must be a string"
+        source))
+    (require-standard-indent 'scheme-line-indent standard-indent)
+    (call-with-values
+      (lambda () (scan source))
+      (lambda (stack state)
+        (and
+          (eq? state 'normal)
+          (context-indent stack standard-indent)))))
+
+  (define (line-end source start)
+    (let ([length (string-length source)])
+      (let loop ([index start])
+        (if
+          (or
+            (= index length)
+            (char=? (string-ref source index) #\newline))
+          index
+          (loop (+ index 1))))))
+
+  (define (leading-whitespace-end source start end)
+    (let loop ([index start])
       (if
-        (null? stack)
-        0
-        (frame-indent (car stack) standard-indent)))))
+        (and
+          (< index end)
+          (memv (string-ref source index) '(#\space #\tab)))
+        (loop (+ index 1))
+        index)))
+
+  (define (spaces count)
+    (make-string count #\space))
+
+  (define (scheme-reindent-entry source standard-indent)
+    (unless (string? source)
+      (assertion-violation
+        'scheme-reindent-entry
+        "source must be a string"
+        source))
+    (require-standard-indent 'scheme-reindent-entry standard-indent)
+    (let ([length (string-length source)])
+      (let loop ([start 0] [parts '()])
+        (if
+          (= start length)
+          (apply string-append (reverse parts))
+          (let* ([end (line-end source start)]
+                 [whitespace-end
+                   (leading-whitespace-end source start end)]
+                 [prefix
+                   (apply string-append (reverse parts))]
+                 [indentation
+                   (scheme-line-indent prefix standard-indent)]
+                 [content
+                   (substring source whitespace-end end)]
+                 [line
+                   (if
+                     indentation
+                     (string-append
+                       (if (zero? (string-length content))
+                           ""
+                           (spaces indentation))
+                       content)
+                     (substring source start end))]
+                 [terminated? (< end length)]
+                 [part
+                   (if terminated?
+                       (string-append line "\n")
+                       line)])
+            (loop
+              (if terminated? (+ end 1) end)
+              (cons part parts))))))))

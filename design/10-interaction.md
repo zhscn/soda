@@ -122,6 +122,8 @@ REPL 把 prompt 之后的完整输入视为一个 entry。`M-<` 和 `M->` 在 en
 - `M-Up` 和 `M-Down` 直接按提交顺序访问历史；
 - `M-p` 和 `M-n` 按当前 entry 的 prefix 向前、向后搜索；
 - `M-P` 和 `M-N` 按当前 entry 包含的文本向前、向后搜索；
+- `M-Tab` 按 Scheme 结构重新缩进当前行；
+- `M-q` 重新缩进完整 entry，并把修改记录为一次 undo transaction；
 - `C-c C-u` 清空当前输入并结束历史浏览。
 
 由源码 Buffer 发起的 `scheme.eval-expression` 与当前 REPL 草稿共享同一个

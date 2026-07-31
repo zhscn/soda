@@ -16,6 +16,7 @@
           (soda editor interaction)
           (soda editor keymap)
           (soda editor scheme-indentation)
+          (soda editor scheme-repl-indentation)
           (soda editor state))
 
   (define repl-resource "*scheme-repl*")
@@ -434,6 +435,7 @@
         keymap
         (list (make-key-stroke 'enter 13 0))
         'scheme.repl-submit)
+      (install-scheme-repl-indentation! editor keymap)
       (keymap-bind!
         keymap
         (list

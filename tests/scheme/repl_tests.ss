@@ -25,7 +25,17 @@
     (= (scheme-continuation-indent "(display \"(\")" 2) 0)
     (= (scheme-continuation-indent "(begin #| ) |#" 2) 2)
     (= (scheme-continuation-indent "(list #\\(" 2) 2)
-    (= (scheme-continuation-indent "(list |(|)" 2) 0))
+    (= (scheme-continuation-indent "(list |(|)" 2) 0)
+    (string=?
+      (scheme-reindent-entry
+        "(define (value x)\n(+ x\n1))"
+        2)
+      "(define (value x)\n  (+ x\n     1))")
+    (string=?
+      (scheme-reindent-entry
+        "(display \"first\n  second\")"
+        2)
+      "(display \"first\n  second\")"))
   (error 'repl-tests
          "Scheme continuation indentation differs from Expeditor rules"))
 
@@ -571,6 +581,33 @@
 (unless (string=? (repl-input) "")
   (error 'repl-tests
          "Down at the last entry line did not restore the draft"))
+
+(insert-text! "(if test\nx")
+(press-key! 'tab 9 2)
+(unless (string=? (repl-input) "(if test\n    x")
+  (error 'repl-tests
+         "M-Tab did not reindent the current REPL entry line"))
+(dispatch! (make-command-message 'scheme.repl-clear-input #f))
+
+(define unindented-entry
+  " (define (entry-value x)\n(+ x\n1))")
+(insert-text! unindented-entry)
+(press-key! 'character (char->integer #\q) 2)
+(unless
+  (and
+    (string=?
+      (repl-input)
+      "(define (entry-value x)\n  (+ x\n     1))")
+    (=
+      (view-caret (editor-active-view editor))
+      (bytevector-length (buffer-bytes repl-buffer))))
+  (error 'repl-tests
+         "M-q did not reindent the complete REPL entry"))
+(dispatch! (make-command-message 'edit.undo #f))
+(unless (string=? (repl-input) unindented-entry)
+  (error 'repl-tests
+         "whole-entry reindent was not one undo transaction"))
+(dispatch! (make-command-message 'scheme.repl-clear-input #f))
 
 (define generation-before-multiline
   (interaction-session-generation session))
