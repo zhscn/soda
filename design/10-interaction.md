@@ -112,16 +112,17 @@ input start 和 Document editable boundary 推进到 prompt 末尾。Buffer 中�
 
 ## 子进程 interaction
 
-pipe-backed 子进程复用 InteractionSession、InteractionTranscript、history 和
+子进程复用 InteractionSession、InteractionTranscript、history 和
 通用 comint command。每个 session 的 `ProcessComint` 拥有一个独立于 Buffer 的
 `ManagedProcess`，并保存 `ProcessComintProfile`。profile 定义 argument vector、
-工作目录、固定 prompt byte sequence、input sender、output filter 与 exit
-sentinel。Scheme 扩展通过 `process.start` 提交 profile；`process.run` 提供 shell
-command 的交互入口。
+工作目录、transport、PTY 初始尺寸、固定 prompt byte sequence、input sender、
+output filter 与 exit sentinel。Scheme 扩展通过 `process.start` 提交 profile；
+`process.run` 提供 pipe-backed shell command 的交互入口。profile 默认使用
+`pipe`；需要 terminal line discipline 的 REPL、debugger 和交互式命令使用 `pty`。
 
 transcript 的 `input-start` 同时是 process mark。子进程输出插入 process mark，
 而不是追加到 Buffer 末端；未提交输入和位于输入区的 caret 随插入向后移动。这样
-异步 stdout/stderr 不会覆盖或打散用户草稿。output filter 按 stdout/stderr
+异步输出不会覆盖或打散用户草稿。output filter 按 stdout、stderr 或 terminal
 stream 接收原始 byte chunk，可以返回 bytes、string 或丢弃该 chunk。
 
 固定 prompt detector 在 byte stream 上工作，保留可能跨 chunk 的 prompt prefix。
@@ -134,9 +135,9 @@ stdin 的 bytes。`C-c C-c` 向子进程发送 SIGINT，`C-c C-d` 关闭 stdin�
 `C-c C-r` 重启逻辑进程。`process.terminate` 和 `process.kill` 分别发送 SIGTERM
 和 SIGKILL。所有 spawn、write、close、signal、restart 和 output/exit 回传都经过
 ManagedProcess effect/runtime adapter，libuv callback 不直接进入 Editor update。
-`ProcessComintProfile` 面向
-stdin/stdout/stderr pipe 程序；终端属性、窗口尺寸和 line discipline 属于独立的
-PTY transport 契约。
+pipe profile 的 EOF 关闭 stdin；PTY profile 的 EOF 向 line discipline 写入 EOT。
+PTY 尺寸属于 ManagedProcess 状态，resize effect 同步更新 native terminal 和逻辑
+进程记录。
 
 Enter 使用 Chez reader 检查当前输入是否包含完整 forms。完整输入作为一个
 `EvaluationRequest` 提交；因输入结束而无法闭合的 form 在 caret 处插入换行并

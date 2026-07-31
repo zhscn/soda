@@ -199,5 +199,48 @@
     (lambda ()
       (not (process-comint-running? process))))
 
+  (define terminal-stream #f)
+  (define terminal-profile
+    (make-process-comint-profile
+      "terminal-test"
+      '("/bin/sh" "-c" "IFS= read line; printf 'pty:%s' \"$line\"")
+      ""
+      ""
+      'pty
+      24
+      80
+      (lambda (input)
+        (string->utf8 (string-append input "\n")))
+      (lambda (stream data)
+        (set! terminal-stream stream)
+        data)
+      (lambda (name status signal) #f)))
+  (dispatch! (make-command-message 'process.start terminal-profile))
+  (define terminal-session (car (reverse (editor-interactions editor))))
+  (define terminal-process
+    (interaction-session-evaluator terminal-session))
+  (dispatch!
+    (make-input-message
+      (make-text-input-event
+        'text
+        (string->utf8 "hello"))))
+  (dispatch!
+    (make-command-message 'process.send-input #f))
+  (wait-until
+    (lambda ()
+      (not (process-comint-running? terminal-process))))
+  (unless
+    (and
+      (eq? terminal-stream 'terminal)
+      (eq?
+        (managed-process-transport
+          (process-comint-managed-process terminal-process))
+        'pty)
+      (eq? (process-comint-profile-transport terminal-profile) 'pty)
+      (= (process-comint-profile-terminal-rows terminal-profile) 24)
+      (= (process-comint-profile-terminal-columns terminal-profile) 80))
+    (error 'process-comint-tests
+           "terminal process profile was not preserved by comint"))
+
   (editor-close! editor)
   (runtime-close! runtime)

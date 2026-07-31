@@ -155,17 +155,19 @@ entry name，flags 保存 rename/change 分类；取消 source 会停止 handle�
 callback 后释放 native 所有权。
 
 Scheme 的 `ManagedProcess` 在 native source 之上提供逻辑进程身份。它保存
-argument vector、工作目录、owner、generation、stdin 状态、退出状态以及 output/
-exit command。start、write、close-input、signal 和 restart 都是 effect；runtime
-adapter 将 native source 映射回逻辑进程，并把每个 output/exit event 包装成带
-generation 的 internal command message。该层不依赖 Buffer、InteractionSession
-或具体 wire protocol。
+argument vector、工作目录、transport、PTY 尺寸、owner、generation、stdin 状态、
+退出状态以及 output/exit command。start、write、close-input、resize-terminal、
+signal 和 restart 都是 effect；runtime adapter 将 native source 映射回逻辑进程，
+并把每个 output/exit event 包装成带 generation 的 internal command message。
+该层不依赖 Buffer、InteractionSession 或具体 wire protocol。
 
 重启保留 `ManagedProcess` identity 并递增 generation。运行中的重启先发送
 SIGTERM，收到旧 generation 的 exit 后再创建新 native source；exit event 标记
 是否已经重启。consumer 使用 event generation 丢弃过期协议数据。comint、build
 工具和 language server 可以拥有不同的 process owner 与 command handler；LSP
 adapter 在 owner command 中维护 `Content-Length` framing 和 JSON-RPC 状态。
+language server 使用默认的 `pipe` transport，保持 stdin、stdout 和 stderr 的原始
+字节流及独立 stream identity。
 
 子进程使用 `uv_spawn`，参数以长度前缀的 UTF-8 argument vector 跨 ABI 传递，不经
 shell 重新解释。工作目录是每个 spawn request 的显式字段，环境继承 Editor 进程。
@@ -176,6 +178,13 @@ byte storage，write callback 后释放。Scheme 可以关闭 stdin、发送指�
 或取消 process source。最终生命周期由 stdin、stdout、stderr、process handle
 的 close callback 与 exit event 共同收束。Editor 关闭时 native runtime 终止并
 回收仍存活的子进程。
+
+`pty` transport 使用一对 pseudo-terminal descriptor，将子进程的 stdin、stdout
+和 stderr 连接到 slave，并把 master 作为一个可读写 libuv stream。输出以
+`terminal` stream flag 返回；resize effect 通过 `TIOCSWINSZ` 更新行列数。
+PTY 没有独立的 stdin half-close，close-input effect 写入 EOT byte。
+该 transport 提供 `isatty`、line discipline 和窗口尺寸，不承担 ANSI 终端模拟或
+完整 shell job-control session 的职责。
 
 终端输出使用 partial-write ABI。`write-some` 返回已写 byte 数或 would-block；
 Scheme 保留未写 suffix，并在 libuv 报告 output fd writable 后继续 flush。短写、

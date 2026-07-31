@@ -73,6 +73,9 @@
           process-comint-profile-arguments
           process-comint-profile-working-directory
           process-comint-profile-prompt
+          process-comint-profile-transport
+          process-comint-profile-terminal-rows
+          process-comint-profile-terminal-columns
           process-comint?
           process-comint-source
           process-comint-running?

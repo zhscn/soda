@@ -5,6 +5,9 @@
           process-comint-profile-arguments
           process-comint-profile-working-directory
           process-comint-profile-prompt
+          process-comint-profile-transport
+          process-comint-profile-terminal-rows
+          process-comint-profile-terminal-columns
           process-comint?
           process-comint-source
           process-comint-running?
@@ -33,6 +36,9 @@
       arguments
       working-directory
       prompt
+      transport
+      terminal-rows
+      terminal-columns
       input-sender
       output-filter
       sentinel))
@@ -108,6 +114,20 @@
          input-sender
          output-filter
          sentinel)
+       (make-process-comint-profile
+         name arguments working-directory prompt
+         'pipe 24 80
+         input-sender output-filter sentinel)]
+      [(name
+         arguments
+         working-directory
+         prompt
+         transport
+         terminal-rows
+         terminal-columns
+         input-sender
+         output-filter
+         sentinel)
        (unless (and (string? name) (positive? (string-length name)))
          (assertion-violation
            'make-process-comint-profile
@@ -133,6 +153,21 @@
            'make-process-comint-profile
            "prompt must be a string"
            prompt))
+       (unless (memq transport '(pipe pty))
+         (assertion-violation
+           'make-process-comint-profile
+           "transport must be pipe or pty"
+           transport))
+       (unless
+         (and
+           (integer? terminal-rows) (exact? terminal-rows)
+           (positive? terminal-rows)
+           (integer? terminal-columns) (exact? terminal-columns)
+           (positive? terminal-columns))
+         (assertion-violation
+           'make-process-comint-profile
+           "terminal rows and columns must be positive exact integers"
+           terminal-rows terminal-columns))
        (unless
          (and
            (procedure? input-sender)
@@ -146,6 +181,9 @@
          arguments
          working-directory
          prompt
+         transport
+         terminal-rows
+         terminal-columns
          input-sender
          output-filter
          sentinel)]))
@@ -244,7 +282,10 @@
             (process-comint-profile-working-directory profile)
             process
             'process.apply-output
-            'process.apply-exit))
+            'process.apply-exit
+            (process-comint-profile-transport profile)
+            (process-comint-profile-terminal-rows profile)
+            (process-comint-profile-terminal-columns profile)))
         (interaction-session-set-evaluator! session process)
         (buffer-set-local-setting! buffer 'track-modified? #f)
         (document-set-editable-start!
@@ -551,6 +592,9 @@
                      [(= (managed-process-event-flags event)
                          process-stderr)
                       'stderr]
+                     [(= (managed-process-event-flags event)
+                         process-terminal)
+                      'terminal]
                      [else 'unknown])]
                  [filtered
                    ((process-comint-profile-output-filter
