@@ -243,6 +243,18 @@
           project-resource-enumerator
           project-settings-layer
           project-task-definitions
+          make-project-settings-layer
+          project-settings-layer?
+          project-settings-layer-entries
+          project-settings-ref
+          make-project-task-definition
+          project-task-definition?
+          project-task-definition-id
+          project-task-definition-label
+          project-task-definition-arguments
+          project-task-definition-working-directory
+          project-task-definition-prompt
+          project-find-task
           project-contains-resource?
           make-project-finder
           make-marker-project-finder

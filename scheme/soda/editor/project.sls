@@ -9,6 +9,18 @@
           project-resource-enumerator
           project-settings-layer
           project-task-definitions
+          make-project-settings-layer
+          project-settings-layer?
+          project-settings-layer-entries
+          project-settings-ref
+          make-project-task-definition
+          project-task-definition?
+          project-task-definition-id
+          project-task-definition-label
+          project-task-definition-arguments
+          project-task-definition-working-directory
+          project-task-definition-prompt
+          project-find-task
           project-contains-resource?
           make-project-finder
           make-marker-project-finder
@@ -48,6 +60,20 @@
             task-definitions))
 
   (define-record-type
+    (project-setting-layer
+      %make-project-settings-layer
+      project-settings-layer?)
+    (fields
+      (immutable entries project-settings-layer-entries)
+      (immutable table project-settings-layer-table)))
+
+  (define-record-type
+    (project-task-definition
+      %make-project-task-definition
+      project-task-definition?)
+    (fields id label arguments working-directory prompt))
+
+  (define-record-type
     (project-finder %make-project-finder project-finder?)
     (fields name priority procedure))
 
@@ -79,6 +105,98 @@
 
   (define (valid-id? value)
     (or (symbol? value) (non-empty-string? value)))
+
+  (define (make-project-settings-layer entries)
+    (unless
+      (and
+        (list? entries)
+        (for-all
+          (lambda (entry)
+            (and (pair? entry) (symbol? (car entry))))
+          entries))
+      (assertion-violation
+        'make-project-settings-layer
+        "entries must be an association list with symbol keys"
+        entries))
+    (let ([table (make-eq-hashtable)])
+      (for-each
+        (lambda (entry)
+          (when (hashtable-contains? table (car entry))
+            (assertion-violation
+              'make-project-settings-layer
+              "setting names must be unique"
+              (car entry)))
+          (hashtable-set! table (car entry) (cdr entry)))
+        entries)
+      (%make-project-settings-layer entries table)))
+
+  (define (project-settings-ref layer name fallback)
+    (unless (project-settings-layer? layer)
+      (assertion-violation
+        'project-settings-ref
+        "expected a project settings layer"
+        layer))
+    (unless (symbol? name)
+      (assertion-violation
+        'project-settings-ref
+        "setting name must be a symbol"
+        name))
+    (hashtable-ref
+      (project-settings-layer-table layer)
+      name
+      fallback))
+
+  (define (make-project-task-definition
+            id label arguments working-directory prompt)
+    (unless (symbol? id)
+      (assertion-violation
+        'make-project-task-definition
+        "id must be a symbol"
+        id))
+    (unless (non-empty-string? label)
+      (assertion-violation
+        'make-project-task-definition
+        "label must be a non-empty string"
+        label))
+    (unless
+      (and
+        (pair? arguments)
+        (list? arguments)
+        (for-all string? arguments)
+        (non-empty-string? (car arguments)))
+      (assertion-violation
+        'make-project-task-definition
+        "arguments must be a non-empty list of strings"
+        arguments))
+    (unless
+      (or (not working-directory) (string? working-directory))
+      (assertion-violation
+        'make-project-task-definition
+        "working directory must be a string or #f"
+        working-directory))
+    (unless (string? prompt)
+      (assertion-violation
+        'make-project-task-definition
+        "prompt must be a string"
+        prompt))
+    (%make-project-task-definition
+      id label arguments working-directory prompt))
+
+  (define (project-find-task value id)
+    (unless (project? value)
+      (assertion-violation
+        'project-find-task
+        "expected a project"
+        value))
+    (unless (symbol? id)
+      (assertion-violation
+        'project-find-task
+        "task id must be a symbol"
+        id))
+    (find
+      (lambda (task)
+        (eq? (project-task-definition-id task) id))
+      (project-task-definitions value)))
 
   (define (make-project
             id
@@ -113,10 +231,32 @@
         'make-project
         "resource enumerator must be a procedure or #f"
         resource-enumerator))
-    (unless (list? task-definitions)
+    (unless
+      (or
+        (not settings-layer)
+        (project-settings-layer? settings-layer))
       (assertion-violation
         'make-project
-        "task definitions must be a list"
+        "settings layer must be a project settings layer or #f"
+        settings-layer))
+    (unless
+      (and
+        (list? task-definitions)
+        (for-all project-task-definition? task-definitions))
+      (assertion-violation
+        'make-project
+        "task definitions must be a list of project tasks"
+        task-definitions))
+    (let ([ids (make-eq-hashtable)])
+      (for-each
+        (lambda (task)
+          (let ([id (project-task-definition-id task)])
+            (when (hashtable-contains? ids id)
+              (assertion-violation
+                'make-project
+                "task ids must be unique"
+                id))
+            (hashtable-set! ids id #t)))
         task-definitions))
     (%make-project
       id
@@ -226,7 +366,7 @@
                      (cons 'finder name)
                      (cons 'marker marker))
                    #f
-                   '()
+                   #f
                    '())]
                 [(absent) (loop (cdr remaining) unavailable?)]
                 [(unavailable)

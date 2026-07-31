@@ -18,6 +18,44 @@
 
 (define catalog (make-project-catalog))
 
+(define settings-layer
+  (make-project-settings-layer
+    '((build-profile . "debug")
+      (parallel-jobs . 8))))
+(check
+  (and
+    (string=?
+      (project-settings-ref settings-layer 'build-profile #f)
+      "debug")
+    (= (project-settings-ref settings-layer 'parallel-jobs 1) 8)
+    (eq?
+      (project-settings-ref settings-layer 'missing 'fallback)
+      'fallback))
+  "project settings must resolve explicit values with a fallback")
+
+(define test-task
+  (make-project-task-definition
+    'test
+    "Run tests"
+    '("cmk" "test")
+    #f
+    ""))
+(define modeled-project
+  (make-project
+    'modeled
+    '("/work/modeled")
+    'test
+    'explicit
+    #f
+    settings-layer
+    (list test-task)))
+(check
+  (and
+    (eq? (project-settings-layer modeled-project) settings-layer)
+    (eq? (project-find-task modeled-project 'test) test-task)
+    (not (project-find-task modeled-project 'missing)))
+  "project must preserve validated settings and task definitions")
+
 (for-each
   (lambda (finder)
     (project-catalog-register-finder! catalog finder))

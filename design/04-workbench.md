@@ -9,7 +9,7 @@
 | 通用 `ResourceContext`、View origin 与文件选择上下文冻结 | 部分实现 |
 | Project identity、发现缓存与 known registry | 已实现 |
 | Project resource enumerator 与 watch lifecycle | 已实现 |
-| Project settings layer 与 task definition runtime | 未实现 |
+| Project settings layer、task definition 与 comint runtime | 已实现 |
 | Workbench scope、slot、visitor、provenance 与持久化 | 未实现 |
 | intent 驱动的统一 display placement policy | 部分实现 |
 
@@ -100,6 +100,15 @@ Project 拥有：
 - Project settings layer；
 - build、test、search 和其他 task definition；
 - 启动 LanguageSession 时可使用的 workspace folder 和配置。
+
+settings layer 是不可变的 symbol-to-value 映射，由使用该 Project 的 tooling 按显式
+fallback 读取。task definition 使用稳定 symbol id，携带显示名、argv、相对或绝对
+working directory 与可选 comint prompt。任务的相对 working directory 以 Project
+primary root 解析，并通过 managed process/comint 执行。
+
+`project.switch` 从 known-project registry 选择 Project，把 origin View 的
+ResourceContext 切换到目标 root 后启动 `find-file`。`project.run-task` 选择 Project
+task 并在定义的 working directory 中启动 process interaction；两者都不修改进程 cwd。
 
 Project 不拥有 Buffer、View、Window、Workbench、LanguageSession、Scheme semantic
 index 或 process。一个 Buffer 可以通过路径发现 home Project，也可以只是 visitor；

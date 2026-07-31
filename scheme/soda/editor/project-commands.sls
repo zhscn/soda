@@ -4,11 +4,14 @@
           (soda editor command)
           (soda editor command-runtime)
           (soda editor completion)
+          (soda editor event)
+          (soda editor process-comint)
           (soda editor project)
           (soda editor project-resource)
           (soda editor prompt)
           (soda editor resource-context)
-          (soda editor state))
+          (soda editor state)
+          (soda vfs))
 
   (define (project-label project)
     (project-primary-root project))
@@ -50,6 +53,62 @@
           (command-context-editor context)))
       'must-match
       'project
+      ""
+      #f
+      (lambda (context result)
+        (let ([candidate (prompt-result-candidate result)])
+          (list
+            (and candidate
+                 (completion-item-payload candidate)))))))
+
+  (define (task-choice-source editor)
+    (let ([items
+            (apply
+              append
+              (map
+                (lambda (project)
+                  (map
+                    (lambda (task)
+                      (let ([label
+                              (string-append
+                                (project-task-definition-label task)
+                                "  "
+                                (project-primary-root project))])
+                        (make-completion-item
+                          (cons
+                            (project-id project)
+                            (project-task-definition-id task))
+                          'project-task
+                          label
+                          label
+                          label
+                          "task"
+                          #f
+                          (vector project task))))
+                    (project-task-definitions project)))
+                (editor-known-projects editor)))])
+      (make-choice-source
+        'project-task
+        '((category . project-task)
+          (styles . (fzf))
+          (preselect . #t))
+        (lambda (input point) (cons 0 (string-length input)))
+        (lambda (query) items)
+        (lambda (value)
+          (exists
+            (lambda (item)
+              (string=? value (completion-item-insert-text item)))
+            items))
+        (lambda (generation) #f))))
+
+  (define known-project-task-reader
+    (interactive-completing-read
+      "Project task: "
+      (lambda (context)
+        (task-choice-source
+          (command-context-editor context)))
+      'must-match
+      'project-task
       ""
       #f
       (lambda (context result)
@@ -149,6 +208,60 @@
             (editor-set-status-message! editor "No Project found")
             '()))))
 
+  (define-command (switch-project-command context project)
+    "Select a known Project and find a file from its root context."
+    (interactive known-project-reader)
+    (if (not project)
+        '()
+        (let* ([editor (command-context-editor context)]
+               [view (command-context-view context)]
+               [old-context
+                 (editor-view-resource-context
+                   editor
+                   (view-id view))])
+          (editor-set-view-resource-context!
+            editor
+            (view-id view)
+            (make-resource-context
+              (project-primary-root project)
+              (view-id view)
+              project
+              (resource-context-language-context old-context)))
+          (list
+            (make-command-effect
+              'command.invoke
+              (make-command-message 'file.find #f))))))
+
+  (define-command (run-project-task-command context selection)
+    "Run a known Project task in a process interaction buffer."
+    (interactive known-project-task-reader)
+    (if (not selection)
+        '()
+        (let* ([project (vector-ref selection 0)]
+               [task (vector-ref selection 1)]
+               [root (project-primary-root project)]
+               [working-directory
+                 (let ([configured
+                         (project-task-definition-working-directory
+                           task)])
+                   (if configured
+                       (vfs-resolve-path
+                         (vfs-directory-path root)
+                         configured)
+                       root))]
+               [profile
+                 (make-process-comint-profile
+                   (project-task-definition-label task)
+                   (project-task-definition-arguments task)
+                   working-directory
+                   (project-task-definition-prompt task))])
+          (list
+            (make-command-effect
+              'command.invoke
+              (make-command-message
+                'process.start
+                profile))))))
+
   (define (apply-project-resource-snapshot-command context)
     (let* ([editor (command-context-editor context)]
            [snapshot (command-context-argument context)])
@@ -182,6 +295,18 @@
         'project.refresh-resources
         refresh-project-resources-command
         "Refresh the current Project resource snapshot."))
+    (editor-register-command!
+      editor
+      (make-interactive-context-command
+        'project.switch
+        switch-project-command
+        "Select a known Project and find a file from its root."))
+    (editor-register-command!
+      editor
+      (make-interactive-context-command
+        'project.run-task
+        run-project-task-command
+        "Run a known Project task."))
     (editor-register-internal-command!
       editor
       (make-internal-context-command
