@@ -556,6 +556,9 @@ struct Runtime::Impl {
         if (data.empty()) {
             return;
         }
+        if (data.size() > std::numeric_limits<unsigned int>::max()) {
+            throw std::length_error("process input exceeds one libuv write buffer");
+        }
 
         auto write = std::make_unique<Process::Write>();
         write->process = &process;
@@ -581,6 +584,22 @@ struct Runtime::Impl {
             throw std::invalid_argument("unknown process source");
         }
         close_process_input(*found->second);
+    }
+
+    void signal_process(SourceId source, int signal) {
+        require_owner_thread();
+        const auto found = processes.find(source.value);
+        if (found == processes.end()) {
+            throw std::invalid_argument("unknown process source");
+        }
+        Process& process = *found->second;
+        if (!process.spawned || process.exited) {
+            throw std::logic_error("process is not running");
+        }
+        const int status = uv_process_kill(&process.handle, signal);
+        if (status < 0) {
+            throw uv_error(status, "cannot signal process");
+        }
     }
 
     bool cancel(SourceId source) {
@@ -1369,6 +1388,10 @@ void Runtime::write_process(SourceId source, std::vector<std::byte> data) {
 
 void Runtime::close_process_input(SourceId source) {
     impl_->close_process_input(source);
+}
+
+void Runtime::signal_process(SourceId source, int signal) {
+    impl_->signal_process(source, signal);
 }
 
 bool Runtime::cancel(SourceId source) {

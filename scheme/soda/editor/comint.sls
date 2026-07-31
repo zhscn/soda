@@ -6,6 +6,7 @@
           comint-stash-current-input!
           comint-commit-input!
           comint-append-output!
+          comint-insert-output!
           comint-insert-newline!
           comint-insert-newline-with-indent!
           comint-line-beginning-position
@@ -168,6 +169,40 @@
         editor
         session
         end)
+      end))
+
+  (define (comint-insert-output!
+            editor
+            session
+            output
+            prompt-size)
+    (let* ([buffer (comint-session-buffer editor session)]
+           [start (interaction-session-input-start session)]
+           [size
+             (if
+               (bytevector? output)
+               (bytevector-length output)
+               (bytevector-length (string->utf8 output)))]
+           [views
+             (filter
+               (lambda (view)
+                 (= (buffer-id (view-buffer view))
+                    (interaction-session-buffer-id session)))
+               (editor-views editor))]
+           [carets (map view-caret views)]
+           [end
+             (interaction-transcript-insert-output!
+               (interaction-session-transcript session)
+               buffer
+               output
+               prompt-size)])
+      (for-each
+        (lambda (view caret)
+          (when (>= caret start)
+            (view-set-caret! view (+ caret size)))
+          (ensure-view-visible! view))
+        views
+        carets)
       end))
 
   (define (comint-insert-newline-with-indent! view indentation)

@@ -158,8 +158,11 @@ callback 后释放 native 所有权。
 shell 重新解释。工作目录是每个 spawn request 的显式字段，环境继承 Editor 进程。
 stdout 和 stderr 分别连接到 libuv pipe，并以带 stream flag 的增量
 `process-output` event 返回；pipe 完成关闭后才发布 `process-exit`，因此 exit event
-之前的输出不会丢失。取消 process source 发送终止信号，最终生命周期仍由 exit 和
-handle close callback 收束。Editor 关闭时 native runtime 终止并回收仍存活的子进程。
+之前的输出不会丢失。stdin 使用独立的 libuv pipe；每次写入拥有自己的 native
+byte storage，write callback 后释放。Scheme 可以关闭 stdin、发送指定 signal，
+或取消 process source。最终生命周期由 stdin、stdout、stderr、process handle
+的 close callback 与 exit event 共同收束。Editor 关闭时 native runtime 终止并
+回收仍存活的子进程。
 
 终端输出使用 partial-write ABI。`write-some` 返回已写 byte 数或 would-block；
 Scheme 保留未写 suffix，并在 libuv 报告 output fd writable 后继续 flush。短写、

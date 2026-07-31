@@ -213,6 +213,27 @@ TEST_CASE("process cancellation terminates the child asynchronously") {
     CHECK_FALSE(runtime.cancel(process));
     CHECK_FALSE(runtime.alive());
 }
+
+TEST_CASE("processes accept an explicit signal") {
+    Runtime runtime;
+    const SourceId process = runtime.spawn_process({"/bin/sleep", "30"});
+    runtime.signal_process(process, SIGINT);
+
+    bool exited = false;
+    while (!exited) {
+        if (runtime.pending_events() == 0) {
+            (void)runtime.poll(PollMode::Once);
+        }
+        while (const auto event = runtime.next_event()) {
+            REQUIRE(event->source == process);
+            if (event->kind == EventKind::ProcessExit) {
+                CHECK(event->flags == SIGINT);
+                exited = true;
+            }
+        }
+    }
+    CHECK_FALSE(runtime.alive());
+}
 #endif
 
 TEST_CASE("asynchronous directory scan returns typed entries") {

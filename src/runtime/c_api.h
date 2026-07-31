@@ -33,7 +33,7 @@ typedef struct soda_terminal soda_terminal;
 #define SODA_EVENT_PROCESS_OUTPUT 8U
 #define SODA_EVENT_PROCESS_EXIT 9U
 
-#define SODA_RUNTIME_ABI_VERSION 8U
+#define SODA_RUNTIME_ABI_VERSION 9U
 
 #define SODA_FD_READABLE (1U << 0U)
 #define SODA_FD_WRITABLE (1U << 1U)
@@ -67,6 +67,8 @@ SODA_RUNTIME_API uint64_t soda_runtime_spawn_process(soda_runtime* runtime,
 SODA_RUNTIME_API int soda_runtime_write_process(soda_runtime* runtime, uint64_t source,
                                                 const uint8_t* data, size_t size);
 SODA_RUNTIME_API int soda_runtime_close_process_input(soda_runtime* runtime, uint64_t source);
+SODA_RUNTIME_API int soda_runtime_signal_process(soda_runtime* runtime, uint64_t source,
+                                                 int signal);
 SODA_RUNTIME_API int soda_runtime_cancel(soda_runtime* runtime, uint64_t source);
 
 SODA_RUNTIME_API int soda_runtime_poll(soda_runtime* runtime, int mode);

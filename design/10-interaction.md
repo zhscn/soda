@@ -110,6 +110,32 @@ input start 和 Document editable boundary 推进到 prompt 末尾。Buffer 中�
 行列都能容纳在占位 viewport 中。终端 resize 随后设置实际 viewport。重新激活
 已有 View 时，caret 位于 Buffer 末尾，因此尚未提交的草稿仍是当前编辑位置。
 
+## 子进程 interaction
+
+pipe-backed 子进程复用 InteractionSession、InteractionTranscript、history 和
+通用 comint command。每个 session 的 `ProcessComint` 保存 native source、
+运行状态和 `ProcessComintProfile`。profile 定义 argument vector、工作目录、固定
+prompt byte sequence、input sender、output filter 与 exit sentinel。Scheme
+扩展通过 `process.start` 提交 profile；`process.run` 提供 shell command 的交互
+入口。
+
+transcript 的 `input-start` 同时是 process mark。子进程输出插入 process mark，
+而不是追加到 Buffer 末端；未提交输入和位于输入区的 caret 随插入向后移动。这样
+异步 stdout/stderr 不会覆盖或打散用户草稿。output filter 按 stdout/stderr
+stream 接收原始 byte chunk，可以返回 bytes、string 或丢弃该 chunk。
+
+固定 prompt detector 在 byte stream 上工作，保留可能跨 chunk 的 prompt prefix。
+完整 prompt 被记录为 prompt field，其余内容记录为 output field。软行首、历史
+prompt 导航和 field inspection 因此沿用同一 transcript 查询，不扫描显示文本。
+进程退出时先排空未决 prompt prefix，再调用 sentinel 生成最终 output。
+
+Enter 固定当前 input field、记录 history，并通过 profile input sender 生成写入
+stdin 的 bytes。`C-c C-c` 向子进程发送 SIGINT，`C-c C-d` 关闭 stdin。所有
+spawn、write、close、signal 和 output/exit 回传都经过 effect/runtime adapter，
+libuv callback 不直接进入 Editor update。`ProcessComintProfile` 面向
+stdin/stdout/stderr pipe 程序；终端属性、窗口尺寸和 line discipline 属于独立的
+PTY transport 契约。
+
 Enter 使用 Chez reader 检查当前输入是否包含完整 forms。完整输入作为一个
 `EvaluationRequest` 提交；因输入结束而无法闭合的 form 在 caret 处插入换行并
 继续编辑。换行缩进由 Scheme lexical scanner 根据 caret 前的 entry prefix

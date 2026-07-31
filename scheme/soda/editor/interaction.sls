@@ -21,6 +21,7 @@
           interaction-session-history-search-previous!
           interaction-session-history-search-next!
           interaction-session-reset-history-navigation!
+          interaction-session-record-input!
           interaction-session-prompt-start
           interaction-session-prompt-end
           interaction-session-last-input-start
@@ -336,6 +337,20 @@
       session)
     (interaction-history-reset!
       (interaction-session-history-state session))
+    session)
+
+  (define (interaction-session-record-input! session input)
+    (require-open-session
+      'interaction-session-record-input!
+      session)
+    (unless (string? input)
+      (assertion-violation
+        'interaction-session-record-input!
+        "input must be a string"
+        input))
+    (interaction-history-record!
+      (interaction-session-history-state session)
+      input)
     session)
 
   (define (interaction-session-history-previous!

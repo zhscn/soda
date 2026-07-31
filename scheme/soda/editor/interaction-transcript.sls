@@ -23,6 +23,7 @@
           interaction-transcript-take-stashed-input!
           interaction-transcript-commit-input!
           interaction-transcript-append-output!
+          interaction-transcript-insert-output!
           interaction-transcript-close!
           interaction-transcript-closed?)
   (import (rnrs)
@@ -151,6 +152,31 @@
             (lambda (result committed-change)
               (set! change committed-change)
               (+ start (bytevector-length bytes)))))
+        (lambda ()
+          (when change
+            (change-close! change))))))
+
+  (define (insert-buffer! buffer offset value)
+    (let ([bytes
+            (if (bytevector? value)
+                value
+                (string->utf8 value))]
+          [change #f])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (call-with-values
+            (lambda ()
+              (call-with-buffer-transaction
+                buffer
+                (lambda (transaction)
+                  (transaction-insert!
+                    transaction
+                    offset
+                    bytes))))
+            (lambda (result committed-change)
+              (set! change committed-change)
+              (+ offset (bytevector-length bytes)))))
         (lambda ()
           (when change
             (change-close! change))))))
@@ -580,6 +606,59 @@
         (buffer-document buffer)
         input-start)
       end))
+
+  (define (interaction-transcript-insert-output!
+            transcript
+            buffer
+            output
+            prompt-size)
+    (require-open-transcript
+      'interaction-transcript-insert-output!
+      transcript)
+    (require-buffer
+      'interaction-transcript-insert-output!
+      transcript
+      buffer)
+    (unless (or (string? output) (bytevector? output))
+      (assertion-violation
+        'interaction-transcript-insert-output!
+        "output must be a string or bytevector"
+        output))
+    (let ([output-size
+            (if
+              (bytevector? output)
+              (bytevector-length output)
+              (bytevector-length (string->utf8 output)))])
+      (unless
+        (and
+          (exact-non-negative-integer? prompt-size)
+          (<= prompt-size output-size))
+        (assertion-violation
+          'interaction-transcript-insert-output!
+          "prompt size must fit within the output"
+          prompt-size))
+      (let* ([start (interaction-transcript-input-start transcript)]
+             [end (insert-buffer! buffer start output)]
+             [prompt-start (- end prompt-size)])
+        (clear-current-prompt! transcript)
+        (append-tracked-field!
+          transcript
+          'output
+          start
+          prompt-start)
+        (append-tracked-field!
+          transcript
+          'prompt
+          prompt-start
+          end)
+        (set-last-output! transcript start prompt-start)
+        (when (positive? prompt-size)
+          (set-current-prompt! transcript prompt-start end))
+        (set-input-start! transcript end)
+        (document-set-editable-start!
+          (buffer-document buffer)
+          end)
+        end)))
 
   (define (interaction-transcript-close! transcript)
     (when

@@ -208,6 +208,13 @@ int soda_runtime_close_process_input(soda_runtime* runtime, uint64_t source) {
     });
 }
 
+int soda_runtime_signal_process(soda_runtime* runtime, uint64_t source, int signal) {
+    return guard(runtime, -1, [&] {
+        runtime->runtime.signal_process(soda::runtime::SourceId{source}, signal);
+        return 0;
+    });
+}
+
 int soda_runtime_cancel(soda_runtime* runtime, uint64_t source) {
     return guard(runtime, -1,
                  [&] { return runtime->runtime.cancel(soda::runtime::SourceId{source}) ? 1 : 0; });

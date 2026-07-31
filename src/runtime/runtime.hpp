@@ -37,6 +37,7 @@ public:
                                          std::string working_directory = {});
     void write_process(SourceId source, std::vector<std::byte> data);
     void close_process_input(SourceId source);
+    void signal_process(SourceId source, int signal);
     bool cancel(SourceId source);
 
     std::size_t poll(PollMode mode);

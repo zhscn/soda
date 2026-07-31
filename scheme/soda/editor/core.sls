@@ -67,6 +67,15 @@
           editor-interactions
           editor-interaction-ref
           editor-interaction-for-buffer
+          make-process-comint-profile
+          process-comint-profile?
+          process-comint-profile-name
+          process-comint-profile-arguments
+          process-comint-profile-working-directory
+          process-comint-profile-prompt
+          process-comint?
+          process-comint-source
+          process-comint-running?
           editor-evaluator
           editor-debugger
           editor-set-debugger!
@@ -796,6 +805,7 @@
           (soda editor prompt-runtime)
           (soda editor prefix)
           (soda editor prefix-commands)
+          (soda editor process-comint)
           (soda editor repl)
           (soda editor scheme-completion)
           (soda editor scheme-commands)
@@ -995,6 +1005,7 @@
       (install-configuration-commands! editor)
       (install-theme-commands! editor)
       (install-comint-commands! editor)
+      (install-process-comint-commands! editor)
       (install-completion-commands! editor)
       (editor-register-completion-provider!
         editor

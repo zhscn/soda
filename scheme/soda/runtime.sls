@@ -14,6 +14,7 @@
           runtime-spawn-process!
           runtime-write-process!
           runtime-close-process-input!
+          runtime-signal-process!
           runtime-cancel!
           runtime-status-name
           runtime-status-message
@@ -48,7 +49,7 @@
     (foreign-procedure __atomic "soda_runtime_abi_version" () unsigned-32))
 
   (define abi-version-checked
-    (unless (= (%abi-version) 8)
+    (unless (= (%abi-version) 9)
       (error 'soda-runtime "unsupported native runtime ABI version")))
 
   (define %runtime-create
@@ -92,6 +93,10 @@
   (define %close-process-input
     (foreign-procedure __atomic "soda_runtime_close_process_input"
                        (void* unsigned-64)
+                       int))
+  (define %signal-process
+    (foreign-procedure __atomic "soda_runtime_signal_process"
+                       (void* unsigned-64 int)
                        int))
   (define %cancel
     (foreign-procedure __atomic "soda_runtime_cancel" (void* unsigned-64) int))
@@ -395,6 +400,34 @@
               source)])
       (when (negative? status)
         (native-error 'runtime-close-process-input! runtime))))
+
+  (define (runtime-signal-process! runtime source signal)
+    (require-runtime 'runtime-signal-process! runtime)
+    (unless
+      (and
+        (integer? source)
+        (exact? source)
+        (positive? source))
+      (assertion-violation
+        'runtime-signal-process!
+        "source must be a positive exact integer"
+        source))
+    (unless
+      (and
+        (integer? signal)
+        (exact? signal)
+        (positive? signal))
+      (assertion-violation
+        'runtime-signal-process!
+        "signal must be a positive exact integer"
+        signal))
+    (let ([status
+            (%signal-process
+              (runtime-pointer runtime)
+              source
+              signal)])
+      (when (negative? status)
+        (native-error 'runtime-signal-process! runtime))))
 
   (define (runtime-cancel! runtime source)
     (require-runtime 'runtime-cancel! runtime)
