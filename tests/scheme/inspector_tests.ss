@@ -49,6 +49,48 @@
     #f)
   "duplicate debugger action ids were accepted")
 
+(define parameter-context
+  (make-debugger-action-context
+    'editor
+    #f
+    'debugger
+    'frame
+    'condition
+    'continuation
+    #f
+    #f))
+(define parameter-spec
+  (make-debugger-action-parameter
+    'expression
+    "Value: "
+    (lambda (context) "42")
+    (lambda (context value)
+      (string=? value "42"))))
+
+(require-test
+  (and
+    (string=?
+      (debugger-action-parameter-default-value
+        parameter-spec
+        parameter-context)
+      "42")
+    (debugger-action-parameter-valid?
+      parameter-spec
+      parameter-context
+      "42")
+    (not
+      (debugger-action-parameter-valid?
+        parameter-spec
+        parameter-context
+        "41"))
+    (string=?
+      (debugger-action-context-argument
+        (debugger-action-context-with-argument
+          parameter-context
+          "replacement"))
+      "replacement"))
+  "debugger action parameter contract differs")
+
 (define list-node
   (make-inspector-node
     "values"

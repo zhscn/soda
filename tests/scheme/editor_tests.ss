@@ -385,6 +385,64 @@
     'test.fail
     (lambda (context)
       (error 'test.fail "expected failure"))))
+(define provider-context #f)
+(define debugger-created-context #f)
+(define executed-action-context #f)
+(editor-register-command!
+  editor
+  (make-interactive-context-command
+    'test.debugger-provider-action
+    (lambda (context)
+      (set! executed-action-context
+        (command-context-argument context))
+      '())))
+(editor-register-debugger-action-provider!
+  editor
+  'test-debugger-provider
+  (lambda (context)
+    (set! provider-context context)
+    (and
+      (who-condition?
+        (debugger-action-context-condition context))
+      (eq?
+        (condition-who
+          (debugger-action-context-condition context))
+        'test.fail)
+      (make-debugger-action
+        'provider-recover
+        "Provider recovery"
+        "Exercise a condition-specific recovery action"
+        'resume
+        (make-debugger-action-parameter
+          'expression
+          "Recovery token: "
+          "allow"
+          (lambda (context value)
+            (string=? value "allow")))
+        'test.debugger-provider-action
+        #f))))
+(unless
+  (memq
+    'test-debugger-provider
+    (editor-debugger-action-provider-names editor))
+  (error 'editor-tests
+         "debugger action provider was not registered"))
+(editor-add-hook!
+  editor
+  'debugger-created
+  'test-debugger-created
+  (lambda (context)
+    (set! debugger-created-context context)
+    (debugger-session-register-action!
+      (debugger-action-context-debugger context)
+      (make-debugger-action
+        'hook-action
+        "Hook action"
+        "Action installed by debugger-created"
+        'resume
+        'none
+        'test.debugger-provider-action
+        #f))))
 (editor-bind-key!
   editor
   (list (make-key-stroke 'character 116 4))
@@ -405,7 +463,16 @@
         debugger-action-id
         (debugger-session-actions
           (editor-debugger editor)))
-      '(dismiss))
+      '(dismiss provider-recover hook-action))
+    (eq? provider-context debugger-created-context)
+    (eq?
+      (debugger-action-context-editor provider-context)
+      editor)
+    (not
+      (debugger-action-context-session provider-context))
+    (eq?
+      (debugger-action-context-debugger provider-context)
+      (editor-debugger editor))
     (string-contains?
       (utf8->string
         (buffer-bytes
@@ -417,8 +484,13 @@
       'debugger-mode))
   (error 'editor-tests
          "interactive command failure did not open the debugger"))
+(define command-debugger (editor-debugger editor))
+(define command-debugger-buffer
+  (view-buffer (editor-active-view editor)))
+(define command-debugger-revision
+  (debugger-session-revision command-debugger))
 (debugger-session-register-action!
-  (editor-debugger editor)
+  command-debugger
   (make-debugger-action
     'close-command-debugger
     "Close"
@@ -427,6 +499,73 @@
     'none
     'scheme.debug-discard
     #f))
+(unless
+  (and
+    (> (debugger-session-revision command-debugger)
+       command-debugger-revision)
+    (string-contains?
+      (utf8->string
+        (buffer-bytes command-debugger-buffer))
+      "close-command-debugger [terminate] Close"))
+  (error 'editor-tests
+         "debugger action mutation did not refresh its Buffer"))
+(let ([before
+        (debugger-session-revision command-debugger)])
+  (debugger-session-next-frame! command-debugger 1)
+  (unless
+    (> (debugger-session-revision command-debugger)
+       before)
+    (error 'editor-tests
+           "debugger frame mutation did not advance revision")))
+(editor-update!
+  editor
+  (make-command-message
+    'scheme.debug-action
+    'provider-recover))
+(unless
+  (and
+    (editor-active-prompt editor)
+    (string=?
+      (editor-active-prompt-input editor)
+      "allow")
+    (string=?
+      (prompt-request-prompt
+        (prompt-session-request
+          (editor-active-prompt editor)))
+      "Recovery token: "))
+  (error 'editor-tests
+         "debugger action parameter did not define its prompt"))
+(let ([reply (editor-accept-prompt! editor)])
+  (editor-update!
+    editor
+    (make-internal-command-message
+      (prompt-reply-command reply)
+      (prompt-reply-result reply))))
+(unless
+  (and
+    (debugger-action-context? executed-action-context)
+    (eq?
+      (debugger-action-context-editor
+        executed-action-context)
+      editor)
+    (eq?
+      (debugger-action-context-debugger
+        executed-action-context)
+      command-debugger)
+    (debugger-frame?
+      (debugger-action-context-selected-frame
+        executed-action-context))
+    (eq?
+      (debugger-action-id
+        (debugger-action-context-action
+          executed-action-context))
+      'provider-recover)
+    (string=?
+      (debugger-action-context-argument
+        executed-action-context)
+      "allow"))
+  (error 'editor-tests
+         "debugger action command did not receive execution context"))
 (editor-update!
   editor
   (make-command-message
@@ -454,6 +593,18 @@
 (editor-update!
   editor
   (make-command-message 'scheme.debug-discard #f))
+(unless
+  (editor-remove-debugger-action-provider!
+    editor
+    'test-debugger-provider)
+  (error 'editor-tests
+         "debugger action provider was not removed"))
+(when
+  (memq
+    'test-debugger-provider
+    (editor-debugger-action-provider-names editor))
+  (error 'editor-tests
+         "removed debugger action provider remains registered"))
 
 (send! editor decoder (bytes 24))
 (send! editor decoder (string->utf8 "z"))

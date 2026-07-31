@@ -75,6 +75,44 @@
           (editor-views editor)))
       buffer))
 
+  (define (make-action-context
+            editor
+            session
+            debugger
+            action
+            argument)
+    (make-debugger-action-context
+      editor
+      session
+      debugger
+      (debugger-session-selected-frame debugger)
+      (debugger-session-condition debugger)
+      (debugger-session-continuation debugger)
+      action
+      argument))
+
+  (define (initialize-debugger!
+            editor
+            session
+            debugger)
+    (debugger-session-set-change-listener!
+      debugger
+      (lambda (changed)
+        (refresh-debugger-buffer!
+          editor
+          changed)))
+    (let ([context
+            (make-action-context
+              editor session debugger #f #f)])
+      (editor-apply-debugger-action-providers!
+        editor
+        context)
+      (editor-run-hooks!
+        editor
+        'debugger-created
+        context))
+    debugger)
+
   (define (buffer-with-id editor id)
     (and
       id
@@ -181,6 +219,8 @@
                  (view-caret view)
                  condition)])
         (editor-set-debugger! editor debugger)
+        (initialize-debugger!
+          editor #f debugger)
         (open-debugger! editor view debugger)
         debugger)))
 
@@ -203,6 +243,8 @@
             (interaction-session-set-debugger!
               session
               debugger)
+            (initialize-debugger!
+              editor session debugger)
             (if
               (eq? (evaluation-result-status result) 'suspended)
               (begin
@@ -312,7 +354,6 @@
       (if (positive? delta)
           (debugger-session-next-frame! debugger count)
           (debugger-session-previous-frame! debugger count))
-      (refresh-debugger-buffer! editor debugger)
       '()))
 
   (define (debug-next-frame-command context)
@@ -387,7 +428,6 @@
          (guard
            (condition
              [else
-              (refresh-debugger-buffer! editor debugger)
               (editor-set-status-message!
                 editor
                 (string-append
@@ -397,7 +437,6 @@
                    (debugger-session-evaluate
                      debugger
                      argument)])
-             (refresh-debugger-buffer! editor debugger)
              (editor-set-status-message!
                editor
                (string-append
@@ -454,7 +493,6 @@
                 (guard
                   (condition
                     [else
-                     (refresh-debugger-buffer! editor debugger)
                      (editor-set-status-message!
                        editor
                        (string-append
@@ -464,7 +502,6 @@
                           (debugger-session-evaluate
                             debugger
                             source)])
-                    (refresh-debugger-buffer! editor debugger)
                     (editor-set-status-message!
                       editor
                       (string-append
@@ -486,7 +523,7 @@
               (exact? argument)
               (not (negative? argument)))
          (debugger-session-inspection-down! debugger argument)
-         (refresh-debugger-buffer! editor debugger)]
+         #f]
         [(not argument)
          (unless (debugger-session-inspection-active? debugger)
            (editor-user-error
@@ -526,7 +563,7 @@
               (exact? argument)
               (not (negative? argument)))
          (debugger-session-inspect-local! debugger argument)
-         (refresh-debugger-buffer! editor debugger)]
+         #f]
         [(not argument)
          (editor-open-prompt!
            editor
@@ -557,7 +594,6 @@
                context)]
            [debugger (cadr target)])
       (debugger-session-inspect-condition! debugger)
-      (refresh-debugger-buffer! editor debugger)
       '()))
 
   (define (debug-inspect-continuation-command context)
@@ -574,7 +610,7 @@
              'scheme.debug-inspect-continuation
              "The raise continuation is unavailable")])
         (debugger-session-inspect-continuation! debugger)
-        (refresh-debugger-buffer! editor debugger))
+        #f)
       '()))
 
   (define (apply-inspect-local-result! editor view result)
@@ -607,7 +643,7 @@
                   'scheme.debug-inspect-local
                   "local index must be a non-negative integer"))
               (debugger-session-inspect-local! debugger index)
-              (refresh-debugger-buffer! editor debugger)))))))
+              #f))))))
 
   (define (debug-inspect-local-accept-command context)
     (apply-inspect-local-result!
@@ -654,8 +690,7 @@
                   "child index must be a non-negative integer"))
               (debugger-session-inspection-down!
                 debugger
-                index)
-              (refresh-debugger-buffer! editor debugger)))))
+                index)))))
       '()))
 
   (define (debug-inspect-up-command context)
@@ -666,7 +701,6 @@
                context)]
            [debugger (cadr target)])
       (debugger-session-inspection-up! debugger)
-      (refresh-debugger-buffer! editor debugger)
       '()))
 
   (define (debug-inspect-top-command context)
@@ -677,7 +711,6 @@
                context)]
            [debugger (cadr target)])
       (debugger-session-inspection-top! debugger)
-      (refresh-debugger-buffer! editor debugger)
       '()))
 
   (define (debug-inspect-role context who role)
@@ -693,8 +726,7 @@
              "The inspected object does not expose that component")])
         (debugger-session-inspection-select-role!
           debugger
-          role)
-        (refresh-debugger-buffer! editor debugger))
+          role))
       '()))
 
   (define (debug-inspect-code-command context)
@@ -771,7 +803,6 @@
               (debugger-session-set-inspected-value!
                 debugger
                 source)])
-        (refresh-debugger-buffer! editor debugger)
         (editor-set-status-message!
           editor
           (string-append
@@ -890,7 +921,6 @@
                     (debugger-session-apply-inspected
                       debugger
                       source)])
-              (refresh-debugger-buffer! editor debugger)
               (editor-set-status-message!
                 editor
                 (string-append
@@ -983,17 +1013,241 @@
               evaluate-effect)
             (list evaluate-effect)))))
 
-  (define (debug-continue-command context)
-    (let* ([editor (command-context-editor context)]
-           [target
+  (define (debugger-action-context-live? context)
+    (let ([editor
+            (debugger-action-context-editor context)]
+          [session
+            (debugger-action-context-session context)]
+          [debugger
+            (debugger-action-context-debugger context)])
+      (and
+        (not (debugger-session-closed? debugger))
+        (if session
+            (eq?
+              (interaction-session-debugger session)
+              debugger)
+            (eq? (editor-debugger editor) debugger)))))
+
+  (define (require-action-execution-context
+            who
+            command-context
+            command)
+    (let ([execution
+            (command-context-argument command-context)])
+      (unless (debugger-action-context? execution)
+        (assertion-violation
+          who
+          "expected a debugger action execution context"
+          execution))
+      (unless
+        (eq?
+          (command-context-editor command-context)
+          (debugger-action-context-editor execution))
+        (assertion-violation
+          who
+          "action context belongs to another editor"))
+      (unless (debugger-action-context-live? execution)
+        (editor-user-error
+          who
+          "The debugger action context is no longer active"))
+      (let* ([debugger
+               (debugger-action-context-debugger execution)]
+             [action
+               (debugger-action-context-action execution)]
+             [current
+               (and
+                 action
+                 (debugger-session-action
+                   debugger
+                   (debugger-action-id action)))])
+        (unless
+          (and
+            current
+            (eq? (debugger-action-command current)
+                 command))
+          (editor-user-error
+            who
+            "The debugger action is no longer available"))
+        execution)))
+
+  (define (invoke-debugger-action!
+            editor
+            context)
+    (let ([action
+            (debugger-action-context-action context)])
+      (when
+        (eq? (debugger-action-command action)
+             'scheme.debug-action)
+        (editor-user-error
+          'scheme.debug-action
+          "A debugger action cannot invoke the action selector"))
+      (editor-execute-command!
+        editor
+        (debugger-action-command action)
+        #f
+        context)))
+
+  (define (open-debugger-action-parameter!
+            editor
+            context)
+    (let* ([action
+             (debugger-action-context-action context)]
+           [parameter
+             (debugger-action-parameter action)]
+           [initial
+             (or
+               (debugger-action-parameter-default-value
+                 parameter
+                 context)
+               "")])
+      (editor-open-prompt!
+        editor
+        (make-prompt-request
+          (debugger-action-parameter-prompt parameter)
+          initial
+          (case
+            (debugger-action-parameter-kind parameter)
+            [(source) 'scheme-debugger-source]
+            [else 'scheme-debugger-expression])
+          #f
+          'must-match
+          (lambda (value)
+            (debugger-action-parameter-valid?
+              parameter
+              context
+              value))
+          'scheme.debug-action-parameter-accept
+          #f
+          context))
+      '()))
+
+  (define (begin-debugger-action!
+            editor
+            session
+            debugger
+            action)
+    (let ([context
+            (make-action-context
+              editor session debugger action #f)])
+      (if
+        (eq?
+          (debugger-action-parameter-kind
+            (debugger-action-parameter action))
+          'none)
+        (invoke-debugger-action!
+          editor
+          context)
+        (open-debugger-action-parameter!
+          editor
+          context))))
+
+  (define (begin-debugger-action-by-id!
+            command-context
+            who
+            id)
+    (let* ([target
              (require-debug-target
-               'scheme.debug-continue
-               context)]
-           [session (car target)])
-      (require-debugger-action
+               who
+               command-context)]
+           [action
+             (require-debugger-action
+               who target id)])
+      (begin-debugger-action!
+        (command-context-editor command-context)
+        (car target)
+        (cadr target)
+        action)))
+
+  (define (begin-debugger-action-for-command!
+            command-context
+            who
+            command)
+    (let* ([target
+             (require-debug-target
+               who
+               command-context)]
+           [action
+             (find
+               (lambda (candidate)
+                 (eq?
+                   (debugger-action-command candidate)
+                   command))
+               (debugger-session-actions
+                 (cadr target)))])
+      (unless action
+        (editor-user-error
+          who
+          "The debugger does not provide this action"))
+      (begin-debugger-action!
+        (command-context-editor command-context)
+        (car target)
+        (cadr target)
+        action)))
+
+  (define (debug-action-parameter-accept-command
+            command-context)
+    (let* ([result
+             (command-context-argument command-context)]
+           [saved
+             (and
+               (prompt-result? result)
+               (prompt-result-data result))]
+           [value
+             (and
+               (prompt-result? result)
+               (eq? (prompt-result-status result) 'accepted)
+               (prompt-result-value result))])
+      (if
+        (and
+          (debugger-action-context? saved)
+          value
+          (debugger-action-context-live? saved))
+        (let* ([debugger
+                 (debugger-action-context-debugger saved)]
+               [old-action
+                 (debugger-action-context-action saved)]
+               [action
+                 (debugger-session-action
+                   debugger
+                   (debugger-action-id old-action))]
+               [context
+                 (and
+                   action
+                   (debugger-action-context-with-argument
+                     (debugger-action-context-with-action
+                       saved action)
+                     value))])
+          (if
+            (and
+              context
+              (debugger-action-parameter-valid?
+                (debugger-action-parameter action)
+                context
+                value))
+            (invoke-debugger-action!
+              (command-context-editor command-context)
+              context)
+            '()))
+        '())))
+
+  (define (debug-continue-command context)
+    (if
+      (not
+        (debugger-action-context?
+          (command-context-argument context)))
+      (begin-debugger-action-by-id!
+        context
         'scheme.debug-continue
-        target
         'continue)
+      (let* ([execution
+               (require-action-execution-context
+                 'scheme.debug-continue
+                 context
+                 'scheme.debug-continue)]
+             [editor
+               (debugger-action-context-editor execution)]
+             [session
+               (debugger-action-context-session execution)])
       (unless
         (and
           session
@@ -1010,68 +1264,40 @@
             (interaction-session-id session)
             (interaction-session-generation session)
             'continue
-            '())))))
+            '()))))))
 
   (define (debug-use-value-command context)
-    (let* ([target
-             (require-debug-target
-               'scheme.debug-use-value
-               context)]
-           [debugger (cadr target)])
-      (require-debugger-action
+    (if
+      (not
+        (debugger-action-context?
+          (command-context-argument context)))
+      (begin-debugger-action-by-id!
+        context
         'scheme.debug-use-value
-        target
         'use-value)
+      (let* ([execution
+               (require-action-execution-context
+                 'scheme.debug-use-value
+                 context
+                 'scheme.debug-use-value)]
+             [editor
+               (debugger-action-context-editor execution)]
+             [session
+               (debugger-action-context-session execution)]
+             [debugger
+               (debugger-action-context-debugger execution)]
+             [frame
+               (debugger-action-context-selected-frame execution)]
+             [source
+               (debugger-action-context-argument execution)])
       (unless
-        (debugger-session-continuation debugger)
+        (and
+          session
+          frame
+          (debugger-action-context-continuation execution))
         (editor-user-error
           'scheme.debug-use-value
           "The condition has no resumable continuation"))
-      (editor-open-prompt!
-        (command-context-editor context)
-        (make-prompt-request
-          "Replacement expression: "
-          ""
-          'scheme-debug-replacement
-          #f
-          'free
-          #f
-          'scheme.debug-use-value-accept
-          #f
-          (cons
-            (debugger-session-origin debugger)
-            (debugger-session-generation debugger))))
-      '()))
-
-  (define (debug-use-value-accept-command context)
-    (let* ([editor (command-context-editor context)]
-           [prompt-result (command-context-argument context)]
-           [source
-             (and
-               (prompt-result? prompt-result)
-               (eq? (prompt-result-status prompt-result) 'accepted)
-               (prompt-result-value prompt-result))]
-           [identity
-             (and
-               (prompt-result? prompt-result)
-               (prompt-result-data prompt-result))]
-           [target
-             (active-debug-target
-               editor
-               (command-context-view context))])
-      (if
-        (and
-          target
-          source
-          (positive? (string-length source))
-          (debugger-session-action
-            (cadr target)
-            'use-value)
-          (pair? identity)
-          (eq? (car identity)
-               (debugger-session-origin (cadr target)))
-          (= (cdr identity)
-             (debugger-session-generation (cadr target))))
         (guard
           (condition
             [else
@@ -1081,16 +1307,11 @@
                  "Replacement evaluation failed: "
                  (condition->string condition)))
              '()])
-          (let* ([session (car target)]
-                 [debugger (cadr target)]
-                 [values
-                   (debugger-session-evaluate
-                     debugger
-                     source)])
-            (unless session
-              (editor-user-error
-                'scheme.debug-use-value
-                "The debugger is not attached to an evaluation"))
+          (let ([values
+                  (debugger-session-evaluate-in-frame
+                    debugger
+                    frame
+                    source)])
             (close-session-debugger! editor session)
             (interaction-session-resume! session)
             (list
@@ -1100,23 +1321,29 @@
                   (interaction-session-id session)
                   (interaction-session-generation session)
                   'use-values
-                  values)))))
-        '())))
+                  values))))))))
 
   (define (debug-retry-command context)
-    (let* ([editor (command-context-editor context)]
-           [target
-             (require-debug-target
-               'scheme.debug-retry
-               context)]
-           [session (car target)]
+    (if
+      (not
+        (debugger-action-context?
+          (command-context-argument context)))
+      (begin-debugger-action-by-id!
+        context
+        'scheme.debug-retry
+        'retry)
+      (let* ([execution
+               (require-action-execution-context
+                 'scheme.debug-retry
+                 context
+                 'scheme.debug-retry)]
+             [editor
+               (debugger-action-context-editor execution)]
+             [session
+               (debugger-action-context-session execution)]
            [result
              (and session
                   (interaction-session-last-result session))])
-      (require-debugger-action
-        'scheme.debug-retry
-        target
-        'retry)
       (unless result
         (assertion-violation
           'scheme.debug-retry
@@ -1126,89 +1353,41 @@
           editor
           session
           (evaluation-request-source request)
-          (evaluation-request-origin request)))))
+          (evaluation-request-origin request))))))
 
   (define (debug-edit-and-retry-command context)
-    (let* ([editor (command-context-editor context)]
-           [target
-             (require-debug-target
-               'scheme.debug-edit-and-retry
-               context)]
-           [session (car target)]
-           [debugger (cadr target)]
+    (if
+      (not
+        (debugger-action-context?
+          (command-context-argument context)))
+      (begin-debugger-action-by-id!
+        context
+        'scheme.debug-edit-and-retry
+        'edit-and-retry)
+      (let* ([execution
+               (require-action-execution-context
+                 'scheme.debug-edit-and-retry
+                 context
+                 'scheme.debug-edit-and-retry)]
+             [editor
+               (debugger-action-context-editor execution)]
+             [session
+               (debugger-action-context-session execution)]
+             [source
+               (debugger-action-context-argument execution)]
            [result
              (and session
                   (interaction-session-last-result session))])
-      (require-debugger-action
-        'scheme.debug-edit-and-retry
-        target
-        'edit-and-retry)
       (unless result
         (editor-user-error
           'scheme.debug-edit-and-retry
           "The debugger is not attached to an evaluation"))
-      (editor-open-prompt!
+      (restart-evaluation!
         editor
-        (make-prompt-request
-          "Restart source: "
-          (evaluation-request-source
-            (evaluation-result-request result))
-          'scheme-debug-restart-source
-          #f
-          'free
-          #f
-          'scheme.debug-edit-and-retry-accept
-          #f
-          (cons
-            (debugger-session-origin debugger)
-            (debugger-session-generation debugger))))
-      '()))
-
-  (define (debug-edit-and-retry-accept-command context)
-    (let* ([editor (command-context-editor context)]
-           [result (command-context-argument context)]
-           [source
-             (and
-               (prompt-result? result)
-               (eq? (prompt-result-status result) 'accepted)
-               (prompt-result-value result))]
-           [identity
-             (and
-               (prompt-result? result)
-               (prompt-result-data result))]
-           [target
-             (active-debug-target
-               editor
-               (command-context-view context))])
-      (if
-        (and
-          target
-          source
-          (positive? (string-length source))
-          (debugger-session-action
-            (cadr target)
-            'edit-and-retry)
-          (pair? identity)
-          (eq? (car identity)
-               (debugger-session-origin (cadr target)))
-          (= (cdr identity)
-             (debugger-session-generation (cadr target))))
-        (let* ([session (car target)]
-               [debugger (cadr target)]
-               [failed
-                 (and session
-                      (interaction-session-last-result session))])
-          (unless failed
-            (editor-user-error
-              'scheme.debug-edit-and-retry
-              "The failed evaluation is unavailable"))
-          (restart-evaluation!
-            editor
-            session
-            source
-            (evaluation-request-origin
-              (evaluation-result-request failed))))
-        '())))
+        session
+        source
+        (evaluation-request-origin
+          (evaluation-result-request result))))))
 
   (define (debug-action-choice-source actions)
     (let ([items
@@ -1278,15 +1457,11 @@
                  "The debugger does not provide the "
                  (symbol->string argument)
                  " action")))
-           (when
-             (eq? (debugger-action-command action)
-                  'scheme.debug-action)
-             (editor-user-error
-               'scheme.debug-action
-               "A debugger action cannot invoke the action selector"))
-           (editor-execute-command!
+           (begin-debugger-action!
              (command-context-editor context)
-             (debugger-action-command action)))]
+             (car target)
+             debugger
+             action))]
         [(not argument)
          (editor-open-prompt!
            (command-context-editor context)
@@ -1302,9 +1477,12 @@
              (debug-action-choice-source actions)
              'scheme.debug-action-accept
              #f
-             (cons
-               (debugger-session-origin debugger)
-               (debugger-session-generation debugger))))
+             (make-action-context
+               (command-context-editor context)
+               (car target)
+               debugger
+               #f
+               #f)))
          '()]
         [else
          (assertion-violation
@@ -1325,25 +1503,25 @@
       '()))
 
   (define (debug-discard-command context)
-    (let* ([editor (command-context-editor context)]
-           [target
-             (require-debug-target
-               'scheme.debug-discard
-               context)]
-           [session (car target)]
-           [debugger (cadr target)])
-      (unless
-        (exists
-          (lambda (action)
-            (and
-              (eq? (debugger-action-kind action)
-                   'terminate)
-              (eq? (debugger-action-command action)
-                   'scheme.debug-discard)))
-          (debugger-session-actions debugger))
-        (editor-user-error
-          'scheme.debug-discard
-          "The debugger does not provide a terminating action"))
+    (if
+      (not
+        (debugger-action-context?
+          (command-context-argument context)))
+      (begin-debugger-action-for-command!
+        context
+        'scheme.debug-discard
+        'scheme.debug-discard)
+      (let* ([execution
+               (require-action-execution-context
+                 'scheme.debug-discard
+                 context
+                 'scheme.debug-discard)]
+             [editor
+               (debugger-action-context-editor execution)]
+             [session
+               (debugger-action-context-session execution)]
+             [debugger
+               (debugger-action-context-debugger execution)])
       (let* ([suspended?
               (and
                 session
@@ -1371,7 +1549,7 @@
               (make-command-effect
                 'scheme.abort-evaluation
                 (interaction-session-id session)))
-            '()))))
+            '())))))
 
   (define (debug-action-accept-command context)
     (let* ([editor (command-context-editor context)]
@@ -1384,33 +1562,28 @@
              (and
                candidate
                (completion-item-payload candidate))]
-           [target
-             (active-debug-target
-               editor
-               (command-context-view context))])
+           [saved
+             (and
+               (prompt-result? result)
+               (prompt-result-data result))])
       (if
         (and
-          target
+          (debugger-action-context? saved)
+          (debugger-action-context-live? saved)
           (debugger-action? selected)
-          (prompt-matches-debugger?
-            result
-            (cadr target)))
+          (eq?
+            editor
+            (debugger-action-context-editor saved)))
         (let ([action
                 (debugger-session-action
-                  (cadr target)
+                  (debugger-action-context-debugger saved)
                   (debugger-action-id selected))])
           (if action
-              (if
-                (eq? (debugger-action-command action)
-                     'scheme.debug-action)
-                (begin
-                  (editor-set-status-message!
-                    editor
-                    "A debugger action cannot invoke the action selector")
-                  '())
-                (editor-execute-command!
-                  editor
-                  (debugger-action-command action)))
+              (begin-debugger-action!
+                editor
+                (debugger-action-context-session saved)
+                (debugger-action-context-debugger saved)
+                action)
               '()))
         '())))
 
@@ -1552,21 +1725,15 @@
     (editor-register-internal-command!
       editor
       (make-internal-context-command
-        'scheme.debug-edit-and-retry-accept
-        debug-edit-and-retry-accept-command
-        "Restart a failed evaluation with edited source."))
-    (editor-register-internal-command!
-      editor
-      (make-internal-context-command
         'scheme.debug-action-accept
         debug-action-accept-command
         "Apply the debugger action selected by the minibuffer."))
     (editor-register-internal-command!
       editor
       (make-internal-context-command
-        'scheme.debug-use-value-accept
-        debug-use-value-accept-command
-        "Resume a failed continuation with replacement values."))
+        'scheme.debug-action-parameter-accept
+        debug-action-parameter-accept-command
+        "Apply a validated debugger action parameter."))
     (editor-register-internal-command!
       editor
       (make-internal-context-command

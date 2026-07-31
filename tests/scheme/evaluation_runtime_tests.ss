@@ -225,16 +225,27 @@
     (error 'evaluation-runtime-tests
            "failed evaluation did not retain its condition continuation"))
 
-  (interaction-session-resume! session)
+  (define failed-debugger
+    (interaction-session-debugger session))
+  (define use-value-context
+    (make-debugger-action-context
+      editor
+      session
+      failed-debugger
+      (debugger-session-selected-frame failed-debugger)
+      (debugger-session-condition failed-debugger)
+      (evaluation-result-continuation
+        (interaction-session-last-result session))
+      (debugger-session-action
+        failed-debugger
+        'use-value)
+      "16"))
   (execute!
-    (list
-      (make-command-effect
-        'scheme.resume-evaluation
-        (make-evaluation-resume-request
-          (interaction-session-id session)
-          (interaction-session-generation session)
-          'use-values
-          '(16)))))
+    (editor-update!
+      editor
+      (make-command-message
+        'scheme.debug-use-value
+        use-value-context)))
   (let loop ()
     (let ([messages
             (evaluation-runtime-handle-event

@@ -130,6 +130,9 @@
           editor-remove-hook!
           editor-hook-names
           editor-run-hooks!
+          editor-register-debugger-action-provider!
+          editor-remove-debugger-action-provider!
+          editor-debugger-action-provider-names
           editor-add-buffer-hook!
           editor-remove-buffer-hook!
           editor-buffer-hook-names
@@ -591,12 +594,16 @@
           debugger-session-frames
           debugger-session-selected-index
           debugger-session-selected-frame
+          debugger-session-next-frame!
+          debugger-session-previous-frame!
           debugger-session-inspection-node
           debugger-session-inspection-capabilities
           debugger-session-actions
           debugger-session-action
           debugger-session-set-actions!
           debugger-session-register-action!
+          debugger-session-revision
+          debugger-session-evaluate-in-frame
           debugger-session-inspection-top!
           debugger-session-inspection-select-role!
           debugger-session-set-inspected-value!
@@ -620,9 +627,30 @@
           debugger-action-label
           debugger-action-description
           debugger-action-kind
+          debugger-action-parameter
           debugger-action-input-kind
           debugger-action-command
           debugger-action-default?
+          make-debugger-action-parameter
+          debugger-action-parameter?
+          debugger-action-parameter-kind
+          debugger-action-parameter-prompt
+          debugger-action-parameter-default
+          debugger-action-parameter-validator
+          debugger-action-parameter-default-value
+          debugger-action-parameter-valid?
+          make-debugger-action-context
+          debugger-action-context?
+          debugger-action-context-editor
+          debugger-action-context-session
+          debugger-action-context-debugger
+          debugger-action-context-selected-frame
+          debugger-action-context-condition
+          debugger-action-context-continuation
+          debugger-action-context-action
+          debugger-action-context-argument
+          debugger-action-context-with-action
+          debugger-action-context-with-argument
           debugger-actions-validate
           debugger-actions-find
           debugger-actions-default

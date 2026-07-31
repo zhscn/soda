@@ -21,11 +21,14 @@
           debugger-session-action
           debugger-session-set-actions!
           debugger-session-register-action!
+          debugger-session-revision
+          debugger-session-set-change-listener!
           debugger-session-buffer-id
           debugger-session-set-buffer-id!
           debugger-session-next-frame!
           debugger-session-previous-frame!
           debugger-session-evaluate
+          debugger-session-evaluate-in-frame
           debugger-session-inspect-condition!
           debugger-session-inspect-continuation!
           debugger-session-inspect-local!
@@ -105,6 +108,12 @@
             (mutable actions
                      debugger-session-actions
                      debugger-session-actions-set!)
+            (mutable revision
+                     debugger-session-revision
+                     debugger-session-revision-set!)
+            (mutable change-listener
+                     debugger-session-change-listener
+                     debugger-session-change-listener-set!)
             (mutable buffer-id
                      debugger-session-buffer-id
                      debugger-session-buffer-id-set!)
@@ -195,7 +204,14 @@
   (define (condition-continuation/safe condition)
     (safe-call #f (lambda () (condition-continuation condition))))
 
-  (define (built-in-action id default?)
+  (define no-action-parameter
+    (make-debugger-action-parameter
+      'none #f #f #f))
+
+  (define (non-empty-action-argument? context value)
+    (positive? (string-length value)))
+
+  (define (built-in-action id default? source)
     (case id
       [(continue)
        (make-debugger-action
@@ -203,7 +219,7 @@
          "Continue"
          "Continue the suspended evaluation"
          'resume
-         'none
+         no-action-parameter
          'scheme.debug-continue
          default?)]
       [(use-value)
@@ -212,7 +228,11 @@
          "Use value"
          "Resume the condition continuation with replacement values"
          'resume
-         'expression
+         (make-debugger-action-parameter
+           'expression
+           "Replacement expression: "
+           ""
+           non-empty-action-argument?)
          'scheme.debug-use-value
          default?)]
       [(retry)
@@ -221,7 +241,7 @@
          "Retry"
          "Evaluate the original source in a new generation"
          'restart
-         'none
+         no-action-parameter
          'scheme.debug-retry
          default?)]
       [(edit-and-retry)
@@ -230,7 +250,11 @@
          "Edit and retry"
          "Edit the source and evaluate it in a new generation"
          'restart
-         'source
+         (make-debugger-action-parameter
+           'source
+           "Restart source: "
+           source
+           non-empty-action-argument?)
          'scheme.debug-edit-and-retry
          default?)]
       [(abort)
@@ -239,7 +263,7 @@
          "Abort"
          "Discard the failed or suspended evaluation"
          'terminate
-         'none
+         no-action-parameter
          'scheme.debug-discard
          default?)]
       [(dismiss)
@@ -248,7 +272,7 @@
          "Dismiss"
          "Discard the saved editor condition"
          'terminate
-         'none
+         no-action-parameter
          'scheme.debug-discard
          default?)]
       [else
@@ -257,24 +281,27 @@
          "unknown built-in debugger action"
          id)]))
 
-  (define (evaluation-actions status continuation)
+  (define (evaluation-actions status continuation source)
     (debugger-actions-validate
       (case status
         [(suspended)
          (list
-           (built-in-action 'continue #t)
-           (built-in-action 'retry #f)
-           (built-in-action 'edit-and-retry #f)
-           (built-in-action 'abort #f))]
+           (built-in-action 'continue #t source)
+           (built-in-action 'retry #f source)
+           (built-in-action 'edit-and-retry #f source)
+           (built-in-action 'abort #f source))]
         [(condition)
          (append
-           (list (built-in-action 'retry #t))
+           (list (built-in-action 'retry #t source))
            (if continuation
-               (list (built-in-action 'use-value #f))
+               (list
+                 (built-in-action
+                   'use-value #f source))
                '())
            (list
-             (built-in-action 'edit-and-retry #f)
-             (built-in-action 'abort #f)))]
+             (built-in-action
+               'edit-and-retry #f source)
+             (built-in-action 'abort #f source)))]
         [else
          (assertion-violation
            'evaluation-actions
@@ -358,7 +385,9 @@
           (and (pair? frames) 0)
           '()
           '()
-          (list (built-in-action 'dismiss #t))
+          (list (built-in-action 'dismiss #t #f))
+          0
+          #f
           #f
           #f))))
 
@@ -399,7 +428,11 @@
           '()
           (evaluation-actions
             (evaluation-result-status result)
-            continuation)
+            continuation
+            (evaluation-request-source
+              (evaluation-result-request result)))
+          0
+          #f
           #f
           #f))))
 
@@ -408,6 +441,31 @@
       (assertion-violation who "expected a debugger session" debugger))
     (when (debugger-session-closed? debugger)
       (assertion-violation who "debugger session is closed" debugger)))
+
+  (define (debugger-session-touch! debugger)
+    (debugger-session-revision-set!
+      debugger
+      (+ (debugger-session-revision debugger) 1))
+    (let ([listener
+            (debugger-session-change-listener debugger)])
+      (when listener (listener debugger)))
+    debugger)
+
+  (define (debugger-session-set-change-listener!
+            debugger
+            listener)
+    (require-open-debugger
+      'debugger-session-set-change-listener!
+      debugger)
+    (unless (or (not listener) (procedure? listener))
+      (assertion-violation
+        'debugger-session-set-change-listener!
+        "change listener must be a procedure or #f"
+        listener))
+    (debugger-session-change-listener-set!
+      debugger
+      listener)
+    listener)
 
   (define (debugger-session-selected-frame debugger)
     (require-open-debugger
@@ -451,6 +509,7 @@
     (debugger-session-actions-set!
       debugger
       (debugger-actions-validate actions))
+    (debugger-session-touch! debugger)
     actions)
 
   (define (debugger-session-register-action!
@@ -507,6 +566,7 @@
                     (length frames))])
             (debugger-session-selected-index-set!
               debugger index)
+            (debugger-session-touch! debugger)
             (list-ref frames index)))))
 
   (define (debugger-session-next-frame! debugger count)
@@ -532,55 +592,77 @@
             form))
         (lambda () (close-port port)))))
 
+  (define (debugger-session-evaluate-in-frame
+            debugger
+            frame
+            source)
+    (require-open-debugger
+      'debugger-session-evaluate-in-frame
+      debugger)
+    (unless
+      (and
+        (debugger-frame? frame)
+        (memq frame (debugger-session-frames debugger)))
+      (assertion-violation
+        'debugger-session-evaluate-in-frame
+        "frame does not belong to the debugger"
+        frame))
+    (unless (string? source)
+      (assertion-violation
+        'debugger-session-evaluate-in-frame
+        "expression must be a string"
+        source))
+    (guard
+      (condition
+        [else
+         (record-evaluation!
+           debugger
+           (make-debugger-evaluation
+             (debugger-frame-index frame)
+             source
+             'condition
+             (condition->string condition)))
+         (debugger-session-touch! debugger)
+         (raise condition)])
+      (let ([values
+              (call-with-values
+                (lambda ()
+                  ((debugger-frame-inspector frame)
+                   'eval
+                   (read-one source)))
+                list)])
+        (record-evaluation!
+          debugger
+          (make-debugger-evaluation
+            (debugger-frame-index frame)
+            source
+            'values
+            (values->preview values)))
+        (debugger-session-inspection-stack-set!
+          debugger
+          (if (null? values)
+              '()
+              (list
+                (make-inspector-node
+                  "result[0]"
+                  (inspect/object (car values))))))
+        (debugger-session-touch! debugger)
+        values)))
+
   (define (debugger-session-evaluate debugger source)
     (require-open-debugger
       'debugger-session-evaluate
       debugger)
-    (unless (string? source)
-      (assertion-violation
-        'debugger-session-evaluate
-        "expression must be a string"
-        source))
     (let ([frame
             (debugger-session-selected-frame debugger)])
       (unless frame
         (assertion-violation
           'debugger-session-evaluate
           "debugger has no selected frame"))
-      (guard
-        (condition
-          [else
-           (record-evaluation!
-             debugger
-             (make-debugger-evaluation
-               (debugger-frame-index frame)
-               source
-               'condition
-               (condition->string condition)))
-           (raise condition)])
-        (let ([values
-                (call-with-values
-                  (lambda ()
-                    ((debugger-frame-inspector frame)
-                     'eval
-                     (read-one source)))
-                  list)])
-          (record-evaluation!
-            debugger
-            (make-debugger-evaluation
-              (debugger-frame-index frame)
-              source
-              'values
-              (values->preview values)))
-          (debugger-session-inspection-stack-set!
-            debugger
-            (if (null? values)
-                '()
-                (list
-                  (make-inspector-node
-                    "result[0]"
-                    (inspect/object (car values))))))
-          values))))
+      (debugger-session-evaluate-in-frame
+        debugger
+        frame
+        source)))
 
   (define (debugger-session-inspect-local! debugger index)
     (require-open-debugger
@@ -620,7 +702,8 @@
                         (debugger-variable-name variable))
                       (number->string index))
                   "]")
-                (debugger-variable-inspector variable))))))))
+                (debugger-variable-inspector variable))))
+          (debugger-session-touch! debugger)))))
 
   (define (debugger-session-inspect-condition! debugger)
     (require-open-debugger
@@ -632,7 +715,8 @@
         (make-inspector-node
           "condition"
           (inspect/object
-            (debugger-session-condition debugger))))))
+            (debugger-session-condition debugger)))))
+    (debugger-session-touch! debugger))
 
   (define (debugger-session-inspect-continuation! debugger)
     (require-open-debugger
@@ -649,7 +733,8 @@
         (list
           (make-inspector-node
             "raise continuation"
-            (inspect/object continuation))))))
+            (inspect/object continuation))))
+      (debugger-session-touch! debugger)))
 
   (define (record-evaluation! debugger evaluation)
     (let loop ([remaining
@@ -717,7 +802,8 @@
             debugger
             (cons
               (inspector-child-node child)
-              stack))))))
+              stack))
+          (debugger-session-touch! debugger)))))
 
   (define (debugger-session-inspection-select-role!
             debugger
@@ -750,6 +836,7 @@
         (debugger-session-inspection-stack-set!
           debugger
           (cons (inspector-child-node child) stack))
+        (debugger-session-touch! debugger)
         (inspector-child-node child))))
 
   (define (debugger-session-inspection-up! debugger)
@@ -760,7 +847,8 @@
       (when (and (pair? stack) (pair? (cdr stack)))
         (debugger-session-inspection-stack-set!
           debugger
-          (cdr stack)))))
+          (cdr stack))
+        (debugger-session-touch! debugger))))
 
   (define (debugger-session-inspection-top! debugger)
     (require-open-debugger
@@ -771,7 +859,8 @@
       (when (pair? stack)
         (debugger-session-inspection-stack-set!
           debugger
-          (list (car (reverse stack)))))))
+          (list (car (reverse stack))))
+        (debugger-session-touch! debugger))))
 
   (define (evaluate-in-selected-frame debugger source)
     (let ([frame
@@ -825,6 +914,7 @@
             'debugger-session-set-inspected-value!
             "replacement expression must produce one value"))
         (inspector-node-set-value! node (car values))
+        (debugger-session-touch! debugger)
         values)))
 
   (define (debugger-session-set-local-value!
@@ -870,6 +960,7 @@
                   (make-inspector-node
                     "apply result[0]"
                     (inspect/object (car values))))))
+          (debugger-session-touch! debugger)
           values))))
 
   (define (condition->string condition)

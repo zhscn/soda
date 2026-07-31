@@ -254,12 +254,34 @@ frame 或 InspectorNode 后重新生成投影，caret 跟随选中的 frame 行�
 使用独立的 generated resource，因此不同 interaction 的失败状态可以同时保留。
 
 每个可恢复或终止的操作由 `DebuggerAction` 描述。descriptor 包含稳定 id、显示
-名称、说明、`resume | restart | terminate` 类别、`none | expression | source`
-输入类型、执行 command 和 default 标记。同一 action set 的 id 唯一，且至多一个
-action 是默认项。`DebuggerSession` 持有 action set；Buffer、minibuffer picker
-和命令校验读取该集合，不根据 session state 重复推导操作。扩展可以注册普通
-interactive command，并通过 `debugger-session-register-action!` 添加或替换对应
-descriptor；`debugger-session-set-actions!` 原子替换完整 action set。
+名称、说明、`resume | restart | terminate` 类别、参数规格、执行 command 和
+default 标记。同一 action set 的 id 唯一，且至多一个 action 是默认项。
+`DebuggerActionParameter` 使用 `none | expression | source` 表示参数类型，并为
+带参数的 action 提供 prompt、默认值和 validator。默认值可以是字符串，也可以根据
+执行上下文延迟计算；validator 在打开 prompt 和接受结果时都使用同一份执行上下文
+校验字符串。
+
+`DebuggerActionContext` 捕获 editor、interaction session、debugger、选中 frame、
+condition、continuation、action 和参数。action 被选中时固定 frame、condition 与
+continuation；参数 prompt 的回调携带该 context，不从当前 View 或全局 debugger
+重新发现目标。action command 只通过 command argument 接收 context，并在执行前
+确认 debugger 仍属于对应 editor 或 interaction session、action id 仍存在且
+command 未被替换。
+
+`DebuggerSession` 持有 action set；Buffer、minibuffer picker 和命令校验读取该
+集合，不根据 session state 重复推导操作。Editor 的具名 action provider registry
+允许扩展根据创建上下文返回一个 action、action 列表或 `#f`。创建 debugger 时先
+安装状态监听器，再按注册顺序应用 provider，然后运行 `debugger-created` hook，
+最后创建或激活 Buffer。provider 适合声明 condition-specific action；hook 可以
+完成依赖完整 debugger session 的初始化。扩展通过
+`debugger-session-register-action!` 添加或替换 descriptor，
+`debugger-session-set-actions!` 原子替换完整 action set。
+
+每个 `DebuggerSession` 保存单调递增的 revision。action set、frame selection、
+frame-relative evaluation、Inspector path、赋值和 apply 结果发生变化时推进
+revision，并同步通知 editor adapter。adapter 将 session 状态重新投影到已有
+debugger Buffer，因此扩展修改 session 后不需要调用刷新函数。Buffer identity、
+返回位置和关闭清理属于生命周期状态，不参与该投影 revision。
 
 condition failure 提供默认的 `retry`、有 continuation 时的 `use-value`、
 `edit-and-retry` 和 `abort`。suspended evaluation 提供默认的 `continue`、`retry`、

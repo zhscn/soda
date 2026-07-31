@@ -68,6 +68,10 @@
           editor-remove-hook!
           editor-hook-names
           editor-run-hooks!
+          editor-register-debugger-action-provider!
+          editor-remove-debugger-action-provider!
+          editor-debugger-action-provider-names
+          editor-apply-debugger-action-providers!
           editor-add-buffer-hook!
           editor-remove-buffer-hook!
           editor-buffer-hook-names
@@ -188,6 +192,7 @@
           (soda editor completion-provider)
           (soda editor condition)
           (soda editor debugger)
+          (soda editor debugger-action)
           (soda editor display)
           (soda editor display-map)
           (soda editor event)
@@ -662,6 +667,92 @@
       (editor-hook-registry value)
       phase
       arguments))
+
+  (define debugger-action-provider-phase
+    'debugger-action-provider)
+
+  (define (editor-register-debugger-action-provider!
+            editor
+            name
+            procedure)
+    (require-open-editor
+      'editor-register-debugger-action-provider!
+      editor)
+    (unless (procedure? procedure)
+      (assertion-violation
+        'editor-register-debugger-action-provider!
+        "provider must be a procedure"
+        procedure))
+    (editor-add-hook!
+      editor
+      debugger-action-provider-phase
+      name
+      procedure))
+
+  (define (editor-remove-debugger-action-provider!
+            editor
+            name)
+    (require-open-editor
+      'editor-remove-debugger-action-provider!
+      editor)
+    (editor-remove-hook!
+      editor
+      debugger-action-provider-phase
+      name))
+
+  (define (editor-debugger-action-provider-names editor)
+    (require-open-editor
+      'editor-debugger-action-provider-names
+      editor)
+    (editor-hook-names
+      editor
+      debugger-action-provider-phase))
+
+  (define (provider-actions who value)
+    (cond
+      [(not value) '()]
+      [(debugger-action? value) (list value)]
+      [(and
+         (list? value)
+         (for-all debugger-action? value))
+       value]
+      [else
+       (assertion-violation
+         who
+         "provider must return an action, a list of actions, or #f"
+         value)]))
+
+  (define (editor-apply-debugger-action-providers!
+            editor
+            context)
+    (require-open-editor
+      'editor-apply-debugger-action-providers!
+      editor)
+    (unless (debugger-action-context? context)
+      (assertion-violation
+        'editor-apply-debugger-action-providers!
+        "expected a debugger action context"
+        context))
+    (unless
+      (eq? editor (debugger-action-context-editor context))
+      (assertion-violation
+        'editor-apply-debugger-action-providers!
+        "action context belongs to another editor"))
+    (for-each
+      (lambda (provider)
+        (for-each
+          (lambda (action)
+            (debugger-session-register-action!
+              (debugger-action-context-debugger context)
+              action))
+          (provider-actions
+            'editor-apply-debugger-action-providers!
+            (provider context))))
+      (hook-registry-procedures
+        (editor-hook-registry editor)
+        debugger-action-provider-phase))
+    (debugger-session-actions
+      (debugger-action-context-debugger context)))
 
   (define (editor-add-buffer-hook!
             value
