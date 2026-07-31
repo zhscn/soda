@@ -670,7 +670,7 @@
       'fundamental-mode
       'scheme
       'editing
-      #f
+      'scheme-mode-map
       (list
         (cons
           'completion-providers

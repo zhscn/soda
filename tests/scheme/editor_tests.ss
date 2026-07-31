@@ -3089,6 +3089,83 @@
   (error 'editor-tests
          "closing the editor did not release annotation anchors"))
 
+(define scheme-indent-source
+  "(define (value x)\n(+ x\n1))\n")
+(define scheme-indent-document
+  (make-document scheme-indent-source 988))
+(define scheme-indent-buffer
+  (make-buffer
+    988
+    scheme-indent-document
+    "indent.scm"
+    'scheme-mode))
+(define scheme-indent-editor
+  (make-editor scheme-indent-buffer))
+(define scheme-indent-decoder (make-input-decoder))
+(view-set-caret!
+  (editor-active-view scheme-indent-editor)
+  (substring-position scheme-indent-source "(+ x"))
+(send! scheme-indent-editor scheme-indent-decoder (bytes 9))
+(define scheme-indent-second-line
+  "(define (value x)\n  (+ x\n1))\n")
+(unless
+  (bytevector=?
+    (buffer-bytes scheme-indent-buffer)
+    (string->utf8 scheme-indent-second-line))
+  (error 'editor-tests
+         "scheme-mode Tab did not indent a body line"))
+(view-set-caret!
+  (editor-active-view scheme-indent-editor)
+  (+
+    (substring-position scheme-indent-second-line "\n1))")
+    1))
+(send! scheme-indent-editor scheme-indent-decoder (bytes 9))
+(unless
+  (bytevector=?
+    (buffer-bytes scheme-indent-buffer)
+    (string->utf8
+      "(define (value x)\n  (+ x\n     1))\n"))
+  (error 'editor-tests
+         "scheme-mode Tab did not align a continuation datum"))
+(editor-close! scheme-indent-editor)
+
+(define scheme-enter-source "(define (value x)")
+(define scheme-enter-document
+  (make-document scheme-enter-source 989))
+(define scheme-enter-buffer
+  (make-buffer
+    989
+    scheme-enter-document
+    "enter.scm"
+    'scheme-mode))
+(define scheme-enter-editor
+  (make-editor scheme-enter-buffer))
+(define scheme-enter-decoder (make-input-decoder))
+(view-set-caret!
+  (editor-active-view scheme-enter-editor)
+  (string-length scheme-enter-source))
+(send! scheme-enter-editor scheme-enter-decoder (bytes 13))
+(unless
+  (and
+    (bytevector=?
+      (buffer-bytes scheme-enter-buffer)
+      (string->utf8 "(define (value x)\n  "))
+    (=
+      (view-caret (editor-active-view scheme-enter-editor))
+      (+ (string-length scheme-enter-source) 3)))
+  (error 'editor-tests
+         "scheme-mode Enter did not insert structural indentation"))
+(editor-update!
+  scheme-enter-editor
+  (make-command-message 'edit.undo #f))
+(unless
+  (bytevector=?
+    (buffer-bytes scheme-enter-buffer)
+    (string->utf8 scheme-enter-source))
+  (error 'editor-tests
+         "scheme-mode Enter was not one undo transaction"))
+(editor-close! scheme-enter-editor)
+
 (define cpp-enter-document
   (make-document "int main() {}\n" 984))
 (define cpp-enter-buffer

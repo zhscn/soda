@@ -277,7 +277,7 @@
           "Reindent the complete REPL entry.")))
     (keymap-bind!
       keymap
-      (list (make-key-stroke 'tab 9 2))
+      (list (make-key-stroke 'tab 9 0))
       'scheme.repl-indent-line)
     (keymap-bind!
       keymap

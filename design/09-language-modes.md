@@ -184,6 +184,13 @@ IndentDecision，再用普通 Buffer transaction 写回 leading whitespace。`cp
 between-braces 等结构执行单次原子编辑并返回 Document change，Buffer 接受 change
 后统一更新 revision、undo history、View caret 与 language runtime。
 
+`scheme-mode` 的 Tab 绑定到 `scheme.indent-line`，按未闭合 delimiter、operator 和
+第二个 datum 的位置重新计算当前行缩进。Enter 绑定到
+`scheme.newline-and-indent`，用 caret 前的 Scheme lexical context 生成换行和
+leading spaces；active region 被同一次 replacement 取代。字符串、quoted symbol、
+字符字面量和注释中的 delimiter 不参与结构缩进。每次命令只产生一个 Document
+transaction。
+
 language profile 的 delimiter pairs 同时驱动通用 `move.matching-delimiter`
 命令。`M-]` 接受 point 上或 point 前的 delimiter，以同类嵌套深度扫描并移动到
 配对位置；没有声明 pairs 的 mode 使用圆括号、方括号和花括号。

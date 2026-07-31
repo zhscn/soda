@@ -583,10 +583,10 @@
          "Down at the last entry line did not restore the draft"))
 
 (insert-text! "(if test\nx")
-(press-key! 'tab 9 2)
+(press-key! 'tab 9 0)
 (unless (string=? (repl-input) "(if test\n    x")
   (error 'repl-tests
-         "M-Tab did not reindent the current REPL entry line"))
+         "Tab did not reindent the current REPL entry line"))
 (dispatch! (make-command-message 'scheme.repl-clear-input #f))
 
 (define unindented-entry

@@ -643,6 +643,7 @@
           (soda editor prefix-commands)
           (soda editor repl)
           (soda editor scheme-completion)
+          (soda editor scheme-commands)
           (soda editor scheme-document-highlight)
           (soda editor scheme-help)
           (soda editor scheme-interface-commands)
@@ -860,5 +861,6 @@
         editor scheme-workspace)
       (install-diagnostic-commands!
         editor scheme-workspace)
+      (install-scheme-commands! editor)
       (install-cpp-commands! editor)
       editor)))
