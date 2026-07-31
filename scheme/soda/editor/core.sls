@@ -303,6 +303,11 @@
           editor-clear-annotation-sets!
           prefix-argument?
           prefix-argument-value
+          prefix-argument-kind
+          prefix-argument-sign
+          prefix-argument-magnitude
+          prefix-argument-universal?
+          prefix-argument-explicit?
           prefix-argument-universal
           prefix-argument-digit
           prefix-argument-negative
@@ -320,6 +325,30 @@
           interactive-message-argument
           interactive-point
           interactive-region
+          make-command-target
+          command-target?
+          command-target-source
+          command-target-buffer-id
+          command-target-document-id
+          command-target-revision
+          command-target-start
+          command-target-end
+          command-target-point
+          command-target-mark
+          command-target-forward?
+          command-target-properties
+          command-target-empty?
+          command-target-current?
+          make-command-target-selector
+          command-target-selector?
+          resolve-command-target
+          make-command-target-reader
+          command-context-point-target
+          command-context-line-target
+          command-context-buffer-target
+          buffer-major-mode-feature
+          buffer-major-mode-function
+          call-buffer-major-mode-function
           interactive-string
           interactive-number
           interactive-completing-read
@@ -664,6 +693,7 @@
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
+          (soda editor command-target)
           (soda editor commands basic)
           (soda editor commands buffer)
           (soda editor commands configuration)
@@ -691,6 +721,7 @@
           (soda editor location)
           (soda editor minor-mode)
           (soda editor minor-mode-runtime)
+          (soda editor mode-runtime)
           (soda editor motion-protocol)
           (soda editor navigation)
           (soda editor prompt)

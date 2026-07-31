@@ -1,6 +1,11 @@
 (library (soda editor prefix)
   (export prefix-argument?
           prefix-argument-value
+          prefix-argument-kind
+          prefix-argument-sign
+          prefix-argument-magnitude
+          prefix-argument-universal?
+          prefix-argument-explicit?
           prefix-argument-universal
           prefix-argument-digit
           prefix-argument-negative
@@ -19,6 +24,22 @@
         prefix))
     (* (prefix-argument-sign prefix)
        (prefix-argument-magnitude prefix)))
+
+  (define (prefix-argument-universal? prefix)
+    (unless (prefix-argument? prefix)
+      (assertion-violation
+        'prefix-argument-universal?
+        "expected a prefix argument"
+        prefix))
+    (eq? (prefix-argument-kind prefix) 'universal))
+
+  (define (prefix-argument-explicit? prefix)
+    (unless (prefix-argument? prefix)
+      (assertion-violation
+        'prefix-argument-explicit?
+        "expected a prefix argument"
+        prefix))
+    (memq (prefix-argument-kind prefix) '(digits negative)))
 
   (define (prefix-argument-universal current)
     (cond

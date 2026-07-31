@@ -1622,9 +1622,19 @@
 
 (send! prefix-editor prefix-decoder (bytes 21))
 (unless
-  (and (= (prefix-argument-value
-            (editor-pending-prefix prefix-editor))
-          4)
+  (and
+    (= (prefix-argument-value
+         (editor-pending-prefix prefix-editor))
+       4)
+    (eq?
+      (prefix-argument-kind
+        (editor-pending-prefix prefix-editor))
+      'universal)
+    (prefix-argument-universal?
+      (editor-pending-prefix prefix-editor))
+    (not
+      (prefix-argument-explicit?
+        (editor-pending-prefix prefix-editor)))
        (string=? (editor-status-message prefix-editor) "Prefix: 4"))
   (error 'editor-tests "C-u did not establish a universal argument"))
 (send! prefix-editor prefix-decoder (bytes #x1b #x5b #x43))
@@ -1640,6 +1650,17 @@
     "M-2 did not repeat forward-word"
     (view-caret prefix-view)
     (editor-status-message prefix-editor)))
+
+(let ([explicit (prefix-argument-digit #f 4)])
+  (unless
+    (and
+      (= (prefix-argument-value explicit) 4)
+      (eq? (prefix-argument-kind explicit) 'digits)
+      (prefix-argument-explicit? explicit)
+      (not (prefix-argument-universal? explicit)))
+    (error 'editor-tests
+           "raw prefix kind did not distinguish M-4 from C-u")))
+
 (send! prefix-editor prefix-decoder (bytes 27 45 49 27 102))
 (unless (= (view-caret prefix-view) 8)
   (error 'editor-tests "negative argument did not reverse word motion"))
@@ -1679,6 +1700,66 @@
              (not (editor-status-message prefix-editor)))
   (error 'editor-tests "keyboard quit did not clear a pending prefix"))
 (editor-close! prefix-editor)
+
+(define target-document
+  (make-document "alpha\nbeta" 997))
+(define target-buffer
+  (make-buffer
+    997
+    target-document
+    "*command-target*"
+    'fundamental-mode))
+(define target-editor (make-editor target-buffer))
+(define target-view (editor-active-view target-editor))
+(view-set-caret! target-view 4)
+(view-set-mark! target-view 1)
+(define target-context
+  (make-command-context
+    target-editor
+    target-view
+    #f
+    #f))
+(define region-first-selector
+  (make-command-target-selector
+    'prefer
+    #f
+    command-context-line-target))
+(define selected-target
+  (resolve-command-target
+    region-first-selector
+    target-context))
+(unless
+  (and
+    (eq? (command-target-source selected-target) 'region)
+    (= (command-target-start selected-target) 1)
+    (= (command-target-end selected-target) 4)
+    (= (command-target-point selected-target) 4)
+    (= (command-target-mark selected-target) 1)
+    (command-target-forward? selected-target)
+    (command-target-current? selected-target target-buffer))
+  (error 'editor-tests
+         "region-first command target did not retain invocation state"))
+(view-deactivate-mark! target-view)
+(define line-target
+  (resolve-command-target
+    region-first-selector
+    target-context))
+(unless
+  (and
+    (eq? (command-target-source line-target) 'line)
+    (= (command-target-start line-target) 0)
+    (= (command-target-end line-target) 5))
+  (error 'editor-tests
+         "command target did not fall back to the current line"))
+(buffer-replace-range!
+  target-buffer
+  0
+  0
+  (string->utf8 "!"))
+(unless (not (command-target-current? line-target target-buffer))
+  (error 'editor-tests
+         "revision-scoped command target survived a document edit"))
+(editor-close! target-editor)
 
 (define transform-document
   (make-document "ab one TWO three" 976))
