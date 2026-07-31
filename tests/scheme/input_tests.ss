@@ -94,6 +94,33 @@
              (key-event-modifier? (car legacy-ctrl-q) 'ctrl))
   (error 'input-tests "legacy ctrl-q differs" legacy-ctrl-q))
 
+(define legacy-ctrl-h
+  (input-decoder-feed! decoder (bytes 8)))
+(unless
+  (and
+    (= (length legacy-ctrl-h) 1)
+    (eq? (key-event-key (car legacy-ctrl-h)) 'character)
+    (= (key-event-codepoint (car legacy-ctrl-h))
+       (char->integer #\h))
+    (key-event-modifier? (car legacy-ctrl-h) 'ctrl)
+    (not (key-event-modifier? (car legacy-ctrl-h) 'alt)))
+  (error 'input-tests "legacy ctrl-h differs" legacy-ctrl-h))
+
+(define legacy-alt-ctrl-h
+  (input-decoder-feed! decoder (bytes 27 8)))
+(unless
+  (and
+    (= (length legacy-alt-ctrl-h) 1)
+    (eq? (key-event-key (car legacy-alt-ctrl-h)) 'character)
+    (= (key-event-codepoint (car legacy-alt-ctrl-h))
+       (char->integer #\h))
+    (key-event-modifier? (car legacy-alt-ctrl-h) 'ctrl)
+    (key-event-modifier? (car legacy-alt-ctrl-h) 'alt))
+  (error
+    'input-tests
+    "legacy alt-ctrl-h differs"
+    legacy-alt-ctrl-h))
+
 (define legacy-alt-backspace
   (input-decoder-feed! decoder (bytes 27 127)))
 (unless

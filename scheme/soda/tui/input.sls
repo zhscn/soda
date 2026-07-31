@@ -320,7 +320,7 @@
     (cond
       [(or (= byte 10) (= byte 13))
        (make-key-event 'enter 13 #f #f 0 'press (make-bytevector 0))]
-      [(or (= byte 8) (= byte 127))
+      [(= byte 127)
        (make-key-event 'backspace 127 #f #f 0 'press (make-bytevector 0))]
       [(= byte 9)
        (make-key-event 'tab 9 #f #f 0 'press (make-bytevector 0))]
@@ -472,7 +472,7 @@
                                      'press
                                      (single-byte next))
                                    events))]
-                              [(or (= next 8) (= next 127))
+                              [(= next 127)
                                (parse-normal
                                  bytes
                                  (+ index 2)
@@ -483,6 +483,20 @@
                                      #f
                                      #f
                                      2
+                                     'press
+                                     (make-bytevector 0))
+                                   events))]
+                              [(= next 8)
+                               (parse-normal
+                                 bytes
+                                 (+ index 2)
+                                 (cons
+                                   (make-key-event
+                                     'character
+                                     (char->integer #\h)
+                                     #f
+                                     #f
+                                     6
                                      'press
                                      (make-bytevector 0))
                                    events))]

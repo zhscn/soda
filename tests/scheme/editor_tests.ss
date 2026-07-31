@@ -289,6 +289,16 @@
 (unless (= (view-caret (editor-active-view editor)) 3)
   (error 'editor-tests "self-insert did not advance the view caret"))
 
+(send! editor decoder (bytes 8))
+(unless
+  (and
+    (bytevector=? (buffer-bytes buffer) (string->utf8 "abc"))
+    (= (length (editor-pending-keys editor)) 1))
+  (error 'editor-tests "legacy C-h did not enter the help prefix"))
+(send! editor decoder (bytes 7))
+(unless (null? (editor-pending-keys editor))
+  (error 'editor-tests "C-g did not clear the help prefix"))
+
 (send! editor decoder (bytes 127))
 (unless (bytevector=? (buffer-bytes buffer) (string->utf8 "ab"))
   (error 'editor-tests "backspace command did not edit the buffer"))

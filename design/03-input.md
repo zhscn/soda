@@ -43,6 +43,10 @@ bracketed paste，退出时恢复原状态。decoder 同时接受：
 - UTF-8 文本；
 - 可跨 read 边界的 bracketed paste。
 
+legacy control byte `0x08` 表示 `C-h`。Backspace 只由 DEL（`0x7f`）或 Kitty
+协议中明确的 Backspace 事件表示；decoder 不使用终端的历史 `C-h`/Backspace
+兼容映射。
+
 按键归一为：
 
 ```text
