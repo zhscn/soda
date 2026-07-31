@@ -61,9 +61,17 @@ session 持有的可变 Chez environment，因此顶层定义在后续 request �
 只有在 session id、generation 和 `evaluating` 状态仍匹配时才能应用；过期结果不
 能修改 transcript 或 Editor。
 
-求值与 command loop 位于同一线程。一次求值返回前，输入分发和 frame rendering
-不会推进。交互命令应保持有界；需要跨 turn 推进的工作通过显式 effect 和带
-revision 的后续 message 表达。
+求值与 command loop 位于同一线程，并由 Chez engine 划分为有界 slice。每个
+`EvaluationTask` 持有可续跑 engine；libuv 单次 timer 触发一个带固定 tick fuel 的
+slice。engine 完成时产生 result，fuel 耗尽时保存后继 engine 并重新安排 timer。
+timer turn 之间，command loop 继续分发输入、处理 I/O 和绘制 frame。Scheme
+计算因此具有协作式抢占，而 Editor 状态仍由单线程串行持有。
+
+`scheme.interrupt-evaluation` 将运行中的 task 标记为 interrupted 并丢弃其后继
+engine。下一次 timer turn 产生 `interrupted` result，session 回到 `ready`，
+transcript 显示中断状态。已经执行的顶层副作用不会回滚，evaluator generation
+随中断失效。engine 的 tick 抢占发生在 Chez 安全点；不可分割的 native FFI 调用
+必须自行保持有界或使用异步 runtime。
 
 每个 editor message 构成一个顶层异常边界。正常 command result 继续进入 effect
 executor；未处理的 Scheme condition 被保存为 Editor 所有的 `DebuggerSession`，

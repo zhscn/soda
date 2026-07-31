@@ -163,6 +163,20 @@ if(CHEZ_SCHEME_EXECUTABLE)
   )
 
   add_test(
+    NAME scheme_evaluation_runtime_tests
+    CONFIGURATIONS Debug Release
+    COMMAND
+      ${CMAKE_COMMAND} -E env
+      SODA_DOCUMENT_LIBRARY=${SODA_SCHEME_NATIVE_LIBRARY}
+      SODA_CPP_ANALYSIS_LIBRARY=${SODA_SCHEME_NATIVE_LIBRARY}
+      SODA_INDENTATION_LIBRARY=${SODA_SCHEME_NATIVE_LIBRARY}
+      SODA_RUNTIME_LIBRARY=${SODA_SCHEME_NATIVE_LIBRARY}
+      ${CHEZ_SCHEME_EXECUTABLE}
+      --libdirs ${PROJECT_SOURCE_DIR}/scheme
+      --program ${CMAKE_CURRENT_SOURCE_DIR}/scheme/evaluation_runtime_tests.ss
+  )
+
+  add_test(
     NAME scheme_semantics_tests
     CONFIGURATIONS Debug Release
     COMMAND

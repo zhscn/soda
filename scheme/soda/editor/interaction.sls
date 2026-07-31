@@ -405,10 +405,10 @@
         'make-evaluation-result
         "expected an evaluation request"
         request))
-    (unless (memq status '(value condition))
+    (unless (memq status '(value condition interrupted))
       (assertion-violation
         'make-evaluation-result
-        "status must be value or condition"
+        "status must be value, condition, or interrupted"
         status))
     (unless (list? values)
       (assertion-violation

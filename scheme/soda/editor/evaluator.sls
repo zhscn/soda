@@ -10,6 +10,13 @@
           chez-evaluator-ref
           chez-evaluator-evaluate
           chez-evaluator-evaluate-file!
+          chez-evaluator-invalidate!
+          make-evaluation-task
+          evaluation-task?
+          evaluation-task-request
+          evaluation-task-state
+          evaluation-task-step!
+          evaluation-task-interrupt!
           evaluation-result-continuation
           evaluation-result->transcript
           runtime-binding?
@@ -52,6 +59,24 @@
       signature-formals
       generation))
 
+  (define-record-type
+    (evaluation-task %make-evaluation-task evaluation-task?)
+    (fields
+      request
+      evaluator
+      (mutable engine
+               evaluation-task-engine
+               evaluation-task-engine-set!)
+      (mutable state
+               evaluation-task-state
+               evaluation-task-state-set!)
+      (mutable started?
+               evaluation-task-started?
+               evaluation-task-started?-set!)
+      (mutable result
+               evaluation-task-result
+               evaluation-task-result-set!)))
+
   (define (make-chez-evaluator)
     (let ([environment
             (copy-environment (scheme-environment))])
@@ -68,6 +93,17 @@
           '()
           -1
           '()))))
+
+  (define (chez-evaluator-invalidate! evaluator)
+    (unless (chez-evaluator? evaluator)
+      (assertion-violation
+        'chez-evaluator-invalidate!
+        "expected a Chez evaluator"
+        evaluator))
+    (chez-evaluator-generation-set!
+      evaluator
+      (+ 1 (chez-evaluator-generation evaluator)))
+    evaluator)
 
   (define (chez-evaluator-symbols evaluator)
     (unless (chez-evaluator? evaluator)
@@ -313,9 +349,7 @@
                 path
                 (lambda (port)
                   (evaluate-port environment port)))])
-        (chez-evaluator-generation-set!
-          evaluator
-          (+ 1 (chez-evaluator-generation evaluator)))
+        (chez-evaluator-invalidate! evaluator)
         values)))
 
   (define (chez-evaluator-evaluate
@@ -385,9 +419,7 @@
                       environment
                       (evaluation-request-source request)))))
               (close-port input-port)
-              (chez-evaluator-generation-set!
-                evaluator
-                (+ 1 (chez-evaluator-generation evaluator)))
+              (chez-evaluator-invalidate! evaluator)
               (make-evaluation-result
                 request
                 (if failure 'condition 'value)
@@ -396,6 +428,109 @@
                 (extract-error)
                 failure
                 (reverse messages))))))))
+
+  (define (make-evaluation-task evaluator request editor session)
+    (unless (chez-evaluator? evaluator)
+      (assertion-violation
+        'make-evaluation-task
+        "expected a Chez evaluator"
+        evaluator))
+    (unless (evaluation-request? request)
+      (assertion-violation
+        'make-evaluation-task
+        "expected an evaluation request"
+        request))
+    (unless (interaction-session? session)
+      (assertion-violation
+        'make-evaluation-task
+        "expected an interaction session"
+        session))
+    (%make-evaluation-task
+      request
+      evaluator
+      (make-engine
+        (lambda ()
+          (chez-evaluator-evaluate
+            evaluator
+            request
+            editor
+            session)))
+      'ready
+      #f
+      #f))
+
+  (define (evaluation-task-interrupt! task)
+    (unless (evaluation-task? task)
+      (assertion-violation
+        'evaluation-task-interrupt!
+        "expected an evaluation task"
+        task))
+    (when (memq (evaluation-task-state task) '(ready running))
+      (when (evaluation-task-started? task)
+        (chez-evaluator-invalidate!
+          (evaluation-task-evaluator task)))
+      (let ([result
+              (make-evaluation-result
+                (evaluation-task-request task)
+                'interrupted
+                '()
+                ""
+                ""
+                #f
+                '())])
+        (evaluation-task-engine-set! task #f)
+        (evaluation-task-result-set! task result)
+        (evaluation-task-state-set! task 'interrupted)))
+    (evaluation-task-result task))
+
+  (define (evaluation-task-step! task ticks)
+    (unless (evaluation-task? task)
+      (assertion-violation
+        'evaluation-task-step!
+        "expected an evaluation task"
+        task))
+    (unless
+      (and
+        (integer? ticks)
+        (exact? ticks)
+        (positive? ticks)
+        (fixnum? ticks))
+      (assertion-violation
+        'evaluation-task-step!
+        "ticks must be a positive fixnum"
+        ticks))
+    (case (evaluation-task-state task)
+      [(completed interrupted)
+       (evaluation-task-result task)]
+      [(ready running)
+       (evaluation-task-started?-set! task #t)
+       (evaluation-task-state-set! task 'running)
+       (let ([outcome
+               ((evaluation-task-engine task)
+                ticks
+                (lambda (remaining result)
+                  (list 'completed result))
+                (lambda (engine)
+                  (list 'expired engine)))])
+         (case (car outcome)
+           [(completed)
+            (evaluation-task-engine-set! task #f)
+            (evaluation-task-result-set! task (cadr outcome))
+            (evaluation-task-state-set! task 'completed)
+            (evaluation-task-result task)]
+           [(expired)
+            (evaluation-task-engine-set! task (cadr outcome))
+            #f]
+           [else
+            (assertion-violation
+              'evaluation-task-step!
+              "engine returned an unknown outcome"
+              outcome)]))]
+      [else
+       (assertion-violation
+         'evaluation-task-step!
+         "evaluation task has an invalid state"
+         (evaluation-task-state task))]))
 
   (define (string-ends-in-newline? value)
     (and (positive? (string-length value))
@@ -443,4 +578,7 @@
            (display-condition
              (evaluation-result-condition result)
              port)
+           (newline port)]
+          [(interrupted)
+           (display "Interrupted" port)
            (newline port)])))))

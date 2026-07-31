@@ -11,6 +11,7 @@
           (soda editor debugger-commands)
           (soda editor effect)
           (soda editor event)
+          (soda editor evaluation-runtime)
           (soda editor file)
           (soda editor file-runtime)
           (soda editor repl)
@@ -231,6 +232,7 @@
           [cursor-color #f]
           [decoder (make-input-decoder)]
           [executor (make-effect-executor)]
+          [evaluation-adapter #f]
           [file-adapter #f]
           [scheme-interface-adapter #f]
           [scheme-project-build-adapter #f]
@@ -350,6 +352,13 @@
                   executor
                   message)])
           continue?))
+      (define (handle-session-messages! messages)
+        (let loop ([remaining messages])
+          (or
+            (null? remaining)
+            (and
+              (handle-session-message! (car remaining))
+              (loop (cdr remaining))))))
       (define (handle-session-input-events! events)
         (let loop ([events events])
           (if (null? events)
@@ -383,7 +392,11 @@
           executor runtime))
       (set! vfs-adapter
         (install-vfs-runtime! editor runtime))
-      (install-interaction-effect-handler! executor editor)
+      (set! evaluation-adapter
+        (install-evaluation-runtime!
+          executor
+          runtime
+          editor))
       (install-completion-effect-handlers!
         executor
         (editor-completion-provider-catalog editor))
@@ -425,6 +438,19 @@
                         (eq? (event-kind (car events)) 'fd-ready))
                    (flush-output!)
                    (process (cdr events) continue?)]
+                  [(and
+                     evaluation-adapter
+                     (evaluation-runtime-event?
+                       evaluation-adapter
+                       (car events)))
+                   (process
+                     (cdr events)
+                     (and
+                       continue?
+                       (handle-session-messages!
+                         (evaluation-runtime-handle-event
+                           evaluation-adapter
+                           (car events)))))]
                   [(and resize-timer
                         (= (event-source (car events)) resize-timer)
                         (eq? (event-kind (car events)) 'timer))

@@ -237,6 +237,35 @@
                     2)))
               '())))))
 
+  (define (interrupt-evaluation-command context)
+    (let* ([editor (command-context-editor context)]
+           [active-buffer
+             (view-buffer (command-context-view context))]
+           [active-session
+             (editor-interaction-for-buffer
+               editor
+               (buffer-id active-buffer))]
+           [session
+             (if
+               (and
+                 active-session
+                 (eq? (interaction-session-state active-session)
+                      'evaluating))
+               active-session
+               (find
+                 (lambda (candidate)
+                   (eq? (interaction-session-state candidate)
+                        'evaluating))
+                 (editor-interactions editor)))])
+      (unless session
+        (editor-user-error
+          'scheme.interrupt-evaluation
+          "No Scheme evaluation is running"))
+      (list
+        (make-command-effect
+          'scheme.interrupt-evaluation
+          (interaction-session-id session)))))
+
   (define (eval-expression-command context)
     (let* ([argument (command-context-argument context)]
            [source
@@ -420,6 +449,10 @@
           repl-submit-command
           "Submit the editable input in the REPL transcript.")
         (list
+          'scheme.interrupt-evaluation
+          interrupt-evaluation-command
+          "Interrupt the active cooperative Scheme evaluation.")
+        (list
           'scheme.repl-history-previous
           comint-history-previous-command
           "Replace REPL input with the previous history entry.")
@@ -573,7 +606,19 @@
             'character
             (char->integer #\u)
             4))
-        'interaction.clear-input))
+        'interaction.clear-input)
+      (keymap-bind!
+        keymap
+        (list
+          (make-key-stroke
+            'character
+            (char->integer #\c)
+            4)
+          (make-key-stroke
+            'character
+            (char->integer #\c)
+            4))
+        'scheme.interrupt-evaluation))
     (editor-bind-key!
       editor
       (list
