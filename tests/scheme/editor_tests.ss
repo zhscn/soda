@@ -2628,6 +2628,39 @@
   (error 'editor-tests "transpose-lines changed final newline policy"))
 (editor-close! transpose-lines-editor)
 
+(define join-line-buffer
+  (make-buffer
+    9762
+    (make-document "one  \n   two\nthree" 9762)
+    "*join-line*"
+    'fundamental-mode))
+(define join-line-editor (make-editor join-line-buffer))
+(define join-line-view (editor-active-view join-line-editor))
+(view-set-caret! join-line-view 9)
+(editor-update!
+  join-line-editor
+  (make-command-message 'edit.join-line #f))
+(unless
+  (and
+    (bytevector=?
+      (buffer-bytes join-line-buffer)
+      (string->utf8 "one two\nthree"))
+    (= (view-caret join-line-view) 4))
+  (error 'editor-tests "join-line did not normalize boundary whitespace"))
+(view-set-caret! join-line-view 0)
+(editor-update!
+  join-line-editor
+  (make-command-message
+    'edit.join-line
+    #f
+    (prefix-argument-universal #f)))
+(unless
+  (bytevector=?
+    (buffer-bytes join-line-buffer)
+    (string->utf8 "one two three"))
+  (error 'editor-tests "join-line prefix did not join the following line"))
+(editor-close! join-line-editor)
+
 (define yank-pop-document (make-document "" 977))
 (define yank-pop-buffer
   (make-buffer

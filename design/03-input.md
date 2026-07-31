@@ -16,6 +16,7 @@
 | regexp capture replacement 与大小写转换 | 已实现 |
 | literal/regexp search case policy 与 smart-case | 已实现 |
 | `edit.transpose-lines` | 已实现 |
+| `edit.join-line` | 已实现 |
 
 本文只定义文本编辑器当前使用的输入路径。minibuffer 的读取与焦点规则由
 [12-minibuffer.md](12-minibuffer.md) 定义；command 与 interactive 参数由
@@ -167,6 +168,11 @@ language profile 和 Unicode 默认实现解析。
 target，并将前一行旋转到 target 末尾；位于首行时以首行和其后行构造同一 target。
 末尾空逻辑行归属于文件终止换行，不作为独立交换对象。命令保留原范围是否具有末尾
 newline，并以一次 Buffer transaction 提交整个旋转。
+
+`edit.join-line` 默认删除当前逻辑行与前一行之间的 newline；带 prefix argument 时
+删除当前行与下一行之间的 newline。连接点两侧的 horizontal whitespace 一并归一；
+两侧都有非空内容时保留一个空格，否则不插入分隔符。该归一化和 newline 删除属于
+同一次 Buffer transaction。
 
 ## Search 与 query replace
 

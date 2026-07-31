@@ -255,6 +255,56 @@
                       (+ start (bytevector-length replacement))))))))))
       '()))
 
+  (define (horizontal-space-byte? byte)
+    (or (= byte 9) (= byte 32)))
+
+  (define (trimmed-line-end text line)
+    (let loop ([offset (text-line-content-end text line)])
+      (if (and (> offset (text-line-start text line))
+               (horizontal-space-byte?
+                 (text-byte-at text (- offset 1))))
+          (loop (- offset 1))
+          offset)))
+
+  (define (trimmed-line-start text line)
+    (let ([end (text-line-content-end text line)])
+      (let loop ([offset (text-line-start text line)])
+        (if (and (< offset end)
+                 (horizontal-space-byte? (text-byte-at text offset)))
+            (loop (+ offset 1))
+            offset))))
+
+  (define (join-line-command context)
+    (let ([view (command-context-view context)])
+      (let ([buffer (view-buffer view)])
+        (with-document-text
+          (buffer-document buffer)
+          (lambda (text)
+            (let* ([line-count (text-line-count text)]
+                   [point-line
+                     (car (text-position text (view-caret view)))]
+                   [left-line
+                     (if (command-context-prefix context)
+                         point-line
+                         (- point-line 1))]
+                   [right-line (+ left-line 1)])
+              (when (and (>= left-line 0) (< right-line line-count))
+                (let* ([start (trimmed-line-end text left-line)]
+                       [end (trimmed-line-start text right-line)]
+                       [space?
+                         (and
+                           (> start (text-line-start text left-line))
+                           (< end (text-line-content-end text right-line)))]
+                       [replacement
+                         (if space?
+                             (u8-list->bytevector '(32))
+                             (make-bytevector 0))])
+                  (buffer-replace-range! buffer start end replacement)
+                  (view-set-caret!
+                    view
+                    (+ start (bytevector-length replacement)))))))))
+      '()))
+
   (define (word-transform-target context)
     (let* ([view (command-context-view context)]
            [buffer (view-buffer view)]
@@ -345,6 +395,10 @@
           transpose-lines-command
           "Transpose the preceding line with following lines.")
         (list
+          'edit.join-line
+          join-line-command
+          "Join the current line with its predecessor.")
+        (list
           'edit.upcase-word
           upcase-word-command
           "Convert words following point to uppercase.")
@@ -362,6 +416,7 @@
       (list
         (cons (stroke #\t 4) 'edit.transpose-characters)
         (cons (stroke #\t 2) 'edit.transpose-words)
+        (cons (stroke #\^ 2) 'edit.join-line)
         (cons (stroke #\u 2) 'edit.upcase-word)
         (cons (stroke #\l 2) 'edit.downcase-word)
         (cons (stroke #\c 2) 'edit.capitalize-word)))
