@@ -305,6 +305,79 @@
                     (+ start (bytevector-length replacement)))))))))
       '()))
 
+  (define (blank-line? text line)
+    (let ([start (text-line-start text line)]
+          [end (text-line-content-end text line)])
+      (and
+        (or (< start (text-size text)) (> end start))
+        (let loop ([offset start])
+          (or (= offset end)
+              (and
+                (horizontal-space-byte? (text-byte-at text offset))
+                (loop (+ offset 1))))))))
+
+  (define (blank-run-first text line)
+    (let loop ([candidate line])
+      (if (and (positive? candidate)
+               (blank-line? text (- candidate 1)))
+          (loop (- candidate 1))
+          candidate)))
+
+  (define (blank-run-last text line)
+    (let ([last-line (- (text-line-count text) 1)])
+      (let loop ([candidate line])
+        (if (and (< candidate last-line)
+                 (blank-line? text (+ candidate 1)))
+            (loop (+ candidate 1))
+            candidate))))
+
+  (define (line-range-end text line)
+    (if (< line (- (text-line-count text) 1))
+        (text-line-start text (+ line 1))
+        (text-size text)))
+
+  (define (delete-blank-lines-command context)
+    (let* ([view (command-context-view context)]
+           [buffer (view-buffer view)])
+      (with-document-text
+        (buffer-document buffer)
+        (lambda (text)
+          (let* ([point-line
+                   (car (text-position text (view-caret view)))]
+                 [line
+                   (if
+                     (and
+                       (not (blank-line? text point-line))
+                       (positive? point-line)
+                       (= (text-line-start text point-line)
+                          (text-size text))
+                       (blank-line? text (- point-line 1)))
+                     (- point-line 1)
+                     point-line)]
+                 [current-blank? (blank-line? text line)]
+                 [candidate
+                   (if current-blank? line (+ line 1))])
+            (when
+              (and (< candidate (text-line-count text))
+                   (blank-line? text candidate))
+              (let* ([first (blank-run-first text candidate)]
+                     [last (blank-run-last text candidate)]
+                     [delete-first
+                       (if (and current-blank? (< first last))
+                           (+ first 1)
+                           first)]
+                     [start (text-line-start text delete-first)]
+                     [end (line-range-end text last)]
+                     [caret
+                       (if (and current-blank? (< first last))
+                           (text-line-start text first)
+                           start)])
+                (when (< start end)
+                  (buffer-replace-range!
+                    buffer start end (make-bytevector 0))
+                  (view-set-caret! view caret)))))))
+      '()))
+
   (define (word-transform-target context)
     (let* ([view (command-context-view context)]
            [buffer (view-buffer view)]
@@ -399,6 +472,10 @@
           join-line-command
           "Join the current line with its predecessor.")
         (list
+          'edit.delete-blank-lines
+          delete-blank-lines-command
+          "Delete blank lines around or following point.")
+        (list
           'edit.upcase-word
           upcase-word-command
           "Convert words following point to uppercase.")
@@ -424,4 +501,8 @@
       editor
       (list (stroke #\x 4) (stroke #\t 4))
       'edit.transpose-lines)
+    (editor-bind-key!
+      editor
+      (list (stroke #\x 4) (stroke #\o 4))
+      'edit.delete-blank-lines)
     editor))

@@ -17,6 +17,7 @@
 | literal/regexp search case policy 与 smart-case | 已实现 |
 | `edit.transpose-lines` | 已实现 |
 | `edit.join-line` | 已实现 |
+| `edit.delete-blank-lines` | 已实现 |
 
 本文只定义文本编辑器当前使用的输入路径。minibuffer 的读取与焦点规则由
 [12-minibuffer.md](12-minibuffer.md) 定义；command 与 interactive 参数由
@@ -173,6 +174,11 @@ newline，并以一次 Buffer transaction 提交整个旋转。
 删除当前行与下一行之间的 newline。连接点两侧的 horizontal whitespace 一并归一；
 两侧都有非空内容时保留一个空格，否则不插入分隔符。该归一化和 newline 删除属于
 同一次 Buffer transaction。
+
+`edit.delete-blank-lines` 在 point 位于空行时把连续空行压缩为一行，只有一行时删除
+该行；point 位于非空行时删除紧随其后的连续空行。仅含 horizontal whitespace 的行
+属于空行，文件末尾 newline 产生的空逻辑行不参与操作。删除作为一次 Buffer
+transaction 提交。
 
 ## Search 与 query replace
 

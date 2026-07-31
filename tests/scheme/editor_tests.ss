@@ -2661,6 +2661,58 @@
   (error 'editor-tests "join-line prefix did not join the following line"))
 (editor-close! join-line-editor)
 
+(define delete-blank-lines-buffer
+  (make-buffer
+    9763
+    (make-document "a\n\n\n  b" 9763)
+    "*delete-blank-lines*"
+    'fundamental-mode))
+(define delete-blank-lines-editor
+  (make-editor delete-blank-lines-buffer))
+(define delete-blank-lines-view
+  (editor-active-view delete-blank-lines-editor))
+(view-set-caret! delete-blank-lines-view 2)
+(editor-update!
+  delete-blank-lines-editor
+  (make-command-message 'edit.delete-blank-lines #f))
+(unless
+  (and
+    (bytevector=?
+      (buffer-bytes delete-blank-lines-buffer)
+      (string->utf8 "a\n\n  b"))
+    (= (view-caret delete-blank-lines-view) 2))
+  (error 'editor-tests "delete-blank-lines did not collapse a blank run"))
+(view-set-caret! delete-blank-lines-view 0)
+(editor-update!
+  delete-blank-lines-editor
+  (make-command-message 'edit.delete-blank-lines #f))
+(unless
+  (bytevector=?
+    (buffer-bytes delete-blank-lines-buffer)
+    (string->utf8 "a\n  b"))
+  (error 'editor-tests "delete-blank-lines did not remove a following blank line"))
+(buffer-undo! delete-blank-lines-buffer)
+(unless
+  (bytevector=?
+    (buffer-bytes delete-blank-lines-buffer)
+    (string->utf8 "a\n\n  b"))
+  (error 'editor-tests "delete-blank-lines was not one transaction"))
+(buffer-replace-range!
+  delete-blank-lines-buffer
+  0
+  (bytevector-length (buffer-bytes delete-blank-lines-buffer))
+  (string->utf8 "a\n\n"))
+(view-set-caret! delete-blank-lines-view 3)
+(editor-update!
+  delete-blank-lines-editor
+  (make-command-message 'edit.delete-blank-lines #f))
+(unless
+  (bytevector=?
+    (buffer-bytes delete-blank-lines-buffer)
+    (string->utf8 "a\n"))
+  (error 'editor-tests "delete-blank-lines treated the EOF sentinel as a line"))
+(editor-close! delete-blank-lines-editor)
+
 (define yank-pop-document (make-document "" 977))
 (define yank-pop-buffer
   (make-buffer
