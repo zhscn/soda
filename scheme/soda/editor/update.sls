@@ -5,6 +5,7 @@
           (soda editor command)
           (soda editor command-runtime)
           (soda editor completion)
+          (soda editor completion-commands)
           (soda editor condition)
           (soda editor debugger-commands)
           (soda editor event)
@@ -83,17 +84,30 @@
       (map (lambda (layer) (catalog-keymap editor layer)) layers)))
 
   (define (dispatch-text! editor event text)
-    (let ([state
-            (view-current-input-state
-              (editor-active-view editor))])
+    (let* ([view (editor-active-view editor)]
+           [buffer (view-buffer view)]
+           [revision (buffer-revision buffer)]
+           [state (view-current-input-state view)])
       (if (and (eq? (input-state-text-policy state) 'accept)
                (positive? (bytevector-length text)))
-          (run-interactive-command
-            editor
-            (input-state-text-command state)
-            event
-            text
-            #f)
+          (let ([effects
+                  (run-interactive-command
+                    editor
+                    (input-state-text-command state)
+                    event
+                    text
+                    #f)])
+            (when
+              (and
+                (eq? buffer
+                     (view-buffer (editor-active-view editor)))
+                (not (= revision (buffer-revision buffer))))
+              (editor-auto-trigger-completion!
+                editor
+                (utf8->string text)))
+            (append
+              effects
+              (editor-take-completion-effects! editor)))
           '())))
 
   (define (handle-key-event! editor event)

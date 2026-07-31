@@ -4941,6 +4941,86 @@
          "resolved completion edits were not committed atomically"))
 (editor-close! resolve-editor)
 
+(define auto-document (make-document "" 945))
+(define auto-buffer
+  (make-buffer 945 auto-document #f 'fundamental-mode))
+(define auto-editor (make-editor auto-buffer))
+(define auto-trigger-kind #f)
+(editor-register-completion-provider!
+  auto-editor
+  (make-completion-provider
+    'auto-test
+    (lambda (request)
+      (list
+        (make-completion-response-for-request request '() #t)))
+    (lambda (request) #f)))
+(buffer-set-local-setting!
+  auto-buffer
+  'completion-providers
+  '(auto-test))
+(buffer-set-local-setting!
+  auto-buffer
+  'completion-trigger-characters
+  '(#\.))
+(buffer-set-local-setting!
+  auto-buffer
+  'completion-trigger-predicate
+  (lambda (buffer caret kind text)
+    (set! auto-trigger-kind kind)
+    #f))
+(unless
+  (null?
+    (editor-update!
+      auto-editor
+      (make-input-message
+        (make-text-input-event
+          'paste
+          (string->utf8 "ab")))))
+  (error 'editor-tests
+         "syntax gate emitted automatic completion work"))
+(when (editor-active-completion auto-editor)
+  (error 'editor-tests
+         "syntax gate did not suppress automatic completion"))
+(buffer-set-local-setting!
+  auto-buffer
+  'completion-trigger-predicate
+  (lambda (buffer caret kind text)
+    (set! auto-trigger-kind kind)
+    #t))
+(let ([effects
+        (editor-update!
+          auto-editor
+          (make-input-message
+            (make-text-input-event
+              'text
+              (string->utf8 "."))))])
+  (unless
+    (and
+      (eq? auto-trigger-kind 'trigger-character)
+      (editor-active-completion auto-editor)
+      (= (length effects) 1)
+      (eq? (command-effect-kind (car effects))
+           'completion.request))
+    (error 'editor-tests
+           "provider trigger character did not start completion")))
+(editor-cancel-completion! auto-editor)
+(editor-take-completion-effects! auto-editor)
+(let ([effects
+        (editor-update!
+          auto-editor
+          (make-input-message
+            (make-text-input-event
+              'paste
+              (string->utf8 "xyz"))))])
+  (unless
+    (and
+      (eq? auto-trigger-kind 'identifier)
+      (editor-active-completion auto-editor)
+      (= (length effects) 1))
+    (error 'editor-tests
+           "identifier paste did not coalesce to one automatic trigger")))
+(editor-close! auto-editor)
+
 (define composition-document
   (make-document (string->utf8 "alpha alpine beta") 943))
 (define composition-buffer

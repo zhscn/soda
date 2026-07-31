@@ -747,6 +747,25 @@
           "Procedure that computes the completion range at point."
           'overlay)
         (make-setting-definition
+          'completion-auto-trigger?
+          #t
+          boolean?
+          "Whether identifier and provider trigger input starts completion."
+          'overlay)
+        (make-setting-definition
+          'completion-trigger-characters
+          '()
+          (lambda (value)
+            (and (list? value) (for-all char? value)))
+          "Characters that trigger provider completion."
+          'overlay)
+        (make-setting-definition
+          'completion-trigger-predicate
+          #f
+          (lambda (value) (or (not value) (procedure? value)))
+          "Optional syntax-aware predicate for automatic completion."
+          'overlay)
+        (make-setting-definition
           'scheme-environment-libraries
           '()
           scheme-library-name-list?

@@ -1,5 +1,6 @@
 (library (soda editor completion-commands)
-  (export install-completion-commands!)
+  (export install-completion-commands!
+          editor-auto-trigger-completion!)
   (import (rnrs)
           (soda document)
           (soda editor buffer)
@@ -130,9 +131,8 @@
       (lambda (value) (string-member? value words))
       (lambda (generation) #f)))
 
-  (define (complete-at-point-command context)
-    (let* ([editor (command-context-editor context)]
-           [view (command-context-view context)]
+  (define (complete-at-point! editor view quiet?)
+    (let* (
            [buffer (view-buffer view)]
            [caret (view-caret view)]
            [identifier-character?
@@ -163,9 +163,10 @@
                          before
                          (string-length before))])
                 (if (not range)
-                    (editor-set-status-message!
-                      editor
-                      "No completion at point")
+                    (unless quiet?
+                      (editor-set-status-message!
+                        editor
+                        "No completion at point"))
                     (let* ([start
                              (+
                                editable-start
@@ -205,9 +206,77 @@
                           (not
                             (completion-session-pending? completion)))
                         (editor-cancel-completion! editor)
-                        (editor-set-status-message!
-                          editor
-                          "No completions"))))))))
+                        (unless quiet?
+                          (editor-set-status-message!
+                            editor
+                            "No completions")))))))))
+      '()))
+
+  (define (complete-at-point-command context)
+    (complete-at-point!
+      (command-context-editor context)
+      (command-context-view context)
+      #f))
+
+  (define (string-last-character value)
+    (and
+      (positive? (string-length value))
+      (string-ref value (- (string-length value) 1))))
+
+  (define (trigger-character? buffer character)
+    (exists
+      (lambda (candidate)
+        (char=? candidate character))
+      (buffer-setting-ref
+        buffer
+        'completion-trigger-characters
+        '())))
+
+  (define (editor-auto-trigger-completion! editor inserted-text)
+    (require-open-editor
+      'editor-auto-trigger-completion!
+      editor)
+    (unless (string? inserted-text)
+      (assertion-violation
+        'editor-auto-trigger-completion!
+        "inserted text must be a string"
+        inserted-text))
+    (let* ([view (editor-active-view editor)]
+           [buffer (view-buffer view)]
+           [character (string-last-character inserted-text)]
+           [identifier-character?
+             (buffer-identifier-character? buffer)]
+           [identifier?
+             (and character (identifier-character? character))]
+           [provider-trigger?
+             (and character (trigger-character? buffer character))]
+           [gate
+             (buffer-setting-ref
+               buffer
+               'completion-trigger-predicate
+               #f)])
+      (when
+        (and
+          (not (editor-active-prompt editor))
+          (not (view-completion view))
+          (buffer-setting-ref
+            buffer
+            'completion-auto-trigger?
+            #t)
+          (pair?
+            (buffer-setting-ref
+              buffer
+              'completion-providers
+              '()))
+          (or identifier? provider-trigger?)
+          (or
+            (not gate)
+            (gate
+              buffer
+              (view-caret view)
+              (if provider-trigger? 'trigger-character 'identifier)
+              inserted-text)))
+        (complete-at-point! editor view #t))
       '()))
 
   (define (accept-completion-command context)
