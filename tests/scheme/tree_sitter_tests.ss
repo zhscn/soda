@@ -160,6 +160,18 @@
     (tsx . "const view = <div id=\"item\">ok</div>;\n")
     (yaml . "name: soda\ncount: 1\n")))
 
+(define structured-query-languages
+  '(css go html javascript lua python rust typescript tsx))
+
+(define (bundled-query-source language kind)
+  (if
+    (eq? language 'tsx)
+    (string-append
+      (tree-sitter-query-source 'typescript kind)
+      "\n"
+      (tree-sitter-query-source 'tsx kind))
+    (tree-sitter-query-source language kind)))
+
 (let loop ([samples bundled-language-samples]
            [document-id 100])
   (unless (null? samples)
@@ -203,6 +215,27 @@
             "bundled highlight query produced no captures"
             language))
         (tree-sitter-query-close! sample-query))
+      (when (memq language structured-query-languages)
+        (for-each
+          (lambda (kind)
+            (let ([query
+                    (make-tree-sitter-query
+                      sample-parser
+                      (bundled-query-source language kind))])
+              (when
+                (null?
+                  (tree-sitter-query-execute
+                    query
+                    sample-parser
+                    0
+                    (string-length source)))
+                (error
+                  'tree-sitter-tests
+                  "bundled structural query produced no captures"
+                  language
+                  kind))
+              (tree-sitter-query-close! query)))
+          '(indents textobjects)))
       (tree-sitter-parser-close! sample-parser)
       (snapshot-close! sample-snapshot)
       (document-close! sample-document)

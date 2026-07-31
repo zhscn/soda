@@ -27,6 +27,7 @@
           (soda editor auto-mode)
           (soda editor buffer)
           (soda editor decoration)
+          (soda editor display)
           (soda editor indentation-protocol)
           (soda editor language)
           (soda editor state)
@@ -297,6 +298,8 @@
   (define-record-type tree-sitter-indent-context
     (fields
       width
+      tab-width
+      use-tabs?
       syntax
       (mutable revision)
       (mutable captures)))
@@ -306,6 +309,40 @@
 
   (define (capture-before-line? capture line-start)
     (< (syntax-capture-start capture) line-start))
+
+  (define (capture-contains-offset? capture offset)
+    (and
+      (<= (syntax-capture-start capture) offset)
+      (< offset (syntax-capture-end capture))))
+
+  (define (capture-property capture name default)
+    (let ([entry
+            (assq
+              name
+              (syntax-capture-properties capture))])
+      (if entry (cdr entry) default)))
+
+  (define (capture-property-true? capture name)
+    (let ([value
+            (capture-property capture name #f)])
+      (or
+        (eq? value #t)
+        (equal? value "true")
+        (equal? value "yes")
+        (equal? value "1"))))
+
+  (define (capture-active-scope? capture line-start line-end)
+    (and
+      (capture-name=? capture 'indent.scope)
+      (or
+        (< (syntax-capture-start capture) line-start)
+        (and
+          (<= line-start (syntax-capture-start capture))
+          (< (syntax-capture-start capture) line-end)
+          (capture-property-true?
+            capture
+            'indent.include-start)))
+      (< line-start (syntax-capture-end capture))))
 
   (define (indent-depth-before-line captures line-start)
     (fold-left
@@ -322,10 +359,28 @@
       0
       captures))
 
-  (define (capture-starts-at? capture offset name)
+  (define (indent-scope-depth captures line-start line-end)
+    (length
+      (filter
+        (lambda (capture)
+          (capture-active-scope?
+            capture
+            line-start
+            line-end))
+        captures)))
+
+  (define (capture-at? capture offset name)
     (and
       (capture-name=? capture name)
-      (= (syntax-capture-start capture) offset)))
+      (or
+        (= (syntax-capture-start capture) offset)
+        (capture-contains-offset? capture offset))))
+
+  (define (captures-at captures offset name)
+    (filter
+      (lambda (capture)
+        (capture-at? capture offset name))
+      captures))
 
   (define (line-preserved? captures start end)
     (exists
@@ -345,6 +400,53 @@
             (memv (text-byte-at text offset) '(9 32)))
           (loop (+ offset 1))
           offset))))
+
+  (define (capture-span capture)
+    (- (syntax-capture-end capture)
+       (syntax-capture-start capture)))
+
+  (define (more-specific-capture left right)
+    (or
+      (not right)
+      (< (capture-span left) (capture-span right))
+      (and
+        (= (capture-span left) (capture-span right))
+        (> (syntax-capture-depth left)
+           (syntax-capture-depth right)))))
+
+  (define (active-alignment-capture captures line-start)
+    (fold-left
+      (lambda (best capture)
+        (if
+          (and
+            (capture-name=? capture 'indent.align)
+            (< (syntax-capture-start capture) line-start)
+            (< line-start (syntax-capture-end capture))
+            (more-specific-capture capture best))
+          capture
+          best))
+      #f
+      captures))
+
+  (define (make-leading-indentation context column)
+    (let* ([tab-width
+             (tree-sitter-indent-context-tab-width context)]
+           [tabs
+             (if
+               (tree-sitter-indent-context-use-tabs? context)
+               (div column tab-width)
+               0)]
+           [spaces
+             (if
+               (tree-sitter-indent-context-use-tabs? context)
+               (mod column tab-width)
+               column)]
+           [result
+             (make-bytevector (+ tabs spaces) 32)])
+      (do ([index 0 (+ index 1)])
+          [(= index tabs)]
+        (bytevector-u8-set! result index 9))
+      result))
 
   (define (ensure-indent-captures! context session snapshot)
     (unless
@@ -368,7 +470,9 @@
   (define (make-tree-sitter-indentation-provider syntax)
     (make-indentation-provider
       (lambda (setting-ref)
-        (let ([width (setting-ref 'indent-width 2)])
+        (let ([width (setting-ref 'indent-width 2)]
+              [tab-width (setting-ref 'tab-width 8)]
+              [use-tabs? (setting-ref 'use-tabs? #f)])
           (make-tree-sitter-indent-context
             (if
               (and
@@ -377,6 +481,14 @@
                 (positive? width))
               width
               2)
+            (if
+              (and
+                (integer? tab-width)
+                (exact? tab-width)
+                (positive? tab-width))
+              tab-width
+              8)
+            (and use-tabs? #t)
             syntax
             #f
             '())))
@@ -398,120 +510,351 @@
                       (line-preserved? captures start end)
                       #f
                       (let* ([depth
-                               (indent-depth-before-line
+                               (+
+                                 (indent-depth-before-line
+                                   captures
+                                   start)
+                                 (indent-scope-depth
+                                   captures
+                                   start
+                                   end))]
+                             [end-count
+                               (length
+                                 (captures-at
+                                   captures
+                                   content
+                                   'indent.end))]
+                             [branch-count
+                               (if
+                                 (null?
+                                   (captures-at
+                                     captures
+                                     content
+                                     'indent.branch))
+                                 0
+                                 1)]
+                             [zero?
+                               (not
+                                 (null?
+                                   (captures-at
+                                     captures
+                                     content
+                                     'indent.zero)))]
+                             [alignment
+                               (active-alignment-capture
                                  captures
                                  start)]
-                             [dedent?
-                               (exists
-                                 (lambda (capture)
-                                   (or
-                                     (capture-starts-at?
-                                       capture
-                                       content
-                                       'indent.end)
-                                     (capture-starts-at?
-                                       capture
-                                       content
-                                       'indent.branch)))
-                                 captures)]
-                             [column
+                             [base-column
                                (*
                                  (max
                                    0
-                                   (if dedent?
-                                       (- depth 1)
-                                       depth))
+                                   (-
+                                     depth
+                                     end-count
+                                     branch-count))
                                  (tree-sitter-indent-context-width
-                                   context))])
-                        (make-bytevector column 32))))))
+                                   context))]
+                             [column
+                               (cond
+                                 [zero? 0]
+                                 [alignment
+                                  (max
+                                    base-column
+                                    (text-cell-column
+                                      text
+                                      (syntax-capture-start alignment)
+                                      (tree-sitter-indent-context-tab-width
+                                        context)))]
+                                 [else base-column])])
+                        (make-leading-indentation
+                          context
+                          column))))))
             (lambda () (text-close! text)))))
       (lambda (context) #f)))
 
-  (define (string-contains? value needle)
-    (let ([limit
-            (- (string-length value)
-               (string-length needle))])
-      (let loop ([index 0])
-        (and
-          (<= index limit)
-          (or
-            (string=?
-              (substring
-                value
-                index
-                (+ index (string-length needle)))
-              needle)
-            (loop (+ index 1)))))))
+  (define (string-prefix? prefix value)
+    (and
+      (<= (string-length prefix)
+          (string-length value))
+      (string=?
+        prefix
+        (substring
+          value
+          0
+          (string-length prefix)))))
 
-  (define (capture-roles name)
-    (let* ([raw (symbol->string name)]
+  (define (string-suffix? suffix value)
+    (and
+      (<= (string-length suffix)
+          (string-length value))
+      (string=?
+        suffix
+        (substring
+          value
+          (-
+            (string-length value)
+            (string-length suffix))
+          (string-length value)))))
+
+  (define (text-object-descriptor capture)
+    (let* ([raw
+             (symbol->string
+               (syntax-capture-name capture))]
            [prefix "text-object."]
-           [value
-             (if
-               (and
-                 (>= (string-length raw)
-                     (string-length prefix))
-                 (string=?
-                   (substring
-                     raw
-                     0
-                     (string-length prefix))
-                   prefix))
-               (substring
-                 raw
-                 (string-length prefix)
-                 (string-length raw))
-               raw)])
-      (cond
-        [(or
-           (string-contains? value "comment")
-           (string-contains? value "documentation"))
-         '(comment text)]
-        [(string-contains? value "string")
-         '(sexp string text)]
-        [(or
-           (string-contains? value "function")
-           (string-contains? value "defun"))
-         '(sexp defun)]
-        [(or
-           (string-contains? value "array")
-           (string-contains? value "object")
-           (string-contains? value "list")
-           (string-contains? value "block"))
-         '(sexp list)]
-        [(or
-           (string-contains? value "statement")
-           (string-contains? value "pair"))
-         '(sexp statement)]
-        [else '(sexp)])))
+           [name
+             (if (string-prefix? prefix raw)
+                 (substring
+                   raw
+                   (string-length prefix)
+                   (string-length raw))
+                 raw)]
+           [inside-suffix ".inside"]
+           [around-suffix ".around"]
+           [extent
+             (cond
+               [(string-suffix? inside-suffix name)
+                'inside]
+               [(string-suffix? around-suffix name)
+                'around]
+               [else 'around])]
+           [base
+             (cond
+               [(eq? extent 'inside)
+                (substring
+                  name
+                  0
+                  (- (string-length name)
+                     (string-length inside-suffix)))]
+               [(string-suffix? around-suffix name)
+                (substring
+                  name
+                  0
+                  (- (string-length name)
+                     (string-length around-suffix)))]
+               [else name])])
+      (list
+        capture
+        (string->symbol base)
+        extent)))
 
-  (define (capture->structural-thing capture)
-    (let ([start (syntax-capture-start capture)]
-          [end (syntax-capture-end capture)]
-          [name (syntax-capture-name capture)])
+  (define (adjoin-role role roles)
+    (if (memq role roles) roles (append roles (list role))))
+
+  (define (capture-roles base)
+    (let ([roles
+            (cond
+              [(memq base '(comment documentation))
+               '(comment text)]
+              [(memq base '(string heredoc))
+               '(sexp string text)]
+              [(memq
+                 base
+                 '(function method defun
+                   constructor destructor))
+               '(sexp defun function)]
+              [(memq
+                 base
+                 '(class interface trait enum module namespace))
+               '(sexp defun class)]
+              [(memq base '(parameter parameters))
+               '(sexp list parameter)]
+              [(memq base '(argument arguments))
+               '(sexp list argument)]
+              [(memq
+                 base
+                 '(array object list tuple map set block body
+                   table element))
+               '(sexp list)]
+              [(memq
+                 base
+                 '(statement expression conditional loop
+                   assignment pair entry item declaration))
+               '(sexp statement)]
+              [(memq base '(call invocation))
+               '(sexp call)]
+              [else '(sexp)])])
+      (adjoin-role base roles)))
+
+  (define (descriptor-capture descriptor)
+    (car descriptor))
+
+  (define (descriptor-base descriptor)
+    (cadr descriptor))
+
+  (define (descriptor-extent descriptor)
+    (caddr descriptor))
+
+  (define (same-outer? left right)
+    (and
+      (eq? (descriptor-base left)
+           (descriptor-base right))
+      (=
+        (syntax-capture-start
+          (descriptor-capture left))
+        (syntax-capture-start
+          (descriptor-capture right)))
+      (=
+        (syntax-capture-end
+          (descriptor-capture left))
+        (syntax-capture-end
+          (descriptor-capture right)))))
+
+  (define (deduplicate-outers descriptors)
+    (fold-left
+      (lambda (result descriptor)
+        (if
+          (exists
+            (lambda (existing)
+              (same-outer? descriptor existing))
+            result)
+          result
+          (append result (list descriptor))))
+      '()
+      descriptors))
+
+  (define (inside-capture? outer descriptor)
+    (let ([outer-capture
+            (descriptor-capture outer)]
+          [capture
+            (descriptor-capture descriptor)])
+      (and
+        (eq? (descriptor-extent descriptor) 'inside)
+        (eq? (descriptor-base descriptor)
+             (descriptor-base outer))
+        (<=
+          (syntax-capture-start outer-capture)
+          (syntax-capture-start capture))
+        (<=
+          (syntax-capture-end capture)
+          (syntax-capture-end outer-capture)))))
+
+  (define (direct-inside-captures outer descriptors)
+    (let ([candidates
+            (filter
+              (lambda (descriptor)
+                (inside-capture? outer descriptor))
+              descriptors)])
+      (if
+        (null? candidates)
+        '()
+        (let ([minimum-depth
+                (apply
+                  min
+                  (map
+                    (lambda (descriptor)
+                      (syntax-capture-depth
+                        (descriptor-capture descriptor)))
+                    candidates))])
+          (map
+            descriptor-capture
+            (filter
+              (lambda (descriptor)
+                (=
+                  (syntax-capture-depth
+                    (descriptor-capture descriptor))
+                  minimum-depth))
+              candidates))))))
+
+  (define (capture-range-union captures fallback-start fallback-end)
+    (if
+      (null? captures)
+      (values fallback-start fallback-end)
+      (values
+        (apply min (map syntax-capture-start captures))
+        (apply max (map syntax-capture-end captures)))))
+
+  (define (outer->structural-thing outer descriptors)
+    (let* ([capture (descriptor-capture outer)]
+           [base (descriptor-base outer)]
+           [start (syntax-capture-start capture)]
+           [end (syntax-capture-end capture)]
+           [inside
+             (direct-inside-captures outer descriptors)])
+      (call-with-values
+        (lambda ()
+          (capture-range-union
+            inside
+            start
+            end))
+        (lambda (inner-start inner-end)
+          (make-structural-thing
+            (capture-roles base)
+            start
+            end
+            inner-start
+            inner-end
+            (syntax-capture-depth capture)
+            (syntax-capture-node-kind capture)
+            (list
+              (cons
+                'capture
+                (syntax-capture-name capture))
+              (cons 'text-object base)))))))
+
+  (define (inside->structural-thing descriptor)
+    (let* ([capture (descriptor-capture descriptor)]
+           [base (descriptor-base descriptor)]
+           [start (syntax-capture-start capture)]
+           [end (syntax-capture-end capture)])
       (make-structural-thing
-        (capture-roles name)
+        (capture-roles base)
         start
         end
         start
         end
         (syntax-capture-depth capture)
         (syntax-capture-node-kind capture)
-        (list (cons 'capture name)))))
+        (list
+          (cons
+            'capture
+            (syntax-capture-name capture))
+          (cons 'text-object base)))))
 
   (define (make-tree-sitter-structure-index
             syntax session snapshot)
-    (let ([captures
+    (let* ([captures
             (syntax-query
               syntax
               session
               'text-object
               0
-              (snapshot-size snapshot))])
+              (snapshot-size snapshot))]
+           [descriptors
+             (map text-object-descriptor captures)]
+           [outers
+             (deduplicate-outers
+               (filter
+                 (lambda (descriptor)
+                   (eq?
+                     (descriptor-extent descriptor)
+                     'around))
+                 descriptors))]
+           [orphan-insides
+             (filter
+               (lambda (descriptor)
+                 (and
+                   (eq?
+                     (descriptor-extent descriptor)
+                     'inside)
+                   (not
+                     (exists
+                       (lambda (outer)
+                         (inside-capture? outer descriptor))
+                       outers))))
+               descriptors)])
       (make-structure-index
         (snapshot-document-id snapshot)
         (snapshot-revision snapshot)
-        (map capture->structural-thing captures))))
+        (append
+          (map
+            (lambda (outer)
+              (outer->structural-thing
+                outer
+                descriptors))
+            outers)
+          (map
+            inside->structural-thing
+            orphan-insides)))))
 
   (define (make-tree-sitter-syntax-provider spec)
     (unless (tree-sitter-language-spec? spec)

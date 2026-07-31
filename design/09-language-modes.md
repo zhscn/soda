@@ -211,8 +211,17 @@ structural target 缩进只产生一个 revision 和一个 undo entry。provider
 Scheme provider 为 snapshot 建立规范化逐行缩进表，按未闭合 delimiter、operator 和
 第二个 datum 的位置计算列宽。批量查询共享同一张表，因此后一行不依赖原文中前一行的
 错误 indentation。字符串、quoted symbol、字符字面量和注释中的 delimiter 不参与
-结构缩进。Tree-sitter provider 把 `@indent.begin`、`@indent.end`、
-`@indent.branch` 和 `@indent.ignore` capture 解释为逐行 indentation event。
+结构缩进。
+
+Tree-sitter provider 对一个 revision 缓存完整的 indent capture 集合，并以目标行
+查询它们。`@indent.scope` 的语法范围为范围内各行增加一级缩进；默认不包含 capture
+起始行，带 `#set! indent.include-start "true"` 时包含起始行。该属性适用于 Python
+等以首个 body node 作为 block 起点的 grammar。`@indent.begin` 与 `@indent.end`
+提供顺序事件兼容面，`@indent.end` 在 closing token 所在行抵消一级缩进，
+`@indent.branch` 对分支行临时抵消一级，`@indent.zero` 强制零列，
+`@indent.align` 将范围内行至少对齐到 capture 起始列，`@indent.ignore` 保留相交行。
+输出遵循 profile 的 `indent-width`、`tab-width` 与 `use-tabs?`。
+
 C++ provider 持有 native indent style，并通过 Buffer 的增量 analyzer 计算每行结果。
 
 `edit.indent-region` 使用 `CommandTarget` 要求 active region，并由 profile provider
@@ -230,6 +239,28 @@ leading whitespace，`M-i` 切换该 buffer-local 设置。`cpp-mode` 和 `schem
 language profile 的 delimiter pairs 同时驱动通用 `move.matching-delimiter`
 命令。`M-]` 接受 point 上或 point 前的 delimiter，以同类嵌套深度扫描并移动到
 配对位置；没有声明 pairs 的 mode 使用圆括号、方括号和花括号。
+
+## Text object 与结构导航
+
+Tree-sitter `textobjects.scm` 使用
+`@text-object.<kind>.around` 和 `@text-object.<kind>.inside`。同一 kind、同一
+outer 范围的 capture 合并为一个 `StructuralThing`；outer 范围定义结构对象边界，
+直接包含的 inside capture 之并集定义进入对象后的内容范围。没有 around capture 的
+inside capture 仍形成独立结构对象。
+
+kind 映射为跨语言结构 role：
+
+- function、method、class、module 等提供 `defun`；
+- parameter、argument、array、object、list、block 等提供 `list`；
+- statement、conditional、loop、call、string 等提供 `sexp`；
+- 原始 kind 作为附加 role 保留，供 major mode 的专用命令查询。
+
+Buffer 为当前 revision 缓存 provider 产生的 `StructureIndex`。通用
+`forward-sexp`、`backward-sexp`、`up-list`、`down-list`、
+`beginning-of-defun`、`end-of-defun`、`mark-sexp`、`kill-sexp`、
+`transpose-sexps` 和 `indent-sexp` 只查询 role 和 outer/inside range，不依赖
+Tree-sitter node kind。没有 text-object query 的 major mode 使用 delimiter
+structure fallback。
 
 ## Tree-sitter runtime
 
@@ -273,9 +304,10 @@ root；loader 不提供单独的 grammar/query search path 或单语言动态库
 内建 runtime package 分发 Bash、CSS、Go、HTML、JavaScript、JSON、Lua、Markdown、
 Markdown inline、Python、Rust、TOML、TypeScript、TSX 和 YAML parser。每个 parser
 source 由构建配置固定 revision 与 archive digest，生成的模块与 Soda 自有 query
-一起安装。所有这些语言提供 highlight query；JSON 还提供 fold、indent 与
-text-object query，HTML 提供 JavaScript 与 CSS injection query。TSX 的 query
-bundle 依次组合 TypeScript 与 TSX query，使通用语言规则与嵌入语法规则保持独立。
+一起安装。所有这些语言提供 highlight query；CSS、Go、HTML、JavaScript、JSON、
+Lua、Python、Rust、TypeScript 与 TSX 提供 indent 和 text-object query，JSON
+提供 fold query，HTML 提供 JavaScript 与 CSS injection query。TSX 的 query bundle
+依次组合 TypeScript 与 TSX query，使通用语言规则与嵌入语法规则保持独立。
 
 Tree-sitter file association 由 rule name、suffix 集合、parser language、major mode
 和 priority 组成。注册关联时，已有的专用 major mode 保留自己的 language profile；

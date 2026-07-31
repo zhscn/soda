@@ -8527,6 +8527,7 @@
            'list
            0
            30)]
+       [object (and (pair? objects) (car objects))]
        [folds
          (syntax-query
            (language-profile-syntax profile)
@@ -8539,11 +8540,17 @@
       (memq 'property (cell-faces property-cell))
       (memq 'constant (cell-faces constant-cell))
       (= (length objects) 1)
+      (= (structural-thing-start object) 0)
+      (= (structural-thing-end object) 30)
+      (= (structural-thing-inner-start object) 1)
+      (= (structural-thing-inner-end object) 29)
+      (memq 'sexp (structural-thing-roles object))
+      (memq 'object (structural-thing-roles object))
       (equal?
         (assq 'capture
           (structural-thing-properties
             (car objects)))
-        '(capture . text-object.object))
+        '(capture . text-object.object.around))
       (= (length folds) 1)
       (eq? (syntax-capture-name (car folds)) 'fold.object)
       (string=?
@@ -8554,6 +8561,48 @@
            (map
              structural-thing-properties
              objects))))
+(let ([view (editor-active-view json-editor)])
+  (view-set-caret! view 0)
+  (editor-update!
+    json-editor
+    (make-command-message 'move.down-list #f))
+  (unless (= (view-caret view) 1)
+    (error 'editor-tests
+           "Tree-sitter text-object inner range did not drive down-list"
+           (view-caret view)))
+  (editor-update!
+    json-editor
+    (make-command-message 'move.forward-sexp #f))
+  (unless (= (view-caret view) 14)
+    (error 'editor-tests
+           "Tree-sitter pair text object did not drive forward-sexp"
+           (view-caret view)))
+  (editor-update!
+    json-editor
+    (make-command-message 'move.backward-sexp #f))
+  (unless (= (view-caret view) 1)
+    (error 'editor-tests
+           "Tree-sitter pair text object did not drive backward-sexp"
+           (view-caret view)))
+  (editor-update!
+    json-editor
+    (make-command-message 'mark.sexp #f))
+  (unless
+    (and
+      (view-mark-active? view)
+      (= (view-mark view) 14))
+    (error 'editor-tests
+           "Tree-sitter pair text object did not drive mark-sexp"
+           (view-mark view)))
+  (view-clear-mark! view)
+  (view-set-caret! view 2)
+  (editor-update!
+    json-editor
+    (make-command-message 'move.backward-up-list #f))
+  (unless (= (view-caret view) 0)
+    (error 'editor-tests
+           "Tree-sitter object text object did not drive backward-up-list"
+           (view-caret view))))
 (define json-indent-source
   "{\n\"items\": [\n{\n\"name\": \"soda\"\n}\n]\n}\n")
 (define json-indent-expected
@@ -8587,6 +8636,61 @@
   (error 'editor-tests
          "Tree-sitter indent captures did not drive region indentation"
          (utf8->string (buffer-bytes json-indent-buffer))))
+(define python-indent-source
+  "def outer(x):\n values = [\n 1,\n 2,\n ]\n if x:\n  return values\n return []\n")
+(define python-indent-expected
+  "def outer(x):\n    values = [\n        1,\n        2,\n    ]\n    if x:\n        return values\n    return []\n")
+(define python-indent-buffer
+  (make-buffer
+    1009
+    (make-document python-indent-source 1009)
+    "indent.py"
+    'fundamental-mode))
+(editor-add-buffer! json-editor python-indent-buffer)
+(buffer-set-file-path! python-indent-buffer "/tmp/indent.py")
+(editor-select-buffer-major-mode!
+  json-editor
+  python-indent-buffer
+  "/tmp/indent.py")
+(editor-set-view-buffer!
+  json-editor
+  (view-id (editor-active-view json-editor))
+  (buffer-id python-indent-buffer))
+(let ([view (editor-active-view json-editor)])
+  (view-clear-mark! view)
+  (view-set-caret! view 0))
+(editor-update!
+  json-editor
+  (make-command-message 'edit.indent-sexp #f))
+(unless
+  (bytevector=?
+    (buffer-bytes python-indent-buffer)
+    (string->utf8 python-indent-expected))
+  (error 'editor-tests
+         "Python Tree-sitter scopes and text objects did not drive indent-sexp"
+         (utf8->string (buffer-bytes python-indent-buffer))))
+(let ([view (editor-active-view json-editor)]
+      [end (- (string-length python-indent-expected) 1)])
+  (view-clear-mark! view)
+  (view-set-caret! view end)
+  (editor-update!
+    json-editor
+    (make-command-message 'move.beginning-of-defun #f))
+  (unless (= (view-caret view) 0)
+    (error 'editor-tests
+           "Tree-sitter function text object did not drive beginning-of-defun"
+           (view-caret view)))
+  (editor-update!
+    json-editor
+    (make-command-message 'move.end-of-defun #f))
+  (unless (= (view-caret view) end)
+    (error 'editor-tests
+           "Tree-sitter function text object did not drive end-of-defun"
+           (view-caret view))))
+(editor-set-view-buffer!
+  json-editor
+  (view-id (editor-active-view json-editor))
+  (buffer-id json-indent-buffer))
 (view-set-caret! (editor-active-view json-editor) 0)
 (editor-update!
   json-editor

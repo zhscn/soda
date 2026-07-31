@@ -1,4 +1,5 @@
-"{" @indent.begin
+(object) @indent.scope
+(array) @indent.scope
+
 "}" @indent.end
-"[" @indent.begin
 "]" @indent.end

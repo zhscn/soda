@@ -138,6 +138,8 @@ runtime/
   queries/
     <language>/
       highlights.scm
+      indents.scm
+      textobjects.scm
 ```
 
 Parser modules use the platform shared-library extension and export
@@ -161,8 +163,9 @@ The distributed runtime includes Bash, CSS, Go, HTML, JavaScript, JSON, Lua,
 Markdown, Markdown inline, Python, Rust, TOML, TypeScript, TSX, and YAML
 parsers. Each parser source is pinned by revision and archive digest in CMake.
 Soda-owned highlight queries are packaged for the same languages; JSON also
-provides fold and text-object queries. TSX composes the TypeScript query bundle
-with TSX-specific captures.
+provides fold queries. CSS, Go, HTML, JavaScript, JSON, Lua, Python, Rust,
+TypeScript, and TSX provide generic indentation and text-object queries. TSX
+composes the TypeScript query bundle with TSX-specific captures.
 
 Language specs associate files, modes, parsers, editing policy, and owned query
 bundles:
@@ -175,7 +178,7 @@ bundles:
   '(".py" ".pyi")
   '((parent-mode . prog-mode)
     (settings . ((indent-width . 4)))
-    (queries . (highlights folds textobjects))))
+    (queries . (highlights indents textobjects))))
 ```
 
 Specs are registered individually with
