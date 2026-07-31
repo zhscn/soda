@@ -25,6 +25,9 @@
   (define published-workspace-generations
     (make-weak-eq-hashtable))
 
+  (define published-presentation-policies
+    (make-weak-eq-hashtable))
+
   (define (scheme-annotation-id diagnostic)
     (list
       (scheme-diagnostic-code diagnostic)
@@ -39,6 +42,80 @@
       (scheme-diagnostic-severity diagnostic)
       (scheme-diagnostic-message diagnostic)
       diagnostic))
+
+  (define provisional-diagnostic-codes
+    '(unclosed-delimiter
+      unterminated-string
+      unterminated-symbol
+      unterminated-block-comment
+      undefined-identifier
+      unused-parameter
+      unused-import
+      library-not-found
+      identifier-not-exported))
+
+  (define incomplete-diagnostic-codes
+    '(unclosed-delimiter
+      unterminated-string
+      unterminated-symbol
+      unterminated-block-comment))
+
+  (define (active-caret editor buffer)
+    (let ([view (editor-active-view editor)])
+      (and
+        (eq? (view-buffer view) buffer)
+        (view-caret view))))
+
+  (define (incomplete-tail-start diagnostics caret)
+    (fold-left
+      (lambda (start diagnostic)
+        (if
+          (and
+            (memq
+              (scheme-diagnostic-code diagnostic)
+              incomplete-diagnostic-codes)
+            (<= (scheme-diagnostic-end diagnostic) caret))
+          (if start
+              (min start (scheme-diagnostic-start diagnostic))
+              (scheme-diagnostic-start diagnostic))
+          start))
+      #f
+      diagnostics))
+
+  (define (diagnostic-presentation-key
+            editor
+            buffer
+            diagnostics)
+    (let ([caret (active-caret editor buffer)])
+      (and
+        caret
+        (incomplete-tail-start diagnostics caret))))
+
+  (define (presented-diagnostics diagnostics start caret)
+    (if
+      (not start)
+      diagnostics
+      (filter
+        (lambda (diagnostic)
+          (not
+            (and
+              (<= start
+                  (scheme-diagnostic-start diagnostic)
+                  (scheme-diagnostic-end diagnostic)
+                  caret)
+              (memq
+                (scheme-diagnostic-code diagnostic)
+                provisional-diagnostic-codes))))
+        diagnostics)))
+
+  (define (expected-presentation-key editor buffer)
+    (let ([caret (active-caret editor buffer)])
+      (and
+        caret
+        (incomplete-tail-start
+          (scheme-semantic-snapshot-diagnostics
+            (buffer-scheme-semantic-snapshot buffer))
+          caret))))
 
   (define (scheme-annotation-set editor buffer)
     (find
@@ -76,10 +153,18 @@
                (buffer-scheme-semantic-snapshot buffer))]
            [revision
              (scheme-semantic-snapshot-revision snapshot)]
+           [diagnostics
+             (scheme-semantic-snapshot-diagnostics snapshot)]
+           [presentation-key
+             (diagnostic-presentation-key
+               editor buffer diagnostics)]
            [annotations
              (map
                scheme-diagnostic->annotation
-               (scheme-semantic-snapshot-diagnostics snapshot))])
+               (presented-diagnostics
+                 diagnostics
+                 presentation-key
+                 (active-caret editor buffer)))])
       (let ([set
               (make-buffer-annotation-set
                 buffer
@@ -94,7 +179,11 @@
             (hashtable-set!
               published-workspace-generations
               set
-              (scheme-workspace-generation workspace))))
+              (scheme-workspace-generation workspace)))
+          (hashtable-set!
+            published-presentation-policies
+            set
+            presentation-key))
         set)))
 
   (define (clear-scheme-diagnostics!
@@ -137,6 +226,12 @@
                    (=
                      (annotation-set-source-revision current)
                      (buffer-revision buffer))
+                   (equal?
+                     (hashtable-ref
+                       published-presentation-policies
+                       current
+                       #f)
+                     (expected-presentation-key editor buffer))
                    (or
                      (not
                        (and

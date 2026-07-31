@@ -2788,6 +2788,117 @@
          (editor-status-message xref-editor)))
 (editor-close! xref-editor)
 
+(define provisional-diagnostic-source
+  "(define (hello name)\n  (display nam")
+(define provisional-diagnostic-document
+  (make-document provisional-diagnostic-source 1983))
+(define provisional-diagnostic-buffer
+  (make-buffer
+    1983
+    provisional-diagnostic-document
+    "*provisional-scheme-diagnostics*"
+    'scheme-mode))
+(define provisional-diagnostic-editor
+  (make-editor provisional-diagnostic-buffer))
+(define provisional-diagnostic-view
+  (editor-active-view provisional-diagnostic-editor))
+(define (provisional-diagnostic-set)
+  (find
+    (lambda (set)
+      (eq?
+        (annotation-set-namespace set)
+        'scheme-semantic-diagnostics))
+    (editor-annotation-sets-for-buffer
+      provisional-diagnostic-editor
+      (buffer-id provisional-diagnostic-buffer))))
+(define (published-provisional-codes)
+  (map
+    (lambda (annotation)
+      (scheme-diagnostic-code
+        (annotation-payload annotation)))
+    (annotation-set-annotations
+      (provisional-diagnostic-set))))
+(let ([end
+        (bytevector-length
+          (buffer-bytes provisional-diagnostic-buffer))])
+  (buffer-replace-range!
+    provisional-diagnostic-buffer
+    end
+    end
+    (string->utf8 " "))
+  (view-set-caret! provisional-diagnostic-view (+ end 1)))
+(editor-refresh-scheme-diagnostics!
+  provisional-diagnostic-editor)
+(let* ([raw
+         (scheme-semantic-snapshot-diagnostics
+           (make-scheme-semantic-snapshot
+             1983
+             1
+             (buffer-bytes provisional-diagnostic-buffer)))]
+       [raw-codes (map scheme-diagnostic-code raw)]
+       [published-codes (published-provisional-codes)])
+  (unless
+    (and
+      (memq 'unclosed-delimiter raw-codes)
+      (memq 'unused-parameter raw-codes)
+      (not (memq 'unclosed-delimiter published-codes))
+      (not (memq 'unused-parameter published-codes))
+      (not (memq 'undefined-identifier published-codes)))
+    (error 'editor-tests
+           "incomplete tail diagnostics were not presentation-filtered"
+           raw-codes
+           published-codes)))
+(view-set-caret! provisional-diagnostic-view 0)
+(editor-refresh-scheme-diagnostics!
+  provisional-diagnostic-editor)
+(unless
+  (and
+    (memq 'unclosed-delimiter
+          (published-provisional-codes))
+    (memq 'unused-parameter
+          (published-provisional-codes)))
+  (error 'editor-tests
+         "leaving the incomplete tail did not restore diagnostics"
+         (published-provisional-codes)))
+(view-set-caret!
+  provisional-diagnostic-view
+  (bytevector-length
+    (buffer-bytes provisional-diagnostic-buffer)))
+(editor-refresh-scheme-diagnostics!
+  provisional-diagnostic-editor)
+(unless
+  (and
+    (not
+      (memq 'unclosed-delimiter
+            (published-provisional-codes)))
+    (not
+      (memq 'unused-parameter
+            (published-provisional-codes))))
+  (error 'editor-tests
+         "returning to the incomplete tail did not suppress diagnostics"
+         (published-provisional-codes)))
+(define completed-unused-source
+  "(define (hello name)\n  (display \"hello\"))")
+(buffer-replace-range!
+  provisional-diagnostic-buffer
+  0
+  (bytevector-length
+    (buffer-bytes provisional-diagnostic-buffer))
+  (string->utf8 completed-unused-source))
+(view-set-caret!
+  provisional-diagnostic-view
+  (bytevector-length
+    (string->utf8 completed-unused-source)))
+(editor-refresh-scheme-diagnostics!
+  provisional-diagnostic-editor)
+(unless
+  (memq 'unused-parameter
+        (published-provisional-codes))
+  (error 'editor-tests
+         "completed form did not restore semantic diagnostics"
+         (published-provisional-codes)))
+(editor-close! provisional-diagnostic-editor)
+
 (define semantic-diagnostic-document
   (make-document
     "(lambda (value value) value)\n"

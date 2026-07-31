@@ -312,6 +312,14 @@ namespace 为 `scheme-semantic-diagnostics`，source revision 与 semantic snaps
 一致。annotation payload 保留原始 `SchemeDiagnostic`，describe-char、LocationList
 和后续 quick-fix 可以共享同一个诊断身份。
 
+semantic snapshot 保存源码当前状态的完整诊断，包括未闭合 delimiter 和由不完整
+scope 暂时产生的 unused 或 unresolved 结果。交互呈现使用独立 policy：当 active
+View 的 point 位于延伸到 Document 末尾的未闭合表单中时，该表单范围内的
+unclosed、unterminated、undefined、unused 和不完整 import 诊断不转换为 annotation。
+definition、use resolution、completion 和 syntax face 继续消费完整 snapshot。表单
+闭合后的下一 revision 没有 provisional range，publisher 立即恢复其中仍然成立的
+诊断。重复 binding 和意外 closing delimiter 属于稳定错误，不受该 policy 影响。
+
 显式的 workspace diagnostics 查询同步 editor Buffer 与 session 安装的编译诊断，
 并产生按 resource、range 排序的 `SchemeWorkspaceDiagnostic`：
 
