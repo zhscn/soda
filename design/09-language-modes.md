@@ -239,7 +239,10 @@ TSQueryHandle
 
 grammar registry 以 language symbol 为键，允许覆盖共享库路径与导出符号。默认约定
 使用 `libtree-sitter-<language>` 和 `tree_sitter_<language>`；加载器依次检查语言
-专用环境变量、grammar search path、可执行文件同目录、安装目录和系统动态库路径。
+专用的 `SODA_TREE_SITTER_<LANGUAGE>_LIBRARY`、由
+`SODA_TREE_SITTER_GRAMMAR_PATH` 提供的平台分隔目录列表、可执行文件同目录、安装
+目录和系统动态库路径。环境变量中的 language 名称转为大写并将连字符替换为下划线；
+语言专用路径指定单个共享库并优先于通用 search path。
 创建 parser 前会验证 grammar language ABI 是否落在静态 Tree-sitter core 支持的
 范围内。major mode 显式拥有 parser session；language availability、grammar
 identity 与 parser identity 相互独立，为同语言多个 parser 和 injection layer

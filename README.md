@@ -20,6 +20,9 @@ The native core is split by data ownership:
   typed-character editing mechanisms. Its C ABI exposes configurable style
   values, explainable indentation decisions, and commands that return the
   resulting caret and normalized document change.
+- `soda_tree_sitter` statically links the Tree-sitter runtime and loads language
+  grammars from shared modules. Major modes own parser sessions and query
+  policy.
 - `soda_runtime` owns libuv handles and exposes pull-based timer, descriptor
   readiness, file I/O, and typed directory-scan completion events through a C
   ABI.
@@ -112,13 +115,30 @@ cmk run -c Debug soda -- path/to/file
 When the path does not exist, Soda starts an empty visiting buffer whose first
 save creates the file. Other startup read failures remain fatal.
 
-The `soda` target is a self-contained ELF application. Its C entry point embeds
-the Chez runtime and compiled editor boot images, registers the statically
-linked native ABI, builds the Scheme heap, and transfers control to the editor
-command loop. Installation copies only the executable:
+The `soda` ELF embeds the Chez runtime and compiled editor boot images. Its C
+entry point registers the statically linked native ABI, builds the Scheme heap,
+and transfers control to the editor command loop. Installation copies the
+executable and the language grammar modules:
 
 ```sh
 cmk install -c Release --prefix ./dist
+```
+
+Tree-sitter grammar modules use the conventional
+`libtree-sitter-<language>.so` name and export
+`tree_sitter_<language>`. `SODA_TREE_SITTER_GRAMMAR_PATH` supplies a
+platform-separated list of additional grammar directories:
+
+```sh
+SODA_TREE_SITTER_GRAMMAR_PATH=/opt/soda/grammars:/work/grammars soda file.json
+```
+
+`SODA_TREE_SITTER_<LANGUAGE>_LIBRARY` selects an exact module for one language
+and takes precedence over the directory search path. The language name is
+uppercased and hyphens become underscores:
+
+```sh
+SODA_TREE_SITTER_JSON_LIBRARY=/work/grammars/libtree-sitter-json.so soda file.json
 ```
 
 Printable input inserts text. The default keymap provides Emacs character,
