@@ -334,6 +334,7 @@
           editor-location-close!
           editor-jump-to-location!
           editor-jump-to-buffer!
+          editor-jump-history
           editor-jump-back!
           editor-jump-forward!
           make-location-item
@@ -345,6 +346,10 @@
           location-item-end
           location-item-excerpt
           location-item-metadata
+          jump-history-entry?
+          jump-history-entry-kind
+          jump-history-entry-source
+          jump-history-entry-target
           make-location-list
           location-list?
           location-list-source

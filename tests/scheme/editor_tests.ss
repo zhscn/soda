@@ -2501,6 +2501,27 @@
     (eq? (view-buffer navigation-view) navigation-buffer-b)
     (= (view-caret navigation-view) 3))
   (error 'editor-tests "cross-buffer jump did not activate its target"))
+(let* ([history (editor-jump-history navigation-editor)]
+       [entry (and (pair? history) (car history))])
+  (unless
+    (and
+      (= (length history) 1)
+      (jump-history-entry? entry)
+      (eq? (jump-history-entry-kind entry) 'explicit)
+      (= (location-item-buffer-id
+           (jump-history-entry-source entry))
+         (buffer-id navigation-buffer-a))
+      (= (location-item-start
+           (jump-history-entry-source entry))
+         2)
+      (= (location-item-buffer-id
+           (jump-history-entry-target entry))
+         (buffer-id navigation-buffer-b))
+      (= (location-item-start
+           (jump-history-entry-target entry))
+         3))
+    (error 'editor-tests
+           "jump history did not preserve source/target LocationItems")))
 
 (buffer-replace-range!
   navigation-buffer-a
@@ -2538,6 +2559,12 @@
 (editor-remove-buffer!
   navigation-editor
   (buffer-id navigation-buffer-b))
+(unless
+  (and
+    (editor-jump-forward! navigation-editor)
+    (eq? (view-buffer navigation-view) navigation-buffer-a))
+  (error 'editor-tests
+         "jump-forward did not skip a detached Buffer location"))
 (editor-close! navigation-editor)
 
 (define search-document
@@ -2899,6 +2926,13 @@
         (editor-current-location-list xref-editor))
       'scheme-definition))
   (error 'editor-tests "Scheme xref did not jump to a definition"))
+(unless
+  (eq?
+    (jump-history-entry-kind
+      (car (reverse (editor-jump-history xref-editor))))
+    'definition)
+  (error 'editor-tests
+         "definition jump did not identify its history source"))
 (unless
   (and
     (editor-jump-back! xref-editor)

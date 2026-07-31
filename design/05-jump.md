@@ -5,6 +5,7 @@
 | 能力 | 状态 |
 |---|---|
 | `EditorLocation`、per-View back/forward walk | 已实现 |
+| source/target `LocationItem` jump history entry | 已实现 |
 | `LocationItem`、`LocationList` 与 next/previous navigation | 已实现 |
 | Scheme definition/reference/diagnostic producer | 已实现 |
 | Workbench 级语义 `JumpGraph` | 未实现 |
@@ -46,6 +47,12 @@ buffer/resource、创建时 revision、DocumentAnchor 和 byte offset fallback�
 `editor-jump-to-location!` 接管 target 的生命周期；每个 View 持有有界 walk，
 View 关闭时释放 walk 内的 anchor。Buffer 从 Editor 移除前，所有 walk 先把对应
 location detach 为 fallback，随后才关闭 Document。
+
+walk 的相邻 live location 同时形成 `JumpHistoryEntry`。entry 保存 jump kind 以及
+source/target `LocationItem`，用于保留发起时的 resource、revision、range 和 metadata；
+live `EditorLocation` 继续负责编辑后的 anchor 跟踪。definition、xref、diagnostic、
+search、goto-line 和显式 API jump 都写入该入口。back/forward 激活位置前先验证目标
+Buffer 和 anchor；已移除 Buffer 的 detached entry 会被跳过。
 
 显式 jump 在 walk 尾部追加 target。用户从历史中间发起新 jump 时，walk 先追加
 当前位置的 revisit，再追加新 target，因此 back 能回到分叉点，继续 back 仍可

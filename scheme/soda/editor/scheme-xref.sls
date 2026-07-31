@@ -103,7 +103,8 @@
           (editor-jump-to-buffer!
             editor
             (view-buffer view)
-            (view-caret view))
+            (view-caret view)
+            'definition)
           (make-command-effect
             'file.read
             (make-open-request
@@ -126,7 +127,7 @@
       (scheme-use-name use)
       use))
 
-  (define (jump-to-item! context item)
+  (define (jump-to-item! context item kind)
     (let* ([editor (command-context-editor context)]
            [buffer-id (location-item-buffer-id item)])
       (if
@@ -143,7 +144,8 @@
           (editor-jump-to-buffer!
             editor
             buffer
-            (location-item-start item))
+            (location-item-start item)
+            kind)
           #f)
         (let ([resource (location-item-resource item)])
           (and
@@ -152,7 +154,8 @@
               (editor-jump-to-buffer!
                 editor
                 (view-buffer view)
-                (view-caret view))
+                (view-caret view)
+                kind)
               (make-command-effect
                 'file.read
                 (make-open-request
@@ -170,7 +173,10 @@
             (editor-set-current-location-list! editor locations)
             (jump-to-item!
               context
-              (location-list-current locations))))))
+              (location-list-current locations)
+              (if (eq? source 'scheme-definition)
+                  'definition
+                  'xref))))))
 
   (define (semantic-query workspace context)
     (let* ([editor (command-context-editor context)]
@@ -295,7 +301,11 @@
                    [effect
                      (jump-to-item!
                        context
-                       (list-ref items index))])
+                       (list-ref items index)
+                       (if (eq? (location-list-source locations)
+                                'scheme-definition)
+                           'definition
+                           'xref))])
               (location-list-set-index! locations index)
               (editor-set-status-message!
                 editor
@@ -464,7 +474,8 @@
            (editor-jump-to-buffer!
              editor
              buffer
-             (scheme-workspace-symbol-start symbol))
+             (scheme-workspace-symbol-start symbol)
+             'xref)
            (editor-set-status-message!
              editor
              (scheme-workspace-symbol-name symbol))
@@ -480,7 +491,8 @@
                (editor-jump-to-buffer!
                  editor
                  (view-buffer view)
-                 (view-caret view))
+                 (view-caret view)
+                 'xref)
                (make-command-effect
                  'file.read
                  (make-open-request
@@ -535,7 +547,8 @@
           (editor-jump-to-buffer!
             editor
             buffer
-            (scheme-workspace-symbol-start symbol))
+            (scheme-workspace-symbol-start symbol)
+            'xref)
           (editor-set-status-message!
             editor
             (scheme-workspace-symbol-name symbol))

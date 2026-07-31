@@ -344,7 +344,8 @@
               editor
               buffer
               (location-item-start
-                (location-list-current locations)))
+                (location-list-current locations))
+              'diagnostic)
             (editor-set-status-message!
               editor
               (string-append
@@ -385,7 +386,8 @@
           (editor-jump-to-buffer!
             editor
             buffer
-            (location-item-start item))
+            (location-item-start item)
+            'diagnostic)
           #f)
         (let ([resource
                 (location-item-resource item)])
@@ -396,7 +398,8 @@
               (editor-jump-to-buffer!
                 editor
                 (view-buffer view)
-                (view-caret view))
+                (view-caret view)
+                'diagnostic)
               (make-command-effect
                 'file.read
                 (make-open-request

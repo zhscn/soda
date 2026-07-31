@@ -19,6 +19,7 @@
           (soda editor motion-runtime)
           (soda editor minor-mode)
           (soda editor minor-mode-runtime)
+          (soda editor navigation)
           (soda editor prompt)
           (soda editor state))
 
@@ -1261,13 +1262,12 @@
                         (- (text-line-count text) 1)
                         (- (car target) 1))]
                     [column (- (cdr target) 1)])
-               (view-set-caret!
-                 view
+               (editor-jump-to-buffer!
+                 editor
+                 (view-buffer view)
                  (text-offset-at-cell-column
-                   text
-                   line
-                   column
-                   tab-width)))))
+                   text line column tab-width)
+                 'goto-line))))
          '()])))
 
   (define (toggle-line-numbers-command context)

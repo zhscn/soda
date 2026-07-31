@@ -310,7 +310,8 @@
                            (search-session-match-end session)
                            (search-session-match-start session))])
                 (restore-origin! editor session)
-                (editor-jump-to-buffer! editor buffer target))
+                (editor-jump-to-buffer!
+                  editor buffer target 'search))
               (restore-origin! editor session)))
         (editor-location-close! (search-session-origin session))
         (editor-set-status-message! editor #f))

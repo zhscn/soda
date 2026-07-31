@@ -5,6 +5,8 @@
           editor-location-resource
           editor-location-revision
           editor-location-offset
+          editor-location->item
+          editor-location-valid-for-buffer?
           editor-location-close!
           editor-location-detach-buffer!
           make-location-item
@@ -16,6 +18,11 @@
           location-item-end
           location-item-excerpt
           location-item-metadata
+          make-jump-history-entry
+          jump-history-entry?
+          jump-history-entry-kind
+          jump-history-entry-source
+          jump-history-entry-target
           make-location-list
           location-list?
           location-list-source
@@ -28,7 +35,9 @@
           navigation-walk-entries
           navigation-walk-cursor
           navigation-walk-cursor-set!
+          navigation-walk-jumps
           navigation-walk-replace-entries!
+          navigation-walk-replace-jumps!
           navigation-walk-detach-buffer!
           navigation-walk-close!)
   (import (rnrs)
@@ -49,7 +58,12 @@
     (navigation-walk %make-navigation-walk navigation-walk?)
     (fields
       (mutable entries)
-      (mutable cursor)))
+      (mutable cursor)
+      (mutable jumps)))
+
+  (define-record-type
+    (jump-history-entry %make-jump-history-entry jump-history-entry?)
+    (fields kind source target))
 
   (define-record-type
     (location-item %make-location-item location-item?)
@@ -144,6 +158,18 @@
         items))
     (%make-location-list source items (and (pair? items) 0)))
 
+  (define (make-jump-history-entry kind source target)
+    (unless (and (symbol? kind)
+                 (location-item? source)
+                 (location-item? target))
+      (assertion-violation
+        'make-jump-history-entry
+        "expected a kind and source/target LocationItems"
+        kind
+        source
+        target))
+    (%make-jump-history-entry kind source target))
+
   (define (location-list-set-index! list index)
     (unless (location-list? list)
       (assertion-violation
@@ -186,6 +212,45 @@
           (editor-location-document location)
           (editor-location-anchor location))))
 
+  (define (editor-location->item location role kind)
+    (unless (editor-location? location)
+      (assertion-violation
+        'editor-location->item
+        "expected an editor location"
+        location))
+    (unless (and (memq role '(source target)) (symbol? kind))
+      (assertion-violation
+        'editor-location->item
+        "invalid jump role or kind"
+        role
+        kind))
+    (let ([offset (editor-location-offset location)])
+      (make-location-item
+        (editor-location-buffer-id location)
+        (editor-location-resource location)
+        (editor-location-revision location)
+        offset
+        offset
+        #f
+        (list
+          (cons 'jump-role role)
+          (cons 'jump-kind kind)))))
+
+  (define (editor-location-valid-for-buffer? location buffer)
+    (unless (and (editor-location? location) (buffer? buffer))
+      (assertion-violation
+        'editor-location-valid-for-buffer?
+        "expected an editor location and buffer"))
+    (and
+      (= (editor-location-buffer-id location) (buffer-id buffer))
+      (not (editor-location-closed? location))
+      (or
+        (and (editor-location-anchor location)
+             (eq? (editor-location-document location)
+                  (buffer-document buffer)))
+        (= (editor-location-revision location)
+           (buffer-revision buffer)))))
+
   (define (editor-location-close! location)
     (when (and (editor-location? location)
                (not (editor-location-closed? location)))
@@ -214,7 +279,7 @@
       (editor-location-anchor-set! location #f)))
 
   (define (make-navigation-walk)
-    (%make-navigation-walk '() #f))
+    (%make-navigation-walk '() #f '()))
 
   (define (navigation-walk-replace-entries! walk entries)
     (unless (navigation-walk? walk)
@@ -229,11 +294,26 @@
         entries))
     (navigation-walk-entries-set! walk entries))
 
+  (define (navigation-walk-replace-jumps! walk jumps)
+    (unless (navigation-walk? walk)
+      (assertion-violation
+        'navigation-walk-replace-jumps!
+        "expected a navigation walk"
+        walk))
+    (unless (and (list? jumps)
+                 (for-all jump-history-entry? jumps))
+      (assertion-violation
+        'navigation-walk-replace-jumps!
+        "expected jump history entries"
+        jumps))
+    (navigation-walk-jumps-set! walk jumps))
+
   (define (navigation-walk-close! walk)
     (when (navigation-walk? walk)
       (for-each editor-location-close! (navigation-walk-entries walk))
       (navigation-walk-entries-set! walk '())
-      (navigation-walk-cursor-set! walk #f)))
+      (navigation-walk-cursor-set! walk #f)
+      (navigation-walk-jumps-set! walk '())))
 
   (define (navigation-walk-detach-buffer! walk buffer-id)
     (when (navigation-walk? walk)
