@@ -10,7 +10,6 @@
           interactive-event
           interactive-message-argument
           interactive-point
-          interactive-region
           interactive-string
           interactive-number
           interactive-completing-read
@@ -121,20 +120,6 @@
           (list
             (view-caret
               (command-context-view context)))))))
-
-  (define interactive-region
-    (make-interactive-reader
-      'region
-      (lambda (context)
-        (let ([region
-                (view-region
-                  (command-context-view context))])
-          (unless region
-            (assertion-violation
-              'interactive-region
-              "the region is not active"))
-          (make-interactive-ready
-            (list (car region) (cdr region)))))))
 
   (define interactive-string
     (case-lambda

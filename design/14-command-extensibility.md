@@ -57,7 +57,6 @@ interactive-prefix-raw
 interactive-event
 interactive-message-argument
 interactive-point
-interactive-region
 (interactive-string prompt history-id default)
 (interactive-number prompt history-id default)
 (interactive-completing-read
@@ -108,6 +107,22 @@ prefix、当前位置和 major-mode feature 选择 line、sexp、defun 或 buffe
 `make-command-target-reader` 在 interactive argument resolution 阶段冻结 target；
 执行写操作前用 `command-target-current?` 验证 Buffer 与 revision，防止
 minibuffer suspension 或异步状态变化后把范围应用到错误文本。
+
+`command-context-range-target` 从调用上下文和两个有方向的端点构造 target。
+`start`/`end` 始终归一化为升序，`command-target-first` 与
+`command-target-second` 恢复调用者给出的方向。target properties 保存 line、
+structure kind 和 motion direction 等选择结果，命令过程不再重新查询 View 或
+重新执行 motion。
+
+内建文本范围命令都把 `CommandTarget` 作为普通过程参数：
+
+- self-insert、newline、open-line、delete 与 yank 优先选择 active region，否则使用
+  point 或相邻字符；
+- copy、kill-region、region indentation 要求 active region；
+- kill-word、kill-line、kill-sentence、kill-sexp 和 word case conversion 忽略
+  region，由 prefix-aware fallback 产生有方向的目标；
+- Scheme evaluation 使用 region、完整 Buffer 或 point 前的完整 datum；
+- Scheme/C++ newline 与 line indentation 使用相同的 target 冻结和 revision 校验。
 
 这种分层使 Scheme 过程接收已解析参数，而不是重复解释 editor 状态。例如结构缩进
 命令的普通调用接收一个明确 target；交互调用优先使用 region，无 region 时选择下一

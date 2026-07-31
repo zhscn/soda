@@ -178,7 +178,73 @@
             target-offset
             column)))))
 
-  (define (self-insert-command context)
+  (define replace-target-selector
+    (make-command-target-selector
+      'prefer
+      #t
+      command-context-point-target))
+
+  (define replace-target-reader
+    (make-command-target-reader
+      'edit-target
+      replace-target-selector))
+
+  (define (character-command-target context direction)
+    (let ([point
+            (view-caret
+              (command-context-view context))])
+      (with-document-text
+        (context-document context)
+        (lambda (text)
+          (let ([target
+                  (if (eq? direction 'backward)
+                      (previous-character-offset text point)
+                      (next-character-offset text point))])
+            (command-context-range-target
+              context
+              'character
+              point
+              target
+              (list (cons 'direction direction))))))))
+
+  (define backward-delete-target-selector
+    (make-command-target-selector
+      'prefer
+      #t
+      (lambda (context)
+        (character-command-target context 'backward))))
+
+  (define backward-delete-target-reader
+    (make-command-target-reader
+      'backward-delete-target
+      backward-delete-target-selector))
+
+  (define forward-delete-target-selector
+    (make-command-target-selector
+      'prefer
+      #t
+      (lambda (context)
+        (character-command-target context 'forward))))
+
+  (define forward-delete-target-reader
+    (make-command-target-reader
+      'forward-delete-target
+      forward-delete-target-selector))
+
+  (define (require-current-target who context target)
+    (let ([buffer (context-buffer context)])
+      (unless (command-target-current? target buffer)
+        (editor-user-error who "The command target is stale"))
+      buffer))
+
+  (define (finish-replacement! view target caret)
+    (view-set-caret! view caret)
+    (when (eq? (command-target-source target) 'region)
+      (view-clear-mark! view)))
+
+  (define-command (self-insert-command context target)
+    "Insert event text, replacing the active region."
+    (interactive replace-target-reader)
     (let* ([event (command-context-event context)]
            [argument (command-context-argument context)]
            [bytes
@@ -193,102 +259,91 @@
                  'self-insert-command
                  context))]
            [view (context-view context)]
-           [caret (view-caret view)]
-           [region (view-region view)]
-           [start (if region (car region) caret)]
-           [end (if region (cdr region) caret)])
+           [buffer
+             (require-current-target
+               'edit.self-insert context target)]
+           [start (command-target-start target)]
+           [end (command-target-end target)])
       (unless (zero? (bytevector-length inserted))
-        (buffer-replace-range! (context-buffer context) start end inserted)
-        (view-set-caret! view (+ start (bytevector-length inserted)))
-        (when region
-          (view-clear-mark! view)))
+        (buffer-replace-range! buffer start end inserted)
+        (finish-replacement!
+          view
+          target
+          (+ start (bytevector-length inserted))))
       '()))
 
-  (define (backward-delete-command context)
+  (define-command (backward-delete-command context target)
+    "Delete the active region or the previous character."
+    (interactive backward-delete-target-reader)
     (let* ([view (context-view context)]
-           [caret (view-caret view)]
-           [region (view-region view)]
-           [start
-             (if region
-                 (car region)
-                 (with-document-text
-                   (context-document context)
-                   (lambda (text)
-                     (previous-character-offset text caret))))]
-           [end (if region (cdr region) caret)])
+           [buffer
+             (require-current-target
+               'edit.backward-delete context target)]
+           [start (command-target-start target)]
+           [end (command-target-end target)])
       (when (< start end)
-        (buffer-delete-range!
-          (context-buffer context)
-          start
-          end))
-      (view-set-caret! view start)
-      (when region
-        (view-clear-mark! view))
+        (buffer-delete-range! buffer start end))
+      (finish-replacement! view target start)
       '()))
 
-  (define (forward-delete-command context)
+  (define-command (forward-delete-command context target)
+    "Delete the active region or the next character."
+    (interactive forward-delete-target-reader)
     (let* ([view (context-view context)]
-           [caret (view-caret view)]
-           [region (view-region view)]
-           [start (if region (car region) caret)]
-           [end
-             (if region
-                 (cdr region)
-                 (with-document-text
-                   (context-document context)
-                   (lambda (text)
-                     (next-character-offset text caret))))])
+           [buffer
+             (require-current-target
+               'edit.forward-delete context target)]
+           [start (command-target-start target)]
+           [end (command-target-end target)])
       (when (> end start)
-        (buffer-delete-range!
-          (context-buffer context)
-          start
-          end))
-      (when region
-        (view-set-caret! view start)
-        (view-clear-mark! view))
+        (buffer-delete-range! buffer start end))
+      (finish-replacement! view target start)
       '()))
 
-  (define (newline-command context)
+  (define-command (newline-command context target)
+    "Insert newlines, replacing the active region."
+    (interactive replace-target-reader)
     (let* ([view (context-view context)]
-           [caret (view-caret view)]
-           [region (view-region view)]
-           [start (if region (car region) caret)]
-           [end (if region (cdr region) caret)]
+           [buffer
+             (require-current-target
+               'edit.newline context target)]
+           [start (command-target-start target)]
+           [end (command-target-end target)]
            [count (require-non-negative-count 'newline-command context)]
            [replacement
              (newline-replacement
-               (context-buffer context)
+               buffer
                start
                count)])
       (unless (zero? count)
         (buffer-replace-range!
-          (context-buffer context)
+          buffer
           start
           end
           replacement)
-        (view-set-caret!
+        (finish-replacement!
           view
-          (+ start (bytevector-length replacement)))
-        (when region
-          (view-clear-mark! view)))
+          target
+          (+ start (bytevector-length replacement))))
       '()))
 
-  (define (open-line-command context)
+  (define-command (open-line-command context target)
+    "Insert newlines at the target and leave point before them."
+    (interactive replace-target-reader)
     (let* ([view (context-view context)]
-           [caret (view-caret view)]
-           [region (view-region view)]
-           [start (if region (car region) caret)]
-           [end (if region (cdr region) caret)]
+           [buffer
+             (require-current-target
+               'edit.open-line context target)]
+           [start (command-target-start target)]
+           [end (command-target-end target)]
            [count (require-non-negative-count 'open-line-command context)])
       (unless (zero? count)
         (buffer-replace-range!
-          (context-buffer context)
+          buffer
           start
           end
           (newline-bytes count))
-        (view-set-caret! view start)
-        (when region
-          (view-clear-mark! view)))
+        (finish-replacement! view target start))
       '()))
 
   (define (toggle-auto-indent-command context)
@@ -364,9 +419,9 @@
             (when change
               (change-close! change)))))))
 
-  (define (region-line-range text region)
-    (let* ([start (car region)]
-           [end (cdr region)]
+  (define (target-line-range text target)
+    (let* ([start (command-target-start target)]
+           [end (command-target-end target)]
            [start-line (car (text-position text start))]
            [last-offset
              (if (> end start) (- end 1) end)]
@@ -414,42 +469,37 @@
                     (list start start (spaces width))
                     result)))))))
 
-  (define (non-empty-region view)
-    (let ([region (view-region view)])
-      (and region (< (car region) (cdr region)) region)))
-
-  (define (shift-region-command context unindent?)
-    (let* ([editor (command-context-editor context)]
-           [view (context-view context)]
-           [buffer (context-buffer context)]
-           [region (view-region view)])
-      (if (not region)
-          (editor-set-status-message!
-            editor
-            "No active region")
-          (with-document-text
-            (buffer-document buffer)
-            (lambda (text)
-              (let* ([lines
-                       (region-line-range text region)]
-                     [width
-                       (*
-                         (indent-width buffer)
-                         (require-non-negative-count
-                           (if unindent?
-                               'edit.unindent-region
-                               'edit.indent-region)
-                           context))])
-                (when (positive? width)
-                  (apply-replacements!
-                    buffer
-                    (region-indent-replacements
-                      text
-                      (car lines)
-                      (cdr lines)
-                      width
-                      (indent-width buffer)
-                      unindent?)))))))
+  (define (shift-region-command context target unindent?)
+    (let ([buffer
+             (require-current-target
+               (if unindent?
+                   'edit.unindent-region
+                   'edit.shift-region-right)
+               context
+               target)])
+      (with-document-text
+        (buffer-document buffer)
+        (lambda (text)
+          (let* ([lines
+                   (target-line-range text target)]
+                 [width
+                   (*
+                     (indent-width buffer)
+                     (require-non-negative-count
+                       (if unindent?
+                           'edit.unindent-region
+                           'edit.shift-region-right)
+                       context))])
+            (when (positive? width)
+              (apply-replacements!
+                buffer
+                (region-indent-replacements
+                  text
+                  (car lines)
+                  (cdr lines)
+                  width
+                  (indent-width buffer)
+                  unindent?))))))
       '()))
 
   (define indent-region-selector
@@ -485,31 +535,48 @@
     (interactive indent-region-reader)
     (reindent-command-target! context target))
 
-  (define (unindent-region-command context)
-    (shift-region-command context #t))
+  (define-command (unindent-region-command context target)
+    "Remove indentation from every line touched by the active region."
+    (interactive indent-region-reader)
+    (shift-region-command context target #t))
 
-  (define (shift-region-right-command context)
-    (shift-region-command context #f))
+  (define-command (shift-region-right-command context target)
+    "Add indentation to every line touched by the active region."
+    (interactive indent-region-reader)
+    (shift-region-command context target #f))
 
-  (define (tab-command context)
+  (define tab-target-selector
+    (make-command-target-selector
+      'prefer
+      #f
+      command-context-point-target))
+
+  (define tab-target-reader
+    (make-command-target-reader
+      'tab-target
+      tab-target-selector))
+
+  (define-command (tab-command context target)
+    "Indent the active region or insert whitespace at point."
+    (interactive tab-target-reader)
     (let* ([view (context-view context)]
-           [buffer (context-buffer context)]
-           [region (non-empty-region view)]
+           [buffer
+             (require-current-target
+               'edit.indent-or-insert-tab
+               context
+               target)]
            [count
              (require-non-negative-count
                'edit.indent-or-insert-tab
                context)])
       (cond
-        [region
+        [(eq? (command-target-source target) 'region)
          (if (buffer-indentation-provider buffer)
              (reindent-command-target!
-               context
-               (resolve-command-target
-                 indent-region-selector
-                 context))
-             (shift-region-command context #f))]
+               context target)
+             (shift-region-command context target #f))]
         [(positive? count)
-         (let* ([caret (view-caret view)]
+         (let* ([caret (command-target-start target)]
                 [width (tab-width buffer)]
                 [replacement
                   (if (buffer-setting-ref buffer 'use-tabs? #f)
@@ -527,26 +594,29 @@
            (view-set-caret!
              view
              (+ caret (bytevector-length replacement)))
-           (when (view-region view)
+           (when (view-mark-active? view)
              (view-clear-mark! view))
            '())]
         [else '()])))
 
-  (define (backtab-command context)
+  (define-command (backtab-command context target)
+    "Unindent the active region or current line."
+    (interactive tab-target-reader)
     (let* ([view (context-view context)]
-           [buffer (context-buffer context)]
-           [region (non-empty-region view)]
+           [buffer
+             (require-current-target
+               'edit.unindent context target)]
            [count
              (require-non-negative-count
                'edit.unindent
                context)])
-      (if region
-          (shift-region-command context #t)
+      (if (eq? (command-target-source target) 'region)
+          (shift-region-command context target #t)
           (when (positive? count)
             (with-document-text
               (buffer-document buffer)
               (lambda (text)
-                (let* ([caret (view-caret view)]
+                (let* ([caret (command-target-point target)]
                        [line (car (text-position text caret))]
                        [start (text-line-start text line)]
                        [replacement
@@ -1057,9 +1127,10 @@
   (define (horizontal-space-byte? byte)
     (or (= byte 9) (= byte 32)))
 
-  (define (delete-horizontal-space-command context)
-    (let* ([view (context-view context)]
-           [caret (view-caret view)])
+  (define (horizontal-space-target context)
+    (let ([caret
+            (view-caret
+              (command-context-view context))])
       (call-with-values
         (lambda ()
           (with-document-text
@@ -1077,13 +1148,35 @@
                           (find-end (+ end 1))
                           (values offset end))))))))
         (lambda (start end)
-          (when (< start end)
-            (buffer-delete-range!
-              (context-buffer context)
-              start
-              end)
-            (view-set-caret! view start)
-            (view-deactivate-mark! view))))
+          (command-context-range-target
+            context
+            'horizontal-space
+            start
+            end)))))
+
+  (define horizontal-space-target-reader
+    (make-command-target-reader
+      'horizontal-space-target
+      (make-command-target-selector
+        'ignore
+        #f
+        horizontal-space-target)))
+
+  (define-command (delete-horizontal-space-command context target)
+    "Delete spaces and tabs around point."
+    (interactive horizontal-space-target-reader)
+    (let* ([view (context-view context)]
+           [buffer
+             (require-current-target
+               'edit.delete-horizontal-space
+               context
+               target)]
+           [start (command-target-start target)]
+           [end (command-target-end target)])
+      (when (< start end)
+        (buffer-delete-range! buffer start end)
+        (view-set-caret! view start)
+        (view-deactivate-mark! view))
       '()))
 
   (define (set-mark-command context)
@@ -1108,76 +1201,117 @@
               "Point and mark exchanged")))
       '()))
 
-  (define (copy-region-command context)
+  (define required-region-target-selector
+    (make-command-target-selector 'require #t #f))
+
+  (define required-region-target-reader
+    (make-command-target-reader
+      'region-target
+      required-region-target-selector))
+
+  (define-command (copy-region-command context target)
+    "Copy the active region to the kill ring."
+    (interactive required-region-target-reader)
     (let* ([editor (command-context-editor context)]
            [view (context-view context)]
-           [region (view-region view)])
-      (if (or (not region) (= (car region) (cdr region)))
+           [buffer
+             (require-current-target
+               'edit.copy-region context target)])
+      (if (command-target-empty? target)
           (editor-set-status-message! editor "Region is empty")
           (begin
-            (editor-copy-buffer-range!
+            (editor-copy-buffer-target!
               editor
-              (context-buffer context)
-              (view-mark view)
-              (view-caret view))
+              buffer
+              target)
             (view-deactivate-mark! view)
             (editor-set-status-message! editor "Region copied")))
       '()))
 
-  (define (kill-range! context first second)
+  (define (kill-target! context target)
     (let* ([editor (command-context-editor context)]
            [view (context-view context)]
-           [start (min first second)]
-           [end (max first second)])
+           [buffer
+             (require-current-target
+               'edit.kill-target context target)]
+           [start (command-target-start target)]
+           [end (command-target-end target)])
       (when (< start end)
-        (editor-kill-buffer-range!
+        (editor-kill-buffer-target!
           editor
-          (context-buffer context)
-          first
-          second)
+          buffer
+          target)
         (view-set-caret! view start)
         (view-clear-mark! view))
       (< start end)))
 
-  (define (kill-region-command context)
-    (let* ([editor (command-context-editor context)]
-           [view (context-view context)]
-           [region (view-region view)])
-      (if (or (not region) (= (car region) (cdr region)))
+  (define-command (kill-region-command context target)
+    "Kill the active region."
+    (interactive required-region-target-reader)
+    (let ([editor (command-context-editor context)])
+      (require-current-target
+        'edit.kill-region context target)
+      (if (command-target-empty? target)
           (editor-set-status-message! editor "Region is empty")
           (begin
-            (kill-range!
-              context
-              (view-mark view)
-              (view-caret view))
+            (kill-target! context target)
             (editor-set-status-message! editor "Region killed")))
       '()))
 
-  (define (kill-word-command context)
-    (let* ([view (context-view context)]
-           [start (view-caret view)]
+  (define (word-kill-target context direction)
+    (let* ([start
+             (view-caret
+               (command-context-view context))]
+           [count
+             (command-context-count context)]
            [end
              (buffer-word-motion-target
                (context-buffer context)
                start
-               (command-context-count context))])
-      (kill-range! context start end)
-      '()))
+               (if (eq? direction 'backward)
+                   (- count)
+                   count))])
+      (command-context-range-target
+        context
+        'word
+        start
+        end
+        (list (cons 'direction direction)))))
 
-  (define (backward-kill-word-command context)
-    (let* ([view (context-view context)]
-           [start (view-caret view)]
-           [end
-             (buffer-word-motion-target
-               (context-buffer context)
-               start
-               (- (command-context-count context)))])
-      (kill-range! context start end)
-      '()))
+  (define kill-word-target-reader
+    (make-command-target-reader
+      'kill-word-target
+      (make-command-target-selector
+        'ignore
+        #f
+        (lambda (context)
+          (word-kill-target context 'forward)))))
 
-  (define (kill-line-command context)
-    (let* ([view (context-view context)]
-           [start (view-caret view)]
+  (define backward-kill-word-target-reader
+    (make-command-target-reader
+      'backward-kill-word-target
+      (make-command-target-selector
+        'ignore
+        #f
+        (lambda (context)
+          (word-kill-target context 'backward)))))
+
+  (define-command (kill-word-command context target)
+    "Kill through the next words selected by the prefix count."
+    (interactive kill-word-target-reader)
+    (kill-target! context target)
+    '())
+
+  (define-command (backward-kill-word-command context target)
+    "Kill backward through words selected by the prefix count."
+    (interactive backward-kill-word-target-reader)
+    (kill-target! context target)
+    '())
+
+  (define (line-kill-target context)
+    (let* ([start
+             (view-caret
+               (command-context-view context))]
            [end
              (with-document-text
                (context-document context)
@@ -1207,12 +1341,25 @@
                             (text-line-start
                               text
                               (max 0 (+ line count 1)))]))))))])
-      (kill-range! context start end)
-      '()))
+      (command-context-range-target
+        context 'line start end)))
 
-  (define (kill-sentence-command context)
-    (let* ([view (context-view context)]
-           [start (view-caret view)]
+  (define kill-line-target-reader
+    (make-command-target-reader
+      'kill-line-target
+      (make-command-target-selector
+        'ignore #f line-kill-target)))
+
+  (define-command (kill-line-command context target)
+    "Kill through the line range selected by the prefix argument."
+    (interactive kill-line-target-reader)
+    (kill-target! context target)
+    '())
+
+  (define (sentence-kill-target context)
+    (let* ([start
+             (view-caret
+               (command-context-view context))]
            [end
              (with-document-text
                (context-document context)
@@ -1221,15 +1368,36 @@
                    text
                    start
                    (command-context-count context))))])
-      (kill-range! context start end)
-      '()))
+      (command-context-range-target
+        context 'sentence start end)))
 
-  (define (yank-command context)
+  (define kill-sentence-target-reader
+    (make-command-target-reader
+      'kill-sentence-target
+      (make-command-target-selector
+        'ignore #f sentence-kill-target)))
+
+  (define-command (kill-sentence-command context target)
+    "Kill through sentences selected by the prefix count."
+    (interactive kill-sentence-target-reader)
+    (kill-target! context target)
+    '())
+
+  (define-command (yank-command context target)
+    "Insert the newest kill-ring entry, replacing the active region."
+    (interactive replace-target-reader)
     (let* ([editor (command-context-editor context)]
            [view (context-view context)])
-      (if (not (editor-yank! editor view))
+      (require-current-target 'edit.yank context target)
+      (if (not
+            (editor-yank!
+              editor
+              view
+              target))
           (editor-set-status-message! editor "Kill ring is empty")
           (begin
+            (when (eq? (command-target-source target) 'region)
+              (view-clear-mark! view))
             (editor-set-status-message! editor "Yanked")))
       '()))
 

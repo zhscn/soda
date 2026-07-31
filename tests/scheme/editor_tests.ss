@@ -1231,6 +1231,18 @@
       (buffer-bytes region-buffer)
       (string->utf8 "alpha beta")))
   (error 'editor-tests "copy-region did not populate the kill ring"))
+(let* ([entry (car (editor-command-history region-editor))]
+       [target (and (pair? (cdr entry)) (cadr entry))])
+  (unless
+    (and
+      (eq? (car entry) 'edit.copy-region)
+      (command-target? target)
+      (eq? (command-target-source target) 'region)
+      (= (command-target-start target) 0)
+      (= (command-target-end target) 5))
+    (error 'editor-tests
+           "copy-region did not resolve a typed command target"
+           entry)))
 
 (editor-update!
   region-editor
@@ -1741,6 +1753,38 @@
     (command-target-current? selected-target target-buffer))
   (error 'editor-tests
          "region-first command target did not retain invocation state"))
+(define reverse-target
+  (command-context-range-target
+    target-context
+    'word
+    4
+    1
+    '((direction . backward))))
+(unless
+  (and
+    (= (command-target-start reverse-target) 1)
+    (= (command-target-end reverse-target) 4)
+    (not (command-target-forward? reverse-target))
+    (= (command-target-first reverse-target) 4)
+    (= (command-target-second reverse-target) 1)
+    (eq?
+      (command-target-property-ref
+        reverse-target 'direction)
+      'backward)
+    (eq?
+      (command-target-property-ref
+        reverse-target 'missing 'fallback)
+      'fallback))
+  (error 'editor-tests
+         "directed command target did not retain range semantics"))
+(editor-copy-buffer-target!
+  target-editor target-buffer reverse-target)
+(unless
+  (bytevector=?
+    (editor-current-kill target-editor)
+    (string->utf8 "lph"))
+  (error 'editor-tests
+         "target-based copy did not preserve the selected bytes"))
 (view-deactivate-mark! target-view)
 (define line-target
   (resolve-command-target

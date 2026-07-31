@@ -5,6 +5,8 @@
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
+          (soda editor command-target)
+          (soda editor condition)
           (soda editor edit)
           (soda editor indentation-runtime)
           (soda editor keymap)
@@ -36,12 +38,36 @@
         value
         2)))
 
-  (define (scheme-indent-line-command context)
+  (define line-target-reader
+    (make-command-target-reader
+      'scheme-line-target
+      (make-command-target-selector
+        'ignore
+        #f
+        command-context-line-target)))
+
+  (define replace-target-reader
+    (make-command-target-reader
+      'scheme-newline-target
+      (make-command-target-selector
+        'prefer
+        #t
+        command-context-point-target)))
+
+  (define (require-current-target who buffer target)
+    (unless (command-target-current? target buffer)
+      (editor-user-error who "The command target is stale")))
+
+  (define-command (scheme-indent-line-command context target)
+    "Reindent the Scheme source line frozen by interactive dispatch."
+    (interactive line-target-reader)
     (let* ([view (command-context-view context)]
            [buffer (view-buffer view)])
+      (require-current-target
+        'scheme.indent-line buffer target)
       (buffer-reindent-line!
         buffer
-        (view-caret view)))
+        (command-target-point target)))
     '())
 
   (define (newline-and-indent-bytes count indentation)
@@ -51,25 +77,22 @@
           ((= index count) result)
         (bytevector-u8-set! result index 10))))
 
-  (define (scheme-newline-command context)
+  (define-command (scheme-newline-command context target)
+    "Insert newlines and Scheme indentation at the command target."
+    (interactive replace-target-reader)
     (let* ([view (command-context-view context)]
            [buffer (view-buffer view)]
-           [count (command-context-count context)]
-           [region (view-region view)])
+           [count (command-context-count context)])
+      (require-current-target
+        'scheme.newline-and-indent buffer target)
       (when (negative? count)
         (assertion-violation
           'scheme.newline-and-indent
           "command requires a non-negative prefix argument"
           count))
       (when (positive? count)
-        (let* ([start
-                 (if region
-                     (car region)
-                     (view-caret view))]
-               [end
-                 (if region
-                     (cdr region)
-                     start)]
+        (let* ([start (command-target-start target)]
+               [end (command-target-end target)]
                [indentation
                  (scheme-continuation-indent
                    (buffer-range-source buffer 0 start)
@@ -86,7 +109,8 @@
           (view-set-caret!
             view
             (+ start (bytevector-length replacement)))
-          (when region (view-clear-mark! view))))
+          (when (eq? (command-target-source target) 'region)
+            (view-clear-mark! view))))
       '()))
 
   (define (install-scheme-commands! editor)

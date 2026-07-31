@@ -13,6 +13,9 @@
           command-target-properties
           command-target-empty?
           command-target-current?
+          command-target-first
+          command-target-second
+          command-target-property-ref
           make-command-target-selector
           command-target-selector?
           command-target-selector-region-policy
@@ -20,6 +23,7 @@
           command-target-selector-fallback
           resolve-command-target
           make-command-target-reader
+          command-context-range-target
           command-context-point-target
           command-context-line-target
           command-context-buffer-target)
@@ -142,7 +146,51 @@
          (document-id (buffer-document buffer)))
       (= (command-target-revision target) (buffer-revision buffer))))
 
-  (define (target-from-range context source first second properties)
+  (define (command-target-first target)
+    (unless (command-target? target)
+      (assertion-violation
+        'command-target-first
+        "expected a command target"
+        target))
+    (if (command-target-forward? target)
+        (command-target-start target)
+        (command-target-end target)))
+
+  (define (command-target-second target)
+    (unless (command-target? target)
+      (assertion-violation
+        'command-target-second
+        "expected a command target"
+        target))
+    (if (command-target-forward? target)
+        (command-target-end target)
+        (command-target-start target)))
+
+  (define command-target-property-ref
+    (case-lambda
+      [(target name)
+       (command-target-property-ref target name #f)]
+      [(target name default)
+       (unless (command-target? target)
+         (assertion-violation
+           'command-target-property-ref
+           "expected a command target"
+           target))
+       (unless (symbol? name)
+         (assertion-violation
+           'command-target-property-ref
+           "property name must be a symbol"
+           name))
+       (let ([entry (assq name (command-target-properties target))])
+         (if entry (cdr entry) default))]))
+
+  (define (make-context-range-target
+            context source first second properties)
+    (unless (command-context? context)
+      (assertion-violation
+        'command-context-range-target
+        "expected a command context"
+        context))
     (let* ([view (command-context-view context)]
            [buffer (view-buffer view)]
            [document (buffer-document buffer)])
@@ -158,13 +206,22 @@
         (<= first second)
         properties)))
 
+  (define command-context-range-target
+    (case-lambda
+      [(context source first second)
+       (make-context-range-target
+         context source first second '())]
+      [(context source first second properties)
+       (make-context-range-target
+         context source first second properties)]))
+
   (define (region-target context allow-empty?)
     (let* ([view (command-context-view context)]
            [mark (and (view-mark-active? view) (view-mark view))])
       (and
         mark
         (or allow-empty? (not (= mark (view-caret view))))
-        (target-from-range
+        (command-context-range-target
           context
           'region
           mark
@@ -256,7 +313,8 @@
 
   (define (command-context-point-target context)
     (let ([point (view-caret (command-context-view context))])
-      (target-from-range context 'point point point '())))
+      (command-context-range-target
+        context 'point point point)))
 
   (define (with-context-text context procedure)
     (let* ([buffer
@@ -279,7 +337,7 @@
       (lambda (text)
         (let* ([point (view-caret (command-context-view context))]
                [line (car (text-position text point))])
-          (target-from-range
+          (command-context-range-target
             context
             'line
             (text-line-start text line)
@@ -290,7 +348,7 @@
     (with-context-text
       context
       (lambda (text)
-        (target-from-range
+        (command-context-range-target
           context
           'buffer
           0

@@ -8,7 +8,9 @@
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
+          (soda editor command-target)
           (soda editor comint)
+          (soda editor condition)
           (soda editor debugger-commands)
           (soda editor effect)
           (soda editor evaluator)
@@ -256,38 +258,56 @@
         #t
         (buffer-origin source-buffer #f #f))))
 
-  (define (submit-buffer-range! context start end)
-    (when (= start end)
-      (assertion-violation
-        'scheme.eval-range
-        "evaluation range is empty"))
-    (let* ([editor (command-context-editor context)]
-           [buffer (view-buffer (command-context-view context))]
-           [source (buffer-range-source buffer start end)]
-           [origin (buffer-origin buffer start end)]
-           [session (editor-open-repl! editor)])
-      (session-submit-source!
-        editor
-        session
-        source
+  (define (submit-buffer-target! context target)
+    (let ([buffer
+            (view-buffer
+              (command-context-view context))])
+      (unless (command-target-current? target buffer)
+        (editor-user-error
+          'scheme.eval-range
+          "The evaluation target is stale"))
+      (when (command-target-empty? target)
+        (editor-user-error
+          'scheme.eval-range
+          "The evaluation target is empty"))
+      (let* ([start (command-target-start target)]
+             [end (command-target-end target)]
+             [editor (command-context-editor context)]
+             [source (buffer-range-source buffer start end)]
+             [origin (buffer-origin buffer start end)]
+             [session (editor-open-repl! editor)])
+        (session-submit-source!
+          editor
+          session
+          source
+          #t
+          origin))))
+
+  (define eval-region-target-reader
+    (make-command-target-reader
+      'scheme-eval-region-target
+      (make-command-target-selector
+        'require
         #t
-        origin)))
+        #f)))
 
-  (define (eval-region-command context)
-    (let* ([view (command-context-view context)]
-           [region (view-region view)])
-      (unless region
-        (assertion-violation
-          'scheme.eval-region
-          "no active region"))
-      (submit-buffer-range! context (car region) (cdr region))))
+  (define eval-buffer-target-reader
+    (make-command-target-reader
+      'scheme-eval-buffer-target
+      (make-command-target-selector
+        'ignore
+        #f
+        command-context-buffer-target)))
 
-  (define (eval-buffer-command context)
-    (submit-buffer-range!
-      context
-      0
-      (buffer-size
-        (view-buffer (command-context-view context)))))
+  (define-command (eval-region-command context target)
+    "Evaluate the active Scheme region."
+    (interactive eval-region-target-reader)
+    (submit-buffer-target! context target))
+
+  (define-command (eval-buffer-command context target)
+    "Evaluate the complete Scheme buffer."
+    (interactive eval-buffer-target-reader)
+    (submit-buffer-target! context target))
 
   (define (last-datum-character-range source)
     (define (skip-whitespace start end)
@@ -316,20 +336,34 @@
     (bytevector-length
       (string->utf8 (substring source 0 offset))))
 
-  (define (eval-last-sexp-command context)
+  (define (last-sexp-target context)
     (let* ([view (command-context-view context)]
            [buffer (view-buffer view)]
            [caret (view-caret view)]
            [source (buffer-range-source buffer 0 caret)]
            [range (last-datum-character-range source)])
       (unless range
-        (assertion-violation
+        (editor-user-error
           'scheme.eval-last-sexp
-          "no complete Scheme datum before point"))
-      (submit-buffer-range!
+          "No complete Scheme datum before point"))
+      (command-context-range-target
         context
+        'sexp
         (character-offset->byte-offset source (car range))
         (character-offset->byte-offset source (cdr range)))))
+
+  (define eval-last-sexp-target-reader
+    (make-command-target-reader
+      'scheme-eval-last-sexp-target
+      (make-command-target-selector
+        'ignore
+        #f
+        last-sexp-target)))
+
+  (define-command (eval-last-sexp-command context target)
+    "Evaluate the complete Scheme datum before point."
+    (interactive eval-last-sexp-target-reader)
+    (submit-buffer-target! context target))
 
   (define (matching-result-session editor result)
     (let* ([request (evaluation-result-request result)]

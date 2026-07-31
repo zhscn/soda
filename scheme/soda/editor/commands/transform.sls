@@ -5,6 +5,8 @@
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
+          (soda editor command-target)
+          (soda editor condition)
           (soda editor edit)
           (soda editor keymap)
           (soda editor motion-runtime)
@@ -172,17 +174,35 @@
                (not (transpose-word-once! view)))])
       '()))
 
-  (define (transform-words! context transform)
+  (define (word-transform-target context)
     (let* ([view (command-context-view context)]
            [buffer (view-buffer view)]
            [caret (view-caret view)]
-           [target
+           [end
              (buffer-word-motion-target
                buffer
                caret
-               (command-context-count context))]
-           [start (min caret target)]
-           [end (max caret target)])
+               (command-context-count context))])
+      (command-context-range-target
+        context 'word caret end)))
+
+  (define word-transform-target-reader
+    (make-command-target-reader
+      'word-transform-target
+      (make-command-target-selector
+        'ignore
+        #f
+        word-transform-target)))
+
+  (define (transform-words! context target transform)
+    (let* ([view (command-context-view context)]
+           [buffer (view-buffer view)]
+           [start (command-target-start target)]
+           [end (command-target-end target)])
+      (unless (command-target-current? target buffer)
+        (editor-user-error
+          'edit.transform-word
+          "The word target is stale"))
       (when (< start end)
         (let ([replacement
                 (with-document-text
@@ -195,19 +215,25 @@
           (buffer-replace-range! buffer start end replacement)
           (view-set-caret!
             view
-            (if (< target caret)
-                start
-                (+ start (bytevector-length replacement))))))
+            (if (command-target-forward? target)
+                (+ start (bytevector-length replacement))
+                start))))
       '()))
 
-  (define (upcase-word-command context)
-    (transform-words! context string-upcase))
+  (define-command (upcase-word-command context target)
+    "Convert the target words to uppercase."
+    (interactive word-transform-target-reader)
+    (transform-words! context target string-upcase))
 
-  (define (downcase-word-command context)
-    (transform-words! context string-downcase))
+  (define-command (downcase-word-command context target)
+    "Convert the target words to lowercase."
+    (interactive word-transform-target-reader)
+    (transform-words! context target string-downcase))
 
-  (define (capitalize-word-command context)
-    (transform-words! context string-titlecase))
+  (define-command (capitalize-word-command context target)
+    "Capitalize the target words."
+    (interactive word-transform-target-reader)
+    (transform-words! context target string-titlecase))
 
   (define (stroke character modifiers)
     (make-key-stroke

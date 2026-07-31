@@ -183,10 +183,10 @@
       (editor-set-status-message! editor "Mark set")
       '()))
 
-  (define (kill-sexp-command context)
-    (let* ([editor (command-context-editor context)]
-           [view (context-view context)]
-           [start (view-caret view)]
+  (define (kill-sexp-target context)
+    (let* ([start
+             (view-caret
+               (context-view context))]
            [end
              (require-target
                'edit.kill-sexp
@@ -195,13 +195,33 @@
                  start
                  (command-context-count context))
                "No expression to kill")])
-      (unless (= start end)
-        (editor-kill-buffer-range!
+      (command-context-range-target
+        context 'sexp start end)))
+
+  (define kill-sexp-target-reader
+    (make-command-target-reader
+      'kill-sexp-target
+      (make-command-target-selector
+        'ignore #f kill-sexp-target)))
+
+  (define-command (kill-sexp-command context target)
+    "Kill balanced expressions selected by the prefix count."
+    (interactive kill-sexp-target-reader)
+    (let* ([editor (command-context-editor context)]
+           [view (context-view context)]
+           [buffer (context-buffer context)])
+      (unless (command-target-current? target buffer)
+        (editor-user-error
+          'edit.kill-sexp
+          "The expression target is stale"))
+      (unless (command-target-empty? target)
+        (editor-kill-buffer-target!
           editor
-          (context-buffer context)
-          start
-          end)
-        (view-set-caret! view (min start end))
+          buffer
+          target)
+        (view-set-caret!
+          view
+          (command-target-start target))
         (view-clear-mark! view))
       '()))
 
@@ -330,20 +350,16 @@
       '()))
 
   (define (thing-command-target context source thing)
-    (let* ([view (context-view context)]
-           [buffer (context-buffer context)]
-           [document (buffer-document buffer)])
-      (make-command-target
-        source
-        (buffer-id buffer)
-        (document-id document)
-        (buffer-revision buffer)
-        (structural-thing-start thing)
-        (structural-thing-end thing)
-        (view-caret view)
-        (and (view-mark-active? view) (view-mark view))
-        #t
-        (list (cons 'thing thing)))))
+    (command-context-range-target
+      context
+      source
+      (structural-thing-start thing)
+      (structural-thing-end thing)
+      (list
+        (cons 'roles (structural-thing-roles thing))
+        (cons 'depth (structural-thing-depth thing))
+        (cons 'node-kind
+              (structural-thing-node-kind thing)))))
 
   (define (indent-sexp-fallback context)
     (let* ([view (context-view context)]

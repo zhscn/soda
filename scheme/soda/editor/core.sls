@@ -264,8 +264,8 @@
           editor-push-kill!
           editor-record-kill!
           editor-current-kill
-          editor-copy-buffer-range!
-          editor-kill-buffer-range!
+          editor-copy-buffer-target!
+          editor-kill-buffer-target!
           editor-yank!
           editor-yank-pop!
           buffer-replace-range!
@@ -374,7 +374,6 @@
           interactive-event
           interactive-message-argument
           interactive-point
-          interactive-region
           make-command-target
           command-target?
           command-target-source
@@ -389,10 +388,14 @@
           command-target-properties
           command-target-empty?
           command-target-current?
+          command-target-first
+          command-target-second
+          command-target-property-ref
           make-command-target-selector
           command-target-selector?
           resolve-command-target
           make-command-target-reader
+          command-context-range-target
           command-context-point-target
           command-context-line-target
           command-context-buffer-target

@@ -5,6 +5,8 @@
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
+          (soda editor command-target)
+          (soda editor condition)
           (soda editor cpp-language)
           (soda editor edit)
           (soda editor keymap)
@@ -70,6 +72,26 @@
           count))
       count))
 
+  (define line-target-reader
+    (make-command-target-reader
+      'cpp-line-target
+      (make-command-target-selector
+        'ignore
+        #f
+        command-context-line-target)))
+
+  (define replace-target-reader
+    (make-command-target-reader
+      'cpp-newline-target
+      (make-command-target-selector
+        'prefer
+        #t
+        command-context-point-target)))
+
+  (define (require-current-target who buffer target)
+    (unless (command-target-current? target buffer)
+      (editor-user-error who "The command target is stale")))
+
   (define (native-enter-once! buffer view session style)
     (let ([result #f] [change #f])
       (dynamic-wind
@@ -91,7 +113,9 @@
           (when change (change-close! change))
           (when result (indent-result-close! result))))))
 
-  (define (cpp-newline-command context)
+  (define-command (cpp-newline-command context target)
+    "Insert newlines with the native C++ indentation engine."
+    (interactive replace-target-reader)
     (let* ([view (command-context-view context)]
            [buffer (view-buffer view)]
            [session (require-cpp-session buffer)]
@@ -99,13 +123,19 @@
              (require-non-negative-count
                'cpp.newline-and-indent
                context)]
-           [region (view-region view)]
            [style #f])
+      (require-current-target
+        'cpp.newline-and-indent buffer target)
       (when (positive? count)
-        (when region
+        (view-set-caret!
+          view
+          (command-target-start target))
+        (unless (command-target-empty? target)
           (buffer-delete-range!
-            buffer (car region) (cdr region))
-          (view-set-caret! view (car region))
+            buffer
+            (command-target-start target)
+            (command-target-end target)))
+        (when (eq? (command-target-source target) 'region)
           (view-clear-mark! view))
         (dynamic-wind
           (lambda () #f)
@@ -175,7 +205,9 @@
           (when text (text-close! text))
           (when snapshot (snapshot-close! snapshot))))))
 
-  (define (cpp-indent-line-command context)
+  (define-command (cpp-indent-line-command context target)
+    "Indent C++ source lines beginning with the frozen target line."
+    (interactive line-target-reader)
     (let* ([view (command-context-view context)]
            [buffer (view-buffer view)]
            [session (require-cpp-session buffer)]
@@ -184,24 +216,12 @@
                'cpp.indent-line
                context)]
            [start-line
-             (let ([snapshot
-                     (document-snapshot
-                       (buffer-document buffer))])
-               (dynamic-wind
-                 (lambda () #f)
-                 (lambda ()
-                   (let ([text (snapshot-text snapshot)])
-                     (dynamic-wind
-                       (lambda () #f)
-                       (lambda ()
-                         (car
-                           (text-position
-                             text
-                             (view-caret view))))
-                       (lambda () (text-close! text)))))
-                 (lambda () (snapshot-close! snapshot))))]
+             (command-target-property-ref
+               target 'line)]
            [style #f]
-           [caret (view-caret view)])
+           [caret (command-target-point target)])
+      (require-current-target
+        'cpp.indent-line buffer target)
       (dynamic-wind
         (lambda () #f)
         (lambda ()

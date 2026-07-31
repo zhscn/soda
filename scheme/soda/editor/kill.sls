@@ -2,13 +2,14 @@
   (export editor-push-kill!
           editor-record-kill!
           editor-current-kill
-          editor-copy-buffer-range!
-          editor-kill-buffer-range!
+          editor-copy-buffer-target!
+          editor-kill-buffer-target!
           editor-yank!
           editor-yank-pop!)
   (import (rnrs)
           (soda document)
           (soda editor buffer)
+          (soda editor command-target)
           (soda editor edit)
           (soda editor state))
 
@@ -93,24 +94,30 @@
   (define (ring-entry ring index)
     (copy-bytevector (list-ref ring index)))
 
-  (define (editor-yank! editor view)
+  (define (editor-yank! editor view target)
     (require-open-editor 'editor-yank! editor)
     (unless (view? view)
       (assertion-violation 'editor-yank! "expected a view" view))
-    (let ([ring (editor-kill-ring editor)])
+    (unless (command-target? target)
+      (assertion-violation
+        'editor-yank!
+        "expected a command target"
+        target))
+    (let ([ring (editor-kill-ring editor)]
+          [buffer (view-buffer view)])
+      (unless (command-target-current? target buffer)
+        (assertion-violation
+          'editor-yank!
+          "command target is stale"
+          target))
       (if (null? ring)
           #f
-          (let* ([buffer (view-buffer view)]
-                 [region (view-region view)]
-                 [caret (view-caret view)]
-                 [start (if region (car region) caret)]
-                 [end (if region (cdr region) caret)]
+          (let* ([start (command-target-start target)]
+                 [end (command-target-end target)]
                  [bytes (ring-entry ring 0)]
                  [new-end (+ start (bytevector-length bytes))])
             (buffer-replace-range! buffer start end bytes)
             (view-set-caret! view new-end)
-            (when region
-              (view-clear-mark! view))
             (editor-set-last-yank!
               editor
               (make-yank-state
@@ -215,15 +222,25 @@
               (lambda () (text-close! text)))))
         (lambda () (snapshot-close! snapshot)))))
 
-  (define (editor-copy-buffer-range! editor buffer first second)
-    (require-open-editor 'editor-copy-buffer-range! editor)
+  (define (read-target who buffer target)
+    (unless (command-target? target)
+      (assertion-violation who "expected a command target" target))
+    (unless (command-target-current? target buffer)
+      (assertion-violation who "command target is stale" target))
+    (read-range
+      who
+      buffer
+      (command-target-first target)
+      (command-target-second target)))
+
+  (define (editor-copy-buffer-target! editor buffer target)
+    (require-open-editor 'editor-copy-buffer-target! editor)
     (call-with-values
       (lambda ()
-        (read-range
-          'editor-copy-buffer-range!
+        (read-target
+          'editor-copy-buffer-target!
           buffer
-          first
-          second))
+          target))
       (lambda (start end direction bytes)
         (and
           bytes
@@ -234,15 +251,14 @@
               direction)
             bytes)))))
 
-  (define (editor-kill-buffer-range! editor buffer first second)
-    (require-open-editor 'editor-kill-buffer-range! editor)
+  (define (editor-kill-buffer-target! editor buffer target)
+    (require-open-editor 'editor-kill-buffer-target! editor)
     (call-with-values
       (lambda ()
-        (read-range
-          'editor-kill-buffer-range!
+        (read-target
+          'editor-kill-buffer-target!
           buffer
-          first
-          second))
+          target))
       (lambda (start end direction bytes)
         (and
           bytes
