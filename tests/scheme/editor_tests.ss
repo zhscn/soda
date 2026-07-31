@@ -1761,6 +1761,111 @@
          "revision-scoped command target survived a document edit"))
 (editor-close! target-editor)
 
+(define structural-source
+  "(define (f x)\n  (list x '(a b)))\n\n(g 1 2)")
+(define structural-document
+  (make-document structural-source 998))
+(define structural-buffer
+  (make-buffer
+    998
+    structural-document
+    "*structural-editing*"
+    'scheme-mode))
+(define structural-editor
+  (make-editor structural-buffer))
+(define structural-view
+  (editor-active-view structural-editor))
+(define structural-index
+  (buffer-structure-index structural-buffer))
+(define structural-defuns
+  (structure-index-things-in-range
+    structural-index
+    'defun
+    0
+    (string-length structural-source)))
+(unless
+  (and
+    (= (structure-index-revision structural-index)
+       (buffer-revision structural-buffer))
+    (= (length structural-defuns) 2)
+    (= (structural-thing-start (car structural-defuns)) 0)
+    (structural-thing-has-role?
+      (car structural-defuns)
+      'list))
+  (error 'editor-tests
+         "Scheme mode did not publish a revision-scoped structure index"))
+
+(define first-form-end
+  (structural-thing-end (car structural-defuns)))
+(editor-update!
+  structural-editor
+  (make-command-message 'move.forward-sexp #f))
+(unless (= (view-caret structural-view) first-form-end)
+  (error 'editor-tests
+         "forward-sexp did not cross the first Scheme form"))
+(editor-update!
+  structural-editor
+  (make-command-message 'move.backward-sexp #f))
+(unless (= (view-caret structural-view) 0)
+  (error 'editor-tests
+         "backward-sexp did not return across the Scheme form"))
+(editor-update!
+  structural-editor
+  (make-command-message 'move.down-list #f))
+(unless (= (view-caret structural-view) 1)
+  (error 'editor-tests "down-list did not enter the Scheme list"))
+(editor-update!
+  structural-editor
+  (make-command-message 'move.forward-up-list #f))
+(unless (= (view-caret structural-view) first-form-end)
+  (error 'editor-tests
+         "forward-up-list did not leave the Scheme list"))
+
+(view-set-caret! structural-view 0)
+(editor-update!
+  structural-editor
+  (make-command-message 'mark.sexp #f))
+(unless
+  (equal?
+    (view-region structural-view)
+    (cons 0 first-form-end))
+  (error 'editor-tests "mark-sexp did not mark the first form"))
+(editor-update!
+  structural-editor
+  (make-command-message 'mark.sexp #f))
+(unless
+  (and
+    (= (car (view-region structural-view)) 0)
+    (= (cdr (view-region structural-view))
+       (string-length structural-source)))
+  (error 'editor-tests
+         "repeated mark-sexp did not extend the active region"))
+(editor-close! structural-editor)
+
+(define transpose-sexp-document
+  (make-document "one two three" 999))
+(define transpose-sexp-buffer
+  (make-buffer
+    999
+    transpose-sexp-document
+    "*transpose-sexps*"
+    'fundamental-mode))
+(define transpose-sexp-editor
+  (make-editor transpose-sexp-buffer))
+(define transpose-sexp-view
+  (editor-active-view transpose-sexp-editor))
+(view-set-caret! transpose-sexp-view 4)
+(editor-update!
+  transpose-sexp-editor
+  (make-command-message 'edit.transpose-sexps #f))
+(unless
+  (bytevector=?
+    (buffer-bytes transpose-sexp-buffer)
+    (string->utf8 "two one three"))
+  (error 'editor-tests
+         "transpose-sexps did not use the delimiter fallback structure"))
+(editor-close! transpose-sexp-editor)
+
 (define transform-document
   (make-document "ab one TWO three" 976))
 (define transform-buffer
@@ -8037,6 +8142,13 @@
        [property-cell (frame-cell-ref frame 0 1)]
        [constant-cell (frame-cell-ref frame 0 25)]
        [profile (buffer-language-profile json-buffer)]
+       [structure (buffer-structure-index json-buffer)]
+       [objects
+         (structure-index-things-in-range
+           structure
+           'list
+           0
+           30)]
        [folds
          (syntax-query
            (language-profile-syntax profile)
@@ -8048,13 +8160,22 @@
     (and
       (memq 'property (cell-faces property-cell))
       (memq 'constant (cell-faces constant-cell))
+      (= (length objects) 1)
+      (equal?
+        (assq 'capture
+          (structural-thing-properties
+            (car objects)))
+        '(capture . text-object.object))
       (= (length folds) 1)
       (eq? (syntax-capture-name (car folds)) 'fold.object)
       (string=?
         (syntax-capture-node-kind (car folds))
         "object"))
     (error 'editor-tests
-           "JSON Tree-sitter highlights or fold captures differ")))
+           "JSON Tree-sitter highlights or fold captures differ"
+           (map
+             structural-thing-properties
+             objects))))
 (editor-register-tree-sitter-file-association!
   json-editor
   'test-json-files

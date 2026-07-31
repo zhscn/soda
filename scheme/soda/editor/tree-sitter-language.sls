@@ -29,6 +29,7 @@
           (soda editor decoration)
           (soda editor language)
           (soda editor state)
+          (soda editor structure)
           (soda tree-sitter))
 
   (define-record-type
@@ -288,6 +289,92 @@
       (if (memq 'folds kinds) '(fold) '())
       (if (memq 'textobjects kinds) '(text-object) '())))
 
+  (define (string-contains? value needle)
+    (let ([limit
+            (- (string-length value)
+               (string-length needle))])
+      (let loop ([index 0])
+        (and
+          (<= index limit)
+          (or
+            (string=?
+              (substring
+                value
+                index
+                (+ index (string-length needle)))
+              needle)
+            (loop (+ index 1)))))))
+
+  (define (capture-roles name)
+    (let* ([raw (symbol->string name)]
+           [prefix "text-object."]
+           [value
+             (if
+               (and
+                 (>= (string-length raw)
+                     (string-length prefix))
+                 (string=?
+                   (substring
+                     raw
+                     0
+                     (string-length prefix))
+                   prefix))
+               (substring
+                 raw
+                 (string-length prefix)
+                 (string-length raw))
+               raw)])
+      (cond
+        [(or
+           (string-contains? value "comment")
+           (string-contains? value "documentation"))
+         '(comment text)]
+        [(string-contains? value "string")
+         '(sexp string text)]
+        [(or
+           (string-contains? value "function")
+           (string-contains? value "defun"))
+         '(sexp defun)]
+        [(or
+           (string-contains? value "array")
+           (string-contains? value "object")
+           (string-contains? value "list")
+           (string-contains? value "block"))
+         '(sexp list)]
+        [(or
+           (string-contains? value "statement")
+           (string-contains? value "pair"))
+         '(sexp statement)]
+        [else '(sexp)])))
+
+  (define (capture->structural-thing capture)
+    (let ([start (syntax-capture-start capture)]
+          [end (syntax-capture-end capture)]
+          [name (syntax-capture-name capture)])
+      (make-structural-thing
+        (capture-roles name)
+        start
+        end
+        start
+        end
+        (syntax-capture-depth capture)
+        (syntax-capture-node-kind capture)
+        (list (cons 'capture name)))))
+
+  (define (make-tree-sitter-structure-index
+            syntax session snapshot)
+    (let ([captures
+            (syntax-query
+              syntax
+              session
+              'text-object
+              0
+              (snapshot-size snapshot))])
+      (make-structure-index
+        (snapshot-document-id snapshot)
+        (snapshot-revision snapshot)
+        (map capture->structural-thing captures))))
+
   (define (make-tree-sitter-syntax-provider spec)
     (unless (tree-sitter-language-spec? spec)
       (assertion-violation
@@ -397,15 +484,29 @@
         'make-tree-sitter-language-profile
         "expected a Tree-sitter language spec"
         spec))
-    (make-language-profile
-      (tree-sitter-language-spec-name spec)
-      (make-tree-sitter-syntax-provider spec)
-      #f
-      (tree-sitter-language-spec-pairs spec)
-      (tree-sitter-language-spec-identifier-character? spec)
-      #f
-      '()
-      #f))
+    (let* ([syntax (make-tree-sitter-syntax-provider spec)]
+           [bundle
+             (tree-sitter-language-spec-query-bundle spec)]
+           [structure
+             (and
+               (memq
+                 'textobjects
+                 (tree-sitter-query-bundle-kinds bundle))
+               (make-structure-provider
+                 (lambda (session snapshot)
+                   (make-tree-sitter-structure-index
+                     syntax
+                     session
+                     snapshot))))])
+      (make-language-profile
+        (tree-sitter-language-spec-name spec)
+        syntax
+        #f
+        (tree-sitter-language-spec-pairs spec)
+        (tree-sitter-language-spec-identifier-character? spec)
+        structure
+        '()
+        #f)))
 
   (define (association-name spec)
     (string->symbol

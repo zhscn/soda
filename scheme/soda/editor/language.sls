@@ -25,7 +25,7 @@
           language-profile-pairs
           language-profile-lexical
           language-profile-word-motion
-          language-profile-text-objects
+          language-profile-structure
           language-profile-electric
           language-profile-enter
           make-language-catalog
@@ -58,7 +58,9 @@
           (soda document)
           (soda editor decoration)
           (soda editor motion-protocol)
-          (soda editor scheme-highlighting))
+          (soda editor scheme-highlighting)
+          (soda editor scheme-structure)
+          (soda editor structure))
 
   (define-record-type (syntax-provider %make-syntax-provider syntax-provider?)
     (fields
@@ -260,7 +262,7 @@
       (immutable pairs language-profile-pairs)
       (immutable lexical language-profile-lexical)
       (immutable word-motion language-profile-word-motion)
-      (immutable text-objects language-profile-text-objects)
+      (immutable structure language-profile-structure)
       (immutable electric language-profile-electric)
       (immutable enter language-profile-enter)))
 
@@ -269,10 +271,10 @@
       [(name syntax)
        (make-language-profile
          name syntax #f '() #f #f #f '() #f)]
-      [(name syntax indent pairs lexical text-objects electric enter)
+      [(name syntax indent pairs lexical structure electric enter)
        (make-language-profile
-         name syntax indent pairs lexical #f text-objects electric enter)]
-      [(name syntax indent pairs lexical word-motion text-objects electric enter)
+         name syntax indent pairs lexical #f structure electric enter)]
+      [(name syntax indent pairs lexical word-motion structure electric enter)
        (unless (symbol? name)
          (assertion-violation
            'make-language-profile
@@ -300,6 +302,12 @@
            'make-language-profile
            "word motion must be a word-motion or #f"
            word-motion))
+       (unless
+         (or (not structure) (structure-provider? structure))
+         (assertion-violation
+           'make-language-profile
+           "structure must be a structure provider or #f"
+           structure))
        (unless (and (list? electric) (for-all char? electric))
          (assertion-violation
            'make-language-profile
@@ -317,7 +325,7 @@
          pairs
          lexical
          word-motion
-         text-objects
+         structure
          electric
          enter)]))
 
@@ -824,6 +832,11 @@
       scheme-syntax-highlights
       (lambda (session) #f)))
 
+  (define scheme-structure-provider
+    (make-structure-provider
+      (lambda (syntax-session snapshot)
+        (make-scheme-structure-index snapshot))))
+
   (register-major-mode!
     default-language-catalog
     (make-major-mode
@@ -839,7 +852,7 @@
         (#\[ . #\])
         (#\{ . #\}))
       scheme-identifier-character?
-      #f
+      scheme-structure-provider
       '()
       #f))
 

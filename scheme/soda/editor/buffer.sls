@@ -27,6 +27,7 @@
           buffer-language-session
           buffer-language-revision
           buffer-language-error
+          buffer-structure-index
           buffer-highlight-runs
           buffer-setting-ref
           buffer-set-local-setting!
@@ -43,7 +44,8 @@
           (soda document)
           (soda editor condition)
           (soda editor language)
-          (soda editor setting))
+          (soda editor setting)
+          (soda editor structure))
 
   (define-record-type
     (language-runtime %make-language-runtime language-runtime?)
@@ -51,7 +53,10 @@
       (immutable profile language-runtime-profile)
       (mutable session language-runtime-session language-runtime-session-set!)
       (mutable revision language-runtime-revision language-runtime-revision-set!)
-      (mutable error language-runtime-error language-runtime-error-set!)))
+      (mutable error language-runtime-error language-runtime-error-set!)
+      (mutable structure-index
+               language-runtime-structure-index
+               language-runtime-structure-index-set!)))
 
   (define-record-type (buffer %make-buffer buffer?)
     (fields
@@ -101,12 +106,20 @@
         (language-runtime-session-set! runtime #f))))
 
   (define (open-runtime profile snapshot)
-    (let ([provider (language-profile-syntax profile)])
+    (let* ([provider (language-profile-syntax profile)]
+           [session (and provider (syntax-open provider snapshot))]
+           [structure (language-profile-structure profile)])
       (%make-language-runtime
         profile
-        (and provider (syntax-open provider snapshot))
+        session
         (snapshot-revision snapshot)
-        #f)))
+        #f
+        (and
+          structure
+          (structure-provider-build
+            structure
+            session
+            snapshot)))))
 
   (define (profile-for-mode catalog mode-name)
     (let ([language
@@ -358,6 +371,15 @@
     (let ([runtime (buffer-language-runtime value)])
       (and runtime (language-runtime-error runtime))))
 
+  (define (buffer-structure-index value)
+    (require-open-buffer 'buffer-structure-index value)
+    (let ([runtime (buffer-language-runtime value)])
+      (and
+        runtime
+        (= (buffer-revision value)
+           (language-runtime-revision runtime))
+        (language-runtime-structure-index runtime))))
+
   (define (buffer-highlight-runs value start end)
     (require-open-buffer 'buffer-highlight-runs value)
     (unless
@@ -483,19 +505,41 @@
           (syntax-close! provider session)))
       (language-runtime-session-set! runtime #f)
       (language-runtime-revision-set! runtime #f)
+      (language-runtime-structure-index-set! runtime #f)
       (language-runtime-error-set! runtime condition)
-      (when provider
-        (guard (reopen-condition
-                 [else
-                  (language-runtime-error-set!
+      (guard (reopen-condition
+               [else
+                (language-runtime-error-set!
+                  runtime
+                  (cons condition reopen-condition))])
+        (let ([reopened
+                (and provider (syntax-open provider snapshot))])
+          (language-runtime-session-set! runtime reopened)
+          (language-runtime-structure-index-set!
             runtime
-            (cons condition reopen-condition))])
-          (language-runtime-session-set!
-            runtime
-            (syntax-open provider snapshot))
+            (let ([structure
+                    (language-profile-structure profile)])
+              (and
+                structure
+                (structure-provider-build
+                  structure
+                  reopened
+                  snapshot))))
           (language-runtime-revision-set!
             runtime
             (snapshot-revision snapshot))))))
+
+  (define (rebuild-structure! runtime snapshot)
+    (let* ([profile (language-runtime-profile runtime)]
+           [structure (language-profile-structure profile)])
+      (language-runtime-structure-index-set!
+        runtime
+        (and
+          structure
+          (structure-provider-build
+            structure
+            (language-runtime-session runtime)
+            snapshot)))))
 
   (define (sync-change! value change)
     (let ([runtime (buffer-language-runtime value)])
@@ -509,6 +553,7 @@
                      [session (language-runtime-session runtime)])
                 (cond
                   [(not provider)
+                   (rebuild-structure! runtime snapshot)
                    (language-runtime-revision-set!
                      runtime
                      (snapshot-revision snapshot))
@@ -521,6 +566,7 @@
                      (language-runtime-session-set!
                        runtime
                        (syntax-open provider snapshot))
+                     (rebuild-structure! runtime snapshot)
                      (language-runtime-revision-set!
                        runtime
                        (snapshot-revision snapshot))
@@ -529,6 +575,7 @@
                    (guard (condition
                             [else (recover-runtime! runtime snapshot condition)])
                      (syntax-sync! provider session change snapshot)
+                     (rebuild-structure! runtime snapshot)
                      (language-runtime-revision-set!
                        runtime
                        (snapshot-revision snapshot))

@@ -133,6 +133,34 @@
           make-tree-sitter-syntax-provider
           make-tree-sitter-language-profile
           tree-sitter-language-available?
+          make-structural-thing
+          structural-thing?
+          structural-thing-roles
+          structural-thing-start
+          structural-thing-end
+          structural-thing-inner-start
+          structural-thing-inner-end
+          structural-thing-depth
+          structural-thing-node-kind
+          structural-thing-properties
+          structural-thing-has-role?
+          make-structure-index
+          structure-index?
+          structure-index-document-id
+          structure-index-revision
+          structure-index-things
+          structure-index-things-in-range
+          structure-index-thing-at
+          structure-index-parent
+          structure-index-next
+          structure-index-previous
+          structure-forward-target
+          structure-backward-target
+          structure-up-target
+          structure-down-target
+          make-structure-provider
+          structure-provider?
+          structure-provider-build
           editor-major-mode-for-path
           editor-select-buffer-major-mode!
           make-setting-definition
@@ -742,6 +770,8 @@
           (soda editor search)
           (soda editor setting)
           (soda editor state)
+          (soda editor structure)
+          (soda editor structural-commands)
           (soda editor theme)
           (soda editor themes catppuccin)
           (soda editor tree-sitter-language)
@@ -918,6 +948,7 @@
       (install-command-runtime-commands! editor)
       (install-prefix-commands! editor)
       (install-basic-commands! editor)
+      (install-structural-commands! editor)
       (install-transform-commands! editor)
       (install-navigation-commands! editor)
       (install-buffer-commands! editor)
