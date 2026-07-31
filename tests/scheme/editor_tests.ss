@@ -2583,6 +2583,51 @@
   (error 'editor-tests "transpose-words did not preserve separators"))
 (editor-close! transform-editor)
 
+(define transpose-lines-buffer
+  (make-buffer
+    9761
+    (make-document "a\nb\nc\n" 9761)
+    "*transpose-lines*"
+    'fundamental-mode))
+(define transpose-lines-editor (make-editor transpose-lines-buffer))
+(define transpose-lines-view
+  (editor-active-view transpose-lines-editor))
+(view-set-caret! transpose-lines-view 2)
+(editor-update!
+  transpose-lines-editor
+  (make-command-message
+    'edit.transpose-lines
+    #f
+    (prefix-argument-digit #f 2)))
+(unless
+  (and
+    (bytevector=?
+      (buffer-bytes transpose-lines-buffer)
+      (string->utf8 "b\nc\na\n"))
+    (= (view-caret transpose-lines-view) 6))
+  (error 'editor-tests "transpose-lines count did not rotate whole lines"))
+(buffer-undo! transpose-lines-buffer)
+(unless
+  (bytevector=?
+    (buffer-bytes transpose-lines-buffer)
+    (string->utf8 "a\nb\nc\n"))
+  (error 'editor-tests "transpose-lines was not one transaction"))
+(buffer-replace-range!
+  transpose-lines-buffer
+  0
+  (bytevector-length (buffer-bytes transpose-lines-buffer))
+  (string->utf8 "a\nb"))
+(view-set-caret! transpose-lines-view 2)
+(editor-update!
+  transpose-lines-editor
+  (make-command-message 'edit.transpose-lines #f))
+(unless
+  (bytevector=?
+    (buffer-bytes transpose-lines-buffer)
+    (string->utf8 "b\na"))
+  (error 'editor-tests "transpose-lines changed final newline policy"))
+(editor-close! transpose-lines-editor)
+
 (define yank-pop-document (make-document "" 977))
 (define yank-pop-buffer
   (make-buffer

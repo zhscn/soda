@@ -174,6 +174,87 @@
                (not (transpose-word-once! view)))])
       '()))
 
+  (define (join-lines lines trailing-newline?)
+    (let ([newline (u8-list->bytevector '(10))])
+      (let loop ([remaining lines] [parts '()])
+        (cond
+          [(null? remaining)
+           (apply
+             append-bytevectors
+             (reverse
+               (if trailing-newline?
+                   (cons newline parts)
+                   parts)))]
+          [(null? (cdr remaining))
+           (loop (cdr remaining) (cons (car remaining) parts))]
+          [else
+           (loop
+             (cdr remaining)
+             (cons newline (cons (car remaining) parts)))]))))
+
+  (define (line-contents text first last)
+    (let loop ([line first] [result '()])
+      (if (> line last)
+          (reverse result)
+          (loop
+            (+ line 1)
+            (cons
+              (text-subbytevector
+                text
+                (text-line-start text line)
+                (text-line-content-end text line))
+              result)))))
+
+  (define (transpose-lines-command context)
+    (let ([count (command-context-count context)]
+          [view (command-context-view context)])
+      (when (negative? count)
+        (editor-user-error
+          'edit.transpose-lines
+          "Transpose line count must be non-negative"))
+      (when (positive? count)
+        (let ([buffer (view-buffer view)])
+          (with-document-text
+            (buffer-document buffer)
+            (lambda (text)
+              (let* ([line-count (text-line-count text)]
+                     [point-line
+                       (car (text-position text (view-caret view)))]
+                     [line
+                       (if
+                         (and
+                           (positive? point-line)
+                           (= point-line (- line-count 1))
+                           (= (text-line-start text point-line)
+                              (text-line-content-end text point-line)))
+                         (- point-line 1)
+                         point-line)]
+                     [first (if (positive? line) (- line 1) line)]
+                     [following-first (+ first 1)]
+                     [last
+                       (min
+                         (- line-count 1)
+                         (+ following-first count -1))])
+                (when (<= following-first last)
+                  (let* ([start (text-line-start text first)]
+                         [end
+                           (if (< last (- line-count 1))
+                               (text-line-start text (+ last 1))
+                               (text-size text))]
+                         [trailing-newline?
+                           (< (text-line-content-end text last) end)]
+                         [contents (line-contents text first last)]
+                         [rotated
+                           (append (cdr contents) (list (car contents)))]
+                         [replacement
+                           (join-lines rotated trailing-newline?)])
+                    (buffer-replace-range!
+                      buffer start end replacement)
+                    (view-set-caret!
+                      view
+                      (+ start (bytevector-length replacement))))))))))
+      '()))
+
   (define (word-transform-target context)
     (let* ([view (command-context-view context)]
            [buffer (view-buffer view)]
@@ -260,6 +341,10 @@
           transpose-words-command
           "Transpose adjacent words at point.")
         (list
+          'edit.transpose-lines
+          transpose-lines-command
+          "Transpose the preceding line with following lines.")
+        (list
           'edit.upcase-word
           upcase-word-command
           "Convert words following point to uppercase.")
@@ -280,4 +365,8 @@
         (cons (stroke #\u 2) 'edit.upcase-word)
         (cons (stroke #\l 2) 'edit.downcase-word)
         (cons (stroke #\c 2) 'edit.capitalize-word)))
+    (editor-bind-key!
+      editor
+      (list (stroke #\x 4) (stroke #\t 4))
+      'edit.transpose-lines)
     editor))

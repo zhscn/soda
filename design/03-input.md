@@ -15,6 +15,7 @@
 | Unicode regexp matcher、编号 capture 与双向搜索 | 已实现 |
 | regexp capture replacement 与大小写转换 | 已实现 |
 | literal/regexp search case policy 与 smart-case | 已实现 |
+| `edit.transpose-lines` | 已实现 |
 
 本文只定义文本编辑器当前使用的输入路径。minibuffer 的读取与焦点规则由
 [12-minibuffer.md](12-minibuffer.md) 定义；command 与 interactive 参数由
@@ -161,6 +162,11 @@ language profile 和 Unicode 默认实现解析。
 - literal/regexp incremental search 和 query replace；
 - 文件、Buffer、Window、帮助和 command invocation；
 - delimiter、sexp、defun 和 Tree-sitter text object 导航。
+
+`edit.transpose-lines` 把 point 前一行与 point 起始的 prefix-count 行作为一个连续
+target，并将前一行旋转到 target 末尾；位于首行时以首行和其后行构造同一 target。
+末尾空逻辑行归属于文件终止换行，不作为独立交换对象。命令保留原范围是否具有末尾
+newline，并以一次 Buffer transaction 提交整个旋转。
 
 ## Search 与 query replace
 
