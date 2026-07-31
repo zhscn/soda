@@ -35,12 +35,16 @@
           major-mode-interaction-class
           major-mode-keymap
           major-mode-default-settings
+          major-mode-features
           register-major-mode!
           find-major-mode
           major-mode-ref
           resolve-major-mode-language
+          resolve-major-mode-interaction-class
           major-mode-keymaps
-          major-mode-setting-ref)
+          major-mode-setting-ref
+          major-mode-feature-ref
+          major-mode-syntax-capabilities)
   (import (rnrs)
           (soda document)
           (soda editor decoration)
@@ -238,7 +242,8 @@
       (immutable language major-mode-language)
       (immutable interaction-class major-mode-interaction-class)
       (immutable keymap major-mode-keymap)
-      (immutable default-settings major-mode-default-settings)))
+      (immutable default-settings major-mode-default-settings)
+      (immutable features major-mode-features)))
 
   (define-record-type
     (language-catalog %make-language-catalog language-catalog?)
@@ -304,14 +309,30 @@
           #f
           'editing
           #f
+          '()
           '()))
       catalog))
 
   (define make-major-mode
     (case-lambda
       [(name parent language)
-       (make-major-mode name parent language 'editing #f '())]
+       (make-major-mode name parent language 'editing #f '() '())]
       [(name parent language interaction-class keymap default-settings)
+       (make-major-mode
+         name
+         parent
+         language
+         interaction-class
+         keymap
+         default-settings
+         '())]
+      [(name
+         parent
+         language
+         interaction-class
+         keymap
+         default-settings
+         features)
        (unless (symbol? name)
          (assertion-violation 'make-major-mode "name must be a symbol" name))
        (unless (or (not parent) (symbol? parent))
@@ -324,10 +345,10 @@
            'make-major-mode
            "language must be a symbol or #f"
            language))
-       (unless (memq interaction-class '(editing interface))
+       (unless (memq interaction-class '(editing interface inherit))
          (assertion-violation
            'make-major-mode
-           "interaction class must be editing or interface"
+           "interaction class must be editing, interface, or inherit"
            interaction-class))
        (unless (or (not keymap) (symbol? keymap))
          (assertion-violation
@@ -342,13 +363,23 @@
            'make-major-mode
            "default settings must be an alist with symbol keys"
            default-settings))
+       (unless (and (list? features)
+                    (for-all
+                      (lambda (entry)
+                        (and (pair? entry) (symbol? (car entry))))
+                      features))
+         (assertion-violation
+           'make-major-mode
+           "features must be an alist with symbol keys"
+           features))
        (%make-major-mode
          name
          parent
          language
          interaction-class
          keymap
-         default-settings)]))
+         default-settings
+         features)]))
 
   (define default-language-catalog (make-language-catalog))
 
@@ -493,6 +524,27 @@
                (if keymap (cons keymap keymaps) keymaps)))
            '()))]))
 
+  (define resolve-major-mode-interaction-class
+    (case-lambda
+      [(name)
+       (resolve-major-mode-interaction-class
+         default-language-catalog
+         name)]
+      [(catalog name)
+       (call/cc
+         (lambda (return)
+           (mode-chain-fold
+             'resolve-major-mode-interaction-class
+             catalog
+             name
+             (lambda (mode state)
+               (let ([interaction
+                       (major-mode-interaction-class mode)])
+                 (if (eq? interaction 'inherit)
+                     state
+                     (return interaction))))
+             'editing)))]))
+
   (define major-mode-setting-ref
     (case-lambda
       [(name key default)
@@ -519,6 +571,47 @@
                          (major-mode-default-settings mode))])
                  (if entry (return (cdr entry)) state)))
              default)))]))
+
+  (define major-mode-feature-ref
+    (case-lambda
+      [(name key default)
+       (major-mode-feature-ref
+         default-language-catalog
+         name
+         key
+         default)]
+      [(catalog name key default)
+       (unless (symbol? key)
+         (assertion-violation
+           'major-mode-feature-ref
+           "key must be a symbol"
+           key))
+       (call/cc
+         (lambda (return)
+           (mode-chain-fold
+             'major-mode-feature-ref
+             catalog
+             name
+             (lambda (mode state)
+               (let ([entry (assq key (major-mode-features mode))])
+                 (if entry (return (cdr entry)) state)))
+             default)))]))
+
+  (define major-mode-syntax-capabilities
+    (case-lambda
+      [(name)
+       (major-mode-syntax-capabilities
+         default-language-catalog
+         name)]
+      [(catalog name)
+       (let* ([language
+                (resolve-major-mode-language catalog name)]
+              [profile
+                (and language
+                     (find-language-profile catalog language))]
+              [provider
+                (and profile (language-profile-syntax profile))])
+         (if provider (syntax-capabilities provider) '()))]))
 
   (define (scheme-identifier-character? character)
     (and
@@ -647,7 +740,8 @@
 
   (register-major-mode!
     default-language-catalog
-    (make-major-mode 'fundamental-mode #f #f 'editing #f '()))
+    (make-major-mode
+      'fundamental-mode #f #f 'editing #f '() '()))
 
   (register-language-profile!
     default-language-catalog

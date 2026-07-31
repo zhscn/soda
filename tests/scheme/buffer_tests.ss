@@ -43,16 +43,18 @@
     'inherit
     'editing
     'prog-map
-    '((indent-width . 2))))
+    '((indent-width . 2))
+    '((display-map-provider . parent-display))))
 
 (register-major-mode!
   (make-major-mode
     'test-mode
     'prog-mode
     'test-language
-    'editing
+    'inherit
     'test-map
-    '((tab-width . 8))))
+    '((tab-width . 8))
+    '((outline-provider . test-outline))))
 
 (define document (make-document "abc" 41))
 (define buffer (make-buffer 7 document "test.cc" 'test-mode))
@@ -67,6 +69,28 @@
   (error 'buffer-tests "parent setting was not inherited"))
 (unless (= (buffer-setting-ref buffer 'tab-width) 8)
   (error 'buffer-tests "mode setting differs"))
+(unless
+  (and
+    (eq?
+      (resolve-major-mode-interaction-class 'test-mode)
+      'editing)
+    (eq?
+      (major-mode-feature-ref
+        'test-mode
+        'display-map-provider
+        #f)
+      'parent-display)
+    (eq?
+      (major-mode-feature-ref
+        'test-mode
+        'outline-provider
+        #f)
+      'test-outline)
+    (equal?
+      (major-mode-syntax-capabilities 'test-mode)
+      '(context pair)))
+  (error 'buffer-tests
+         "major mode features or syntax capabilities did not resolve"))
 
 (buffer-set-local-setting! buffer 'indent-width 6)
 (unless (= (buffer-setting-ref buffer 'indent-width) 6)

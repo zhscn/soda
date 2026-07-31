@@ -23,12 +23,15 @@ major mode 是 Scheme registry 中的描述值：
   #:parent 'prog-mode
   #:keymap 'cpp-mode-map
   #:language 'cpp
-  #:interaction-class 'editing)
+  #:interaction-class 'editing
+  #:features '((display-map-provider . cpp-display)))
 ```
 
 mode parent 只表达 policy 继承，不表达 parser 继承。有效 keymap、settings、
-interaction class 和 language profile 沿 parent chain 合并。minor mode 叠加局部
-行为，但不替换 Buffer 的 language identity。
+interaction class、feature 和 language profile 沿 parent chain 合并。feature
+是具名的 mode 扩展点，可引用 display-map、outline、navigation 等 provider；
+命令通过 feature 名和 syntax capability 查询能力，不比较 major mode 名称。
+minor mode 叠加局部行为，但不替换 Buffer 的 language identity。
 
 language profile 与 major mode 注册到 Editor 所属 catalog。替换同名描述值后，
 Editor 刷新已注册 Buffer 的 runtime；Buffer 在查询 setting、profile 和 mode
