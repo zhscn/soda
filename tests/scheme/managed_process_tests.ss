@@ -25,7 +25,7 @@
     (make-managed-process
       "language-server"
       '("/bin/cat")
-      ""
+      "."
       owner
       'lsp.process-output
       'lsp.process-exit))
@@ -152,7 +152,7 @@
       '("/bin/sh"
         "-c"
         "IFS= read line; size=$(stty size); printf 'line=%s size=%s' \"$line\" \"$size\"")
-      ""
+      "."
       owner
       'terminal.output
       'terminal.exit

@@ -121,10 +121,13 @@
            'make-managed-process
            "arguments must be a non-empty list of strings"
            arguments))
-       (unless (string? working-directory)
+       (unless
+         (and
+           (string? working-directory)
+           (positive? (string-length working-directory)))
          (assertion-violation
            'make-managed-process
-           "working directory must be a string"
+           "working directory must be a non-empty string"
            working-directory))
        (unless (memq transport '(pipe pty))
          (assertion-violation

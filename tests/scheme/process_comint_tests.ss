@@ -87,7 +87,7 @@
       '("/bin/sh"
         "-c"
         "printf 'prompt> '; sleep 0.05; printf '\\nnotice\\nprompt> '; IFS= read line; printf 'out:%s\\nprompt> ' \"$line\"; IFS= read ignored")
-      ""
+      "."
       "prompt> "))
 
   (dispatch! (make-command-message 'process.start profile))
@@ -204,7 +204,7 @@
     (make-process-comint-profile
       "terminal-test"
       '("/bin/sh" "-c" "IFS= read line; printf 'pty:%s' \"$line\"")
-      ""
+      "."
       ""
       'pty
       24

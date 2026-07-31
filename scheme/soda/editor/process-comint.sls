@@ -144,10 +144,13 @@
            'make-process-comint-profile
            "arguments must be a non-empty list of strings"
            arguments))
-       (unless (string? working-directory)
+       (unless
+         (and
+           (string? working-directory)
+           (positive? (string-length working-directory)))
          (assertion-violation
            'make-process-comint-profile
-           "working directory must be a string"
+           "working directory must be a non-empty string"
            working-directory))
        (unless (string? prompt)
          (assertion-violation
@@ -321,7 +324,10 @@
           (make-process-comint-profile
             command
             (list "/bin/sh" "-c" command)
-            "")))
+            (resource-context-base-resource
+              (editor-view-resource-context
+                (command-context-editor context)
+                (view-id (command-context-view context)))))))
       (lambda (session request)
         (list
           (make-command-effect
