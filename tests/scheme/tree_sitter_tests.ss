@@ -72,6 +72,34 @@
       strings))
   (error 'tree-sitter-tests "JSON string captures differ"))
 
+(define metadata-query
+  (make-tree-sitter-query
+    parser
+    "((string) @injection.content (#set! injection.language \"json\"))"))
+(let ([captures
+        (tree-sitter-query-execute
+          metadata-query
+          parser
+          0
+          25)])
+  (unless
+    (and
+      (= (length captures) 3)
+      (for-all
+        (lambda (capture)
+          (and
+            (integer?
+              (tree-sitter-capture-match-id capture))
+            (zero?
+              (tree-sitter-capture-pattern-index capture))
+            (equal?
+              (tree-sitter-capture-properties capture)
+              '((injection.language . "json")))))
+        captures))
+    (error 'tree-sitter-tests
+           "query match metadata differs")))
+(tree-sitter-query-close! metadata-query)
+
 (define transaction (document-begin-transaction document))
 (transaction-replace! transaction 0 25 "{\"enabled\":true}")
 (define change (transaction-commit! transaction))

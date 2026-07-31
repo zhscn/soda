@@ -21,7 +21,10 @@
           tree-sitter-capture-start
           tree-sitter-capture-end
           tree-sitter-capture-node-kind
-          tree-sitter-capture-depth)
+          tree-sitter-capture-depth
+          tree-sitter-capture-match-id
+          tree-sitter-capture-pattern-index
+          tree-sitter-capture-properties)
   (import (chezscheme)
           (soda document)
           (soda document handles)
@@ -32,7 +35,14 @@
     (load-soda-native-library! "SODA_TREE_SITTER_LIBRARY"))
 
   (define-record-type tree-sitter-capture
-    (fields name start end node-kind depth))
+    (fields name
+            start
+            end
+            node-kind
+            depth
+            match-id
+            pattern-index
+            properties))
 
   (define %abi-version
     (foreign-procedure
@@ -119,6 +129,31 @@
       __atomic "soda_ts_query_result_depth"
       (void* unsigned-32)
       unsigned-32))
+  (define %query-result-match-id
+    (foreign-procedure
+      __atomic "soda_ts_query_result_match_id"
+      (void* unsigned-32)
+      unsigned-32))
+  (define %query-result-pattern-index
+    (foreign-procedure
+      __atomic "soda_ts_query_result_pattern_index"
+      (void* unsigned-32)
+      unsigned-32))
+  (define %query-result-property-count
+    (foreign-procedure
+      __atomic "soda_ts_query_result_property_count"
+      (void* unsigned-32)
+      unsigned-32))
+  (define %query-result-property-key
+    (foreign-procedure
+      __atomic "soda_ts_query_result_property_key"
+      (void* unsigned-32 unsigned-32)
+      string))
+  (define %query-result-property-value
+    (foreign-procedure
+      __atomic "soda_ts_query_result_property_value"
+      (void* unsigned-32 unsigned-32)
+      string))
 
   (define abi-version-checked
     (unless (= (%abi-version) 1)
@@ -317,7 +352,37 @@
                             result
                             index
                             range-start
-                            range-end)))])
+                            range-end)))]
+                    [properties
+                      (let ([property-count
+                              (%query-result-property-count
+                                result index)])
+                        (when (= property-count #xffffffff)
+                          (native-error who))
+                        (let property-loop
+                          ([property-index 0]
+                           [values '()])
+                          (if (= property-index property-count)
+                              (reverse values)
+                              (let ([key
+                                      (%query-result-property-key
+                                        result
+                                        index
+                                        property-index)]
+                                    [value
+                                      (%query-result-property-value
+                                        result
+                                        index
+                                        property-index)])
+                                (unless (and key value)
+                                  (native-error who))
+                                (property-loop
+                                  (+ property-index 1)
+                                  (cons
+                                    (cons
+                                      (string->symbol key)
+                                      value)
+                                    values))))))])
                 (loop
                   (+ index 1)
                   count
@@ -328,7 +393,10 @@
                       (car range)
                       (cdr range)
                       (%query-result-node-kind result index)
-                      (%query-result-depth result index))
+                      (%query-result-depth result index)
+                      (%query-result-match-id result index)
+                      (%query-result-pattern-index result index)
+                      properties)
                     captures))))))
       (lambda () (%query-result-destroy result))))
 

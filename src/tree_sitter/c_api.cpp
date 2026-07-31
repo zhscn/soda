@@ -53,9 +53,12 @@ struct soda_ts_parser {
 struct soda_ts_capture {
     std::string name;
     std::string node_kind;
+    std::vector<std::pair<std::string, std::string>> properties;
     std::uint32_t start = 0;
     std::uint32_t end = 0;
     std::uint32_t depth = 0;
+    std::uint32_t match_id = 0;
+    std::uint32_t pattern_index = 0;
 };
 
 struct soda_ts_query_result {
@@ -343,6 +346,40 @@ std::unique_ptr<TSQuery, decltype(&ts_query_delete)> compile_query(const soda_ts
 TSNode root_node(soda_ts_parser& parser);
 std::uint32_t node_depth(TSNode node);
 
+std::string query_string(const TSQuery* query, std::uint32_t value_id) {
+    std::uint32_t length = 0;
+    const char* value = ts_query_string_value_for_id(query, value_id, &length);
+    return std::string(value, length);
+}
+
+std::vector<std::pair<std::string, std::string>> pattern_properties(const TSQuery* query,
+                                                                    std::uint32_t pattern_index) {
+    std::uint32_t count = 0;
+    const TSQueryPredicateStep* steps =
+        ts_query_predicates_for_pattern(query, pattern_index, &count);
+    std::vector<std::pair<std::string, std::string>> properties;
+    std::uint32_t index = 0;
+    while (index < count) {
+        const std::uint32_t begin = index;
+        while (index < count && steps[index].type != TSQueryPredicateStepTypeDone) {
+            ++index;
+        }
+        const std::uint32_t end = index;
+        if (end - begin >= 2 && steps[begin].type == TSQueryPredicateStepTypeString &&
+            query_string(query, steps[begin].value_id) == "set!" &&
+            steps[begin + 1].type == TSQueryPredicateStepTypeString) {
+            const std::string key = query_string(query, steps[begin + 1].value_id);
+            std::string value;
+            if (end - begin >= 3 && steps[begin + 2].type == TSQueryPredicateStepTypeString) {
+                value = query_string(query, steps[begin + 2].value_id);
+            }
+            properties.emplace_back(key, value);
+        }
+        index = end + 1;
+    }
+    return properties;
+}
+
 soda_ts_query_result* execute_query(soda_ts_parser& parser, const TSQuery* query,
                                     std::uint32_t start, std::uint32_t end) {
     if (query == nullptr) {
@@ -359,18 +396,27 @@ soda_ts_query_result* execute_query(soda_ts_parser& parser, const TSQuery* query
     ts_query_cursor_set_byte_range(cursor.get(), start, end);
     ts_query_cursor_exec(cursor.get(), query, root_node(parser));
     auto result = std::make_unique<soda_ts_query_result>();
+    std::vector<std::optional<std::vector<std::pair<std::string, std::string>>>> property_cache(
+        ts_query_pattern_count(query));
     TSQueryMatch match{};
     uint32_t capture_index = 0;
     while (ts_query_cursor_next_capture(cursor.get(), &match, &capture_index)) {
         const TSQueryCapture capture = match.captures[capture_index];
         uint32_t name_length = 0;
         const char* name = ts_query_capture_name_for_id(query, capture.index, &name_length);
+        auto& properties = property_cache.at(match.pattern_index);
+        if (!properties.has_value()) {
+            properties = pattern_properties(query, match.pattern_index);
+        }
         result->captures.push_back(soda_ts_capture{
             .name = std::string(name, name_length),
             .node_kind = ts_node_type(capture.node),
+            .properties = *properties,
             .start = ts_node_start_byte(capture.node),
             .end = ts_node_end_byte(capture.node),
             .depth = node_depth(capture.node),
+            .match_id = match.id,
+            .pattern_index = match.pattern_index,
         });
     }
     return result.release();
@@ -442,6 +488,14 @@ const soda_ts_capture& capture_at(const soda_ts_query_result& result, std::uint3
         throw std::out_of_range("Tree-sitter capture index is out of range");
     }
     return result.captures[index];
+}
+
+const std::pair<std::string, std::string>& capture_property_at(const soda_ts_capture& capture,
+                                                               std::uint32_t index) {
+    if (index >= capture.properties.size()) {
+        throw std::out_of_range("Tree-sitter capture property index is out of range");
+    }
+    return capture.properties[index];
 }
 
 } // namespace
@@ -691,6 +745,41 @@ int soda_ts_query_result_range(const soda_ts_query_result* result, uint32_t inde
 uint32_t soda_ts_query_result_depth(const soda_ts_query_result* result, uint32_t index) {
     return guard(std::numeric_limits<std::uint32_t>::max(),
                  [&] { return capture_at(require_handle(result, "query result"), index).depth; });
+}
+
+uint32_t soda_ts_query_result_match_id(const soda_ts_query_result* result, uint32_t index) {
+    return guard(std::numeric_limits<std::uint32_t>::max(), [&] {
+        return capture_at(require_handle(result, "query result"), index).match_id;
+    });
+}
+
+uint32_t soda_ts_query_result_pattern_index(const soda_ts_query_result* result, uint32_t index) {
+    return guard(std::numeric_limits<std::uint32_t>::max(), [&] {
+        return capture_at(require_handle(result, "query result"), index).pattern_index;
+    });
+}
+
+uint32_t soda_ts_query_result_property_count(const soda_ts_query_result* result, uint32_t index) {
+    return guard(std::numeric_limits<std::uint32_t>::max(), [&] {
+        return static_cast<std::uint32_t>(
+            capture_at(require_handle(result, "query result"), index).properties.size());
+    });
+}
+
+const char* soda_ts_query_result_property_key(const soda_ts_query_result* result, uint32_t index,
+                                              uint32_t property_index) {
+    return guard<const char*>(nullptr, [&] {
+        const auto& capture = capture_at(require_handle(result, "query result"), index);
+        return capture_property_at(capture, property_index).first.c_str();
+    });
+}
+
+const char* soda_ts_query_result_property_value(const soda_ts_query_result* result, uint32_t index,
+                                                uint32_t property_index) {
+    return guard<const char*>(nullptr, [&] {
+        const auto& capture = capture_at(require_handle(result, "query result"), index);
+        return capture_property_at(capture, property_index).second.c_str();
+    });
 }
 
 } // extern "C"

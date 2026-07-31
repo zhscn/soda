@@ -28,6 +28,7 @@
           buffer-language-revision
           buffer-language-error
           buffer-structure-index
+          buffer-injection-index
           buffer-highlight-runs
           buffer-setting-ref
           buffer-set-local-setting!
@@ -43,6 +44,9 @@
   (import (rnrs)
           (soda document)
           (soda editor condition)
+          (soda editor decoration)
+          (soda editor injection)
+          (soda editor injection-highlighting)
           (soda editor language)
           (soda editor setting)
           (soda editor structure))
@@ -56,7 +60,13 @@
       (mutable error language-runtime-error language-runtime-error-set!)
       (mutable structure-index
                language-runtime-structure-index
-               language-runtime-structure-index-set!)))
+               language-runtime-structure-index-set!)
+      (mutable injection-index
+               language-runtime-injection-index
+               language-runtime-injection-index-set!)
+      (mutable injection-highlights
+               language-runtime-injection-highlights
+               language-runtime-injection-highlights-set!)))
 
   (define-record-type (buffer %make-buffer buffer?)
     (fields
@@ -108,7 +118,10 @@
   (define (open-runtime profile snapshot)
     (let* ([provider (language-profile-syntax profile)]
            [session (and provider (syntax-open provider snapshot))]
-           [structure (language-profile-structure profile)])
+           [structure (language-profile-structure profile)]
+           [injections
+             (build-injection-index
+               profile session snapshot)])
       (%make-language-runtime
         profile
         session
@@ -119,7 +132,10 @@
           (structure-provider-build
             structure
             session
-            snapshot)))))
+            snapshot))
+        injections
+        (make-injection-highlight-index
+          snapshot injections))))
 
   (define (profile-for-mode catalog mode-name)
     (let ([language
@@ -380,6 +396,15 @@
            (language-runtime-revision runtime))
         (language-runtime-structure-index runtime))))
 
+  (define (buffer-injection-index value)
+    (require-open-buffer 'buffer-injection-index value)
+    (let ([runtime (buffer-language-runtime value)])
+      (and
+        runtime
+        (= (buffer-revision value)
+           (language-runtime-revision runtime))
+        (language-runtime-injection-index runtime))))
+
   (define (buffer-highlight-runs value start end)
     (require-open-buffer 'buffer-highlight-runs value)
     (unless
@@ -412,7 +437,13 @@
                                #f])
                        (syntax-highlights
                          provider session start end)))])
-            (if provided provided '())))))
+            (append
+              (if provided provided '())
+              (decoration-index-runs-in-range
+                (language-runtime-injection-highlights
+                  runtime)
+                start
+                end))))))
 
   (define buffer-setting-ref
     (case-lambda
@@ -506,6 +537,10 @@
       (language-runtime-session-set! runtime #f)
       (language-runtime-revision-set! runtime #f)
       (language-runtime-structure-index-set! runtime #f)
+      (language-runtime-injection-index-set! runtime #f)
+      (language-runtime-injection-highlights-set!
+        runtime
+        (make-decoration-index '()))
       (language-runtime-error-set! runtime condition)
       (guard (reopen-condition
                [else
@@ -525,6 +560,16 @@
                   structure
                   reopened
                   snapshot))))
+          (language-runtime-injection-index-set!
+            runtime
+            (build-injection-index
+              profile reopened snapshot))
+          (language-runtime-injection-highlights-set!
+            runtime
+            (make-injection-highlight-index
+              snapshot
+              (language-runtime-injection-index
+                runtime)))
           (language-runtime-revision-set!
             runtime
             (snapshot-revision snapshot))))))
@@ -541,6 +586,42 @@
             (language-runtime-session runtime)
             snapshot)))))
 
+  (define (snapshot-size snapshot)
+    (let ([text (snapshot-text snapshot)])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda () (text-size text))
+        (lambda () (text-close! text)))))
+
+  (define (build-injection-index profile session snapshot)
+    (let ([provider (language-profile-syntax profile)])
+      (and
+        provider
+        session
+        (memq 'injection
+          (syntax-capabilities provider))
+        (syntax-captures->injection-index
+          snapshot
+          (syntax-query
+            provider
+            session
+            'injection
+            0
+            (snapshot-size snapshot))))))
+
+  (define (rebuild-injections! runtime snapshot)
+    (let ([index
+            (build-injection-index
+              (language-runtime-profile runtime)
+              (language-runtime-session runtime)
+              snapshot)])
+      (language-runtime-injection-index-set!
+        runtime index)
+      (language-runtime-injection-highlights-set!
+        runtime
+        (make-injection-highlight-index
+          snapshot index))))
+
   (define (sync-change! value change)
     (let ([runtime (buffer-language-runtime value)])
       (when runtime
@@ -554,6 +635,7 @@
                 (cond
                   [(not provider)
                    (rebuild-structure! runtime snapshot)
+                   (rebuild-injections! runtime snapshot)
                    (language-runtime-revision-set!
                      runtime
                      (snapshot-revision snapshot))
@@ -567,6 +649,7 @@
                        runtime
                        (syntax-open provider snapshot))
                      (rebuild-structure! runtime snapshot)
+                     (rebuild-injections! runtime snapshot)
                      (language-runtime-revision-set!
                        runtime
                        (snapshot-revision snapshot))
@@ -576,6 +659,7 @@
                             [else (recover-runtime! runtime snapshot condition)])
                      (syntax-sync! provider session change snapshot)
                      (rebuild-structure! runtime snapshot)
+                     (rebuild-injections! runtime snapshot)
                      (language-runtime-revision-set!
                        runtime
                        (snapshot-revision snapshot))

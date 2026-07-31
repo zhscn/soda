@@ -135,6 +135,7 @@
           make-tree-sitter-syntax-provider
           make-tree-sitter-language-profile
           tree-sitter-language-available?
+          buffer-injection-index
           make-structural-thing
           structural-thing?
           structural-thing-roles
@@ -163,6 +164,17 @@
           make-structure-provider
           structure-provider?
           structure-provider-build
+          injection-region?
+          injection-region-language
+          injection-region-start
+          injection-region-end
+          injection-region-depth
+          injection-region-properties
+          injection-index?
+          injection-index-document-id
+          injection-index-revision
+          injection-index-regions
+          injection-index-regions-in-range
           make-indentation-provider
           indentation-provider?
           indentation-provider-open
@@ -765,6 +777,7 @@
           (soda editor fold)
           (soda editor fold-runtime)
           (soda editor input-state)
+          (soda editor injection)
           (soda editor indentation-protocol)
           (soda editor indentation-runtime)
           (soda editor interaction)

@@ -595,7 +595,16 @@
                     (tree-sitter-capture-start capture)
                     (tree-sitter-capture-end capture)
                     (tree-sitter-capture-node-kind capture)
-                    '()
+                    (append
+                      (tree-sitter-capture-properties capture)
+                      (list
+                        (cons
+                          'query.match-id
+                          (tree-sitter-capture-match-id capture))
+                        (cons
+                          'query.pattern-index
+                          (tree-sitter-capture-pattern-index
+                            capture))))
                     (tree-sitter-capture-depth capture)))
                 (tree-sitter-query-execute
                   (session-query session resource-name)

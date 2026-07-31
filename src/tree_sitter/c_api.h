@@ -62,6 +62,18 @@ SODA_TREE_SITTER_API int soda_ts_query_result_range(const soda_ts_query_result* 
                                                     uint32_t index, uint32_t* start, uint32_t* end);
 SODA_TREE_SITTER_API uint32_t soda_ts_query_result_depth(const soda_ts_query_result* result,
                                                          uint32_t index);
+SODA_TREE_SITTER_API uint32_t soda_ts_query_result_match_id(const soda_ts_query_result* result,
+                                                            uint32_t index);
+SODA_TREE_SITTER_API uint32_t soda_ts_query_result_pattern_index(const soda_ts_query_result* result,
+                                                                 uint32_t index);
+SODA_TREE_SITTER_API uint32_t
+soda_ts_query_result_property_count(const soda_ts_query_result* result, uint32_t index);
+SODA_TREE_SITTER_API const char*
+soda_ts_query_result_property_key(const soda_ts_query_result* result, uint32_t index,
+                                  uint32_t property_index);
+SODA_TREE_SITTER_API const char*
+soda_ts_query_result_property_value(const soda_ts_query_result* result, uint32_t index,
+                                    uint32_t property_index);
 
 #ifdef __cplusplus
 }

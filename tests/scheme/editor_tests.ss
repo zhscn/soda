@@ -19,6 +19,8 @@
               interaction-session-evaluator)
         (soda editor keymap)
         (soda editor language)
+        (only (soda editor injection)
+              syntax-captures->injection-index)
         (soda editor minor-mode)
         (soda editor modeline)
         (soda editor motion)
@@ -8433,3 +8435,128 @@
   (error 'editor-tests
          "Tree-sitter file association did not select its parser mode"))
 (editor-close! json-editor)
+
+(let* ([document
+         (make-document "javascript body" 1010)]
+       [snapshot
+         (document-snapshot document)]
+       [index
+         (syntax-captures->injection-index
+           snapshot
+           (list
+             (make-syntax-capture
+               'injection.language
+               0
+               10
+               'language
+               '((query.match-id . 7))
+               0)
+             (make-syntax-capture
+               'injection.content
+               11
+               15
+               'content
+               '((query.match-id . 7))
+               0)))]
+       [regions (injection-index-regions index)])
+  (unless
+    (and
+      (= (length regions) 1)
+      (eq?
+        (injection-region-language (car regions))
+        'javascript)
+      (= (injection-region-start (car regions)) 11)
+      (= (injection-region-end (car regions)) 15))
+    (error 'editor-tests
+           "dynamic injection language capture did not resolve"
+           regions))
+  (snapshot-close! snapshot)
+  (document-close! document))
+
+(define html-injection-source
+  "<script>const answer = 42;</script>\n<style>body { color: red; }</style>\n")
+(define html-injection-buffer
+  (make-buffer
+    1010
+    (make-document html-injection-source 1010)
+    "injections.html"
+    'fundamental-mode))
+(define html-injection-editor
+  (make-editor html-injection-buffer))
+(buffer-set-file-path!
+  html-injection-buffer
+  "/tmp/injections.html")
+(editor-select-buffer-major-mode!
+  html-injection-editor
+  html-injection-buffer
+  "/tmp/injections.html")
+(let* ([index
+         (buffer-injection-index
+           html-injection-buffer)]
+       [regions
+         (and index
+              (injection-index-regions index))])
+  (unless
+    (and
+      index
+      (=
+        (injection-index-revision index)
+        (buffer-revision html-injection-buffer))
+      (= (length regions) 2)
+      (equal?
+        (map injection-region-language regions)
+        '(javascript css))
+      (string=?
+        (substring
+          html-injection-source
+          (injection-region-start (car regions))
+          (injection-region-end (car regions)))
+        "const answer = 42;")
+      (string=?
+        (substring
+          html-injection-source
+          (injection-region-start (cadr regions))
+          (injection-region-end (cadr regions)))
+        "body { color: red; }"))
+    (error 'editor-tests
+           "HTML injection query did not build language regions"
+           regions)))
+(let* ([const-start
+         (substring-position
+           html-injection-source
+           "const")]
+       [runs
+         (buffer-highlight-runs
+           html-injection-buffer
+           0
+           (string-length html-injection-source))]
+       [keyword
+         (find
+           (lambda (run)
+             (and
+               (eq?
+                 (decoration-run-face run)
+                 'keyword)
+               (= (decoration-run-start run)
+                  const-start)
+               (eq?
+                 (decoration-run-owner run)
+                 'tree-sitter.injection.javascript)))
+           runs)])
+  (unless keyword
+    (error 'editor-tests
+           "injected JavaScript highlights did not refine the host syntax")))
+(buffer-replace-range!
+  html-injection-buffer
+  (substring-position html-injection-source "42")
+  (substring-position html-injection-source "42")
+  (string->utf8 "1 + "))
+(unless
+  (=
+    (injection-index-revision
+      (buffer-injection-index
+        html-injection-buffer))
+    (buffer-revision html-injection-buffer))
+  (error 'editor-tests
+         "injection index did not follow the host revision"))
+(editor-close! html-injection-editor)

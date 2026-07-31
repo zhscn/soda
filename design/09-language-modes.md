@@ -274,8 +274,8 @@ root；loader 不提供单独的 grammar/query search path 或单语言动态库
 Markdown inline、Python、Rust、TOML、TypeScript、TSX 和 YAML parser。每个 parser
 source 由构建配置固定 revision 与 archive digest，生成的模块与 Soda 自有 query
 一起安装。所有这些语言提供 highlight query；JSON 还提供 fold、indent 与
-text-object query。TSX 的 query bundle 依次组合 TypeScript 与 TSX query，使通用
-语言规则与嵌入语法规则保持独立。
+text-object query，HTML 提供 JavaScript 与 CSS injection query。TSX 的 query
+bundle 依次组合 TypeScript 与 TSX query，使通用语言规则与嵌入语法规则保持独立。
 
 Tree-sitter file association 由 rule name、suffix 集合、parser language、major mode
 和 priority 组成。注册关联时，已有的专用 major mode 保留自己的 language profile；
@@ -346,44 +346,44 @@ spec catalog 可以批量注册。注册创建或替换 major mode、language pr
 auto-mode rule，并只刷新使用相关 mode 的 Buffer。grammar availability 在文件规则
 匹配或 mode 建立 session 时查询，因此 catalog 安装不会加载全部 parser module。
 
-一个 Tree-sitter session 持有 layered syntax map：
+Buffer language runtime 将宿主 session 与 revision-scoped 派生索引组合：
 
 ```text
-TreeSitterSession {
-  document_id,
-  parsed_revision,
-  interpolated_revision,
-  root_layer,
-  injection_layers,
-  query_set,
-  damage_ranges
-}
-
-SyntaxLayer {
-  language,
-  depth,
-  host_ranges,
-  tree
+LanguageRuntime {
+  profile,
+  host_session,
+  revision,
+  structure_index,
+  injection_index,
+  injection_highlights
 }
 ```
 
-root 和 injection layer 都使用宿主 Document 的 byte 坐标。一次 edit 先用
-`TSInputEdit` 调整所有相交 tree 的结构位置并推进 `interpolated_revision`，然后以旧
-tree 增量 parse。成功发布的全部 layer 属于同一个 `parsed_revision`；changed ranges
-合并为 syntax damage，供高亮缓存和 View invalidation 使用。
+宿主 session 持有增量 Tree-sitter parser。Document commit 先通过 `TSInputEdit`
+更新旧 tree，再对新 snapshot 增量 parse；同一 commit 随后重建 structure 与
+injection 派生索引，最后发布 runtime revision。Buffer 查询只返回与自身 revision
+相同的索引。
 
-injection query 返回宿主 ranges、目标 language 和 query configuration。provider
-创建、复用或释放对应 layer，并在宿主 edit 后只重新查询受影响的父 layer。嵌套深度、
-总 layer 数、单次 query 字节数和 capture 数由 profile 限制。
+query capture 包含 match id、pattern index 和该 pattern 的 `#set!` properties。
+injection builder 按 match id 分组，使用 `injection.language` property 或
+`@injection.language` capture 确定目标语言，并将每个 `@injection.content` 变成宿主
+byte range。语言名按小写、连字符形式规范化，`js` 与 `ts` 分别解析为
+`javascript` 与 `typescript`。
+
+每个 injection range 使用独立的子 Document 和目标 grammar 执行 highlight query，
+结果映射回宿主 byte range 后写入 `DecorationIndex`。嵌套 injection 递归执行相同
+流程，更深层 capture 使用更高的 base-syntax priority。派生完成后即释放子 parser、
+query、snapshot 与 Document；renderer 只查询缓存，不运行语言分析。单次构建最多
+处理 64 个顶层 range、每个 range 最多 1 MiB，嵌套深度最多为 4。缺少目标 grammar、
+query 或子 parser 错误只使对应 range 不产生高亮。
 
 highlight query capture 名直接作为稳定的语义 `FaceId`。theme resolver 对
 `FaceId` 使用层级 fallback；theme generation 改变时只重建 face 解析缓存，不改变
-capture mapping，也不重新 parse tree。viewport 查询只执行与请求范围相交的 query，
-并返回按 host byte range 排序的 capture cursor。
+capture mapping，也不重新 parse tree。宿主与 injection highlight 都按 revision
+缓存为按 range 排序的 `DecorationIndex`，viewport 查询只提取相交 runs。
 
-初次 parse 与增量 parse 都在 editor thread 执行。provider 为 parse、injection 和
-query 工作设置交互预算；超出一次 command-loop turn 的工作保留 revision-tagged
-pending state，并在后续 turn 继续。新 edit 使旧 revision 的 pending 结果失效。
+宿主 parse、query 与 injection 派生构建都在 editor thread 执行。资源上限约束
+injection 工作量；runtime 只在整组派生状态属于同一宿主 revision 后发布它们。
 
 ## 生命周期不变量
 
