@@ -10451,6 +10451,56 @@
     (error 'editor-tests
            "Tree-sitter object text object did not drive backward-up-list"
            (view-caret view))))
+(define nested-json-source
+  "{\"outer\":{\"first\":1,\"second\":2},\"tail\":3}")
+(define nested-json-buffer
+  (make-buffer
+    1007
+    (make-document nested-json-source 1007)
+    "nested.json"
+    'fundamental-mode))
+(editor-add-buffer! json-editor nested-json-buffer)
+(buffer-set-file-path! nested-json-buffer "/tmp/nested.json")
+(editor-select-buffer-major-mode!
+  json-editor
+  nested-json-buffer
+  "/tmp/nested.json")
+(editor-set-view-buffer!
+  json-editor
+  (view-id (editor-active-view json-editor))
+  (buffer-id nested-json-buffer))
+(let ([view (editor-active-view json-editor)])
+  ;; The first inner pair is [10, 19), and the second is [20, 30).
+  ;; Motion at their structural boundaries remains restricted to siblings.
+  (view-set-caret! view 19)
+  (editor-update!
+    json-editor
+    (make-command-message 'move.forward-sexp #f))
+  (unless (= (view-caret view) 30)
+    (error 'editor-tests
+           "Tree-sitter forward-sexp skipped an inner JSON sibling"
+           (view-caret view)))
+  (editor-update!
+    json-editor
+    (make-command-message 'move.backward-sexp #f))
+  (unless (= (view-caret view) 20)
+    (error 'editor-tests
+           "Tree-sitter backward-sexp skipped an inner JSON sibling"
+           (view-caret view)))
+  (view-set-caret! view 30)
+  (editor-update!
+    json-editor
+    (make-command-message 'move.forward-sexp #f))
+  (unless
+    (and
+      (= (view-caret view) 30)
+      (string=?
+        (editor-status-message json-editor)
+        "No next expression"))
+    (error 'editor-tests
+           "Tree-sitter forward-sexp escaped its enclosing JSON object"
+           (view-caret view)
+           (editor-status-message json-editor))))
 (define json-indent-source
   "{\n\"items\": [\n{\n\"name\": \"soda\"\n}\n]\n}\n")
 (define json-indent-expected

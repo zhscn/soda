@@ -301,13 +301,12 @@
       #f
       (structure-index-things index)))
 
-  (define (atomic-thing-at index role offset)
+  (define (strict-enclosing-thing index role offset)
     (fold-left
       (lambda (best thing)
         (if
           (and
             (role-matches? thing role)
-            (not (structural-thing-has-role? thing 'list))
             (< (structural-thing-start thing) offset)
             (< offset (structural-thing-end thing))
             (more-specific? thing best))
@@ -316,20 +315,89 @@
       #f
       (structure-index-things index)))
 
+  (define (restricted-candidate? role parent candidate)
+    (and
+      (role-matches? candidate role)
+      (or
+        (not parent)
+        (and
+          (not (eq? candidate parent))
+          (<= (structural-thing-start parent)
+              (structural-thing-start candidate))
+          (<= (structural-thing-end candidate)
+              (structural-thing-end parent))))))
+
+  (define (next-restricted-thing index role parent offset)
+    (fold-left
+      (lambda (best candidate)
+        (if
+          (and
+            (restricted-candidate? role parent candidate)
+            (>= (structural-thing-start candidate) offset)
+            (or
+              (not best)
+              (< (structural-thing-start candidate)
+                 (structural-thing-start best))
+              (and
+                (= (structural-thing-start candidate)
+                   (structural-thing-start best))
+                (more-specific? candidate best))))
+          candidate
+          best))
+      #f
+      (structure-index-things index)))
+
+  (define (previous-restricted-thing index role parent offset)
+    (fold-left
+      (lambda (best candidate)
+        (if
+          (and
+            (restricted-candidate? role parent candidate)
+            (<= (structural-thing-end candidate) offset)
+            (or
+              (not best)
+              (> (structural-thing-end candidate)
+                 (structural-thing-end best))
+              (and
+                (= (structural-thing-end candidate)
+                   (structural-thing-end best))
+                (more-specific? candidate best))))
+          candidate
+          best))
+      #f
+      (structure-index-things index)))
+
+  (define (thing-has-direct-child? index role thing)
+    (exists
+      (lambda (candidate)
+        (and
+          (not (eq? candidate thing))
+          (restricted-candidate? role thing candidate)))
+      (structure-index-things index)))
+
   (define (structure-forward-once index role offset)
-    (let ([inside (atomic-thing-at index role offset)])
-      (if inside
-          (structural-thing-end inside)
-          (let ([next (structure-index-next index role offset)])
-            (and next (structural-thing-end next))))))
+    (let* ([parent (strict-enclosing-thing index role offset)]
+           [next
+             (next-restricted-thing
+               index role parent offset)])
+      (cond
+        [next (structural-thing-end next)]
+        [(and parent
+              (not (thing-has-direct-child? index role parent)))
+         (structural-thing-end parent)]
+        [else #f])))
 
   (define (structure-backward-once index role offset)
-    (let ([inside (atomic-thing-at index role offset)])
-      (if inside
-          (structural-thing-start inside)
-          (let ([previous
-                  (structure-index-previous index role offset)])
-            (and previous (structural-thing-start previous))))))
+    (let* ([parent (strict-enclosing-thing index role offset)]
+           [previous
+             (previous-restricted-thing
+               index role parent offset)])
+      (cond
+        [previous (structural-thing-start previous)]
+        [(and parent
+              (not (thing-has-direct-child? index role parent)))
+         (structural-thing-start parent)]
+        [else #f])))
 
   (define (structure-forward-target index role offset count)
     (unless
