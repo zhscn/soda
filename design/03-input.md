@@ -20,6 +20,7 @@
 | `edit.delete-blank-lines` | 已实现 |
 | `edit.sort-lines` | 已实现 |
 | `edit.reverse-region` | 已实现 |
+| `edit.delete-duplicate-lines` | 已实现 |
 
 本文只定义文本编辑器当前使用的输入路径。minibuffer 的读取与焦点规则由
 [12-minibuffer.md](12-minibuffer.md) 定义；command 与 interactive 参数由
@@ -188,6 +189,11 @@ transaction 提交。
 
 `edit.reverse-region` 反转 active region 完整包含的逻辑行。region 两端只覆盖部分内容
 的行保持原位；结果保留最后一行之后的 newline，并以一次 Buffer transaction 提交。
+
+`edit.delete-duplicate-lines` 默认保留 active region 中每种相同行的第一次出现；一个
+universal prefix 保留最后一次出现，两个 universal prefix 只比较相邻行，三个
+universal prefix 还保留重复空行。命令只替换 region，并在一次 Buffer transaction
+中提交所有删除。
 
 ## Search 与 query replace
 

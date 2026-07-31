@@ -2791,6 +2791,54 @@
   (error 'editor-tests "reverse-region did not accept a backward region"))
 (editor-close! reverse-region-editor)
 
+(define duplicate-lines-buffer
+  (make-buffer
+    9766
+    (make-document "a\nb\n\n\na\nb\n" 9766)
+    "*duplicate-lines*"
+    'fundamental-mode))
+(define duplicate-lines-editor (make-editor duplicate-lines-buffer))
+(define duplicate-lines-view (editor-active-view duplicate-lines-editor))
+(view-set-mark! duplicate-lines-view 0)
+(view-set-caret!
+  duplicate-lines-view
+  (bytevector-length (buffer-bytes duplicate-lines-buffer)))
+(editor-update!
+  duplicate-lines-editor
+  (make-command-message 'edit.delete-duplicate-lines #f))
+(unless
+  (and
+    (bytevector=?
+      (buffer-bytes duplicate-lines-buffer)
+      (string->utf8 "a\nb\n\n"))
+    (string=?
+      (editor-status-message duplicate-lines-editor)
+      "Deleted 3 duplicate lines"))
+  (error 'editor-tests "delete-duplicate-lines did not keep first occurrences"))
+(buffer-undo! duplicate-lines-buffer)
+(view-set-mark! duplicate-lines-view 0)
+(view-set-caret!
+  duplicate-lines-view
+  (bytevector-length (buffer-bytes duplicate-lines-buffer)))
+(editor-update!
+  duplicate-lines-editor
+  (make-command-message
+    'edit.delete-duplicate-lines
+    #f
+    (prefix-argument-universal #f)))
+(unless
+  (bytevector=?
+    (buffer-bytes duplicate-lines-buffer)
+    (string->utf8 "\na\nb\n"))
+  (error 'editor-tests "delete-duplicate-lines prefix did not keep last occurrences"))
+(buffer-undo! duplicate-lines-buffer)
+(unless
+  (bytevector=?
+    (buffer-bytes duplicate-lines-buffer)
+    (string->utf8 "a\nb\n\n\na\nb\n"))
+  (error 'editor-tests "delete-duplicate-lines was not one transaction"))
+(editor-close! duplicate-lines-editor)
+
 (define yank-pop-document (make-document "" 977))
 (define yank-pop-buffer
   (make-buffer

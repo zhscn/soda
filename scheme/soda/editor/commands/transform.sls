@@ -490,6 +490,98 @@
               (buffer-replace-range! buffer start end replacement)))))
       '()))
 
+  (define (bytevector-content-hash value)
+    (let loop ([offset 0] [hash 2166136261])
+      (if (= offset (bytevector-length value))
+          hash
+          (loop
+            (+ offset 1)
+            (mod
+              (*
+                (bitwise-xor
+                  hash
+                  (bytevector-u8-ref value offset))
+                16777619)
+              4294967291)))))
+
+  (define (deduplicate-lines lines reverse? adjacent? keep-blanks?)
+    (let ([seen
+            (and
+              (not adjacent?)
+              (make-hashtable bytevector-content-hash bytevector=?))])
+      (let loop ([remaining (if reverse? (reverse lines) lines)]
+                 [previous #f]
+                 [result '()]
+                 [deleted 0])
+        (if (null? remaining)
+            (values
+              (if reverse? result (reverse result))
+              deleted)
+            (let* ([line (car remaining)]
+                   [blank?
+                     (zero? (bytevector-length line))]
+                   [duplicate?
+                     (and
+                       (not (and keep-blanks? blank?))
+                       (if adjacent?
+                           (and previous (bytevector=? previous line))
+                           (hashtable-contains? seen line)))])
+              (unless (or adjacent? duplicate?
+                          (and keep-blanks? blank?))
+                (hashtable-set! seen line #t))
+              (loop
+                (cdr remaining)
+                line
+                (if duplicate? result (cons line result))
+                (if duplicate? (+ deleted 1) deleted)))))))
+
+  (define-command (delete-duplicate-lines-command context target)
+    "Delete duplicate lines in the active region."
+    (interactive region-transform-target-reader)
+    (let* ([editor (command-context-editor context)]
+           [view (command-context-view context)]
+           [buffer (view-buffer view)]
+           [start (command-target-start target)]
+           [end (command-target-end target)]
+           [prefix-count
+             (and
+               (command-context-prefix context)
+               (abs (command-context-count context)))]
+           [reverse? (and prefix-count (< prefix-count 16))]
+           [adjacent? (and prefix-count (>= prefix-count 16))]
+           [keep-blanks? (and prefix-count (>= prefix-count 64))])
+      (unless (command-target-current? target buffer)
+        (editor-user-error
+          'edit.delete-duplicate-lines
+          "The region target is stale"))
+      (if (= start end)
+          (editor-set-status-message! editor "Deleted 0 duplicate lines")
+          (with-document-text
+            (buffer-document buffer)
+            (lambda (text)
+              (let ([trailing-newline?
+                      (= (text-byte-at text (- end 1)) 10)]
+                    [lines (range-lines text start end)])
+                (call-with-values
+                  (lambda ()
+                    (deduplicate-lines
+                      lines reverse? adjacent? keep-blanks?))
+                  (lambda (unique deleted)
+                    (when (positive? deleted)
+                      (buffer-replace-range!
+                        buffer
+                        start
+                        end
+                        (join-lines unique trailing-newline?)))
+                    (editor-set-status-message!
+                      editor
+                      (string-append
+                        "Deleted "
+                        (number->string deleted)
+                        " duplicate line"
+                        (if (= deleted 1) "" "s")))))))))
+      '()))
+
   (define (word-transform-target context)
     (let* ([view (command-context-view context)]
            [buffer (view-buffer view)]
@@ -595,6 +687,10 @@
           'edit.reverse-region
           reverse-region-command
           "Reverse complete lines in the active region.")
+        (list
+          'edit.delete-duplicate-lines
+          delete-duplicate-lines-command
+          "Delete duplicate lines in the active region.")
         (list
           'edit.upcase-word
           upcase-word-command
