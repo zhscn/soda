@@ -761,6 +761,102 @@
          "removing a buffer retained its global mark anchors"))
 (editor-close! global-mark-editor)
 
+(define change-ring-buffer
+  (make-buffer
+    7402
+    (make-document "" 7402)
+    "*change-ring-a*"
+    'fundamental-mode))
+(define change-ring-editor (make-editor change-ring-buffer))
+(define change-ring-view (editor-active-view change-ring-editor))
+(define change-ring-decoder (make-input-decoder))
+(define change-ring-other
+  (editor-create-buffer!
+    change-ring-editor
+    "*change-ring-b*"
+    'fundamental-mode
+    ""))
+(send! change-ring-editor change-ring-decoder (string->utf8 "a"))
+(send! change-ring-editor change-ring-decoder (string->utf8 "b"))
+(unless
+  (equal?
+    (editor-change-ring change-ring-editor)
+    (list (list (buffer-id change-ring-buffer) 0 'self-insert)))
+  (error 'editor-tests
+         "consecutive self-insert transactions did not coalesce"))
+(editor-set-view-buffer!
+  change-ring-editor
+  (view-id change-ring-view)
+  (buffer-id change-ring-other))
+(send! change-ring-editor change-ring-decoder (string->utf8 "x"))
+(unless (= (length (editor-change-ring change-ring-editor)) 2)
+  (error 'editor-tests
+         "changes in different buffers were incorrectly coalesced"))
+(editor-update!
+  change-ring-editor
+  (make-command-message 'navigation.previous-change #f))
+(unless
+  (and
+    (eq? (view-buffer change-ring-view) change-ring-other)
+    (= (view-caret change-ring-view) 0))
+  (error 'editor-tests "previous-change did not visit the newest change"))
+(editor-update!
+  change-ring-editor
+  (make-command-message 'navigation.previous-change #f))
+(unless
+  (and
+    (eq? (view-buffer change-ring-view) change-ring-buffer)
+    (= (view-caret change-ring-view) 0))
+  (error 'editor-tests "previous-change did not cross buffers"))
+(editor-update!
+  change-ring-editor
+  (make-command-message 'navigation.next-change #f))
+(unless
+  (and
+    (eq? (view-buffer change-ring-view) change-ring-other)
+    (= (view-caret change-ring-view) 0))
+  (error 'editor-tests "next-change did not walk toward newer changes"))
+(editor-set-view-buffer!
+  change-ring-editor
+  (view-id change-ring-view)
+  (buffer-id change-ring-buffer))
+(editor-remove-buffer!
+  change-ring-editor
+  (buffer-id change-ring-other))
+(unless
+  (and
+    (= (length (editor-change-ring change-ring-editor)) 1)
+    (= (caar (editor-change-ring change-ring-editor))
+       (buffer-id change-ring-buffer)))
+  (error 'editor-tests
+         "removing a buffer retained its change ring entries"))
+(buffer-replace-range!
+  change-ring-buffer
+  0
+  (bytevector-length (buffer-bytes change-ring-buffer))
+  (string->utf8 "one two three"))
+(view-set-caret! change-ring-view 0)
+(editor-update!
+  change-ring-editor
+  (make-command-message 'edit.kill-word #f))
+(editor-update!
+  change-ring-editor
+  (make-command-message 'edit.kill-word #f))
+(editor-update!
+  change-ring-editor
+  (make-command-message 'edit.yank #f))
+(editor-update!
+  change-ring-editor
+  (make-command-message 'edit.yank #f))
+(unless
+  (equal?
+    (map caddr (editor-change-ring change-ring-editor))
+    '(yank kill self-insert))
+  (error 'editor-tests
+         "consecutive kill or yank transactions did not coalesce"
+         (editor-change-ring change-ring-editor)))
+(editor-close! change-ring-editor)
+
 (define unicode-document (make-document "a\néx\n" 74))
 (define unicode-buffer
   (make-buffer 20 unicode-document "*unicode*" 'fundamental-mode))

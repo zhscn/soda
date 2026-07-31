@@ -312,6 +312,9 @@
           editor-global-mark-ring
           editor-push-global-mark!
           editor-pop-global-mark!
+          editor-change-ring
+          editor-previous-change!
+          editor-next-change!
           editor-push-kill!
           editor-record-kill!
           editor-current-kill

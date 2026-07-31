@@ -1425,21 +1425,45 @@
       (editor-set-status-message! editor "Global mark pushed")
       '()))
 
+  (define (visit-editor-location! editor view location message)
+    (let ([buffer (editor-buffer-ref editor (car location))])
+      (unless (eq? buffer (view-buffer view))
+        (editor-set-view-buffer!
+          editor
+          (view-id view)
+          (buffer-id buffer)))
+      (view-set-caret! view (cdr location))
+      (view-deactivate-mark! view)
+      (editor-set-status-message! editor message)))
+
   (define (pop-global-mark-command context)
     (let* ([editor (command-context-editor context)]
            [view (context-view context)]
            [location (editor-pop-global-mark! editor)])
       (if location
-          (let ([buffer (editor-buffer-ref editor (car location))])
-            (unless (eq? buffer (view-buffer view))
-              (editor-set-view-buffer!
-                editor
-                (view-id view)
-                (buffer-id buffer)))
-            (view-set-caret! view (cdr location))
-            (view-deactivate-mark! view)
-            (editor-set-status-message! editor "Global mark popped"))
+          (visit-editor-location!
+            editor view location "Global mark popped")
           (editor-set-status-message! editor "Global mark ring is empty"))
+      '()))
+
+  (define (previous-change-command context)
+    (let* ([editor (command-context-editor context)]
+           [view (context-view context)]
+           [location (editor-previous-change! editor)])
+      (if location
+          (visit-editor-location!
+            editor view location "Previous change")
+          (editor-set-status-message! editor "No older change"))
+      '()))
+
+  (define (next-change-command context)
+    (let* ([editor (command-context-editor context)]
+           [view (context-view context)]
+           [location (editor-next-change! editor)])
+      (if location
+          (visit-editor-location!
+            editor view location "Next change")
+          (editor-set-status-message! editor "No newer change"))
       '()))
 
   (define (exchange-point-and-mark-command context)
@@ -1928,7 +1952,11 @@
           'keyboard.quit
           keyboard-quit-command
           "Cancel the active input state and key sequence.")
-        (list 'edit.self-insert self-insert-command "Insert event text.")
+        (list
+          'edit.self-insert
+          self-insert-command
+          "Insert event text."
+          'self-insert)
         (list
           'edit.backward-delete
           backward-delete-command
@@ -2073,6 +2101,14 @@
           'mark.pop-global
           pop-global-mark-command
           "Pop and visit the newest Editor-global mark.")
+        (list
+          'navigation.previous-change
+          previous-change-command
+          "Visit the previous recorded change.")
+        (list
+          'navigation.next-change
+          next-change-command
+          "Visit the next recorded change.")
         (list
           'mark.exchange-point-and-mark
           exchange-point-and-mark-command

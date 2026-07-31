@@ -10,6 +10,7 @@
 | per-View `InputState`、文本策略与单键捕获 | 已实现 |
 | prefix argument、selection、View-local mark ring 与 kill ring | 已实现 |
 | Editor-global mark ring | 已实现 |
+| change ring 与跨 Buffer change navigation | 已实现 |
 | 基础 motion、editing、search、replace 与 window command | 已实现 |
 
 本文只定义文本编辑器当前使用的输入路径。minibuffer 的读取与焦点规则由
@@ -137,6 +138,12 @@ ring 的 entry 保存 Buffer identity 和该 Buffer 中的 anchor，可通过独
 push/pop；Buffer 关闭时释放对应 entry。Editor 持有 kill ring；连续 kill 依据方向
 追加或前置，yank-pop 只在紧随 yank 且 Buffer revision 与范围仍匹配时替换上一条
 yank。
+
+Buffer 在 revision 发生变化的 transaction commit 后发布 change 通知。Editor 仅在
+interactive command 边界内把通知记录到 change ring，entry 保存 Buffer identity、
+稳定 anchor 和 command class。连续 `self-insert`、`kill` 与 `yank` transaction 按
+class 和 Buffer 合并；previous/next change 命令沿同一历史跨 Buffer 移动。直接的
+后台或初始化修改不进入用户 change ring。
 
 motion 从 snapshot 和当前位置计算目标，不直接修改 Document。thing 解析 word、
 sentence、paragraph、delimiter、sexp、defun 或 language text object 的范围。编辑命令

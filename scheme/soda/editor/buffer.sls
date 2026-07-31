@@ -30,6 +30,8 @@
           buffer-structure-index
           buffer-injection-index
           buffer-highlight-runs
+          buffer-add-change-observer!
+          buffer-remove-change-observer!
           buffer-setting-ref
           buffer-set-local-setting!
           buffer-clear-local-setting!
@@ -97,6 +99,7 @@
       (mutable language-runtime
                buffer-language-runtime
                buffer-language-runtime-set!)
+      (immutable change-observers buffer-change-observers)
       (mutable closed? buffer-closed? buffer-closed?-set!)))
 
   (define (require-open-buffer who value)
@@ -224,6 +227,7 @@
                  'fundamental-mode
                  0
                  #f
+                 (make-eq-hashtable)
                  #f)])
          (install-major-mode! value mode-name)
          value)]))
@@ -348,10 +352,39 @@
       (document-undo-position (buffer-document value)))
     value)
 
+  (define (buffer-add-change-observer! value name procedure)
+    (require-open-buffer 'buffer-add-change-observer! value)
+    (unless (and (symbol? name) (procedure? procedure))
+      (assertion-violation
+        'buffer-add-change-observer!
+        "expected a symbol and procedure"
+        name
+        procedure))
+    (hashtable-set! (buffer-change-observers value) name procedure)
+    name)
+
+  (define (buffer-remove-change-observer! value name)
+    (require-open-buffer 'buffer-remove-change-observer! value)
+    (unless (symbol? name)
+      (assertion-violation
+        'buffer-remove-change-observer!
+        "expected a symbol"
+        name))
+    (hashtable-delete! (buffer-change-observers value) name))
+
+  (define (buffer-notify-change! value change)
+    (let-values ([(names observers)
+                  (hashtable-entries (buffer-change-observers value))])
+      (let loop ([index 0])
+        (unless (= index (vector-length observers))
+          ((vector-ref observers index) value change)
+          (loop (+ index 1))))))
+
   (define (buffer-close! value)
     (when (and (buffer? value) (not (buffer-closed? value)))
       (close-runtime! (buffer-language-runtime value))
       (buffer-language-runtime-set! value #f)
+      (hashtable-clear! (buffer-change-observers value))
       (document-close! (buffer-document value))
       (buffer-closed?-set! value #t)))
 
@@ -760,7 +793,8 @@
               (change-new-revision change))
             (when (not (= (change-old-revision change)
                           (change-new-revision change)))
-              (sync-change! value change))
+              (sync-change! value change)
+              (buffer-notify-change! value change))
             (values result change)))
         (lambda ()
           (unless committed?
@@ -792,7 +826,8 @@
           (document-revision (buffer-document value))))
       (buffer-revision-set! value new-revision)
       (when (not (= old-revision new-revision))
-        (sync-change! value change))
+        (sync-change! value change)
+        (buffer-notify-change! value change))
       change))
 
   (define (sync-optional-change! value change)

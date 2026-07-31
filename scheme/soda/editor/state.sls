@@ -128,6 +128,9 @@
           editor-global-mark-ring
           editor-push-global-mark!
           editor-pop-global-mark!
+          editor-change-ring
+          editor-previous-change!
+          editor-next-change!
           editor-last-yank
           editor-set-last-yank!
           editor-current-location-list
@@ -316,6 +319,12 @@
       (mutable global-mark-ring-entries
                editor-global-mark-ring-entries
                editor-global-mark-ring-entries-set!)
+      (mutable change-ring-entries
+               editor-change-ring-entries
+               editor-change-ring-entries-set!)
+      (mutable change-ring-index
+               editor-change-ring-index
+               editor-change-ring-index-set!)
       (mutable last-yank editor-last-yank editor-last-yank-set!)
       (mutable current-location-list
                editor-current-location-list
@@ -373,6 +382,9 @@
 
   (define-record-type global-mark-entry
     (fields buffer-id anchor))
+
+  (define-record-type change-ring-entry
+    (fields buffer-id anchor class))
 
   (define-record-type
     (editor-buffer-configuration-state
@@ -1099,6 +1111,7 @@
           id))
       (register-buffer-resource! value buffer)
       (hashtable-set! (editor-buffer-table value) id buffer)
+      (attach-editor-change-observer! value buffer)
       (editor-buffer-ids-set!
         value
         (append (editor-buffer-ids value) (list id)))
@@ -1174,6 +1187,7 @@
         'before-buffer-removed
         buffer)
       (editor-clear-buffer-global-marks! value buffer)
+      (editor-clear-buffer-changes! value buffer)
       (hashtable-delete! (editor-buffer-table value) id)
       (let ([resource (buffer-resource buffer)])
         (when
@@ -4101,6 +4115,129 @@
         removed)
       (editor-global-mark-ring-entries-set! value kept)))
 
+  (define (change-ring-entry-location editor entry)
+    (let* ([buffer
+             (editor-buffer-ref
+               editor
+               (change-ring-entry-buffer-id entry))]
+           [offset
+             (document-anchor-offset
+               (buffer-document buffer)
+               (change-ring-entry-anchor entry))])
+      (cons (buffer-id buffer) offset)))
+
+  (define (close-change-ring-entry! editor entry)
+    (let ([buffer
+            (hashtable-ref
+              (editor-buffer-table editor)
+              (change-ring-entry-buffer-id entry)
+              #f)])
+      (when buffer
+        (document-remove-anchor!
+          (buffer-document buffer)
+          (change-ring-entry-anchor entry)))))
+
+  (define (editor-change-ring value)
+    (require-open-editor 'editor-change-ring value)
+    (map
+      (lambda (entry)
+        (let ([location (change-ring-entry-location value entry)])
+          (list
+            (car location)
+            (cdr location)
+            (change-ring-entry-class entry))))
+      (editor-change-ring-entries value)))
+
+  (define (coalescing-change-class? class)
+    (memq class '(self-insert kill yank)))
+
+  (define (editor-current-command-class editor)
+    (let ([name (editor-current-command editor)])
+      (and
+        name
+        (guard (condition [else #f])
+          (command-class (editor-command-registry editor) name)))))
+
+  (define (editor-record-buffer-change! editor buffer change)
+    (let* ([command (editor-current-command editor)]
+           [class (and command (editor-current-command-class editor))])
+      (when command
+        (let* ([entries (editor-change-ring-entries editor)]
+               [top (and (pair? entries) (car entries))]
+               [coalesce?
+                 (and
+                   (coalescing-change-class? class)
+                   top
+                   (= (change-ring-entry-buffer-id top)
+                      (buffer-id buffer))
+                   (eq? (change-ring-entry-class top) class)
+                   (eq? (editor-last-command-class editor) class))])
+          (unless coalesce?
+            (let* ([range (change-affected-new-range change)]
+                   [entry
+                     (make-change-ring-entry
+                       (buffer-id buffer)
+                       (document-create-anchor!
+                         (buffer-document buffer)
+                         (car range)
+                         anchor-before-insertion)
+                       class)]
+                   [ring (cons entry entries)])
+              (call-with-values
+                (lambda () (split-mark-ring ring 64))
+                (lambda (kept discarded)
+                  (for-each
+                    (lambda (old)
+                      (close-change-ring-entry! editor old))
+                    discarded)
+                  (editor-change-ring-entries-set! editor kept)))))
+          (editor-change-ring-index-set! editor -1)))))
+
+  (define (attach-editor-change-observer! editor buffer)
+    (buffer-add-change-observer!
+      buffer
+      'editor.change-ring
+      (lambda (changed-buffer change)
+        (editor-record-buffer-change!
+          editor changed-buffer change))))
+
+  (define (editor-change-at-index editor index)
+    (and
+      (<= 0 index)
+      (< index (length (editor-change-ring-entries editor)))
+      (change-ring-entry-location
+        editor
+        (list-ref (editor-change-ring-entries editor) index))))
+
+  (define (editor-previous-change! editor)
+    (require-open-editor 'editor-previous-change! editor)
+    (let ([index (+ (editor-change-ring-index editor) 1)])
+      (let ([location (editor-change-at-index editor index)])
+        (when location
+          (editor-change-ring-index-set! editor index))
+        location)))
+
+  (define (editor-next-change! editor)
+    (require-open-editor 'editor-next-change! editor)
+    (let ([index (- (editor-change-ring-index editor) 1)])
+      (let ([location (editor-change-at-index editor index)])
+        (when location
+          (editor-change-ring-index-set! editor index))
+        location)))
+
+  (define (editor-clear-buffer-changes! editor buffer)
+    (let-values ([(removed kept)
+                  (partition
+                    (lambda (entry)
+                      (= (change-ring-entry-buffer-id entry)
+                         (buffer-id buffer)))
+                    (editor-change-ring-entries editor))])
+      (for-each
+        (lambda (entry) (close-change-ring-entry! editor entry))
+        removed)
+      (editor-change-ring-entries-set! editor kept)
+      (editor-change-ring-index-set! editor -1)))
+
   (define (replace-view-caret-anchor! value offset)
     (let* ([document (buffer-document (view-buffer value))]
            [anchor
@@ -4634,6 +4771,8 @@
                #f
                '()
                '()
+               '()
+               -1
                #f
                #f
                '()
@@ -4657,6 +4796,7 @@
                0
                #f)])
       (hashtable-set! buffers (buffer-id buffer) buffer)
+      (attach-editor-change-observer! value buffer)
       (register-buffer-resource! value buffer)
       (hashtable-set! views 1 view)
       (keymap-catalog-register! keymaps 'editor.override (make-keymap))
@@ -4763,6 +4903,11 @@
         (lambda (entry) (close-global-mark-entry! value entry))
         (editor-global-mark-ring-entries value))
       (editor-global-mark-ring-entries-set! value '())
+      (for-each
+        (lambda (entry) (close-change-ring-entry! value entry))
+        (editor-change-ring-entries value))
+      (editor-change-ring-entries-set! value '())
+      (editor-change-ring-index-set! value -1)
       (for-each
         (lambda (view)
           (when (view-completion view)
