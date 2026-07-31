@@ -10,6 +10,7 @@ list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 include(FetchContent)
 include(SodaChez)
 
+set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 set(LIBUV_BUILD_SHARED OFF CACHE BOOL "" FORCE)
 set(LIBUV_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(LIBUV_BUILD_BENCH OFF CACHE BOOL "" FORCE)
@@ -21,6 +22,26 @@ FetchContent_Declare(
   EXCLUDE_FROM_ALL
 )
 FetchContent_MakeAvailable(libuv)
+
+set(TREE_SITTER_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(TREE_SITTER_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(
+  tree_sitter
+  URL https://github.com/tree-sitter/tree-sitter/archive/refs/tags/v0.26.9.tar.gz
+  URL_HASH SHA256=8e14780500933f43d86662fcaa1b0ce99ebe9c220f4680bc929dce09a0e0cfc6
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+  EXCLUDE_FROM_ALL
+)
+FetchContent_MakeAvailable(tree_sitter)
+
+FetchContent_Declare(
+  tree_sitter_json
+  URL https://github.com/tree-sitter/tree-sitter-json/archive/refs/tags/v0.24.8.tar.gz
+  URL_HASH SHA256=acf6e8362457e819ed8b613f2ad9a0e1b621a77556c296f3abea58f7880a9213
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+  EXCLUDE_FROM_ALL
+)
+FetchContent_MakeAvailable(tree_sitter_json)
 
 find_package(Threads REQUIRED)
 find_package(ZLIB REQUIRED)

@@ -50,6 +50,19 @@ target_link_libraries(soda_indentation PUBLIC soda_cpp_analysis)
 set_target_properties(soda_indentation PROPERTIES POSITION_INDEPENDENT_CODE ON)
 soda_target_warnings(soda_indentation)
 
+add_library(soda_tree_sitter STATIC
+  tree_sitter/c_api.cpp
+  "${tree_sitter_json_SOURCE_DIR}/src/parser.c"
+)
+target_include_directories(soda_tree_sitter PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  "${tree_sitter_SOURCE_DIR}/lib/include"
+)
+target_compile_features(soda_tree_sitter PUBLIC cxx_std_23)
+target_link_libraries(soda_tree_sitter PUBLIC soda_document tree-sitter)
+set_target_properties(soda_tree_sitter PROPERTIES POSITION_INDEPENDENT_CODE ON)
+soda_target_warnings(soda_tree_sitter)
+
 add_library(soda_runtime STATIC
   runtime/c_api.cpp
   runtime/runtime.cpp
@@ -66,6 +79,7 @@ target_link_libraries(soda_native_core INTERFACE
   soda_document
   soda_cpp_analysis
   soda_indentation
+  soda_tree_sitter
   soda_runtime
 )
 
@@ -79,6 +93,7 @@ set(SODA_ABI_HEADERS
   "${CMAKE_CURRENT_SOURCE_DIR}/document/c_api.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/syntax/c_api.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/indentation/c_api.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/tree_sitter/c_api.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/runtime/c_api.h"
 )
 set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
@@ -180,6 +195,8 @@ if(BUILD_TESTING)
     indentation/c_api.cpp
     indentation/expression_continuation.cpp
     indentation/indentation_service.cpp
+    tree_sitter/c_api.cpp
+    "${tree_sitter_json_SOURCE_DIR}/src/parser.c"
     runtime/c_api.cpp
     runtime/runtime.cpp
     runtime/terminal_c_api.cpp
@@ -188,6 +205,9 @@ if(BUILD_TESTING)
     PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}"
   )
   target_compile_features(soda_scheme_native_test PUBLIC cxx_std_23)
-  target_link_libraries(soda_scheme_native_test PRIVATE uv_a)
+  target_include_directories(soda_scheme_native_test PRIVATE
+    "${tree_sitter_SOURCE_DIR}/lib/include"
+  )
+  target_link_libraries(soda_scheme_native_test PRIVATE uv_a tree-sitter)
   soda_target_warnings(soda_scheme_native_test)
 endif()

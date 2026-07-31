@@ -78,6 +78,18 @@ if(CHEZ_SCHEME_EXECUTABLE)
   )
 
   add_test(
+    NAME scheme_tree_sitter_tests
+    CONFIGURATIONS Debug Release
+    COMMAND
+      ${CMAKE_COMMAND} -E env
+      SODA_DOCUMENT_LIBRARY=${SODA_SCHEME_NATIVE_LIBRARY}
+      SODA_TREE_SITTER_LIBRARY=${SODA_SCHEME_NATIVE_LIBRARY}
+      ${CHEZ_SCHEME_EXECUTABLE}
+      --libdirs ${PROJECT_SOURCE_DIR}/scheme
+      --program ${CMAKE_CURRENT_SOURCE_DIR}/scheme/tree_sitter_tests.ss
+  )
+
+  add_test(
     NAME scheme_indentation_tests
     CONFIGURATIONS Debug Release
     COMMAND

@@ -663,6 +663,7 @@
           (soda editor file)
           (soda editor input-state)
           (soda editor interaction)
+          (soda editor json-language)
           (soda editor kill)
           (soda editor location)
           (soda editor minor-mode)
@@ -835,6 +836,13 @@
         '(".c" ".cc" ".cpp" ".cxx"
           ".h" ".hh" ".hpp" ".hxx")
         'cpp-mode))
+    (editor-register-auto-mode-rule!
+      editor
+      (make-file-suffix-auto-mode-rule
+        'json-files
+        0
+        '(".json")
+        'json-mode))
     editor)
 
   (define (make-editor buffer)
@@ -843,6 +851,7 @@
              (install-scheme-xref-commands! editor)])
       (editor-set-evaluator! editor (make-chez-evaluator))
       (install-core-settings! editor)
+      (install-json-language! (editor-language-catalog editor))
       (when
         (and
           (string? (buffer-resource buffer))

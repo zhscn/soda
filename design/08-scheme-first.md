@@ -14,6 +14,7 @@ terminal / files / timers
           │
           ▼
  static soda_runtime / libuv
+ static soda_tree_sitter / tree-sitter / selected grammars
           │ plain event values
           ▼
  Chez command loop ───── editor state and policy

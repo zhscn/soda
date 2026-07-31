@@ -87,6 +87,10 @@ Scheme profile 组合 revision-scoped syntax view、静态 binding analyzer 和�
 session catalog。scope graph、library index、completion 与 xref 的契约见
 [11-scheme-semantics.md](11-scheme-semantics.md)。
 
+Scheme 的 reader、highlight、indentation 与静态语义分析共享现有 Scheme syntax
+provider。C++ 使用专用 lossless parser。Tree-sitter 用于没有专用语法内核的语言，
+避免同一 Buffer 同时维护两棵功能重叠的语法树。
+
 syntax view 为指定 byte range 建立有序 highlight cursor。cursor 只属于 syntax
 view 的 revision，产生语义 face、layer、priority 与 provenance，不选择终端颜色。
 Tree-sitter provider 从 highlight query capture 生成 cursor；specialized provider
@@ -113,6 +117,11 @@ session；普通 commit、undo 和 redo 使用 change 增量同步。native 编�
 同一 analyzer 推进到目标 revision 时，Buffer sync 识别目标 revision 并跳过重复
 apply。临时 transaction 的 syntax view 使用独立 analyzer 分析 speculative
 snapshot，关闭 view 时立即释放。
+
+内建 `json-mode` 覆盖 `.json` 资源并继承 `prog-mode`。JSON profile 使用静态链接
+的 Tree-sitter grammar，提供增量 parse、highlight、fold capture 和 text-object
+capture。query capture 转换为统一的 `SyntaxCapture`；highlight capture 转换为
+base-syntax decoration，renderer 不直接调用 Tree-sitter。
 
 ## Syntax provider
 
@@ -216,7 +225,7 @@ language profile 的 delimiter pairs 同时驱动通用 `move.matching-delimiter
 
 ## Tree-sitter runtime
 
-Tree-sitter 通过窄 native wrapper 接入：
+Tree-sitter core 与启用的 grammar 静态链接到 native core，并通过窄 wrapper 接入：
 
 ```text
 TSLanguageHandle

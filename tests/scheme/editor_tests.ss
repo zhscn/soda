@@ -7897,3 +7897,46 @@
 (unless (not (view-display-map mapped-view))
   (error 'editor-tests "view did not clear its display map"))
 (editor-close! mapped-editor)
+
+(define json-document
+  (make-document "{\"name\":\"soda\",\"enabled\":true}" 992))
+(define json-buffer
+  (make-buffer 992 json-document "sample.json" 'fundamental-mode))
+(define json-editor (make-editor json-buffer))
+(buffer-set-file-path! json-buffer "/tmp/sample.json")
+(editor-select-buffer-major-mode!
+  json-editor
+  json-buffer
+  "/tmp/sample.json")
+(unless
+  (and
+    (eq? (buffer-major-mode-name json-buffer) 'json-mode)
+    (memq
+      'fold
+      (major-mode-syntax-capabilities
+        (editor-language-catalog json-editor)
+        'json-mode)))
+  (error 'editor-tests "JSON auto mode did not select Tree-sitter"))
+(let* ([frame (render-editor-frame json-editor 3 40)]
+       [property-cell (frame-cell-ref frame 0 1)]
+       [constant-cell (frame-cell-ref frame 0 25)]
+       [profile (buffer-language-profile json-buffer)]
+       [folds
+         (syntax-query
+           (language-profile-syntax profile)
+           (buffer-language-session json-buffer)
+           'fold
+           0
+           30)])
+  (unless
+    (and
+      (memq 'property (cell-faces property-cell))
+      (memq 'constant (cell-faces constant-cell))
+      (= (length folds) 1)
+      (eq? (syntax-capture-name (car folds)) 'fold.object)
+      (string=?
+        (syntax-capture-node-kind (car folds))
+        "object"))
+    (error 'editor-tests
+           "JSON Tree-sitter highlights or fold captures differ")))
+(editor-close! json-editor)
