@@ -169,6 +169,12 @@ buffer local 设置仍可覆盖。
 定义终端光标颜色：TUI 会话在首帧与主题切换时发射 OSC 12，退出时以 OSC 112
 复位；theme 未给出具体颜色时不发射。
 
+`application` 及其层级子 face（application.heading、application.border、
+application.selection、application.disabled、application.error）服务于
+[16-tui-applications.md](16-tui-applications.md) 的 TUI application
+framework：默认 theme 为这组 role 提供样式，应用专用 face 按层级回退到
+这组通用 role。
+
 chrome component 通过 role 请求 face。syntax provider、annotation producer 和
 View decoration 也只发布 face identity。默认 theme 为每个内建 role 和通用 syntax
 face 定义 terminal style。

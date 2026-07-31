@@ -51,11 +51,14 @@ TUI Buffer 仍持有一个内部 Document，以维持 Buffer、View anchor 和�
 ```text
 track-modified? = false
 read-only?      = true
+confirm-on-exit? = false
 interaction-class = interface
 ```
 
 因此应用的选择、展开、排序、请求状态和组件焦点不会污染 Document undo，也不会触发
-保存确认。需要真正编辑文本的组件通过普通 document Buffer、minibuffer 或显式
+保存或退出确认。`interface` interaction class 同时把 modeline 的 state block 从
+read-only 指示切换为应用状态呈现：`read-only?` 只约束编辑命令，不作为
+interface Buffer 的用户可见状态。需要真正编辑文本的组件通过普通 document Buffer、minibuffer 或显式
 editable child session 承载。
 
 TUI Buffer 自动参与：
@@ -118,6 +121,11 @@ TuiSession {
 }
 ```
 
+两个世代字段职责不同：`generation` 是 Model 世代，每次 update 结果被应用后
+加一，用于 View 失效与投影刷新。`command_generation` 是命令世代，只在 session
+显式失效（definition reload、失败恢复、状态迁移）时由框架加一，并同时取消全部
+in-flight commands；普通 Model 更新不推进命令世代，正常交互不会作废在途结果。
+
 Model 是 Buffer 级共享状态。同一个 TUI Buffer 显示在多个 Window 时，各 View
 看到相同的业务数据。viewport、局部 focus 和 geometry 属于 `TuiViewState`：
 
@@ -176,7 +184,8 @@ TuiClose
 
 terminal decoder 只产生规范 InputEvent。TUI framework 在焦点和 session identity
 确定后构造 TuiMessage。外部 runtime 和其他 Scheme 代码也只能通过 TuiMessage
-投递应用事件，不能直接调用应用 update。
+投递应用事件，不能直接调用应用 update。`TuiKeyRelease` 只在 host 声明并成功
+启用对应终端 capability 时投递，应用不得假设 release 事件存在。
 
 消息进入 Editor command loop，与文件读取、补全响应和 REPL result 使用相同的串行
 更新边界。应用 update 返回：
@@ -189,7 +198,9 @@ TuiUpdateResult {
 }
 ```
 
-`view_actions` 只描述 focus、scroll、cursor 和 overlay 等 View 状态改变。更新完成
+`view_actions` 只描述 focus、scroll、cursor 和 overlay 等 View 状态改变。每个
+view action 显式声明目标：`origin`（消息的 origin_view_id，缺失时丢弃该
+action）、具体 view_id，或 `all-views`；框架不做隐式广播。更新完成
 后，session generation 前进，相关 View 以 `application` dirty reason 失效。
 update 中抛出的 `editor-user-error` 成为 status message；其他 condition 进入 Soda
 debugger，command loop 保持可用，session 进入 `failed`。debugger 的 retry 可以
@@ -215,13 +226,18 @@ TuiCommand {
 `command-effect`，由已注册的 effect handler 执行。文件、目录、timer、process、
 build、language service 和其他 libuv 操作均沿用这一入口。
 
-effect 完成后产生 `TuiCommandResult`。应用结果前必须验证：
+effect 完成后产生 `TuiCommandResult`。框架在调用 update 之前验证：
 
 - session 仍存在且未关闭；
-- result 的 session generation 与 command contract 兼容；
+- result 携带的 command_generation 等于 session 当前命令世代；
 - view-scoped command 的 origin View 仍存在；
 - cancellation key 没有被更新的 command 取代；
 - 携带 Document resource/revision 的结果仍满足其专用 revision contract。
+
+任一验证失败都不调用 update，但必须同时退役对应的 pending command：拒绝与
+退役是同一个原子步骤，不存在"已拒绝但仍 pending"的中间状态（异步拒绝不退役
+会把 session 永久卡在 pending，这是已被验证过的失效模式）。需要重试的应用在
+后续 update 中显式重发 command。
 
 并发 commands 不保证完成顺序。需要顺序的工作流由 update 在收到前一个 result 后
 返回下一个 command。`batch` 只表示无顺序依赖的并发集合；`sequence` 把 commands
@@ -284,6 +300,12 @@ minibuffer 活动时，Prompt View 完全拥有输入；被遮住的 application
 text、paste 或 focus message。prompt 关闭后，active Window View 重新获得 focus，
 application 收到 `TuiFocus`。
 
+prompt 活动时 editor 命令链仍然可达，但改变 Window tree、active view、Buffer
+display 或 Workbench layout 的命令必须先检查 active prompt：不合法时抛
+`editor-user-error` 降级为 status message，且不得在失败前部分修改布局。默认
+拒绝；合法子集（scroll、describe、theme 切换等只读或显示级命令）由命令显式
+声明。
+
 Window 切换、Buffer 替换、Workbench 切换和 prompt 打开/关闭产生配对的
 `TuiBlur`/`TuiFocus`。重复选择同一 View 不重复发送 focus 消息。resize 针对每个
 可见 application View 发送局部 rectangle 的 width/height，而不是 terminal 总尺寸。
@@ -315,6 +337,16 @@ InputState {
 - View close 从栈顶向栈底运行退出流程；
 - `keyboard.quit` 清空 transient state，保留 durable state。
 
+遮蔽是严格的：未消费的事件只经过栈顶 transient state 的 handler 与 keymap
+layers；被遮 transient 的 layers 不参与解析，直到重新成为栈顶。durable state
+的 handler 与 layers 始终参与，排在全部 transient 之后。实现迁移时必须修正
+早期"折叠全部栈层"的行为：`completion.menu` 一类 transient layer 在被遮蔽
+期间不得再响应按键。
+
+`key-capture-command` 是 handler 的前身，等价于只返回
+`DispatchCommand`/`Consume` 的受限 handler。迁移期两者并存时按 handler 参与
+解析；新代码不再使用 capture-command。
+
 `editing` major mode 通常使用接受文本的 durable state。`interface` major mode
 通常使用 `application` text policy 和 application input handler。同一 Buffer 的
 两个 View 可以具有不同 transient stack 和 focused component。
@@ -326,15 +358,18 @@ InputState {
 ```text
 0. Editor override keymap
 1. active Prompt View（存在时终止后续 application 分发）
-2. InputState transient handlers，栈顶在前
-3. durable InputState handler
-4. InputState keymap layers，栈顶在前
-5. View keymap layers
-6. active minor modes，逆激活顺序
-7. major mode 与 parent keymaps
-8. Editor default keymap
-9. 未消费文本策略
+2. 栈顶 transient InputState 的 handler
+3. 栈顶 transient InputState 的 keymap layers
+4. durable InputState handler
+5. durable InputState 的 keymap layers
+6. View keymap layers
+7. active minor modes，逆激活顺序
+8. major mode 与 parent keymaps
+9. Editor default keymap
+10. 未消费文本策略
 ```
+
+被遮蔽的 transient state 不参与第 2-3 步（见 InputState 一节的遮蔽规则）。
 
 Editor override 保存不可遮蔽的逃生和 host control bindings。`C-g` 至少清除
 pending key sequence、prefix argument、completion、prompt、应用 transient state
@@ -384,7 +419,8 @@ Pending { sequence, hints, continuation }
 - `Pass` 继续下一个 handler 或 keymap 层；
 - `Consume` 结束该事件，不产生 command；
 - `DispatchCommand` 退出输入解析并通过普通 command registry 调用命令；
-- `DispatchApplication` 构造目标 TuiMessage，调用一次 application update；
+- `DispatchApplication` 构造目标 TuiMessage 并追加到 command loop 消息队列；
+  update 在本轮输入解析结束后、同一串行边界内执行，不在按键解析中途运行；
 - `Pending` 消费当前事件并保存规范 sequence、帮助 hints 和 continuation。
 
 handler 不直接改变 Buffer、Model、View 或 Frame。`DispatchApplication` 的 Model
@@ -543,6 +579,11 @@ child order 分配。Border、Padding 和 Scroll 明确缩减 child rectangle。
 Window layout 先分配 application View rectangle，application layout 只能在该
 rectangle 内继续分配。节点 paint 被 rectangle clip；Custom node 不能写出其 clip。
 
+view 是纯投影，框架据此缓存 arranged tree 与 TuiSurface：以
+(session generation, view state, theme generation, rectangle) 为键，键未变时
+直接复用，不重跑 view、measure 和 arrange。与应用无关的 editor 重绘因此不为
+未变化的 application View 付出布局成本。
+
 ### Paint 与 Frame
 
 arranged tree 绘制到 `TuiSurface`：
@@ -586,10 +627,14 @@ CellSource {
 与 component，而不从字符或 ANSI 反推结构。Theme resolver 把 faces 解析为 style；
 应用不能持有 RGB terminal state，也不能绕过 active theme。
 
-TuiSurface 合成到 Window text rectangle。该 Window 的 modeline 仍由 Editor 绘制；
-应用可以通过只读 modeline contribution 提供 process、状态和 mode segment，不能
-覆盖其他 Window 或 root minibuffer。completion、help 和 prompt overlay 最后由
-Editor root compositor 绘制。
+TuiSurface 合成到 Window text rectangle，其 component_tree 以单个 application
+component node 嫁接到该 Window 的 frame layout 子树：路径为
+`window -> application/<session> -> <node key path>`，hit testing、mouse
+routing 与 `describe-char` 沿同一路径解析。该 Window 的 modeline 仍由 Editor
+绘制；应用通过 buffer 级 segment registry 注册只读 modeline segment（id、
+供给过程、faces、priority），注册的 id 可被 buffer local `modeline-format`
+引用，不能覆盖其他 Window 或 root minibuffer。completion、help 和 prompt
+overlay 最后由 Editor root compositor 绘制。
 
 ### Cursor
 
@@ -625,6 +670,11 @@ text_projection(model, view-state?) -> string
 - accessibility 和外部工具；
 - 应用崩溃时的降级展示。
 
+投影随 Model generation 惰性刷新：读取者（search、copy、snapshot、
+accessibility）先把投影推进到当前 generation 再消费。投影上的 incremental
+search 命中以只读 location list 呈现，不映射回 TuiSurface 坐标；需要界面内
+高亮的应用在 Model 中表达命中并由 view 渲染。
+
 projection 不是 Model 的反序列化格式。对内部 Document 的编辑不会回写 Model，
 也不产生应用消息。需要语义复制时，node accessibility 数据可以提供 label、value、
 role 和 selection；普通 copy command 优先使用 focus node 的 copy action，再回退
@@ -644,9 +694,10 @@ tui.open(application, arguments, intent, origin)
 definition 的默认 intent 通常为 `tools` 或 `doc`。调用方可以请求 `edit`、`pop` 或
 显式 Window。placement policy 只处理 Buffer identity 和 intent，不读取应用 Model。
 
-应用 Buffer 可以 pinned 到具名 Window slot。切换 Workbench 保留 session 和 layout；
-异步 result 沿 origin workbench 更新 Model，但不抢占当前 focus。应用显式请求
-attention 时发布 status/notification message，不能自行切换 active Workbench。
+应用 Buffer 可以 pinned 到具名 Window slot。切换 Workbench 保留 session 和 layout。
+异步 result 更新的始终是 session 全局 Model；display/attention 请求写入
+origin workbench，不抢占当前 focus。应用显式请求 attention 时发布
+status/notification message，不能自行切换 active Workbench。
 
 ## Scheme API
 
@@ -663,18 +714,20 @@ attention 时发布 status/notification message，不能自行切换 active Work
 
   (update
     (lambda (model message context)
-      (match (tui-message-payload message)
-        [('packages.loaded packages)
-         (tui-result
-           (package-model-with-packages model packages)
-           '()
-           '())]
-        [('key 'down)
-         (tui-result
-           (package-select-next model)
-           '()
-           '())]
-        [else (tui-result model '() '())])))
+      (let ([payload (tui-message-payload message)])
+        (cond
+          [(and (pair? payload)
+                (eq? (car payload) 'packages.loaded))
+           (tui-result
+             (package-model-with-packages model (cadr payload))
+             '()
+             '())]
+          [(equal? payload '(key down))
+           (tui-result
+             (package-select-next model)
+             '()
+             '())]
+          [else (tui-result model '() '())]))))
 
   (view
     (lambda (model context)
@@ -809,7 +862,12 @@ runtime、第二个事件循环或递归 REPL。
 4. 完整 InputState handler、application text policy 和 focus/resize message；
 5. TuiNode、measure/arrange、TuiSurface 与 Frame composition；
 6. Text、Row、Column、Padding、Border、Scroll、List 和 Table 基础组件；
-7. accessibility projection、inspection、pointer routing 与 persistence。
+7. accessibility projection、inspection、pointer routing 与 persistence；
+8. host 能力扩展：`TuiKeyRelease` 需要的 Kitty enhancement flags、cursor
+   shape 的 DECSCUSR、SGR mouse 解码与 mouse mode 聚合。每项都改变终端
+   握手序列，须同步 [03-input.md](03-input.md)、
+   [13-rendering-theme.md](13-rendering-theme.md) 与 TUI smoke 测试的
+   握手断言。
 
 最小一致性样例包含 counter、异步 list 和可输入 form：
 
