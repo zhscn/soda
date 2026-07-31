@@ -2051,6 +2051,33 @@
          (frame-cursor-row multi-window-prompt-frame)
          (view-viewport-rows first-window-view)
          (view-viewport-rows second-window-view)))
+(let ([root (editor-window-root window-editor)]
+      [active-window-id (editor-active-window-id window-editor)]
+      [active-view-id (view-id (editor-active-view window-editor))])
+  (for-each
+    (lambda (command)
+      (editor-update!
+        window-editor
+        (make-command-message command #f))
+      (unless
+        (and
+          (eq? (editor-window-root window-editor) root)
+          (= (editor-active-window-id window-editor)
+             active-window-id)
+          (= (view-id (editor-active-view window-editor))
+             active-view-id)
+          (editor-active-prompt window-editor)
+          (not (editor-debugger window-editor))
+          (string? (editor-status-message window-editor)))
+        (error
+          'editor-tests
+          "window command mutated state while prompt was active"
+          command)))
+    '(window.split-below
+      window.split-right
+      window.other
+      window.delete
+      window.delete-others)))
 (send! window-editor window-decoder (bytes 7))
 (editor-other-window! window-editor -1)
 (send! window-editor window-decoder (bytes 24 48))

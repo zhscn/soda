@@ -11,6 +11,7 @@
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
+          (soda editor condition)
           (soda editor keymap)
           (soda editor state)
           (soda editor window))
@@ -49,6 +50,12 @@
       (view-keymap-layers source))
     target)
 
+  (define (require-window-command-available who editor)
+    (when (editor-active-prompt editor)
+      (editor-user-error
+        who
+        "Window commands are unavailable while the minibuffer is active")))
+
   (define (editor-split-window! editor orientation)
     (require-open-editor 'editor-split-window! editor)
     (unless (memq orientation '(horizontal vertical))
@@ -56,10 +63,9 @@
         'editor-split-window!
         "orientation must be horizontal or vertical"
         orientation))
-    (when (editor-active-prompt editor)
-      (assertion-violation
-        'editor-split-window!
-        "cannot split a minibuffer view"))
+    (require-window-command-available
+      'editor-split-window!
+      editor)
     (let* ([window (editor-active-window editor)]
            [source (editor-active-view editor)]
            [view
@@ -108,6 +114,9 @@
         'editor-other-window!
         "count must be an exact integer"
         count))
+    (require-window-command-available
+      'editor-other-window!
+      editor)
     (let* ([leaves (editor-window-leaves editor)]
            [length (length leaves)]
            [index
@@ -117,6 +126,9 @@
 
   (define (editor-delete-window! editor)
     (require-open-editor 'editor-delete-window! editor)
+    (require-window-command-available
+      'editor-delete-window!
+      editor)
     (let ([leaves (editor-window-leaves editor)])
       (when (null? (cdr leaves))
         (assertion-violation
@@ -142,6 +154,9 @@
 
   (define (editor-delete-other-windows! editor)
     (require-open-editor 'editor-delete-other-windows! editor)
+    (require-window-command-available
+      'editor-delete-other-windows!
+      editor)
     (let* ([active (editor-active-window editor)]
            [others
              (filter
