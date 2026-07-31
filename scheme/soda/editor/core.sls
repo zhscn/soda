@@ -581,6 +581,7 @@
           completion-provider-name
           completion-provider-start
           completion-provider-cancel
+          completion-provider-resolve
           completion-provider-catalog?
           completion-provider-catalog-find
           completion-provider-catalog-ref

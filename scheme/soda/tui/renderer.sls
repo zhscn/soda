@@ -1135,8 +1135,23 @@
               '(popup)
               (resolve-faces theme '(popup))
               background-sources)
-            (let* ([start
-                     (let* ([rows (rect-rows rectangle)]
+            (let* ([selected-item
+                     (completion-session-selected-item completion)]
+                   [documentation
+                     (and
+                       selected-item
+                       (completion-item-documentation selected-item))]
+                   [documentation?
+                     (and
+                       (string? documentation)
+                       (positive? (string-length documentation))
+                       (> (rect-rows rectangle) 1))]
+                   [candidate-rows
+                     (-
+                       (rect-rows rectangle)
+                       (if documentation? 1 0))]
+                   [start
+                     (let* ([rows candidate-rows]
                             [maximum-start
                               (max 0 (- (length items) rows))]
                             [stored
@@ -1152,7 +1167,7 @@
                          [else stored]))]
                    [visible
                      (let loop ([remaining (list-tail items start)]
-                                [count (rect-rows rectangle)]
+                                [count candidate-rows]
                                 [result '()])
                        (if (or (zero? count) (null? remaining))
                            (reverse result)
@@ -1277,6 +1292,38 @@
                             '(popup popup.scrollbar))
                           #f
                           background-sources))))))
+              (when documentation?
+                (let ([row
+                        (+
+                          (rect-row rectangle)
+                          candidate-rows)])
+                  (frame-fill-rect!
+                    frame
+                    (make-rect
+                      row
+                      (rect-column rectangle)
+                      1
+                      (rect-columns rectangle))
+                    (make-cell
+                      " "
+                      1
+                      '(popup popup.documentation)
+                      (resolve-faces
+                        theme
+                        '(popup popup.documentation))
+                      #f
+                      background-sources))
+                  (draw-string!
+                    frame
+                    row
+                    (rect-column rectangle)
+                    (rect-columns rectangle)
+                    documentation
+                    '(popup popup.documentation)
+                    (resolve-faces
+                      theme
+                      '(popup popup.documentation))
+                    background-sources)))
               (when indicator
                 (draw-string!
                   frame
@@ -1369,7 +1416,29 @@
             caret-row
             caret-column)
     (let* ([items (completion-session-items completion)]
-           [popup-rows (min 6 (length items) (max 0 (- rows 1)))])
+           [selected
+             (completion-session-selected-item completion)]
+           [documentation
+             (and selected (completion-item-documentation selected))]
+           [documentation?
+             (and
+               (string? documentation)
+               (positive? (string-length documentation)))]
+           [available-rows (max 0 (- rows 1))]
+           [candidate-rows
+             (min
+               completion-window-max-rows
+               (length items)
+               (if documentation?
+                   (max 0 (- available-rows 1))
+                   available-rows))]
+           [popup-rows
+             (+
+               candidate-rows
+               (if
+                 (and documentation? (positive? candidate-rows))
+                 1
+                 0))])
       (and
         (positive? popup-rows)
         (let* ([desired-width

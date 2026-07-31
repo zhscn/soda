@@ -113,6 +113,7 @@
           completion-session-selected-item
           completion-session-refresh!
           completion-session-apply-response!
+          completion-session-replace-item!
           completion-session-select-next!
           completion-session-select-previous!)
   (import (rnrs)
@@ -467,7 +468,7 @@
          label
          #f
          #t
-         annotation
+         #f
          provider-data
          annotation
          group
@@ -1481,6 +1482,53 @@
                 provider))
             (rebuild-session-items! session selected)
             #t))))
+
+  (define (completion-session-replace-item!
+            session
+            original
+            replacement)
+    (unless
+      (and
+        (completion-session? session)
+        (completion-item? original)
+        (completion-item? replacement)
+        (completion-item-identity=? original replacement))
+      (assertion-violation
+        'completion-session-replace-item!
+        "replacement must preserve completion item identity"
+        original
+        replacement))
+    (let ([replaced? #f])
+      (completion-session-provider-results-set!
+        session
+        (map
+          (lambda (result)
+            (if
+              (eq?
+                (completion-item-provider original)
+                (completion-provider-result-provider result))
+              (make-completion-provider-result
+                (completion-provider-result-provider result)
+                (completion-provider-result-complete? result)
+                (map
+                  (lambda (item)
+                    (if
+                      (completion-item-identity=? item original)
+                      (begin
+                        (set! replaced? #t)
+                        replacement)
+                      item))
+                  (completion-provider-result-items result))
+                (completion-provider-result-asynchronous? result))
+              result))
+          (completion-session-provider-results session)))
+      (unless replaced?
+        (assertion-violation
+          'completion-session-replace-item!
+          "completion item is no longer in the session"
+          original))
+      (rebuild-session-items! session replacement)
+      replacement))
 
   (define (completion-session-select-next! session)
     (unless (completion-session? session)

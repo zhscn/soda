@@ -4,6 +4,7 @@
           completion-provider-name
           completion-provider-start
           completion-provider-cancel
+          completion-provider-resolve
           make-completion-provider-catalog
           completion-provider-catalog?
           completion-provider-catalog-snapshot
@@ -21,7 +22,11 @@
 
   (define-record-type
     (completion-provider %make-completion-provider completion-provider?)
-    (fields name start-procedure cancel-procedure))
+    (fields
+      name
+      start-procedure
+      cancel-procedure
+      resolve-procedure))
 
   (define-record-type
     (completion-provider-catalog
@@ -35,18 +40,30 @@
       completion-provider-catalog-state?)
     (fields entries))
 
-  (define (make-completion-provider name start cancel)
-    (unless (symbol? name)
-      (assertion-violation
-        'make-completion-provider
-        "provider name must be a symbol"
-        name))
-    (unless (and (procedure? start) (procedure? cancel))
-      (assertion-violation
-        'make-completion-provider
-        "provider operations must be procedures"
-        name))
-    (%make-completion-provider name start cancel))
+  (define make-completion-provider
+    (case-lambda
+      [(name start cancel)
+       (make-completion-provider
+         name
+         start
+         cancel
+         (lambda (item) #f))]
+      [(name start cancel resolve)
+       (unless (symbol? name)
+         (assertion-violation
+           'make-completion-provider
+           "provider name must be a symbol"
+           name))
+       (unless
+         (and
+           (procedure? start)
+           (procedure? cancel)
+           (procedure? resolve))
+         (assertion-violation
+           'make-completion-provider
+           "provider operations must be procedures"
+           name))
+       (%make-completion-provider name start cancel resolve)]))
 
   (define (completion-provider-start provider request)
     (unless (completion-provider? provider)
@@ -96,6 +113,45 @@
         "request names another provider"
         (completion-request-provider request)))
     ((completion-provider-cancel-procedure provider) request))
+
+  (define (completion-provider-resolve provider item)
+    (unless (completion-provider? provider)
+      (assertion-violation
+        'completion-provider-resolve
+        "expected a completion provider"
+        provider))
+    (unless (completion-item? item)
+      (assertion-violation
+        'completion-provider-resolve
+        "expected a completion item"
+        item))
+    (unless
+      (eq?
+        (completion-provider-name provider)
+        (completion-item-provider item))
+      (assertion-violation
+        'completion-provider-resolve
+        "item names another provider"
+        (completion-item-provider item)))
+    (let ([resolved
+            ((completion-provider-resolve-procedure provider) item)])
+      (unless
+        (or
+          (not resolved)
+          (and
+            (completion-item? resolved)
+            (completion-item-resolved? resolved)
+            (equal?
+              (completion-item-id resolved)
+              (completion-item-id item))
+            (eq?
+              (completion-item-provider resolved)
+              (completion-item-provider item))))
+        (assertion-violation
+          'completion-provider-resolve
+          "provider resolve returned an invalid completion item"
+          resolved))
+      resolved))
 
   (define (make-completion-provider-catalog)
     (%make-completion-provider-catalog (make-eq-hashtable)))

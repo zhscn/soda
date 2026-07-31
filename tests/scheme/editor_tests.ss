@@ -4816,6 +4816,131 @@
          "accepting document completion did not apply one replacement"))
 (editor-close! completion-editor)
 
+(define resolve-document
+  (make-document (string->utf8 "fo\n") 944))
+(define resolve-buffer
+  (make-buffer
+    944
+    resolve-document
+    #f
+    'fundamental-mode))
+(define resolve-editor (make-editor resolve-buffer))
+(define resolve-source
+  (make-choice-source
+    'resolve-test
+    '((category . resolve-test))
+    (lambda (input point) (cons 0 point))
+    (lambda (query) '())
+    (lambda (value) #f)
+    (lambda (generation) #f)))
+(define resolve-provider
+  (make-completion-provider
+    'resolve-test
+    (lambda (request)
+      (list
+        (make-completion-response-for-request
+          request
+          (list
+            (make-completion-item
+              'foo
+              'resolve-test
+              "foo"
+              "foo"
+              "foo"
+              'function
+              #f
+              #f
+              "foo"
+              #f
+              #f
+              #f
+              'foo
+              #f
+              #f))
+          #t)))
+    (lambda (request) #f)
+    (lambda (item)
+      (make-completion-item
+        (completion-item-id item)
+        (completion-item-provider item)
+        (completion-item-filter-text item)
+        (completion-item-label item)
+        (completion-item-insert-text item)
+        (completion-item-kind item)
+        "resolved detail"
+        (make-completion-edit
+          (make-completion-text-edit 0 2 "foo")
+          (make-completion-text-edit 0 2 "foo")
+          (list
+            (make-completion-text-edit 3 3 "resolved\n")))
+        (completion-item-sort-text item)
+        #f
+        #t
+        "Resolved documentation"
+        (completion-item-provider-data item)
+        #f
+        #f))))
+(editor-register-completion-provider!
+  resolve-editor
+  resolve-provider)
+(view-set-caret! (editor-active-view resolve-editor) 2)
+(editor-start-document-completion!
+  resolve-editor
+  resolve-source
+  0
+  2
+  2
+  '(resolve-test))
+(define resolve-executor (make-effect-executor))
+(install-completion-effect-handlers!
+  resolve-executor
+  (editor-completion-provider-catalog resolve-editor))
+(for-each
+  (lambda (message)
+    (editor-update! resolve-editor message))
+  (effect-result-messages
+    (execute-effects!
+      resolve-executor
+      (editor-take-completion-effects! resolve-editor))))
+(let ([item
+        (completion-session-selected-item
+          (editor-active-completion resolve-editor))])
+  (unless
+    (and
+      item
+      (completion-item-resolved? item)
+      (string=?
+        (completion-item-documentation item)
+        "Resolved documentation")
+      (=
+        (length
+          (completion-edit-additional-edits
+            (completion-item-edit item)))
+        1))
+    (error 'editor-tests
+           "completion provider did not resolve the selected item")))
+(editor-update! resolve-editor (make-resize-message 6 30))
+(let ([frame (render-editor-frame resolve-editor 6 30)])
+  (unless
+    (let loop ([row 0])
+      (and
+        (< row (frame-rows frame))
+        (or
+          (string-contains?
+            (frame-row-text frame row)
+            "Resolved")
+          (loop (+ row 1)))))
+    (error 'editor-tests
+           "resolved completion documentation was not rendered")))
+(editor-accept-completion! resolve-editor)
+(unless
+  (bytevector=?
+    (buffer-bytes resolve-buffer)
+    (string->utf8 "foo\nresolved\n"))
+  (error 'editor-tests
+         "resolved completion edits were not committed atomically"))
+(editor-close! resolve-editor)
+
 (define composition-document
   (make-document (string->utf8 "alpha alpine beta") 943))
 (define composition-buffer

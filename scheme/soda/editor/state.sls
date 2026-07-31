@@ -1899,6 +1899,34 @@
           (when change
             (change-close! change))))))
 
+  (define (editor-resolve-completion-item!
+            value
+            completion
+            item)
+    (if
+      (completion-item-resolved? item)
+      item
+      (let ([resolved
+              (guard
+                (condition [else #f])
+                (let ([provider
+                        (completion-provider-catalog-find
+                          (editor-completion-provider-catalog value)
+                          (completion-item-provider item))])
+                  (and
+                    provider
+                    (completion-provider-resolve provider item))))])
+        (if resolved
+            (completion-session-replace-item!
+              completion
+              item
+              resolved)
+            (begin
+              (editor-set-status-message!
+                value
+                "Unable to resolve completion candidate")
+              #f)))))
+
   (define editor-accept-completion!
     (case-lambda
       [(value) (editor-accept-completion! value 'insert)]
@@ -1913,61 +1941,97 @@
          (assertion-violation
            'editor-accept-completion!
            "prompt completion is accepted through its prompt"))
-       (let* ([view (editor-active-view value)]
-              [completion (view-completion view)]
-              [item
-                (and completion
-                     (completion-session-selected-item completion))])
+       (let* ((view (editor-active-view value))
+              (completion (view-completion view))
+              (item
+                (and
+                  completion
+                  (completion-session-selected-item completion))))
          (cond
-           [(not completion) #f]
-           [(not item)
+           ((not completion) #f)
+           ((not item)
             (editor-set-status-message! value "No completion candidate")
-            #f]
-           [else
-            (let* ([target (completion-session-target completion)]
-                   [buffer (view-buffer view)]
-                   [document (buffer-document buffer)])
-              (if (or
-                    (not (document-completion-target? target))
-                    (not (= (view-id view)
-                            (document-completion-target-view-id target)))
-                    (not (= (buffer-id buffer)
-                            (document-completion-target-buffer-id target)))
-                    (not (= (document-id document)
-                            (document-completion-target-document-id target)))
-                    (not (= (buffer-revision buffer)
-                            (document-completion-target-revision target)))
-                    (not (= (view-caret view)
-                            (document-completion-target-end target))))
-                  (begin
-                    (cancel-view-completion! value view)
-                    (editor-set-status-message!
-                      value
-                      "Completion target changed")
-                    #f)
-                  (let ([caret
-                          (begin
-                            (validate-completion-item-edit! item target)
-                            (apply-completion-edits!
-                              buffer
-                              (completion-primary-edit item target mode)
-                              (completion-additional-edits item)))])
-                    (view-set-caret! view caret)
-                    (cancel-view-completion! value view)
-                    item)))]))]))
+            #f)
+           (else
+            (let* ((target
+                     (completion-session-target completion))
+                   (buffer (view-buffer view))
+                   (document (buffer-document buffer)))
+              (if
+                (or
+                  (not (document-completion-target? target))
+                  (not
+                    (=
+                      (view-id view)
+                      (document-completion-target-view-id target)))
+                  (not
+                    (=
+                      (buffer-id buffer)
+                      (document-completion-target-buffer-id target)))
+                  (not
+                    (=
+                      (document-id document)
+                      (document-completion-target-document-id target)))
+                  (not
+                    (=
+                      (buffer-revision buffer)
+                      (document-completion-target-revision target)))
+                  (not
+                    (=
+                      (view-caret view)
+                      (document-completion-target-end target))))
+                (begin
+                  (cancel-view-completion! value view)
+                  (editor-set-status-message!
+                    value
+                    "Completion target changed")
+                  #f)
+                (let ((resolved
+                        (editor-resolve-completion-item!
+                          value
+                          completion
+                          item)))
+                  (and
+                    resolved
+                    (let ((caret
+                            (begin
+                              (validate-completion-item-edit!
+                                resolved
+                                target)
+                              (apply-completion-edits!
+                                buffer
+                                (completion-primary-edit
+                                  resolved
+                                  target
+                                  mode)
+                                (completion-additional-edits
+                                  resolved)))))
+                      (view-set-caret! view caret)
+                      (cancel-view-completion! value view)
+                      resolved))))))))]))
 
   (define (editor-completion-next! value)
     (require-open-editor 'editor-completion-next! value)
     (let ([completion (editor-active-completion value)])
       (when completion
-        (completion-session-select-next! completion))
+        (completion-session-select-next! completion)
+        (let ([item
+                (completion-session-selected-item completion)])
+          (when item
+            (editor-resolve-completion-item!
+              value completion item))))
       completion))
 
   (define (editor-completion-previous! value)
     (require-open-editor 'editor-completion-previous! value)
     (let ([completion (editor-active-completion value)])
       (when completion
-        (completion-session-select-previous! completion))
+        (completion-session-select-previous! completion)
+        (let ([item
+                (completion-session-selected-item completion)])
+          (when item
+            (editor-resolve-completion-item!
+              value completion item))))
       completion))
 
   (define (completion-response-target-matches?
@@ -2033,6 +2097,14 @@
                  (completion-response-message-provider message)
                  (completion-response-message-items message)
                  (completion-response-message-complete? message)))])
+      (when
+        (and
+          accepted?
+          (completion-session-selected-item completion))
+        (editor-resolve-completion-item!
+          value
+          completion
+          (completion-session-selected-item completion)))
       (when
         (and
           accepted?
