@@ -10,6 +10,7 @@
           debugger-session-return-caret
           debugger-session-condition
           debugger-session-continuation
+          debugger-session-source-stop
           debugger-session-frames
           debugger-session-selected-index
           debugger-session-selected-frame
@@ -68,7 +69,8 @@
           (soda editor debugger-action)
           (soda editor evaluator)
           (soda editor inspector)
-          (soda editor interaction))
+          (soda editor interaction)
+          (soda editor source-debug))
 
   (define-record-type debugger-variable
     (fields
@@ -226,7 +228,21 @@
         inspector)))
 
   (define (condition-continuation/safe condition)
-    (safe-call #f (lambda () (condition-continuation condition))))
+    (if
+      (source-debug-suspension-condition? condition)
+      (source-debug-stop-continuation
+        (source-debug-suspension-stop condition))
+      (safe-call #f (lambda () (condition-continuation condition)))))
+
+  (define (debugger-session-source-stop debugger)
+    (require-open-debugger
+      'debugger-session-source-stop
+      debugger)
+    (let ([condition (debugger-session-condition debugger)])
+      (and
+        condition
+        (source-debug-suspension-condition? condition)
+        (source-debug-suspension-stop condition))))
 
   (define no-action-parameter
     (make-debugger-action-parameter
@@ -268,6 +284,33 @@
          no-action-parameter
          'scheme.debug-retry
          default?)]
+      [(step)
+       (make-debugger-action
+         'step
+         "Step"
+         "Stop at the next source expression"
+         'resume
+         no-action-parameter
+         'scheme.debug-step
+         default?)]
+      [(next)
+       (make-debugger-action
+         'next
+         "Next"
+         "Stop at the next source expression in this frame"
+         'resume
+         no-action-parameter
+         'scheme.debug-next
+         default?)]
+      [(finish)
+       (make-debugger-action
+         'finish
+         "Finish"
+         "Continue until the selected source frame returns"
+         'resume
+         no-action-parameter
+         'scheme.debug-finish
+         default?)]
       [(edit-and-retry)
        (make-debugger-action
          'edit-and-retry
@@ -305,15 +348,28 @@
          "unknown built-in debugger action"
          id)]))
 
-  (define (evaluation-actions status continuation source)
+  (define (evaluation-actions
+            status
+            condition
+            continuation
+            source)
     (debugger-actions-validate
       (case status
         [(suspended)
-         (list
-           (built-in-action 'continue #t source)
-           (built-in-action 'retry #f source)
-           (built-in-action 'edit-and-retry #f source)
-           (built-in-action 'abort #f source))]
+         (append
+           (list
+             (built-in-action 'continue #t source))
+           (if
+             (source-debug-suspension-condition? condition)
+             (list
+               (built-in-action 'step #f source)
+               (built-in-action 'next #f source)
+               (built-in-action 'finish #f source))
+             '())
+           (list
+             (built-in-action 'retry #f source)
+             (built-in-action 'edit-and-retry #f source)
+             (built-in-action 'abort #f source)))]
         [(condition)
          (append
            (list (built-in-action 'retry #t source))
@@ -458,6 +514,7 @@
           #f
           (evaluation-actions
             (evaluation-result-status result)
+            (evaluation-result-condition result)
             continuation
             (evaluation-request-source
               (evaluation-result-request result)))
@@ -1231,6 +1288,38 @@
       (write (condition-irritants condition) port)
       (newline port)))
 
+  (define (write-source-stop debugger port)
+    (let ([stop
+            (debugger-session-source-stop debugger)])
+      (when stop
+        (let ([location
+                (source-debug-stop-location stop)])
+          (display "Source stop: " port)
+          (display
+            (symbol->string
+              (source-debug-stop-kind stop))
+            port)
+          (display " at " port)
+          (write
+            (source-location-resource location)
+            port)
+          (display ":" port)
+          (display
+            (number->string
+              (source-location-start location))
+            port)
+          (display "-" port)
+          (display
+            (number->string
+              (source-location-end location))
+            port)
+          (display " depth " port)
+          (display
+            (number->string
+              (source-debug-stop-depth stop))
+            port)
+          (newline port)))))
+
   (define (write-actions debugger port)
     (display "Actions:\n" port)
     (for-each
@@ -1406,6 +1495,7 @@
         (write-condition-details
           (debugger-session-condition debugger)
           port)
+        (write-source-stop debugger port)
         (newline port)
         (write-actions debugger port)
         (newline port)

@@ -6,6 +6,7 @@
           chez-evaluator-runtime-symbols
           chez-evaluator-runtime-bindings
           chez-evaluator-generation
+          chez-evaluator-source-debugger
           chez-evaluator-binding-metadata
           chez-evaluator-ref
           chez-evaluator-evaluate
@@ -18,6 +19,7 @@
           evaluation-task-step!
           evaluation-task-interrupt!
           evaluation-task-resume!
+          evaluation-task-resume-source!
           evaluation-task-resume-condition!
           evaluation-task-resume-continuation!
           evaluation-task-abort!
@@ -33,10 +35,12 @@
           runtime-binding-generation)
   (import (chezscheme)
           (soda editor event)
-          (soda editor interaction))
+          (soda editor interaction)
+          (soda editor source-debug))
 
   (define-record-type (chez-evaluator %make-chez-evaluator chez-evaluator?)
     (fields environment
+            source-debugger
             baseline-symbols
             (mutable generation
                      chez-evaluator-generation
@@ -67,7 +71,18 @@
     (fields
       (mutable failure
                evaluation-control-failure
-               evaluation-control-failure-set!)))
+               evaluation-control-failure-set!)
+      source-debugger
+      engine-enabled?
+      (mutable stop
+               evaluation-control-stop
+               evaluation-control-stop-set!)
+      (mutable plan
+               evaluation-control-plan
+               evaluation-control-plan-set!)
+      (mutable suppressed-breakpoint-id
+               evaluation-control-suppressed-breakpoint-id
+               evaluation-control-suppressed-breakpoint-id-set!)))
 
   (define-record-type
     (evaluation-task %make-evaluation-task evaluation-task?)
@@ -98,12 +113,118 @@
           (environment-symbols environment))
         (%make-chez-evaluator
           environment
+          (make-source-debug-controller)
           baseline-symbols
           0
           -1
           '()
           -1
           '()))))
+
+  (define current-evaluation-control
+    (make-thread-parameter #f))
+
+  (define (same-source-location? left right)
+    (and
+      (equal?
+        (source-location-resource left)
+        (source-location-resource right))
+      (= (source-location-start left)
+         (source-location-start right))
+      (= (source-location-end left)
+         (source-location-end right))))
+
+  (define (continuation-depth continuation)
+    (guard (condition [else 0])
+      (let ([depth
+              ((inspect/object continuation) 'depth)])
+        (if
+          (and
+            (integer? depth)
+            (exact? depth)
+            (not (negative? depth)))
+          depth
+          0))))
+
+  (define (source-plan-stop-kind plan location depth)
+    (and
+      plan
+      (not
+        (same-source-location?
+          location
+          (source-debug-plan-location plan)))
+      (case (source-debug-plan-kind plan)
+        [(step) 'step]
+        [(next)
+         (and
+           (<= depth (source-debug-plan-depth plan))
+           'next)]
+        [(finish)
+         (and
+           (< depth (source-debug-plan-depth plan))
+           'finish)])))
+
+  (define (source-debug-probe resource start end)
+    (let ([control (current-evaluation-control)])
+      (when
+        (and
+          control
+          (evaluation-control-engine-enabled? control))
+        (let* ([location
+                 (make-source-location resource start end)]
+               [controller
+                 (evaluation-control-source-debugger control)]
+               [matched
+                 (source-debug-controller-matching-breakpoint
+                   controller
+                   location)]
+               [suppressed-id
+                 (evaluation-control-suppressed-breakpoint-id
+                   control)]
+               [breakpoint
+                 (and
+                   matched
+                   (not
+                     (and
+                       suppressed-id
+                       (= suppressed-id
+                          (source-breakpoint-id matched))))
+                   matched)]
+               [plan (evaluation-control-plan control)])
+          (when
+            (or breakpoint plan)
+            (call/cc
+              (lambda (continuation)
+                (let* ([depth
+                         (continuation-depth continuation)]
+                       [kind
+                         (or
+                           (and breakpoint 'breakpoint)
+                           (source-plan-stop-kind
+                             plan
+                             location
+                             depth))])
+                  (when kind
+                    (evaluation-control-stop-set!
+                      control
+                      (make-source-debug-stop
+                        kind
+                        location
+                        depth
+                        continuation
+                        breakpoint))
+                    (evaluation-control-plan-set!
+                      control
+                      #f)
+                    (when breakpoint
+                      (evaluation-control-suppressed-breakpoint-id-set!
+                        control
+                        (source-breakpoint-id breakpoint)))
+                    (engine-block))))))
+          (unless matched
+            (evaluation-control-suppressed-breakpoint-id-set!
+              control
+              #f))))))
 
   (define (chez-evaluator-invalidate! evaluator)
     (unless (chez-evaluator? evaluator)
@@ -327,19 +448,65 @@
              (top-level-value name environment)
              fallback))]))
 
-  (define (evaluate-port environment port)
-    (let loop ([last-values '()] [evaluated? #f])
-      (let ([form (read port)])
-        (if (eof-object? form)
-            (if evaluated? last-values '())
-            (loop
-              (call-with-values
-                (lambda () (eval form environment))
-                list)
-              #t)))))
+  (define (evaluate-annotated-port
+            environment
+            port
+            resource
+            initial-position)
+    (let ([sfd (source-file-descriptor resource 0)])
+      (let loop
+        ([position initial-position]
+         [last-values '()]
+         [evaluated? #f])
+        (call-with-values
+          (lambda ()
+            (get-datum/annotations port sfd position))
+          (lambda (form next-position)
+            (if (eof-object? form)
+                (if evaluated? last-values '())
+                (loop
+                  next-position
+                  (call-with-values
+                    (lambda ()
+                      (eval
+                        (source-debug-instrument
+                          form
+                          resource
+                          'soda-source-debug-probe)
+                        environment))
+                    list)
+                  #t)))))))
 
-  (define (evaluate-source environment source)
-    (evaluate-port environment (open-string-input-port source)))
+  (define (evaluation-source-resource request)
+    (let ([origin (evaluation-request-origin request)])
+      (or
+        (and origin
+             (evaluation-origin-resource origin))
+        (string-append
+          "*evaluation:"
+          (number->string
+            (evaluation-request-session-id request))
+          ":"
+          (number->string
+            (evaluation-request-generation request))
+          "*"))))
+
+  (define (evaluation-source-start request)
+    (let ([origin (evaluation-request-origin request)])
+      (or
+        (and origin
+             (evaluation-origin-start origin))
+        0)))
+
+  (define (evaluate-source environment request)
+    (let* ([source (evaluation-request-source request)]
+           [resource (evaluation-source-resource request)]
+           [port (open-string-input-port source)])
+      (evaluate-annotated-port
+        environment
+        port
+        resource
+        (evaluation-source-start request))))
 
   (define (chez-evaluator-evaluate-file! evaluator path editor)
     (unless (chez-evaluator? evaluator)
@@ -355,11 +522,22 @@
     (let ([environment (chez-evaluator-environment evaluator)])
       (set-top-level-value! '*editor* editor environment)
       (set-top-level-value! '*interaction-session* #f environment)
+      (set-top-level-value!
+        'soda-source-debug-probe
+        source-debug-probe
+        environment)
       (let ([values
-              (call-with-input-file
-                path
-                (lambda (port)
-                  (evaluate-port environment port)))])
+              (parameterize
+                ([generate-inspector-information #t]
+                 [run-cp0 (lambda (cp0 form) form)])
+                (call-with-input-file
+                  path
+                  (lambda (port)
+                    (evaluate-annotated-port
+                      environment
+                      port
+                      path
+                      0))))])
         (chez-evaluator-invalidate! evaluator)
         values)))
 
@@ -418,6 +596,10 @@
                 'editor-command!
                 emit-command!
                 environment)
+              (set-top-level-value!
+                'soda-source-debug-probe
+                source-debug-probe
+                environment)
               (guard (condition
                        [else
                         (evaluation-control-failure-set!
@@ -429,10 +611,12 @@
                    [current-error-port error-port]
                    [generate-inspector-information #t]
                    [run-cp0 (lambda (cp0 form) form)])
-                  (set! result-values
-                    (evaluate-source
-                      environment
-                      (evaluation-request-source request)))))
+                  (parameterize
+                    ([current-evaluation-control control])
+                    (set! result-values
+                      (evaluate-source
+                        environment
+                        request)))))
               (let ([failure
                       (evaluation-control-failure control)]
                     [output (extract-output)]
@@ -459,7 +643,13 @@
       request
       editor
       session
-      (make-evaluation-control #f)))
+      (make-evaluation-control
+        #f
+        (chez-evaluator-source-debugger evaluator)
+        #f
+        #f
+        #f
+        #f)))
 
   (define (make-evaluation-task evaluator request editor session)
     (unless (chez-evaluator? evaluator)
@@ -477,7 +667,14 @@
         'make-evaluation-task
         "expected an interaction session"
         session))
-    (let ([control (make-evaluation-control #f)])
+    (let ([control
+            (make-evaluation-control
+              #f
+              (chez-evaluator-source-debugger evaluator)
+              #t
+              #f
+              #f
+              #f)])
       (%make-evaluation-task
         request
         evaluator
@@ -539,9 +736,53 @@
         'evaluation-task-resume!
         "evaluation task is not suspended"
         (evaluation-task-state task)))
+    (evaluation-control-stop-set!
+      (evaluation-task-control task)
+      #f)
+    (evaluation-control-plan-set!
+      (evaluation-task-control task)
+      #f)
     (evaluation-task-result-set! task #f)
     (evaluation-task-state-set! task 'running)
     task)
+
+  (define (evaluation-task-resume-source! task kind)
+    (unless (evaluation-task? task)
+      (assertion-violation
+        'evaluation-task-resume-source!
+        "expected an evaluation task"
+        task))
+    (unless (memq kind '(step next finish))
+      (assertion-violation
+        'evaluation-task-resume-source!
+        "source resume kind must be step, next, or finish"
+        kind))
+    (unless
+      (and
+        (eq? (evaluation-task-state task) 'suspended)
+        (evaluation-task-result task)
+        (source-debug-suspension-condition?
+          (evaluation-result-condition
+            (evaluation-task-result task))))
+      (assertion-violation
+        'evaluation-task-resume-source!
+        "evaluation task is not stopped in source code"
+        (evaluation-task-state task)))
+    (let* ([control (evaluation-task-control task)]
+           [stop
+             (source-debug-suspension-stop
+               (evaluation-result-condition
+                 (evaluation-task-result task)))])
+      (evaluation-control-stop-set! control #f)
+      (evaluation-control-plan-set!
+        control
+        (make-source-debug-plan
+          kind
+          (source-debug-stop-location stop)
+          (source-debug-stop-depth stop)))
+      (evaluation-task-result-set! task #f)
+      (evaluation-task-state-set! task 'running)
+      task))
 
   (define (evaluation-task-resume-condition! task values)
     (unless (evaluation-task? task)
@@ -679,7 +920,34 @@
             (evaluation-task-result task)]
            [(expired)
             (evaluation-task-engine-set! task (cadr outcome))
-            #f]
+            (let ([stop
+                    (evaluation-control-stop
+                      (evaluation-task-control task))])
+              (if stop
+                  (let* ([kind
+                           (source-debug-stop-kind stop)]
+                         [condition
+                           (condition
+                             (make-source-debug-suspension-condition
+                               stop)
+                             (make-who-condition 'scheme.evaluate)
+                             (make-message-condition
+                               (string-append
+                                 "evaluation stopped at a source "
+                                 (symbol->string kind))))]
+                         [result
+                           (make-evaluation-result
+                             (evaluation-task-request task)
+                             'suspended
+                             '()
+                             ""
+                             ""
+                             condition
+                             '())])
+                    (evaluation-task-result-set! task result)
+                    (evaluation-task-state-set! task 'suspended)
+                    result)
+                  #f))]
            [else
             (assertion-violation
               'evaluation-task-step!
@@ -708,11 +976,17 @@
         'evaluation-result-continuation
         "expected an evaluation result"
         result))
-    (and
-      (eq? (evaluation-result-status result) 'condition)
-      (guard (condition [else #f])
-        (condition-continuation
-          (evaluation-result-condition result)))))
+    (let ([condition (evaluation-result-condition result)])
+      (cond
+        [(and
+           condition
+           (source-debug-suspension-condition? condition))
+         (source-debug-stop-continuation
+           (source-debug-suspension-stop condition))]
+        [(eq? (evaluation-result-status result) 'condition)
+         (guard (condition [else #f])
+           (condition-continuation condition))]
+        [else #f])))
 
   (define (evaluation-result->transcript result)
     (unless (evaluation-result? result)

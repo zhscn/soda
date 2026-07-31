@@ -125,6 +125,10 @@
       (case (evaluation-resume-request-kind request)
         [(continue)
          (evaluation-task-resume! task)]
+        [(step next finish)
+         (evaluation-task-resume-source!
+           task
+           (evaluation-resume-request-kind request))]
         [(use-values)
          (evaluation-task-resume-condition!
            task

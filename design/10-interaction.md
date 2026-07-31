@@ -285,9 +285,43 @@ debugger Buffer，因此扩展修改 session 后不需要调用刷新函数。Bu
 
 condition failure 提供默认的 `retry`、有 continuation 时的 `use-value`、
 `edit-and-retry` 和 `abort`。suspended evaluation 提供默认的 `continue`、`retry`、
-`edit-and-retry` 和 `abort`。Editor command condition 提供 `dismiss`。默认 action
-在模糊排序前具有 selection priority，因此 picker 初始选择与 Buffer 中的 `>`
-标记一致。
+`edit-and-retry` 和 `abort`。源码 stop 额外提供 `step`、`next` 和 `finish`。
+Editor command condition 提供 `dismiss`。默认 action 在模糊排序前具有 selection
+priority，因此 picker 初始选择与 Buffer 中的 `>` 标记一致。
+
+## 源码断点与步进
+
+evaluator 使用 Chez annotated reader 读取交互 request 和源码文件，并在可执行
+expression 前插入 source probe。probe 保存 resource 与 UTF-8 byte range；顶层
+definition 中的 probe 通过 evaluator environment 动态取得当前
+`EvaluationControl`，因此文件加载完成后调用该 definition 仍能参与后续 task 的
+调试。Inspector information 与关闭 CP0 源级优化的编译策略同时用于异常 continuation
+和源码步进。
+
+源码断点由 evaluator 的 `SourceDebugController` 持有，不依附某个 Buffer 或
+InteractionSession。断点位置是 resource 中的一段行范围；probe 的起点位于该范围
+时命中。`F9` 执行 `scheme.debug-toggle-breakpoint`，在当前 View 所在物理行切换
+断点。`scheme.debug-list-breakpoints` 把所有断点投影到只读
+`*scheme-breakpoints*` Buffer。关闭源码 Buffer 不移除断点。
+
+probe 命中断点时捕获当前位置的 continuation 和 continuation depth，并显式
+`engine-block`。task 把该 stop 转成带 `SourceDebugStop` 的 suspended result，
+DebuggerSession 继续使用普通 condition、frame、action 与 revision 模型。恢复操作
+复用原 EvaluationTask 和 engine：
+
+- `continue` 清除步进计划并恢复执行；
+- `step` 在下一个不同的 probe 停止，包括进入被调用 procedure；
+- `next` 在下一个不同且 continuation depth 不深于当前位置的 probe 停止；
+- `finish` 在下一个 continuation depth 浅于当前位置的 probe 停止。
+
+断点恢复时暂时抑制同一断点，执行离开该行后恢复匹配，避免 continue 立即再次停在
+同一个 probe。源码 stop 的 resource 与 byte range 优先于 continuation frame 的
+source metadata，`scheme.debug-visit-source` 使用已有 Buffer 或异步 VFS open 定位
+该范围。
+
+源码 probe 覆盖 evaluator 读取的 source forms。预编译 vfasl、native procedure
+和 FFI 调用没有 Scheme source probe；这些帧仍可由 Chez continuation inspector
+检查。
 
 失败状态提供以下动作：
 
@@ -323,6 +357,8 @@ condition failure 提供默认的 `retry`、有 continuation 时的 `use-value`�
 - `scheme.debug-visit-source` 通过异步 VFS open request 打开选中 frame 的 source
   path，并按行与字符位置定位 caret；
 - `scheme.debug-continue` 恢复用户中断时保存的 engine；
+- `scheme.debug-step`、`scheme.debug-next` 与 `scheme.debug-finish` 按当前
+  SourceDebugStop 安装步进计划并恢复同一个 engine；
 - `scheme.debug-use-value` 在选中 frame 中求值 replacement expression，把产生的
   多值传给 condition continuation，并在新的 engine 中继续原计算；
 - `scheme.debug-retry` 关闭当前 debugger，使用新的 generation 重放原始 source
@@ -338,11 +374,11 @@ condition failure 提供默认的 `retry`、有 continuation 时的 `use-value`�
   保存的 engine。
 
 debugger Buffer 的 `n`、`p`、`e`、`i`、`k`、`l`、`d`、`u`、`t`、`[`、`]`、
-`P`、`W`、`/`、`N`、`!`、`a`、`v`、`c`、`r`、`=`、`x`、`q` 分别映射到 frame
-导航、求值、检查 condition、检查 continuation、检查局部值、进入子项、返回父
-节点、返回根节点、Inspector 分页、print、write、find、find-next、设置变量、应用
-procedure、源码访问、继续、action selector、replacement value、保留退出与丢弃
-操作。
+`P`、`W`、`/`、`N`、`!`、`a`、`v`、`c`、`s`、`o`、`f`、`r`、`=`、`x`、`q`
+分别映射到 frame 导航、求值、检查 condition、检查 continuation、检查局部值、
+进入子项、返回父节点、返回根节点、Inspector 分页、print、write、find、
+find-next、设置变量、应用 procedure、源码访问、继续、step、next、finish、
+action selector、replacement value、保留退出与丢弃操作。
 源码访问复用普通 `file.read` effect，文件
 读取期间 command loop 保持可用；打开完成后 debugger 状态仍可重新激活。重试和
 丢弃会先把所有显示 debugger Buffer 的 View 切回来源 Buffer。Editor 关闭时释放

@@ -20,6 +20,7 @@
           (soda editor keymap)
           (soda editor language)
           (soda editor prompt)
+          (soda editor source-debug)
           (soda editor state))
 
   (define (debugger-resource debugger)
@@ -368,35 +369,72 @@
              (require-debug-target
                'scheme.debug-visit-source
                context)]
+           [debugger (cadr target)]
+           [stop
+             (debugger-session-source-stop debugger)]
+           [stop-location
+             (and stop
+                  (source-debug-stop-location stop))]
+           [stop-resource
+             (and stop-location
+                  (source-location-resource stop-location))]
+           [source-buffer
+             (and stop-resource
+                  (editor-buffer-for-resource
+                    editor
+                    stop-resource))]
            [frame
              (debugger-session-selected-frame
-               (cadr target))])
-      (unless
-        (and
-          frame
-          (string? (debugger-frame-source-path frame))
-          (integer? (debugger-frame-source-line frame))
-          (exact? (debugger-frame-source-line frame))
-          (not (negative? (debugger-frame-source-line frame))))
-        (editor-user-error
-          'scheme.debug-visit-source
-          "selected frame has no source location"))
-      (editor-set-status-message!
-        editor
-        (string-append
-          "Reading "
-          (debugger-frame-source-path frame)))
-      (list
-        (make-command-effect
-          'file.read
-          (make-open-request
-            (view-id (command-context-view context))
-            (debugger-frame-source-path frame)
-            (make-file-source-position
-              (debugger-frame-source-line frame)
-              (or
-                (debugger-frame-source-character frame)
-                0)))))))
+               debugger)])
+      (cond
+        [source-buffer
+         (editor-set-view-buffer!
+           editor
+           (view-id (command-context-view context))
+           (buffer-id source-buffer))
+         (view-set-caret!
+           (command-context-view context)
+           (min
+             (source-location-start stop-location)
+             (buffer-size source-buffer)))
+         '()]
+        [(and stop-location (string? stop-resource))
+         (editor-set-status-message!
+           editor
+           (string-append "Reading " stop-resource))
+         (list
+           (make-command-effect
+             'file.read
+             (make-open-request
+               (view-id (command-context-view context))
+               stop-resource
+               (source-location-start stop-location))))]
+        [(and
+           frame
+           (string? (debugger-frame-source-path frame))
+           (integer? (debugger-frame-source-line frame))
+           (exact? (debugger-frame-source-line frame))
+           (not (negative? (debugger-frame-source-line frame))))
+         (editor-set-status-message!
+           editor
+           (string-append
+             "Reading "
+             (debugger-frame-source-path frame)))
+         (list
+           (make-command-effect
+             'file.read
+             (make-open-request
+               (view-id (command-context-view context))
+               (debugger-frame-source-path frame)
+               (make-file-source-position
+                 (debugger-frame-source-line frame)
+                 (or
+                   (debugger-frame-source-character frame)
+                   0)))))]
+        [else
+         (editor-user-error
+           'scheme.debug-visit-source
+           "selected frame has no source location")])))
 
   (define (values->string values)
     (call-with-string-output-port
@@ -1429,6 +1467,74 @@
             'continue
             '()))))))
 
+  (define (debug-source-resume-command
+            context
+            who
+            action-id
+            command
+            resume-kind)
+    (if
+      (not
+        (debugger-action-context?
+          (command-context-argument context)))
+      (begin-debugger-action-by-id!
+        context
+        who
+        action-id)
+      (let* ([execution
+               (require-action-execution-context
+                 who
+                 context
+                 command)]
+             [editor
+               (debugger-action-context-editor execution)]
+             [session
+               (debugger-action-context-session execution)]
+             [debugger
+               (debugger-action-context-debugger execution)])
+        (unless
+          (and
+            session
+            (eq? (interaction-session-state session) 'suspended)
+            (debugger-session-source-stop debugger))
+          (editor-user-error
+            who
+            "The debugger is not stopped at a source expression"))
+        (close-session-debugger! editor session)
+        (interaction-session-resume! session)
+        (list
+          (make-command-effect
+            'scheme.resume-evaluation
+            (make-evaluation-resume-request
+              (interaction-session-id session)
+              (interaction-session-generation session)
+              resume-kind
+              '()))))))
+
+  (define (debug-step-command context)
+    (debug-source-resume-command
+      context
+      'scheme.debug-step
+      'step
+      'scheme.debug-step
+      'step))
+
+  (define (debug-next-command context)
+    (debug-source-resume-command
+      context
+      'scheme.debug-next
+      'next
+      'scheme.debug-next
+      'next))
+
+  (define (debug-finish-command context)
+    (debug-source-resume-command
+      context
+      'scheme.debug-finish
+      'finish
+      'scheme.debug-finish
+      'finish))
+
   (define (debug-use-value-command context)
     (if
       (not
@@ -1780,6 +1886,18 @@
           debug-continue-command
           "Continue a suspended Scheme evaluation.")
         (list
+          'scheme.debug-step
+          debug-step-command
+          "Step into the next instrumented Scheme source expression.")
+        (list
+          'scheme.debug-next
+          debug-next-command
+          "Step over to the next Scheme source expression in this frame.")
+        (list
+          'scheme.debug-finish
+          debug-finish-command
+          "Continue until the current Scheme source frame returns.")
+        (list
           'scheme.debug-use-value
           debug-use-value-command
           "Resume a failed continuation with replacement values.")
@@ -1964,6 +2082,9 @@
           (#\p . scheme.debug-previous-frame)
           (#\e . scheme.debug-eval-frame)
           (#\c . scheme.debug-continue)
+          (#\s . scheme.debug-step)
+          (#\o . scheme.debug-next)
+          (#\f . scheme.debug-finish)
           (#\i . scheme.debug-inspect-condition)
           (#\k . scheme.debug-inspect-continuation)
           (#\= . scheme.debug-use-value)

@@ -108,6 +108,7 @@
           make-managed-process-signal-request
           make-managed-process-resize-request
           editor-evaluator
+          chez-evaluator-source-debugger
           editor-debugger
           editor-set-debugger!
           chez-evaluator-symbols
@@ -591,6 +592,7 @@
           debugger-session-return-buffer-id
           debugger-session-return-caret
           debugger-session-condition
+          debugger-session-source-stop
           debugger-session-frames
           debugger-session-selected-index
           debugger-session-selected-frame
@@ -630,6 +632,30 @@
           debugger-variable-index
           debugger-variable-name
           debugger-variable-preview
+          make-source-location
+          source-location?
+          source-location-resource
+          source-location-start
+          source-location-end
+          source-debug-controller?
+          source-debug-controller-breakpoints
+          source-debug-controller-add-breakpoint!
+          source-debug-controller-remove-breakpoint!
+          source-debug-controller-toggle-breakpoint!
+          source-debug-controller-matching-breakpoint
+          source-breakpoint?
+          source-breakpoint-id
+          source-breakpoint-location
+          source-breakpoint-enabled?
+          source-breakpoint-set-enabled!
+          source-debug-stop?
+          source-debug-stop-kind
+          source-debug-stop-location
+          source-debug-stop-depth
+          source-debug-stop-continuation
+          source-debug-stop-breakpoint
+          source-debug-suspension-condition?
+          source-debug-suspension-stop
           make-debugger-action
           debugger-action?
           debugger-action-id
@@ -938,6 +964,8 @@
           (soda editor scheme-xref)
           (soda editor search)
           (soda editor setting)
+          (soda editor source-debug)
+          (soda editor source-debug-commands)
           (soda editor state)
           (soda editor structure)
           (soda editor structural-commands)
@@ -1155,5 +1183,6 @@
       (install-diagnostic-commands!
         editor scheme-workspace)
       (install-scheme-commands! editor)
+      (install-source-debug-commands! editor)
       (install-cpp-commands! editor)
       editor)))

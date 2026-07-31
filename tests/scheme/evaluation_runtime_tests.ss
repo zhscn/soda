@@ -1,5 +1,6 @@
 #!r6rs
 (import (rnrs)
+        (only (chezscheme) getenv)
         (soda document)
         (soda editor buffer)
         (soda editor command)
@@ -7,6 +8,7 @@
         (soda editor effect)
         (soda editor evaluation-runtime)
         (only (soda editor evaluator)
+              chez-evaluator-evaluate-file!
               evaluation-result-continuation)
         (soda editor interaction)
         (soda editor repl)
@@ -44,6 +46,18 @@
         (execute! (editor-update! editor message)))
       messages))
 
+  (define (run-until-evaluation-message!)
+    (let loop ()
+      (let ([messages
+              (evaluation-runtime-handle-event
+                adapter
+                (next-evaluation-event))])
+        (if (null? messages)
+            (loop)
+            (begin
+              (apply-messages! messages)
+              messages)))))
+
   (define finite-request
     (interaction-session-begin!
       session
@@ -76,6 +90,259 @@
            "finite evaluation did not advance through engine slices"
            finite-expirations
            (interaction-session-state session)))
+
+  (define source-debugger
+    (chez-evaluator-source-debugger
+      (interaction-session-evaluator session)))
+  (define loaded-source-path
+    (getenv "SODA_SOURCE_DEBUG_LOADED_FILE"))
+  (chez-evaluator-evaluate-file!
+    (interaction-session-evaluator session)
+    loaded-source-path
+    editor)
+  (define loaded-breakpoint
+    (source-debug-controller-add-breakpoint!
+      source-debugger
+      (make-source-location loaded-source-path 0 4096)))
+  (define loaded-call-request
+    (interaction-session-begin!
+      session
+      "(soda-debug-loaded 4)"))
+  (execute!
+    (list
+      (make-command-effect
+        'scheme.evaluate
+        loaded-call-request)))
+  (run-until-evaluation-message!)
+  (define loaded-stop
+    (source-debug-suspension-stop
+      (evaluation-result-condition
+        (interaction-session-last-result session))))
+  (unless
+    (and
+      (eq? (source-debug-stop-kind loaded-stop) 'breakpoint)
+      (string=?
+        (source-location-resource
+          (source-debug-stop-location loaded-stop))
+        loaded-source-path))
+    (error 'evaluation-runtime-tests
+           "file-loaded Scheme code was not source instrumented"))
+  (execute!
+    (editor-update!
+      editor
+      (make-command-message 'scheme.debug-continue #f)))
+  (run-until-evaluation-message!)
+  (unless
+    (equal?
+      (evaluation-result-values
+        (interaction-session-last-result session))
+      '(6))
+    (error 'evaluation-runtime-tests
+           "continued file-loaded evaluation did not complete"))
+  (source-debug-controller-remove-breakpoint!
+    source-debugger
+    (source-breakpoint-id loaded-breakpoint))
+
+  (define breakpoint-command-document
+    (make-document "(define command-breakpoint 1)\n" 902))
+  (define breakpoint-command-buffer
+    (make-buffer
+      902
+      breakpoint-command-document
+      "breakpoint-command.ss"
+      'scheme-mode))
+  (define breakpoint-command-editor
+    (make-editor breakpoint-command-buffer))
+  (define breakpoint-command-controller
+    (chez-evaluator-source-debugger
+      (editor-evaluator breakpoint-command-editor)))
+  (editor-execute-command!
+    breakpoint-command-editor
+    'scheme.debug-toggle-breakpoint)
+  (unless
+    (= 1
+       (length
+         (source-debug-controller-breakpoints
+           breakpoint-command-controller)))
+    (error 'evaluation-runtime-tests
+           "toggle breakpoint command did not create a line breakpoint"))
+  (editor-execute-command!
+    breakpoint-command-editor
+    'scheme.debug-toggle-breakpoint)
+  (unless
+    (null?
+      (source-debug-controller-breakpoints
+        breakpoint-command-controller))
+    (error 'evaluation-runtime-tests
+           "toggle breakpoint command did not remove its line breakpoint"))
+  (editor-execute-command!
+    breakpoint-command-editor
+    'scheme.debug-toggle-breakpoint)
+  (editor-execute-command!
+    breakpoint-command-editor
+    'scheme.debug-list-breakpoints)
+  (unless
+    (string=?
+      (buffer-resource
+        (view-buffer
+          (editor-active-view breakpoint-command-editor)))
+      "*scheme-breakpoints*")
+    (error 'evaluation-runtime-tests
+           "list breakpoints command did not open its projection Buffer"))
+  (editor-close! breakpoint-command-editor)
+
+  (define debug-definition
+    "(define (soda-debug-inner x)\n  (+ x 1))")
+  (define debug-definition-request
+    (interaction-session-begin!
+      session
+      debug-definition
+      (make-evaluation-origin
+        (buffer-id buffer)
+        "debug-definition.ss"
+        0
+        0
+        (string-length debug-definition))))
+  (execute!
+    (list
+      (make-command-effect
+        'scheme.evaluate
+        debug-definition-request)))
+  (run-until-evaluation-message!)
+
+  (define debug-call-source
+    "(let ([x 1])\n  (soda-debug-inner x)\n  (* x 3))")
+  (define call-breakpoint
+    (source-debug-controller-add-breakpoint!
+      source-debugger
+      (make-source-location "debug-call.ss" 13 36)))
+
+  (define (begin-debug-call!)
+    (let ([request
+            (interaction-session-begin!
+              session
+              debug-call-source
+              (make-evaluation-origin
+                (buffer-id buffer)
+                "debug-call.ss"
+                0
+                0
+                (string-length debug-call-source)))])
+      (execute!
+        (list
+          (make-command-effect 'scheme.evaluate request)))
+      (run-until-evaluation-message!)))
+
+  (begin-debug-call!)
+  (define breakpoint-result
+    (interaction-session-last-result session))
+  (define breakpoint-stop
+    (and
+      (source-debug-suspension-condition?
+        (evaluation-result-condition breakpoint-result))
+      (source-debug-suspension-stop
+        (evaluation-result-condition breakpoint-result))))
+  (unless
+    (and
+      breakpoint-stop
+      (eq? (source-debug-stop-kind breakpoint-stop) 'breakpoint)
+      (eq?
+        (source-debug-stop-breakpoint breakpoint-stop)
+        call-breakpoint)
+      (equal?
+        (map
+          debugger-action-id
+          (debugger-session-actions
+            (interaction-session-debugger session)))
+        '(continue step next finish retry edit-and-retry abort)))
+    (error 'evaluation-runtime-tests
+           "source breakpoint did not suspend with stepping actions"))
+
+  (execute!
+    (editor-update!
+      editor
+      (make-command-message 'scheme.debug-step #f)))
+  (run-until-evaluation-message!)
+  (define step-stop
+    (source-debug-suspension-stop
+      (evaluation-result-condition
+        (interaction-session-last-result session))))
+  (unless
+    (and
+      (eq? (source-debug-stop-kind step-stop) 'step)
+      (string=?
+        (source-location-resource
+          (source-debug-stop-location step-stop))
+        "debug-definition.ss"))
+    (error 'evaluation-runtime-tests
+           "source step did not enter the called procedure"))
+
+  (execute!
+    (editor-update!
+      editor
+      (make-command-message 'scheme.debug-finish #f)))
+  (run-until-evaluation-message!)
+  (define finish-stop
+    (source-debug-suspension-stop
+      (evaluation-result-condition
+        (interaction-session-last-result session))))
+  (unless
+    (and
+      (eq? (source-debug-stop-kind finish-stop) 'finish)
+      (string=?
+        (source-location-resource
+          (source-debug-stop-location finish-stop))
+        "debug-call.ss")
+      (= (source-location-start
+           (source-debug-stop-location finish-stop))
+         38))
+    (error 'evaluation-runtime-tests
+           "source finish did not return to the caller"))
+  (execute!
+    (editor-update!
+      editor
+      (make-command-message 'scheme.debug-continue #f)))
+  (run-until-evaluation-message!)
+  (unless
+    (and
+      (eq? (interaction-session-state session) 'ready)
+      (equal?
+        (evaluation-result-values
+          (interaction-session-last-result session))
+        '(3)))
+    (error 'evaluation-runtime-tests
+           "continued source-debug evaluation did not complete"))
+
+  (begin-debug-call!)
+  (execute!
+    (editor-update!
+      editor
+      (make-command-message 'scheme.debug-next #f)))
+  (run-until-evaluation-message!)
+  (define next-stop
+    (source-debug-suspension-stop
+      (evaluation-result-condition
+        (interaction-session-last-result session))))
+  (unless
+    (and
+      (eq? (source-debug-stop-kind next-stop) 'next)
+      (string=?
+        (source-location-resource
+          (source-debug-stop-location next-stop))
+        "debug-call.ss")
+      (= (source-location-start
+           (source-debug-stop-location next-stop))
+         38))
+    (error 'evaluation-runtime-tests
+           "source next did not step over the called procedure"))
+  (execute!
+    (editor-update!
+      editor
+      (make-command-message 'scheme.debug-continue #f)))
+  (run-until-evaluation-message!)
+  (source-debug-controller-remove-breakpoint!
+    source-debugger
+    (source-breakpoint-id call-breakpoint))
 
   (define infinite-request
     (interaction-session-begin!

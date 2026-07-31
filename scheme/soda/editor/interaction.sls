@@ -270,10 +270,14 @@
         "session id and generation must be non-negative exact integers"
         session-id
         generation))
-    (unless (memq kind '(continue use-values apply-continuation))
+    (unless
+      (memq
+        kind
+        '(continue step next finish
+           use-values apply-continuation))
       (assertion-violation
         'make-evaluation-resume-request
-        "resume kind must be continue, use-values, or apply-continuation"
+        "resume kind must be continue, step, next, finish, use-values, or apply-continuation"
         kind))
     (unless (list? values)
       (assertion-violation
