@@ -24,6 +24,7 @@
 | 14 | [14-command-extensibility.md](14-command-extensibility.md) | interactive command、hook、advice 与 minor mode |
 | 15 | [15-configuration.md](15-configuration.md) | setting、配置快照与跨 catalog 原子事务 |
 | 16 | [16-tui-applications.md](16-tui-applications.md) | application Buffer、声明式 TUI、消息循环与完整输入协议 |
+| 17 | [17-packaging.md](17-packaging.md) | 进程内编译流水线、trailer 容器、纯 Chez 与 soda runtime 打包 |
 
 依赖关系：
 

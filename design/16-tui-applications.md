@@ -852,6 +852,22 @@ close procedure 发生 condition 时由 Editor debugger 保存 condition，资�
 这些边界使 application 与文本 Buffer 共享一个 Workbench，而不会形成第二套终端
 runtime、第二个事件循环或递归 REPL。
 
+## Host 模式
+
+同一个 TuiSession 支持两种宿主，application 代码不感知差异：
+
+- **embedded host**：现状。application Buffer 显示在编辑器 Window leaf 中，
+  与文本 Buffer、minibuffer 和其他 application 共存；开发期配合 REPL、
+  `scheme.eval-buffer` 与 debugger 在运行时演进应用。
+- **sole host**：打包产物（[17-packaging.md](17-packaging.md)）的启动模式。
+  terminal session 建立后挂载单一 application window，占据整个终端，无
+  modeline、minibuffer 等编辑器 chrome；minibuffer 类交互由应用自身的
+  prompt child 组件承担。退出语义由应用声明：默认 `C-g` 仍走 editor
+  override 的逃生路径并终止进程，应用可通过 `confirm-on-exit?` 接管。
+
+两种模式共享 lifecycle、消息循环、渲染管线和输入分发；sole host 只是把
+Window 树退化为单一 leaf 并跳过编辑器 chrome 组件。
+
 ## 实现分层
 
 框架按以下机制层组织：
