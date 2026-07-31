@@ -254,6 +254,7 @@
       (mutable next-completion-id
                editor-next-completion-id
                editor-next-completion-id-set!)
+      (immutable completion-table editor-completion-table)
       (immutable prompt-histories editor-prompt-histories)
       (immutable interaction-table editor-interaction-table)
       (mutable interaction-ids
@@ -1484,6 +1485,33 @@
       (editor-active-prompt-completion value)
       (view-completion (editor-active-view value))))
 
+  (define (register-completion! value completion)
+    (let ([id (completion-session-id completion)])
+      (when (hashtable-ref (editor-completion-table value) id #f)
+        (assertion-violation
+          'register-completion!
+          "completion session id is already registered"
+          id))
+      (hashtable-set!
+        (editor-completion-table value)
+        id
+        completion))
+    completion)
+
+  (define (unregister-completion! value completion)
+    (let* ([id (completion-session-id completion)]
+           [registered
+             (hashtable-ref
+               (editor-completion-table value)
+               id
+               #f)])
+      (when (eq? registered completion)
+        (hashtable-delete! (editor-completion-table value) id)))
+    completion)
+
+  (define (editor-completion-ref value id)
+    (hashtable-ref (editor-completion-table value) id #f))
+
   (define (editor-root-viewport-columns value)
     (require-open-editor
       'editor-root-viewport-columns
@@ -1516,6 +1544,7 @@
   (define (cancel-view-completion! value view)
     (let ([completion (view-completion view)])
       (when completion
+        (unregister-completion! value completion)
         (queue-completion-cancellation! value completion)
         (choice-source-cancel!
           (completion-session-source completion)
@@ -1734,6 +1763,7 @@
                     source
                     provider-names)])
            (editor-next-completion-id-set! value (+ id 1))
+           (register-completion! value completion)
            (view-completion-set! view completion)
            (view-push-input-state!
              view
@@ -2041,8 +2071,13 @@
     (let ([target (completion-session-target completion)])
       (cond
         [(document-completion-target? target)
-         (let ([view (editor-active-view value)])
+         (let ([view
+                 (hashtable-ref
+                   (editor-view-table value)
+                   (document-completion-target-view-id target)
+                   #f)])
            (and
+             view
              (= (view-id view)
                 (document-completion-target-view-id target))
              (= (buffer-id (view-buffer view))
@@ -2058,7 +2093,11 @@
              (= (buffer-revision (view-buffer view))
                 (document-completion-target-revision target))))]
         [(prompt-completion-target? target)
-         (let ([prompt (editor-active-prompt value)])
+         (let ([prompt
+                 (hashtable-ref
+                   (editor-prompt-table value)
+                   (prompt-completion-target-prompt-id target)
+                   #f)])
            (and
              prompt
              (= (prompt-session-id prompt)
@@ -2079,12 +2118,13 @@
         'editor-apply-completion-response!
         "expected a completion response message"
         message))
-    (let* ([completion (editor-active-completion value)]
+    (let* ([completion
+             (editor-completion-ref
+               value
+               (completion-response-message-session-id message))]
            [accepted?
              (and
                completion
-               (= (completion-response-message-session-id message)
-                  (completion-session-id completion))
                (= (completion-response-message-generation message)
                   (completion-session-generation completion))
                (completion-response-target-matches?
@@ -2112,9 +2152,14 @@
             (completion-session-target completion))
           (null? (completion-session-items completion))
           (not (completion-session-pending? completion)))
-        (cancel-view-completion!
-          value
-          (editor-active-view value))
+        (let* ([target (completion-session-target completion)]
+               [view
+                 (hashtable-ref
+                   (editor-view-table value)
+                   (document-completion-target-view-id target)
+                   #f)])
+          (when view
+            (cancel-view-completion! value view)))
         (editor-set-status-message! value "No completions"))
       accepted?))
 
@@ -2318,6 +2363,7 @@
         (cons id (editor-prompt-ids value)))
       (editor-next-prompt-id-set! value (+ id 1))
       (when completion
+        (register-completion! value completion)
         (editor-next-completion-id-set!
           value
           (+ completion-id 1)))
@@ -2383,6 +2429,9 @@
                (prompt-request-data
                  (prompt-session-request session)))])
       (when (prompt-session-completion session)
+        (unregister-completion!
+          value
+          (prompt-session-completion session))
         (queue-completion-cancellation!
           value
           (prompt-session-completion session))
@@ -3870,6 +3919,7 @@
            [views (make-eqv-hashtable)]
            [interactions (make-eqv-hashtable)]
            [prompts (make-eqv-hashtable)]
+           [completions (make-eqv-hashtable)]
            [prompt-histories (make-eq-hashtable)]
            [keymaps (make-keymap-catalog)]
            [view
@@ -3914,6 +3964,7 @@
                '()
                1
                1
+               completions
                prompt-histories
                interactions
                '()
@@ -4025,6 +4076,7 @@
         (editor-prompts value))
       (editor-prompt-ids-set! value '())
       (hashtable-clear! (editor-prompt-table value))
+      (hashtable-clear! (editor-completion-table value))
       (when (editor-active-command-invocation value)
         (command-invocation-set-state!
           (editor-active-command-invocation value)

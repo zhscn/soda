@@ -4349,10 +4349,34 @@
              (string=? (prompt-result-value captured-prompt-result) "yes"))
   (error 'editor-tests "valid must-match input was not accepted"))
 
+(editor-register-completion-provider!
+  prompt-editor
+  (make-completion-provider
+    'nested-routing-provider
+    (lambda (request) '())
+    (lambda (request) #f)))
+(define nested-routing-source
+  (make-choice-source
+    'nested-routing
+    '((providers . (nested-routing-provider)))
+    (lambda (input point) (cons 0 point))
+    (lambda (query) '())
+    (lambda (value) #f)
+    (lambda (generation) #f)))
 (define outer-prompt
   (editor-open-prompt!
     prompt-editor
-    (make-prompt-request "Outer: " 'test.capture-prompt)))
+    (make-completing-prompt-request
+      "Outer: "
+      ""
+      #f
+      #f
+      'free
+      nested-routing-source
+      'test.capture-prompt
+      #f)))
+(define outer-completion
+  (prompt-session-completion outer-prompt))
 (define inner-prompt
   (editor-open-prompt!
     prompt-editor
@@ -4363,6 +4387,36 @@
              (eq? (view-buffer (editor-base-view prompt-editor))
                   prompt-buffer))
   (error 'editor-tests "nested prompts did not retain their origin stack"))
+(let ([target (completion-session-target outer-completion)])
+  (unless
+    (editor-apply-completion-response!
+      prompt-editor
+      (make-completion-response-message
+        (completion-session-id outer-completion)
+        (completion-session-generation outer-completion)
+        'nested-routing-provider
+        (prompt-completion-target-prompt-id target)
+        #f
+        (list
+          (make-completion-item
+            'outer-result
+            'nested-routing-provider
+            "outer"
+            "outer"
+            "outer"
+            #f
+            #f
+            'outer-result))
+        #t))
+    (error 'editor-tests
+           "inactive prompt completion response was not routed by session id")))
+(unless
+  (exists
+    (lambda (item)
+      (equal? (completion-item-id item) 'outer-result))
+    (completion-session-items outer-completion))
+  (error 'editor-tests
+         "inactive prompt completion did not receive its response"))
 (editor-abort-prompt! prompt-editor)
 (unless (and (eq? (editor-active-prompt prompt-editor) outer-prompt)
              (= (view-id (editor-active-view prompt-editor))
