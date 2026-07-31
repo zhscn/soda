@@ -1,23 +1,121 @@
-# Workbench、Project 与 Window
+# Resource Context、Project、Workbench 与 Window
 
 ## 实现状态
 
 | 能力 | 状态 |
 |---|---|
 | Window tree、View 生命周期与基础 display 操作 | 已实现 |
-| Scheme 显式 project session 与 interface artifact | 已实现 |
-| 通用 Project identity、resource enumerator 与 settings layer | 未实现 |
-| Workbench scope、slot、provenance 与持久化 | 未实现 |
+| 显式 process working directory 与异步请求 origin | 部分实现 |
+| 通用 `ResourceContext` 与 origin 传播 | 未实现 |
+| Project identity、发现缓存、known registry、resource enumerator 与 settings layer | 未实现 |
+| Workbench scope、slot、visitor、provenance 与持久化 | 未实现 |
 | intent 驱动的统一 display placement policy | 部分实现 |
 
-## 三个正交概念
+## 正交概念
 
-- **Buffer** 是全局文本对象，可同时显示在多个 view。
-- **Project** 是资源发现、配置和构建入口的边界。
-- **Window layout** 是屏幕上的 view 排布，不属于某个 project。
+- **Buffer** 是全局文本对象，可同时显示在多个 View。
+- **ResourceContext** 是一次资源操作解析相对路径和工作目录的显式上下文。
+- **Project** 是资源发现、配置、任务和构建入口的边界。
+- **LanguageSession** 是某个语言服务实例及其语义环境。
+- **Window layout** 是屏幕上的 View 排布，不属于某个 Project。
+- **Workbench** 组合 Project scope、layout 和一次工作会话的 recency。
 
-Workbench 把 project scope、window layout 和一次工作会话的 recency 组合起来，
-但不改变三者各自的身份：
+Project、LanguageSession 和 Workbench 可以相互引用，但不拥有彼此。编辑器没有全局
+`current-project`，进程启动目录也不定义当前 Project。
+
+```text
+launch directory ──> initial ResourceContext fallback
+
+Buffer <──────────── shared text identity
+  ▲
+View ──> ResourceContext? ──> Project hint?
+  │             │
+  │             └──────────> explicit process/file request cwd
+  └──> LanguageAttachment ──> LanguageSession
+
+Workbench = Project scope + WindowLayout + MRU + placement slots
+```
+
+## ResourceContext
+
+依赖目录的操作接收显式上下文：
+
+```text
+ResourceContext {
+  base_resource,
+  origin_view_id?,
+  project_hint?,
+  language_context?
+}
+```
+
+`base_resource` 是相对资源解析和默认 working directory 的基础。context 按以下来源
+建立：
+
+1. 调用方显式提供的 resource 或 directory；
+2. 发起 View 当前 Buffer 的 resource；
+3. generated/tool Buffer 保存的创建 provenance；
+4. Workbench scope 中唯一且适用的 Project；
+5. editor 启动目录。
+
+存在多个可用 Project 时，命令通过 completing-read 选择，不按最近一次命令或全局
+cwd 猜测。异步 file、directory、process 和 language 请求在创建时冻结 context；
+完成时不重新读取 active View，因此切换 Buffer、Window 或 Workbench 不会改变请求
+落点和 working directory。
+
+启动目录只用于第一个无资源 Buffer 的初始上下文和缺少其他 provenance 时的最终
+fallback。Editor 不调用进程级 `chdir` 来切换 Project。`find-file` 从 origin context
+选择初始目录；每个 process request 显式携带 working directory。
+
+## Project
+
+Project 是轻量、可缓存的 tooling 描述值：
+
+```text
+Project {
+  id,
+  roots,
+  kind,
+  discovery_provenance,
+  resource_enumerator,
+  settings_layer,
+  task_definitions
+}
+```
+
+发现器从给定 resource 向上查询 VCS marker、build manifest 或显式 marker。发现策略
+是有序 registry，第一个有效结果建立 Project；成功和确定性的失败都按起始目录缓存。
+远程或暂时不可访问的 resource 不缓存失败。显式 known-project registry 独立保存用户
+选择过的 root，使 project switch 不依赖当前 Buffer 或启动目录。
+
+project switch 是“选择 Project 并在其 ResourceContext 中执行 action”，不改变全局
+cwd，不替换 WindowLayout，也不把所有后续 Buffer 归入该 Project。Project commands
+可以从 active resource 发现 Project，也可以直接从 known registry 选择。
+
+Project 拥有：
+
+- root/resource identity、枚举与忽略规则；
+- Project settings layer；
+- build、test、search 和其他 task definition；
+- 启动 LanguageSession 时可使用的 workspace folder 和配置。
+
+Project 不拥有 Buffer、View、Window、Workbench、LanguageSession、Scheme semantic
+index 或 process。一个 Buffer 可以通过路径发现 home Project，也可以只是 visitor；
+同一 Project 可以出现在多个 Workbench scope 中。
+
+打开 file-backed Buffer 不创建 Project，不递归枚举目录，也不启动 language index。
+显式 project command、adopt 或 language bootstrap 才解析 Project。Project 发现只产生
+描述值，LanguageSession 是否启动由 language policy 决定。
+
+resource enumerator 由 Project 操作按需启动，通过 libuv directory scan 逐层展开
+目录，并通过异步 file read 产生调用方需要的 resource snapshot。隐藏目录、VCS
+metadata、构建输出和依赖目录由枚举 policy 排除。enumerator 不为后台索引创建
+Buffer；用户访问资源时才由普通文件打开流程建立 Buffer identity。
+
+目录 watch 只承担失效通知。合并后的异步重扫定义 resource 集合，接入新增子目录并
+撤销已删除目录子树的 watch。关闭请求该 enumerator 的 operation 会释放全部 watch。
+
+## Workbench
 
 ```text
 Workbench {
@@ -31,126 +129,102 @@ Workbench {
 }
 ```
 
-编辑器始终有一个 active workbench。只有一个 workbench 时，工作台机制不要求额外
-操作或 UI。
+编辑器始终有一个 active Workbench。只有一个 Workbench 时不要求额外操作或 UI。
+Workbench 不提供自己的 cwd，也不把 scope 合成为单一 Project。
 
-## Project
-
-Project 由 resource root 和 project kind 标识。发现器可以使用 VCS root、
-build manifest 或用户配置；一个 buffer 可以有 home project，也可以只是 visitor。
-
-Project 拥有：
-
-- resource 枚举与忽略规则；
-- project settings layer；
-- build 与 language session 可使用的 root 和配置。
-
-Project 不拥有 Buffer、Window 或 layout。同一 project 可以出现在多个 workbench
-scope 中；是否保持 scope 互斥由 Scheme policy 决定。
-
-打开 file-backed Buffer 不创建 Project，也不启动 resource discovery 或 language
-index。显式 load/adopt project 根据 manifest、VCS root 或用户给定 root 建立
-Project；visitor Buffer 可以始终不属于任何 Project。
-
-Language session 是独立于 Project 的显式运行对象。Scheme session 从 project
-manifest 加载构建生成的 interface index，并按 artifact owner 标识其生命周期；
-Project 的存在、root 识别和 resource 枚举本身不会创建 language session。一个
-language session 可以使用 Project 提供的 root 与设置，也可以只服务于 visitor
-Buffer。关闭 session 会撤销其 interface surface 和运行时资源。
-没有已加载 artifact 的 Scheme workspace 保持 dormant；当前 Buffer 的语义能力由
-文档 snapshot 提供，不注册跨文档 catalog。Scheme load/compile workflow 安装
-interface artifact 时激活 session，卸载最后一个 artifact 时释放 workspace cache。
-
-resource enumerator 由 Project 操作按需启动，通过 libuv directory scan 逐层展开
-目录，并通过异步 file read 产生请求方需要的 resource snapshot。隐藏目录、VCS
-metadata、构建输出和依赖目录由枚举 policy 排除。
-enumerator 只发布 resource 与内容，不为后台索引创建 Buffer；用户访问资源时才由
-普通文件打开流程建立 Buffer identity。每个已发现目录持有一个 libuv path watch；
-变更通知使对应目录失效并触发合并后的异步重扫。重扫更新 resource 集合、递归接入
-新增子目录，并撤销已删除目录子树的 watch。文件通知只承担失效职责，目录扫描结果
-定义该 enumerator session 当前的 resource 集合。关闭请求该 enumerator 的 Project
-operation 会释放全部 watch。
-
-## Workbench 成员语义
-
-某 workbench 可见的 buffer 集合是：
+某 Workbench 可见的 Buffer 集合是：
 
 ```text
 buffers(project in scope) union buffers in workbench MRU
 ```
 
-scope 是声明式成员；MRU 是显示足迹。显示 scope 外的 buffer 会把它加入 MRU，
-但不会修改 project 归属。显式 adopt project 才会扩大 scope。
+scope 是声明式搜索范围；MRU 是显示足迹。显示 scope 外的 Buffer 会把它作为 visitor
+加入 MRU，但不会修改 Project、LanguageSession 或配置归属。显式 adopt Project 才会
+扩大 scope。
 
-切换 workbench 会整体切换 layout、active window 和 MRU。非 active workbench 的
-View 保留 caret、selection、viewport 与 input state。关闭 workbench 释放其
-Window/View，不关闭全局 Buffer。
+切换 Workbench 会整体切换 layout、active Window 和 MRU。非 active Workbench 的
+View 保留 caret、selection、viewport、InputState 和 LanguageAttachment。关闭
+Workbench 释放其 Window/View，不关闭全局 Buffer、Project 或共享 LanguageSession。
 
 ## Display placement
 
-所有“把 buffer 显示出来”的操作经过同一个入口：
+所有“把 Buffer 显示出来”的操作经过同一个入口：
 
 ```text
-display(buffer, intent, origin, target?) -> Window
+display(buffer, intent, origin, target?, resource_context?) -> View
 ```
 
-命令在调用点声明 intent，placement policy 不根据 buffer 名称或窗口几何猜测：
+命令在调用点声明 intent，placement policy 不根据 Buffer 名称或窗口几何恢复意图：
 
 | intent | 语义 | 默认 slot |
 |---|---|---|
-| `edit` | 用户主动编辑资源 | active window |
+| `edit` | 用户主动编辑资源 | active Window |
 | `jump` | definition、reference、location list 落点 | jump |
 | `tools` | grep、build、terminal 等持久工具 | tools |
 | `doc` | help 与文档 | doc |
 | `pop` | 显式新窗格 | 新 slot |
-| `explicit` | 调用方指定 window | 指定 window |
+| `explicit` | 调用方指定 Window | 指定 Window |
 
-Window 可声明唯一 role，由此成为具名 slot；pinned window 不被普通 placement
-替换。policy 返回完整 plan，layout mechanism 校验 window 存活、role 唯一和
-split 结构不变量。
+Window 可声明唯一 role，由此成为具名 slot；pinned Window 不被普通 placement 替换。
+policy 返回完整 plan，layout mechanism 校验 Window 存活、role 唯一和 split 结构不变量。
 
-display request 携带 origin。异步请求在其他 workbench active 时完成，结果仍写入
-origin 所属 workbench，不隐式切换用户当前工作台。origin 已销毁时才使用 active
-workbench。
+display request 携带 origin View 和冻结的 ResourceContext。异步请求在其他 Workbench
+active 时完成，结果仍写入 origin 所属 Workbench，不隐式切换用户当前工作台。origin
+已销毁时才由显式 fallback policy 选择 active Workbench。
 
 ## 临时界面
 
-持久工具使用 Window slot。completion、hover、which-key、picker 和 minibuffer
-是 view 上的临时层：
+持久工具使用 Window slot。completion、hover、which-key、picker 和 minibuffer 是
+View 上的临时层：
 
 - caret-relative popup 锚定到文档位置，不改变正文 viewport；
 - minibuffer/picker 可占用保留的 TUI 行并参与 reflow；
-- 临时层关闭后不留在 WindowLayout 或 workbench MRU。
+- 临时层关闭后不留在 WindowLayout 或 Workbench MRU。
 
 这一区分让 layout 只保存可恢复的工作状态。
 
-## Language session provenance
+## LanguageSession bootstrap
 
-language session 的键至少包含 project/root、language、server/provider 配置。
-session 可跨 workbench 共享。Project membership 只提供可选 root 和配置，不自动
-创建 language session；`load-project`、build/compile workflow 或显式 language
-命令负责启动 session。关闭最后一个引用者会停止其后台任务。
+Project 可以为 LanguageSession 提供 workspace folders、server 配置和 toolchain 信息，
+但 Project identity 不是 session identity。一个 Project 可以启动多个 session；支持
+multi-root 的 session 也可以服务多个 Project。
 
-导航到不属于任何 home project 的资源时，display request 的 origin session
-成为该 buffer 的 guest provenance。后续 definition、completion 和 hover 可以
-沿 guest binding 继续使用来源 session。若 buffer 获得 home session，home
-优先；同一 resource 在不同 view/context 下可以有不同 guest provenance。
+```text
+LanguageSessionKey {
+  language,
+  server_or_provider,
+  workspace_folders,
+  initialization_options,
+  environment_fingerprint,
+  client_capabilities
+}
+```
+
+session 建立后，请求路由使用 [09-language-modes.md](09-language-modes.md) 定义的
+LanguageAttachment，而不是每次从目标文件路径重新发现 Project。Project 只参与
+bootstrap、配置和 task discovery。SchemeEnvironment 不从 Project root 推导，详见
+[11-scheme-semantics.md](11-scheme-semantics.md)。
 
 ## 持久化
 
-workbench session 使用稳定 resource 与结构值序列化：
+Workbench session 使用稳定 resource 与结构值序列化：
 
 - name、scope roots 与 MRU resources；
 - WindowLayout、role、pinned 与 active leaf；
-- 每个 View 的 resource、selection fallback 与 viewport；
+- 每个 View 的 resource、selection fallback、viewport 与可恢复 context hint；
 - 有界 jump walk 和 durable jump graph。
 
-运行时 id、native pointer、pending popup 和在途异步请求不进入持久格式。
+运行时 id、native pointer、LanguageSession、pending popup 和在途异步请求不进入持久
+格式。恢复时重新发现 Project，并按 language policy 建立所需 session。
 
 ## 设计依据
 
-Emacs `display-buffer` 说明显示需要 policy，但在显示时按 buffer 名与窗口几何恢复
-调用意图会产生不可预测的 fallback。Kakoune 的具名 tools/jump client 表明意图
-可以直接映射到位置。Emacs project.el 与 Helix workspace 则说明 project 适合
-保持为轻量 tooling root。Workbench 显式组合 scope 与 layout，同时保留 buffer
-全局共享，避免把 IDE 的单 project 窗口所有权强加给编辑会话。
+Emacs Buffer 的 `default-directory` 和 Projectile 的 root finder 表明 Project 应从
+当前资源发现，known-project registry 与启动 cwd 保持独立；project switch 只是以
+目标 root 执行 action。Soda 使用显式 ResourceContext 代替动态目录绑定，使异步请求
+不受 active Buffer 变化影响。
+
+Emacs `display-buffer` 说明显示需要 policy，但在显示时按 Buffer 名和窗口几何恢复
+调用意图会产生不可预测的 fallback。Kakoune 的具名 tools/jump client 表明意图可以
+直接映射到位置。Workbench 显式组合 scope 与 layout，同时保留 Buffer 全局共享，
+避免把 IDE 的单 Project 窗口所有权强加给编辑会话。

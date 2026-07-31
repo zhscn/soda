@@ -7,30 +7,34 @@
 | 文档 syntax view、scope/binding 与 diagnostics | 已实现 |
 | completion、signature/help、definition、references 与 rename | 已实现 |
 | 构建期 Soda API index 与 runtime catalog | 已实现 |
-| 显式 Scheme project session 与 interface artifact | 已实现 |
+| Scheme interface artifact、异步 build 与显式安装 | 已实现 |
+| 显式 SchemeEnvironment、Document attachment 与隔离的跨文档索引 | 部分实现 |
 | 任意用户宏的可执行展开与完整 phase 分析 | 未实现 |
 | 跨语言 server/session 接口 | 未实现 |
 
 ## 定位
 
-Scheme 语言服务由静态语义索引和运行时 session 两个来源组成：
+Scheme 语言服务由文档分析、显式 SchemeEnvironment 和运行时 evaluator 三个来源组成：
 
 ```text
 Document snapshot
       │
       ▼
-Scheme syntax view ──> binding analysis ──> semantic snapshot
+Scheme syntax view ──> binding analysis ──> document semantic snapshot
                                                 │
                                                 ├── completion provider
                                                 ├── definition provider
                                                 ├── reference provider
                                                 └── diagnostic publisher
 
-InteractionSession ──> Chez environment symbol view ──┘
+SchemeEnvironment ──> interface catalog + attached documents ──┘
+InteractionSession ──> Chez environment symbol view ───────────┘
 ```
 
-静态索引负责 lexical scope、library import/export、定义位置和源码引用。运行时
-symbol view 负责 REPL 中已经求值的定义和没有对应源码文件的值。两者通过
+文档分析负责 lexical scope、library import/export、定义位置和当前源码引用。
+SchemeEnvironment 负责显式加载的 interface catalog、跨文档 library resolution 和
+definition-to-uses 索引。运行时 symbol view 负责 REPL 中已经求值的定义和没有对应
+源码文件的值。三者通过
 [06-completion.md](06-completion.md) 的 provider 管线和
 [05-jump.md](05-jump.md) 的位置模型汇合，不共享可变 namespace，也不互相替代。
 
@@ -39,21 +43,58 @@ symbol view 负责 REPL 中已经求值的定义和没有对应源码文件的�
 completion 和 xref provider；Document 仍只拥有文本、revision、snapshot 和
 transaction。
 
-## 所有权
+## 所有权与环境边界
 
-Scheme semantic provider 是进程内 Scheme library，不建立平行的 VFS、Document
-或 LSP object graph：
+Scheme semantic provider 是进程内 Scheme library，不从目录 root 建立平行 VFS，
+也不把打开的全部 Scheme Buffer 视为一个隐式 Project：
 
-- Buffer language runtime 持有当前 Document revision 的 syntax 与 semantic
+- Buffer language runtime 持有当前 Document revision 的 syntax 与 document semantic
   snapshot；
-- Workbench 持有 library graph、跨文档 definition/use 索引和 dirty queue；
+- SchemeEnvironment 持有 dialect、interface catalog、显式 attachment、library graph、
+  跨文档 definition/use 索引和 dirty queue；
 - InteractionSession 的 evaluator 持有 Chez environment；
 - completion session、LocationList 和 jump graph 只借用 provider 产生的公共值；
+- Project 只为 build/task discovery 提供 ResourceContext，不拥有 SchemeEnvironment；
+- Workbench 只持有显示 scope、layout 和 navigation，不拥有 Scheme 索引；
 - LSP 是可选的外部 provider/adapter，不是内部语义索引的表示格式。
 
 binding rule、metadata 和查询 policy 都通过 Scheme registry 注册，可以在 editor
 内求值、替换并用普通 Buffer 检查。native 层只在 syntax provider 需要增量 parser
 或稳定性能机制时提供窄 ABI。
+
+SchemeEnvironment 是传统 Scheme/CL 开发流程中的语言环境，而不是 LSP workspace 的
+同义词：
+
+```text
+SchemeEnvironment {
+  id,
+  dialect,
+  interface_catalogs,
+  runtime_binding_source?,
+  attachments: BufferId -> revision,
+  library_index,
+  reference_index,
+  generation
+}
+```
+
+Scheme provider 把每个 SchemeEnvironment 暴露为进程内 LanguageSession；通用
+LanguageAttachment 使用 environment id 选择该 provider state。同一 Buffer 可以附加到
+多个 SchemeEnvironment，发起查询的 View 通过 `ViewLanguageContext` 选择其中一个。
+definition、reference 和其他导航结果携带该 attachment，使落点继续使用来源环境。
+attachment 与导航 provenance 的公共契约见
+[09-language-modes.md](09-language-modes.md)。
+
+打开文件只建立 document analysis，不自动加入其他文件的 environment。attachment
+由显式 environment 选择、REPL/load workflow、build artifact 安装或 Buffer setting
+建立。两个无关目录中的同名 library 只有在被附加到同一 environment 时才发生冲突；
+同时打开文件不会改变彼此的 completion、xref 或 diagnostics。
+
+scratch Buffer 关联 Editor 自身的 Chez/Soda environment。普通独立源码可以只使用
+默认 Chez/R6RS catalog，不需要 Project 或跨文档 environment。`load`、`compile-file`
+和 build workflow 可以把成功产生的 interface surface 安装进指定 environment；运行时
+求值产生的值仍由 evaluator catalog 提供，不把 transcript 或进程 namespace 复制进
+静态索引。
 
 ## Scheme syntax view
 
@@ -155,10 +196,10 @@ references、hover 和 rename 共用的身份。跨 revision 保存的 UI 状态
 library 和 primitive。`canonical` 表达 rename、prefix、re-export 和其他别名关系；
 跳转定义沿该关系到真实声明，补全仍使用当前位置可见的名字。
 
-Workspace 维护跨文档索引：
+SchemeEnvironment 为显式 attachment 维护跨文档索引：
 
 ```text
-SchemeWorkspaceIndex {
+SchemeEnvironmentIndex {
   libraries: LibraryName -> ExportSurface
   import_edges: DocumentId -> DocumentId[]
   reverse_import_edges: DocumentId -> DocumentId[]
@@ -168,6 +209,8 @@ SchemeWorkspaceIndex {
 ```
 
 references 查询直接读取 `uses` 倒排表，不在请求时扫描所有同名 syntax node。
+只有 attachment 和 interface catalog 进入该索引；查询不遍历 `editor-buffers` 来推断
+environment 成员。
 
 ## Binding rule
 
@@ -291,17 +334,17 @@ definition 与 references 查询沿原始 identity 工作。
 
 Soda application build 从全部内置 Scheme library 生成 API 与 library catalog，
 随 editor boot image 静态嵌入。运行时把该 catalog 转换为共享的 library lookup
-table；使用同一 session catalog 的 semantic snapshot 复用对应 lookup table。
+table；使用同一 environment catalog 的 semantic snapshot 复用对应 lookup table。
 单个文档分析只处理文档 token、scope、definition、use 和 diagnostics，不重复构造
 内置 API 索引。打开的 Buffer 始终由当前 Document revision 建立 semantic snapshot，
 因此编辑 Soda library 时当前文件的 definition、use 与诊断来自实时文本。
 
-打开文件不建立 Scheme project session，也不遍历当前目录。跨文件索引由显式
-language workspace session 持有，session 安装编译过程产生的 interface artifact。
-Project 只提供资源、工作目录和构建入口语义，不拥有 Scheme 索引生命周期。插件和
-其他编译单元的 interface 进入 workspace catalog，其中与内置 library 同名的
-surface 以显式 session 安装的版本为准。interface revision 变化时建立新的 catalog
-identity，并使下一次分析使用新的共享 lookup table。
+打开文件不建立 SchemeEnvironment，也不遍历当前目录。跨文件索引由显式 environment
+持有，environment 安装编译过程产生的 interface artifact。Project 只提供资源、工作
+目录和构建入口语义，不拥有 Scheme 索引生命周期。插件和其他编译单元的 interface
+进入 environment catalog，其中与内置 library 同名的 surface 以显式安装的版本为准。
+interface revision 变化时建立新的 catalog identity，并使下一次分析使用新的共享
+lookup table。
 
 ## Diagnostics
 
@@ -331,11 +374,11 @@ definition、use resolution、completion 和 syntax face 继续消费完整 snap
 闭合后的下一 revision 没有 provisional range，publisher 立即恢复其中仍然成立的
 诊断。重复 binding 和意外 closing delimiter 属于稳定错误，不受该 policy 影响。
 
-显式的 workspace diagnostics 查询同步 editor Buffer 与 session 安装的编译诊断，
-并产生按 resource、range 排序的 `SchemeWorkspaceDiagnostic`：
+显式的 workspace diagnostics 查询同步当前 environment attachment 与安装的编译诊断，
+并产生按 resource、range 排序的 `SchemeEnvironmentDiagnostic`：
 
 ```text
-SchemeWorkspaceDiagnostic {
+SchemeEnvironmentDiagnostic {
   buffer_id?,
   resource?,
   revision,
@@ -344,7 +387,8 @@ SchemeWorkspaceDiagnostic {
 }
 ```
 
-同一 resource 已经打开时，Buffer snapshot 取代 artifact 中该 resource 的诊断。
+同一 resource 已附加到当前 environment 时，Buffer snapshot 取代 artifact 中该
+resource 的诊断。
 `diagnostics.list-workspace` 将查询结果发布为普通 LocationList，使
 `xref.next-location` 和 `xref.previous-location` 可以复用统一的导航协议。
 Buffer-backed item 直接切换 view；后台 resource item 通过异步 `file.read`
@@ -359,7 +403,7 @@ Buffer-backed item 直接切换 view；后台 resource item 通过异步 `file.r
 - 未被 resolved use 引用的 parameter；
 - 重复的 import library；
 - 没有任何可见 binding 被引用的 Soda library import；
-- 具有静态 export surface 的 Soda 或 Project library，其 `only`、`except`、
+- 具有静态 export surface 的 Soda 或 environment library，其 `only`、`except`、
   `rename` selector 引用了 import set 未导出的 identifier；
 - 嵌入 Soda library catalog 中不存在的 `(soda ...)` import；
 - 静态 import environment 完整时，expression position 中没有 lexical、library
@@ -392,22 +436,22 @@ snapshot 的 import surface 就被视为不完整，不发布推测性的 undefi
 
 call arity 诊断复用 callee 的 `SchemeUse.resolution` 和
 `SchemeDefinition.signature_formals`。本地 procedure definition、`lambda` 或
-`case-lambda` initializer、Project interface 与嵌入 Soda/Chez API 使用同一规则。
+`case-lambda` initializer、environment interface 与嵌入 Soda/Chez API 使用同一规则。
 proper formals 要求精确参数数量，dotted formals 要求满足固定前缀的最小数量，
 单 identifier formals 接受任意数量。任一候选是 syntax、缺少 formals metadata，
 或调用 list 尚未闭合时不发布诊断；quoted/syntax datum 也不进入调用分析。payload
 保存 callee name、实际参数数量和全部候选 formals，供 describe 与 quick-fix
 呈现层复用。
 
-publisher 在 buffer 创建、major mode 变化和 revert 后同步诊断，并在顶层交互命令
-结束后检查所有 Scheme buffer。诊断、completion 和 xref 从 editor 的同一个
-`SchemeWorkspaceIndex` 取得 snapshot。freshness 同时比较 Document revision 与
-workspace library catalog generation；session export surface 变化时，即使 consumer
-Buffer 没有修改，也会重新分析其 import 和诊断。新结果用更高 annotation
+publisher 在 Buffer 创建、major mode 变化和 revert 后同步文档诊断，并在顶层交互
+命令结束后检查发生变化的 Scheme Buffer。诊断、completion 和 xref 从 Buffer 的
+document snapshot 与 environment attachment 取得相同语义结果。freshness 同时比较
+Document revision 与 environment catalog generation；interface surface 变化时，即使
+consumer Buffer 没有修改，也会重新分析其 import 和诊断。新结果用更高 annotation
 generation 原子替换同 namespace 的 annotation set。空诊断集仍记录已分析
 revision 和 catalog generation，使普通光标移动只执行 freshness 检查。post-command
 刷新只同步发生变化的 Buffer，并复用最近一次已提交的 library catalog；显式
-workspace 查询负责合并待处理的 session catalog，避免输入路径触发跨文件重建。
+environment 查询负责合并待处理的 interface catalog，避免输入路径触发跨文件重建。
 
 ## Completion
 
@@ -455,12 +499,12 @@ accessor 和 mutator，普通 expression role 降低不能作为值使用的 syn
 
 ## Symbol inspection 与调用签名
 
-symbol inspection 与调用签名通过 editor 的 `SchemeWorkspaceIndex` 读取和
-completion、xref 相同 revision 与 library catalog generation 的 semantic
+symbol inspection 与调用签名通过 Buffer 的 environment attachment 读取和
+completion、xref 相同 revision 与 catalog generation 的 semantic
 snapshot。光标落在 definition 或 resolved use 上时，查询返回 canonical
 `SchemeDefinition`，呈现层可读取 kind、signature、library detail、documentation
 和 source location。`help.describe-symbol` 通过 `C-h o` 把这些字段组合成简短描述；
-project library 的 definition 与嵌入 API 使用相同呈现路径。
+environment library 的 definition 与嵌入 API 使用相同呈现路径。
 
 调用现场使用独立的数据模型：
 
@@ -485,23 +529,23 @@ import modifier 和嵌入 Soda API 具有相同的查询行为。
 
 document symbol 查询投影当前 Buffer snapshot 的 root definitions，不包含 import
 surface、primitive、其他 Buffer 或局部 lexical binding。每个结果复用
-`SchemeWorkspaceSymbol` 的 DefinitionId、kind、buffer、revision 与 declaration
+`SchemeEnvironmentSymbol` 的 DefinitionId、kind、buffer、revision 与 declaration
 range，并按源码位置排序。`xref.find-document-symbol`（`M-g i`）使用通用
 completing-read 与 fzf matching 打开当前文档候选，接受后通过普通 jump graph
-移动到声明。`xref.find-symbol`（`M-g I`）独立合并显式 language session、打开的
-Buffer 和带源码的嵌入 API。
+移动到声明。`xref.find-symbol`（`M-g I`）合并当前 SchemeEnvironment attachment、
+interface artifact 和带源码的嵌入 API。
 
 document highlight 查询解析光标下的 declaration 或 use，并在当前 semantic
 snapshot 中返回同一 DefinitionId 的 declaration 与 reference range。lexical
 shadowing 因此产生互不干扰的高亮集合。外部 library 和 primitive binding 只返回
 当前文档中的 reference，不构造本地 declaration；syntax binding 不参与该查询。
 
-editor 在每个顶层命令结束后按 Buffer revision、caret 和 workspace catalog
+editor 在每个顶层命令结束后按 Buffer revision、caret 和 environment catalog
 generation 刷新当前 Scheme Buffer 的结果。结果发布到独立的
 `scheme-document-highlight` annotation namespace，使用 `symbol-highlight` face 和
 search decoration layer。selection layer 保持更高优先级，diagnostic 与 semantic
 annotation 的生命周期不受光标高亮替换影响。光标刷新只同步当前 Buffer，并使用
-最近一次已提交的 session catalog。
+最近一次已提交的 environment catalog。
 
 ## 自举静态 Provider
 
@@ -574,21 +618,23 @@ export surface。provider catalog、completion session 和 TUI 不依赖 scanner
 内部 token 表示。
 
 自举 xref provider 把 definition 和 resolved uses 转成通用 LocationList。当前
-Document 的 declaration 与 references 可立即导航。editor 持有一个
-`SchemeWorkspaceIndex` 保存 editor 已知 Scheme Buffer 和显式 session 安装的
-interface artifact。查询前同步 Buffer 集合；document id、resource 或 revision
-改变时替换对应 snapshot，已关闭或离开 Scheme mode 的 Buffer 从实时集合移除。
-未变化的 snapshot 直接复用。Workspace 从当前 Buffer 的 resolved uses 和 artifact
-中的编译引用建立 `DefinitionId -> WorkspaceReference[]` 倒排表；普通 references
-查询只读取目标 identity 的 buckets。
+Document 的 declaration 与 references 可立即导航。跨文档查询读取当前 Buffer 所附加
+的 `SchemeEnvironmentIndex`；没有 environment attachment 时只返回当前 Document、
+默认 catalog 和带源码的内置 API 结果。
 
-Workspace 从带 resource 的 Scheme Buffer 提取 R6RS library name、export surface
-与源码 definition，并与 artifact library catalog 和嵌入 API catalog 合并。catalog
-分别保存 library name 集合和 export symbol 集合，没有 export 的 library 仍具有
-独立 identity。Buffer revision 或 artifact revision 改变时按 library 比较存在性与
-新旧 export surface。发生变化的 Buffer snapshot 与直接 import 对应 library 的
-consumer snapshot 使用合并后的 catalog 重新分析；不受影响的 snapshot 保持对象
-identity。snapshot 更新后重建 references 倒排表。
+environment 只同步其显式 attachment。attach、detach、Document revision 或 resource
+改变时更新对应 snapshot；打开、关闭或切换其他 Scheme Buffer 不改变该 environment。
+未变化的 snapshot 直接复用。environment 从 attachment 的 resolved uses 和 interface
+artifact 中的编译引用建立 `DefinitionId -> EnvironmentReference[]` 倒排表；普通
+references 查询只读取目标 identity 的 buckets。
+
+environment 从 attachment 提取 R6RS library name、export surface 与源码 definition，
+并与 interface catalog 和嵌入 API catalog 合并。catalog 分别保存 library name 集合
+和 export symbol 集合，没有 export 的 library 仍具有独立 identity。Document 或
+artifact revision 改变时按 library 比较存在性与新旧 export surface。发生变化的
+snapshot 与直接 import 对应 library 的 consumer snapshot 使用合并后的 catalog
+重新分析；不受影响的 snapshot 保持对象 identity。snapshot 更新后重建 references
+倒排表。
 
 artifact library entry 保留声明 resource、byte range、kind 与 procedure formals。
 consumer 的 `only`、`except`、`prefix`、`rename` 和 `for` import modifier 由通用
@@ -597,10 +643,10 @@ import-binding pipeline 解释，因此 artifact export 与嵌入 Soda API 具�
 遮蔽，允许编辑已编译源码而不产生重复候选。
 library metadata reader 使用 lexical token 的 delimiter depth 恢复未闭合的外围
 form；编辑 library body 时，已经完整出现的 name、export 和 definition 继续留在
-session catalog。
+environment catalog。
 
 源码 Buffer 中的 root definition 使用 document DefinitionId，嵌入 API import
-解析到 index DefinitionId。workspace index 通过 `resource + declaration start +
+解析到 index DefinitionId。environment index 通过 `resource + declaration start +
 name` 建立这两种身份的等价集合。references 查询在每个已索引 snapshot 中匹配
 等价 DefinitionId，因此从 API 消费文件或已打开的 Soda 源码 declaration 发起查询，
 都会得到跨 Buffer LocationList。局部 definition 继续使用 document identity，
@@ -635,15 +681,17 @@ export identity，因此直接 export、rename 和 re-export 共享 canonical re
 
 构建分析在生成引用的同一次 semantic snapshot 中提取诊断。编译诊断只保存
 resource、source revision、code、range、severity、message 和所在行 excerpt，不保存
-syntax tree 或 source text。`diagnostics.list-workspace` 合并当前 Buffer 诊断和已安装
-session 的编译诊断。相同 resource 的实时 Buffer revision 整体遮蔽编译诊断；关闭
-Buffer 后恢复 artifact 中的结果。
+syntax tree 或 source text。`diagnostics.list-workspace` 是面向用户保留的查询名称，
+它合并当前 SchemeEnvironment attachment 的实时诊断和已安装 artifact 诊断。相同
+resource 的 attached Buffer revision 整体遮蔽编译诊断；detach 后恢复 artifact 中的
+结果。
 
 产物以带格式版本、Chez 版本和 machine type 的 FASL datum 编码，加载时完整验证
-manifest、entry、reference 和 diagnostic shape。workspace 直接把 reference datum 加入
-DefinitionId 倒排表，不读取或重新分析对应源码。打开相同 resource 的 Buffer 时，
-实时 revision 整体遮蔽 artifact 中该 resource 的引用；关闭 Buffer 后 artifact
-引用恢复可见。同一 owner 的新 artifact 同时替换 export surface、引用和诊断集合。
+manifest、entry、reference 和 diagnostic shape。environment 直接把 reference datum 加入
+DefinitionId 倒排表，不读取或重新分析对应源码。相同 resource 的 Buffer 附加到该
+environment 时，实时 revision 整体遮蔽 artifact 中该 resource 的引用；detach 后
+artifact 引用恢复可见。同一 owner 的新 artifact 同时替换 export surface、引用和
+诊断集合。
 
 `call-with-scheme-interface-build` 包住项目原有的 Chez 编译过程。它代理
 `library-search-handler`，记录编译器在声明 source root 内实际解析到的 source，
@@ -666,60 +714,53 @@ DefinitionId 倒排表，不读取或重新分析对应源码。打开相同 res
 `scheme-sources->interface-index-file!` 保留为底层入口，供已经掌握精确 source set
 的构建系统直接生成相同 artifact。
 
-编辑器常驻层只按 revision 分析已打开的 Scheme Buffer，用于当前文档的高亮、补全
-和诊断；该分析不枚举目录，也不建立 workspace 索引。跨文件 catalog、引用和诊断
-属于显式 language session，并从构建 artifact 加载。
+编辑器常驻层只按 revision 分析被查询的 Scheme Buffer，用于当前文档的高亮、补全
+和诊断；该分析不枚举目录，也不建立 editor-global 跨文档索引。显式 attachment 才把
+Document 加入 SchemeEnvironment。xref、rename 和 workspace symbol 可以同步该
+environment 的 attachment，但不会扫描 `editor-buffers`、遍历目录、建立 watcher 或
+启动周期性索引。
 
-Scheme workspace 在没有 interface artifact 时处于 dormant 状态。
-completion、document highlight、help 和实时诊断直接读取 Buffer 自身按 revision
-缓存的 semantic snapshot，不向 workspace 注册文档。安装第一个 interface artifact
-后，workspace 才同步打开的 Scheme Buffer，并维护跨文档 catalog 与 reference
-倒排表；移除最后一个 session artifact 时释放这些缓存。
-xref、rename 和 workspace symbol 等显式查询可以按需同步打开文档，但不会
-启动后台目录遍历、watcher 或周期性索引。
-Scheme `load`、`load-program` 和 `load-library` 是 evaluator 的运行时操作，不向
-workspace 注入 source definitions。跨文件静态 surface 只由显式 language session
-安装的编译 artifact 提供。
+interface index 按 owner 安装到指定 environment。同一 owner 的新 revision 原子替换
+旧 surface；移除 owner 时撤销对应 surface。多个 index 按安装次序组成依赖层，attached
+Document 位于 artifact surface 之上。interface 变化只重新分析 import 受影响 library
+的 Document。插件依赖因而可以在不读取依赖源码、不建立目录 watcher 的情况下提供
+completion、signature、hover、workspace symbol 和 definition。
+`scheme.load-interface-index` 通过 minibuffer 选择 environment 和产物并以 libuv 异步
+读取；编译脚本在 Editor evaluator 中运行时向 command loop 投递带 environment id 的
+安装请求，使成功构建的产物进入同一路径。
 
-显式 language workspace session 按 owner 安装 interface index。同一 owner 的新
-revision 原子替换旧 surface；移除 session 时撤销对应 surface。多个 index 按安装
-次序组成依赖层，打开的 Buffer 位于 artifact surface 之上。interface 变化只重新
-分析 import 受影响 library 的 Document。插件依赖因而可以在不读取依赖源码、不建立
-目录 watcher 的情况下提供 completion、signature、hover、workspace symbol 和
-definition。`scheme.load-interface-index` 通过 minibuffer 选择产物并以 libuv
-异步读取；编译脚本在 Editor evaluator 中运行时向 command loop 投递
-`scheme.load-interface-index-path`，使成功构建的产物进入同一安装路径。
-
-Scheme project manifest 把一次显式 language session 连接到构建产物：
+Scheme environment manifest 把显式 environment、构建调用和 interface 产物组合起来：
 
 ```scheme
-(soda-scheme-project
+(soda-scheme-environment
   (format-version 1)
+  (name "example-plugin")
+  (dialect r6rs)
   (interface-index "build/scheme-interfaces.fasl")
   (build-command
     ("scheme" "--script" "tools/build-project.ss"))
   (working-directory "."))
 ```
 
-`interface-index` 相对 manifest 所在目录解析。`scheme.load-project` 异步读取并验证
-manifest，再安装对应 interface index；`scheme.unload-project` 从当前已安装的 owner
-中选择并撤销 session。加载普通文件、识别 Project root 和枚举 Project resource
-不会启动 Scheme 索引。`build-command` 是直接传给 process runtime 的 argument
-vector，`working-directory` 相对 manifest 所在目录解析；两者省略时 manifest 仍可
-作为只加载 artifact 的 session。
+`interface-index` 相对 manifest 所在目录解析。加载 manifest 会建立或更新具名
+SchemeEnvironment，再安装对应 interface index；卸载 environment 会撤销 attachment、
+interface surface 和派生索引。加载普通文件、识别 Project root 和枚举 Project
+resource 不会启动 Scheme 索引。`build-command` 是直接传给 process runtime 的
+argument vector，`working-directory` 相对 manifest 所在目录解析；两者省略时 manifest
+仍可只声明 environment 和 artifact。
 
-`scheme.build-project` 只列出已经显式加载且声明 build command 的 manifest。构建
+environment build command 只列出已经显式加载且声明 build command 的 manifest。构建
 stdout/stderr 增量写入 `*scheme-build*` Buffer，不阻塞 command loop；同一 manifest
-同时只运行一个 build，`scheme.cancel-project-build` 终止活动 process。build
+同时只运行一个 build，cancel command 终止活动 process。build
 command 使用 Scheme interface build 协议，使编译与 interface 生成共享同一次
 library resolution。process 成功退出后 Editor 异步读取 artifact，并按 owner 原子
-替换 language surface；构建失败保留原 interface index。session 关闭后 Editor
+替换 environment surface；构建失败保留原 interface index。environment 关闭后 Editor
 撤销该 owner 的 surface，不保留目录 watcher、后台扫描或持续索引任务。
 
-workspace symbol 查询合并当前 Buffer、session artifact 和构建时嵌入的 Soda API
-definitions。局部 lexical binding 不进入该查询。相同源码声明在实时 snapshot 中
+workspace symbol 查询合并当前 environment attachment、interface artifact 和构建时
+嵌入的 Soda API definitions。局部 lexical binding 不进入该查询。相同源码声明在
 使用 document DefinitionId，在构建索引中使用 index DefinitionId。一个 source
-resource 存在已打开 Buffer 时，artifact 中对应的静态 catalog 条目整体由当前
+resource 存在 attached Buffer 时，artifact 中对应的静态 catalog 条目整体由当前
 Buffer revision 替代；其余 artifact 条目以
 `resource + declaration start + name` 去重。候选 key 使用
 `buffer id + revision + declaration` 或 `resource + declaration`，不会依赖过滤
@@ -738,9 +779,9 @@ revision。编译 declaration 已经打开但无法在相同 resource 与 range 
 源码的候选时直接记录 jump edge 并移动到对应 Buffer；接受未打开的嵌入源码候选时
 产生异步文件读取请求，再按声明 byte offset 完成跳转。
 
-Scheme static completion provider 与 xref provider 共享 editor 的
-`SchemeWorkspaceIndex`。completion request 按目标 Document revision 读取 workspace
-snapshot；项目 export、lexical binding、嵌入 API 和 primitive 在同一个
+Scheme static completion provider 与 xref provider 共享 Buffer 的 environment
+attachment。completion request 按目标 Document revision 和 environment generation
+读取 snapshot；environment export、lexical binding、嵌入 API 和 primitive 在同一个
 visible-definition 查询中完成遮蔽与去重，不由 completion UI 再拼接平行目录。
 
 ## Definition、references 与 rename
@@ -756,7 +797,7 @@ visible-definition 查询中完成遮蔽与去重，不由 completion UI 再拼�
 definition 结果转换为 LocationList，并由 Workbench display policy 记录 jump edge。
 多定义结果保持独立 location，不在 provider 内选择一个落点。
 
-references 按 DefinitionId 读取 workspace 倒排表。查询 policy 决定是否包含声明和
+references 按 DefinitionId 读取 environment 倒排表。查询 policy 决定是否包含声明和
 别名声明；返回值仍是普通 LocationList。rename 复用同一 use 集合生成带源
 revision 的 workspace edit。`scheme.rename`（`C-c C-r`）读取一个完整 Scheme
 identifier；仅存在于编译 artifact 的 source 通过没有 View target 的 `file.read`
@@ -809,7 +850,7 @@ environment 新增的 binding。重新定义同名 binding 后，environment 中
 经过限制的 metadata；preview 使用有限打印深度、长度和字符数。完整 environment
 catalog 与 runtime-only catalog 分别按 generation 缓存，因此普通 Scheme
 completion 不需要为初始 Chez binding 构建 metadata。一次求值或文件加载使缓存
-失效。运行时值不序列化进 semantic workspace，静态 analyzer 也不依赖 evaluator
+失效。运行时值不序列化进 SchemeEnvironment，静态 analyzer 也不依赖 evaluator
 的执行顺序。静态 symbol inspection 没有结果时，`help.describe-symbol` 与
 signature help 使用 runtime binding metadata 作为 fallback。procedure 的
 `signature_formals` 从 Chez arity mask 生成稳定的占位参数名，保留固定 arity、
@@ -837,7 +878,7 @@ Document commit 后，Scheme language runtime 按以下顺序推进：
 1. syntax provider 同步到新 revision；
 2. 产生该 Document 的 semantic snapshot；
 3. 比较 library export surface 与 import edges；
-4. 更新 workspace definition/use 索引；
+4. 若 Document 已 attachment，更新 environment definition/use 索引；
 5. 标记受 export 或 import 变化影响的反向依赖 Document；
 6. 在后续有界 turn 中按依赖顺序重新分析 dirty Document。
 
@@ -849,7 +890,7 @@ binding 变化时，反向依赖进入 dirty 状态。
 查询只消费完整 snapshot；新 revision 尚未分析时，provider 可以返回上一 snapshot
 的明确 stale 结果并触发更新，也可以返回 pending，不把新旧图的部分状态混合。
 
-所有分析状态由 editor thread 应用。较大的 workspace 更新拆成按 Document 或 scope
+所有分析状态由 editor thread 应用。较大的 environment 更新拆成按 Document 或 scope
 分片的 effect/message，每个分片在落地前重新检查 generation。
 
 ## 能力层级
@@ -858,7 +899,7 @@ Scheme semantic provider 按依赖关系形成三个能力层：
 
 1. **自举层**：容错 syntax view、Chez/R6RS metadata、核心 lexical binding、
    library import/export、completion 和 definition；
-2. **workspace 层**：definition-to-uses 索引、references、rename、hover、反向依赖
+2. **environment 层**：definition-to-uses 索引、references、rename、hover、反向依赖
    与按 revision 更新；
 3. **macro 层**：syntax-rules、受控 syntax-case expansion、自定义 binding rule
    和可选类型排序。

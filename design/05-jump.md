@@ -10,6 +10,7 @@
 | 文件 Buffer 的 save-place 恢复与持久化 | 已实现 |
 | `LocationItem`、`LocationList` 与 next/previous navigation | 已实现 |
 | Scheme definition/reference/diagnostic producer | 已实现 |
+| navigation origin 与 LanguageAttachment provenance | 未实现 |
 | Workbench 级语义 `JumpGraph` | 未实现 |
 | 可编辑 excerpt 组合视图 | 未实现 |
 | 通用跨 Buffer 原子事务与 group undo | 未实现 |
@@ -97,6 +98,7 @@ LocationItem {
   range,
   coordinate_encoding: byte | utf16,
   excerpt,
+  language_context?,
   metadata,
   resolved: (BufferId, AnchorRange, stale)?
 }
@@ -123,8 +125,15 @@ grep、references、implementations、diagnostics、build errors 和外部语义
 不同 producer。创建列表不打开文件；坐标保持 producer 的原始编码，直到资源被
 解析到具体 snapshot 后再换算。
 
+依赖语言上下文的 producer 把发起 View 的 LanguageAttachment identity 写入 item 的
+`language_context`。异步打开目标资源时，该值随 request 冻结；display 完成后由目标
+View 继承对应 attachment。落点路径不重新决定 Project 或 LanguageSession。同一
+resource 从不同 session 得到的 item 因而可以打开同一 Buffer，并在不同 View 中保留
+各自的 completion、hover、diagnostic 和后续 xref 上下文。具体 attachment 生命周期
+由 [09-language-modes.md](09-language-modes.md) 定义。
+
 Scheme definition 与 references 由
-[11-scheme-semantics.md](11-scheme-semantics.md) 的 DefinitionId 和 workspace
+[11-scheme-semantics.md](11-scheme-semantics.md) 的 DefinitionId 和 environment
 倒排索引产生。provider 返回 LocationList，不直接打开 Buffer 或选择 Window。
 
 excerpt 同时用于显示和内容校验。item 在首次跳转或对应 buffer 打开时提升为

@@ -13,7 +13,8 @@ Soda 是一个 Scheme-first 的原生 TUI 编辑器。Chez Scheme 持有命令�
 | 终端输入、Kitty keyboard、增量渲染与主题 | 已实现 |
 | command、interactive reader、keymap、hook、advice、minor mode、setting | 已实现 |
 | minibuffer、补全、REPL、comint 与 continuation debugger | 已实现 |
-| C/C++ 专用分析、Scheme 语义服务、Tree-sitter major mode | 已实现 |
+| C/C++ 专用分析、Scheme 文档语义服务、Tree-sitter major mode | 已实现 |
+| 隔离的 SchemeEnvironment 与显式 Document attachment | 部分实现 |
 | 通用 Project/Workbench 与跨语言语义会话 | 部分实现 |
 | 通用跨 Buffer 修改与组合结果视图 | 部分实现 |
 | Scheme 宏展开与完整 phase 语义 | 部分实现 |

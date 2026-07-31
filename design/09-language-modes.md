@@ -9,6 +9,7 @@
 | highlights、indents、textobjects、folds 与 injections 接口 | 已实现 |
 | C/C++ 和 Scheme 专用 provider | 已实现 |
 | 各分发语言的 query 覆盖 | 部分实现 |
+| LanguageSession registry、per-View attachment 与 provenance 路由 | 未实现 |
 
 ## 分层
 
@@ -16,7 +17,7 @@
 
 ```text
 MajorMode        内容分类、继承与按键
-LanguageProfile  语言能力组合与 project policy
+LanguageProfile  语言能力组合与 session bootstrap policy
 SyntaxProvider   revision-scoped 语法机制
 ```
 
@@ -61,7 +62,7 @@ AutoModeRule {
 
 规则按 priority 从高到低匹配；同名注册替换旧规则。内建规则覆盖 Scheme 与 C/C++
 扩展名，比较时不区分大小写。扩展可以使用 suffix helper，或提供任意 Scheme matcher
-实现文件名、目录或 project policy。未匹配资源使用
+实现文件名、目录或用户 policy。未匹配资源使用
 `fundamental-mode`。
 
 新文件 Buffer 通过 Editor auto-mode catalog 选择 mode。启动 init 加载后会重新选择
@@ -90,11 +91,11 @@ LanguageProfile {
 }
 ```
 
-project settings 可覆盖 style 和 provider 配置。profile 是普通 Scheme 值，
+Project settings 可作为 bootstrap 输入覆盖 style 和 provider 配置。profile 是普通 Scheme 值，
 major mode 只引用其名字；同一 provider 可以被多个 mode 复用。
 
-Scheme profile 组合 revision-scoped syntax view、静态 binding analyzer 和运行时
-session catalog。scope graph、library index、completion 与 xref 的契约见
+Scheme profile 组合 revision-scoped syntax view、静态 binding analyzer 和
+SchemeEnvironment catalog。scope graph、library index、completion 与 xref 的契约见
 [11-scheme-semantics.md](11-scheme-semantics.md)。
 
 Scheme 的 reader、highlight、indentation 与静态语义分析共享现有 Scheme syntax
@@ -140,6 +141,70 @@ capture 和 text-object capture。grammar 可用时 `.json` auto-mode rule 才�
 `json-mode`；显式启用 mode 时由 syntax provider 建立 parser。query capture 转换为
 统一的 `SyntaxCapture`；highlight capture 转换为 base-syntax decoration，
 renderer 不直接调用 Tree-sitter。
+
+## Language context 与 session attachment
+
+syntax runtime 属于 Buffer，因为它只由文本 revision 决定。外部 LSP、编译数据库、
+运行时 environment 和其他依赖上下文的语义服务属于独立 LanguageSession。两者不使用
+同一个生命周期：
+
+```text
+BufferLanguageRuntime {
+  language,
+  syntax_session,
+  revision
+}
+
+LanguageSession {
+  id,
+  language,
+  provider,
+  workspace_folders,
+  configuration,
+  environment_fingerprint,
+  generation
+}
+
+LanguageAttachment {
+  buffer_id,
+  session_id,
+  provenance: home | inherited,
+  origin_view_id?,
+  opened_revision
+}
+
+ViewLanguageContext {
+  attachment_id?
+}
+```
+
+LanguageSession registry 按 provider、workspace folders、初始化配置、toolchain/environment
+fingerprint 和 client capability 建键。Project 可以为 bootstrap 提供 workspace folder
+和配置，但 session identity 不等于 Project identity。一个 Project 可以产生多个
+session，一个 multi-root session 也可以服务多个 Project。
+
+Buffer 可以同时具有多个 attachment。同一系统头文件或依赖源码可以由两个具有不同
+compile command、include path 或宏环境的 session 打开。LSP document lifecycle 按
+`(BufferId, LanguageSessionId)` 计数；一个 session 的 `didClose` 不影响其他 session。
+依赖语义上下文的 diagnostics、semantic decoration、completion、hover 和 xref 都标记
+attachment，并由发起 View 的 `ViewLanguageContext` 选择。
+
+session bootstrap 只在初次关联时使用 resource 和 Project discovery：
+
+1. resource 明确属于一个可启动的 home session 时建立 `home` attachment；
+2. 导航落点没有 home session 时，继承 origin View 的 attachment；
+3. 两者都不存在时保持无 attachment，由显式 language command 或用户选择建立；
+4. 已存在其他 attachment 不阻止增加新的 attachment，也不覆盖其他 View 的 context。
+
+definition、reference、diagnostic 和其他异步导航请求冻结 origin attachment。打开落点
+Buffer 后，目标 View 选择该 attachment，后续查询继续沿相同 session 路由；请求不再
+从落点路径反推 Project。这样跳入 Project 外的系统头文件、生成源码或依赖缓存后仍可
+连续导航，同时允许另一个 View 用不同语义环境显示同一 Buffer。
+
+Buffer 关闭时释放全部 attachment；View 关闭只释放其 context 引用。没有 Buffer、
+View、pending request 或显式 owner 引用的 session 可以由 policy 停止。Workbench
+切换不改变 attachment；持久化只保存可重新发现的 context hint，不序列化运行中的
+LanguageSession。
 
 ## Syntax provider
 
@@ -433,6 +498,9 @@ injection 工作量；runtime 只在整组派生状态属于同一宿主 revisio
 - runtime revision 不得领先或落后于用于查询的 snapshot；
 - syntax node/capture 不跨 revision 保存；
 - 持久语义位置使用 Document anchor；
+- syntax runtime 不引用 Project 或 LanguageSession；
+- dependency-sensitive 查询必须携带 View 的 attachment identity；
+- 同一 Buffer 的多个 attachment 不共享 session-specific derived state；
 - provider 错误只使该语言能力降级，不破坏 Text 与 Document；
 - provider 和 native handle 都由 editor thread 创建、查询和释放。
 
