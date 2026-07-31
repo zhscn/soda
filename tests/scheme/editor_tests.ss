@@ -300,6 +300,15 @@
       build-project-marker
       vcs-project-marker))
   (error 'editor-tests "built-in project finder registry differs"))
+(unless
+  (and
+    (command-registered?
+      (editor-command-registry editor)
+      'project.remember-current)
+    (command-registered?
+      (editor-command-registry editor)
+      'project.forget))
+  (error 'editor-tests "project commands were not installed"))
 (define editor-test-project
   (editor-discover-project
     editor
