@@ -5019,6 +5019,22 @@
           (loop (+ row 1)))))
     (error 'editor-tests
            "resolved completion documentation was not rendered")))
+(let* ([view (editor-active-view resolve-editor)]
+       [completion (editor-active-completion resolve-editor)]
+       [decoder (make-input-decoder)])
+  (view-push-input-state!
+    view
+    (make-input-state 'buried-menu-test '() 'ignore))
+  (send! resolve-editor decoder (bytes 27))
+  (unless
+    (and
+      (eq? (input-state-name (view-current-input-state view))
+           'buried-menu-test)
+      (eq? (editor-active-completion resolve-editor)
+           completion))
+    (error 'editor-tests
+           "buried completion keymap handled an escape key"))
+  (view-pop-input-state! view))
 (editor-accept-completion! resolve-editor)
 (unless
   (bytevector=?

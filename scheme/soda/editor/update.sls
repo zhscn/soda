@@ -69,12 +69,8 @@
                (if (editor-pending-prefix editor)
                    (list 'editor.prefix)
                    '())
-               (fold-right
-                 append
-                 '()
-                 (map
-                   input-state-keymap-layers
-                   (view-input-states view)))
+               (input-state-keymap-layers
+                 (view-current-input-state view))
                (view-keymap-layers view)
                (editor-minor-mode-keymap-layers editor buffer)
                (major-mode-keymaps
