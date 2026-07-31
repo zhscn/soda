@@ -96,6 +96,7 @@
           (soda editor keymap)
           (soda editor navigation)
           (soda editor prompt)
+          (soda editor resource-context)
           (soda editor state)
           (soda vfs))
 
@@ -594,11 +595,15 @@
        (make-interactive-reader
          'file-name
          (lambda (context)
-           (let* ([buffer
-                    (view-buffer
-                      (command-context-view context))]
+           (let* ([editor (command-context-editor context)]
+                  [view (command-context-view context)]
+                  [resource-context
+                    (editor-view-resource-context
+                      editor
+                      (view-id view))]
                   [base-directory
-                    (buffer-default-directory buffer)])
+                    (resource-context-base-resource
+                      resource-context)])
              (make-interactive-suspend
                (make-completing-prompt-request
                  prompt
@@ -983,12 +988,34 @@
   (define (view-default-directory editor view-id)
     (let ([view (find-view-by-id editor view-id)])
       (if view
-          (buffer-default-directory (view-buffer view))
+          (resource-context-base-resource
+            (editor-view-resource-context editor view-id))
           (vfs-directory-path (current-directory)))))
 
+  (define (prompt-resource-context editor result)
+    (let ([data (and (prompt-result? result)
+                     (prompt-result-data result))])
+      (if
+        (resource-context? data)
+        data
+        (let ([view
+                (and
+                  (prompt-result? result)
+                  (find-view-by-id
+                    editor
+                    (prompt-result-origin-view-id result)))])
+          (if view
+              (editor-view-resource-context
+                editor
+                (view-id view))
+              (make-resource-context
+                (vfs-directory-path (current-directory))))))))
+
   (define (open-find-file-prompt! editor view initial)
-    (let* ([base-directory
-             (buffer-default-directory (view-buffer view))]
+    (let* ([context
+             (editor-view-resource-context editor (view-id view))]
+           [base-directory
+             (resource-context-base-resource context)]
            [initial-path
              (or initial base-directory)])
       (editor-open-prompt!
@@ -1001,11 +1028,14 @@
           'free
           (make-file-choice-source base-directory)
           'file.open-path
-          #f))))
+          #f
+          context))))
 
   (define (open-insert-file-prompt! editor view initial)
-    (let* ([base-directory
-             (buffer-default-directory (view-buffer view))]
+    (let* ([context
+             (editor-view-resource-context editor (view-id view))]
+           [base-directory
+             (resource-context-base-resource context)]
            [initial-path
              (or initial base-directory)])
       (editor-open-prompt!
@@ -1018,7 +1048,8 @@
           'free
           (make-file-choice-source base-directory)
           'file.insert-path
-          #f))))
+          #f
+          context))))
 
   (define (find-file-command context)
     (open-find-file-prompt!
@@ -1062,8 +1093,8 @@
                buffer
                input
                (positive? (string-length input))
-               (vfs-resolve-path
-                 (buffer-default-directory buffer)
+               (resource-context-resolve
+                 (prompt-resource-context editor result)
                  input))])
       (cond
         [(not buffer)
@@ -1199,10 +1230,8 @@
              (and
                input
                (positive? (string-length input))
-               (vfs-resolve-path
-                 (view-default-directory
-                   editor
-                   (prompt-result-origin-view-id result))
+               (resource-context-resolve
+                 (prompt-resource-context editor result)
                  input))])
       (cond
         [(or (not path) (zero? (string-length path)))

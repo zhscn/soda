@@ -339,6 +339,30 @@
     'temporary-project-marker)
   (error 'editor-tests
          "configuration rollback retained a project finder"))
+(define editor-test-resource-context
+  (make-resource-context
+    "/virtual/workspace"
+    #f
+    editor-test-project
+    'test-language-context))
+(editor-set-view-resource-context!
+  editor
+  (view-id (editor-active-view editor))
+  editor-test-resource-context)
+(let ([context
+        (editor-view-resource-context
+          editor
+          (view-id (editor-active-view editor)))])
+  (unless
+    (and
+      (string=?
+        (resource-context-base-resource context)
+        "/virtual/workspace/")
+      (= (resource-context-origin-view-id context)
+         (view-id (editor-active-view editor)))
+      (eq? (resource-context-project-hint context)
+           editor-test-project))
+    (error 'editor-tests "view resource context differs")))
 (define decoder (make-input-decoder))
 
 (unless (and (editor? editor)

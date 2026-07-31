@@ -1,6 +1,7 @@
 #!r6rs
 (import (rnrs)
-        (soda editor project))
+        (soda editor project)
+        (soda editor resource-context))
 
 (define (check condition message . irritants)
   (unless condition
@@ -40,6 +41,30 @@
 (check
   (not (project-contains-resource? discovered "/work/repository-copy/main.ss"))
   "project containment must respect path component boundaries")
+
+(define resource-context
+  (make-resource-context
+    "/work/repository"
+    7
+    discovered
+    'language-context))
+(check
+  (string=?
+    (resource-context-base-resource resource-context)
+    "/work/repository/")
+  "resource context must normalize its base as a directory")
+(check
+  (string=?
+    (resource-context-resolve resource-context "src/main.ss")
+    "/work/repository/src/main.ss")
+  "resource context must resolve relative resources against its frozen base")
+(check
+  (and
+    (= (resource-context-origin-view-id resource-context) 7)
+    (eq? (resource-context-project-hint resource-context) discovered)
+    (eq? (resource-context-language-context resource-context)
+         'language-context))
+  "resource context must preserve its provenance")
 
 (define probes-after-first-discovery probe-count)
 (check

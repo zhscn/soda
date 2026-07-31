@@ -86,6 +86,8 @@
           editor-register-auto-mode-rule!
           editor-major-mode-for-path
           editor-select-buffer-major-mode!
+          editor-view-resource-context
+          editor-set-view-resource-context!
           editor-project-catalog
           editor-register-project-finder!
           editor-remove-project-finder!
@@ -217,6 +219,7 @@
           editor-replace-view-folds!
           editor-clear-view-folds!
           view-navigation-walk
+          view-resource-context
           view-completion
           view-current-input-state
           view-push-input-state!
@@ -232,6 +235,7 @@
           view-set-keymap-layers!
           ensure-view-visible!)
   (import (rnrs)
+          (only (chezscheme) current-directory)
           (soda document)
           (soda editor annotation)
           (soda editor auto-mode)
@@ -256,10 +260,12 @@
           (soda editor prefix)
           (soda editor prompt)
           (soda editor project)
+          (soda editor resource-context)
           (soda editor setting)
           (soda editor theme)
           (soda editor themes catppuccin)
-          (soda editor window))
+          (soda editor window)
+          (soda vfs))
 
   (define-record-type (view %make-view view?)
     (fields
@@ -295,6 +301,9 @@
       (mutable projection-cache
                view-projection-cache
                view-projection-cache-set!)
+      (mutable resource-context
+               view-resource-context
+               view-resource-context-set!)
       (immutable navigation-walk view-navigation-walk)))
 
   (define-record-type
@@ -1408,10 +1417,50 @@
     (or (hashtable-ref (editor-view-table value) id #f)
         (assertion-violation 'editor-view-ref "unknown view id" id)))
 
+  (define (editor-view-resource-context value view-id)
+    (require-open-editor 'editor-view-resource-context value)
+    (let* ([view (editor-view-ref value view-id)]
+           [context (view-resource-context view)]
+           [path (buffer-file-path (view-buffer view))])
+      (if path
+          (let* ([resource
+                   (resource-context-resolve context path)]
+                 [project
+                   (resource-context-project-hint context)])
+            (make-resource-context
+              (vfs-parent-directory resource)
+              view-id
+              (and
+                project
+                (project-contains-resource? project resource)
+                project)
+              (resource-context-language-context context)))
+          (resource-context-with-origin context view-id))))
+
+  (define (editor-set-view-resource-context! value view-id context)
+    (require-open-editor 'editor-set-view-resource-context! value)
+    (unless (resource-context? context)
+      (assertion-violation
+        'editor-set-view-resource-context!
+        "expected a resource context"
+        context))
+    (let ([view (editor-view-ref value view-id)])
+      (view-resource-context-set!
+        view
+        (resource-context-with-origin context view-id))
+      (editor-invalidate! value 'configuration)
+      (view-resource-context view)))
+
   (define (editor-open-view! value buffer-id)
     (require-open-editor 'editor-open-view! value)
     (let* ([buffer (editor-buffer-ref value buffer-id)]
            [id (editor-next-view-id value)]
+           [context
+             (resource-context-with-origin
+               (editor-view-resource-context
+                 value
+                 (view-id (editor-active-view value)))
+               id)]
            [view
              (%make-view
                id
@@ -1441,6 +1490,7 @@
                #f
                '()
                #f
+               context
                (make-navigation-walk))])
       (hashtable-set! (editor-view-table value) id view)
       (editor-view-ids-set!
@@ -5184,6 +5234,11 @@
                #f
                '()
                #f
+               (make-resource-context
+                 (vfs-directory-path (current-directory))
+                 1
+                 #f
+                 #f)
                (make-navigation-walk))]
            [value
              (%make-editor

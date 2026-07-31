@@ -652,6 +652,11 @@
     (and
       request
       (string=? (prompt-request-initial request) save-directory)
+      (resource-context? (prompt-request-data request))
+      (string=?
+        (resource-context-base-resource
+          (prompt-request-data request))
+        save-directory)
       (eq? (choice-source-category
              (prompt-request-completion-source request))
            'file)

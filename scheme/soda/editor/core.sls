@@ -261,6 +261,17 @@
           editor-known-projects
           editor-remember-project!
           editor-forget-project!
+          make-resource-context
+          resource-context?
+          resource-context-base-resource
+          resource-context-origin-view-id
+          resource-context-project-hint
+          resource-context-language-context
+          resource-context-with-origin
+          resource-context-with-base-resource
+          resource-context-resolve
+          editor-view-resource-context
+          editor-set-view-resource-context!
           make-setting-definition
           setting-definition?
           setting-definition-name
@@ -1048,6 +1059,7 @@
           (soda editor process-comint)
           (soda editor project)
           (soda editor repl)
+          (soda editor resource-context)
           (soda editor scheme-completion)
           (soda editor scheme-commands)
           (soda editor scheme-document-highlight)

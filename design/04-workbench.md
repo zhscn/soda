@@ -6,7 +6,7 @@
 |---|---|
 | Window tree、View 生命周期与基础 display 操作 | 已实现 |
 | 显式 process working directory 与异步请求 origin | 部分实现 |
-| 通用 `ResourceContext` 与 origin 传播 | 未实现 |
+| 通用 `ResourceContext`、View origin 与文件选择上下文冻结 | 部分实现 |
 | Project identity、发现缓存与 known registry | 已实现 |
 | Project resource enumerator、settings layer 与 task definition runtime | 未实现 |
 | Workbench scope、slot、visitor、provenance 与持久化 | 未实现 |
@@ -43,14 +43,14 @@ Workbench = Project scope + WindowLayout + MRU + placement slots
 
 ```text
 ResourceContext {
-  base_resource,
+  base_directory,
   origin_view_id?,
   project_hint?,
   language_context?
 }
 ```
 
-`base_resource` 是相对资源解析和默认 working directory 的基础。context 按以下来源
+`base_directory` 是相对资源解析和默认 working directory 的基础。context 按以下来源
 建立：
 
 1. 调用方显式提供的 resource 或 directory；
