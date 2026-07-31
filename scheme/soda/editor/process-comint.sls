@@ -24,6 +24,7 @@
           (soda editor interaction)
           (soda editor keymap)
           (soda editor managed-process)
+          (soda editor resource-context)
           (soda editor state)
           (soda runtime))
 
@@ -248,7 +249,14 @@
                editor
                #f
                'fundamental-mode
-               header)])
+               header
+               (let ([working-directory
+                       (process-comint-profile-working-directory profile)])
+                 (if (positive? (string-length working-directory))
+                     (make-resource-context working-directory)
+                     (editor-view-resource-context
+                       editor
+                       (view-id (editor-active-view editor))))))])
       (editor-set-buffer-resource!
         editor
         buffer

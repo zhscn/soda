@@ -161,7 +161,10 @@
                 editor
                 "*scratch*"
                 'scheme-mode
-                "")])
+                ""
+                (editor-view-resource-context
+                  editor
+                  (view-id (editor-active-view editor))))])
         (buffer-set-local-setting!
           buffer
           'confirm-on-exit?
@@ -267,7 +270,10 @@
                  editor
                  resource
                  'fundamental-mode
-                 contents))])
+                 contents
+                 (editor-view-resource-context
+                   editor
+                   (view-id (command-context-view context)))))])
       (when existing
         (buffer-replace-range-internal!
           buffer

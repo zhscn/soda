@@ -5,6 +5,8 @@
           buffer-document
           buffer-resource
           buffer-set-resource!
+          buffer-creation-context
+          buffer-set-creation-context!
           buffer-closed?
           buffer-close!
           buffer-language-catalog
@@ -50,6 +52,7 @@
           (soda editor injection)
           (soda editor injection-highlighting)
           (soda editor language)
+          (soda editor resource-context)
           (soda editor setting)
           (soda editor structure))
 
@@ -75,6 +78,9 @@
       (immutable id buffer-id)
       (immutable document buffer-document)
       (mutable resource buffer-resource buffer-resource-set!)
+      (mutable creation-context
+               buffer-creation-context
+               buffer-creation-context-set!)
       (immutable local-settings buffer-local-settings)
       (immutable language-catalog buffer-language-catalog)
       (mutable setting-store
@@ -215,6 +221,7 @@
                  id
                  document
                  resource
+                 #f
                  (make-eq-hashtable)
                  catalog
                  setting-store
@@ -231,6 +238,16 @@
                  #f)])
          (install-major-mode! value mode-name)
          value)]))
+
+  (define (buffer-set-creation-context! value context)
+    (require-open-buffer 'buffer-set-creation-context! value)
+    (unless (or (not context) (resource-context? context))
+      (assertion-violation
+        'buffer-set-creation-context!
+        "creation context must be a ResourceContext or #f"
+        context))
+    (buffer-creation-context-set! value context)
+    context)
 
   (define (buffer-set-file-path! value path)
     (require-open-buffer 'buffer-set-file-path! value)

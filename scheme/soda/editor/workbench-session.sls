@@ -101,8 +101,9 @@
           (min cursor (- (length entries) 1)))
         jumps)))
 
-  (define (view-datum view)
-    (let* ([context (view-resource-context view)]
+  (define (view-datum editor view)
+    (let* ([context
+             (editor-view-resource-context editor (view-id view))]
            [project (resource-context-project-hint context)])
       (list
         (buffer-resource-for-session (view-buffer view))
@@ -125,6 +126,7 @@
             workbench
             (window-leaf-id node))
           (view-datum
+            editor
             (editor-view-ref editor (window-leaf-view-id node))))
         (list
           'split

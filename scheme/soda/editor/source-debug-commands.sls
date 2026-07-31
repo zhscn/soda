@@ -150,7 +150,10 @@
                  editor
                  breakpoint-buffer-resource
                  'fundamental-mode
-                 text))])
+                 text
+                 (editor-view-resource-context
+                   editor
+                   (view-id (command-context-view context)))))])
       (when existing
         (buffer-replace-range-internal!
           buffer

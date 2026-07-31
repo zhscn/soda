@@ -163,7 +163,10 @@
                      editor
                      repl-resource
                      'scheme-mode
-                     repl-header)]
+                     repl-header
+                     (editor-view-resource-context
+                       editor
+                       (view-id (editor-active-view editor))))]
                  [input-start (buffer-size buffer)]
                  [session
                    (editor-register-interaction!

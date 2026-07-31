@@ -4,6 +4,7 @@
         (soda editor buffer)
         (soda editor display-placement)
         (soda editor project)
+        (soda editor resource-context)
         (soda editor state)
         (soda editor window)
         (soda editor window-runtime)
@@ -131,4 +132,46 @@
   "closing a workbench must release its Views and preserve global Buffers")
 
 (editor-close! editor)
+
+(define context-document (make-document "context" 9141))
+(define context-buffer
+  (make-buffer 9142 context-document "*context*" 'fundamental-mode))
+(define context-editor (make-editor-state context-buffer))
+(editor-workbench-adopt-project!
+  context-editor
+  (workbench-id (editor-active-workbench context-editor))
+  project)
+(define scoped-context
+  (editor-view-resource-context
+    context-editor
+    (view-id (editor-active-view context-editor))))
+(check
+  (and
+    (eq? (resource-context-project-hint scoped-context) project)
+    (string=?
+      (resource-context-resolve scoped-context "source.scm")
+      "/work/fixture/source.scm"))
+  "a unique Workbench Project must provide the resource fallback")
+
+(define generated
+  (editor-create-buffer!
+    context-editor
+    "*generated*"
+    'fundamental-mode
+    "generated"
+    (make-resource-context "/tmp/generated-origin")))
+(editor-set-view-buffer!
+  context-editor
+  (view-id (editor-active-view context-editor))
+  (buffer-id generated))
+(define generated-context
+  (editor-view-resource-context
+    context-editor
+    (view-id (editor-active-view context-editor))))
+(check
+  (string=?
+    (resource-context-resolve generated-context "result.txt")
+    "/tmp/generated-origin/result.txt")
+  "a generated Buffer must preserve its creation provenance")
+(editor-close! context-editor)
 (display "workbench tests passed\n")

@@ -212,14 +212,25 @@
       (interaction-session-debugger session)))
 
   (define (open-debugger! editor debugger)
-    (let ([buffer (debugger-buffer editor debugger)])
+    (let* ([return-buffer-id
+             (debugger-session-return-buffer-id debugger)]
+           [return-view
+             (and
+               return-buffer-id
+               (visible-view-for-buffer editor return-buffer-id))]
+           [origin-view
+             (or return-view (editor-active-view editor))]
+           [buffer (debugger-buffer editor debugger)])
       (unless buffer
         (set! buffer
           (editor-create-buffer!
             editor
             (debugger-resource debugger)
             'debugger-mode
-            (debugger-session->string debugger)))
+            (debugger-session->string debugger)
+            (editor-view-resource-context
+              editor
+              (view-id origin-view))))
         (buffer-set-local-setting!
           buffer
           'track-modified?
@@ -227,15 +238,7 @@
         (debugger-session-set-buffer-id!
           debugger
           (buffer-id buffer)))
-      (let* ([return-buffer-id
-               (debugger-session-return-buffer-id debugger)]
-             [return-view
-               (and
-                 return-buffer-id
-                 (visible-view-for-buffer editor return-buffer-id))]
-             [origin-view
-               (or return-view (editor-active-view editor))]
-             [target
+      (let* ([target
                (editor-display-buffer!
                  editor
                  (make-display-request

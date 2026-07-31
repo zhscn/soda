@@ -10,6 +10,8 @@
           editor-remove-buffer!
           editor-buffer-for-resource
           editor-set-buffer-resource!
+          buffer-creation-context
+          buffer-set-creation-context!
           editor-views
           editor-view-ref
           editor-open-view!

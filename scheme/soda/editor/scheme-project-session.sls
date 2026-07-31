@@ -36,6 +36,7 @@
           (soda editor completion)
           (soda editor display)
           (soda editor file)
+          (soda editor resource-context)
           (soda editor scheme-interface-commands)
           (soda editor scheme-workspace)
           (soda editor state)
@@ -443,7 +444,7 @@
           (ensure-view-visible! view)))
       (editor-views editor)))
 
-  (define (project-build-buffer editor)
+  (define (project-build-buffer editor working-directory)
     (or
       (editor-buffer-for-resource
         editor
@@ -453,7 +454,8 @@
                 editor
                 project-build-buffer-resource
                 'fundamental-mode
-                "")])
+                ""
+                (make-resource-context working-directory))])
         (buffer-set-local-setting!
           buffer
           'track-modified?
@@ -525,7 +527,8 @@
           (let* ([working-directory
                    (scheme-project-manifest-working-directory
                      manifest)]
-                 [buffer (project-build-buffer editor)]
+                 [buffer
+                   (project-build-buffer editor working-directory)]
                  [header
                    (string-append
                      "Scheme build in "
@@ -573,7 +576,11 @@
              [manifest-path
                (scheme-project-build-request-manifest-path
                  request)]
-             [buffer (project-build-buffer editor)])
+             [buffer
+               (project-build-buffer
+                 editor
+                 (scheme-project-build-request-working-directory
+                   request))])
         (case
           (scheme-project-build-result-kind result)
           [(output)

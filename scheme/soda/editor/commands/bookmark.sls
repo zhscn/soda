@@ -188,7 +188,13 @@
            [buffer
              (or existing
                  (editor-create-buffer!
-                   editor resource 'fundamental-mode contents))])
+                   editor
+                   resource
+                   'fundamental-mode
+                   contents
+                   (editor-view-resource-context
+                     editor
+                     (view-id (command-context-view context)))))])
       (when existing
         (buffer-replace-range-internal!
           buffer 0 (buffer-size buffer) contents))

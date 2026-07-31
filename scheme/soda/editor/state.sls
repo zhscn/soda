@@ -1232,36 +1232,47 @@
         buffer)
       buffer))
 
-  (define (editor-create-buffer! value resource mode-name bytes)
-    (require-open-editor 'editor-create-buffer! value)
-    (require-buffer-topology-mutable 'editor-create-buffer! value)
-    (unless (or (not resource) (string? resource))
-      (assertion-violation
-        'editor-create-buffer!
-        "resource must be a string or #f"
-        resource))
-    (unless (symbol? mode-name)
-      (assertion-violation
-        'editor-create-buffer!
-        "mode name must be a symbol"
-        mode-name))
-    (unless (or (string? bytes) (bytevector? bytes))
-      (assertion-violation
-        'editor-create-buffer!
-        "initial text must be a string or bytevector"
-        bytes))
-    (let* ([id (editor-next-buffer-id value)]
-           [new-document-id (editor-next-document-id value)]
-           [document (make-document bytes new-document-id)]
-           [buffer
-             (make-buffer
-               id
-               document
-               resource
-               mode-name
-               (editor-language-catalog value)
-               (editor-setting-store value))])
-      (editor-add-buffer! value buffer)))
+  (define editor-create-buffer!
+    (case-lambda
+      [(value resource mode-name bytes)
+       (editor-create-buffer! value resource mode-name bytes #f)]
+      [(value resource mode-name bytes creation-context)
+       (require-open-editor 'editor-create-buffer! value)
+       (require-buffer-topology-mutable 'editor-create-buffer! value)
+       (unless (or (not resource) (string? resource))
+         (assertion-violation
+           'editor-create-buffer!
+           "resource must be a string or #f"
+           resource))
+       (unless (symbol? mode-name)
+         (assertion-violation
+           'editor-create-buffer!
+           "mode name must be a symbol"
+           mode-name))
+       (unless (or (string? bytes) (bytevector? bytes))
+         (assertion-violation
+           'editor-create-buffer!
+           "initial text must be a string or bytevector"
+           bytes))
+       (unless (or (not creation-context)
+                   (resource-context? creation-context))
+         (assertion-violation
+           'editor-create-buffer!
+           "creation context must be a ResourceContext or #f"
+           creation-context))
+       (let* ([id (editor-next-buffer-id value)]
+              [new-document-id (editor-next-document-id value)]
+              [document (make-document bytes new-document-id)]
+              [buffer
+                (make-buffer
+                  id
+                  document
+                  resource
+                  mode-name
+                  (editor-language-catalog value)
+                  (editor-setting-store value))])
+         (buffer-set-creation-context! buffer creation-context)
+         (editor-add-buffer! value buffer))]))
 
   (define (editor-remove-buffer! value id)
     (require-open-editor 'editor-remove-buffer! value)
@@ -1443,25 +1454,78 @@
     (or (hashtable-ref (editor-view-table value) id #f)
         (assertion-violation 'editor-view-ref "unknown view id" id)))
 
+  (define (unique-workbench-project value view resource)
+    (let ([workbench
+            (editor-workbench-for-view value (view-id view))])
+      (and
+        workbench
+        (let ([projects
+                (filter
+                  (lambda (project)
+                    (or
+                      (not resource)
+                      (project-contains-resource? project resource)))
+                  (filter
+                    (lambda (project) project)
+                    (map
+                      (lambda (project-id)
+                        (project-catalog-find-known
+                          (editor-project-catalog value)
+                          project-id))
+                      (workbench-scope workbench))))])
+          (and (= (length projects) 1) (car projects))))))
+
+  (define (context-with-project context origin-view-id project)
+    (make-resource-context
+      (resource-context-base-resource context)
+      origin-view-id
+      project
+      (resource-context-language-context context)))
+
   (define (editor-view-resource-context value view-id)
     (require-open-editor 'editor-view-resource-context value)
     (let* ([view (editor-view-ref value view-id)]
            [context (view-resource-context view)]
-           [path (buffer-file-path (view-buffer view))])
-      (if path
-          (let* ([resource
-                   (resource-context-resolve context path)]
-                 [project
-                   (resource-context-project-hint context)])
-            (make-resource-context
-              (vfs-parent-directory resource)
-              view-id
-              (and
-                project
-                (project-contains-resource? project resource)
-                project)
-              (resource-context-language-context context)))
-          (resource-context-with-origin context view-id))))
+           [buffer (view-buffer view)]
+           [path (buffer-file-path buffer)]
+           [creation-context (buffer-creation-context buffer)])
+      (cond
+        [path
+         (let* ([resource (resource-context-resolve context path)]
+                [hint (resource-context-project-hint context)]
+                [project
+                  (or
+                    (and
+                      hint
+                      (project-contains-resource? hint resource)
+                      hint)
+                    (unique-workbench-project value view resource))])
+           (make-resource-context
+             (vfs-parent-directory resource)
+             view-id
+             project
+             (resource-context-language-context context)))]
+        [creation-context
+         (let ([project
+                 (or
+                   (resource-context-project-hint creation-context)
+                   (unique-workbench-project
+                     value
+                     view
+                     (resource-context-base-resource creation-context)))])
+           (context-with-project
+             creation-context view-id project))]
+        [(resource-context-project-hint context)
+         (resource-context-with-origin context view-id)]
+        [else
+         (let ([project (unique-workbench-project value view #f)])
+           (if project
+               (make-resource-context
+                 (project-primary-root project)
+                 view-id
+                 project
+                 (resource-context-language-context context))
+               (resource-context-with-origin context view-id)))])))
 
   (define (editor-set-view-resource-context! value view-id context)
     (require-open-editor 'editor-set-view-resource-context! value)
