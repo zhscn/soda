@@ -75,9 +75,8 @@
             stat)
     (make-internal-command-message
       'file.apply-open-result
-      (make-open-result
-        (map car (open-operation-targets operation))
-        (map cdr (open-operation-targets operation))
+      (make-open-result-for-requests
+        (open-operation-targets operation)
         (open-operation-path operation)
         status
         data
@@ -147,16 +146,13 @@
               existing
               (append
                 (filter
-                  (lambda (target)
+                  (lambda (pending-request)
                     (not
                       (equal?
-                        (car target)
+                        (open-request-view-id pending-request)
                         (open-request-view-id request))))
                   (open-operation-targets existing))
-                (list
-                  (cons
-                    (open-request-view-id request)
-                    (open-request-offset request)))))
+                (list request)))
             (make-effect-result #t '()))
           (guard (condition
                    [else
@@ -173,10 +169,7 @@
             (let* ([operation
                      (%make-open-operation
                        path
-                       (list
-                         (cons
-                           (open-request-view-id request)
-                           (open-request-offset request)))
+                       (list request)
                        'stat
                        #f)]
                    [source

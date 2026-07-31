@@ -109,7 +109,11 @@
               (view-id view)
               (scheme-definition-id-document-id
                 (scheme-definition-id definition))
-              (scheme-definition-start definition)))))))
+              (scheme-definition-start definition)
+              'jump
+              (editor-view-resource-context
+                editor
+                (view-id view))))))))
 
   (define (use-location
             buffer-id
@@ -156,7 +160,11 @@
                 (make-open-request
                   (view-id view)
                   resource
-                  (location-item-start item)))))))))
+                  (location-item-start item)
+                  'jump
+                  (editor-view-resource-context
+                    editor
+                    (view-id view))))))))))
 
   (define (publish-and-jump! context source items)
     (let ([editor (command-context-editor context)])
@@ -490,7 +498,11 @@
                  (make-open-request
                    (view-id view)
                    resource
-                   start))))) =>
+                   start
+                   'jump
+                   (editor-view-resource-context
+                     editor
+                     (view-id view))))))) =>
          list]
         [else
          (editor-set-status-message!

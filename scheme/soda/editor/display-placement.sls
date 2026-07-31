@@ -181,6 +181,8 @@
              (workbench-window-pinned?
                workbench
                target-window-id)]
+           [target-role
+             (workbench-window-role workbench target-window-id)]
            [action
              (cond
                [existing 'reuse]
@@ -189,12 +191,16 @@
                [pinned? 'split]
                [slot-window-id 'replace]
                [(eq? intent 'edit) 'replace]
+               [(and
+                  (eq? intent 'jump)
+                  (not target-role))
+                'replace]
                [else 'split])]
            [plan-role
              (and
                role
                (not slot-window-id)
-               (eq? action 'split)
+               (memq action '(replace split))
                role)])
       (make-display-plan
         (workbench-id workbench)
@@ -286,6 +292,10 @@
                   (editor-view-ref
                     editor
                     (window-leaf-view-id leaf))])
+           (editor-set-view-resource-context!
+             editor
+             (view-id view)
+             (request-context editor request))
            (activate-placement! editor workbench leaf view)
            view)]
         [(replace)
@@ -297,6 +307,11 @@
                (display-plan-window-id plan)
                request))
            (lambda (leaf view)
+             (when (display-plan-role plan)
+               (workbench-set-slot!
+                 workbench
+                 (display-plan-role plan)
+                 (window-leaf-id leaf)))
              (activate-placement! editor workbench leaf view)
              view))]
         [(split)

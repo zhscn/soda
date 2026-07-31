@@ -402,7 +402,11 @@
                 (make-open-request
                   (view-id view)
                   resource
-                  (location-item-start item)))))))))
+                  (location-item-start item)
+                  'jump
+                  (editor-view-resource-context
+                    editor
+                    (view-id view))))))))))
 
   (define (list-workspace-diagnostics-command
             workspace

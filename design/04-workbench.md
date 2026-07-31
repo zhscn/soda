@@ -12,7 +12,7 @@
 | Project settings layer、task definition 与 comint runtime | 已实现 |
 | Workbench lifecycle、scope、MRU、slot 与 pinned window | 已实现 |
 | Workbench provenance 与持久化 | 未实现 |
-| intent 驱动的统一 display placement policy | 部分实现 |
+| intent 驱动的统一 display placement policy | 已实现 |
 
 ## 正交概念
 

@@ -1,6 +1,7 @@
 (library (soda editor navigation)
   (export editor-jump-to-location!
           editor-jump-to-buffer!
+          editor-jump-view-to-buffer!
           editor-begin-async-jump!
           editor-complete-async-jump!
           editor-cancel-async-jump!
@@ -12,9 +13,12 @@
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
+          (soda editor display-placement)
           (soda editor keymap)
           (soda editor location)
-          (soda editor state))
+          (soda editor state)
+          (soda editor window)
+          (soda editor workbench))
 
   (define walk-limit 100)
 
@@ -234,6 +238,32 @@
        (jump-view-to-location!
          editor (editor-active-view editor) location kind)]))
 
+  (define (editor-jump-view-to-buffer!
+            editor view buffer offset kind)
+    (require-open-editor 'editor-jump-view-to-buffer! editor)
+    (unless (and
+              (view? view)
+              (buffer? buffer)
+              (integer? offset)
+              (exact? offset)
+              (not (negative? offset))
+              (symbol? kind))
+      (assertion-violation
+        'editor-jump-view-to-buffer!
+        "expected a View, Buffer, offset, and jump kind"
+        view buffer offset kind))
+    (unless
+      (eq? (editor-view-ref editor (view-id view)) view)
+      (assertion-violation
+        'editor-jump-view-to-buffer!
+        "View does not belong to the editor"
+        view))
+    (jump-view-to-location!
+      editor
+      view
+      (make-buffer-location buffer offset)
+      kind))
+
   (define (editor-begin-async-jump! editor view resource kind)
     (require-open-editor 'editor-begin-async-jump! editor)
     (unless (and (view? view) (string? resource) (symbol? kind))
@@ -308,10 +338,55 @@
       [(editor buffer offset)
        (editor-jump-to-buffer! editor buffer offset 'explicit)]
       [(editor buffer offset kind)
-       (editor-jump-to-location!
-         editor
-         (make-buffer-location buffer offset)
-         kind)]))
+       (let* ([origin (editor-active-view editor)]
+              [request
+                (make-display-request
+                  (buffer-id buffer)
+                  'jump
+                  (view-id origin)
+                  #f
+                  (editor-view-resource-context
+                    editor
+                    (view-id origin)))]
+              [plan (editor-plan-display editor request)]
+              [workbench
+                (editor-workbench-ref
+                  editor
+                  (display-plan-workbench-id plan))])
+         (if (eq? (display-plan-action plan) 'split)
+             (let ([view (editor-display-buffer! editor request)])
+               (view-set-caret! view offset)
+               (ensure-view-visible! view)
+               #t)
+             (let* ([leaf
+                      (window-node-find
+                        (workbench-layout workbench)
+                        (display-plan-window-id plan))]
+                    [view
+                      (editor-view-ref
+                        editor
+                        (window-leaf-view-id leaf))]
+                    [result
+                      (jump-view-to-location!
+                        editor
+                        view
+                        (make-buffer-location buffer offset)
+                        kind)])
+               (editor-set-view-resource-context!
+                 editor
+                 (view-id view)
+                 (display-request-resource-context request))
+               (when (display-plan-role plan)
+                 (workbench-set-slot!
+                   workbench
+                   (display-plan-role plan)
+                   (window-leaf-id leaf)))
+               (when (eq? workbench (editor-active-workbench editor))
+                 (editor-set-active-window-id!
+                   editor
+                   (window-leaf-id leaf))
+                 (editor-set-active-view! editor (view-id view)))
+               result)))]))
 
   (define (valid-step-index editor entries start delta)
     (let loop ([index (+ start delta)])

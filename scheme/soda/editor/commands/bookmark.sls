@@ -106,7 +106,11 @@
                (bookmark-resource entry)
                (make-file-source-position
                  (bookmark-line entry)
-                 (bookmark-column entry)))))]
+                 (bookmark-column entry))
+               'jump
+               (editor-view-resource-context
+                 editor
+                 (view-id view)))))]
         [else
          (editor-set-status-message! editor "Bookmark target is unavailable")
          '()])))

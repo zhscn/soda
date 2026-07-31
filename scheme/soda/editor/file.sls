@@ -8,12 +8,16 @@
           open-request-view-id
           open-request-path
           open-request-offset
+          open-request-display-intent
+          open-request-resource-context
           make-file-source-position
           file-source-position?
           file-source-position-line
           file-source-position-character
           make-open-result
+          make-open-result-for-requests
           open-result?
+          open-result-requests
           open-result-view-id
           open-result-view-ids
           open-result-offsets
@@ -91,6 +95,7 @@
           (soda editor command-runtime)
           (soda editor completion)
           (soda editor condition)
+          (soda editor display-placement)
           (soda editor edit)
           (soda editor event)
           (soda editor keymap)
@@ -98,11 +103,13 @@
           (soda editor prompt)
           (soda editor resource-context)
           (soda editor state)
+          (soda editor window)
+          (soda editor workbench)
           (soda vfs))
 
   (define-record-type
     (open-request %make-open-request open-request?)
-    (fields view-id path offset))
+    (fields view-id path offset display-intent resource-context))
 
   (define-record-type
     (file-source-position
@@ -113,8 +120,7 @@
   (define-record-type
     (open-result %make-open-result open-result?)
     (fields
-      view-ids
-      offsets
+      requests
       path
       status
       data
@@ -165,17 +171,22 @@
             detail
             kind))
 
+  (define (open-result-view-ids result)
+    (map open-request-view-id (open-result-requests result)))
+
+  (define (open-result-offsets result)
+    (map open-request-offset (open-result-requests result)))
+
   (define (open-result-view-id result)
-    (car (open-result-view-ids result)))
+    (open-request-view-id (car (open-result-requests result))))
 
   (define (open-result-offset-for-view result view-id)
-    (let loop ([view-ids (open-result-view-ids result)]
-               [offsets (open-result-offsets result)])
+    (let loop ([requests (open-result-requests result)])
       (and
-        (pair? view-ids)
-        (if (equal? (car view-ids) view-id)
-            (car offsets)
-            (loop (cdr view-ids) (cdr offsets))))))
+        (pair? requests)
+        (if (equal? (open-request-view-id (car requests)) view-id)
+            (open-request-offset (car requests))
+            (loop (cdr requests))))))
 
   (define-record-type
     (save-request %make-save-request save-request?)
@@ -227,6 +238,8 @@
       [(view-id path)
        (make-open-request view-id path #f)]
       [(view-id path offset)
+       (make-open-request view-id path offset #f #f)]
+      [(view-id path offset display-intent resource-context)
        (unless
          (or
            (not view-id)
@@ -246,7 +259,29 @@
            'make-open-request
            "offset must be a byte offset, source position, or #f"
            offset))
-       (%make-open-request view-id path offset)]))
+       (unless
+         (or
+           (not display-intent)
+           (memq display-intent '(edit jump tools doc pop)))
+         (assertion-violation
+           'make-open-request
+           "display intent must be an intent symbol or #f"
+           display-intent))
+       (when (and display-intent (not view-id))
+         (assertion-violation
+           'make-open-request
+           "display placement requires an origin View id"
+           display-intent))
+       (unless
+         (or
+           (not resource-context)
+           (resource-context? resource-context))
+         (assertion-violation
+           'make-open-request
+           "resource context must be a ResourceContext or #f"
+           resource-context))
+       (%make-open-request
+         view-id path offset display-intent resource-context)]))
 
   (define (make-reload-request
             view-id
@@ -395,6 +430,52 @@
          detail
          kind)]))
 
+  (define (make-open-result-for-requests
+            requests path status data error-name detail kind stat)
+    (unless
+      (and (pair? requests) (for-all open-request? requests))
+      (assertion-violation
+        'make-open-result-for-requests
+        "requests must be a non-empty list of open requests"
+        requests))
+    (unless (non-empty-string? path)
+      (assertion-violation
+        'make-open-result-for-requests
+        "path must be a non-empty string"
+        path))
+    (unless (and (integer? status) (exact? status))
+      (assertion-violation
+        'make-open-result-for-requests
+        "status must be an exact integer"
+        status))
+    (unless (bytevector? data)
+      (assertion-violation
+        'make-open-result-for-requests
+        "data must be a bytevector"
+        data))
+    (unless (or (not error-name) (string? error-name))
+      (assertion-violation
+        'make-open-result-for-requests
+        "error name must be a string or #f"
+        error-name))
+    (unless (or (not detail) (string? detail))
+      (assertion-violation
+        'make-open-result-for-requests
+        "detail must be a string or #f"
+        detail))
+    (unless (or (not kind) (symbol? kind))
+      (assertion-violation
+        'make-open-result-for-requests
+        "kind must be a symbol or #f"
+        kind))
+    (unless (or (not stat) (vfs-stat? stat))
+      (assertion-violation
+        'make-open-result-for-requests
+        "stat must be a VFS stat value or #f"
+        stat))
+    (%make-open-result
+      requests path status data error-name detail kind stat))
+
   (define make-open-result
     (case-lambda
       [(request status data detail)
@@ -402,9 +483,8 @@
       [(first second third fourth fifth)
        (if
          (open-request? first)
-         (make-open-result
-           (list (open-request-view-id first))
-           (list (open-request-offset first))
+         (make-open-result-for-requests
+           (list first)
            (open-request-path first)
            second
            third
@@ -425,85 +505,38 @@
          (make-open-result
            view-ids
            (map (lambda (view-id) #f) view-ids)
-           path
-           status
-           data
-           error-name
-           detail
-           kind
-           stat))]
+           path status data error-name detail kind stat))]
       [(views offsets path status data error-name detail kind stat)
        (let ([view-ids (if (list? views) views (list views))])
-       (unless
-         (and
-           (pair? view-ids)
-           (for-all
-             (lambda (view-id)
-               (or
-                 (not view-id)
-                 (exact-non-negative-integer? view-id)))
-             view-ids))
-         (assertion-violation
-           'make-open-result
-           "view ids must be a non-empty list of optional non-negative exact integers"
-           views))
-       (unless
-         (and
-           (list? offsets)
-           (= (length offsets) (length view-ids))
-           (for-all
-             (lambda (offset)
-               (valid-open-position? offset))
+         (unless
+           (and
+             (pair? view-ids)
+             (for-all
+               (lambda (view-id)
+                 (or
+                   (not view-id)
+                   (exact-non-negative-integer? view-id)))
+               view-ids))
+           (assertion-violation
+             'make-open-result
+             "view ids must be a non-empty list of optional non-negative exact integers"
+             views))
+         (unless
+           (and
+             (list? offsets)
+             (= (length offsets) (length view-ids))
+             (for-all valid-open-position? offsets))
+           (assertion-violation
+             'make-open-result
+             "offsets must align with view ids"
              offsets))
-         (assertion-violation
-           'make-open-result
-           "offsets must align with view ids"
-           offsets))
-       (unless (non-empty-string? path)
-         (assertion-violation
-           'make-open-result
-           "path must be a non-empty string"
-           path))
-       (unless (and (integer? status) (exact? status))
-         (assertion-violation
-           'make-open-result
-           "status must be an exact integer"
-           status))
-       (unless (bytevector? data)
-         (assertion-violation
-           'make-open-result
-           "data must be a bytevector"
-           data))
-       (unless (or (not error-name) (string? error-name))
-         (assertion-violation
-           'make-open-result
-           "error name must be a string or #f"
-           error-name))
-       (unless (or (not detail) (string? detail))
-         (assertion-violation
-           'make-open-result
-           "detail must be a string or #f"
-           detail))
-       (unless (or (not kind) (symbol? kind))
-         (assertion-violation
-           'make-open-result
-           "kind must be a symbol or #f"
-           kind))
-       (unless (or (not stat) (vfs-stat? stat))
-         (assertion-violation
-           'make-open-result
-           "stat must be a VFS stat value or #f"
-           stat))
-       (%make-open-result
-         view-ids
-         offsets
-         path
-         status
-         data
-         error-name
-         detail
-         kind
-         stat))]))
+         (make-open-result-for-requests
+           (map
+             (lambda (view-id offset)
+               (make-open-request view-id path offset))
+             view-ids
+             offsets)
+           path status data error-name detail kind stat))]))
 
   (define (detect-file-line-ending bytes)
     (unless (bytevector? bytes)
@@ -954,36 +987,119 @@
           #t)
         #f))
 
-  (define (activate-open-target! editor result buffer view-id)
-    (let* ([view (find-view-by-id editor view-id)]
+  (define (activate-open-request! editor result buffer request)
+    (let* ([origin-view-id (open-request-view-id request)]
+           [view (find-view-by-id editor origin-view-id)]
            [offset
              (open-target-offset
                buffer
-               (open-result-offset-for-view result view-id))]
+               (open-request-offset request))]
            [target-offset
              (and offset (min offset (buffer-byte-length buffer)))])
       (and
         view
-        (or
-          (and target-offset
-               (editor-complete-async-jump!
-                 editor view buffer target-offset (open-result-path result)))
-          (and
-            (activate-buffer! editor view-id buffer)
-            (begin
-              (editor-cancel-async-jump! editor view #f)
-              (when target-offset
-                (view-set-caret! view target-offset))
-              #t))))))
+        (let ([intent (open-request-display-intent request)])
+          (if intent
+              (let* ([placement-request
+                       (make-display-request
+                         (buffer-id buffer)
+                         intent
+                         origin-view-id
+                         #f
+                         (or
+                           (open-request-resource-context request)
+                           (editor-view-resource-context
+                             editor
+                             origin-view-id)))]
+                     [plan
+                       (editor-plan-display
+                         editor
+                         placement-request)]
+                     [planned-workbench
+                       (editor-workbench-ref
+                         editor
+                         (display-plan-workbench-id plan))]
+                     [planned-leaf
+                       (window-node-find
+                         (workbench-layout planned-workbench)
+                         (display-plan-window-id plan))]
+                     [planned-view
+                       (editor-view-ref
+                         editor
+                         (window-leaf-view-id planned-leaf))])
+                (if
+                  (and
+                    (eq? intent 'jump)
+                    target-offset
+                    (not (eq? (display-plan-action plan) 'split))
+                    (not (= (view-id planned-view) origin-view-id)))
+                  (begin
+                    (editor-cancel-async-jump!
+                      editor view (open-result-path result))
+                    (editor-jump-view-to-buffer!
+                      editor
+                      planned-view
+                      buffer
+                      target-offset
+                      'jump)
+                    (editor-display-buffer!
+                      editor
+                      placement-request)
+                    #t)
+                  (let ([target
+                          (editor-display-buffer!
+                            editor
+                            placement-request)])
+                    (if (= (view-id target) origin-view-id)
+                        (or
+                          (and
+                            target-offset
+                            (editor-complete-async-jump!
+                              editor
+                              target
+                              buffer
+                              target-offset
+                              (open-result-path result)))
+                          (begin
+                            (editor-cancel-async-jump!
+                              editor target #f)
+                            (when target-offset
+                              (view-set-caret!
+                                target target-offset))
+                            #t))
+                        (begin
+                          (editor-cancel-async-jump!
+                            editor view (open-result-path result))
+                          (when target-offset
+                            (view-set-caret! target target-offset))
+                          #t)))))
+              (or
+                (and target-offset
+                     (editor-complete-async-jump!
+                       editor
+                       view
+                       buffer
+                       target-offset
+                       (open-result-path result)))
+                (and
+                  (activate-buffer! editor origin-view-id buffer)
+                  (begin
+                    (editor-cancel-async-jump! editor view #f)
+                    (when target-offset
+                      (view-set-caret! view target-offset))
+                    #t))))))))
 
   (define (cancel-open-jumps! editor result)
     (for-each
-      (lambda (view-id)
-        (let ([view (find-view-by-id editor view-id)])
+      (lambda (request)
+        (let ([view
+                (find-view-by-id
+                  editor
+                  (open-request-view-id request))])
           (when view
             (editor-cancel-async-jump!
               editor view (open-result-path result)))))
-      (open-result-view-ids result)))
+      (open-result-requests result)))
 
   (define (view-default-directory editor view-id)
     (let ([view (find-view-by-id editor view-id)])
@@ -1299,16 +1415,16 @@
           (open-result-stat result)))
       (if
         (fold-left
-          (lambda (activated? view-id)
+          (lambda (activated? request)
             (or
-              (activate-open-target!
+              (activate-open-request!
                 editor
                 result
                 buffer
-                view-id)
+                request)
               activated?))
           #f
-          (open-result-view-ids result))
+          (open-result-requests result))
         (editor-set-status-message!
           editor
           (string-append
@@ -1330,16 +1446,16 @@
 
   (define (activate-open-result-buffer! editor result buffer)
     (fold-left
-      (lambda (activated? view-id)
+      (lambda (activated? request)
         (or
-          (activate-open-target!
+          (activate-open-request!
             editor
             result
             buffer
-            view-id)
+            request)
           activated?))
       #f
-      (open-result-view-ids result)))
+      (open-result-requests result)))
 
   (define (apply-open-result-command context)
     (let* ([editor (command-context-editor context)]

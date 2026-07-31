@@ -465,6 +465,7 @@
           editor-location-close!
           editor-jump-to-location!
           editor-jump-to-buffer!
+          editor-jump-view-to-buffer!
           editor-jump-history
           editor-jump-back!
           editor-jump-forward!

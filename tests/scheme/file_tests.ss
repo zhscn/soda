@@ -16,6 +16,7 @@
         (soda editor file-runtime)
         (soda editor vfs-runtime)
         (soda editor keymap)
+        (only (soda editor navigation) editor-begin-async-jump!)
         (soda editor prompt)
         (soda runtime)
         (soda vfs))
@@ -1299,6 +1300,11 @@
 (write-file-bytes
   offset-path
   (string->utf8 "zero\none\ntwo\n"))
+(editor-begin-async-jump!
+  editor
+  (editor-active-view editor)
+  offset-path
+  'test-jump)
 (let ([result
         (execute-effects!
           executor
@@ -1308,7 +1314,11 @@
               (make-open-request
                 origin-view-id
                 offset-path
-                9))))])
+                9
+                'jump
+                (editor-view-resource-context
+                  editor
+                  origin-view-id)))))])
   (unless
     (and
       (effect-result-continue? result)
@@ -1320,7 +1330,10 @@
   (let ([view (editor-active-view editor)])
     (and
       (string=? (buffer-file-path (view-buffer view)) offset-path)
-      (= (view-caret view) 9)))
+      (= (view-caret view) 9)
+      (workbench-slot-window-id
+        (editor-active-workbench editor)
+        'jump)))
   (error 'file-tests
          "positioned open did not restore the requested byte offset"))
 
