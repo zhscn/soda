@@ -8,6 +8,7 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 list(APPEND CMAKE_MODULE_PATH "${PROJECT_SOURCE_DIR}/cmake")
 
 include(FetchContent)
+include(GNUInstallDirs)
 include(SodaChez)
 
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)

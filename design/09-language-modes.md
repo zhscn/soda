@@ -118,10 +118,12 @@ session；普通 commit、undo 和 redo 使用 change 增量同步。native 编�
 apply。临时 transaction 的 syntax view 使用独立 analyzer 分析 speculative
 snapshot，关闭 view 时立即释放。
 
-内建 `json-mode` 覆盖 `.json` 资源并继承 `prog-mode`。JSON profile 使用静态链接
+内建 `json-mode` 覆盖 `.json` 资源并继承 `prog-mode`。JSON profile 使用动态加载
 的 Tree-sitter grammar，提供增量 parse、highlight、fold capture 和 text-object
-capture。query capture 转换为统一的 `SyntaxCapture`；highlight capture 转换为
-base-syntax decoration，renderer 不直接调用 Tree-sitter。
+capture。grammar 可用时 `.json` auto-mode rule 才选择 `json-mode`；显式启用 mode
+时由 syntax provider 建立 parser。query capture 转换为统一的 `SyntaxCapture`；
+highlight capture 转换为 base-syntax decoration，renderer 不直接调用
+Tree-sitter。
 
 ## Syntax provider
 
@@ -225,7 +227,8 @@ language profile 的 delimiter pairs 同时驱动通用 `move.matching-delimiter
 
 ## Tree-sitter runtime
 
-Tree-sitter core 与启用的 grammar 静态链接到 native core，并通过窄 wrapper 接入：
+Tree-sitter core 静态链接到 native core，语言 grammar 作为共享模块加载，并通过窄
+wrapper 接入：
 
 ```text
 TSLanguageHandle
@@ -233,6 +236,18 @@ TSParserHandle
 TSTreeHandle
 TSQueryHandle
 ```
+
+grammar registry 以 language symbol 为键，允许覆盖共享库路径与导出符号。默认约定
+使用 `libtree-sitter-<language>` 和 `tree_sitter_<language>`；加载器依次检查语言
+专用环境变量、grammar search path、可执行文件同目录、安装目录和系统动态库路径。
+创建 parser 前会验证 grammar language ABI 是否落在静态 Tree-sitter core 支持的
+范围内。major mode 显式拥有 parser session；language availability、grammar
+identity 与 parser identity 相互独立，为同语言多个 parser 和 injection layer
+保留空间。
+
+major mode 保存 highlight、indent、navigation、outline 等 provider/query policy，
+grammar 模块只提供 `TSLanguage`。mode setup 根据已声明能力装配这些功能，不从
+grammar 文件推断 editor policy。
 
 文本读取 callback 直接遍历 `Text` chunk，不要求 flatten 整个 buffer。一次
 Document commit 的 normalized changes 转成 `TSInputEdit`，先 edit 旧 tree，再以

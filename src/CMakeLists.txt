@@ -52,16 +52,31 @@ soda_target_warnings(soda_indentation)
 
 add_library(soda_tree_sitter STATIC
   tree_sitter/c_api.cpp
-  "${tree_sitter_json_SOURCE_DIR}/src/parser.c"
 )
 target_include_directories(soda_tree_sitter PUBLIC
   ${CMAKE_CURRENT_SOURCE_DIR}
   "${tree_sitter_SOURCE_DIR}/lib/include"
 )
 target_compile_features(soda_tree_sitter PUBLIC cxx_std_23)
-target_link_libraries(soda_tree_sitter PUBLIC soda_document tree-sitter)
+target_compile_definitions(soda_tree_sitter PRIVATE
+  SODA_TREE_SITTER_INSTALL_LIBDIR="${CMAKE_INSTALL_LIBDIR}"
+)
+target_link_libraries(soda_tree_sitter
+  PUBLIC soda_document tree-sitter
+  PRIVATE "${CMAKE_DL_LIBS}"
+)
 set_target_properties(soda_tree_sitter PROPERTIES POSITION_INDEPENDENT_CODE ON)
 soda_target_warnings(soda_tree_sitter)
+
+add_library(soda_tree_sitter_json MODULE
+  "${tree_sitter_json_SOURCE_DIR}/src/parser.c"
+)
+target_include_directories(soda_tree_sitter_json PRIVATE
+  "${tree_sitter_SOURCE_DIR}/lib/include"
+)
+set_target_properties(soda_tree_sitter_json PROPERTIES
+  OUTPUT_NAME "tree-sitter-json"
+)
 
 add_library(soda_runtime STATIC
   runtime/c_api.cpp
@@ -137,6 +152,7 @@ file(CONFIGURE
 )
 
 add_executable(soda launcher/main.c)
+add_dependencies(soda soda_tree_sitter_json)
 target_include_directories(soda PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}"
   "${soda_generated_dir}"
@@ -196,7 +212,6 @@ if(BUILD_TESTING)
     indentation/expression_continuation.cpp
     indentation/indentation_service.cpp
     tree_sitter/c_api.cpp
-    "${tree_sitter_json_SOURCE_DIR}/src/parser.c"
     runtime/c_api.cpp
     runtime/runtime.cpp
     runtime/terminal_c_api.cpp
@@ -205,9 +220,19 @@ if(BUILD_TESTING)
     PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}"
   )
   target_compile_features(soda_scheme_native_test PUBLIC cxx_std_23)
+  target_compile_definitions(soda_scheme_native_test PRIVATE
+    SODA_TREE_SITTER_INSTALL_LIBDIR="${CMAKE_INSTALL_LIBDIR}"
+  )
   target_include_directories(soda_scheme_native_test PRIVATE
     "${tree_sitter_SOURCE_DIR}/lib/include"
   )
-  target_link_libraries(soda_scheme_native_test PRIVATE uv_a tree-sitter)
+  target_link_libraries(soda_scheme_native_test
+    PRIVATE uv_a tree-sitter "${CMAKE_DL_LIBS}"
+  )
   soda_target_warnings(soda_scheme_native_test)
 endif()
+
+install(
+  TARGETS soda_tree_sitter_json
+  LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}/soda/grammars"
+)

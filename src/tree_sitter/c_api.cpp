@@ -7,11 +7,15 @@
 
 #include <algorithm>
 #include <array>
+#include <cctype>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <exception>
+#include <filesystem>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -19,12 +23,26 @@
 #include <utility>
 #include <vector>
 
-extern "C" const TSLanguage* tree_sitter_json(void);
+#if defined(_WIN32)
+#include <windows.h>
+#else
+#include <dlfcn.h>
+#if defined(__APPLE__)
+#include <mach-o/dyld.h>
+#else
+#include <unistd.h>
+#endif
+#endif
+
+#ifndef SODA_TREE_SITTER_INSTALL_LIBDIR
+#define SODA_TREE_SITTER_INSTALL_LIBDIR "lib"
+#endif
 
 struct soda_ts_parser {
     TSParser* parser = nullptr;
     TSTree* tree = nullptr;
     const TSLanguage* language = nullptr;
+    void* language_library = nullptr;
     soda::Text text;
     std::uint32_t document_id = 0;
     std::uint64_t revision = SODA_TREE_SITTER_REVISION_NONE;
@@ -103,11 +121,200 @@ const soda_ts_parser& parser_handle(const soda_ts_parser* parser) {
     return value;
 }
 
-const TSLanguage* language_by_name(std::string_view name) {
-    if (name == "json") {
-        return tree_sitter_json();
+std::string platform_library_name(std::string_view language, bool prefix) {
+#if defined(_WIN32)
+    (void)prefix;
+    return "tree-sitter-" + std::string(language) + ".dll";
+#elif defined(__APPLE__)
+    return (prefix ? "lib" : "") + std::string("tree-sitter-") + std::string(language) + ".dylib";
+#else
+    return (prefix ? "lib" : "") + std::string("tree-sitter-") + std::string(language) + ".so";
+#endif
+}
+
+char path_list_separator() {
+#if defined(_WIN32)
+    return ';';
+#else
+    return ':';
+#endif
+}
+
+std::optional<std::filesystem::path> executable_path() {
+#if defined(_WIN32)
+    std::array<char, 32768> buffer{};
+    const DWORD length =
+        GetModuleFileNameA(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+    if (length == 0 || length == buffer.size()) {
+        return std::nullopt;
     }
-    throw std::invalid_argument("unknown statically linked Tree-sitter language");
+    return std::filesystem::path(std::string_view(buffer.data(), static_cast<std::size_t>(length)));
+#elif defined(__APPLE__)
+    std::uint32_t size = 0;
+    (void)_NSGetExecutablePath(nullptr, &size);
+    std::string buffer(size, '\0');
+    if (_NSGetExecutablePath(buffer.data(), &size) != 0) {
+        return std::nullopt;
+    }
+    buffer.resize(std::char_traits<char>::length(buffer.c_str()));
+    return std::filesystem::weakly_canonical(buffer);
+#else
+    std::array<char, 4096> buffer{};
+    const auto length = readlink("/proc/self/exe", buffer.data(), buffer.size() - 1);
+    if (length < 0) {
+        return std::nullopt;
+    }
+    return std::filesystem::path(std::string_view(buffer.data(), static_cast<std::size_t>(length)));
+#endif
+}
+
+void* open_library(const std::filesystem::path& path) {
+#if defined(_WIN32)
+    return static_cast<void*>(LoadLibraryA(path.string().c_str()));
+#else
+    return dlopen(path.string().c_str(), RTLD_NOW | RTLD_LOCAL);
+#endif
+}
+
+void close_library(void* library) noexcept {
+#if defined(_WIN32)
+    if (library != nullptr) {
+        (void)FreeLibrary(static_cast<HMODULE>(library));
+    }
+#else
+    if (library != nullptr) {
+        (void)dlclose(library);
+    }
+#endif
+}
+
+void* library_symbol(void* library, const char* symbol) {
+#if defined(_WIN32)
+    return reinterpret_cast<void*>(GetProcAddress(static_cast<HMODULE>(library), symbol));
+#else
+    (void)dlerror();
+    return dlsym(library, symbol);
+#endif
+}
+
+std::string library_error() {
+#if defined(_WIN32)
+    return "dynamic library error " + std::to_string(GetLastError());
+#else
+    const char* error = dlerror();
+    return error == nullptr ? "unknown dynamic library error" : error;
+#endif
+}
+
+std::string language_environment_name(std::string_view language) {
+    std::string result = "SODA_TREE_SITTER_";
+    for (const char character : language) {
+        if (character == '-') {
+            result.push_back('_');
+        } else {
+            result.push_back(
+                static_cast<char>(std::toupper(static_cast<unsigned char>(character))));
+        }
+    }
+    result += "_LIBRARY";
+    return result;
+}
+
+std::vector<std::filesystem::path> language_candidates(std::string_view language,
+                                                       std::string_view override_library) {
+    std::vector<std::filesystem::path> candidates;
+    if (!override_library.empty()) {
+        candidates.emplace_back(override_library);
+        return candidates;
+    }
+    const std::string environment_name = language_environment_name(language);
+    if (const char* configured = std::getenv(environment_name.c_str());
+        configured != nullptr && configured[0] != '\0') {
+        candidates.emplace_back(configured);
+        return candidates;
+    }
+    const std::array names{
+        platform_library_name(language, true),
+        platform_library_name(language, false),
+    };
+    if (const char* search_path = std::getenv("SODA_TREE_SITTER_GRAMMAR_PATH");
+        search_path != nullptr) {
+        std::string_view remaining(search_path);
+        while (!remaining.empty()) {
+            const auto separator = remaining.find(path_list_separator());
+            const std::string_view directory = remaining.substr(0, separator);
+            if (!directory.empty()) {
+                for (const auto& name : names) {
+                    candidates.emplace_back(std::filesystem::path(directory) / name);
+                }
+            }
+            if (separator == std::string_view::npos) {
+                break;
+            }
+            remaining.remove_prefix(separator + 1);
+        }
+    }
+    if (const auto executable = executable_path(); executable.has_value()) {
+        const auto directory = executable->parent_path();
+        for (const auto& name : names) {
+            candidates.emplace_back(directory / name);
+            candidates.emplace_back(directory.parent_path() / SODA_TREE_SITTER_INSTALL_LIBDIR /
+                                    "soda" / "grammars" / name);
+        }
+    }
+    for (const auto& name : names) {
+        candidates.emplace_back(name);
+    }
+    return candidates;
+}
+
+struct LoadedLanguage {
+    void* library = nullptr;
+    const TSLanguage* language = nullptr;
+};
+
+LoadedLanguage load_language(std::string_view name, std::string_view override_library,
+                             std::string_view override_symbol) {
+    if (name.empty() || !std::ranges::all_of(name, [](unsigned char character) {
+            return std::isalnum(character) != 0 || character == '_' || character == '-';
+        })) {
+        throw std::invalid_argument("Tree-sitter language name is invalid");
+    }
+    std::string symbol =
+        override_symbol.empty() ? "tree_sitter_" + std::string(name) : std::string(override_symbol);
+    std::ranges::replace(symbol, '-', '_');
+    std::string failures;
+    for (const auto& candidate : language_candidates(name, override_library)) {
+        void* library = open_library(candidate);
+        if (library == nullptr) {
+            if (!failures.empty()) {
+                failures += "; ";
+            }
+            failures += candidate.string() + ": " + library_error();
+            continue;
+        }
+        using LanguageFunction = const TSLanguage* (*)();
+        auto* function =
+            reinterpret_cast<LanguageFunction>(library_symbol(library, symbol.c_str()));
+        if (function == nullptr) {
+            const std::string error = library_error();
+            close_library(library);
+            std::string message = candidate.string();
+            message += " does not export ";
+            message += symbol;
+            message += ": ";
+            message += error;
+            throw std::runtime_error(message);
+        }
+        const TSLanguage* language = function();
+        if (language == nullptr) {
+            close_library(library);
+            throw std::runtime_error(candidate.string() + " returned a null TSLanguage");
+        }
+        return {.library = library, .language = language};
+    }
+    throw std::runtime_error("unable to load Tree-sitter grammar " + std::string(name) +
+                             (failures.empty() ? std::string{} : ": " + failures));
 }
 
 struct InputPayload {
@@ -190,20 +397,53 @@ const char* soda_tree_sitter_last_error(void) {
     return last_error.data();
 }
 
-soda_ts_parser* soda_ts_parser_create(const char* language) {
+int soda_ts_language_available(const char* language, const char* library, const char* symbol) {
+    return guard(-1, [&] {
+        if (language == nullptr) {
+            throw std::invalid_argument("Tree-sitter language is null");
+        }
+        LoadedLanguage loaded =
+            load_language(language, library == nullptr ? std::string_view{} : library,
+                          symbol == nullptr ? std::string_view{} : symbol);
+        TSParser* parser = ts_parser_new();
+        if (parser == nullptr) {
+            close_library(loaded.library);
+            throw std::runtime_error("Tree-sitter parser allocation failed");
+        }
+        const bool compatible = ts_parser_set_language(parser, loaded.language);
+        const std::uint32_t language_abi = ts_language_abi_version(loaded.language);
+        ts_parser_delete(parser);
+        close_library(loaded.library);
+        if (!compatible) {
+            throw std::runtime_error("Tree-sitter grammar ABI " + std::to_string(language_abi) +
+                                     " is outside the supported range " +
+                                     std::to_string(TREE_SITTER_MIN_COMPATIBLE_LANGUAGE_VERSION) +
+                                     "-" + std::to_string(TREE_SITTER_LANGUAGE_VERSION));
+        }
+        return 1;
+    });
+}
+
+soda_ts_parser* soda_ts_parser_create(const char* language, const char* library,
+                                      const char* symbol) {
     return guard<soda_ts_parser*>(nullptr, [&] {
         if (language == nullptr) {
             throw std::invalid_argument("Tree-sitter language is null");
         }
-        auto* value = new soda_ts_parser;
-        value->language = language_by_name(language);
+        auto value = std::make_unique<soda_ts_parser>();
+        LoadedLanguage loaded =
+            load_language(language, library == nullptr ? std::string_view{} : library,
+                          symbol == nullptr ? std::string_view{} : symbol);
+        value->language = loaded.language;
+        value->language_library = loaded.library;
         value->parser = ts_parser_new();
         if (value->parser == nullptr || !ts_parser_set_language(value->parser, value->language)) {
             ts_parser_delete(value->parser);
-            delete value;
-            throw std::runtime_error("Tree-sitter language is incompatible");
+            close_library(value->language_library);
+            value->language_library = nullptr;
+            throw std::runtime_error("Tree-sitter grammar ABI is incompatible");
         }
-        return value;
+        return value.release();
     });
 }
 
@@ -216,6 +456,7 @@ void soda_ts_parser_destroy(soda_ts_parser* parser) {
     }
     ts_tree_delete(parser->tree);
     ts_parser_delete(parser->parser);
+    close_library(parser->language_library);
     delete parser;
 }
 

@@ -6,6 +6,17 @@
 (define document
   (make-document "{\"name\":\"soda\",\"count\":1}" 81))
 (define snapshot (document-snapshot document))
+(unless
+  (and
+    (tree-sitter-language-available? 'json)
+    (not (tree-sitter-language-available? 'missing-language)))
+  (error 'tree-sitter-tests
+         "dynamic grammar availability differs"))
+(register-tree-sitter-language! 'json #f "missing_tree_sitter_json")
+(unless (not (tree-sitter-language-available? 'json))
+  (error 'tree-sitter-tests
+         "grammar entry-symbol override was ignored"))
+(register-tree-sitter-language! 'json)
 (define parser (make-tree-sitter-parser 'json))
 
 (tree-sitter-parser-parse! parser snapshot)

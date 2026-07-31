@@ -836,13 +836,22 @@
         '(".c" ".cc" ".cpp" ".cxx"
           ".h" ".hh" ".hpp" ".hxx")
         'cpp-mode))
-    (editor-register-auto-mode-rule!
-      editor
-      (make-file-suffix-auto-mode-rule
-        'json-files
-        0
-        '(".json")
-        'json-mode))
+    (let ([suffix-rule
+            (make-file-suffix-auto-mode-rule
+              'json-files.suffix
+              0
+              '(".json")
+              'json-mode)])
+      (editor-register-auto-mode-rule!
+        editor
+        (make-auto-mode-rule
+          'json-files
+          0
+          (lambda (path)
+            (and
+              (json-language-ready?)
+              ((auto-mode-rule-matcher suffix-rule) path)))
+          'json-mode)))
     editor)
 
   (define (make-editor buffer)
