@@ -1070,15 +1070,60 @@
 
   (define (rebuild-session-items! session selected-item)
     (let* ([query (or (completion-session-query session) "")]
+           [target (completion-session-target session)]
+           [semantic-key
+             (lambda (item)
+               (let ([edit (completion-item-edit item)])
+                 (list
+                   (if edit
+                       (completion-text-edit-new-text
+                         (completion-edit-insert edit))
+                       (completion-item-insert-text item))
+                   (if edit
+                       (cons
+                         (completion-text-edit-start
+                           (completion-edit-insert edit))
+                         (completion-text-edit-end
+                           (completion-edit-insert edit)))
+                       (cons
+                         (if
+                           (document-completion-target? target)
+                           (document-completion-target-start target)
+                           (prompt-completion-target-start target))
+                         (if
+                           (document-completion-target? target)
+                           (document-completion-target-end target)
+                           (prompt-completion-target-end target))))
+                   (completion-item-kind item))))]
+           [deduplicated
+             (let loop
+               ([remaining
+                  (fold-right
+                    append
+                    '()
+                    (map
+                      completion-provider-result-items
+                      (completion-session-provider-results session)))]
+                [keys '()]
+                [result '()])
+               (if
+                 (null? remaining)
+                 (reverse result)
+                 (let ([key (semantic-key (car remaining))])
+                   (if
+                     (exists
+                       (lambda (candidate)
+                         (equal? candidate key))
+                       keys)
+                     (loop (cdr remaining) keys result)
+                     (loop
+                       (cdr remaining)
+                       (cons key keys)
+                       (cons (car remaining) result))))))]
            [matched
              (match-items
                (completion-session-source session)
-               (fold-right
-                 append
-                 '()
-                 (map
-                   completion-provider-result-items
-                   (completion-session-provider-results session)))
+               deduplicated
                query)]
            [items (map car matched)]
            [matches (map cdr matched)]

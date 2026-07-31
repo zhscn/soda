@@ -4390,6 +4390,44 @@
              (buffer-closed? prompt-buffer))
   (error 'editor-tests "prompt editor did not release its resources"))
 
+(let* ([source
+         (make-choice-source
+           'deduplication-test
+           '((category . deduplication-test))
+           (lambda (input point) (cons 0 point))
+           (lambda (query)
+             (list
+               (make-completion-item
+                 'left
+                 'left-provider
+                 "same"
+                 "same"
+                 "same"
+                 "left"
+                 #f
+                 'left)
+               (make-completion-item
+                 'right
+                 'right-provider
+                 "same"
+                 "same"
+                 "same"
+                 "right"
+                 #f
+                 'right)))
+           (lambda (value) #f)
+           (lambda (generation) #f))]
+       [session
+         (make-completion-session
+           939
+           (make-prompt-completion-target 939 0 0)
+           source)])
+  (completion-session-refresh! session "")
+  (unless
+    (= (length (completion-session-items session)) 1)
+    (error 'editor-tests
+           "semantically equivalent completion items were not deduplicated")))
+
 (define completion-document
   (make-document (string->utf8 "alpha alpine beta al") 940))
 (define completion-buffer

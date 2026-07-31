@@ -546,6 +546,7 @@
           completion-selection-policy-domain
           completion-selection-policy-initial
           completion-selection-policy-cycle?
+          make-completion-session
           completion-session?
           completion-session-id
           completion-session-target
@@ -592,6 +593,7 @@
           completion-session-selected-index
           completion-session-viewport-start
           completion-session-selected-item
+          completion-session-refresh!
           install-prompt-effect-handler!
           command-effect?
           command-effect-kind
