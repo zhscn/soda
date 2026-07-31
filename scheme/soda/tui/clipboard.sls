@@ -58,17 +58,26 @@
         (base64-encode bytes)
         (string (integer->char 7)))))
 
-  (define (install-terminal-clipboard-effect-handler!
-            executor queue-control-output!)
-    (register-effect-handler!
-      executor
-      'terminal.clipboard-copy
-      (lambda (payload)
-        (unless (and (list? payload)
-                     (= (length payload) 2)
-                     (bytevector? (car payload)))
-          (assertion-violation
-            'terminal.clipboard-copy "invalid clipboard payload" payload))
-        (let ([control (osc52-copy-control (car payload) (cadr payload))])
-          (when control (queue-control-output! control)))
-        (make-effect-result #t '())))))
+  (define install-terminal-clipboard-effect-handler!
+    (case-lambda
+      [(executor queue-control-output!)
+       (install-terminal-clipboard-effect-handler!
+         executor queue-control-output! #t 100000)]
+      [(executor queue-control-output! osc52-supported? maximum)
+       (unless (boolean? osc52-supported?)
+         (assertion-violation
+           'install-terminal-clipboard-effect-handler!
+           "OSC 52 capability must be a boolean"
+           osc52-supported?))
+       (register-effect-handler!
+         executor
+         'clipboard.write
+         (lambda (payload)
+           (unless (bytevector? payload)
+             (assertion-violation
+               'clipboard.write "invalid clipboard payload" payload))
+           (when osc52-supported?
+             (let ([control (osc52-copy-control payload maximum)])
+               (when control (queue-control-output! control))))
+           (make-effect-result #t '())))]))
+)

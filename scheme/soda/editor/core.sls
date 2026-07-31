@@ -1071,9 +1071,6 @@
   (define (final-newline-policy? value)
     (memq value '(preserve ensure remove)))
 
-  (define (clipboard-integration? value)
-    (memq value '(internal osc52)))
-
   (define (install-core-settings! editor)
     (for-each
       (lambda (definition)
@@ -1250,19 +1247,7 @@
             (or (not value)
                 (and (integer? value) (exact? value) (not (negative? value)))))
           "Maximum blank lines retained at end of file, or #f for no limit."
-          'document)
-        (make-setting-definition
-          'clipboard-integration
-          'osc52
-          clipboard-integration?
-          "Clipboard backend used by explicit clipboard copy commands."
-          'chrome)
-        (make-setting-definition
-          'clipboard-osc52-max-bytes
-          100000
-          positive-exact-integer?
-          "Maximum source byte length sent through OSC 52."
-          'chrome)))
+          'document)))
     editor)
 
   (define (install-core-auto-modes! editor)

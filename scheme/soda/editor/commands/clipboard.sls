@@ -21,7 +21,7 @@
         'prefer #t command-context-point-target)))
 
   (define-command (clipboard-copy-region-command context target)
-    "Copy the active region to the kill ring and configured clipboard."
+    "Copy the active region to the kill ring and runtime clipboard."
     (interactive copy-target-reader)
     (let* ([editor (command-context-editor context)]
            [view (command-context-view context)]
@@ -36,27 +36,8 @@
               '())
             (begin
               (view-deactivate-mark! view)
-              (if (eq? (buffer-setting-ref
-                         buffer 'clipboard-integration 'osc52)
-                       'osc52)
-                  (let ([maximum
-                          (buffer-setting-ref
-                            buffer 'clipboard-osc52-max-bytes 100000)])
-                    (if (> (bytevector-length bytes) maximum)
-                        (begin
-                          (editor-set-status-message!
-                            editor "Region copied internally; OSC 52 limit exceeded")
-                          '())
-                        (begin
-                          (editor-set-status-message!
-                            editor "Region copied to clipboard")
-                          (list
-                            (make-command-effect
-                              'terminal.clipboard-copy
-                              (list bytes maximum))))))
-                  (begin
-                    (editor-set-status-message! editor "Region copied internally")
-                    '())))))))
+              (editor-set-status-message! editor "Region copied")
+              (list (make-command-effect 'clipboard.write bytes)))))))
 
   (define-command (clipboard-paste-command context target)
     "Paste the current kill-ring entry through the normal edit path."
@@ -83,7 +64,7 @@
         (list
           'clipboard.copy-region
           clipboard-copy-region-command
-          "Copy the region to the kill ring and configured clipboard.")
+          "Copy the region to the kill ring and runtime clipboard.")
         (list
           'clipboard.paste
           clipboard-paste-command

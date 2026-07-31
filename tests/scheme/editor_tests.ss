@@ -3064,9 +3064,9 @@
   (and
     (= (length clipboard-effects) 1)
     (eq? (command-effect-kind (car clipboard-effects))
-         'terminal.clipboard-copy)
+         'clipboard.write)
     (bytevector=?
-      (car (command-effect-payload (car clipboard-effects)))
+      (command-effect-payload (car clipboard-effects))
       (string->utf8 "copy"))
     (bytevector=?
       (car (editor-kill-ring clipboard-editor))
@@ -3088,6 +3088,17 @@
         (string (integer->char 7))))
     (not (osc52-copy-control (string->utf8 "copy") 3)))
   (error 'editor-tests "clipboard copy did not encode OSC 52 output"))
+(let ([unsupported-control #f]
+      [unsupported-executor (make-effect-executor)])
+  (install-terminal-clipboard-effect-handler!
+    unsupported-executor
+    (lambda (control) (set! unsupported-control control))
+    #f
+    100000)
+  (execute-effects! unsupported-executor clipboard-effects)
+  (when unsupported-control
+    (error 'editor-tests
+           "unsupported terminal emitted OSC 52 clipboard output")))
 (view-set-caret! clipboard-view 4)
 (editor-update!
   clipboard-editor
@@ -3097,17 +3108,6 @@
     (buffer-bytes clipboard-buffer)
     (string->utf8 "copycopy"))
   (error 'editor-tests "clipboard paste bypassed the normal yank path"))
-(buffer-undo! clipboard-buffer)
-(editor-set-buffer-setting!
-  clipboard-editor clipboard-buffer 'clipboard-integration 'internal)
-(view-set-mark! clipboard-view 0)
-(view-set-caret! clipboard-view 4)
-(unless
-  (null?
-    (editor-update!
-      clipboard-editor
-      (make-command-message 'clipboard.copy-region #f)))
-  (error 'editor-tests "internal clipboard mode emitted terminal output"))
 (editor-close! clipboard-editor)
 
 (define yank-pop-document (make-document "" 977))
