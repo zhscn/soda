@@ -2953,6 +2953,28 @@
     (buffer-bytes align-regexp-buffer)
     (string->utf8 "a=1\nlong=2\nx =3\n"))
   (error 'editor-tests "align-regexp was not one transaction"))
+(buffer-replace-range!
+  align-regexp-buffer
+  0
+  (bytevector-length (buffer-bytes align-regexp-buffer))
+  (string->utf8 "\t=1\n你好=2\nabc=3\n"))
+(view-set-mark! align-regexp-view 0)
+(view-set-caret!
+  align-regexp-view
+  (bytevector-length (buffer-bytes align-regexp-buffer)))
+(dispatch-align-regexp-effects!
+  (editor-update!
+    align-regexp-editor
+    (make-command-message 'edit.align-regexp #f)))
+(send! align-regexp-editor align-regexp-decoder (string->utf8 "="))
+(dispatch-align-regexp-effects!
+  (send! align-regexp-editor align-regexp-decoder (bytes 13)))
+(unless
+  (bytevector=?
+    (buffer-bytes align-regexp-buffer)
+    (string->utf8 "\t=1\n你好    =2\nabc     =3\n"))
+  (error 'editor-tests
+         "align-regexp did not use terminal display columns"))
 (editor-close! align-regexp-editor)
 
 (define whitespace-cleanup-buffer
@@ -3004,6 +3026,22 @@
     (buffer-bytes whitespace-cleanup-buffer)
     (string->utf8 "a\nb"))
   (error 'editor-tests "whitespace cleanup ignored final newline policy"))
+(buffer-replace-range!
+  whitespace-cleanup-buffer
+  0
+  (bytevector-length (buffer-bytes whitespace-cleanup-buffer))
+  (string->utf8 "a  x\n"))
+(view-set-mark! whitespace-cleanup-view 0)
+(view-set-caret! whitespace-cleanup-view 3)
+(editor-update!
+  whitespace-cleanup-editor
+  (make-command-message 'edit.whitespace-cleanup #f))
+(unless
+  (bytevector=?
+    (buffer-bytes whitespace-cleanup-buffer)
+    (string->utf8 "a  x\n"))
+  (error 'editor-tests
+         "whitespace cleanup treated a region boundary as line end"))
 (editor-close! whitespace-cleanup-editor)
 
 (define clipboard-buffer

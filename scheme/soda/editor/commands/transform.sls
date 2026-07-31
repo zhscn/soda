@@ -8,7 +8,9 @@
           (soda editor command-target)
           (soda editor condition)
           (soda editor edit)
+          (soda editor display)
           (soda editor keymap)
+          (soda editor line-range)
           (soda editor motion-runtime)
           (soda editor regexp)
           (soda editor state))
@@ -399,22 +401,7 @@
            #f]
           [else (loop (+ offset 1))]))))
 
-  (define (range-lines text start end)
-    (let loop ([offset start] [line-start start] [result '()])
-      (cond
-        [(= offset end)
-         (reverse
-           (if (< line-start end)
-               (cons (text-subbytevector text line-start end) result)
-               result))]
-        [(= (text-byte-at text offset) 10)
-         (loop
-           (+ offset 1)
-           (+ offset 1)
-           (cons
-             (text-subbytevector text line-start offset)
-             result))]
-        [else (loop (+ offset 1) line-start result)])))
+  (define range-lines text-range-lines)
 
   (define region-transform-target-reader
     (make-command-target-reader
@@ -449,24 +436,7 @@
           (buffer-replace-range! buffer start end replacement)))
       '()))
 
-  (define (full-line-range text start end)
-    (let* ([start-line (car (text-position text start))]
-           [first
-             (if (= start (text-line-start text start-line))
-                 start-line
-                 (+ start-line 1))]
-           [end-line (car (text-position text end))]
-           [last
-             (cond
-               [(= end (text-line-start text end-line)) (- end-line 1)]
-               [(>= end (text-line-content-end text end-line)) end-line]
-               [else (- end-line 1)])])
-      (and
-        (<= first last)
-        (< first (text-line-count text))
-        (cons
-          (text-line-start text first)
-          (text-line-content-end text last)))))
+  (define full-line-range text-complete-line-range)
 
   (define-command (reverse-region-command context target)
     "Reverse complete lines in the active region."
@@ -595,26 +565,39 @@
       0
       (bytevector-length line)))
 
-  (define (align-lines lines pattern)
+  (define (line-byte-column line offset tab-width)
+    (string-cell-width
+      (utf8->string (bytevector-slice line 0 offset))
+      tab-width))
+
+  (define (align-lines lines pattern tab-width)
     (let* ([matches
              (map (lambda (line) (align-line-match line pattern)) lines)]
            [column
              (fold-left
-               (lambda (maximum match)
-                 (if match (max maximum (car match)) maximum))
+               (lambda (maximum line match)
+                 (if match
+                     (max
+                       maximum
+                       (line-byte-column line (car match) tab-width))
+                     maximum))
                0
+               lines
                matches)])
       (map
         (lambda (line match)
-          (if (or (not match) (= (car match) column))
-              line
-              (let* ([position (car match)]
-                     [padding (make-bytevector (- column position) 32)])
-                (append-bytevectors
-                  (bytevector-slice line 0 position)
-                  padding
-                  (bytevector-slice
-                    line position (bytevector-length line))))))
+          (let ([current
+                  (and match
+                       (line-byte-column line (car match) tab-width))])
+            (if (or (not match) (= current column))
+                line
+                (let* ([position (car match)]
+                       [padding (make-bytevector (- column current) 32)])
+                  (append-bytevectors
+                    (bytevector-slice line 0 position)
+                    padding
+                    (bytevector-slice
+                      line position (bytevector-length line)))))))
         lines
         matches)))
 
@@ -638,9 +621,11 @@
             (let* ([trailing-newline?
                      (= (text-byte-at text (- end 1)) 10)]
                    [lines (range-lines text start end)]
+                   [tab-width
+                     (buffer-setting-ref buffer 'tab-width 8)]
                    [replacement
                      (join-lines
-                       (align-lines lines pattern)
+                       (align-lines lines pattern tab-width)
                        trailing-newline?)])
               (buffer-replace-range! buffer start end replacement)))))
       '()))
@@ -707,13 +692,23 @@
         (with-document-text
           (buffer-document buffer)
           (lambda (text)
-            (let* ([trailing-newline? (= (text-byte-at text (- end 1)) 10)]
-                   [lines (range-lines text start end)]
+            (let* ([fragments
+                     (text-range-line-fragments text start end)]
+                   [trailing-newline?
+                     (text-range-trailing-newline? text start end)]
                    [cleaned-lines
                      (if (buffer-setting-ref
                            buffer 'whitespace-cleanup-trailing? #t)
-                         (map trim-line-trailing-whitespace lines)
-                         lines)]
+                         (map
+                           (lambda (fragment)
+                             (if
+                               (text-line-fragment-reaches-content-end?
+                                 fragment)
+                               (trim-line-trailing-whitespace
+                                 (text-line-fragment-content fragment))
+                               (text-line-fragment-content fragment)))
+                           fragments)
+                         (map text-line-fragment-content fragments))]
                    [cleaned (join-lines cleaned-lines trailing-newline?)]
                    [replacement
                      (if whole-buffer?
