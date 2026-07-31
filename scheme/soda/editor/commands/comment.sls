@@ -8,6 +8,7 @@
           (soda editor command-target)
           (soda editor condition)
           (soda editor keymap)
+          (soda editor setting)
           (soda editor state))
 
   (define (bytevector-prefix-at? text offset prefix)
@@ -188,6 +189,19 @@
       '()))
 
   (define (install-comment-commands! editor)
+    (for-each
+      (lambda (entry)
+        (editor-register-setting!
+          editor
+          (make-setting-definition
+            (car entry)
+            #f
+            (lambda (value) (or (not value) (string? value)))
+            (cadr entry)
+            'document)))
+      '((comment-line-prefix "Line comment prefix used by comment commands.")
+        (comment-block-start "Opening delimiter used by block comments.")
+        (comment-block-end "Closing delimiter used by block comments.")))
     (editor-register-command!
       editor
       (make-interactive-context-command

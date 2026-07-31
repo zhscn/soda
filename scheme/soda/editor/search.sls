@@ -12,6 +12,7 @@
           (soda editor navigation)
           (soda editor prompt)
           (soda editor regexp)
+          (soda editor setting)
           (soda editor state))
 
   (define-record-type search-session
@@ -807,6 +808,21 @@
       modifiers))
 
   (define (install-search-commands! editor)
+    (for-each
+      (lambda (entry)
+        (editor-register-setting!
+          editor
+          (make-setting-definition
+            (car entry)
+            'smart
+            (lambda (value)
+              (memq value '(sensitive insensitive smart)))
+            (cadr entry)
+            'chrome)))
+      '((search-literal-case-policy
+          "Case policy for literal search and replacement.")
+        (search-regexp-case-policy
+          "Case policy for regexp search and replacement.")))
     (for-each
       (lambda (entry)
         (editor-register-command!

@@ -13,6 +13,7 @@
           (soda editor line-range)
           (soda editor motion-runtime)
           (soda editor regexp)
+          (soda editor setting)
           (soda editor state))
 
   (define (with-document-text document procedure)
@@ -794,6 +795,31 @@
       modifiers))
 
   (define (install-transform-commands! editor)
+    (for-each
+      (lambda (definition)
+        (editor-register-setting! editor definition))
+      (list
+        (make-setting-definition
+          'whitespace-cleanup-trailing?
+          #t
+          boolean?
+          "Whether whitespace cleanup removes trailing horizontal whitespace."
+          'document)
+        (make-setting-definition
+          'whitespace-cleanup-final-newline
+          'ensure
+          (lambda (value) (memq value '(preserve ensure remove)))
+          "Final newline policy used by whole-buffer whitespace cleanup."
+          'document)
+        (make-setting-definition
+          'whitespace-cleanup-max-final-blank-lines
+          0
+          (lambda (value)
+            (or (not value)
+                (and
+                  (integer? value) (exact? value) (not (negative? value)))))
+          "Maximum blank lines retained at end of file, or #f for no limit."
+          'document)))
     (for-each
       (lambda (entry)
         (editor-register-command!

@@ -1065,12 +1065,6 @@
   (define (symbol-list? value)
     (and (list? value) (for-all symbol? value)))
 
-  (define (search-case-policy? value)
-    (memq value '(sensitive insensitive smart)))
-
-  (define (final-newline-policy? value)
-    (memq value '(preserve ensure remove)))
-
   (define (install-core-settings! editor)
     (for-each
       (lambda (definition)
@@ -1118,30 +1112,6 @@
           #f
           boolean?
           "Whether indentation commands may insert tab characters."
-          'document)
-        (make-setting-definition
-          'comment-line-prefix
-          #f
-          (lambda (value) (or (not value) (string? value)))
-          "Line comment prefix used by comment commands."
-          'document)
-        (make-setting-definition
-          'comment-block-start
-          #f
-          (lambda (value) (or (not value) (string? value)))
-          "Opening delimiter used by block comment commands."
-          'document)
-        (make-setting-definition
-          'comment-block-end
-          #f
-          (lambda (value) (or (not value) (string? value)))
-          "Closing delimiter used by block comment commands."
-          'document)
-        (make-setting-definition
-          'fill-column
-          80
-          positive-exact-integer?
-          "Preferred column for paragraph filling."
           'document)
         (make-setting-definition
           'read-only?
@@ -1215,39 +1185,7 @@
           #f
           (lambda (value) (or (not value) (word-motion? value)))
           "Mode-specific word motion protocol."
-          'cursor)
-        (make-setting-definition
-          'search-literal-case-policy
-          'smart
-          search-case-policy?
-          "Case policy for literal search and replacement."
-          'chrome)
-        (make-setting-definition
-          'search-regexp-case-policy
-          'smart
-          search-case-policy?
-          "Case policy for regexp search and replacement."
-          'chrome)
-        (make-setting-definition
-          'whitespace-cleanup-trailing?
-          #t
-          boolean?
-          "Whether whitespace cleanup removes trailing horizontal whitespace."
-          'document)
-        (make-setting-definition
-          'whitespace-cleanup-final-newline
-          'ensure
-          final-newline-policy?
-          "Final newline policy used by whole-buffer whitespace cleanup."
-          'document)
-        (make-setting-definition
-          'whitespace-cleanup-max-final-blank-lines
-          0
-          (lambda (value)
-            (or (not value)
-                (and (integer? value) (exact? value) (not (negative? value)))))
-          "Maximum blank lines retained at end of file, or #f for no limit."
-          'document)))
+          'cursor)))
     editor)
 
   (define (install-core-auto-modes! editor)

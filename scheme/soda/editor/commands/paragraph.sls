@@ -10,6 +10,7 @@
           (soda editor keymap)
           (soda editor minor-mode)
           (soda editor minor-mode-runtime)
+          (soda editor setting)
           (soda editor state))
 
   (define (line-blank? text line)
@@ -276,6 +277,15 @@
     #f))
 
   (define (install-paragraph-commands! editor)
+    (editor-register-setting!
+      editor
+      (make-setting-definition
+        'fill-column
+        80
+        (lambda (value)
+          (and (integer? value) (exact? value) (positive? value)))
+        "Preferred column for paragraph filling."
+        'document))
     (editor-register-command!
       editor
       (make-interactive-context-command
