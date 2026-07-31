@@ -35,6 +35,32 @@
           editor-delete-window!
           editor-delete-other-windows!
           editor-other-window!
+          editor-workbenches
+          editor-workbench-ref
+          editor-active-workbench
+          editor-workbench-for-view
+          editor-create-workbench!
+          editor-switch-workbench!
+          editor-close-workbench!
+          editor-workbench-adopt-project!
+          editor-workbench-remove-project!
+          make-workbench
+          workbench?
+          workbench-id
+          workbench-name
+          workbench-scope
+          workbench-layout
+          workbench-active-window-id
+          workbench-mru
+          workbench-slots
+          workbench-pinned-window-ids
+          workbench-set-slot!
+          workbench-clear-slot!
+          workbench-slot-window-id
+          workbench-window-role
+          workbench-pin-window!
+          workbench-unpin-window!
+          workbench-window-pinned?
           window-leaf?
           window-leaf-id
           window-leaf-view-id
@@ -1111,7 +1137,9 @@
           (soda editor tree-sitter-languages)
           (soda editor update)
           (soda editor window)
-          (soda editor window-runtime))
+          (soda editor window-runtime)
+          (soda editor workbench)
+          (soda editor workbench-commands))
 
   (define (positive-exact-integer? value)
     (and (integer? value) (exact? value) (positive? value)))
@@ -1344,6 +1372,7 @@
       (install-prompt-commands! editor)
       (install-search-commands! editor)
       (install-window-commands! editor)
+      (install-workbench-commands! editor)
       (install-scheme-help-commands!
         editor scheme-workspace)
       (install-scheme-document-highlights!

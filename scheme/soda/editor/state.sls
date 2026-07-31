@@ -27,6 +27,15 @@
           editor-set-window-root!
           editor-set-active-window-id!
           editor-allocate-window-id!
+          editor-workbenches
+          editor-workbench-ref
+          editor-active-workbench
+          editor-workbench-for-view
+          editor-create-workbench!
+          editor-switch-workbench!
+          editor-close-workbench!
+          editor-workbench-adopt-project!
+          editor-workbench-remove-project!
           editor-prompts
           editor-active-prompt
           editor-open-prompt!
@@ -269,6 +278,7 @@
           (soda editor theme)
           (soda editor themes catppuccin)
           (soda editor window)
+          (soda editor workbench)
           (soda vfs))
 
   (define-record-type (view %make-view view?)
@@ -341,6 +351,16 @@
       (mutable next-window-id
                editor-next-window-id
                editor-next-window-id-set!)
+      (immutable workbench-table editor-workbench-table)
+      (mutable workbench-ids
+               editor-workbench-ids
+               editor-workbench-ids-set!)
+      (mutable active-workbench-id
+               editor-active-workbench-id
+               editor-active-workbench-id-set!)
+      (mutable next-workbench-id
+               editor-next-workbench-id
+               editor-next-workbench-id-set!)
       (immutable prompt-table editor-prompt-table)
       (mutable prompt-ids editor-prompt-ids editor-prompt-ids-set!)
       (mutable next-prompt-id
@@ -1516,12 +1536,16 @@
     (let ([view (editor-view-ref value id)])
       (when
         (exists
-          (lambda (leaf)
-            (= (window-leaf-view-id leaf) id))
-          (window-node-leaves (editor-window-root value)))
+          (lambda (workbench)
+            (exists
+              (lambda (leaf)
+                (= (window-leaf-view-id leaf) id))
+              (window-node-leaves
+                (workbench-layout workbench))))
+          (editor-workbenches value))
         (assertion-violation
           'editor-close-view!
-          "displayed views are owned by their editor window"
+          "displayed views are owned by their workbench window"
           id))
       (when (= (length (editor-view-ids value)) 1)
         (assertion-violation
@@ -1566,6 +1590,152 @@
     (require-open-editor 'editor-active-view value)
     (editor-view-ref value (editor-active-view-id value)))
 
+  (define (editor-workbenches value)
+    (require-open-editor 'editor-workbenches value)
+    (table-values
+      (editor-workbench-table value)
+      (editor-workbench-ids value)))
+
+  (define (editor-workbench-ref value id)
+    (require-open-editor 'editor-workbench-ref value)
+    (unless (and (integer? id) (exact? id) (positive? id))
+      (assertion-violation
+        'editor-workbench-ref
+        "workbench id must be a positive exact integer"
+        id))
+    (or
+      (hashtable-ref (editor-workbench-table value) id #f)
+      (assertion-violation
+        'editor-workbench-ref
+        "unknown workbench id"
+        id)))
+
+  (define (editor-active-workbench value)
+    (require-open-editor 'editor-active-workbench value)
+    (editor-workbench-ref value (editor-active-workbench-id value)))
+
+  (define (editor-workbench-for-view value view-id)
+    (require-open-editor 'editor-workbench-for-view value)
+    (editor-view-ref value view-id)
+    (find
+      (lambda (workbench)
+        (exists
+          (lambda (leaf)
+            (= (window-leaf-view-id leaf) view-id))
+          (window-node-leaves (workbench-layout workbench))))
+      (editor-workbenches value)))
+
+  (define (editor-create-workbench! value name scope)
+    (require-open-editor 'editor-create-workbench! value)
+    (when (editor-active-prompt value)
+      (assertion-violation
+        'editor-create-workbench!
+        "cannot create a workbench while the minibuffer is active"))
+    (let* ([source (editor-active-view value)]
+           [view
+             (editor-open-view!
+               value
+               (buffer-id (view-buffer source)))]
+           [window-id (editor-allocate-window-id! value)]
+           [layout (make-window-leaf window-id (view-id view))]
+           [id (editor-next-workbench-id value)]
+           [workbench
+             (make-workbench
+               id
+               name
+               scope
+               layout
+               window-id
+               (list (buffer-id (view-buffer view)))
+               '()
+               '())])
+      (hashtable-set!
+        (editor-workbench-table value)
+        id
+        workbench)
+      (editor-workbench-ids-set!
+        value
+        (append (editor-workbench-ids value) (list id)))
+      (editor-next-workbench-id-set! value (+ id 1))
+      workbench))
+
+  (define (editor-switch-workbench! value id)
+    (require-open-editor 'editor-switch-workbench! value)
+    (when (editor-active-prompt value)
+      (assertion-violation
+        'editor-switch-workbench!
+        "cannot switch workbench while the minibuffer is active"))
+    (let ([target (editor-workbench-ref value id)])
+      (unless (= id (editor-active-workbench-id value))
+        (editor-active-workbench-id-set! value id)
+        (editor-window-root-set! value (workbench-layout target))
+        (editor-active-window-id-set!
+          value
+          (workbench-active-window-id target))
+        (let ([leaf
+                (window-node-find
+                  (workbench-layout target)
+                  (workbench-active-window-id target))])
+          (editor-active-view-id-set!
+            value
+            (window-leaf-view-id leaf)))
+        (editor-invalidate! value 'layout))
+      target))
+
+  (define (editor-close-workbench! value id)
+    (require-open-editor 'editor-close-workbench! value)
+    (when (null? (cdr (editor-workbench-ids value)))
+      (assertion-violation
+        'editor-close-workbench!
+        "an open editor requires at least one workbench"))
+    (let* ([target (editor-workbench-ref value id)]
+           [view-ids
+             (map
+               window-leaf-view-id
+               (window-node-leaves (workbench-layout target)))])
+      (when (= id (editor-active-workbench-id value))
+        (editor-switch-workbench!
+          value
+          (find
+            (lambda (candidate) (not (= candidate id)))
+            (editor-workbench-ids value))))
+      (hashtable-delete! (editor-workbench-table value) id)
+      (editor-workbench-ids-set!
+        value
+        (remv id (editor-workbench-ids value)))
+      (for-each
+        (lambda (view-id)
+          (editor-close-view! value view-id))
+        view-ids)
+      (editor-invalidate! value 'layout)
+      target))
+
+  (define (editor-workbench-adopt-project! value workbench-id project)
+    (require-open-editor 'editor-workbench-adopt-project! value)
+    (unless (project? project)
+      (assertion-violation
+        'editor-workbench-adopt-project!
+        "expected a project"
+        project))
+    (editor-remember-project! value project)
+    (let ([scope
+            (workbench-adopt-project!
+              (editor-workbench-ref value workbench-id)
+              (project-id project))])
+      (editor-invalidate! value 'configuration)
+      scope))
+
+  (define (editor-workbench-remove-project!
+            value workbench-id project-id)
+    (require-open-editor 'editor-workbench-remove-project! value)
+    (let ([removed
+            (workbench-remove-project!
+              (editor-workbench-ref value workbench-id)
+              project-id)])
+      (when removed
+        (editor-invalidate! value 'configuration))
+      removed))
+
   (define (editor-set-window-root! value root)
     (require-open-editor 'editor-set-window-root! value)
     (unless (window-node? root)
@@ -1582,7 +1752,12 @@
       (window-node-find root (editor-active-window-id value))
       (editor-active-window-id-set!
         value
-        (window-leaf-id (car (window-node-leaves root))))))
+        (window-leaf-id (car (window-node-leaves root)))))
+    (let ([workbench (editor-active-workbench value)])
+      (workbench-set-layout! workbench root)
+      (workbench-set-active-window-id!
+        workbench
+        (editor-active-window-id value))))
 
   (define (editor-set-active-window-id! value id)
     (require-open-editor 'editor-set-active-window-id! value)
@@ -1592,7 +1767,10 @@
           'editor-set-active-window-id!
           "active window must identify a window leaf"
           id))
-      (editor-active-window-id-set! value id)))
+      (editor-active-window-id-set! value id)
+      (workbench-set-active-window-id!
+        (editor-active-workbench value)
+        id)))
 
   (define (editor-allocate-window-id! value)
     (require-open-editor 'editor-allocate-window-id! value)
@@ -1630,7 +1808,12 @@
             (window-leaf-set-view-id!
               other
               (window-leaf-view-id window)))
-          (window-leaf-set-view-id! window id)))))
+          (window-leaf-set-view-id! window id))))
+    (let ([workbench (editor-workbench-for-view value id)])
+      (when workbench
+        (workbench-touch-buffer!
+          workbench
+          (buffer-id (view-buffer (editor-view-ref value id)))))))
 
   (define (editor-set-view-buffer! value view-id buffer-id)
     (require-open-editor 'editor-set-view-buffer! value)
@@ -1674,7 +1857,13 @@
       (view-caret-display-affinity-set! view #f)
       (view-reset-input-states! view)
       (view-pending-keys-set! view '())
-      (editor-restore-view-place! value view)))
+      (editor-restore-view-place! value view)
+      (when
+        (eq? (editor-workbench-for-view value view-id)
+             (editor-active-workbench value))
+        (workbench-touch-buffer!
+          (editor-active-workbench value)
+          buffer-id))))
 
   (define (editor-set-view-display-map! value view-id display-map)
     (require-open-editor 'editor-set-view-display-map! value)
@@ -5256,6 +5445,7 @@
            [interactions (make-eqv-hashtable)]
            [prompts (make-eqv-hashtable)]
            [completions (make-eqv-hashtable)]
+           [workbenches (make-eqv-hashtable)]
            [prompt-histories (make-eq-hashtable)]
            [keymaps (make-keymap-catalog)]
            [view
@@ -5305,6 +5495,10 @@
                1
                2
                (make-window-leaf 1 1)
+               1
+               2
+               workbenches
+               '(1)
                1
                2
                prompts
@@ -5361,6 +5555,18 @@
       (attach-editor-change-observer! value buffer)
       (register-buffer-resource! value buffer)
       (hashtable-set! views 1 view)
+      (hashtable-set!
+        workbenches
+        1
+        (make-workbench
+          1
+          "main"
+          '()
+          (editor-window-root value)
+          1
+          (list (buffer-id buffer))
+          '()
+          '()))
       (keymap-catalog-register! keymaps 'editor.override (make-keymap))
       (let ([default-map (make-keymap)]
             [ctl-x-map (make-keymap)]
