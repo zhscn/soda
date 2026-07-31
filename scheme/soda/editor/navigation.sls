@@ -16,6 +16,7 @@
           (soda editor display-placement)
           (soda editor keymap)
           (soda editor location)
+          (soda editor resource-context)
           (soda editor state)
           (soda editor window)
           (soda editor workbench))
@@ -134,10 +135,16 @@
           (editor-location-buffer-id location)
           (editor-location-revision location)))
       (unless (= (buffer-id (view-buffer view)) (buffer-id buffer))
-        (editor-set-view-buffer!
-          editor
-          (view-id view)
-          (buffer-id buffer)))
+        (let ([context
+                (editor-view-resource-context editor (view-id view))])
+          (editor-set-view-buffer!
+            editor
+            (view-id view)
+            (buffer-id buffer))
+          (editor-set-view-resource-context!
+            editor
+            (view-id view)
+            context)))
       (view-set-caret! view (editor-location-offset location))
       (ensure-view-visible! view)
       location))
@@ -176,6 +183,9 @@
            "jump target is stale or unavailable"
            (editor-location-buffer-id location)))
        (let* ([walk (view-navigation-walk view)]
+              [source-language-context
+                (resource-context-language-context
+                  (editor-view-resource-context editor (view-id view)))]
               [ignored (cancel-pending-walk! walk)]
               [current (current-location view)]
               [cursor (navigation-walk-cursor walk)]
@@ -207,17 +217,24 @@
                           (make-jump-history-entry
                             bridge-kind
                             (editor-location->item
-                              previous 'source bridge-kind)
+                              previous 'source bridge-kind
+                              source-language-context)
                             (editor-location->item
-                              revisit 'target bridge-kind)))))
+                              revisit 'target bridge-kind
+                              source-language-context)))))
                     (navigation-walk-jumps walk))]
               [source-location (or revisit current)]
+              [activated (activate-location! editor view location)]
+              [target-language-context
+                (resource-context-language-context
+                  (editor-view-resource-context editor (view-id view)))]
               [jump
                 (make-jump-history-entry
                   kind
                   (editor-location->item
-                    source-location 'source kind)
-                  (editor-location->item location 'target kind))])
+                    source-location 'source kind source-language-context)
+                  (editor-location->item
+                    location 'target kind target-language-context))])
          (navigation-walk-replace-entries!
            walk
            (append base-entries (list location)))
@@ -228,7 +245,7 @@
            walk
            (- (length (navigation-walk-entries walk)) 1))
          (trim-walk! walk)
-         (activate-location! editor view location)))
+         activated))
 
   (define editor-jump-to-location!
     (case-lambda
@@ -318,7 +335,13 @@
                   (pending-jump-kind pending)
                   (jump-history-entry-source jump)
                   (editor-location->item
-                    target 'target (pending-jump-kind pending))))))
+                    target
+                    'target
+                    (pending-jump-kind pending)
+                    (resource-context-language-context
+                      (editor-view-resource-context
+                        editor
+                        (view-id view))))))))
           (navigation-walk-pending-set! walk #f)
           (editor-location-close! placeholder)
           (activate-location! editor view target)
@@ -338,6 +361,16 @@
       [(editor buffer offset)
        (editor-jump-to-buffer! editor buffer offset 'explicit)]
       [(editor buffer offset kind)
+       (let ([origin (editor-active-view editor)])
+         (editor-jump-to-buffer!
+           editor
+           buffer
+           offset
+           kind
+           (editor-view-resource-context
+             editor
+             (view-id origin))))]
+      [(editor buffer offset kind resource-context)
        (let* ([origin (editor-active-view editor)]
               [request
                 (make-display-request
@@ -345,9 +378,7 @@
                   'jump
                   (view-id origin)
                   #f
-                  (editor-view-resource-context
-                    editor
-                    (view-id origin)))]
+                  resource-context)]
               [plan (editor-plan-display editor request)]
               [workbench
                 (editor-workbench-ref

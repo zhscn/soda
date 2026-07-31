@@ -14,6 +14,7 @@
           (soda editor location)
           (soda editor navigation)
           (soda editor prompt)
+          (soda editor resource-context)
           (soda editor scheme-query)
           (soda editor scheme-semantics)
           (soda editor scheme-workspace)
@@ -131,6 +132,15 @@
 
   (define (jump-to-item! context item kind)
     (let* ([editor (command-context-editor context)]
+           [view (command-context-view context)]
+           [base-context
+             (editor-view-resource-context editor (view-id view))]
+           [resource-context
+             (if (location-item-language-context item)
+                 (resource-context-with-language-context
+                   base-context
+                   (location-item-language-context item))
+                 base-context)]
            [buffer-id (location-item-buffer-id item)])
       (if
         buffer-id
@@ -147,7 +157,8 @@
             editor
             buffer
             (location-item-start item)
-            kind)
+            kind
+            resource-context)
           #f)
         (let ([resource (location-item-resource item)])
           (and
@@ -162,12 +173,24 @@
                   resource
                   (location-item-start item)
                   'jump
-                  (editor-view-resource-context
-                    editor
-                    (view-id view))))))))))
+                  resource-context))))))))
 
   (define (publish-and-jump! context source items)
-    (let ([editor (command-context-editor context)])
+    (let* ([editor (command-context-editor context)]
+           [view (command-context-view context)]
+           [language-context
+             (resource-context-language-context
+               (editor-view-resource-context editor (view-id view)))]
+           [items
+             (if language-context
+                 (map
+                   (lambda (item)
+                     (if (location-item-language-context item)
+                         item
+                         (location-item-with-language-context
+                           item language-context)))
+                   items)
+                 items)])
       (if (null? items)
           (begin
             (editor-set-current-location-list! editor #f)

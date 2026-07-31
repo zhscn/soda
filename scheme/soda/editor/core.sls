@@ -518,6 +518,8 @@
           location-item-end
           location-item-excerpt
           location-item-metadata
+          location-item-language-context
+          location-item-with-language-context
           jump-history-entry?
           jump-history-entry-kind
           jump-history-entry-source

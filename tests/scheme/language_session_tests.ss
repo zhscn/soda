@@ -4,6 +4,8 @@
         (soda editor buffer)
         (soda editor display-placement)
         (soda editor language-session)
+        (soda editor location)
+        (soda editor navigation)
         (soda editor resource-context)
         (soda editor state))
 
@@ -76,6 +78,28 @@
     (= (language-attachment-session-id inherited) (language-session-id session))
     (eq? (language-attachment-provenance inherited) 'inherited))
   "display must translate the frozen origin attachment to the target Buffer")
+
+(editor-jump-view-to-buffer!
+  editor target buffer-a 1 'definition)
+(define returned-home
+  (editor-view-language-attachment editor (view-id target)))
+(define jump
+  (car (reverse (navigation-walk-jumps (view-navigation-walk target)))))
+(check
+  (and
+    (eq? returned-home home)
+    (view-language-context?
+      (location-item-language-context
+        (jump-history-entry-source jump)))
+    (view-language-context?
+      (location-item-language-context
+        (jump-history-entry-target jump)))
+    (=
+      (view-language-context-attachment-id
+        (location-item-language-context
+          (jump-history-entry-target jump)))
+      (language-attachment-id home)))
+  "navigation history must preserve source and target attachment provenance")
 
 (define independent
   (editor-open-view!

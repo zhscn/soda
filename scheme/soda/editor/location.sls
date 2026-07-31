@@ -18,6 +18,8 @@
           location-item-end
           location-item-excerpt
           location-item-metadata
+          location-item-language-context
+          location-item-with-language-context
           make-jump-history-entry
           jump-history-entry?
           jump-history-entry-kind
@@ -76,7 +78,8 @@
             start
             end
             excerpt
-            metadata))
+            metadata
+            language-context))
 
   (define-record-type
     (location-list %make-location-list location-list?)
@@ -113,15 +116,20 @@
         offset
         #f)))
 
-  (define (make-location-item
-            buffer-id
-            resource
-            revision
-            start
-            end
-            excerpt
-            metadata)
-    (unless (and (or
+  (define make-location-item
+    (case-lambda
+      [(buffer-id resource revision start end excerpt metadata)
+       (make-location-item
+         buffer-id resource revision start end excerpt metadata #f)]
+      [(buffer-id
+         resource
+         revision
+         start
+         end
+         excerpt
+         metadata
+         language-context)
+       (unless (and (or
                    (exact-non-negative-integer? buffer-id)
                    (and
                      (not buffer-id)
@@ -136,17 +144,34 @@
                  (exact? end)
                  (<= 0 start end)
                  (or (not excerpt) (string? excerpt)))
+         (assertion-violation
+           'make-location-item
+           "invalid location item"
+           buffer-id
+           resource
+           revision
+           start
+           end
+           excerpt))
+       (%make-location-item
+         buffer-id resource revision start end excerpt metadata
+         language-context)]))
+
+  (define (location-item-with-language-context item language-context)
+    (unless (location-item? item)
       (assertion-violation
-        'make-location-item
-        "invalid location item"
-        buffer-id
-        resource
-        revision
-        start
-        end
-        excerpt))
-    (%make-location-item
-      buffer-id resource revision start end excerpt metadata))
+        'location-item-with-language-context
+        "expected a LocationItem"
+        item))
+    (make-location-item
+      (location-item-buffer-id item)
+      (location-item-resource item)
+      (location-item-revision item)
+      (location-item-start item)
+      (location-item-end item)
+      (location-item-excerpt item)
+      (location-item-metadata item)
+      language-context))
 
   (define (make-location-list source items)
     (unless (symbol? source)
@@ -215,29 +240,34 @@
           (editor-location-document location)
           (editor-location-anchor location))))
 
-  (define (editor-location->item location role kind)
-    (unless (editor-location? location)
-      (assertion-violation
-        'editor-location->item
-        "expected an editor location"
-        location))
-    (unless (and (memq role '(source target)) (symbol? kind))
-      (assertion-violation
-        'editor-location->item
-        "invalid jump role or kind"
-        role
-        kind))
-    (let ([offset (editor-location-offset location)])
-      (make-location-item
-        (editor-location-buffer-id location)
-        (editor-location-resource location)
-        (editor-location-revision location)
-        offset
-        offset
-        #f
-        (list
-          (cons 'jump-role role)
-          (cons 'jump-kind kind)))))
+  (define editor-location->item
+    (case-lambda
+      [(location role kind)
+       (editor-location->item location role kind #f)]
+      [(location role kind language-context)
+       (unless (editor-location? location)
+         (assertion-violation
+           'editor-location->item
+           "expected an editor location"
+           location))
+       (unless (and (memq role '(source target)) (symbol? kind))
+         (assertion-violation
+           'editor-location->item
+           "invalid jump role or kind"
+           role
+           kind))
+       (let ([offset (editor-location-offset location)])
+         (make-location-item
+           (editor-location-buffer-id location)
+           (editor-location-resource location)
+           (editor-location-revision location)
+           offset
+           offset
+           #f
+           (list
+             (cons 'jump-role role)
+             (cons 'jump-kind kind))
+           language-context))]))
 
   (define (editor-location-valid-for-buffer? location buffer)
     (unless (and (editor-location? location) (buffer? buffer))
