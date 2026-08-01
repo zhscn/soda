@@ -142,7 +142,8 @@
 (check
   (and
     (eq? (lsp-client-session-state session) 'ready)
-    (= (length ready-effects) 2))
+    (= (length ready-effects) 3)
+    (eq? (command-effect-kind (caddr ready-effects)) 'command.invoke))
   "initialize response did not transition the LSP session to ready")
 
 (editor-workbench-adopt-project!
@@ -164,8 +165,9 @@
   (car (editor-buffer-language-attachments editor (buffer-id external))))
 (check
   (and
-    (= (length external-start-effects) 1)
+    (= (length external-start-effects) 2)
     (eq? (command-effect-kind (car external-start-effects)) 'managed-process.write)
+    (eq? (command-effect-kind (cadr external-start-effects)) 'command.invoke)
     (eq? (language-attachment-provenance external-attachment) 'inherited)
     (= (language-attachment-session-id external-attachment)
        (language-session-id language-session)))
@@ -281,7 +283,7 @@
 (define change-effects (editor-take-tui-effects! editor))
 (check
   (and
-    (= (length change-effects) 1)
+    (= (length change-effects) 2)
     (string=?
       (json-object-ref
         (car
@@ -291,8 +293,37 @@
               (command-effect-payload (car change-effects)))))
         "method"
         #f)
-      "textDocument/didChange"))
+      "textDocument/didChange")
+    (eq? (command-effect-kind (cadr change-effects)) 'command.invoke)
+    (internal-command-message?
+      (command-effect-payload (cadr change-effects)))
+    (eq?
+      (internal-command-message-name
+        (command-effect-payload (cadr change-effects)))
+      'lsp.refresh-semantic-tokens))
   "buffer edits did not enqueue an LSP didChange notification")
+
+(define automatic-semantic-effects
+  (editor-execute-command!
+    editor
+    (internal-command-message-name
+      (command-effect-payload (cadr change-effects)))
+    #f
+    (internal-command-message-argument
+      (command-effect-payload (cadr change-effects)))))
+(define automatic-semantic-message
+  (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload (car automatic-semantic-effects))))))
+(check
+  (and
+    (= (length automatic-semantic-effects) 1)
+    (string=?
+      (json-object-ref automatic-semantic-message "method" #f)
+      "textDocument/semanticTokens/full"))
+  "a synchronized document did not refresh semantic tokens")
 
 (define diagnostic-range
   (make-json-object

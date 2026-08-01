@@ -14,7 +14,7 @@
 | ProjectWorkspace bootstrap snapshot 与 file-backed Buffer 归属解析 | 已实现 |
 | LSP process transport、ProjectWorkspace bootstrap 与 full-text document synchronization | 已实现 |
 | LSP diagnostics、completion text edits/resolve、hover、definition、references、rename、code actions 与 workspace/applyEdit | 已实现 |
-| LSP semantic tokens full refresh | 已实现 |
+| LSP semantic tokens full refresh 与 document lifecycle refresh | 已实现 |
 
 ## 分层
 
@@ -227,6 +227,10 @@ Buffer 关闭时释放全部 attachment；View 关闭只释放其 context 引用
 View、pending request 或显式 owner 引用的 session 可以由 policy 停止。Workbench
 切换不改变 attachment；持久化只保存可重新发现的 context hint，不序列化运行中的
 LanguageSession。
+
+支持 `semanticTokens/full` 的 LanguageSession 在 `didOpen` 和每次 `didChange` 后排入
+revision-tagged refresh。请求只携带该 Buffer 的 session document；响应仅在 Buffer 仍为
+同一 revision 时发布 semantic annotation，迟到结果不会覆盖当前 decoration。
 
 ## Syntax provider
 

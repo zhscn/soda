@@ -121,6 +121,9 @@
   (define-record-type lsp-completion-data
     (fields session completion-id generation buffer-id revision raw))
 
+  (define-record-type lsp-semantic-refresh
+    (fields session buffer-id revision))
+
   (define editor-lsp-registries (make-eq-hashtable))
   (define pending-lsp-workspace-edits (make-weak-eq-hashtable))
   (define pending-lsp-completion-resolutions (make-weak-eq-hashtable))
@@ -392,6 +395,14 @@
         (number->string
           (language-session-id (lsp-client-session-language-session session))))))
 
+  (define (semantic-refresh-effect session buffer)
+    (make-command-effect
+      'command.invoke
+      (make-internal-command-message
+        'lsp.refresh-semantic-tokens
+        (make-lsp-semantic-refresh
+          session (buffer-id buffer) (buffer-revision buffer)))))
+
   (define (lsp-client-sync-buffer! editor session buffer)
     (let ([document (find-document session (buffer-id buffer))])
       (if
@@ -418,7 +429,8 @@
                         (make-json-array
                           (list
                             (make-json-object
-                              (list (cons "text" (buffer-text buffer)))))))))))))))
+                              (list (cons "text" (buffer-text buffer))))))))))
+            (semantic-refresh-effect session buffer))))))
 
   (define (install-document-observer! editor session buffer document)
     (unless (lsp-client-document-observer-name document)
@@ -479,7 +491,9 @@
           (let ([document (ensure-document! session buffer)])
             (if (lsp-client-document-opened? document)
                 '()
-                (list (did-open-effect editor session buffer document)))))
+                (list
+                  (did-open-effect editor session buffer document)
+                  (semantic-refresh-effect session buffer)))))
         (session-attached-buffers editor session))))
 
   (define (lsp-client-close-buffer! editor buffer)
@@ -1668,14 +1682,12 @@
                   generation
                   annotations))))))))
 
-  (define (lsp-request-semantic-tokens! editor)
-    (let* ([view (editor-active-view editor)]
-           [buffer (view-buffer view)]
-           [session (active-view-lsp-session editor)]
-           [document (and session (find-document session (buffer-id buffer)))]
-           [types (and session (semantic-token-types session))]
-           [revision (buffer-revision buffer)])
-      (if (and session document types
+  (define (lsp-request-semantic-tokens-for-buffer!
+            editor session buffer revision)
+    (let ([document (find-document session (buffer-id buffer))]
+          [types (semantic-token-types session)])
+      (if (and document types
+               (= (buffer-revision buffer) revision)
                (eq? (lsp-client-session-state session) 'ready))
           (list
             (session-request!
@@ -1690,10 +1702,39 @@
                 (publish-semantic-tokens!
                   response-editor response-session buffer revision result)
                 '())))
+          '())))
+
+  (define (lsp-request-semantic-tokens! editor)
+    (let* ([view (editor-active-view editor)]
+           [buffer (view-buffer view)]
+           [session (active-view-lsp-session editor)]
+           [revision (buffer-revision buffer)])
+      (if (and session (semantic-token-types session))
+          (lsp-request-semantic-tokens-for-buffer!
+            editor session buffer revision)
           (begin
             (editor-set-status-message!
               editor "The language server does not provide semantic tokens")
             '()))))
+
+  (define (lsp-refresh-semantic-tokens-command context)
+    (let* ([editor (command-context-editor context)]
+           [refresh (command-context-argument context)])
+      (if (not (lsp-semantic-refresh? refresh))
+          '()
+          (guard (condition [else '()])
+            (let* ([session (lsp-semantic-refresh-session refresh)]
+                   [buffer
+                     (editor-buffer-ref
+                       editor (lsp-semantic-refresh-buffer-id refresh))]
+                   [document
+                     (find-document session (buffer-id buffer))])
+              (if (and document
+                       (= (buffer-revision buffer)
+                          (lsp-semantic-refresh-revision refresh)))
+                  (lsp-request-semantic-tokens-for-buffer!
+                    editor session buffer (lsp-semantic-refresh-revision refresh))
+                  '()))))))
 
   (define (hover-text value)
     (cond
@@ -2489,6 +2530,12 @@
                     (command-context-editor context) "No language server is active")
                   '()))))
         "Stop the language server selected by the active view."))
+    (editor-register-internal-command!
+      editor
+      (make-internal-context-command
+        'lsp.refresh-semantic-tokens
+        lsp-refresh-semantic-tokens-command
+        "Refresh semantic tokens for a synchronized language-server document."))
     (editor-register-internal-command!
       editor
       (make-internal-context-command
