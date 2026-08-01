@@ -613,6 +613,35 @@
                 (list (cons "code" -32601)
                       (cons "message" message)))))))
 
+  (define (server-request-result id result)
+    (make-json-object
+      (list (cons "jsonrpc" "2.0")
+            (cons "id" id)
+            (cons "result" result))))
+
+  (define (repeated-json-value count value)
+    (let loop ([remaining count] [values '()])
+      (if (zero? remaining)
+          (reverse values)
+          (loop (- remaining 1) (cons value values)))))
+
+  (define (server-request-response session id method params)
+    (cond
+      [(string=? method "workspace/workspaceFolders")
+       (server-request-result
+         id (workspace-folders-json (lsp-client-session-workspace session)))]
+      [(string=? method "workspace/configuration")
+       (let* ([items (and (json-object? params)
+                          (json-object-ref params "items" #f))]
+              [count (if (json-array? items)
+                         (length (json-array-values items))
+                         0)]
+              [settings (lsp-server-profile-settings (lsp-client-session-server session))])
+         (server-request-result id (make-json-array (repeated-json-value count settings))))]
+      [(string=? method "client/registerCapability")
+       (server-request-result id json-null)]
+      [else (server-request-error id "Soda does not implement this server request")]))
+
   (define (lsp-client-handle-json-message! editor session message)
     (unless (lsp-client-session? session)
       (assertion-violation
@@ -644,13 +673,17 @@
                     ((lsp-client-pending-request-continuation pending)
                      editor session (lsp-json-response-result message)))))]
            [(or (string? id) (exact-non-negative-integer? id))
-            (list
-              (make-command-effect
-                'managed-process.write
-                (make-managed-process-write-request
-                  (lsp-client-session-process session)
-                  (lsp-json-rpc-frame
-                    (server-request-error id "Soda does not implement this server request")))))]
+            (let ([method (json-object-ref message "method" #f)])
+              (if (string? method)
+                  (list
+                    (make-command-effect
+                      'managed-process.write
+                      (make-managed-process-write-request
+                        (lsp-client-session-process session)
+                        (lsp-json-rpc-frame
+                          (server-request-response
+                            session id method (json-object-ref message "params" #f))))))
+                  '()))]
            [else '()]))]
       [else
        (let ([method (json-object-ref message "method" #f)])
