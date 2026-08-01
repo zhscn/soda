@@ -612,6 +612,38 @@
             (editor-set-status-message! editor "No Project found")
             '()))))
 
+  (define-command (search-project-command context query)
+    "Search the current Project with ripgrep."
+    (interactive
+      (interactive-string "Search Project regexp: " 'project-search))
+    (let* ([editor (command-context-editor context)]
+           [project
+             (current-project editor (command-context-view context))])
+      (cond
+        [(zero? (string-length query))
+         (editor-set-status-message! editor "Project search is empty")
+         '()]
+        [(not project)
+         (editor-set-status-message! editor "No Project found")
+         '()]
+        [else
+         (profile-effect
+           (project-profile
+             project
+             (string-append "Project search: " query)
+             (list
+               "rg"
+               "--line-number"
+               "--column"
+               "--no-heading"
+               "--color=never"
+               "--smart-case"
+               "--"
+               query
+               ".")
+             ""
+             'pipe))])))
+
   (define (open-project-program-command context name arguments prompt)
     (let* ([editor (command-context-editor context)]
            [project
@@ -772,6 +804,8 @@
               "Run a shell command from the current Project root.")
         (list 'project.run-async-shell-command run-project-shell-command
               "Run an asynchronous shell command from the Project root.")
+        (list 'project.search search-project-command
+              "Search the current Project with ripgrep.")
         (list 'project.shell open-project-shell-command
               "Open a shell in the current Project root.")
         (list 'project.terminal open-project-shell-command

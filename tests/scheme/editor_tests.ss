@@ -375,6 +375,7 @@
     project.install
     project.package
     project.run
+    project.search
     project.run-shell-command
     project.run-async-shell-command
     project.shell
@@ -541,6 +542,33 @@
         (process-comint-profile-working-directory profile)
         "/virtual/repository"))
     (error 'editor-tests "Project lifecycle command differs" effects)))
+(let* ([context
+         (make-command-context
+           editor (editor-active-view editor) #f #f #f)]
+       [effects
+         (execute-command!
+           (editor-command-registry editor)
+           'project.search
+           context
+           '("project-resource"))]
+       [message
+         (and
+           (= (length effects) 1)
+           (eq? (command-effect-kind (car effects)) 'command.invoke)
+           (command-effect-payload (car effects)))]
+       [profile
+         (and
+           (command-message? message)
+           (command-message-argument message))])
+  (unless
+    (and
+      (process-comint-profile? profile)
+      (equal?
+        (process-comint-profile-arguments profile)
+        '("rg" "--line-number" "--column" "--no-heading"
+          "--color=never" "--smart-case" "--"
+          "project-resource" ".")))
+    (error 'editor-tests "Project search command differs" effects)))
 (let ([context
         (editor-view-resource-context
           editor
