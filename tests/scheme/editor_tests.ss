@@ -7748,22 +7748,24 @@
            "completion provider did not resolve the selected item")))
 (editor-update! resolve-editor (make-resize-message 6 80))
 (let ([frame (render-editor-frame resolve-editor 6 80)])
-  (let ([documentation
-          (let loop ([row 0])
-            (and
-              (< row (frame-rows frame))
-              (let ([text (frame-row-text frame row)])
-                (if (string-contains? text "From `<concepts>`")
-                    text
-                    (loop (+ row 1))))))])
+  (let ([rows
+          (let loop ([row 0] [result '()])
+            (if (= row (frame-rows frame))
+                (reverse result)
+                (loop (+ row 1)
+                      (cons (frame-row-text frame row) result))))])
     (unless
-      (and documentation
-           (string-contains? documentation "[concepts.arithmetic]")
-           (not (string-contains?
-                  documentation
-                  (string (integer->char #xfffd)))))
+      (and (exists (lambda (text) (string-contains? text "From `<concepts>`")) rows)
+           (exists (lambda (text) (string-contains? text "[concepts.arithmetic]")) rows)
+           (not
+             (exists
+               (lambda (text)
+                 (string-contains?
+                   text
+                   (string (integer->char #xfffd))))
+               rows)))
       (error 'editor-tests
-             "completion documentation was not normalized for a single cell row"))))
+             "completion documentation was not rendered as a multi-line preview"))))
 (let* ([view (editor-active-view resolve-editor)]
        [completion (editor-active-completion resolve-editor)]
        [decoder (make-input-decoder)])

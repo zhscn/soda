@@ -1643,7 +1643,80 @@
                              (when (and emitted? separator?)
                                (write-char #\space port))
                              (write-char character port)
-                             (loop (+ index 1) #t #f))))))))))
+                             (loop (+ index 1) #t #f)))))))))))
+
+  (define (completion-documentation-lines documentation columns limit)
+    (define (finish-line characters lines)
+      (let ([line (list->string (reverse characters))])
+        (if (null? lines)
+            (list line)
+            (append lines (list line)))))
+    (define (source-lines value)
+      (let loop ([index 0] [characters '()] [lines '()])
+        (if (= index (string-length value))
+            (finish-line characters lines)
+            (let ([character (string-ref value index)])
+              (if (char=? character #\newline)
+                  (loop (+ index 1) '() (finish-line characters lines))
+                  (loop
+                    (+ index 1)
+                    (cons
+                      (if (eq? (char-general-category character) 'Cc)
+                          #\space
+                          character)
+                      characters)
+                    lines))))))
+    (define (words value)
+      (let loop ([index 0] [characters '()] [result '()])
+        (if (= index (string-length value))
+            (reverse
+              (if (null? characters)
+                  result
+                  (cons (list->string (reverse characters)) result)))
+            (let ([character (string-ref value index)])
+              (if (char-whitespace? character)
+                  (loop
+                    (+ index 1)
+                    '()
+                    (if (null? characters)
+                        result
+                        (cons (list->string (reverse characters)) result)))
+                  (loop (+ index 1) (cons character characters) result))))))
+    (define (wrap-line value)
+      (let loop ([remaining (words value)] [line ""] [result '()])
+        (if (null? remaining)
+            (reverse (if (string=? line "") result (cons line result)))
+            (let* ([word (car remaining)]
+                   [next (if (string=? line "")
+                             word
+                             (string-append line " " word))])
+              (cond
+                [(<= (string-cell-width next 8) columns)
+                 (loop (cdr remaining) next result)]
+                [(string=? line "")
+                 (loop
+                   (cdr remaining)
+                   ""
+                   (cons (truncate-cells word columns) result))]
+                [else
+                 (loop remaining "" (cons line result))])))))
+    (let loop ([remaining (source-lines documentation)] [result '()])
+      (if (or (null? remaining) (>= (length result) limit))
+          (reverse result)
+          (let ([line (car remaining)])
+            (let ([wrapped
+                    (if (string=? line "")
+                        '("")
+                        (wrap-line line))])
+              (loop
+                (cdr remaining)
+                (fold-left
+                  (lambda (lines value)
+                    (if (< (length lines) limit)
+                        (cons value lines)
+                        lines))
+                  result
+                  wrapped)))))))
 
   (define (truncate-cells value width)
     (if (<= (string-cell-width value 8) width)
@@ -1786,9 +1859,8 @@
                    [selected-item
                      (completion-session-selected-item completion)]
                    [documentation
-                     (and
-                       selected-item
-                       (completion-documentation-summary selected-item))]
+                     (and selected-item
+                          (completion-item-documentation selected-item))]
                    [documentation?
                      (and
                        document-target?
@@ -1796,9 +1868,9 @@
                        (positive? (string-length documentation))
                        (> (rect-rows rectangle) 1))]
                    [candidate-rows
-                     (-
-                       (rect-rows rectangle)
-                       (if documentation? 1 0))]
+                     (if document-target?
+                         (completion-session-viewport-rows completion)
+                         (rect-rows rectangle))]
                    [start
                      (begin
                        (completion-session-set-viewport-rows!
@@ -1969,37 +2041,45 @@
                           #f
                           background-sources))))))
               (when documentation?
-                (let ([row
-                        (+
-                          (rect-row rectangle)
-                          candidate-rows)])
-                  (frame-fill-rect!
-                    frame
-                    (make-rect
-                      row
-                      (rect-column rectangle)
-                      1
-                      (rect-columns rectangle))
-                    (make-cell
-                      " "
-                      1
-                      '(popup popup.documentation)
-                      (resolve-faces
-                        theme
-                        '(popup popup.documentation))
-                      #f
-                      background-sources))
-                  (draw-string!
-                    frame
-                    row
-                    (rect-column rectangle)
-                    (rect-columns rectangle)
-                    documentation
-                    '(popup popup.documentation)
-                    (resolve-faces
-                      theme
-                      '(popup popup.documentation))
-                    background-sources)))
+                (let ([lines
+                        (completion-documentation-lines
+                          documentation
+                          (rect-columns rectangle)
+                          (- (rect-rows rectangle) candidate-rows))])
+                  (do ([index 0 (+ index 1)])
+                      ((= index (length lines)))
+                    (let ([row
+                            (+
+                              (rect-row rectangle)
+                              candidate-rows
+                              index)])
+                      (frame-fill-rect!
+                        frame
+                        (make-rect
+                          row
+                          (rect-column rectangle)
+                          1
+                          (rect-columns rectangle))
+                        (make-cell
+                          " "
+                          1
+                          '(popup popup.documentation)
+                          (resolve-faces
+                            theme
+                            '(popup popup.documentation))
+                          #f
+                          background-sources))
+                      (draw-string!
+                        frame
+                        row
+                        (rect-column rectangle)
+                        (rect-columns rectangle)
+                        (list-ref lines index)
+                        '(popup popup.documentation)
+                        (resolve-faces
+                          theme
+                          '(popup popup.documentation))
+                        background-sources))))
               (when indicator
                 (draw-string!
                   frame
@@ -2009,7 +2089,7 @@
                   indicator
                   '(popup)
                   (resolve-faces theme '(popup))
-                  background-sources))))))))
+                  background-sources)))))))))
 
   (define editor-text-component
     (make-component 'editor.text render-text-component!))
@@ -2095,32 +2175,60 @@
            [selected
              (completion-session-selected-item completion)]
            [documentation
-             (and selected (completion-documentation-summary selected))]
+             (and selected (completion-item-documentation selected))]
            [documentation?
              (and
                (string? documentation)
                (positive? (string-length documentation)))]
            [available-rows (max 0 (- rows 1))]
+           [candidate-width
+             (fold-left
+               (lambda (width item)
+                 (max
+                   width
+                   (+ 2
+                      (string-cell-width
+                        (completion-row-text item)
+                        8))))
+               12
+               items)]
+           [documentation-width
+             (if documentation?
+                 (min
+                   72
+                   (max
+                     24
+                     (fold-left
+                       (lambda (width line)
+                         (max width (string-cell-width line 8)))
+                       0
+                       (completion-documentation-lines
+                         documentation
+                         72
+                         1))))
+                 0)]
+           [popup-columns
+             (min columns (max candidate-width documentation-width))]
+           [documentation-rows
+             (if documentation?
+                 (length
+                   (completion-documentation-lines
+                     documentation
+                     popup-columns
+                     (max 0 (min 5 (- available-rows 1)))))
+                 0)]
            [candidate-rows
              (min
                completion-window-max-rows
                (length items)
-               (if documentation?
-                   (max 0 (- available-rows 1))
-                   available-rows))]
-           [popup-rows
-             (+
-               candidate-rows
-               (if
-                 (and documentation? (positive? candidate-rows))
-                 1
-                 0))])
-      (completion-session-set-viewport-rows!
-        completion
-        candidate-rows)
-      (and
-        (positive? popup-rows)
-        (let* ([desired-width
+               (max 0 (- available-rows documentation-rows)))]
+           [popup-rows (+ candidate-rows documentation-rows)])
+      (and (positive? candidate-rows)
+           (begin
+             (completion-session-set-viewport-rows!
+               completion
+               candidate-rows)
+             (let* ([desired-width
                  (fold-left
                    (lambda (width item)
                      (max
@@ -2131,7 +2239,7 @@
                             8))))
                    12
                    items)]
-               [popup-columns (min columns desired-width)]
+               [popup-columns (min columns (max desired-width documentation-width))]
                [text-rows (- rows 1)]
                [screen-row (max 0 (min caret-row (- text-rows 1)))]
                [below (- text-rows (+ screen-row 1))]
@@ -2143,11 +2251,11 @@
                  (max 0 (min caret-column (- columns 1)))]
                [popup-column
                  (min screen-column (- columns popup-columns))])
-          (make-rect
-            popup-row
-            popup-column
-            popup-rows
-            popup-columns)))))
+               (make-rect
+                 popup-row
+                 popup-column
+                 popup-rows
+                 popup-columns))))))
 
   (define (render-single-editor-frame editor rows columns)
     (unless (editor? editor)
