@@ -8930,6 +8930,40 @@
   (error 'editor-tests
          "buffer-local modeline format was not applied"
          custom-modeline-text))
+(define modeline-tool-state " [Git main]")
+(define modeline-tool-source
+  (make-modeline-segment-source
+    'tool-state
+    (lambda (editor view buffer) modeline-tool-state)
+    '(modeline.process)
+    65
+    0
+    'end))
+(buffer-register-modeline-segment-source!
+  modeline-buffer
+  modeline-tool-source)
+(buffer-set-local-setting!
+  modeline-buffer
+  'modeline-format
+  '(state buffer right-align tool-state position))
+(define tool-modeline-text
+  (frame-row-text (render-editor-frame modeline-editor 3 80) 2))
+(set! modeline-tool-state " [Git dirty]")
+(define updated-tool-modeline-text
+  (frame-row-text (render-editor-frame modeline-editor 3 80) 2))
+(unless
+  (and (string-contains? tool-modeline-text "[Git main]")
+       (string-contains? updated-tool-modeline-text "[Git dirty]")
+       (eq?
+         (buffer-remove-modeline-segment-source!
+           modeline-buffer
+           'tool-state)
+         modeline-tool-source)
+       (null? (buffer-modeline-segment-sources modeline-buffer)))
+  (error 'editor-tests
+         "buffer modeline segment registry did not supply dynamic state"
+         tool-modeline-text
+         updated-tool-modeline-text))
 (editor-close! modeline-editor)
 
 (define configuration-document (make-document "configuration" 956))

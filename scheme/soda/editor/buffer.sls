@@ -34,6 +34,9 @@
           buffer-structure-index
           buffer-injection-index
           buffer-highlight-runs
+          buffer-modeline-segment-sources
+          buffer-register-modeline-segment-source!
+          buffer-remove-modeline-segment-source!
           buffer-add-change-observer!
           buffer-remove-change-observer!
           buffer-setting-ref
@@ -54,6 +57,7 @@
           (soda editor injection)
           (soda editor injection-highlighting)
           (soda editor language)
+          (soda editor modeline)
           (soda editor presentation)
           (soda editor resource-context)
           (soda editor setting)
@@ -111,6 +115,9 @@
       (mutable language-runtime
                buffer-language-runtime
                buffer-language-runtime-set!)
+      (mutable modeline-segment-sources
+               buffer-modeline-segment-sources
+               buffer-modeline-segment-sources-set!)
       (immutable change-observers buffer-change-observers)
       (mutable closed? buffer-closed? buffer-closed?-set!)))
 
@@ -241,10 +248,50 @@
                  'fundamental-mode
                  0
                  #f
+                 '()
                  (make-eq-hashtable)
                  #f)])
          (install-major-mode! value mode-name)
          value)]))
+
+  (define (buffer-register-modeline-segment-source! value source)
+    (require-open-buffer 'buffer-register-modeline-segment-source! value)
+    (unless (modeline-segment-source? source)
+      (assertion-violation
+        'buffer-register-modeline-segment-source!
+        "expected a ModelineSegmentSource"
+        source))
+    (let ([id (modeline-segment-source-id source)])
+      (buffer-modeline-segment-sources-set!
+        value
+        (append
+          (filter
+            (lambda (candidate)
+              (not (eq? id (modeline-segment-source-id candidate))))
+            (buffer-modeline-segment-sources value))
+          (list source))))
+    source)
+
+  (define (buffer-remove-modeline-segment-source! value id)
+    (require-open-buffer 'buffer-remove-modeline-segment-source! value)
+    (unless (symbol? id)
+      (assertion-violation
+        'buffer-remove-modeline-segment-source!
+        "id must be a symbol"
+        id))
+    (let ([removed
+            (find
+              (lambda (source)
+                (eq? id (modeline-segment-source-id source)))
+              (buffer-modeline-segment-sources value))])
+      (when removed
+        (buffer-modeline-segment-sources-set!
+          value
+          (filter
+            (lambda (source)
+              (not (eq? id (modeline-segment-source-id source))))
+            (buffer-modeline-segment-sources value))))
+      removed))
 
   (define (buffer-set-presentation! value presentation)
     (require-open-buffer 'buffer-set-presentation! value)

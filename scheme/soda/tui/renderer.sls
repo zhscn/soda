@@ -793,12 +793,35 @@
              (and (editor-render-context-focused? context)
                   (editor-status-message editor))]
            [state-label (modeline-state-label context buffer)]
+           [custom-segments
+             (map
+               (lambda (source)
+                 (let ([text
+                         ((modeline-segment-source-supply source)
+                          editor
+                          (editor-render-context-view context)
+                          buffer)])
+                   (unless (string? text)
+                     (assertion-violation
+                       'render-editor-frame
+                       "modeline segment supplier must return a string"
+                       (modeline-segment-source-id source)
+                       text))
+                   (make-modeline-segment
+                     (modeline-segment-source-id source)
+                     text
+                     (modeline-segment-source-faces source)
+                     (modeline-segment-source-priority source)
+                     (modeline-segment-source-minimum-width source)
+                     (modeline-segment-source-truncation source))))
+               (buffer-modeline-segment-sources buffer))]
            [segments
              (map
                (lambda (segment)
                  (cons
                    (modeline-segment-id segment)
                    segment))
+               (append
                (list
                  (modeline-segment
                    'state
@@ -876,7 +899,8 @@
                    'modeline.status
                    10
                    0
-                   'end)))])
+                   'end))
+               custom-segments))])
       (arrange-modeline-segments
         (modeline-format buffer segments)
         segments)))

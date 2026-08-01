@@ -7,6 +7,14 @@
           modeline-segment-priority
           modeline-segment-minimum-width
           modeline-segment-truncation
+          make-modeline-segment-source
+          modeline-segment-source?
+          modeline-segment-source-id
+          modeline-segment-source-supply
+          modeline-segment-source-faces
+          modeline-segment-source-priority
+          modeline-segment-source-minimum-width
+          modeline-segment-source-truncation
           modeline-text-width
           layout-modeline-segments
           modeline-span?
@@ -23,6 +31,12 @@
 
   (define-record-type modeline-span
     (fields id column text faces))
+
+  (define-record-type
+    (modeline-segment-source
+      %make-modeline-segment-source
+      modeline-segment-source?)
+    (fields id supply faces priority minimum-width truncation))
 
   (define (exact-non-negative-integer? value)
     (and
@@ -74,6 +88,37 @@
       priority
       minimum-width
       truncation))
+
+  (define (make-modeline-segment-source
+            id supply faces priority minimum-width truncation)
+    (unless (symbol? id)
+      (assertion-violation
+        'make-modeline-segment-source "id must be a symbol" id))
+    (unless (procedure? supply)
+      (assertion-violation
+        'make-modeline-segment-source "supply must be a procedure" supply))
+    (unless (and (list? faces) (for-all symbol? faces))
+      (assertion-violation
+        'make-modeline-segment-source
+        "faces must be a list of symbols"
+        faces))
+    (unless (exact-non-negative-integer? priority)
+      (assertion-violation
+        'make-modeline-segment-source
+        "priority must be a non-negative exact integer"
+        priority))
+    (unless (exact-non-negative-integer? minimum-width)
+      (assertion-violation
+        'make-modeline-segment-source
+        "minimum width must be a non-negative exact integer"
+        minimum-width))
+    (unless (memq truncation '(end middle))
+      (assertion-violation
+        'make-modeline-segment-source
+        "truncation must be end or middle"
+        truncation))
+    (%make-modeline-segment-source
+      id supply faces priority minimum-width truncation))
 
   (define (modeline-text-width text)
     (unless (string? text)
