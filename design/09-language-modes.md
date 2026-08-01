@@ -13,7 +13,7 @@
 | LanguageProfile bootstrap hook 与 home attachment 选择 | 已实现 |
 | ProjectWorkspace bootstrap snapshot 与 file-backed Buffer 归属解析 | 已实现 |
 | LSP process transport、ProjectWorkspace bootstrap 与 full-text document synchronization | 已实现 |
-| LSP push/pull diagnostics、completion text edits/resolve、hover、signature help、document symbols、document highlights、formatting、definition、implementation、type definition、references、workspace symbol、rename、code actions 与 workspace/applyEdit | 已实现 |
+| LSP push/pull diagnostics、completion text edits/resolve、hover、signature help、selection ranges、document symbols、document highlights、formatting、definition、implementation、type definition、references、workspace symbol、rename、code actions 与 workspace/applyEdit | 已实现 |
 | LSP semantic tokens full refresh 与 document lifecycle refresh | 已实现 |
 
 ## 分层
@@ -258,6 +258,10 @@ signature label。
 
 `lsp.document-symbols` 查询当前 document 的结构符号。层级 DocumentSymbol 与扁平
 SymbolInformation 都投影为 revision-tagged LocationList，并通过通用 xref 跳转。
+
+`lsp.expand-selection` 请求 point 的 SelectionRange，并把返回的首个语义范围应用为
+当前 View 的 active region。响应只在发起时的 LanguageSession 与 Buffer revision 仍有效时
+生效。
 
 CodeAction picker 接受带 edit、command 或 data 的 action。只有 data 的 action 在选择后
 使用 `codeAction/resolve` 获取最终内容，并在原始 Buffer revision 与 LanguageSession
