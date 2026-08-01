@@ -13,7 +13,7 @@
 | LanguageProfile bootstrap hook 与 home attachment 选择 | 已实现 |
 | ProjectWorkspace bootstrap snapshot 与 file-backed Buffer 归属解析 | 已实现 |
 | LSP process transport、ProjectWorkspace bootstrap 与 full-text document synchronization | 已实现 |
-| LSP diagnostics、completion text edits/resolve、hover、document highlights、formatting、definition、implementation、type definition、references、workspace symbol、rename、code actions 与 workspace/applyEdit | 已实现 |
+| LSP diagnostics、completion text edits/resolve、hover、signature help、document highlights、formatting、definition、implementation、type definition、references、workspace symbol、rename、code actions 与 workspace/applyEdit | 已实现 |
 | LSP semantic tokens full refresh 与 document lifecycle refresh | 已实现 |
 
 ## 分层
@@ -247,6 +247,9 @@ revision 校验与单次 Buffer transaction 应用。
 `lsp.workspace-symbol` 向 active View 所选 LanguageSession 请求
 `workspace/symbol`。带有文件 range 的结果转换为 LocationList，使用通用 xref 跳转与
 历史；请求只使用已经建立的 workspace session，不从当前 Buffer 重新解析 Project。
+
+`lsp.signature-help` 查询 point 的 active signature，并在状态区显示 server 选择的
+signature label。
 
 ## Syntax provider
 

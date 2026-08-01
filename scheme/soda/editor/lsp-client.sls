@@ -1880,6 +1880,59 @@
           (or (hover-text result) "No hover information"))
         '())))
 
+  (define (signature-help-supported? session)
+    (let ([capability
+            (json-object-ref
+              (lsp-client-session-capabilities session)
+              "signatureHelpProvider"
+              #f)])
+      (or (eq? capability #t) (json-object? capability))))
+
+  (define (signature-label value)
+    (let ([label
+            (and (json-object? value)
+                 (json-object-ref value "label" #f))])
+      (cond
+        [(string? label) label]
+        [(and (json-array? label)
+              (= (length (json-array-values label)) 2)
+              (string? (car (json-array-values label))))
+         (car (json-array-values label))]
+        [else #f])))
+
+  (define (signature-help-text value)
+    (and
+      (json-object? value)
+      (let ([signatures (json-object-ref value "signatures" #f)])
+        (and
+          (json-array? signatures)
+          (let* ([values (json-array-values signatures)]
+                 [active
+                   (json-object-ref value "activeSignature" 0)]
+                 [index
+                   (if (and (exact-non-negative-integer? active)
+                            (< active (length values)))
+                       active
+                       0)])
+            (and (pair? values) (signature-label (list-ref values index))))))))
+
+  (define (lsp-signature-help! editor)
+    (let ([session (active-view-lsp-session editor)])
+      (if (and session (signature-help-supported? session))
+          (lsp-request-at-active-point!
+            editor
+            "textDocument/signatureHelp"
+            '()
+            (lambda (response-editor response-session result)
+              (editor-set-status-message!
+                response-editor
+                (or (signature-help-text result) "No signature information"))
+              '()))
+          (begin
+            (editor-set-status-message!
+              editor "The language server does not provide signature help")
+            '()))))
+
   (define (lsp-first-location value)
     (cond
       [(json-array? value)
@@ -2818,6 +2871,13 @@
         'lsp.hover
         (lambda (context) (lsp-hover! (command-context-editor context)))
         "Show language-server hover information at point."))
+    (editor-register-command!
+      editor
+      (make-interactive-context-command
+        'lsp.signature-help
+        (lambda (context)
+          (lsp-signature-help! (command-context-editor context)))
+        "Show language-server signature help at point."))
     (editor-register-command!
       editor
       (make-interactive-context-command

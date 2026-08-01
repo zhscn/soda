@@ -127,6 +127,7 @@
       (cons "documentHighlightProvider" #t)
       (cons "documentFormattingProvider" #t)
       (cons "documentRangeFormattingProvider" #t)
+      (cons "signatureHelpProvider" #t)
       (cons
         "semanticTokensProvider"
         (make-json-object
@@ -577,6 +578,49 @@
 (check
   (string=? (editor-status-message editor) "int main()")
   "hover result was not presented to the user")
+
+(define signature-help-effects
+  (editor-execute-command! editor 'lsp.signature-help))
+(check
+  (and (= (length signature-help-effects) 1)
+       (eq? (command-effect-kind (car signature-help-effects))
+            'managed-process.write))
+  "signature-help did not issue an LSP request"
+  signature-help-effects)
+(define signature-help-message
+  (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload (car signature-help-effects))))))
+(check
+  (string=?
+    (json-object-ref signature-help-message "method" #f)
+    "textDocument/signatureHelp")
+  "signature-help used the wrong LSP method")
+(lsp-client-handle-json-message!
+  editor session
+  (make-json-object
+    (list
+      (cons "jsonrpc" "2.0")
+      (cons "id" (json-object-ref signature-help-message "id" #f))
+      (cons
+        "result"
+        (make-json-object
+          (list
+            (cons "activeSignature" 1)
+            (cons
+              "signatures"
+              (make-json-array
+                (list
+                  (make-json-object (list (cons "label" "main()")))
+                  (make-json-object
+                    (list (cons "label" "main(int argc, char** argv)"))))))))))))
+(check
+  (string=?
+    (editor-status-message editor)
+    "main(int argc, char** argv)")
+  "signature-help did not present the active signature")
 
 (define definition-effects
   (editor-execute-command! editor 'lsp.find-definition))
