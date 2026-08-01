@@ -13,6 +13,7 @@
 | Project settings layer、task definition 与 comint runtime | 已实现 |
 | Workbench lifecycle、scope、MRU、slot 与 pinned window | 已实现 |
 | Workbench session 稳定资源持久化与恢复 | 已实现 |
+| Workbench JumpGraph 与 location-list stack 持久化 | 已实现 |
 | generated/tool Buffer 创建 provenance | 已实现 |
 | intent 驱动的统一 display placement policy | 已实现 |
 | LanguageSession registry、attachment 与 display provenance 路由 | 已实现 |

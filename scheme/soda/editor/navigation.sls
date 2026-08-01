@@ -114,6 +114,27 @@
       (lambda (buffer) (= (buffer-id buffer) id))
       (editor-buffers editor)))
 
+  (define (record-workbench-jump! editor view jump)
+    (let ([workbench
+            (editor-workbench-for-view editor (view-id view))])
+      (when workbench
+        (let ([graph (workbench-jump-graph workbench)])
+          (jump-graph-record!
+            graph
+            (jump-history-entry-source jump)
+            (jump-history-entry-target jump)
+            (jump-history-entry-kind jump))
+          (for-each
+            (lambda (item)
+              (let ([buffer-id (location-item-buffer-id item)])
+                (when buffer-id
+                  (let ([buffer (editor-buffer-find editor buffer-id)])
+                    (when buffer
+                      (jump-graph-attach-buffer! graph buffer))))))
+            (list
+              (jump-history-entry-source jump)
+              (jump-history-entry-target jump)))))))
+
   (define (location-valid? editor location)
     (let ([buffer
             (editor-buffer-find
@@ -236,14 +257,7 @@
                     source-location 'source kind source-language-context)
                   (editor-location->item
                     location 'target kind target-language-context))])
-         (let ([workbench
-                 (editor-workbench-for-view editor (view-id view))])
-           (when workbench
-             (jump-graph-record!
-               (workbench-jump-graph workbench)
-               (jump-history-entry-source jump)
-               (jump-history-entry-target jump)
-               kind)))
+         (record-workbench-jump! editor view jump)
          (navigation-walk-replace-entries!
            walk
            (append base-entries (list location)))
@@ -350,14 +364,7 @@
             (navigation-walk-replace-jumps!
               walk
               (append (drop-last jumps) (list completed)))
-            (let ([workbench
-                    (editor-workbench-for-view editor (view-id view))])
-              (when workbench
-                (jump-graph-record!
-                  (workbench-jump-graph workbench)
-                  (jump-history-entry-source completed)
-                  (jump-history-entry-target completed)
-                  (pending-jump-kind pending)))))
+            (record-workbench-jump! editor view completed))
           (navigation-walk-pending-set! walk #f)
           (editor-location-close! placeholder)
           (activate-location! editor view target)

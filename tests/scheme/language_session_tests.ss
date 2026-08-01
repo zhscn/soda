@@ -109,6 +109,32 @@
          (workbench-jump-graph (editor-active-workbench editor))))
      1)
   "semantic navigation must record an edge in the Workbench JumpGraph")
+(define graph
+  (workbench-jump-graph (editor-active-workbench editor)))
+(define dependency-node
+  (find
+    (lambda (node)
+      (string=? (jump-node-resource node) "/dependency/b.hpp"))
+    (jump-graph-nodes graph)))
+(define graph-change #f)
+(call-with-values
+  (lambda ()
+    (call-with-buffer-transaction
+      buffer-b
+      (lambda (transaction)
+        (transaction-insert! transaction 0 "XX"))))
+  (lambda (result change)
+    (set! graph-change change)))
+(when graph-change (change-close! graph-change))
+(check (= (jump-node-start dependency-node) 2)
+  "a live JumpNode must track edits through a Document anchor")
+(jump-graph-detach-buffer! graph (buffer-id buffer-b))
+(check
+  (and
+    (not (jump-node-buffer-id dependency-node))
+    (= (jump-node-start dependency-node) 2))
+  "detaching a Buffer must retain the JumpNode fallback offset")
+(jump-graph-attach-buffer! graph buffer-b)
 
 (define independent
   (editor-open-view!

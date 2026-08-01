@@ -11,7 +11,7 @@
 | `LocationItem`、`LocationList` 与 next/previous navigation | 已实现 |
 | Scheme definition/reference/diagnostic producer | 已实现 |
 | navigation origin 与 LanguageAttachment provenance | 已实现 |
-| Workbench 级语义 `JumpGraph` | 未实现 |
+| Workbench 级语义 `JumpGraph` 与持久化 | 已实现 |
 | 可编辑 excerpt 组合视图 | 未实现 |
 | 通用跨 Buffer 原子事务与 group undo | 未实现 |
 

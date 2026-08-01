@@ -14,6 +14,7 @@
                 path-parent)
           (soda document)
           (soda editor buffer)
+          (soda editor jump-graph)
           (soda editor location)
           (soda editor project)
           (soda editor resource-context)
@@ -22,7 +23,7 @@
           (soda editor workbench))
 
   (define schema-name 'soda-workbench-session)
-  (define schema-version 1)
+  (define schema-version 2)
 
   (define-record-type
     (workbench-session-snapshot
@@ -101,6 +102,58 @@
           (min cursor (- (length entries) 1)))
         jumps)))
 
+  (define (durable-location-item-datum item)
+    (let ([resource (location-item-resource item)])
+      (and
+        (stable-resource? resource)
+        (list
+          resource
+          (location-item-revision item)
+          (location-item-start item)
+          (location-item-end item)
+          (location-item-excerpt item)))))
+
+  (define (location-list-datum locations)
+    (let ([items
+            (filter
+              (lambda (value) value)
+              (map
+                durable-location-item-datum
+                (location-list-items locations)))])
+      (list
+        (location-list-source locations)
+        (and
+          (location-list-index locations)
+          (pair? items)
+          (min
+            (location-list-index locations)
+            (- (length items) 1)))
+        items)))
+
+  (define (jump-graph-datum graph)
+    (list
+      (map
+        (lambda (node)
+          (list
+            (jump-node-id node)
+            (jump-node-resource node)
+            (jump-node-revision node)
+            (jump-node-start node)
+            (jump-node-end node)
+            (jump-node-excerpt node)
+            (jump-node-last-visit node)))
+        (filter
+          (lambda (node) (stable-resource? (jump-node-resource node)))
+          (jump-graph-nodes graph)))
+      (map
+        (lambda (edge)
+          (list
+            (jump-edge-from edge)
+            (jump-edge-to edge)
+            (jump-edge-kind edge)
+            (jump-edge-timestamp edge)))
+        (jump-graph-edges graph))))
+
   (define (view-datum editor view)
     (let* ([context
              (editor-view-resource-context editor (view-id view))]
@@ -170,7 +223,9 @@
             (lambda (id) (buffer-resource-for-id editor id))
             (workbench-mru workbench)))
         active-index
-        (layout-datum editor workbench (workbench-layout workbench)))))
+        (layout-datum editor workbench (workbench-layout workbench))
+        (jump-graph-datum (workbench-jump-graph workbench))
+        (map location-list-datum (workbench-location-lists workbench)))))
 
   (define (active-workbench-index editor workbenches)
     (let ([active (editor-active-workbench editor)])
@@ -229,6 +284,67 @@
                 (valid-location-datum? (caddr jump))))
             jumps)))))
 
+  (define (valid-durable-location-item-datum? value)
+    (and
+      (list? value)
+      (= (length value) 5)
+      (stable-resource? (list-ref value 0))
+      (exact-non-negative-integer? (list-ref value 1))
+      (exact-non-negative-integer? (list-ref value 2))
+      (exact-non-negative-integer? (list-ref value 3))
+      (<= (list-ref value 2) (list-ref value 3))
+      (or (not (list-ref value 4)) (string? (list-ref value 4)))))
+
+  (define (valid-location-list-datum? value)
+    (and
+      (list? value)
+      (= (length value) 3)
+      (symbol? (list-ref value 0))
+      (list? (list-ref value 2))
+      (for-all
+        valid-durable-location-item-datum?
+        (list-ref value 2))
+      (or
+        (not (list-ref value 1))
+        (and
+          (exact-non-negative-integer? (list-ref value 1))
+          (< (list-ref value 1) (length (list-ref value 2)))))))
+
+  (define (valid-jump-graph-datum? value)
+    (and
+      (list? value)
+      (= (length value) 2)
+      (let ([nodes (car value)] [edges (cadr value)])
+        (and
+          (list? nodes)
+          (for-all
+            (lambda (node)
+              (and
+                (list? node)
+                (= (length node) 7)
+                (exact-non-negative-integer? (list-ref node 0))
+                (positive? (list-ref node 0))
+                (stable-resource? (list-ref node 1))
+                (exact-non-negative-integer? (list-ref node 2))
+                (exact-non-negative-integer? (list-ref node 3))
+                (exact-non-negative-integer? (list-ref node 4))
+                (<= (list-ref node 3) (list-ref node 4))
+                (or (not (list-ref node 5))
+                    (string? (list-ref node 5)))
+                (exact-non-negative-integer? (list-ref node 6))))
+            nodes)
+          (let ([node-ids (map car nodes)])
+            (for-all
+              (lambda (edge)
+                (and
+                  (list? edge)
+                  (= (length edge) 4)
+                  (memv (list-ref edge 0) node-ids)
+                  (memv (list-ref edge 1) node-ids)
+                  (symbol? (list-ref edge 2))
+                  (exact-non-negative-integer? (list-ref edge 3))))
+              edges))))))
+
   (define (valid-view-datum? value)
     (and
       (list? value)
@@ -270,14 +386,17 @@
   (define (valid-workbench-datum? value)
     (and
       (list? value)
-      (= (length value) 5)
+      (= (length value) 7)
       (non-empty-string? (list-ref value 0))
       (list? (list-ref value 1))
       (for-all stable-resource? (list-ref value 1))
       (list? (list-ref value 2))
       (for-all stable-resource? (list-ref value 2))
       (exact-non-negative-integer? (list-ref value 3))
-      (valid-layout-datum? (list-ref value 4))))
+      (valid-layout-datum? (list-ref value 4))
+      (valid-jump-graph-datum? (list-ref value 5))
+      (list? (list-ref value 6))
+      (for-all valid-location-list-datum? (list-ref value 6))))
 
   (define (workbench-session-decode bytes)
     (unless (bytevector? bytes)
@@ -359,6 +478,13 @@
           (lambda (result workbench)
             (append
               (list-ref workbench 2)
+              (map cadr (car (list-ref workbench 5)))
+              (apply
+                append
+                (map
+                  (lambda (locations)
+                    (map car (list-ref locations 2)))
+                  (list-ref workbench 6)))
               (collect-layout-resources
                 (list-ref workbench 4)
                 result)))
@@ -429,6 +555,64 @@
             (editor-location->item location role kind))
           (lambda ()
             (when location (editor-location-close! location)))))))
+
+  (define (restore-durable-location-item buffer-loader datum)
+    (let ([buffer (buffer-loader (list-ref datum 0))])
+      (make-location-item
+        (and buffer (buffer-id buffer))
+        (list-ref datum 0)
+        (list-ref datum 1)
+        (list-ref datum 2)
+        (list-ref datum 3)
+        (list-ref datum 4)
+        '())))
+
+  (define (restore-location-list buffer-loader datum)
+    (let* ([locations
+             (make-location-list
+               (list-ref datum 0)
+               (map
+                 (lambda (item)
+                   (restore-durable-location-item buffer-loader item))
+                 (list-ref datum 2)))]
+           [index (list-ref datum 1)])
+      (when index
+        (location-list-set-index! locations index))
+      locations))
+
+  (define (restore-jump-graph! graph buffer-loader datum)
+    (let ([nodes
+            (map
+              (lambda (node)
+                (let ([buffer (buffer-loader (list-ref node 1))])
+                  (make-jump-node
+                    (list-ref node 0)
+                    (list-ref node 1)
+                    (and buffer (buffer-id buffer))
+                    (list-ref node 2)
+                    (list-ref node 3)
+                    (list-ref node 4)
+                    (list-ref node 5)
+                    #f
+                    (list-ref node 6))))
+              (car datum))]
+          [edges
+            (map
+              (lambda (edge)
+                (make-jump-edge
+                  (list-ref edge 0)
+                  (list-ref edge 1)
+                  (list-ref edge 2)
+                  (list-ref edge 3)))
+              (cadr datum))])
+      (jump-graph-replace! graph nodes edges)
+      (for-each
+        (lambda (node)
+          (let ([buffer (buffer-loader (jump-node-resource node))])
+            (when buffer
+              (jump-graph-attach-buffer! graph buffer))))
+        nodes)
+      graph))
 
   (define (restore-navigation! view datum buffer-loader)
     (let* ([walk (view-navigation-walk view)]
@@ -605,6 +789,16 @@
               (let ([buffer (buffer-loader resource)])
                 (and buffer (buffer-id buffer))))
             (list-ref datum 2))))
+      (restore-jump-graph!
+        (workbench-jump-graph workbench)
+        buffer-loader
+        (list-ref datum 5))
+      (workbench-replace-location-lists!
+        workbench
+        (map
+          (lambda (locations)
+            (restore-location-list buffer-loader locations))
+          (list-ref datum 6)))
       (for-each
         (lambda (view-id) (editor-close-view! editor view-id))
         old-view-ids)
@@ -651,6 +845,10 @@
           (list-ref
             targets
             (workbench-session-snapshot-active-index snapshot))))
+      (editor-set-current-location-list!
+        editor
+        (workbench-current-location-list
+          (editor-active-workbench editor)))
       targets))
 
   (define (load-workbench-session-file path)

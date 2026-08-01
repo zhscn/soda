@@ -22,21 +22,28 @@
           jump-graph-edges
           jump-graph-limit
           jump-graph-record!
-          jump-graph-replace!)
+          jump-graph-replace!
+          jump-graph-attach-buffer!
+          jump-graph-detach-buffer!
+          jump-graph-close!)
   (import (rnrs)
+          (soda document)
+          (soda editor buffer)
           (soda editor location))
 
   (define-record-type
     (jump-node %make-jump-node jump-node?)
     (fields id
             resource
-            buffer-id
+            (mutable buffer-id jump-node-buffer-id jump-node-buffer-id-set!)
             revision
-            start
+            (mutable start %jump-node-start jump-node-start-set!)
             end
             excerpt
             language-context
-            (mutable last-visit jump-node-last-visit jump-node-last-visit-set!)))
+            (mutable last-visit jump-node-last-visit jump-node-last-visit-set!)
+            (mutable document jump-node-document jump-node-document-set!)
+            (mutable anchor jump-node-anchor jump-node-anchor-set!)))
 
   (define-record-type jump-edge
     (fields from to kind timestamp))
@@ -76,7 +83,16 @@
         id resource buffer-id revision start end excerpt last-visit))
     (%make-jump-node
       id resource buffer-id revision start end excerpt language-context
-      last-visit))
+      last-visit #f #f))
+
+  (define (jump-node-start node)
+    (unless (jump-node? node)
+      (assertion-violation 'jump-node-start "expected a JumpNode" node))
+    (if (and (jump-node-document node) (jump-node-anchor node))
+        (document-anchor-offset
+          (jump-node-document node)
+          (jump-node-anchor node))
+        (%jump-node-start node)))
 
   (define (make-jump-graph . maybe-limit)
     (let ([limit (if (null? maybe-limit) 512 (car maybe-limit))])
@@ -160,12 +176,22 @@
         #f
         (jump-graph-nodes graph))))
 
+  (define (release-node-anchor! node)
+    (when (and (jump-node-document node) (jump-node-anchor node))
+      (document-remove-anchor!
+        (jump-node-document node)
+        (jump-node-anchor node)))
+    (jump-node-document-set! node #f)
+    (jump-node-anchor-set! node #f)
+    (jump-node-buffer-id-set! node #f))
+
   (define (trim-graph! graph)
     (let loop ()
       (when (> (length (jump-graph-nodes graph)) (jump-graph-limit graph))
         (let ([node (oldest-evictable-node graph)])
           (when node
             (let ([id (jump-node-id node)])
+              (release-node-anchor! node)
               (jump-graph-nodes-set!
                 graph
                 (filter
@@ -217,6 +243,7 @@
         'jump-graph-replace!
         "expected JumpNode and JumpEdge lists"
         nodes edges))
+    (for-each release-node-anchor! (jump-graph-nodes graph))
     (jump-graph-nodes-set! graph nodes)
     (jump-graph-edges-set! graph edges)
     (jump-graph-next-node-id-set!
@@ -233,5 +260,67 @@
         0
         edges))
     (trim-graph! graph)
+    graph)
+
+  (define (buffer-end buffer)
+    (let ([snapshot (document-snapshot (buffer-document buffer))])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (let ([text (snapshot-text snapshot)])
+            (dynamic-wind
+              (lambda () #f)
+              (lambda () (text-size text))
+              (lambda () (text-close! text)))))
+        (lambda () (snapshot-close! snapshot)))))
+
+  (define (jump-graph-attach-buffer! graph buffer)
+    (require-graph 'jump-graph-attach-buffer! graph)
+    (unless (buffer? buffer)
+      (assertion-violation
+        'jump-graph-attach-buffer!
+        "expected a Buffer"
+        buffer))
+    (let ([resource (or (buffer-file-path buffer) (buffer-resource buffer))]
+          [document (buffer-document buffer)]
+          [end (buffer-end buffer)])
+      (when resource
+        (for-each
+          (lambda (node)
+            (when
+              (and
+                (string=? resource (jump-node-resource node))
+                (not (jump-node-anchor node)))
+              (jump-node-buffer-id-set! node (buffer-id buffer))
+              (jump-node-document-set! node document)
+              (jump-node-anchor-set!
+                node
+                (document-create-anchor!
+                  document
+                  (min (%jump-node-start node) end)
+                  anchor-after-insertion))))
+          (jump-graph-nodes graph))))
+    graph)
+
+  (define (jump-graph-detach-buffer! graph buffer-id)
+    (require-graph 'jump-graph-detach-buffer! graph)
+    (for-each
+      (lambda (node)
+        (when (and (jump-node-buffer-id node)
+                   (= (jump-node-buffer-id node) buffer-id))
+          (when (and (jump-node-document node) (jump-node-anchor node))
+            (jump-node-start-set! node (jump-node-start node)))
+          (release-node-anchor! node)))
+      (jump-graph-nodes graph))
+    graph)
+
+  (define (jump-graph-close! graph)
+    (require-graph 'jump-graph-close! graph)
+    (for-each
+      (lambda (node)
+        (release-node-anchor! node))
+      (jump-graph-nodes graph))
+    (jump-graph-nodes-set! graph '())
+    (jump-graph-edges-set! graph '())
     graph)
 )

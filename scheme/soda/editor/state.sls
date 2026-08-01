@@ -272,6 +272,7 @@
           (soda editor hook)
           (soda editor input-state)
           (soda editor interaction)
+          (soda editor jump-graph)
           (soda editor keymap)
           (soda editor language)
           (soda editor language-session)
@@ -1321,6 +1322,12 @@
       (editor-clear-buffer-global-marks! value buffer)
       (editor-clear-buffer-changes! value buffer)
       (editor-detach-buffer-bookmarks! value buffer)
+      (for-each
+        (lambda (workbench)
+          (jump-graph-detach-buffer!
+            (workbench-jump-graph workbench)
+            id))
+        (editor-workbenches value))
       (language-session-registry-detach-buffer!
         (editor-language-session-registry value)
         id)
@@ -1972,6 +1979,7 @@
         (lambda (view-id)
           (editor-close-view! value view-id))
         view-ids)
+      (jump-graph-close! (workbench-jump-graph target))
       (editor-invalidate! value 'layout)
       target))
 
@@ -5984,6 +5992,10 @@
             (view-caret-anchor view))
           (navigation-walk-close! (view-navigation-walk view)))
         (table-values (editor-view-table value) (editor-view-ids value)))
+      (for-each
+        (lambda (workbench)
+          (jump-graph-close! (workbench-jump-graph workbench)))
+        (editor-workbenches value))
       (for-each
         (lambda (buffer)
           (unless (buffer-closed? buffer)

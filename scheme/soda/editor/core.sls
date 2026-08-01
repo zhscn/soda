@@ -71,6 +71,8 @@
           workbench-jump-graph
           workbench-location-lists
           workbench-current-location-list
+          workbench-set-current-location-list!
+          workbench-replace-location-lists!
           workbench-set-name!
           workbench-set-slot!
           workbench-replace-mru!
@@ -99,6 +101,8 @@
           jump-graph-nodes
           jump-graph-edges
           jump-graph-limit
+          jump-graph-attach-buffer!
+          jump-graph-detach-buffer!
           default-workbench-session-path
           workbench-session-encode
           workbench-session-decode

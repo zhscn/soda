@@ -13,6 +13,7 @@
           workbench-location-lists
           workbench-current-location-list
           workbench-set-current-location-list!
+          workbench-replace-location-lists!
           workbench-set-name!
           workbench-set-layout!
           workbench-set-active-window-id!
@@ -277,6 +278,17 @@
          value
          (cons locations (workbench-location-lists value)))])
     locations)
+
+  (define (workbench-replace-location-lists! value location-lists)
+    (require-workbench 'workbench-replace-location-lists! value)
+    (unless (and (list? location-lists)
+                 (for-all location-list? location-lists))
+      (assertion-violation
+        'workbench-replace-location-lists!
+        "expected a list of LocationLists"
+        location-lists))
+    (workbench-location-lists-set! value location-lists)
+    location-lists)
 
   (define (workbench-slot-window-id value role)
     (require-workbench 'workbench-slot-window-id value)

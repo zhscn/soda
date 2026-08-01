@@ -2,6 +2,8 @@
 (import (rnrs)
         (soda document)
         (soda editor buffer)
+        (soda editor jump-graph)
+        (soda editor location)
         (soda editor project)
         (soda editor state)
         (soda editor window)
@@ -67,6 +69,29 @@
 (workbench-set-slot! secondary 'tools active-window-id)
 (workbench-pin-window! secondary active-window-id)
 (workbench-touch-buffer! secondary (buffer-id buffer-b))
+(define graph-source
+  (make-location-item
+    (buffer-id buffer-b)
+    "/workspace/b.scm"
+    (buffer-revision buffer-b)
+    2 2 "2" '()))
+(define graph-target
+  (make-location-item
+    (buffer-id buffer-c)
+    "/workspace/c.scm"
+    (buffer-revision buffer-c)
+    4 4 "p" '()))
+(jump-graph-record!
+  (workbench-jump-graph secondary)
+  graph-source
+  graph-target
+  'definition)
+(define persisted-locations
+  (make-location-list
+    'references
+    (list graph-source graph-target)))
+(location-list-set-index! persisted-locations 1)
+(editor-set-current-location-list! source persisted-locations)
 
 (define encoded (workbench-session-encode source))
 (define snapshot (workbench-session-decode encoded))
@@ -119,6 +144,37 @@
     restored-secondary
     (workbench-active-window-id restored-secondary))
   "restore must recreate pinned Windows")
+(check
+  (and
+    (= (length
+         (jump-graph-nodes
+           (workbench-jump-graph restored-secondary)))
+       2)
+    (= (length
+         (jump-graph-edges
+           (workbench-jump-graph restored-secondary)))
+       1)
+    (eq?
+      (jump-edge-kind
+        (car
+          (jump-graph-edges
+            (workbench-jump-graph restored-secondary))))
+      'definition))
+  "restore must recreate the durable Workbench JumpGraph")
+(check
+  (and
+    (= (length (workbench-location-lists restored-secondary)) 1)
+    (eq?
+      (location-list-source
+        (workbench-current-location-list restored-secondary))
+      'references)
+    (= (location-list-index
+         (workbench-current-location-list restored-secondary))
+       1)
+    (eq?
+      (editor-current-location-list restored)
+      (workbench-current-location-list restored-secondary)))
+  "restore must recreate and activate the Workbench location-list stack")
 
 (define restored-b
   (find
