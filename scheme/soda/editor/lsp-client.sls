@@ -1521,20 +1521,49 @@
                                (make-lsp-workspace-text-edit resource range text)
                                edits)))))))))))
 
+  (define (lsp-changes-edits changes)
+    (and
+      (json-object? changes)
+      (let loop ([entries (json-object-entries changes)] [edits '()])
+        (if (null? entries)
+            (reverse edits)
+            (let ([resource-edits
+                    (lsp-workspace-edits-for-resource
+                      (caar entries) (cdar entries))])
+              (and resource-edits
+                   (loop (cdr entries) (append (reverse resource-edits) edits))))))))
+
+  (define (lsp-document-changes-edits changes)
+    (and
+      (json-array? changes)
+      (let loop ([remaining (json-array-values changes)] [edits '()])
+        (if (null? remaining)
+            (reverse edits)
+            (let ([change (car remaining)])
+              (and
+                (json-object? change)
+                (let ([document (json-object-ref change "textDocument" #f)]
+                      [document-edits (json-object-ref change "edits" #f)])
+                  (and
+                    (json-object? document)
+                    (let* ([uri (json-object-ref document "uri" #f)]
+                           [resource-edits
+                            (lsp-workspace-edits-for-resource uri document-edits)])
+                      (and resource-edits
+                           (loop
+                             (cdr remaining)
+                             (append (reverse resource-edits) edits))))))))))))
+
   (define (lsp-workspace-edits result)
     (and
       (json-object? result)
-      (let ([changes (json-object-ref result "changes" #f)])
-        (and
-          (json-object? changes)
-          (let loop ([entries (json-object-entries changes)] [edits '()])
-            (if (null? entries)
-                (reverse edits)
-                (let ([resource-edits
-                        (lsp-workspace-edits-for-resource
-                          (caar entries) (cdar entries))])
-                  (and resource-edits
-                       (loop (cdr entries) (append (reverse resource-edits) edits))))))))))
+      (let ([changes (json-object-ref result "changes" #f)]
+            [document-changes (json-object-ref result "documentChanges" #f)])
+        (cond
+          [(json-object? changes) (lsp-changes-edits changes)]
+          [(json-array? document-changes)
+           (lsp-document-changes-edits document-changes)]
+          [else #f]))))
 
   (define (lsp-workspace-edit-resources edits)
     (reverse

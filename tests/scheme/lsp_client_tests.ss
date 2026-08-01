@@ -473,16 +473,27 @@
   (make-json-object
     (list (cons "range" rename-target-range)
           (cons "newText" "Gadget"))))
+(define rename-source-document-change
+  (make-json-object
+    (list
+      (cons "textDocument"
+            (make-json-object
+              (list (cons "uri" "file:///workspace/src/main.cpp"))))
+      (cons "edits" (make-json-array (list rename-source-edit))))))
+(define rename-target-document-change
+  (make-json-object
+    (list
+      (cons "textDocument"
+            (make-json-object
+              (list (cons "uri" "file:///workspace/src/other.cpp"))))
+      (cons "edits" (make-json-array (list rename-target-edit))))))
 (define rename-workspace-edit
   (make-json-object
     (list
-      (cons "changes"
-            (make-json-object
-              (list
-                (cons "file:///workspace/src/main.cpp"
-                      (make-json-array (list rename-source-edit)))
-                (cons "file:///workspace/src/other.cpp"
-                      (make-json-array (list rename-target-edit)))))))))
+      (cons "documentChanges"
+            (make-json-array
+              (list rename-source-document-change
+                    rename-target-document-change))))))
 (lsp-client-handle-json-message!
   editor session
   (make-json-object
