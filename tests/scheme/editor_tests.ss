@@ -394,6 +394,48 @@
     project.repeat-last-command
     project.repeat-last-task
     project.discard-command-cache))
+(define project-lifecycle-events '())
+(editor-add-hook!
+  editor
+  'project-registry-changed
+  'editor-tests.project-lifecycle
+  (lambda (changed-editor reason project generation)
+    (set! project-lifecycle-events
+      (append
+        project-lifecycle-events
+        (list (list changed-editor reason project generation))))))
+(define lifecycle-project
+  (make-project
+    'editor-lifecycle-project
+    '("/virtual/lifecycle")
+    'manual 'explicit #f #f '()))
+(define lifecycle-project-update
+  (make-project
+    'editor-lifecycle-project
+    '("/virtual/lifecycle" "/virtual/lifecycle-generated")
+    'manual 'updated #f #f '()))
+(editor-remember-project! editor lifecycle-project)
+(editor-remember-project! editor lifecycle-project-update)
+(editor-forget-project! editor (project-id lifecycle-project))
+(unless
+  (and
+    (equal?
+      (map cadr project-lifecycle-events)
+      '(remembered updated forgotten))
+    (for-all
+      (lambda (entry)
+        (and
+          (eq? (car entry) editor)
+          (integer? (list-ref entry 3))))
+      project-lifecycle-events))
+  (error
+    'editor-tests
+    "Project registry lifecycle notifications differ"
+    project-lifecycle-events))
+(editor-remove-hook!
+  editor
+  'project-registry-changed
+  'editor-tests.project-lifecycle)
 (define editor-test-project
   (editor-discover-project
     editor

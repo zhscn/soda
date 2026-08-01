@@ -32,6 +32,7 @@
           make-project-catalog
           project-catalog?
           project-catalog-generation
+          project-catalog-project-generation
           project-catalog-finders
           project-catalog-register-finder!
           project-catalog-remove-finder!
@@ -87,6 +88,7 @@
       positive-cache
       negative-cache
       projects
+      project-generations
       (mutable known-ids
                project-catalog-known-ids
                project-catalog-known-ids-set!)))
@@ -95,7 +97,7 @@
     (project-catalog-state
       %make-project-catalog-state
       project-catalog-state?)
-    (fields finders generation projects known-ids))
+    (fields finders generation projects project-generations known-ids))
 
   (define project-discovery-unavailable
     (list 'project-discovery-unavailable))
@@ -384,6 +386,7 @@
       (make-hashtable string-hash string=?)
       (make-hashtable string-hash string=?)
       (make-hashtable equal-hash equal?)
+      (make-hashtable equal-hash equal?)
       '()))
 
   (define (require-catalog who catalog)
@@ -453,15 +456,43 @@
         (project-catalog-clear-discovery-cache! catalog))
       finder))
 
+  (define (bump-catalog-generation! catalog)
+    (project-catalog-generation-set!
+      catalog
+      (+ (project-catalog-generation catalog) 1)))
+
+  (define (project-catalog-project-generation catalog id)
+    (require-catalog 'project-catalog-project-generation catalog)
+    (unless (valid-id? id)
+      (assertion-violation
+        'project-catalog-project-generation
+        "id must be a symbol or non-empty string"
+        id))
+    (hashtable-ref (project-catalog-project-generations catalog) id #f))
+
   (define (intern-project! catalog value)
     (let* ([id (project-id value)]
            [existing
              (hashtable-ref (project-catalog-projects catalog) id #f)])
-      (if existing
-          existing
-          (begin
-            (hashtable-set! (project-catalog-projects catalog) id value)
-            value))))
+      (cond
+        [(eq? existing value) existing]
+        [existing
+         (hashtable-set! (project-catalog-projects catalog) id value)
+         (hashtable-set!
+           (project-catalog-project-generations catalog)
+           id
+           (+ 1
+              (hashtable-ref
+                (project-catalog-project-generations catalog) id 0)))
+         (bump-catalog-generation! catalog)
+         (project-catalog-clear-discovery-cache! catalog)
+         value]
+        [else
+         (hashtable-set! (project-catalog-projects catalog) id value)
+         (hashtable-set!
+           (project-catalog-project-generations catalog) id 0)
+         (bump-catalog-generation! catalog)
+         value])))
 
   (define (directory-parent directory)
     (vfs-normalize-path (vfs-parent-directory directory)))
@@ -609,6 +640,7 @@
       (project-catalog-finders catalog)
       (project-catalog-generation catalog)
       (hashtable->alist (project-catalog-projects catalog))
+      (hashtable->alist (project-catalog-project-generations catalog))
       (project-catalog-known-ids catalog)))
 
   (define (project-catalog-restore! catalog state)
@@ -632,6 +664,14 @@
           (car entry)
           (cdr entry)))
       (project-catalog-state-projects state))
+    (hashtable-clear! (project-catalog-project-generations catalog))
+    (for-each
+      (lambda (entry)
+        (hashtable-set!
+          (project-catalog-project-generations catalog)
+          (car entry)
+          (cdr entry)))
+      (project-catalog-state-project-generations state))
     (project-catalog-known-ids-set!
       catalog
       (project-catalog-state-known-ids state))

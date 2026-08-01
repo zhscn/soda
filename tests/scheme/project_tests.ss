@@ -126,6 +126,33 @@
     discovered)
   "known project lookup must preserve canonical identity")
 
+(define discovered-generation
+  (project-catalog-project-generation catalog (project-id discovered)))
+(define updated-discovered
+  (make-project
+    (project-id discovered)
+    (project-roots discovered)
+    (project-kind discovered)
+    'refreshed
+    #f
+    (make-project-settings-layer '((language-server . clangd)))
+    '()))
+(check
+  (eq?
+    (project-catalog-remember! catalog updated-discovered)
+    updated-discovered)
+  "remembering a refreshed descriptor must replace its canonical Project")
+(check
+  (= (project-catalog-project-generation
+       catalog (project-id discovered))
+     (+ discovered-generation 1))
+  "replacing a Project descriptor must advance its own generation")
+(check
+  (eq?
+    (project-catalog-find-known catalog (project-id discovered))
+    updated-discovered)
+  "known lookup must expose the refreshed Project descriptor")
+
 (define snapshot (project-catalog-snapshot catalog))
 (project-catalog-forget! catalog (project-id discovered))
 (project-catalog-remove-finder! catalog 'vcs-project-marker)
@@ -139,6 +166,11 @@
 (check
   (project-catalog-find-known catalog (project-id discovered))
   "catalog restore must restore known projects")
+(check
+  (= (project-catalog-project-generation
+       catalog (project-id discovered))
+     (+ discovered-generation 1))
+  "catalog restore must preserve per-Project generations")
 
 (define negative-catalog (make-project-catalog))
 (project-catalog-register-finder!

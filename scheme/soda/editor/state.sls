@@ -4115,6 +4115,13 @@
               (editor-project-catalog value)
               finder)])
       (editor-invalidate! value 'configuration)
+      (editor-run-hooks!
+        value
+        'project-registry-changed
+        value
+        'discovery-policy-changed
+        #f
+        (project-catalog-generation (editor-project-catalog value)))
       registered))
 
   (define (editor-remove-project-finder! value name)
@@ -4124,7 +4131,14 @@
               (editor-project-catalog value)
               name)])
       (when removed
-        (editor-invalidate! value 'configuration))
+        (editor-invalidate! value 'configuration)
+        (editor-run-hooks!
+          value
+          'project-registry-changed
+          value
+          'discovery-policy-changed
+          #f
+          (project-catalog-generation (editor-project-catalog value))))
       removed))
 
   (define editor-discover-project
@@ -4134,10 +4148,19 @@
          value directory default-project-marker-probe)]
       [(value directory probe)
        (require-open-editor 'editor-discover-project value)
-       (project-catalog-discover
-         (editor-project-catalog value)
-         directory
-         probe)]))
+       (let* ([catalog (editor-project-catalog value)]
+              [before (project-catalog-generation catalog)]
+              [project
+                (project-catalog-discover catalog directory probe)])
+         (when (> (project-catalog-generation catalog) before)
+           (editor-run-hooks!
+             value
+             'project-registry-changed
+             value
+             'discovered
+             project
+             (project-catalog-generation catalog)))
+         project)]))
 
   (define (editor-known-projects value)
     (require-open-editor 'editor-known-projects value)
@@ -4146,11 +4169,22 @@
 
   (define (editor-remember-project! value project)
     (require-open-editor 'editor-remember-project! value)
-    (let ([remembered
+    (let* ([catalog (editor-project-catalog value)]
+           [before
+             (project-catalog-find-known catalog (project-id project))]
+           [remembered
             (project-catalog-remember!
-              (editor-project-catalog value)
+              catalog
               project)])
       (editor-invalidate! value 'configuration)
+      (unless (eq? before remembered)
+        (editor-run-hooks!
+          value
+          'project-registry-changed
+          value
+          (if before 'updated 'remembered)
+          remembered
+          (project-catalog-generation catalog)))
       remembered))
 
   (define (editor-forget-project! value id)
@@ -4164,7 +4198,14 @@
           (lambda (workbench)
             (workbench-remove-project! workbench id))
           (editor-workbenches value))
-        (editor-invalidate! value 'configuration))
+        (editor-invalidate! value 'configuration)
+        (editor-run-hooks!
+          value
+          'project-registry-changed
+          value
+          'forgotten
+          forgotten
+          (project-catalog-generation (editor-project-catalog value))))
       forgotten))
 
   (define (editor-project-resource-snapshot value project-id)

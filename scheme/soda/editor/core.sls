@@ -670,6 +670,7 @@
           project-finder-name
           project-finder-priority
           project-catalog-generation
+          project-catalog-project-generation
           project-catalog-finders
           project-catalog-find-finder
           project-discovery-unavailable
