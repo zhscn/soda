@@ -698,6 +698,7 @@
           editor-project-workspace
           editor-project-workspaces-for-resource
           editor-project-workspace-for-resource
+          editor-project-workspace-for-buffer
           project-workspace-language-session-key
           make-project-resource-policy
           project-resource-policy?

@@ -5,6 +5,7 @@
         (soda editor language-session)
         (soda editor project)
         (soda editor project-workspace)
+        (soda editor resource-context)
         (soda editor state))
 
 (define (check condition message . irritants)
@@ -149,6 +150,36 @@
       #f
       (lambda (path) 'absent)))
   "a standalone resource must remain explicitly outside Project scope")
+
+(define source-buffer
+  (editor-create-buffer!
+    editor
+    "/workspace/component/src/other.cpp"
+    'fundamental-mode
+    ""))
+(buffer-set-file-path!
+  source-buffer "/workspace/component/src/other.cpp")
+(define buffer-workspace
+  (editor-project-workspace-for-buffer
+    editor
+    source-buffer
+    (make-resource-context
+      "/workspace"
+      #f
+      outer
+      #f)
+    (lambda (path) 'absent)))
+(check
+  (eq? (project-workspace-project-id buffer-workspace) 'outer)
+  "Buffer bootstrap must honor an applicable frozen Project hint")
+(check
+  (not
+    (editor-project-workspace-for-buffer
+      editor
+      buffer
+      (make-resource-context "/workspace")
+      (lambda (path) 'absent)))
+  "generated Buffers must not acquire a Project language workspace")
 
 (editor-close! editor)
 (display "project workspace tests passed\n")

@@ -14,10 +14,13 @@
           editor-project-workspace
           editor-project-workspaces-for-resource
           editor-project-workspace-for-resource
+          editor-project-workspace-for-buffer
           project-workspace-language-session-key)
   (import (rnrs)
+          (soda editor buffer)
           (soda editor language-session)
           (soda editor project)
+          (soda editor resource-context)
           (soda editor state)
           (soda vfs))
 
@@ -247,6 +250,38 @@
                (editor-project-workspaces-for-resource
                  editor resource hint probe)])
          (and (pair? workspaces) (car workspaces)))]))
+
+  (define editor-project-workspace-for-buffer
+    (case-lambda
+      [(editor buffer context)
+       (editor-project-workspace-for-buffer
+         editor buffer context #f)]
+      [(editor buffer context probe)
+       (require-open-editor
+         'editor-project-workspace-for-buffer editor)
+       (unless (buffer? buffer)
+         (assertion-violation
+           'editor-project-workspace-for-buffer
+           "expected a Buffer"
+           buffer))
+       (unless (or (not context) (resource-context? context))
+         (assertion-violation
+           'editor-project-workspace-for-buffer
+           "context must be a ResourceContext or #f"
+           context))
+       (unless (or (not probe) (procedure? probe))
+         (assertion-violation
+           'editor-project-workspace-for-buffer
+           "probe must be a procedure or #f"
+           probe))
+       (let ([resource (buffer-file-path buffer)])
+         (and
+           resource
+           (editor-project-workspace-for-resource
+             editor
+             resource
+             (and context (resource-context-project-hint context))
+             probe)))]))
 
   (define project-workspace-language-session-key
     (case-lambda
