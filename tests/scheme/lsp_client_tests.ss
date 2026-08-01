@@ -4,6 +4,7 @@
         (soda editor annotation)
         (soda editor buffer)
         (soda editor command)
+        (soda editor completion-provider)
         (soda editor file)
         (soda editor language-session)
         (soda editor lsp-client)
@@ -1124,6 +1125,119 @@
     (string->utf8 "// Widget\n// Generated\nint main() {}\n"))
   "accepting an LSP completion did not apply its primary and additional edits"
   (utf8->string (buffer-bytes source)))
+(editor-take-tui-effects! editor)
+
+(define failed-completion-caret (view-caret (editor-active-view editor)))
+(editor-start-document-completion!
+  editor
+  lsp-completion-source
+  failed-completion-caret
+  failed-completion-caret
+  failed-completion-caret
+  '(lsp))
+(define failed-completion-request
+  (command-effect-payload (car (editor-take-completion-effects! editor))))
+(define failed-completion-effects
+  (editor-update!
+    editor
+    (make-internal-command-message
+      'lsp.completion-request failed-completion-request)))
+(define failed-completion-message
+  (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload (car failed-completion-effects))))))
+(lsp-client-handle-json-message!
+  editor
+  session
+  (make-json-object
+    (list
+      (cons "jsonrpc" "2.0")
+      (cons "id" (json-object-ref failed-completion-message "id" #f))
+      (cons
+        "error"
+        (make-json-object
+          (list (cons "code" -32603)
+                (cons "message" "completion failed")))))))
+(check
+  (and
+    (or
+      (not (editor-active-completion editor))
+      (not (completion-session-pending? (editor-active-completion editor))))
+    (string=? (editor-status-message editor)
+              "LSP completion failed: completion failed"))
+  "an LSP error response left completion pending")
+(editor-cancel-completion! editor)
+(editor-take-completion-effects! editor)
+
+(define cancelled-completion-caret (view-caret (editor-active-view editor)))
+(editor-start-document-completion!
+  editor
+  lsp-completion-source
+  cancelled-completion-caret
+  cancelled-completion-caret
+  cancelled-completion-caret
+  '(lsp))
+(define cancelled-completion-request-effects
+  (editor-take-completion-effects! editor))
+(check
+  (pair? cancelled-completion-request-effects)
+  "cancellation test did not start completion")
+(define cancelled-completion-request
+  (command-effect-payload (car cancelled-completion-request-effects)))
+(define cancelled-completion-start-effects
+  (editor-update!
+    editor
+    (make-internal-command-message
+      'lsp.completion-request cancelled-completion-request)))
+(define cancelled-completion-message
+  (begin
+    (check
+      (pair? cancelled-completion-start-effects)
+      "cancellation test did not start an LSP request")
+    (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload
+          (car cancelled-completion-start-effects)))))))
+(editor-cancel-completion! editor)
+(define cancelled-provider-effects (editor-take-completion-effects! editor))
+(for-each
+  (lambda (effect)
+    (when (eq? (command-effect-kind effect) 'completion.cancel)
+      (let* ([request (command-effect-payload effect)]
+             [provider
+               (completion-provider-for-request
+                 (editor-completion-provider-catalog editor)
+                 request)])
+        (completion-provider-cancel provider request))))
+  cancelled-provider-effects)
+(define lsp-cancel-effects (editor-take-tui-effects! editor))
+(define lsp-cancel-message
+  (begin
+    (check
+      (pair? lsp-cancel-effects)
+      "completion provider did not emit an LSP cancellation")
+    (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload (car lsp-cancel-effects)))))))
+(check
+  (and
+    (= (length lsp-cancel-effects) 1)
+    (string=?
+      (json-object-ref lsp-cancel-message "method" #f)
+      "$/cancelRequest")
+    (=
+      (json-object-ref
+        (json-object-ref lsp-cancel-message "params" #f)
+        "id"
+        -1)
+      (json-object-ref cancelled-completion-message "id" #f)))
+  "cancelling completion did not cancel the matching LSP request")
 
 (define rename-target
   (editor-create-buffer!
@@ -1630,6 +1744,39 @@
         (eq? (command-effect-kind effect) 'managed-process.start))
       reconcile-effects))
   "Project descriptor updates did not recreate the LSP workspace session")
+(define shutdown-effect
+  (find
+    (lambda (effect)
+      (equal? (effect-method effect) "shutdown"))
+    reconcile-effects))
+(define shutdown-message
+  (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload shutdown-effect)))))
+(define failed-shutdown-effects
+  (lsp-client-handle-json-message!
+    editor
+    session
+    (make-json-object
+      (list
+        (cons "jsonrpc" "2.0")
+        (cons "id" (json-object-ref shutdown-message "id" #f))
+        (cons
+          "error"
+          (make-json-object
+            (list (cons "code" -32603)
+                  (cons "message" "shutdown failed"))))))))
+(check
+  (and
+    (= (length failed-shutdown-effects) 1)
+    (eq? (command-effect-kind (car failed-shutdown-effects))
+         'managed-process.signal)
+    (string=?
+      (editor-status-message editor)
+      "Language server shutdown failed: shutdown failed"))
+  "a failed shutdown request left the language server alive")
 
 (define replacement-attachment
   (car (editor-buffer-language-attachments editor (buffer-id source))))

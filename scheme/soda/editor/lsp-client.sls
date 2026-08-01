@@ -79,7 +79,7 @@
                      lsp-client-document-observer-name-set!)))
 
   (define-record-type lsp-client-pending-request
-    (fields id method continuation))
+    (fields id method result error cancel context))
 
   (define-record-type
     (lsp-client-session %make-lsp-client-session lsp-client-session?)
@@ -91,7 +91,9 @@
             (mutable process
                      lsp-client-session-process
                      lsp-client-session-process-set!)
-            decoder
+            (mutable decoder
+                     lsp-client-session-decoder
+                     lsp-client-session-decoder-set!)
             (mutable state lsp-client-session-state lsp-client-session-state-set!)
             (mutable next-request-id
                      lsp-client-session-next-request-id
@@ -393,19 +395,70 @@
         language-session))
     (session-for-language-session (editor-lsp-registry editor) language-session))
 
-  (define (session-request! session method params continuation)
-    (let ([id (lsp-client-session-next-request-id session)])
-      (lsp-client-session-next-request-id-set! session (+ id 1))
-      (lsp-client-session-pending-set!
-        session
-        (cons
-          (make-lsp-client-pending-request id method continuation)
-          (lsp-client-session-pending session)))
-      (make-command-effect
-        'managed-process.write
-        (make-managed-process-write-request
-          (lsp-client-session-process session)
-          (lsp-json-rpc-frame (lsp-json-request id method params))))))
+  (define (default-request-error editor session error context)
+    (editor-set-status-message! editor (error-message error))
+    '())
+
+  (define (default-request-cancel editor session reason context)
+    '())
+
+  (define session-request!
+    (case-lambda
+      [(session method params result)
+       (session-request!
+         session method params result
+         default-request-error default-request-cancel #f)]
+      [(session method params result error cancel context)
+       (let ([id (lsp-client-session-next-request-id session)])
+         (lsp-client-session-next-request-id-set! session (+ id 1))
+         (lsp-client-session-pending-set!
+           session
+           (cons
+             (make-lsp-client-pending-request
+               id method result error cancel context)
+             (lsp-client-session-pending session)))
+         (make-command-effect
+           'managed-process.write
+           (make-managed-process-write-request
+             (lsp-client-session-process session)
+             (lsp-json-rpc-frame (lsp-json-request id method params)))))]))
+
+  (define (cancel-request-effect session request)
+    (session-notification-effect
+      session
+      "$/cancelRequest"
+      (make-json-object
+        (list (cons "id" (lsp-client-pending-request-id request))))))
+
+  (define (terminate-pending-requests!
+            editor session reason notify-server? predicate)
+    (let loop ([remaining (lsp-client-session-pending session)]
+               [kept '()]
+               [terminated '()])
+      (if (null? remaining)
+          (begin
+            (lsp-client-session-pending-set! session (reverse kept))
+            (apply append
+              (map
+                (lambda (request)
+                  (append
+                    ((lsp-client-pending-request-cancel request)
+                     editor
+                     session
+                     reason
+                     (lsp-client-pending-request-context request))
+                    (if notify-server?
+                        (list (cancel-request-effect session request))
+                        '())))
+                (reverse terminated))))
+          (let ([request (car remaining)])
+            (if (predicate request)
+                (loop (cdr remaining) kept (cons request terminated))
+                (loop (cdr remaining) (cons request kept) terminated))))))
+
+  (define (terminate-all-pending-requests! editor session reason)
+    (terminate-pending-requests!
+      editor session reason #f (lambda (request) #t)))
 
   (define (session-notification-effect session method params)
     (make-command-effect
@@ -661,6 +714,10 @@
           (make-json-object
             (list (cons "settings" (session-lsp-settings session))))))
       (session-open-attached-documents! editor session)))
+
+  (define (initialize-error! editor session error context)
+    (lsp-client-session-state-set! session 'failed)
+    (default-request-error editor session error context))
 
   (define (take-pending-request! session id)
     (let loop ([remaining (lsp-client-session-pending session)] [kept '()])
@@ -991,17 +1048,15 @@
                 (not pending)
                 '()
                 (if (json-object-has-key? message "error")
-                    (begin
-                      (when (string=?
-                              (lsp-client-pending-request-method pending)
-                              "initialize")
-                        (lsp-client-session-state-set! session 'failed)
-                      (editor-set-status-message!
-                        editor
-                        (error-message (lsp-json-response-error message))))
-                      '())
-                    ((lsp-client-pending-request-continuation pending)
-                     editor session (lsp-json-response-result message)))))]
+                    ((lsp-client-pending-request-error pending)
+                     editor
+                     session
+                     (lsp-json-response-error message)
+                     (lsp-client-pending-request-context pending))
+                    ((lsp-client-pending-request-result pending)
+                     editor
+                     session
+                     (lsp-json-response-result message)))))]
            [(or (string? id) (exact-non-negative-integer? id))
             (let ([method (json-object-ref message "method" #f)])
               (if (string? method)
@@ -1036,9 +1091,11 @@
   (define (lsp-protocol-failure! editor session condition)
     (let* ([profile (lsp-client-session-server session)]
            [process (lsp-client-session-process session)]
-           [detail (condition-message condition)])
+           [detail (condition-message condition)]
+           [cancel-effects
+             (terminate-all-pending-requests!
+               editor session 'protocol-failure)])
       (lsp-client-session-state-set! session 'failed)
-      (lsp-client-session-pending-set! session '())
       (editor-set-status-message!
         editor
         (string-append
@@ -1048,12 +1105,14 @@
           (if (and (string? detail) (positive? (string-length detail)))
               (string-append ": " detail)
               "")))
-      (if (memq (managed-process-state process) '(running stopping))
-          (list
-            (make-command-effect
-              'managed-process.signal
-              (make-managed-process-signal-request process 15)))
-          '())))
+      (append
+        cancel-effects
+        (if (memq (managed-process-state process) '(running stopping))
+            (list
+              (make-command-effect
+                'managed-process.signal
+                (make-managed-process-signal-request process 15)))
+            '()))))
 
   (define (lsp-client-handle-process-output! editor event)
     (unless (managed-process-event? event)
@@ -1115,22 +1174,42 @@
                 (if (not (eq? process (lsp-client-session-process session)))
                     (loop (+ index 1) effects)
                     (if (managed-process-event-restarted? event)
-                        (begin
+                        (let ([cancel-effects
+                                (terminate-all-pending-requests!
+                                  editor session 'process-restarted)])
                           (lsp-client-session-state-set! session 'starting)
-                          (lsp-client-session-pending-set! session '())
+                          (lsp-client-session-decoder-set!
+                            session (make-lsp-json-rpc-decoder))
+                          (lsp-client-session-capabilities-set!
+                            session (make-json-object '()))
+                          (lsp-client-session-diagnostic-generation-set!
+                            session 0)
+                          (hashtable-delete! lsp-semantic-generations session)
+                          (hashtable-delete!
+                            lsp-document-highlight-generations session)
                           (for-each
                             (lambda (document)
-                              (lsp-client-document-opened?-set! document #f))
+                              (lsp-client-document-opened?-set! document #f)
+                              (lsp-client-document-diagnostic-result-id-set!
+                                document #f))
                             (lsp-client-session-documents session))
                           (loop
                             (+ index 1)
-                            (cons
-                              (session-request!
-                                session "initialize" (initialize-params session)
-                                initialize-response!)
-                              effects)))
-                        (begin
-                          (lsp-client-session-pending-set! session '())
+                            (append
+                              (reverse cancel-effects)
+                              (cons
+                                (session-request!
+                                  session
+                                  "initialize"
+                                  (initialize-params session)
+                                  initialize-response!
+                                  initialize-error!
+                                  default-request-cancel
+                                  #f)
+                                effects))))
+                        (let ([cancel-effects
+                                (terminate-all-pending-requests!
+                                  editor session 'process-exited)])
                           (for-each
                             (lambda (document)
                               (lsp-client-document-opened?-set! document #f))
@@ -1143,7 +1222,9 @@
                               (unless stopping?
                                 (editor-set-status-message!
                                   editor "Language server exited"))))
-                          (loop (+ index 1) effects))))))))))
+                          (loop
+                            (+ index 1)
+                            (append (reverse cancel-effects) effects)))))))))))
 
   (define (lsp-session-key workspace language profile)
     (project-workspace-language-session-key
@@ -1339,7 +1420,10 @@
                 session
                 "initialize"
                 (initialize-params session)
-                initialize-response!)))))))
+                initialize-response!
+                initialize-error!
+                default-request-cancel
+                #f)))))))
 
   (define (same-project-workspace? left right)
     (and (project-workspace? left)
@@ -1511,13 +1595,14 @@
     (case (lsp-client-session-state session)
       [(starting)
        (lsp-client-session-state-set! session 'stopping)
-       (lsp-client-session-pending-set! session '())
-       (list
-         (make-command-effect
-           'managed-process.signal
-           (make-managed-process-signal-request
-             (lsp-client-session-process session)
-             15)))]
+       (append
+         (terminate-all-pending-requests! editor session 'session-stopped)
+         (list
+           (make-command-effect
+             'managed-process.signal
+             (make-managed-process-signal-request
+               (lsp-client-session-process session)
+               15))))]
       [(ready)
        (lsp-client-session-state-set! session 'stopping)
        (list
@@ -1531,7 +1616,21 @@
                  response-session "exit" (make-json-object '()))
                (make-command-effect
                  'managed-process.close-input
-                 (lsp-client-session-process response-session))))))]
+                 (lsp-client-session-process response-session))))
+           (lambda (response-editor response-session error context)
+             (editor-set-status-message!
+               response-editor
+               (string-append
+                 "Language server shutdown failed: "
+                 (error-message error)))
+             (list
+               (make-command-effect
+                 'managed-process.signal
+                 (make-managed-process-signal-request
+                   (lsp-client-session-process response-session)
+                   15))))
+           default-request-cancel
+           #f))]
       [else '()]))
 
   (define (auto-start-lsp-for-buffer! editor buffer)
@@ -1954,8 +2053,27 @@
                             (lambda (response-editor response-session result)
                               (lsp-apply-completion-resolution!
                                 response-editor data item result)
-                              '()))))
+                              '())
+                            (lambda (response-editor response-session error context)
+                              (hashtable-delete!
+                                pending-lsp-completion-resolutions item)
+                              (default-request-error
+                                response-editor response-session error context))
+                            (lambda (response-editor response-session reason context)
+                              (hashtable-delete!
+                                pending-lsp-completion-resolutions item)
+                              '())
+                            item)))
                       'pending)))))))
+
+  (define (complete-failed-lsp-request! editor request error)
+    (editor-apply-completion-response!
+      editor
+      (make-completion-response-for-request request '() #t))
+    (editor-set-status-message!
+      editor
+      (string-append "LSP completion failed: " (error-message error)))
+    '())
 
   (define (lsp-start-completion! editor request)
     (let ([session (completion-request-session editor request)])
@@ -1981,9 +2099,41 @@
                       response-editor
                       (make-completion-response-for-request
                         request (lsp-completion-items response-editor request result) #t))
-                    '())))
+                    '())
+                  (lambda (response-editor response-session error context)
+                    (complete-failed-lsp-request!
+                      response-editor request error))
+                  default-request-cancel
+                  request))
               '()))
         '())))
+
+  (define (cancel-lsp-completion-request! editor request)
+    (let-values
+      ([(ids sessions)
+        (hashtable-entries
+          (lsp-client-registry-sessions (editor-lsp-registry editor)))])
+      (let loop ([index 0] [effects '()])
+        (if (= index (vector-length sessions))
+            (begin
+              (when (pair? effects)
+                (editor-queue-tui-effects! editor (reverse effects)))
+              #t)
+            (let* ([session (vector-ref sessions index)]
+                   [notify-server?
+                     (eq? (lsp-client-session-state session) 'ready)]
+                   [cancelled
+                     (terminate-pending-requests!
+                       editor
+                       session
+                       'completion-cancelled
+                       notify-server?
+                       (lambda (pending)
+                         (eq? (lsp-client-pending-request-context pending)
+                              request)))])
+              (loop
+                (+ index 1)
+                (append (reverse cancelled) effects)))))))
 
   (define (lsp-request-at-active-point!
             editor method additional-parameters continuation)
@@ -3541,7 +3691,8 @@
         'lsp
         (lambda (request)
           (list (make-internal-command-message 'lsp.completion-request request)))
-        (lambda (request) #f)
+        (lambda (request)
+          (cancel-lsp-completion-request! editor request))
         (lambda (item)
           (lsp-resolve-completion-item! editor item))))
     (editor-register-command!
