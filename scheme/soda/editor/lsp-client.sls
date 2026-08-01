@@ -724,6 +724,13 @@
       #f
       lsp-client-capability-identity))
 
+  (define (enable-lsp-completion! buffer)
+    (let ([providers
+            (buffer-setting-ref buffer 'completion-providers '())])
+      (unless (memq 'lsp providers)
+        (buffer-set-local-setting!
+          buffer 'completion-providers (append providers '(lsp))))))
+
   (define (session-language session)
     (language-session-key-language
       (language-session-identity
@@ -812,7 +819,8 @@
                     (buffer-id buffer)
                     (lsp-client-session-language-session replacement)
                     (language-attachment-provenance attachment)
-                    (language-attachment-origin-view-id attachment))))
+                    (language-attachment-origin-view-id attachment))
+                  (enable-lsp-completion! buffer)))
               attachments)
             (editor-remove-language-session!
               editor
@@ -925,6 +933,7 @@
           (lsp-client-session-language-session session)
           'home
           #f)
+        (enable-lsp-completion! buffer)
         (append
           effects
           (if (eq? (lsp-client-session-state session) 'ready)
