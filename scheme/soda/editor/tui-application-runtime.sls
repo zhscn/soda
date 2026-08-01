@@ -18,6 +18,7 @@
           tui-synchronize-view-lifecycle!
           tui-route-pointer-event
           tui-mouse-capability-active?
+          tui-host-passthrough?
           tui-ensure-session-text-projection!
           tui-ensure-buffer-text-projection!
           tui-focused-accessibility
@@ -30,6 +31,7 @@
           (soda editor display-placement)
           (soda editor edit)
           (soda editor event)
+          (soda editor keymap)
           (soda editor presentation)
           (soda editor state)
           (soda editor tui-application)
@@ -519,6 +521,31 @@
         'tui-open!
         "unknown TUI application"
         name)))
+
+  (define (tui-host-passthrough? editor session-id sequence)
+    (require-open-editor 'tui-host-passthrough? editor)
+    (unless (and (list? sequence) (for-all key-stroke? sequence))
+      (assertion-violation
+        'tui-host-passthrough? "expected a key sequence" sequence))
+    (let* ([session (editor-tui-session-ref editor session-id)]
+           [names
+             (tui-application-definition-host-passthrough-keymaps
+               (tui-session-definition session))]
+           [keymaps
+             (map
+               (lambda (name)
+                 (or (keymap-catalog-find
+                       (editor-keymap-catalog editor)
+                       name)
+                     (assertion-violation
+                       'tui-host-passthrough?
+                       "unknown host passthrough keymap"
+                       name)))
+               names)])
+      (call-with-values
+        (lambda () (keymaps-resolve keymaps sequence))
+        (lambda (status command)
+          (or (eq? status 'prefix) (eq? status 'command))))))
 
   (define (initialize definition context arguments)
     (call-with-values

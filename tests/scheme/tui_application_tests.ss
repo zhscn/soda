@@ -4,6 +4,7 @@
         (soda editor buffer)
         (soda editor core)
         (soda editor effect)
+        (only (soda editor keymap) make-key-stroke)
         (only (soda editor event)
               make-key-event
               key-event?
@@ -157,7 +158,8 @@
     (lambda (model state) (number->string model))
     'fundamental-mode
     'edit
-    '(timer mouse)))
+    '(timer mouse)
+    '(editor.override)))
 (editor-register-tui-application! editor definition)
 
 (define application-buffer (tui-open! editor 'counter 41))
@@ -198,6 +200,20 @@
         #f)
       'interface))
   "tui-open! must create and display an interface Buffer backed by a session")
+(check
+  (and
+    (tui-host-passthrough?
+      editor
+      (tui-session-id session)
+      (list
+        (make-key-stroke 'character (char->integer #\g) 4)))
+    (not
+      (tui-host-passthrough?
+        editor
+        (tui-session-id session)
+        (list
+          (make-key-stroke 'character (char->integer #\z) 0)))))
+  "host passthrough must resolve declared host keymaps")
 (check
   (and (= (length lifecycle-events) 2)
        (tui-resize-event? (car lifecycle-events))

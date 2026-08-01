@@ -170,6 +170,7 @@
           tui-application-definition-default-mode
           tui-application-definition-default-display-intent
           tui-application-definition-capabilities
+          tui-application-definition-host-passthrough-keymaps
           tui-application-definition-serializer
           tui-application-definition-deserializer
           tui-application-definition-resume
@@ -326,6 +327,7 @@
           tui-synchronize-view-lifecycle!
           tui-route-pointer-event
           tui-mouse-capability-active?
+          tui-host-passthrough?
           make-tui-dimension
           tui-dimension?
           tui-dimension-kind

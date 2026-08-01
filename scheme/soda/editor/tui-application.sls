@@ -11,6 +11,7 @@
           tui-application-definition-default-mode
           tui-application-definition-default-display-intent
           tui-application-definition-capabilities
+          tui-application-definition-host-passthrough-keymaps
           tui-application-definition-serializer
           tui-application-definition-deserializer
           tui-application-definition-resume
@@ -217,6 +218,7 @@
             default-mode
             default-display-intent
             capabilities
+            host-passthrough-keymaps
             serializer
             deserializer
             resume))
@@ -227,9 +229,22 @@
              default-display-intent capabilities)
        (make-tui-application-definition
          name init update view close text-projection default-mode
-         default-display-intent capabilities #f #f #f)]
+         default-display-intent capabilities '() #f #f #f)]
+      [(name init update view close text-projection default-mode
+             default-display-intent capabilities host-passthrough-keymaps)
+       (make-tui-application-definition
+         name init update view close text-projection default-mode
+         default-display-intent capabilities host-passthrough-keymaps
+         #f #f #f)]
       [(name init update view close text-projection default-mode
              default-display-intent capabilities serializer deserializer resume)
+       (make-tui-application-definition
+         name init update view close text-projection default-mode
+         default-display-intent capabilities '()
+         serializer deserializer resume)]
+      [(name init update view close text-projection default-mode
+             default-display-intent capabilities host-passthrough-keymaps
+             serializer deserializer resume)
     (unless (symbol? name)
       (assertion-violation
         'make-tui-application-definition
@@ -267,6 +282,11 @@
         'make-tui-application-definition
         "capabilities must contain unique symbols"
         capabilities))
+    (unless (unique-symbol-list? host-passthrough-keymaps)
+      (assertion-violation
+        'make-tui-application-definition
+        "host passthrough keymaps must contain unique symbols"
+        host-passthrough-keymaps))
     (unless (or (not serializer) (procedure? serializer))
       (assertion-violation
         'make-tui-application-definition
@@ -289,11 +309,28 @@
         resume))
     (%make-tui-application-definition
       name init update view close text-projection default-mode
-      default-display-intent capabilities serializer deserializer resume)]))
+      default-display-intent capabilities host-passthrough-keymaps
+      serializer deserializer resume)]))
 
   (define-syntax define-tui-application
     (syntax-rules (init update view close text-projection mode
-                        display-intent capabilities serialize deserialize resume)
+                        display-intent capabilities host-passthrough-keymaps
+                        serialize deserialize resume)
+      [(_ name
+          (init init-procedure)
+          (update update-procedure)
+          (view view-procedure)
+          (close close-procedure)
+          (text-projection projection-procedure)
+          (mode mode-name)
+          (display-intent intent)
+          (capabilities capability-list)
+          (host-passthrough-keymaps passthrough-list))
+       (define name
+         (make-tui-application-definition
+           'name init-procedure update-procedure view-procedure
+           close-procedure projection-procedure mode-name intent
+           capability-list passthrough-list))]
       [(_ name
           (init init-procedure)
           (update update-procedure)
