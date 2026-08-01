@@ -360,6 +360,27 @@
       (editor-command-registry editor)
       'project.info))
   (error 'editor-tests "project commands were not installed"))
+(for-each
+  (lambda (name)
+    (unless
+      (command-registered? (editor-command-registry editor) name)
+      (error 'editor-tests "project process command was not installed" name)))
+  '(project.run-task
+    project.configure
+    project.compile
+    project.test
+    project.install
+    project.package
+    project.run
+    project.run-shell-command
+    project.run-async-shell-command
+    project.shell
+    project.terminal
+    project.repl
+    project.gdb
+    project.repeat-last-command
+    project.repeat-last-task
+    project.discard-command-cache))
 (define editor-test-project
   (editor-discover-project
     editor
@@ -450,6 +471,35 @@
   editor
   (view-id (editor-active-view editor))
   editor-test-resource-context)
+(let* ([context
+         (make-command-context
+           editor (editor-active-view editor) #f #f #f)]
+       [effects
+         (execute-command!
+           (editor-command-registry editor)
+           'project.compile
+           context
+           '())]
+       [message
+         (and
+           (= (length effects) 1)
+           (eq? (command-effect-kind (car effects)) 'command.invoke)
+           (command-effect-payload (car effects)))]
+       [profile
+         (and
+           (command-message? message)
+           (eq? (command-message-name message) 'process.start)
+           (command-message-argument message))])
+  (unless
+    (and
+      (process-comint-profile? profile)
+      (equal?
+        (process-comint-profile-arguments profile)
+        '("/bin/sh" "-lc" "cmake --build build"))
+      (string=?
+        (process-comint-profile-working-directory profile)
+        "/virtual/repository"))
+    (error 'editor-tests "Project lifecycle command differs" effects)))
 (let ([context
         (editor-view-resource-context
           editor

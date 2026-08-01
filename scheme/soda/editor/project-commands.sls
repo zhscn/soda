@@ -15,6 +15,104 @@
           (soda editor state)
           (soda vfs))
 
+  (define-record-type
+    (project-command-state make-project-command-state project-command-state?)
+    (fields
+      (mutable last-command
+               project-command-state-last-command
+               project-command-state-last-command-set!)
+      (mutable last-task
+               project-command-state-last-task
+               project-command-state-last-task-set!)))
+
+  (define (project-marker project)
+    (let ([entry
+            (and
+              (list? (project-discovery-provenance project))
+              (assq 'marker (project-discovery-provenance project)))])
+      (and entry (cdr entry))))
+
+  (define (project-profile project label arguments prompt transport)
+    (make-process-comint-profile
+      label
+      arguments
+      (project-primary-root project)
+      prompt
+      transport))
+
+  (define (task-profile project task)
+    (let ([configured
+            (project-task-definition-working-directory task)])
+      (make-process-comint-profile
+        (project-task-definition-label task)
+        (project-task-definition-arguments task)
+        (if configured
+            (vfs-resolve-path
+              (vfs-directory-path (project-primary-root project))
+              configured)
+            (project-primary-root project))
+        (project-task-definition-prompt task))))
+
+  (define (profile-effect profile)
+    (list
+      (make-command-effect
+        'command.invoke
+        (make-command-message 'process.start profile))))
+
+  (define (remember-command-profile! state profile task?)
+    (project-command-state-last-command-set! state profile)
+    (when task?
+      (project-command-state-last-task-set! state profile))
+    profile)
+
+  (define (project-task-effects state project task)
+    (profile-effect
+      (remember-command-profile!
+        state
+        (task-profile project task)
+        #t)))
+
+  (define (lifecycle-default marker phase)
+    (let ([table
+            (cond
+              [(equal? marker "CMakeLists.txt")
+               '((configure "cmake -S . -B build")
+                 (compile "cmake --build build")
+                 (test "ctest --test-dir build")
+                 (install "cmake --install build")
+                 (package "cpack --config build/CPackConfig.cmake"))]
+              [(equal? marker "meson.build")
+               '((configure "meson setup build")
+                 (compile "meson compile -C build")
+                 (test "meson test -C build")
+                 (install "meson install -C build"))]
+              [(equal? marker "Cargo.toml")
+               '((compile "cargo build")
+                 (test "cargo test")
+                 (install "cargo install --path .")
+                 (package "cargo package")
+                 (run "cargo run"))]
+              [(equal? marker "go.mod")
+               '((compile "go build ./...")
+                 (test "go test ./...")
+                 (install "go install ./...")
+                 (run "go run ."))]
+              [(equal? marker "package.json")
+               '((configure "npm install")
+                 (compile "npm run build")
+                 (test "npm test")
+                 (install "npm install")
+                 (package "npm pack")
+                 (run "npm start"))]
+              [(equal? marker "pyproject.toml")
+               '((compile "python -m build")
+                 (test "python -m pytest")
+                 (install "python -m pip install .")
+                 (package "python -m build"))]
+              [else '()])])
+      (let ([entry (assq phase table)])
+        (and entry (cadr entry)))))
+
   (define (project-label project)
     (project-primary-root project))
 
@@ -436,35 +534,147 @@
           "No Project found"))
       '()))
 
-  (define-command (run-project-task-command context selection)
-    "Run a known Project task in a process interaction buffer."
-    (interactive known-project-task-reader)
+  (define (run-project-task-effects state selection)
     (if (not selection)
         '()
         (let* ([project (vector-ref selection 0)]
-               [task (vector-ref selection 1)]
-               [root (project-primary-root project)]
-               [working-directory
-                 (let ([configured
-                         (project-task-definition-working-directory
-                           task)])
-                   (if configured
-                       (vfs-resolve-path
-                         (vfs-directory-path root)
-                         configured)
-                       root))]
-               [profile
-                 (make-process-comint-profile
-                   (project-task-definition-label task)
-                   (project-task-definition-arguments task)
-                   working-directory
-                   (project-task-definition-prompt task))])
-          (list
-            (make-command-effect
-              'command.invoke
-              (make-command-message
-                'process.start
-                profile))))))
+               [task (vector-ref selection 1)])
+          (project-task-effects state project task))))
+
+  (define (make-run-project-task-command state)
+    (let ([implementation
+            (lambda (context selection)
+              (run-project-task-effects state selection))])
+      (make-command-definition
+        'project.run-task
+        implementation
+        (lambda (context arguments)
+          (apply implementation context arguments))
+        "Run a known Project task in a process interaction buffer."
+        #f
+        (make-interactive-plan (list known-project-task-reader))
+        '())))
+
+  (define (run-lifecycle-command state phase context)
+    (let* ([editor (command-context-editor context)]
+           [project
+             (current-project editor (command-context-view context))])
+      (cond
+        [(not project)
+         (editor-set-status-message! editor "No Project found")
+         '()]
+        [(project-find-task project phase) =>
+         (lambda (task)
+           (project-task-effects state project task))]
+        [(lifecycle-default (project-marker project) phase) =>
+         (lambda (command)
+           (profile-effect
+             (remember-command-profile!
+               state
+               (project-profile
+                 project
+                 (string-append
+                   (symbol->string phase)
+                   ": "
+                   (project-primary-root project))
+                 (list "/bin/sh" "-lc" command)
+                 ""
+                 'pipe)
+               #t)))]
+        [else
+         (editor-set-status-message!
+           editor
+           (string-append
+             "No " (symbol->string phase) " task for Project"))
+         '()])))
+
+  (define (make-lifecycle-command state phase)
+    (make-interactive-context-command
+      (string->symbol
+        (string-append "project." (symbol->string phase)))
+      (lambda (context)
+        (run-lifecycle-command state phase context))
+      (string-append
+        "Run the Project " (symbol->string phase) " task.")))
+
+  (define-command (run-project-shell-command context command)
+    "Run a shell command from the current Project root."
+    (interactive
+      (interactive-string "Run in Project root: " 'project-command))
+    (let* ([editor (command-context-editor context)]
+           [project
+             (current-project editor (command-context-view context))])
+      (if project
+          (profile-effect
+            (project-profile
+              project command (list "/bin/sh" "-lc" command) "" 'pipe))
+          (begin
+            (editor-set-status-message! editor "No Project found")
+            '()))))
+
+  (define (open-project-program-command context name arguments prompt)
+    (let* ([editor (command-context-editor context)]
+           [project
+             (current-project editor (command-context-view context))])
+      (if project
+          (profile-effect
+            (project-profile project name arguments prompt 'pty))
+          (begin
+            (editor-set-status-message! editor "No Project found")
+            '()))))
+
+  (define (open-project-shell-command context)
+    (open-project-program-command
+      context "Project shell" (list "/bin/sh") "$ "))
+
+  (define (open-project-gdb-command context)
+    (open-project-program-command context "Project GDB" (list "gdb") ""))
+
+  (define (open-project-repl-command context)
+    (let* ([editor (command-context-editor context)]
+           [project
+             (current-project editor (command-context-view context))])
+      (cond
+        [(not project)
+         (editor-set-status-message! editor "No Project found")
+         '()]
+        [(project-find-task project 'repl) =>
+         (lambda (task)
+           (profile-effect (task-profile project task)))]
+        [else
+         (let ([arguments
+                 (cond
+                   [(equal? (project-marker project) "pyproject.toml")
+                    (list "python")]
+                   [(equal? (project-marker project) "package.json")
+                    (list "npm" "repl")]
+                   [else (list "/bin/sh")])])
+           (profile-effect
+             (project-profile
+               project "Project REPL" arguments "" 'pty)))])))
+
+  (define (repeat-project-profile-command state task? context)
+    (let ([profile
+            (if task?
+                (project-command-state-last-task state)
+                (project-command-state-last-command state))])
+      (if profile
+          (profile-effect profile)
+          (begin
+            (editor-set-status-message!
+              (command-context-editor context)
+              (if task?
+                  "No previous Project task"
+                  "No previous Project command"))
+            '()))))
+
+  (define (discard-project-command-cache-command state context)
+    (project-command-state-last-command-set! state #f)
+    (project-command-state-last-task-set! state #f)
+    (editor-set-status-message!
+      (command-context-editor context)
+      "Discarded Project command history")
+    '())
 
   (define (apply-project-resource-snapshot-command context)
     (let* ([editor (command-context-editor context)]
@@ -481,12 +691,13 @@
       '()))
 
   (define (install-project-commands! editor)
-    (editor-register-command!
-      editor
-      (make-interactive-context-command
-        'project.remember-current
-        remember-current-project-command
-        "Discover and remember the current Project."))
+    (let ([state (make-project-command-state #f #f)])
+      (editor-register-command!
+        editor
+        (make-interactive-context-command
+          'project.remember-current
+          remember-current-project-command
+          "Discover and remember the current Project."))
     (editor-register-command!
       editor
       (make-interactive-context-command
@@ -507,10 +718,13 @@
         "Select a known Project and find a file from its root."))
     (editor-register-command!
       editor
-      (make-interactive-context-command
-        'project.run-task
-        run-project-task-command
-        "Run a known Project task."))
+      (make-run-project-task-command state))
+    (for-each
+      (lambda (phase)
+        (editor-register-command!
+          editor
+          (make-lifecycle-command state phase)))
+      '(configure compile test install package run))
     (for-each
       (lambda (entry)
         (editor-register-command!
@@ -543,12 +757,36 @@
         (list 'project.root open-project-root-command
               "Start file selection at the current Project root.")
         (list 'project.info project-info-command
-              "Describe the current Project.")))
+              "Describe the current Project.")
+        (list 'project.run-shell-command run-project-shell-command
+              "Run a shell command from the current Project root.")
+        (list 'project.run-async-shell-command run-project-shell-command
+              "Run an asynchronous shell command from the Project root.")
+        (list 'project.shell open-project-shell-command
+              "Open a shell in the current Project root.")
+        (list 'project.terminal open-project-shell-command
+              "Open a terminal process in the current Project root.")
+        (list 'project.repl open-project-repl-command
+              "Open the configured Project REPL.")
+        (list 'project.gdb open-project-gdb-command
+              "Open GDB in the current Project root.")
+        (list 'project.repeat-last-command
+              (lambda (context)
+                (repeat-project-profile-command state #f context))
+              "Repeat the last Project process command.")
+        (list 'project.repeat-last-task
+              (lambda (context)
+                (repeat-project-profile-command state #t context))
+              "Repeat the last Project task.")
+        (list 'project.discard-command-cache
+              (lambda (context)
+                (discard-project-command-cache-command state context))
+              "Discard cached Project process commands.")))
     (editor-register-internal-command!
       editor
       (make-internal-context-command
         'project.apply-resource-snapshot
         apply-project-resource-snapshot-command
         "Apply an asynchronous Project resource snapshot."))
-    editor)
+      editor))
 )

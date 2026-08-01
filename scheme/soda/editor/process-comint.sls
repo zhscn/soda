@@ -108,6 +108,13 @@
          default-input-sender
          default-output-filter
          default-sentinel)]
+      [(name arguments working-directory prompt transport)
+       (make-process-comint-profile
+         name arguments working-directory prompt
+         transport 24 80
+         default-input-sender
+         default-output-filter
+         default-sentinel)]
       [(name
          arguments
          working-directory
