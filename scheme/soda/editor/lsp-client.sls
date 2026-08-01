@@ -41,6 +41,7 @@
           (soda editor file)
           (soda editor language)
           (soda editor language-session)
+          (soda editor location)
           (soda editor lsp-json-rpc)
           (soda editor lsp-position)
           (soda editor lsp-protocol)
@@ -1268,7 +1269,19 @@
               '()))
         '())))
 
-  (define (lsp-request-at-active-point! editor method continuation)
+  (define (lsp-request-at-active-point!
+            editor method additional-parameters continuation)
+    (unless (and (list? additional-parameters)
+                 (for-all
+                   (lambda (entry)
+                     (and (pair? entry)
+                          (string? (car entry))
+                          (json-value? (cdr entry))))
+                   additional-parameters))
+      (assertion-violation
+        'lsp-request-at-active-point!
+        "additional LSP parameters must be JSON object entries"
+        additional-parameters))
     (let* ([view (editor-active-view editor)]
            [buffer (view-buffer view)]
            [session (active-view-lsp-session editor)]
@@ -1281,11 +1294,13 @@
             (session-request!
               session method
               (make-json-object
-                (list
-                  (cons "textDocument"
-                        (make-json-object
-                          (list (cons "uri" (lsp-client-document-uri document)))))
-                  (cons "position" (lsp-position->json position))))
+                (append
+                  (list
+                    (cons "textDocument"
+                          (make-json-object
+                            (list (cons "uri" (lsp-client-document-uri document)))))
+                    (cons "position" (lsp-position->json position)))
+                  additional-parameters))
               continuation))
           (begin
             (editor-set-status-message! editor "No ready language server at point")
@@ -1312,6 +1327,7 @@
     (lsp-request-at-active-point!
       editor
       "textDocument/hover"
+      '()
       (lambda (response-editor response-session result)
         (editor-set-status-message!
           response-editor
@@ -1325,45 +1341,141 @@
       [(json-object? value) value]
       [else #f]))
 
-  (define (lsp-jump-to-location! editor view location)
-    (guard (condition [else '()])
-      (let* ([uri (or (json-object-ref location "uri" #f)
-                      (json-object-ref location "targetUri" #f))]
-             [range (or (json-object-ref location "range" #f)
-                        (json-object-ref location "targetSelectionRange" #f))]
-             [path (and (string? uri) (lsp-uri-file-path uri))]
-             [lsp-range (lsp-range-from-json range)]
-             [buffer (and path (editor-buffer-for-resource editor path))]
-             [context (editor-view-resource-context editor (view-id view))])
-        (if buffer
-            (let ([offset
-                    (lsp-buffer-offset-at buffer (lsp-range-start lsp-range))])
-              (if offset
-                  (begin
-                    (editor-jump-to-buffer! editor buffer offset 'definition context)
-                    '())
-                  '()))
-            (if path
+  (define (lsp-location-range location)
+    (and
+      (json-object? location)
+      (let ([range
+              (or (json-object-ref location "range" #f)
+                  (json-object-ref location "targetSelectionRange" #f))])
+        (guard (condition [else #f]) (lsp-range-from-json range)))))
+
+  (define (lsp-location-resource location)
+    (and
+      (json-object? location)
+      (let ([uri
+              (or (json-object-ref location "uri" #f)
+                  (json-object-ref location "targetUri" #f))])
+        (and (string? uri)
+             (guard (condition [else #f]) (lsp-uri-file-path uri))))))
+
+  (define (lsp-location-item editor location)
+    (guard (condition [else #f])
+      (let* ([path (lsp-location-resource location)]
+             [range (lsp-location-range location)]
+             [buffer (and path (editor-buffer-for-resource editor path))])
+        (and path range
+          (if buffer
+              (let ([start
+                      (lsp-buffer-offset-at buffer (lsp-range-start range))]
+                    [end
+                      (lsp-buffer-offset-at buffer (lsp-range-end range))])
+                (and start end
+                     (make-location-item
+                       (buffer-id buffer)
+                       path
+                       (buffer-revision buffer)
+                       start
+                       end
+                       #f
+                       location)))
+              (make-location-item
+                #f
+                path
+                0
+                0
+                0
+                #f
+                (list
+                  (cons
+                    'file-open-position
+                    (make-file-utf16-position
+                      (lsp-position-line (lsp-range-start range))
+                      (lsp-position-character (lsp-range-start range)))))))))))
+
+  (define (lsp-jump-to-location-item! editor view item kind)
+    (let ([context (editor-view-resource-context editor (view-id view))]
+          [buffer-id (location-item-buffer-id item)])
+      (if buffer-id
+          (let ([buffer (editor-buffer-ref editor buffer-id)])
+            (if (= (buffer-revision buffer) (location-item-revision item))
                 (begin
-                  (editor-begin-async-jump! editor view path 'definition)
-                  (list
-                    (make-command-effect
-                      'file.read
-                      (make-open-request
-                        (view-id view)
-                        path
-                        (make-file-utf16-position
-                          (lsp-position-line (lsp-range-start lsp-range))
-                          (lsp-position-character (lsp-range-start lsp-range)))
-                        'jump
-                        context))))
-                '())))))
+                  (editor-jump-to-buffer!
+                    editor buffer (location-item-start item) kind context)
+                  '())
+                '()))
+          (let ([path (location-item-resource item)]
+                [metadata (location-item-metadata item)])
+            (let ([entry
+                    (and (list? metadata)
+                         (assq 'file-open-position metadata))])
+              (if (and (string? path)
+                       entry
+                       (file-utf16-position? (cdr entry)))
+                  (begin
+                    (editor-begin-async-jump! editor view path kind)
+                    (list
+                      (make-command-effect
+                        'file.read
+                        (make-open-request
+                          (view-id view)
+                          path
+                          (cdr entry)
+                          'jump
+                          context))))
+                  '()))))))
+
+  (define (lsp-jump-to-location! editor view location)
+    (let ([item (lsp-location-item editor location)])
+      (if item
+          (lsp-jump-to-location-item! editor view item 'definition)
+          '())))
+
+  (define (lsp-reference-items editor value)
+    (if (json-array? value)
+        (let loop ([locations (json-array-values value)] [items '()])
+          (if (null? locations)
+              (reverse items)
+              (let ([item (lsp-location-item editor (car locations))])
+                (loop
+                  (cdr locations)
+                  (if item (cons item items) items)))))
+        '()))
+
+  (define (lsp-find-references! editor)
+    (let ([view (editor-active-view editor)])
+      (lsp-request-at-active-point!
+        editor
+        "textDocument/references"
+        (list
+          (cons "context"
+                (make-json-object
+                  (list (cons "includeDeclaration" #t)))))
+        (lambda (response-editor response-session result)
+          (let ([items (lsp-reference-items response-editor result)])
+            (if (null? items)
+                (begin
+                  (editor-set-current-location-list! response-editor #f)
+                  (editor-set-status-message! response-editor "No references found")
+                  '())
+                (let ([locations (make-location-list 'lsp-references items)])
+                  (editor-set-current-location-list! response-editor locations)
+                  (editor-set-status-message!
+                    response-editor
+                    (string-append
+                      "References: "
+                      (number->string (length items))))
+                  (lsp-jump-to-location-item!
+                    response-editor
+                    view
+                    (location-list-current locations)
+                    'xref))))))))
 
   (define (lsp-find-definition! editor)
     (let ([view (editor-active-view editor)])
       (lsp-request-at-active-point!
         editor
         "textDocument/definition"
+        '()
         (lambda (response-editor response-session result)
           (let ([location (lsp-first-location result)])
             (if location
@@ -1400,6 +1512,12 @@
         'lsp.hover
         (lambda (context) (lsp-hover! (command-context-editor context)))
         "Show language-server hover information at point."))
+    (editor-register-command!
+      editor
+      (make-interactive-context-command
+        'lsp.find-references
+        (lambda (context) (lsp-find-references! (command-context-editor context)))
+        "Find language-server references at point."))
     (editor-register-command!
       editor
       (make-interactive-context-command

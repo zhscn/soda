@@ -177,7 +177,15 @@
             kind
             resource-context)
           #f)
-        (let ([resource (location-item-resource item)])
+        (let ([resource (location-item-resource item)]
+              [position
+                (let ([metadata (location-item-metadata item)])
+                  (let ([entry
+                          (and (list? metadata)
+                               (assq 'file-open-position metadata))])
+                    (if (and entry (file-utf16-position? (cdr entry)))
+                        (cdr entry)
+                        (location-item-start item))))])
           (and
             (string? resource)
             (let ([view (command-context-view context)])
@@ -188,7 +196,7 @@
                 (make-open-request
                   (view-id view)
                   resource
-                  (location-item-start item)
+                  position
                   'jump
                   resource-context))))))))
 

@@ -4,6 +4,7 @@
         (soda editor annotation)
         (soda editor buffer)
         (soda editor command)
+        (soda editor file)
         (soda editor language-session)
         (soda editor lsp-client)
         (soda editor lsp-json-rpc)
@@ -335,6 +336,88 @@
     (string->utf8 "// Widget\n// Generated\nint main() {}\n"))
   "accepting an LSP completion did not apply its primary and additional edits"
   (utf8->string (buffer-bytes source)))
+
+(define lsp-reference-effects
+  (editor-execute-command! editor 'lsp.find-references))
+(check
+  (and (= (length lsp-reference-effects) 1)
+       (eq? (command-effect-kind (car lsp-reference-effects))
+            'managed-process.write))
+  "find-references did not issue an LSP request"
+  lsp-reference-effects)
+(define lsp-reference-message
+  (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload (car lsp-reference-effects))))))
+(check
+  (and
+    (string=? (json-object-ref lsp-reference-message "method" #f)
+              "textDocument/references")
+    (eq?
+      (json-object-ref
+        (json-object-ref
+          (json-object-ref lsp-reference-message "params" #f)
+          "context"
+          #f)
+        "includeDeclaration"
+        #f)
+      #t))
+  "find-references request has an invalid LSP payload")
+(define reference-source-range
+  (make-json-object
+    (list
+      (cons "start"
+            (make-json-object
+              (list (cons "line" 0) (cons "character" 3))))
+      (cons "end"
+            (make-json-object
+              (list (cons "line" 0) (cons "character" 9)))))))
+(define reference-external-range
+  (make-json-object
+    (list
+      (cons "start"
+            (make-json-object
+              (list (cons "line" 2) (cons "character" 1))))
+      (cons "end"
+            (make-json-object
+              (list (cons "line" 2) (cons "character" 7)))))))
+(lsp-client-handle-json-message!
+  editor session
+  (make-json-object
+    (list
+      (cons "jsonrpc" "2.0")
+      (cons "id" (json-object-ref lsp-reference-message "id" #f))
+      (cons "result"
+            (make-json-array
+              (list
+                (make-json-object
+                  (list (cons "uri" "file:///workspace/src/main.cpp")
+                        (cons "range" reference-source-range)))
+                (make-json-object
+                  (list (cons "uri" "file:///workspace/src/external.cpp")
+                        (cons "range" reference-external-range)))))))))
+(let ([locations (editor-current-location-list editor)])
+  (check
+    (and locations
+         (eq? (location-list-source locations) 'lsp-references)
+         (= (length (location-list-items locations)) 2)
+         (= (view-caret (editor-active-view editor)) 3))
+    "LSP references did not publish a navigable location list"))
+(define reference-next-effects
+  (editor-execute-command! editor 'xref.next-location))
+(check
+  (and
+    (= (length reference-next-effects) 1)
+    (eq? (command-effect-kind (car reference-next-effects)) 'file.read)
+    (let ([position
+            (open-request-offset
+              (command-effect-payload (car reference-next-effects)))])
+      (and (file-utf16-position? position)
+           (= (file-utf16-position-line position) 2)
+           (= (file-utf16-position-character position) 1))))
+  "xref navigation did not preserve an unopened LSP reference UTF-16 position")
 
 (define updated-project
   (make-project
