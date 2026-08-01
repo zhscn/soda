@@ -77,6 +77,9 @@
 
 (define third
   (editor-create-buffer! editor "/tmp/third.txt" 'fundamental-mode "third"))
+(check
+  (= (length (dashboard-model-entries (tui-session-model session))) 4)
+  "dashboard must refresh when the Buffer registry changes")
 (editor-update! editor (make-command-message 'dashboard.open #f))
 (define reopened (tui-active-session editor))
 (check
@@ -118,6 +121,17 @@
        2))
   "each Workbench must own an independent dashboard session")
 (editor-switch-workbench! editor (workbench-id primary-workbench))
+(editor-close-workbench! editor (workbench-id secondary-workbench))
+(check
+  (= (length
+       (filter
+         (lambda (candidate)
+           (eq? (tui-application-definition-name
+                  (tui-session-definition candidate))
+                'dashboard))
+         (editor-tui-sessions editor)))
+     1)
+  "closing a Workbench must close its dashboard session")
 
 (define project-root (getenv "SODA_DASHBOARD_PROJECT_FIXTURE"))
 (define project-buffer

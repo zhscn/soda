@@ -11,6 +11,8 @@
           editor-remove-buffer!
           editor-buffer-for-resource
           editor-set-buffer-resource!
+          editor-buffer-registry-generation
+          editor-touch-buffer-registry!
           editor-views
           editor-view-ref
           editor-open-view!
@@ -370,6 +372,9 @@
       (immutable buffer-table editor-buffer-table)
       (immutable resource-table editor-resource-table)
       (mutable buffer-ids editor-buffer-ids editor-buffer-ids-set!)
+      (mutable buffer-registry-generation
+               editor-buffer-registry-generation
+               editor-buffer-registry-generation-set!)
       (mutable next-buffer-id
                editor-next-buffer-id
                editor-next-buffer-id-set!)
@@ -1178,6 +1183,33 @@
         who
         "buffer topology cannot change in a configuration transaction")))
 
+  (define (editor-touch-buffer-registry! value buffer reason)
+    (require-open-editor 'editor-touch-buffer-registry! value)
+    (unless (buffer? buffer)
+      (assertion-violation
+        'editor-touch-buffer-registry!
+        "expected a Buffer"
+        buffer))
+    (unless (symbol? reason)
+      (assertion-violation
+        'editor-touch-buffer-registry!
+        "reason must be a symbol"
+        reason))
+    (let ([generation
+            (+ 1 (editor-buffer-registry-generation value))])
+      (editor-buffer-registry-generation-set! value generation)
+      (editor-invalidate! value 'application)
+      (guard
+        (condition
+          [else
+           (editor-set-status-message!
+             value "buffer-registry-changed hook failed")])
+        (editor-run-hooks!
+          value
+          'buffer-registry-changed
+          value buffer reason generation))
+      generation))
+
   (define (editor-set-buffer-resource! value buffer resource)
     (require-open-editor 'editor-set-buffer-resource! value)
     (unless (buffer? buffer)
@@ -1229,7 +1261,8 @@
           (hashtable-set!
             (editor-resource-table value)
             resource
-            buffer))))
+            buffer))
+        (editor-touch-buffer-registry! value buffer 'resource-changed)))
     buffer)
 
   (define (editor-add-buffer! value buffer)
@@ -1277,6 +1310,7 @@
         value
         'buffer-created
         buffer)
+      (editor-touch-buffer-registry! value buffer 'created)
       buffer))
 
   (define editor-create-buffer!
@@ -1425,6 +1459,7 @@
         (editor-hook-registry value)
         id)
       (buffer-close! buffer)
+      (editor-touch-buffer-registry! value buffer 'removed)
       (when close-failure (raise close-failure))))
 
   (define (editor-interactions value)
@@ -2329,6 +2364,8 @@
              (map
                window-leaf-view-id
                (window-node-leaves (workbench-layout target)))])
+      (editor-run-hooks!
+        value 'workbench-before-close value target)
       (when (= id (editor-active-workbench-id value))
         (editor-switch-workbench!
           value
@@ -4210,7 +4247,8 @@
             target
             old-mode
             mode))
-        (editor-invalidate! value 'document))
+        (editor-invalidate! value 'document)
+        (editor-touch-buffer-registry! value target 'major-mode-changed))
       mode))
 
   (define (require-editor-setting-definition who editor name)
@@ -5353,7 +5391,9 @@
       'editor.change-ring
       (lambda (changed-buffer change)
         (editor-record-buffer-change!
-          editor changed-buffer change))))
+          editor changed-buffer change)
+        (editor-touch-buffer-registry!
+          editor changed-buffer 'modified))))
 
   (define (editor-change-at-index editor index)
     (and
@@ -6271,6 +6311,7 @@
                buffers
                resources
                (list (buffer-id buffer))
+               0
                (+ (buffer-id buffer) 1)
                (+ (document-id (buffer-document buffer)) 1)
                views

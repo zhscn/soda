@@ -1918,6 +1918,8 @@
           buffer
           (save-result-revision result)
           success?)
+        (when success?
+          (editor-touch-buffer-registry! editor buffer 'saved))
         (when (and success? (save-result-adopt-path? result))
           (buffer-set-file-path! buffer (save-result-path result))
           (editor-set-buffer-resource!

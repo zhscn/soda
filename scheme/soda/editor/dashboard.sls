@@ -184,6 +184,31 @@
                 'dashboard)
            session)))
 
+  (define (dashboard-session? session)
+    (eq? (tui-application-definition-name
+           (tui-session-definition session))
+         'dashboard))
+
+  (define (refresh-dashboard-sessions! editor)
+    (for-each
+      (lambda (session)
+        (when (dashboard-session? session)
+          (tui-send! editor (tui-session-id session) 'refresh)))
+      (editor-tui-sessions editor)))
+
+  (define (close-workbench-dashboard! editor workbench)
+    (let ([session
+            (find
+              (lambda (candidate)
+                (and
+                  (dashboard-session? candidate)
+                  (equal?
+                    (tui-session-arguments candidate)
+                    (workbench-id workbench))))
+              (editor-tui-sessions editor))])
+      (when session
+        (tui-close! editor (tui-session-id session)))))
+
   (define (send-dashboard! context payload)
     (let* ([editor (command-context-editor context)]
            [session (active-dashboard-session editor)])
@@ -235,10 +260,21 @@
                    session
                    (view-id (command-context-view context)))))])
       (when entry
-        (editor-set-view-buffer!
-          editor
-          (view-id (command-context-view context))
-          (dashboard-entry-buffer-id entry)))
+        (let ([buffer
+                (find
+                  (lambda (candidate)
+                    (= (buffer-id candidate)
+                       (dashboard-entry-buffer-id entry)))
+                  (editor-buffers editor))])
+          (if buffer
+              (editor-set-view-buffer!
+                editor
+                (view-id (command-context-view context))
+                (buffer-id buffer))
+              (begin
+                (editor-set-status-message!
+                  editor "Dashboard entry is no longer available")
+                (send-dashboard! context 'refresh)))))
       '()))
 
   (define (bind-key! keymap key codepoint modifiers command)
@@ -249,6 +285,17 @@
 
   (define (install-dashboard! editor)
     (editor-register-tui-application! editor dashboard-definition)
+    (editor-add-hook!
+      editor
+      'buffer-registry-changed
+      'dashboard.refresh
+      (lambda (changed-editor buffer reason generation)
+        (refresh-dashboard-sessions! changed-editor)))
+    (editor-add-hook!
+      editor
+      'workbench-before-close
+      'dashboard.close-with-workbench
+      close-workbench-dashboard!)
     (register-major-mode!
       (editor-language-catalog editor)
       (make-major-mode
