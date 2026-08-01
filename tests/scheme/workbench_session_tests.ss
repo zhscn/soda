@@ -6,10 +6,13 @@
         (soda editor location)
         (soda editor project)
         (soda editor state)
+        (soda editor tui-application)
+        (soda editor tui-application-runtime)
         (soda editor window)
         (soda editor window-runtime)
         (soda editor workbench)
-        (soda editor workbench-session))
+        (soda editor workbench-session)
+        (soda tui application))
 
 (define (check condition message . irritants)
   (unless condition
@@ -121,13 +124,39 @@
       (cadddr encoded-datum))))
 (define version-2-snapshot
   (workbench-session-decode (datum->bytes version-2-datum)))
+
+(define session-application-definition
+  (make-tui-application-definition
+    'session-application
+    (lambda (context arguments) (values arguments '()))
+    (lambda (model message context) (tui-result model '() '()))
+    (lambda (model context)
+      (tui-text 'session-application.value (number->string model)))
+    #f #f 'fundamental-mode 'edit '()
+    (lambda (model context) (list 'model model))
+    (lambda (datum context) (cadr datum))
+    (lambda (model context) '())))
+(editor-register-tui-application! source session-application-definition)
+(define application-workbench
+  (editor-create-workbench! source "application" '()))
+(editor-switch-workbench! source (workbench-id application-workbench))
+(define session-application-buffer
+  (tui-open! source 'session-application 73 'edit))
+(define session-application (tui-active-session source))
+(define session-application-view-state
+  (car (tui-session-view-states session-application)))
+(tui-view-state-set-viewport! session-application-view-state (cons 4 2))
+(tui-view-state-set-focused-node!
+  session-application-view-state
+  'session-application.value)
+(editor-switch-workbench! source (workbench-id secondary))
+(set! encoded (workbench-session-encode source))
+(set! snapshot (workbench-session-decode encoded))
 (define session-resources (workbench-session-resources snapshot))
 (check
   (and
     (= (length session-resources) 3)
-    (equal?
-      session-resources
-      (workbench-session-resources version-2-snapshot))
+    (= (length (workbench-session-resources version-2-snapshot)) 3)
     (for-all
       (lambda (resource) (member resource session-resources))
       '("/workspace/a.scm" "/workspace/b.scm" "/workspace/c.scm")))
@@ -136,6 +165,7 @@
 
 (define restored
   (make-test-editor "*scratch*" "scratch" 9301))
+(editor-register-tui-application! restored session-application-definition)
 (define (load-buffer resource)
   (or
     (editor-buffer-for-resource restored resource)
@@ -148,7 +178,7 @@
 (define restored-primary (car workbenches))
 (define restored-secondary (cadr workbenches))
 
-(check (= (length workbenches) 2)
+(check (= (length workbenches) 3)
   "restore must recreate every Workbench")
 (check (string=? (workbench-name restored-primary) "source")
   "restore must replace the initial Workbench name")
@@ -236,6 +266,33 @@
     (lambda (id)
       (buffer-resource (editor-buffer-ref restored id)))
     (workbench-mru restored-secondary)))
+
+(define restored-application-session
+  (find
+    (lambda (session)
+      (eq?
+        (tui-application-definition-name (tui-session-definition session))
+        'session-application))
+    (editor-tui-sessions restored)))
+(check
+  (and
+    restored-application-session
+    (= (tui-session-model restored-application-session) 73)
+    (= (length (tui-session-view-states restored-application-session)) 1)
+    (equal?
+      (tui-view-state-viewport
+        (car (tui-session-view-states restored-application-session)))
+      (cons 4 2))
+    (eq?
+      (tui-view-state-focused-node
+        (car (tui-session-view-states restored-application-session)))
+      'session-application.value)
+    (exists
+      (lambda (view)
+        (= (buffer-id (view-buffer view))
+           (tui-session-buffer-id restored-application-session)))
+      (editor-views restored)))
+  "restore must reconnect application sessions to Window Views")
 
 (check
   (guard (condition [else #t])

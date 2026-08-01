@@ -304,6 +304,7 @@
           tui-replay!
           tui-snapshot-session
           tui-restore!
+          tui-restore-session-view-states!
           tui-session-snapshot?
           tui-session-snapshot-application-name
           tui-session-snapshot-buffer-resource

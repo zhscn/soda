@@ -12,6 +12,7 @@
           tui-replay!
           tui-snapshot-session
           tui-restore!
+          tui-restore-session-view-states!
           tui-lifecycle-snapshot
           tui-synchronize-view-lifecycle!
           tui-route-pointer-event
@@ -707,6 +708,23 @@
           (tui-view-state-set-viewport! state viewport))
         (tui-view-state-set-focused-node! state focused-node))))
 
+  (define (tui-restore-session-view-states! session data)
+    (unless (tui-session? session)
+      (assertion-violation
+        'tui-restore-session-view-states!
+        "expected a TuiSession"
+        session))
+    (unless (list? data)
+      (assertion-violation
+        'tui-restore-session-view-states!
+        "view state data must be a list"
+        data))
+    (let loop ([states (tui-session-view-states session)] [data data])
+      (unless (or (null? states) (null? data))
+        (restore-view-state! (car states) (car data))
+        (loop (cdr states) (cdr data))))
+    session)
+
   (define tui-restore!
     (case-lambda
       [(editor snapshot)
@@ -748,11 +766,9 @@
                     origin-view-id initializer)]
                 [session
                   (editor-tui-session-for-buffer editor (buffer-id buffer))])
-           (let loop ([states (tui-session-view-states session)]
-                      [data (tui-session-snapshot-view-states snapshot)])
-             (unless (or (null? states) (null? data))
-               (restore-view-state! (car states) (car data))
-               (loop (cdr states) (cdr data))))
+           (tui-restore-session-view-states!
+             session
+             (tui-session-snapshot-view-states snapshot))
            (editor-invalidate! editor 'application)
            buffer))]))
 

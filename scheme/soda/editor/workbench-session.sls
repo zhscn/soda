@@ -19,17 +19,19 @@
           (soda editor project)
           (soda editor resource-context)
           (soda editor state)
+          (soda editor tui-application)
+          (soda editor tui-application-runtime)
           (soda editor window)
           (soda editor workbench))
 
   (define schema-name 'soda-workbench-session)
-  (define schema-version 3)
+  (define schema-version 4)
 
   (define-record-type
     (workbench-session-snapshot
       %make-workbench-session-snapshot
       workbench-session-snapshot?)
-    (fields active-index workbenches))
+    (fields active-index workbenches applications))
 
   (define (non-empty-string? value)
     (and (string? value) (positive? (string-length value))))
@@ -154,12 +156,23 @@
             (jump-edge-timestamp edge)))
         (jump-graph-edges graph))))
 
-  (define (view-datum editor view)
+  (define (application-reference editor buffer application-indices)
+    (let ([session
+            (editor-tui-session-for-buffer editor (buffer-id buffer))])
+      (and session
+           (let ([entry (assv (tui-session-id session) application-indices)])
+             (and entry (list 'application (cdr entry)))))))
+
+  (define (buffer-reference editor buffer application-indices)
+    (or (application-reference editor buffer application-indices)
+        (buffer-resource-for-session buffer)))
+
+  (define (view-datum editor view application-indices)
     (let* ([context
              (editor-view-resource-context editor (view-id view))]
            [project (resource-context-project-hint context)])
       (list
-        (buffer-resource-for-session (view-buffer view))
+        (buffer-reference editor (view-buffer view) application-indices)
         (view-caret view)
         (view-mark view)
         (view-mark-active? view)
@@ -170,7 +183,7 @@
         (and project (project-primary-root project))
         (navigation-datum view))))
 
-  (define (layout-datum editor workbench node)
+  (define (layout-datum editor workbench node application-indices)
     (if (window-leaf? node)
         (list
           'leaf
@@ -180,13 +193,14 @@
             (window-leaf-id node))
           (view-datum
             editor
-            (editor-view-ref editor (window-leaf-view-id node))))
+            (editor-view-ref editor (window-leaf-view-id node))
+            application-indices))
         (list
           'split
           (window-split-orientation node)
           (map
             (lambda (child)
-              (layout-datum editor workbench child))
+              (layout-datum editor workbench child application-indices))
             (window-split-children node)))))
 
   (define (project-root-for-id editor id)
@@ -196,11 +210,12 @@
               id)])
       (and project (project-primary-root project))))
 
-  (define (buffer-resource-for-id editor id)
+  (define (buffer-reference-for-id editor id application-indices)
     (guard (condition [else #f])
-      (buffer-resource-for-session (editor-buffer-ref editor id))))
+      (buffer-reference
+        editor (editor-buffer-ref editor id) application-indices)))
 
-  (define (workbench-datum editor workbench)
+  (define (workbench-datum editor workbench application-indices)
     (let* ([leaves (window-node-leaves (workbench-layout workbench))]
            [active-index
              (let loop ([remaining leaves] [index 0])
@@ -225,10 +240,12 @@
         (filter
           (lambda (value) value)
           (map
-            (lambda (id) (buffer-resource-for-id editor id))
+            (lambda (id)
+              (buffer-reference-for-id editor id application-indices))
             (workbench-mru workbench)))
         active-index
-        (layout-datum editor workbench (workbench-layout workbench))
+        (layout-datum
+          editor workbench (workbench-layout workbench) application-indices)
         (jump-graph-datum (workbench-jump-graph workbench))
         (map location-list-datum (workbench-location-lists workbench)))))
 
@@ -242,6 +259,31 @@
 
   (define (workbench-session-encode editor)
     (let* ([workbenches (editor-workbenches editor)]
+           [sessions (editor-tui-sessions editor)]
+           [application-indices
+             (let loop ([remaining sessions] [index 0] [result '()])
+               (if (null? remaining)
+                   (reverse result)
+                   (loop
+                     (cdr remaining)
+                     (+ index 1)
+                     (cons
+                       (cons (tui-session-id (car remaining)) index)
+                       result))))]
+           [applications
+             (map
+               (lambda (session)
+                 (let ([snapshot
+                         (tui-snapshot-session editor (tui-session-id session))])
+                   (list
+                     (tui-session-snapshot-application-name snapshot)
+                     (tui-session-snapshot-buffer-resource snapshot)
+                     (tui-session-snapshot-display-intent snapshot)
+                     (tui-session-snapshot-arguments snapshot)
+                     (tui-session-snapshot-serialized-model? snapshot)
+                     (tui-session-snapshot-model snapshot)
+                     (tui-session-snapshot-view-states snapshot))))
+               sessions)]
            [datum
              (list
                schema-name
@@ -249,8 +291,9 @@
                (active-workbench-index editor workbenches)
                (map
                  (lambda (workbench)
-                   (workbench-datum editor workbench))
-                 workbenches))])
+                   (workbench-datum editor workbench application-indices))
+                 workbenches)
+               applications)])
       (let-values ([(port extract) (open-string-output-port)])
         (write datum port)
         (newline port)
@@ -350,12 +393,20 @@
                   (exact-non-negative-integer? (list-ref edge 3))))
               edges))))))
 
+  (define (buffer-reference? value)
+    (or
+      (stable-resource? value)
+      (and (list? value)
+           (= (length value) 2)
+           (eq? (car value) 'application)
+           (exact-non-negative-integer? (cadr value)))))
+
   (define (valid-view-datum? value)
     (and
       (list? value)
       (= (length value) 10)
       (or (not (list-ref value 0))
-          (stable-resource? (list-ref value 0)))
+          (buffer-reference? (list-ref value 0)))
       (exact-non-negative-integer? (list-ref value 1))
       (or (not (list-ref value 2))
           (exact-non-negative-integer? (list-ref value 2)))
@@ -399,12 +450,33 @@
         (not (list-ref value 2))
         (member (list-ref value 2) (list-ref value 1)))
       (list? (list-ref value 3))
-      (for-all stable-resource? (list-ref value 3))
+      (for-all buffer-reference? (list-ref value 3))
       (exact-non-negative-integer? (list-ref value 4))
       (valid-layout-datum? (list-ref value 5))
       (valid-jump-graph-datum? (list-ref value 6))
       (list? (list-ref value 7))
       (for-all valid-location-list-datum? (list-ref value 7))))
+
+  (define (valid-application-view-state? value)
+    (and
+      (list? value)
+      (= (length value) 2)
+      (let ([viewport (car value)])
+        (and
+          (pair? viewport)
+          (exact-non-negative-integer? (car viewport))
+          (exact-non-negative-integer? (cdr viewport))))))
+
+  (define (valid-application-datum? value)
+    (and
+      (list? value)
+      (= (length value) 7)
+      (symbol? (list-ref value 0))
+      (or (not (list-ref value 1)) (string? (list-ref value 1)))
+      (symbol? (list-ref value 2))
+      (boolean? (list-ref value 4))
+      (list? (list-ref value 6))
+      (for-all valid-application-view-state? (list-ref value 6))))
 
   (define (upgrade-v2-workbench-datum value)
     (unless (and (list? value) (= (length value) 7))
@@ -426,17 +498,23 @@
         (list-ref value 6))))
 
   (define (normalize-session-datum datum)
-    (if (and (list? datum)
-             (= (length datum) 4)
-             (eq? (car datum) schema-name)
-             (eqv? (cadr datum) 2)
-             (list? (cadddr datum)))
-        (list
-          schema-name
-          schema-version
-          (caddr datum)
-          (map upgrade-v2-workbench-datum (cadddr datum)))
-        datum))
+    (cond
+      [(and (list? datum)
+            (= (length datum) 4)
+            (eq? (car datum) schema-name)
+            (eqv? (cadr datum) 2)
+            (list? (cadddr datum)))
+       (list
+         schema-name schema-version (caddr datum)
+         (map upgrade-v2-workbench-datum (cadddr datum))
+         '())]
+      [(and (list? datum)
+            (= (length datum) 4)
+            (eq? (car datum) schema-name)
+            (eqv? (cadr datum) 3))
+       (list
+         schema-name schema-version (caddr datum) (cadddr datum) '())]
+      [else datum]))
 
   (define (workbench-session-decode bytes)
     (unless (bytevector? bytes)
@@ -454,24 +532,45 @@
       (let* ([port (open-string-input-port (utf8->string bytes))]
              [datum (normalize-session-datum (read port))]
              [trailing (read port)])
+        (define (valid-reference-index? reference)
+          (or
+            (not (and (list? reference)
+                      (pair? reference)
+                      (eq? (car reference) 'application)))
+            (< (cadr reference) (length (list-ref datum 4)))))
         (unless
           (and
             (eof-object? trailing)
             (list? datum)
-            (= (length datum) 4)
+            (= (length datum) 5)
             (eq? (car datum) schema-name)
             (= (cadr datum) schema-version)
             (exact-non-negative-integer? (caddr datum))
-            (list? (cadddr datum))
-            (pair? (cadddr datum))
-            (< (caddr datum) (length (cadddr datum)))
-            (for-all valid-workbench-datum? (cadddr datum)))
+            (list? (list-ref datum 3))
+            (pair? (list-ref datum 3))
+            (< (caddr datum) (length (list-ref datum 3)))
+            (for-all valid-workbench-datum? (list-ref datum 3))
+            (list? (list-ref datum 4))
+            (for-all valid-application-datum? (list-ref datum 4))
+            (for-all
+              (lambda (workbench)
+                (and
+                  (for-all valid-reference-index? (list-ref workbench 3))
+                  (let validate-layout ([layout (list-ref workbench 5)])
+                    (case (car layout)
+                      [(leaf)
+                       (valid-reference-index?
+                         (list-ref (cadddr layout) 0))]
+                      [(split)
+                       (for-all validate-layout (caddr layout))]))))
+              (list-ref datum 3)))
           (assertion-violation
             'workbench-session-decode
             "unsupported or malformed Workbench session state"))
         (%make-workbench-session-snapshot
           (caddr datum)
-          (cadddr datum)))))
+          (list-ref datum 3)
+          (list-ref datum 4)))))
 
   (define (collect-layout-resources layout result)
     (case (car layout)
@@ -490,7 +589,9 @@
          (fold-left
            (lambda (resources location)
              (cons (car location) resources))
-           (if resource (cons resource result) result)
+           (if (stable-resource? resource)
+               (cons resource result)
+               result)
            locations))]
       [(split)
        (fold-left
@@ -517,7 +618,7 @@
         (fold-left
           (lambda (result workbench)
             (append
-              (list-ref workbench 3)
+              (filter stable-resource? (list-ref workbench 3))
               (map cadr (car (list-ref workbench 6)))
               (apply
                 append
@@ -873,9 +974,39 @@
       (assertion-violation
         'editor-restore-workbench-session!
         "cannot restore while the minibuffer is active"))
-    (let* ([states (workbench-session-snapshot-workbenches snapshot)]
+    (for-each
+      (lambda (session) (tui-close! editor (tui-session-id session)))
+      (editor-tui-sessions editor))
+    (let* ([application-data
+             (workbench-session-snapshot-applications snapshot)]
            [existing (editor-workbenches editor)]
            [fallback-buffer (view-buffer (editor-active-view editor))]
+           [application-buffers
+             (map
+               (lambda (datum)
+                 (guard (condition [else #f])
+                   (tui-restore!
+                     editor
+                     (make-tui-session-snapshot
+                       (list-ref datum 0)
+                       (list-ref datum 1)
+                       (list-ref datum 2)
+                       (list-ref datum 3)
+                       (list-ref datum 4)
+                       (list-ref datum 5)
+                       (list-ref datum 6)))))
+               application-data)]
+           [resolve-buffer
+             (lambda (reference)
+               (cond
+                 [(stable-resource? reference) (buffer-loader reference)]
+                 [(and (list? reference)
+                       (= (length reference) 2)
+                       (eq? (car reference) 'application)
+                       (< (cadr reference) (length application-buffers)))
+                  (list-ref application-buffers (cadr reference))]
+                 [else #f]))]
+           [states (workbench-session-snapshot-workbenches snapshot)]
            [targets
              (cons
                (car existing)
@@ -889,7 +1020,7 @@
       (for-each
         (lambda (workbench state)
           (restore-workbench!
-            editor workbench state buffer-loader fallback-buffer))
+            editor workbench state resolve-buffer fallback-buffer))
         targets
         states)
       (editor-switch-workbench!
@@ -902,6 +1033,19 @@
         editor
         (workbench-current-location-list
           (editor-active-workbench editor)))
+      (for-each
+        (lambda (buffer datum)
+          (when buffer
+            (let ([session
+                    (editor-tui-session-for-buffer
+                      editor
+                      (buffer-id buffer))])
+              (when session
+                (tui-restore-session-view-states!
+                  session
+                  (list-ref datum 6))))))
+        application-buffers
+        application-data)
       targets))
 
   (define (load-workbench-session-file path)
