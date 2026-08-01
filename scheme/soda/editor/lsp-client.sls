@@ -59,7 +59,8 @@
           (soda editor project-workspace)
           (soda editor state)
           (soda editor workspace-edit)
-          (soda json))
+          (soda json)
+          (soda runtime))
 
   (define-record-type
     (lsp-server-profile %make-lsp-server-profile lsp-server-profile?)
@@ -1054,16 +1055,28 @@
                     (managed-process-generation process)))
             (not (eq? (managed-process-event-kind event) 'process-output)))
         '()
-        (guard
-          (condition
-            [else (lsp-protocol-failure! editor session condition)])
-          (apply append
-            (map
-              (lambda (message)
-                (lsp-client-handle-json-message! editor session message))
-              (lsp-json-rpc-decode!
-                (lsp-client-session-decoder session)
-                (managed-process-event-data event))))))))
+        (cond
+          [(= (managed-process-event-flags event) process-stderr)
+           ;; LSP reserves stdout for Content-Length-framed messages.
+           ;; Server diagnostics on stderr are not protocol input.
+           '()]
+          [(not (= (managed-process-event-flags event) process-stdout))
+           (lsp-protocol-failure!
+             editor
+             session
+             (condition
+               (make-message-condition "Language server output has an unknown stream")))]
+          [else
+           (guard
+             (condition
+               [else (lsp-protocol-failure! editor session condition)])
+             (apply append
+               (map
+                 (lambda (message)
+                   (lsp-client-handle-json-message! editor session message))
+                 (lsp-json-rpc-decode!
+                   (lsp-client-session-decoder session)
+                   (managed-process-event-data event)))))]))))
 
   (define (lsp-client-handle-process-exit! editor event)
     (unless (managed-process-event? event)
