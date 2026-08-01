@@ -430,6 +430,24 @@
     (string=? (cell-text (frame-cell-ref updated-frame 0 1)) "2"))
   "publishing a Model generation must invalidate the application surface")
 
+(define replay (tui-start-recording! editor (tui-session-id session)))
+(tui-send! editor (tui-session-id session) 'increment active-view-id)
+(check
+  (and
+    (eq? replay (tui-stop-recording! editor (tui-session-id session)))
+    (= (length (tui-replay-entries replay)) 1)
+    (eq? (tui-replay-entry-payload (car (tui-replay-entries replay)))
+         'increment)
+    (= (tui-replay-entry-origin-view-id (car (tui-replay-entries replay)))
+       active-view-id)
+    (= (tui-session-model session) 43))
+  "recording must preserve delivered application payloads and their origin")
+(check
+  (and (= (tui-replay! editor (tui-session-id session) replay) 44)
+       (= (length (tui-replay-entries replay)) 1)
+       (not (tui-session-replay-recorder session)))
+  "headless replay must recompute generations without recording itself")
+
 (tui-send! editor (tui-session-id session) 'refresh active-view-id)
 (define first-refresh-effect (car (tui-take-effects! editor)))
 (define first-refresh-command

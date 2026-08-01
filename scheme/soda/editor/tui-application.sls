@@ -63,9 +63,11 @@
           tui-session-state
           tui-session-pending-commands
           tui-session-last-message
+          tui-session-replay-recorder
           tui-session-set-model!
           tui-session-set-state!
           tui-session-set-last-message!
+          tui-session-set-replay-recorder!
           tui-session-advance-generation!
           tui-session-invalidate-commands!
           tui-session-set-pending-commands!
@@ -90,6 +92,16 @@
           tui-message-origin-view-id
           tui-message-payload
           tui-message-prefix
+          make-tui-replay
+          tui-replay?
+          tui-replay-application-name
+          tui-replay-entries
+          tui-replay-record!
+          tui-replay-clear!
+          tui-replay-entry?
+          tui-replay-entry-origin-view-id
+          tui-replay-entry-payload
+          tui-replay-entry-prefix
           make-tui-input-event
           tui-input-event?
           tui-input-event-kind
@@ -576,7 +588,8 @@
             (mutable view-state-ids)
             (mutable pending-commands)
             (mutable state)
-            (mutable last-message)))
+            (mutable last-message)
+            (mutable replay-recorder)))
 
   (define (make-tui-session id definition buffer-id model)
     (unless (and (exact-positive-integer? id)
@@ -588,7 +601,17 @@
         id definition buffer-id))
     (%make-tui-session
       id definition buffer-id model 0 0 1
-      (make-eqv-hashtable) '() '() 'initializing #f))
+      (make-eqv-hashtable) '() '() 'initializing #f #f))
+
+  (define (tui-session-set-replay-recorder! session recorder)
+    (require-session 'tui-session-set-replay-recorder! session)
+    (unless (or (not recorder) (tui-replay? recorder))
+      (assertion-violation
+        'tui-session-set-replay-recorder!
+        "expected a TuiReplay or #f"
+        recorder))
+    (tui-session-replay-recorder-set! session recorder)
+    recorder)
 
   (define-record-type
     (tui-input-event %make-tui-input-event tui-input-event?)
@@ -899,6 +922,49 @@
            session-id session-generation origin-view-id))
        (%make-tui-message
          session-id session-generation origin-view-id payload prefix)]))
+
+  (define-record-type tui-replay-entry
+    (fields origin-view-id payload prefix))
+
+  (define-record-type
+    (tui-replay %make-tui-replay tui-replay?)
+    (fields application-name
+            (mutable entries-reversed
+                     tui-replay-entries-reversed
+                     tui-replay-entries-reversed-set!)))
+
+  (define (make-tui-replay application-name)
+    (unless (symbol? application-name)
+      (assertion-violation
+        'make-tui-replay
+        "application name must be a symbol"
+        application-name))
+    (%make-tui-replay application-name '()))
+
+  (define (tui-replay-entries replay)
+    (unless (tui-replay? replay)
+      (assertion-violation 'tui-replay-entries "expected a TuiReplay" replay))
+    (reverse (tui-replay-entries-reversed replay)))
+
+  (define (tui-replay-record! replay message)
+    (unless (tui-replay? replay)
+      (assertion-violation 'tui-replay-record! "expected a TuiReplay" replay))
+    (unless (tui-message? message)
+      (assertion-violation 'tui-replay-record! "expected a TuiMessage" message))
+    (let ([entry
+            (make-tui-replay-entry
+              (tui-message-origin-view-id message)
+              (tui-message-payload message)
+              (tui-message-prefix message))])
+      (tui-replay-entries-reversed-set!
+        replay
+        (cons entry (tui-replay-entries-reversed replay)))
+      entry))
+
+  (define (tui-replay-clear! replay)
+    (unless (tui-replay? replay)
+      (assertion-violation 'tui-replay-clear! "expected a TuiReplay" replay))
+    (tui-replay-entries-reversed-set! replay '()))
 
   (define-record-type
     (tui-update-result %make-tui-update-result tui-update-result?)

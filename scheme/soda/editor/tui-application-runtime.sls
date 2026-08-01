@@ -7,6 +7,9 @@
           tui-complete-command!
           tui-take-effects!
           tui-retry!
+          tui-start-recording!
+          tui-stop-recording!
+          tui-replay!
           tui-lifecycle-snapshot
           tui-synchronize-view-lifecycle!
           tui-route-pointer-event
@@ -722,6 +725,52 @@
       editor
       (buffer-id (view-buffer (editor-active-view editor)))))
 
+  (define (tui-start-recording! editor session-id)
+    (let* ([session (editor-tui-session-ref editor session-id)]
+           [replay
+             (make-tui-replay
+               (tui-application-definition-name
+                 (tui-session-definition session)))])
+      (tui-session-set-replay-recorder! session replay)
+      replay))
+
+  (define (tui-stop-recording! editor session-id)
+    (let* ([session (editor-tui-session-ref editor session-id)]
+           [replay (tui-session-replay-recorder session)])
+      (tui-session-set-replay-recorder! session #f)
+      replay))
+
+  (define (tui-replay! editor session-id replay)
+    (require-open-editor 'tui-replay! editor)
+    (unless (tui-replay? replay)
+      (assertion-violation 'tui-replay! "expected a TuiReplay" replay))
+    (let* ([session (editor-tui-session-ref editor session-id)]
+           [name
+             (tui-application-definition-name
+               (tui-session-definition session))]
+           [recorder (tui-session-replay-recorder session)])
+      (unless (eq? name (tui-replay-application-name replay))
+        (assertion-violation
+          'tui-replay!
+          "replay belongs to a different application"
+          (tui-replay-application-name replay)
+          name))
+      (dynamic-wind
+        (lambda () (tui-session-set-replay-recorder! session #f))
+        (lambda ()
+          (for-each
+            (lambda (entry)
+              (tui-send!
+                editor
+                session-id
+                (tui-replay-entry-payload entry)
+                (tui-replay-entry-origin-view-id entry)
+                (tui-replay-entry-prefix entry)))
+            (tui-replay-entries replay))
+          (tui-session-model session))
+        (lambda ()
+          (tui-session-set-replay-recorder! session recorder)))))
+
   (define (tui-send-message! editor message)
     (require-open-editor 'tui-send-message! editor)
     (unless (tui-message? message)
@@ -743,6 +792,8 @@
         [(eq? (tui-session-state session) 'failed)
          #f]
         [else
+         (let ([recorder (tui-session-replay-recorder session)])
+           (when recorder (tui-replay-record! recorder message)))
          (guard
            (condition
              [(editor-user-error-condition? condition)

@@ -187,6 +187,7 @@
           tui-session-state
           tui-session-pending-commands
           tui-session-last-message
+          tui-session-replay-recorder
           tui-session-view-states
           tui-session-view-state
           tui-view-state?
@@ -207,6 +208,16 @@
           tui-message-origin-view-id
           tui-message-payload
           tui-message-prefix
+          make-tui-replay
+          tui-replay?
+          tui-replay-application-name
+          tui-replay-entries
+          tui-replay-record!
+          tui-replay-clear!
+          tui-replay-entry?
+          tui-replay-entry-origin-view-id
+          tui-replay-entry-payload
+          tui-replay-entry-prefix
           make-tui-input-event
           tui-input-event?
           tui-input-event-kind
@@ -281,6 +292,9 @@
           tui-complete-command!
           tui-take-effects!
           tui-retry!
+          tui-start-recording!
+          tui-stop-recording!
+          tui-replay!
           tui-lifecycle-snapshot
           tui-synchronize-view-lifecycle!
           tui-route-pointer-event
