@@ -649,9 +649,12 @@
                       (lsp-client-session-documents session)))] )
         (when document
           (let ([buffer (editor-buffer-ref editor (lsp-client-document-buffer-id document))]
-                [diagnostics (json-object-ref params "diagnostics" #f)])
+                [diagnostics (json-object-ref params "diagnostics" #f)]
+                [version (json-object-ref params "version" #f)])
             (when
               (and (json-array? diagnostics)
+                   (or (not (exact-non-negative-integer? version))
+                       (= version (lsp-client-document-version document)))
                    (= (buffer-revision buffer)
                       (lsp-client-document-revision document)))
               (let ([generation

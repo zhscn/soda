@@ -608,6 +608,38 @@
     (list
       (cons "jsonrpc" "2.0")
       (cons "method" "textDocument/publishDiagnostics")
+      (cons
+        "params"
+        (make-json-object
+          (list
+            (cons "uri" "file:///workspace/src/main.cpp")
+            (cons "version" 1)
+            (cons
+              "diagnostics"
+              (make-json-array
+                (list
+                  (make-json-object
+                    (list
+                      (cons "range" diagnostic-range)
+                      (cons "severity" 1)
+                      (cons "message" "stale diagnostic"))))))))))))
+(check
+  (not
+    (exists
+      (lambda (annotation)
+        (and (string? (annotation-message annotation))
+             (string=? (annotation-message annotation) "stale diagnostic")))
+      (apply append
+        (map
+          annotation-set-annotations
+          (editor-annotation-sets-for-buffer editor (buffer-id source))))))
+  "a stale push diagnostic overwrote the synchronized document revision")
+(lsp-client-handle-json-message!
+  editor session
+  (make-json-object
+    (list
+      (cons "jsonrpc" "2.0")
+      (cons "method" "textDocument/publishDiagnostics")
       (cons "params" diagnostic-params))))
 (define lsp-annotations
   (filter
