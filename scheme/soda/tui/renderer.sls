@@ -1315,7 +1315,8 @@
                       (and
                         (rect-contains? rectangle row column)
                         (< row (frame-rows frame))
-                        (< column (frame-columns frame)))))
+                        (< column (frame-columns frame)))
+                      (tui-cursor-shape cursor)))
                   (frame-set-cursor! frame 0 0 #f)))
             (frame-set-cursor! frame 0 0 #f)))))
 

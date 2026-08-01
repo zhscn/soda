@@ -35,6 +35,7 @@
           frame-cursor-row
           frame-cursor-column
           frame-cursor-visible?
+          frame-cursor-shape
           frame-layout
           frame-cell-ref
           frame-put-cell!
@@ -75,6 +76,9 @@
             (mutable cursor-visible?
                      frame-cursor-visible?
                      frame-cursor-visible?-set!)
+            (mutable cursor-shape
+                     frame-cursor-shape
+                     frame-cursor-shape-set!)
             (mutable layout frame-layout frame-layout-set!)))
 
   (define valid-attributes
@@ -235,6 +239,7 @@
       0
       0
       #f
+      'block
       #f))
 
   (define (require-frame who value)
@@ -372,21 +377,30 @@
     (frame-layout-set! value layout)
     value)
 
-  (define (frame-set-cursor! value row column visible?)
-    (require-frame 'frame-set-cursor! value)
-    (unless
-      (and (exact-non-negative-integer? row)
-           (< row (frame-rows value))
-           (exact-non-negative-integer? column)
-           (< column (frame-columns value))
-           (boolean? visible?))
-      (assertion-violation
-        'frame-set-cursor!
-        "invalid cursor coordinates or visibility"
-        row
-        column
-        visible?))
-    (frame-cursor-row-set! value row)
-    (frame-cursor-column-set! value column)
-    (frame-cursor-visible?-set! value visible?)
-    value))
+  (define frame-set-cursor!
+    (case-lambda
+      [(value row column visible?)
+       (frame-set-cursor! value row column visible? 'block)]
+      [(value row column visible? shape)
+       (require-frame 'frame-set-cursor! value)
+       (unless
+         (and (exact-non-negative-integer? row)
+              (< row (frame-rows value))
+              (exact-non-negative-integer? column)
+              (< column (frame-columns value))
+              (boolean? visible?)
+              (memq shape
+                    '(block underline bar
+                      blinking-block blinking-underline blinking-bar)))
+         (assertion-violation
+           'frame-set-cursor!
+           "invalid cursor coordinates, visibility, or shape"
+           row
+           column
+           visible?
+           shape))
+       (frame-cursor-row-set! value row)
+       (frame-cursor-column-set! value column)
+       (frame-cursor-visible?-set! value visible?)
+       (frame-cursor-shape-set! value shape)
+       value])))

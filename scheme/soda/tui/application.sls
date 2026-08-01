@@ -681,8 +681,30 @@
   (define-record-type tui-focus-entry
     (fields node-key rect order enabled?))
 
-  (define-record-type tui-cursor
+  (define-record-type
+    (tui-cursor %make-tui-cursor tui-cursor?)
     (fields node-key local-row local-column shape visible?))
+
+  (define (make-tui-cursor node-key local-row local-column shape visible?)
+    (unless node-key
+      (assertion-violation
+        'make-tui-cursor "node key must not be #f" node-key))
+    (unless (and (exact-non-negative-integer? local-row)
+                 (exact-non-negative-integer? local-column))
+      (assertion-violation
+        'make-tui-cursor
+        "local cursor coordinates must be non-negative exact integers"
+        local-row
+        local-column))
+    (unless (memq shape
+                  '(block underline bar
+                    blinking-block blinking-underline blinking-bar))
+      (assertion-violation
+        'make-tui-cursor "unknown cursor shape" shape))
+    (unless (boolean? visible?)
+      (assertion-violation
+        'make-tui-cursor "cursor visibility must be boolean" visible?))
+    (%make-tui-cursor node-key local-row local-column shape visible?))
 
   (define-record-type tui-surface
     (fields rows columns frame component-tree arranged-tree focus-ring cursor))

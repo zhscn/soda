@@ -13,6 +13,7 @@
         (soda tui component)
         (soda tui frame)
         (soda tui inspect)
+        (soda tui presenter)
         (soda tui renderer))
 
 (define (check condition message . irritants)
@@ -207,6 +208,29 @@
 (check
   (eq? (tui-view-state-focused-node application-view-state) 'counter.value)
   "rendering must choose the first enabled component when focus is absent")
+(tui-view-state-set-cursor!
+  application-view-state
+  (make-tui-cursor 'counter.value 0 0 'bar #t))
+(define application-cursor-frame (render-editor-frame editor 5 30))
+(check
+  (and
+    (frame-cursor-visible? application-cursor-frame)
+    (eq? (frame-cursor-shape application-cursor-frame) 'bar)
+    (let ([sequence
+            (string-append (string (integer->char 27)) "[6 q")])
+      (let loop ([start 0])
+        (and
+          (<= (+ start (string-length sequence))
+              (string-length (frame->ansi application-cursor-frame)))
+          (or
+            (string=?
+              (substring
+                (frame->ansi application-cursor-frame)
+                start
+                (+ start (string-length sequence)))
+              sequence)
+            (loop (+ start 1)))))))
+  "application cursor shape must reach the terminal presenter")
 (define application-description (describe-caret editor first-frame))
 (check
   (and

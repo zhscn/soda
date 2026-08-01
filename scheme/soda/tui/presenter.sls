@@ -102,6 +102,7 @@
                 (number->string (+ (frame-cursor-column value) 1))
                 "H"))
             port)
+          (display (cursor-shape-sequence (frame-cursor-shape value)) port)
           (display (ansi "[?25h") port))
         (extract))))
 
@@ -121,6 +122,22 @@
         (number->string (+ column 1))
         "H")))
 
+  (define (cursor-shape-sequence shape)
+    (ansi
+      (string-append
+        "["
+        (case shape
+          [(blinking-block) "1"]
+          [(block) "2"]
+          [(blinking-underline) "3"]
+          [(underline) "4"]
+          [(blinking-bar) "5"]
+          [(bar) "6"]
+          [else
+           (assertion-violation
+             'frame->ansi "unsupported cursor shape" shape)])
+        " q")))
+
   (define (write-final-cursor! port value)
     (if (frame-cursor-visible? value)
         (begin
@@ -129,6 +146,7 @@
               (frame-cursor-row value)
               (frame-cursor-column value))
             port)
+          (display (cursor-shape-sequence (frame-cursor-shape value)) port)
           (display (ansi "[?25h") port))
         (display (ansi "[?25l") port)))
 
@@ -141,7 +159,9 @@
         (and
           (= (frame-cursor-row left) (frame-cursor-row right))
           (= (frame-cursor-column left)
-             (frame-cursor-column right))))))
+             (frame-cursor-column right))
+          (eq? (frame-cursor-shape left)
+               (frame-cursor-shape right))))))
 
   (define (cell-changed? previous value row column)
     (not
