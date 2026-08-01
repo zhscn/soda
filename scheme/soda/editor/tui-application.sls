@@ -25,6 +25,7 @@
           tui-application-context-buffer-id
           tui-application-context-view-id
           tui-application-context-arguments
+          tui-application-context-view-state
           make-tui-view-state
           tui-view-state?
           tui-view-state-view-id
@@ -35,12 +36,17 @@
           tui-view-state-viewport
           tui-view-state-transient-state
           tui-view-state-cursor
+          tui-view-state-generation
+          tui-view-state-surface-cache-key
+          tui-view-state-surface-cache
           tui-view-state-set-size!
           tui-view-state-set-focused!
           tui-view-state-set-focused-node!
           tui-view-state-set-viewport!
           tui-view-state-set-transient-state!
           tui-view-state-set-cursor!
+          tui-view-state-set-surface-cache!
+          tui-view-state-clear-surface-cache!
           make-tui-session
           tui-session?
           tui-session-id
@@ -331,8 +337,20 @@
           (+ 1 (tui-application-catalog-generation catalog))))
       definition))
 
-  (define-record-type tui-application-context
-    (fields editor session-id buffer-id view-id arguments))
+  (define-record-type
+    (tui-application-context
+      %make-tui-application-context
+      tui-application-context?)
+    (fields editor session-id buffer-id view-id arguments view-state))
+
+  (define make-tui-application-context
+    (case-lambda
+      [(editor session-id buffer-id view-id arguments)
+       (make-tui-application-context
+         editor session-id buffer-id view-id arguments #f)]
+      [(editor session-id buffer-id view-id arguments view-state)
+       (%make-tui-application-context
+         editor session-id buffer-id view-id arguments view-state)]))
 
   (define-record-type
     (tui-view-state %make-tui-view-state tui-view-state?)
@@ -343,7 +361,10 @@
             (mutable focused-node)
             (mutable viewport)
             (mutable transient-state)
-            (mutable cursor)))
+            (mutable cursor)
+            (mutable generation)
+            (mutable surface-cache-key)
+            (mutable surface-cache)))
 
   (define make-tui-view-state
     (case-lambda
@@ -369,7 +390,15 @@
            focused?))
        (%make-tui-view-state
          view-id width height focused? focused-node viewport
-         transient-state cursor)]))
+         transient-state cursor 0 #f #f)]))
+
+  (define (touch-view-state! state)
+    (tui-view-state-generation-set!
+      state
+      (+ 1 (tui-view-state-generation state)))
+    (tui-view-state-surface-cache-key-set! state #f)
+    (tui-view-state-surface-cache-set! state #f)
+    state)
 
   (define (tui-view-state-set-size! state width height)
     (unless (tui-view-state? state)
@@ -383,8 +412,11 @@
         'tui-view-state-set-size!
         "view size must contain non-negative exact integers"
         width height))
-    (tui-view-state-width-set! state width)
-    (tui-view-state-height-set! state height)
+    (unless (and (= width (tui-view-state-width state))
+                 (= height (tui-view-state-height state)))
+      (tui-view-state-width-set! state width)
+      (tui-view-state-height-set! state height)
+      (touch-view-state! state))
     state)
 
   (define (tui-view-state-set-focused! state focused?)
@@ -393,7 +425,9 @@
         'tui-view-state-set-focused!
         "expected a TuiViewState and boolean"
         state focused?))
-    (tui-view-state-focused?-set! state focused?)
+    (unless (eq? focused? (tui-view-state-focused? state))
+      (tui-view-state-focused?-set! state focused?)
+      (touch-view-state! state))
     state)
 
   (define (tui-view-state-set-focused-node! state node)
@@ -402,7 +436,9 @@
         'tui-view-state-set-focused-node!
         "expected a TuiViewState"
         state))
-    (tui-view-state-focused-node-set! state node)
+    (unless (equal? node (tui-view-state-focused-node state))
+      (tui-view-state-focused-node-set! state node)
+      (touch-view-state! state))
     state)
 
   (define (tui-view-state-set-viewport! state viewport)
@@ -411,7 +447,9 @@
         'tui-view-state-set-viewport!
         "expected a TuiViewState"
         state))
-    (tui-view-state-viewport-set! state viewport)
+    (unless (equal? viewport (tui-view-state-viewport state))
+      (tui-view-state-viewport-set! state viewport)
+      (touch-view-state! state))
     state)
 
   (define (tui-view-state-set-transient-state! state transient-state)
@@ -420,7 +458,9 @@
         'tui-view-state-set-transient-state!
         "expected a TuiViewState"
         state))
-    (tui-view-state-transient-state-set! state transient-state)
+    (unless (equal? transient-state (tui-view-state-transient-state state))
+      (tui-view-state-transient-state-set! state transient-state)
+      (touch-view-state! state))
     state)
 
   (define (tui-view-state-set-cursor! state cursor)
@@ -429,8 +469,29 @@
         'tui-view-state-set-cursor!
         "expected a TuiViewState"
         state))
-    (tui-view-state-cursor-set! state cursor)
+    (unless (equal? cursor (tui-view-state-cursor state))
+      (tui-view-state-cursor-set! state cursor)
+      (touch-view-state! state))
     state)
+
+  (define (tui-view-state-set-surface-cache! state key surface)
+    (unless (tui-view-state? state)
+      (assertion-violation
+        'tui-view-state-set-surface-cache!
+        "expected a TuiViewState"
+        state))
+    (tui-view-state-surface-cache-key-set! state key)
+    (tui-view-state-surface-cache-set! state surface)
+    surface)
+
+  (define (tui-view-state-clear-surface-cache! state)
+    (unless (tui-view-state? state)
+      (assertion-violation
+        'tui-view-state-clear-surface-cache!
+        "expected a TuiViewState"
+        state))
+    (tui-view-state-surface-cache-key-set! state #f)
+    (tui-view-state-surface-cache-set! state #f))
 
   (define-record-type
     (tui-session %make-tui-session tui-session?)

@@ -5,7 +5,9 @@
         (soda editor core)
         (soda editor presentation)
         (soda editor tui-application)
-        (soda editor tui-application-runtime))
+        (soda editor tui-application-runtime)
+        (soda tui frame)
+        (soda tui renderer))
 
 (define (check condition message . irritants)
   (unless condition
@@ -23,6 +25,7 @@
 (define editor (make-editor initial-buffer))
 (define close-count 0)
 (define fail-next? #t)
+(define view-count 0)
 
 (check
   (document-presentation? (buffer-presentation initial-buffer))
@@ -77,7 +80,9 @@
                  (error 'counter "failed once"))
                (tui-result model '() '()))]
           [else (tui-result model '() '())])))
-    (lambda (model context) model)
+    (lambda (model context)
+      (set! view-count (+ view-count 1))
+      (tui-text 'counter.value (number->string model)))
     (lambda (model context)
       (set! close-count (+ close-count 1)))
     (lambda (model state) (number->string model))
@@ -125,6 +130,25 @@
       'interface))
   "tui-open! must create and display an interface Buffer backed by a session")
 
+(define first-frame (render-editor-frame editor 5 30))
+(define second-frame (render-editor-frame editor 5 30))
+(define application-cell (frame-cell-ref first-frame 0 0))
+(check
+  (and
+    (= view-count 1)
+    (string=? (cell-text application-cell) "4")
+    (exists
+      (lambda (source)
+        (and
+          (eq? (cell-source-layer source) 'application)
+          (= (cell-source-owner source) (tui-session-id session))
+          (eq? (cell-source-detail source) 'counter.value)))
+      (cell-sources application-cell))
+    (string=?
+      (cell-text (frame-cell-ref second-frame 0 0))
+      "4"))
+  "renderer must compose and cache an application surface")
+
 (define active-view-id (view-id (editor-active-view editor)))
 (define stale-message
   (make-tui-message
@@ -145,6 +169,13 @@
         (tui-session-view-state session active-view-id))
       'counter.value))
   "update must atomically publish Model and origin-targeted view actions")
+(define updated-frame (render-editor-frame editor 5 30))
+(check
+  (and
+    (= view-count 2)
+    (string=? (cell-text (frame-cell-ref updated-frame 0 0)) "4")
+    (string=? (cell-text (frame-cell-ref updated-frame 0 1)) "2"))
+  "publishing a Model generation must invalidate the application surface")
 
 (tui-send! editor (tui-session-id session) 'refresh active-view-id)
 (define first-refresh-effect (car (tui-take-effects! editor)))

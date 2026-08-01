@@ -9,7 +9,10 @@
           (soda editor display)
           (soda editor modeline)
           (soda editor minor-mode-runtime)
+          (soda editor presentation)
+          (soda editor tui-application)
           (soda editor window)
+          (soda tui application)
           (soda tui component)
           (soda tui frame)
           (soda tui layout))
@@ -881,7 +884,7 @@
         number
         " ")))
 
-  (define (render-text-component! context frame rectangle)
+  (define (render-document-text-component! context frame rectangle)
     (let* ([view (editor-render-context-view context)]
            [theme
              (editor-theme
@@ -1128,6 +1131,117 @@
               #t)
             (when (editor-render-context-focused? context)
               (frame-set-cursor! frame 0 0 #f))))))
+
+  (define (copy-application-surface! surface frame rectangle)
+    (let ([source (tui-surface-frame surface)])
+      (do ([row 0 (+ row 1)])
+          ((= row (min (tui-surface-rows surface)
+                       (rect-rows rectangle))))
+        (do ([column 0 (+ column 1)])
+            ((= column (min (tui-surface-columns surface)
+                            (rect-columns rectangle))))
+          (let ([cell (frame-cell-ref source row column)])
+            (unless (cell-continuation? cell)
+              (frame-put-cell!
+                frame
+                (+ (rect-row rectangle) row)
+                (+ (rect-column rectangle) column)
+                cell)))))))
+
+  (define (application-surface context rectangle)
+    (let* ([editor (editor-render-context-editor context)]
+           [view (editor-render-context-view context)]
+           [buffer (editor-render-context-buffer context)]
+           [presentation (buffer-presentation buffer)]
+           [session
+             (editor-tui-session-ref
+               editor
+               (tui-presentation-session-id presentation))]
+           [view-state
+             (tui-session-ensure-view-state! session (view-id view))])
+      (tui-view-state-set-size!
+        view-state
+        (rect-columns rectangle)
+        (rect-rows rectangle))
+      (tui-view-state-set-focused!
+        view-state
+        (editor-render-context-focused? context))
+      (let ([key
+              (list
+                (tui-session-generation session)
+                (tui-view-state-generation view-state)
+                (theme-generation (editor-theme editor))
+                (rect-rows rectangle)
+                (rect-columns rectangle))])
+        (if (and
+              (equal? key (tui-view-state-surface-cache-key view-state))
+              (tui-view-state-surface-cache view-state))
+            (tui-view-state-surface-cache view-state)
+            (let ([node
+                    ((tui-application-definition-view
+                       (tui-session-definition session))
+                     (tui-session-model session)
+                     (make-tui-application-context
+                       editor
+                       (tui-session-id session)
+                       (buffer-id buffer)
+                       (view-id view)
+                       #f
+                       view-state))])
+              (unless (tui-node? node)
+                (assertion-violation
+                  'render-editor-frame
+                  "application view must return a TuiNode"
+                  (tui-application-definition-name
+                    (tui-session-definition session))
+                  node))
+              (let ([surface
+                      (tui-render-surface
+                        node
+                        (max 1 (rect-rows rectangle))
+                        (max 1 (rect-columns rectangle))
+                        (editor-theme editor)
+                        (tui-session-id session)
+                        (tui-view-state-cursor view-state))])
+                (tui-view-state-set-surface-cache! view-state key surface)
+                surface))))))
+
+  (define (render-application-text-component! context frame rectangle)
+    (let* ([surface (application-surface context rectangle)]
+           [cursor (tui-surface-cursor surface)])
+      (copy-application-surface! surface frame rectangle)
+      (when (editor-render-context-focused? context)
+        (if (and cursor (tui-cursor-visible? cursor))
+            (let ([node
+                    (tui-arranged-node-find
+                      (tui-surface-component-tree surface)
+                      (tui-cursor-node-key cursor))])
+              (if node
+                  (let* ([node-rect (tui-arranged-node-rect node)]
+                         [row
+                           (+ (rect-row rectangle)
+                              (rect-row node-rect)
+                              (tui-cursor-local-row cursor))]
+                         [column
+                           (+ (rect-column rectangle)
+                              (rect-column node-rect)
+                              (tui-cursor-local-column cursor))])
+                    (frame-set-cursor!
+                      frame
+                      row
+                      column
+                      (and
+                        (rect-contains? rectangle row column)
+                        (< row (frame-rows frame))
+                        (< column (frame-columns frame)))))
+                  (frame-set-cursor! frame 0 0 #f)))
+            (frame-set-cursor! frame 0 0 #f)))))
+
+  (define (render-text-component! context frame rectangle)
+    (if (tui-presentation?
+          (buffer-presentation (editor-render-context-buffer context)))
+        (render-application-text-component! context frame rectangle)
+        (render-document-text-component! context frame rectangle)))
 
   (define (render-modeline-component! context frame rectangle)
     (let* ([theme

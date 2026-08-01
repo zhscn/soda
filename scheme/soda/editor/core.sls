@@ -239,6 +239,90 @@
           tui-complete-command!
           tui-take-effects!
           tui-retry!
+          make-tui-dimension
+          tui-dimension?
+          tui-dimension-kind
+          tui-dimension-amount
+          tui-dimension-minimum
+          tui-dimension-maximum
+          tui-fixed
+          tui-content
+          tui-flex
+          tui-percent
+          make-tui-layout
+          tui-layout?
+          tui-layout-width
+          tui-layout-height
+          make-tui-focus
+          tui-focus?
+          tui-focus-focusable?
+          tui-focus-group
+          tui-focus-order
+          tui-focus-enabled?
+          make-tui-accessibility
+          tui-accessibility?
+          tui-accessibility-role
+          tui-accessibility-label
+          tui-accessibility-value
+          tui-accessibility-description
+          tui-accessibility-commands
+          tui-accessibility-keymap
+          make-tui-node
+          tui-node?
+          tui-node-key
+          tui-node-kind
+          tui-node-layout
+          tui-node-faces
+          tui-node-content
+          tui-node-children
+          tui-node-focus
+          tui-node-semantic-source
+          tui-node-accessibility
+          tui-node-with-layout
+          tui-node-with-focus
+          tui-text
+          tui-styled-text
+          tui-row
+          tui-column
+          tui-stack
+          tui-padding
+          tui-border
+          tui-scroll
+          tui-list
+          tui-table
+          tui-spacer
+          tui-custom
+          make-tui-size
+          tui-size?
+          tui-size-rows
+          tui-size-columns
+          tui-measure
+          tui-arranged-node?
+          tui-arranged-node-node
+          tui-arranged-node-rect
+          tui-arranged-node-children
+          tui-arranged-node-find
+          tui-arrange
+          tui-focus-entry?
+          tui-focus-entry-node-key
+          tui-focus-entry-rect
+          tui-focus-entry-order
+          tui-focus-entry-enabled?
+          make-tui-cursor
+          tui-cursor?
+          tui-cursor-node-key
+          tui-cursor-local-row
+          tui-cursor-local-column
+          tui-cursor-shape
+          tui-cursor-visible?
+          tui-surface?
+          tui-surface-rows
+          tui-surface-columns
+          tui-surface-frame
+          tui-surface-component-tree
+          tui-surface-focus-ring
+          tui-surface-cursor
+          tui-render-surface
           make-process-comint-profile
           process-comint-profile?
           process-comint-profile-name
@@ -1347,7 +1431,8 @@
           (soda editor window-runtime)
           (soda editor workbench)
           (soda editor workbench-commands)
-          (soda editor workbench-session))
+          (soda editor workbench-session)
+          (soda tui application))
 
   (define (positive-exact-integer? value)
     (and (integer? value) (exact? value) (positive? value)))

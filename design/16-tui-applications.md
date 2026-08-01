@@ -8,7 +8,7 @@
 | `TuiApplicationDefinition`、catalog、session 与 lifecycle | 部分实现 |
 | message/update/effect 与 generation 模型 | 部分实现 |
 | application input handler、focus、pointer 与 replay | 未实现 |
-| 声明式 node、layout、surface 与 Frame composition | 未实现 |
+| 声明式 node、layout、surface 与 Frame composition | 部分实现 |
 | text projection、inspection、persistence 与 sole host | 未实现 |
 
 ## 定位
