@@ -13,7 +13,7 @@
 | LanguageProfile bootstrap hook 与 home attachment 选择 | 已实现 |
 | ProjectWorkspace bootstrap snapshot 与 file-backed Buffer 归属解析 | 已实现 |
 | LSP process transport、ProjectWorkspace bootstrap 与 full-text document synchronization | 已实现 |
-| LSP diagnostics、completion text edits/resolve、hover、document highlights、formatting、definition、implementation、type definition、references、rename、code actions 与 workspace/applyEdit | 已实现 |
+| LSP diagnostics、completion text edits/resolve、hover、document highlights、formatting、definition、implementation、type definition、references、workspace symbol、rename、code actions 与 workspace/applyEdit | 已实现 |
 | LSP semantic tokens full refresh 与 document lifecycle refresh | 已实现 |
 
 ## 分层
@@ -239,6 +239,10 @@ provider 的 decoration 不受影响。
 `lsp.format` 使用 command target：active region 请求 `rangeFormatting`，其他情况请求
 `formatting`。服务器返回的 TextEdit 转换为当前资源的 workspace edit，并通过同一
 revision 校验与单次 Buffer transaction 应用。
+
+`lsp.workspace-symbol` 向 active View 所选 LanguageSession 请求
+`workspace/symbol`。带有文件 range 的结果转换为 LocationList，使用通用 xref 跳转与
+历史；请求只使用已经建立的 workspace session，不从当前 Buffer 重新解析 Project。
 
 ## Syntax provider
 

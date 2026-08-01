@@ -1024,6 +1024,71 @@
       (string->utf8 "int Action;\n")))
   "code action did not apply its edit before executing its command")
 
+(define workspace-symbol-effects
+  ((command-procedure (editor-command-registry editor) 'lsp.workspace-symbol)
+   (make-command-context editor (editor-active-view editor) #f #f)
+   "Widget"))
+(check
+  (and (= (length workspace-symbol-effects) 1)
+       (eq? (command-effect-kind (car workspace-symbol-effects))
+            'managed-process.write))
+  "workspace-symbol did not issue an LSP request"
+  workspace-symbol-effects)
+(define workspace-symbol-message
+  (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload (car workspace-symbol-effects))))))
+(check
+  (and
+    (string=?
+      (json-object-ref workspace-symbol-message "method" #f)
+      "workspace/symbol")
+    (string=?
+      (json-object-ref
+        (json-object-ref workspace-symbol-message "params" #f)
+        "query"
+        #f)
+      "Widget"))
+  "workspace-symbol request has an invalid LSP payload")
+(define workspace-symbol-range
+  (make-json-object
+    (list
+      (cons "start"
+            (make-json-object
+              (list (cons "line" 0) (cons "character" 3))))
+      (cons "end"
+            (make-json-object
+              (list (cons "line" 0) (cons "character" 9)))))))
+(lsp-client-handle-json-message!
+  editor session
+  (make-json-object
+    (list
+      (cons "jsonrpc" "2.0")
+      (cons "id" (json-object-ref workspace-symbol-message "id" #f))
+      (cons
+        "result"
+        (make-json-array
+          (list
+            (make-json-object
+              (list
+                (cons "name" "Widget")
+                (cons "kind" 5)
+                (cons
+                  "location"
+                  (make-json-object
+                    (list
+                      (cons "uri" "file:///workspace/src/main.cpp")
+                      (cons "range" workspace-symbol-range))))))))))))
+(let ([locations (editor-current-location-list editor)])
+  (check
+    (and locations
+         (eq? (location-list-source locations) 'lsp-workspace-symbol)
+         (= (length (location-list-items locations)) 1)
+         (= (view-caret (editor-active-view editor)) 3))
+    "workspace-symbol did not publish a navigable location list"))
+
 (define lsp-reference-effects
   (editor-execute-command! editor 'lsp.find-references))
 (check

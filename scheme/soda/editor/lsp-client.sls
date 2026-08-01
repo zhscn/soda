@@ -2019,6 +2019,59 @@
       'type-definition
       "No type definition found"))
 
+  (define (lsp-workspace-symbol-items editor value)
+    (if (json-array? value)
+        (let loop ([symbols (json-array-values value)] [items '()])
+          (if (null? symbols)
+              (reverse items)
+              (let* ([symbol (car symbols)]
+                     [location
+                       (and
+                         (json-object? symbol)
+                         (json-object-ref symbol "location" #f))]
+                     [item (lsp-location-item editor location)])
+                (loop
+                  (cdr symbols)
+                  (if item (cons item items) items)))))
+        '()))
+
+  (define (lsp-workspace-symbol! editor query)
+    (let ([session (active-view-lsp-session editor)]
+          [view (editor-active-view editor)])
+      (if (and session
+               (eq? (lsp-client-session-state session) 'ready))
+          (list
+            (session-request!
+              session
+              "workspace/symbol"
+              (make-json-object (list (cons "query" query)))
+              (lambda (response-editor response-session result)
+                (let ([items (lsp-workspace-symbol-items response-editor result)])
+                  (if (null? items)
+                      (begin
+                        (editor-set-current-location-list! response-editor #f)
+                        (editor-set-status-message!
+                          response-editor "No workspace symbols found")
+                        '())
+                      (let ([locations
+                              (make-location-list 'lsp-workspace-symbol items)])
+                        (editor-set-current-location-list!
+                          response-editor locations)
+                        (editor-set-status-message!
+                          response-editor
+                          (string-append
+                            "Workspace symbols: "
+                            (number->string (length items))))
+                        (lsp-jump-to-location-item!
+                          response-editor
+                          view
+                          (location-list-current locations)
+                          'xref)))))))
+          (begin
+            (editor-set-status-message!
+              editor "No ready language server for workspace symbol search")
+            '()))))
+
   (define (lsp-workspace-edits-for-resource uri values)
     (let ([resource
             (and (string? uri)
@@ -2738,6 +2791,20 @@
         'lsp.find-references
         (lambda (context) (lsp-find-references! (command-context-editor context)))
         "Find language-server references at point."))
+    (let ([implementation
+            (lambda (context query)
+              (lsp-workspace-symbol! (command-context-editor context) query))])
+      (editor-register-command!
+        editor
+        (make-command-definition
+          'lsp.workspace-symbol
+          implementation
+          (lambda (context arguments) (apply implementation context arguments))
+          "Find symbols across the language-server workspace."
+          #f
+          (make-interactive-plan
+            (list (interactive-string "Workspace symbol: " 'lsp-workspace-symbol)))
+          '())))
     (editor-register-command!
       editor
       (make-interactive-context-command
