@@ -33,7 +33,6 @@
           (soda editor event)
           (soda editor keymap)
           (soda editor presentation)
-          (soda editor project-target)
           (soda editor resource-context)
           (soda editor state)
           (soda editor tui-application)
@@ -592,20 +591,18 @@
                  (editor-view-ref editor origin-view-id)
                  (editor-active-view editor))]
            [context
-             (editor-view-resource-context editor (view-id view))]
-           [project (editor-view-home-project editor view)])
+             (editor-view-resource-context editor (view-id view))])
       (make-resource-context
         (resource-context-base-resource context)
         (view-id view)
-        project
+        (resource-context-project-hint context)
         (resource-context-language-context context))))
 
   (define (open-with-initializer!
-            editor name arguments intent origin-view-id initializer)
+            editor name arguments intent origin-view-id origin-context
+            initializer)
     (require-open-editor 'tui-open! editor)
     (let* ([lifecycle-before (tui-lifecycle-snapshot editor)]
-           [origin-context
-             (application-origin-context editor origin-view-id)]
            [definition (definition-ref editor name)]
            [registry (editor-tui-application-registry editor)]
            [session-id
@@ -697,7 +694,18 @@
          (view-id (editor-active-view editor)))]
       [(editor name arguments intent origin-view-id)
        (open-with-initializer!
-         editor name arguments intent origin-view-id initialize)]))
+         editor name arguments intent origin-view-id
+         (application-origin-context editor origin-view-id)
+         initialize)]
+      [(editor name arguments intent origin-view-id origin-context)
+       (unless (resource-context? origin-context)
+         (assertion-violation
+           'tui-open!
+           "expected a ResourceContext"
+           origin-context))
+       (open-with-initializer!
+         editor name arguments intent origin-view-id origin-context
+         initialize)]))
 
   (define (durable-view-state state)
     (list
@@ -790,7 +798,9 @@
                     editor name
                     (tui-session-snapshot-arguments snapshot)
                     (tui-session-snapshot-display-intent snapshot)
-                    origin-view-id initializer)]
+                    origin-view-id
+                    (application-origin-context editor origin-view-id)
+                    initializer)]
                 [session
                   (editor-tui-session-for-buffer editor (buffer-id buffer))])
            (tui-restore-session-view-states!

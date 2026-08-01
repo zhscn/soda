@@ -29,7 +29,7 @@
 | [13-rendering-theme.md](13-rendering-theme.md) | highlight、DisplayMap、theme 与增量 presenter | 部分实现 |
 | [14-command-extensibility.md](14-command-extensibility.md) | interactive command、hook、advice 与 minor mode | 已实现 |
 | [15-configuration.md](15-configuration.md) | setting、配置快照、用户 init 与热替换 | 已实现 |
-| [16-tui-applications.md](16-tui-applications.md) | Buffer 承载的声明式 TUI application framework | 未实现 |
+| [16-tui-applications.md](16-tui-applications.md) | Buffer 承载的声明式 TUI application framework | 已实现 |
 | [17-packaging.md](17-packaging.md) | 单文件编辑器发行与 Scheme application 打包 | 部分实现 |
 
 ## 规范边界

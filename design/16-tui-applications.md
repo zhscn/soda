@@ -83,6 +83,12 @@ TUI Buffer 自动参与：
 Project 不拥有 TuiSession。应用可以显式使用 Project root、VFS、language session
 或 build service，也可以作为无 Project 的全局工具运行。
 
+打开 application 时，host 把 origin View 的 `ResourceContext` 复制到新 Buffer，并
+冻结 origin View identity。通用 runtime 不发现 Project，也不读取 Workbench focus。
+需要 Project 语义的应用由调用方解析 `ProjectTarget`，再把其中的 ResourceContext
+显式传给 `tui-open!`；无 Project 的应用只继承调用方已经提供的 base resource、Project
+hint 和 language context。
+
 ## Application definition
 
 Editor 持有按名字索引的 `TuiApplicationCatalog`。定义是无运行状态的构造契约：

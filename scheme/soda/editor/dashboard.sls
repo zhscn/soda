@@ -17,6 +17,7 @@
           (soda editor display-placement)
           (soda editor keymap)
           (soda editor language)
+          (soda editor project-target)
           (soda editor state)
           (soda editor tui-application)
           (soda editor tui-application-runtime)
@@ -244,8 +245,16 @@
                 (view-id view)
                 #f
                 (buffer-creation-context buffer))))
-          (tui-open! editor 'dashboard workbench-id 'edit
-                     (view-id view)))
+          (let ([target
+                  (editor-project-target editor view 'workspace)])
+            (if target
+                (tui-open!
+                  editor 'dashboard workbench-id 'edit
+                  (view-id view)
+                  (project-target-resource-context target))
+                (tui-open!
+                  editor 'dashboard workbench-id 'edit
+                  (view-id view)))))
       (send-dashboard! context 'refresh)))
 
   (define (visit-buffer-command context)

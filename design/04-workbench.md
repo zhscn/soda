@@ -28,7 +28,7 @@
 - **ResourceContext** 是一次资源操作解析相对路径和工作目录的显式上下文。
 - **Project** 是资源发现、配置、任务和构建入口的边界。
 - **LanguageSession** 是某个语言服务实例及其语义环境。
-- **Window layout** 是屏幕上的 View 排布，不属于某个 Project。
+- **Window layout** 是 Workbench 拥有的 View 排布，独立于 Project scope。
 - **Workbench** 组合 Project scope、focused Project、layout 和一次工作会话的 recency。
 
 Project、LanguageSession 和 Workbench 可以相互引用，但不拥有彼此。编辑器没有全局
@@ -44,7 +44,7 @@ View ──> ResourceContext? ──> Project hint?
   │             └──────────> explicit process/file request cwd
   └──> LanguageAttachment ──> LanguageSession
 
-Workbench = Project scope + focused Project? + WindowLayout + MRU + placement slots
+Workbench = Project scope + focused Project? + owned WindowLayout + MRU + placement slots
 ```
 
 ## ResourceContext
@@ -152,9 +152,10 @@ index 或 process。一个 Buffer 可以通过路径发现 home Project，也可
 ## Dashboard projection
 
 Dashboard 是 Workbench、Project 和 tooling 关系的显式 TUI projection，不是新的所有权
-层。`dashboard.open` 打开一个普通 application Buffer；基础面板列出 Editor Buffer
-registry，并允许选择、刷新和在 origin View 中访问 Buffer。dashboard session 可以像
-其他 Buffer 一样放入 Window、切换、复用和参与 Workbench MRU。
+层。每个 Workbench 至多持有一个 dashboard session；`dashboard.open` 打开或复用其
+普通 application Buffer。基础面板列出 Editor Buffer registry，并允许选择、刷新和
+在 origin View 中访问 Buffer。dashboard session 可以像其他 Buffer 一样放入 Window、
+切换和参与 Workbench MRU；关闭 Workbench 同时关闭对应 session。
 
 Project dashboard 以 Project identity 为根节点，关联 Buffer、LanguageSession、Git、
 诊断、搜索结果和 task。关联项保存其真实 identity 或冻结的 target，不依赖 active
@@ -164,28 +165,33 @@ View、启动目录或隐式 current Project。多个独立 Project 可以通过
 子 Project 合并成新的 root，也不改变各自的 ResourceContext、settings 或 language
 session 边界。
 
-Dashboard Model 是 registry 与 session 状态的可见投影。刷新重新读取相应 registry，
-选择和 viewport 属于 dashboard session/view state；访问条目仍调用普通 display、
-project command 或 language command，因此 dashboard 不绕过既有路由 policy。
+Dashboard Model 保存 registry 的可见投影与所属 Workbench identity。Buffer registry
+generation 变化时，所有 dashboard session 通过 hook 重新读取投影。selection 使用
+稳定 Buffer identity，selection 与 viewport 都属于各自 `TuiViewState`；同一 dashboard
+Buffer 的多个 View 因此可以独立浏览。访问条目仍调用普通 display、project command
+或 language command，因此 dashboard 不绕过既有路由 policy。
 
 打开 file-backed Buffer 不创建 Project，不递归枚举目录，也不启动 language index。
 显式 project command、adopt 或 language bootstrap 才解析 Project。Project 发现只产生
 描述值，LanguageSession 是否启动由 language policy 决定。
 
 resource enumerator 由 Project 操作按需启动，通过 libuv directory scan 逐层展开
-目录。每个目录批次都发布同一 scan generation 的累计路径 snapshot；picker 立即用
-已有候选响应输入，并在 snapshot 增长时按当前 query 重新过滤。候选更新按稳定
-resource identity 保留 selection 和 viewport，不重启目录扫描。
+目录。扫描器先发布首个可用批次，随后按固定目录批量发布同一 generation 的累计路径
+snapshot，并在结束时发布完整 snapshot。picker 立即用已有候选响应输入，并在 snapshot
+增长时按当前 query 重新过滤。候选更新按稳定 resource identity 保留 selection 和
+viewport，不重启目录扫描。
 
 枚举 session 属于 Editor 的 Project resource cache，不属于启动它的 minibuffer。
 接受或取消 picker 只结束交互 session；枚举可以继续完成并服务下一次命令。重复命令
-复用已有 snapshot 或在途 session，Project 切换后的批次只更新引用同一 Project id 的
-picker。forget Project 和 Editor close 释放 scan source 与全部目录 watch。
+复用已有 snapshot 或相同 generation 的在途 session，Project 切换后的批次只更新引用
+同一 Project id 的 picker。forget Project 和 Editor close 释放 scan source 与 session
+持有的目录 watch。
 
 需要内容的调用方通过异步 file read 单独读取资源。隐藏目录、VCS metadata、构建输出
 和依赖目录由枚举 policy 排除。enumerator 不为后台索引创建 Buffer；用户访问资源时
-才由普通文件打开流程建立 Buffer identity。目录 watch 只承担失效通知；文件系统变化
-启动新 generation 的异步重扫，并以累计 snapshot 替换旧集合。
+才由普通文件打开流程建立 Buffer identity。session 按固定预算为已扫描目录建立 watch，
+watch 只承担失效通知；收到文件系统变化后启动新 generation 的异步重扫，并以累计
+snapshot 替换旧集合。超出 watch 预算的目录通过显式 refresh 重新枚举。
 
 ## Workbench
 
@@ -223,6 +229,8 @@ scope 是声明式搜索范围；MRU 是显示足迹。显示 scope 外的 Buffe
 切换 Workbench 会整体切换 layout、active Window 和 MRU。非 active Workbench 的
 View 保留 caret、selection、viewport、InputState 和 LanguageAttachment。关闭
 Workbench 释放其 Window/View，不关闭全局 Buffer、Project 或共享 LanguageSession。
+每个 View 由唯一 Workbench 拥有，并且在该 Workbench layout 中恰好出现一次；layout
+替换、View 转移和 Workbench 关闭都通过 Editor 状态入口维护这一不变量。
 
 ## Display placement
 
