@@ -200,7 +200,7 @@
     (let ([keymap (make-keymap)])
       (bind-key! keymap 'down #f 0 'dashboard.next)
       (bind-key! keymap 'up #f 0 'dashboard.previous)
-      (bind-key! keymap 'enter #f 0 'dashboard.visit-buffer)
+      (bind-key! keymap 'enter 13 0 'dashboard.visit-buffer)
       (for-each
         (lambda (entry)
           (bind-key! keymap 'character

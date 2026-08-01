@@ -56,7 +56,7 @@
 (editor-update!
   editor
   (make-key-message
-    (make-key-event 'enter #f #f #f 0 'press (make-bytevector 0))))
+    (make-key-event 'enter 13 #f #f 0 'press (make-bytevector 0))))
 (check
   (= (buffer-id (view-buffer (editor-active-view editor)))
      (buffer-id first))
