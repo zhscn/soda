@@ -39,10 +39,10 @@
     (language-session-key %make-language-session-key language-session-key?)
     (fields language
             provider
-            workspace-folders
-            configuration
-            environment-fingerprint
-            client-capabilities))
+            workspace-folders-data
+            configuration-data
+            environment-fingerprint-data
+            client-capabilities-data))
 
   (define-record-type
     (language-session %make-language-session language-session?)
@@ -94,6 +94,33 @@
   (define (exact-positive-integer? value)
     (and (integer? value) (exact? value) (positive? value)))
 
+  (define (snapshot-value value)
+    (cond
+      [(pair? value)
+       (cons (snapshot-value (car value))
+             (snapshot-value (cdr value)))]
+      [(vector? value)
+       (list->vector (map snapshot-value (vector->list value)))]
+      [(bytevector? value) (bytevector-copy value)]
+      [(string? value) (string-copy value)]
+      [else value]))
+
+  (define (language-session-key-workspace-folders key)
+    (snapshot-value
+      (language-session-key-workspace-folders-data key)))
+
+  (define (language-session-key-configuration key)
+    (snapshot-value
+      (language-session-key-configuration-data key)))
+
+  (define (language-session-key-environment-fingerprint key)
+    (snapshot-value
+      (language-session-key-environment-fingerprint-data key)))
+
+  (define (language-session-key-client-capabilities key)
+    (snapshot-value
+      (language-session-key-client-capabilities-data key)))
+
   (define make-language-session-key
     (case-lambda
       [(language provider workspace-folders)
@@ -132,10 +159,10 @@
        (%make-language-session-key
          language
          provider
-         workspace-folders
-         configuration
-         environment-fingerprint
-         client-capabilities)]))
+         (snapshot-value workspace-folders)
+         (snapshot-value configuration)
+         (snapshot-value environment-fingerprint)
+         (snapshot-value client-capabilities))]))
 
   (define (language-session-key=? left right)
     (and
@@ -143,14 +170,14 @@
            (language-session-key-language right))
       (equal? (language-session-key-provider left)
               (language-session-key-provider right))
-      (equal? (language-session-key-workspace-folders left)
-              (language-session-key-workspace-folders right))
-      (equal? (language-session-key-configuration left)
-              (language-session-key-configuration right))
-      (equal? (language-session-key-environment-fingerprint left)
-              (language-session-key-environment-fingerprint right))
-      (equal? (language-session-key-client-capabilities left)
-              (language-session-key-client-capabilities right))))
+      (equal? (language-session-key-workspace-folders-data left)
+              (language-session-key-workspace-folders-data right))
+      (equal? (language-session-key-configuration-data left)
+              (language-session-key-configuration-data right))
+      (equal? (language-session-key-environment-fingerprint-data left)
+              (language-session-key-environment-fingerprint-data right))
+      (equal? (language-session-key-client-capabilities-data left)
+              (language-session-key-client-capabilities-data right))))
 
   (define (make-language-session-registry)
     (%make-language-session-registry '() '() 1 1))

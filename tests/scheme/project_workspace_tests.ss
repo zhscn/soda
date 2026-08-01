@@ -81,6 +81,43 @@
       "/workspace/build"))
   "ProjectWorkspace must freeze folders and declarative settings")
 
+(define mutable-configuration
+  (list
+    (cons 'lsp-settings
+          (list (cons 'clangd (vector "--background-index"))))))
+(define mutable-project
+  (make-project
+    'mutable
+    '("/mutable-workspace")
+    'manual 'explicit #f
+    (make-project-settings-layer mutable-configuration)
+    '()))
+(editor-remember-project! editor mutable-project)
+(define mutable-workspace
+  (editor-project-workspace editor mutable-project))
+(vector-set!
+  (cdr (assq 'clangd (cdr (assq 'lsp-settings mutable-configuration))))
+  0
+  "--changed")
+(let ([exposed (project-workspace-configuration mutable-workspace)])
+  (vector-set!
+    (cdr (assq 'clangd (cdr (assq 'lsp-settings exposed))))
+    0
+    "--also-changed"))
+(check
+  (string=?
+    (vector-ref
+      (cdr
+        (assq
+          'clangd
+          (cdr
+            (assq
+              'lsp-settings
+              (project-workspace-configuration mutable-workspace)))))
+      0)
+    "--background-index")
+  "workspace configuration must remain stable across caller mutation")
+
 (define inner-generation (project-workspace-generation inner-workspace))
 (define updated-inner
   (make-project
@@ -125,6 +162,33 @@
       (language-session-key-environment-fingerprint language-key)
       '("clang" "22")))
   "ProjectWorkspace must build a complete LanguageSession identity")
+
+(define mutable-folders (list "/workspace/component"))
+(define mutable-session-configuration
+  (list (cons 'server (vector "clangd"))))
+(define immutable-session-key
+  (make-language-session-key
+    'cpp
+    'clangd
+    mutable-folders
+    mutable-session-configuration
+    '() '()))
+(vector-set! (cdr (assq 'server mutable-session-configuration)) 0 "changed")
+(let ([exposed (language-session-key-configuration immutable-session-key)])
+  (vector-set! (cdr (assq 'server exposed)) 0 "also-changed"))
+(check
+  (and
+    (equal?
+      (language-session-key-workspace-folders immutable-session-key)
+      '("/workspace/component"))
+    (equal?
+      (vector->list
+        (cdr
+          (assq
+            'server
+            (language-session-key-configuration immutable-session-key))))
+      '("clangd")))
+  "LanguageSession identity inputs must remain stable across caller mutation")
 
 (define discovered-workspace
   (editor-project-workspace-for-resource

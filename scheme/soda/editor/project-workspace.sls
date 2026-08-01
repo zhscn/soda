@@ -31,7 +31,7 @@
     (fields name resource))
 
   (define-record-type project-workspace
-    (fields project project-id generation folders configuration))
+    (fields project project-id generation folders configuration-data))
 
   (define (non-empty-string? value)
     (and (string? value) (positive? (string-length value))))
@@ -87,6 +87,26 @@
             (project-settings-layer-entries layer))
           '())))
 
+  (define (snapshot-value value)
+    (cond
+      [(pair? value)
+       (cons (snapshot-value (car value))
+             (snapshot-value (cdr value)))]
+      [(vector? value)
+       (list->vector (map snapshot-value (vector->list value)))]
+      [(bytevector? value) (bytevector-copy value)]
+      [(string? value) (string-copy value)]
+      [else value]))
+
+  (define (project-workspace-configuration workspace)
+    (unless (project-workspace? workspace)
+      (assertion-violation
+        'project-workspace-configuration
+        "expected a ProjectWorkspace"
+        workspace))
+    (snapshot-value
+      (project-workspace-configuration-data workspace)))
+
   (define (editor-project-workspace editor project)
     (require-open-editor 'editor-project-workspace editor)
     (unless (project? project)
@@ -107,7 +127,7 @@
         (project-id canonical)
         generation
         (folders-for-roots (project-roots canonical))
-        (project-configuration canonical))))
+        (snapshot-value (project-configuration canonical)))))
 
   (define (project-workspace-folder-resources workspace)
     (unless (project-workspace? workspace)

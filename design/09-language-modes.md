@@ -206,6 +206,10 @@ configuration，并可转换为 `LanguageSessionKey`。Project descriptor 更新
 workspace folder/configuration 变化或建立新 session。普通语义请求只携带 attachment，
 不重新运行 Project discovery。
 
+`LanguageSessionKey` 对 workspace folders、configuration、environment fingerprint 和
+client capabilities 使用按值快照。嵌套的 list、vector、string 与 bytevector 在建立 key
+和读取 key 时独立复制，使异步 transport 的 identity 不受调用方后续原地修改影响。
+
 definition、reference、diagnostic 和其他异步导航请求冻结 origin attachment。打开落点
 Buffer 后，目标 View 选择该 attachment，后续查询继续沿相同 session 路由；请求不再
 从落点路径反推 Project。这样跳入 Project 外的系统头文件、生成源码或依赖缓存后仍可

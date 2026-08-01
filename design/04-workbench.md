@@ -166,6 +166,8 @@ ProjectWorkspace {
 ```
 
 folder 来自 Project roots，configuration 是 Project settings layer 的结构快照。
+workspace folders、configuration 及其嵌套的 list、vector、string 和 bytevector 值按值
+复制；调用方修改自己的配置值或读取到的投影不会改变已创建的 workspace identity。
 资源解析优先采用仍覆盖目标文件的冻结 Project hint；否则执行 Project discovery，并在
 多个 known Project 都包含资源时选择匹配 root 最长者。调用方也可以取得全部匹配
 workspace。file-backed Buffer 通过 `(Buffer, ResourceContext)` 使用同一解析入口；
