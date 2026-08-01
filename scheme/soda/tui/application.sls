@@ -301,6 +301,14 @@
          #f (list child) #f #f #f)]))
 
   (define (tui-scroll key child viewport)
+    (unless (and (tui-node? child)
+                 (pair? viewport)
+                 (exact-non-negative-integer? (car viewport))
+                 (exact-non-negative-integer? (cdr viewport)))
+      (assertion-violation
+        'tui-scroll
+        "viewport must be a non-negative row/column pair"
+        viewport))
     (make-tui-node
       key 'scroll content-layout '(application)
       viewport (list child) #f #f #f))
@@ -619,9 +627,24 @@
       (case (tui-node-kind node)
         [(row) (arrange-linear node rect 'horizontal)]
         [(column list table) (arrange-linear node rect 'vertical)]
-        [(stack scroll)
+        [(stack)
          (map (lambda (child) (tui-arrange child rect))
               (tui-node-children node))]
+        [(scroll)
+         (let* ([viewport (tui-node-content node)]
+                [child (car (tui-node-children node))]
+                [desired (tui-measure child 1000000 1000000)]
+                [rows (max (rect-rows rect) (tui-size-rows desired))]
+                [columns
+                  (max (rect-columns rect) (tui-size-columns desired))])
+           (list
+             (tui-arrange
+               child
+               (make-rect
+                 (- (rect-row rect) (car viewport))
+                 (- (rect-column rect) (cdr viewport))
+                 rows
+                 columns))))]
         [(padding)
          (let ([padding (tui-node-content node)])
            (list
@@ -677,14 +700,39 @@
     (and (<= 0 row) (< row (frame-rows frame))
          (<= 0 column) (< column (frame-columns frame))))
 
-  (define (put-character! frame row column character faces theme session-id key)
+  (define (intersect-rect left right)
+    (let* ([row (max (rect-row left) (rect-row right))]
+           [column (max (rect-column left) (rect-column right))]
+           [end-row
+             (min (+ (rect-row left) (rect-rows left))
+                  (+ (rect-row right) (rect-rows right)))]
+           [end-column
+             (min (+ (rect-column left) (rect-columns left))
+                  (+ (rect-column right) (rect-columns right)))])
+      (make-rect
+        row column
+        (max 0 (- end-row row))
+        (max 0 (- end-column column)))))
+
+  (define (inside-clip? clip row column width)
+    (and (<= (rect-row clip) row)
+         (< row (+ (rect-row clip) (rect-rows clip)))
+         (<= (rect-column clip) column)
+         (<= (+ column width)
+             (+ (rect-column clip) (rect-columns clip)))))
+
+  (define (put-character!
+            frame clip row column character faces theme session-id key)
     (let ([width (character-cell-width character)])
       (cond
         [(zero? width)
-         (when (and (> column 0) (inside-frame? frame row (- column 1)))
+         (when (and (> column 0)
+                    (inside-frame? frame row (- column 1))
+                    (inside-clip? clip row (- column 1) 1))
            (frame-append-cell-text! frame row (- column 1) (string character)))
          column]
         [(and (inside-frame? frame row column)
+              (inside-clip? clip row column width)
               (<= (+ column width) (frame-columns frame)))
          (frame-put-cell!
            frame row column
@@ -698,7 +746,7 @@
          (+ column width)]
         [else column])))
 
-  (define (paint-string! frame rect text faces theme session-id key)
+  (define (paint-string! frame rect clip text faces theme session-id key)
     (let ([row (rect-row rect)]
           [column (rect-column rect)]
           [end-row (+ (rect-row rect) (rect-rows rect))]
@@ -715,10 +763,10 @@
             [(and (< row end-row) (< column end-column))
              (set! column
                (put-character!
-                 frame row column character faces theme session-id key))]))
+                 frame clip row column character faces theme session-id key))]))
         (string->list text))))
 
-  (define (paint-border! frame rect faces theme session-id key)
+  (define (paint-border! frame rect clip faces theme session-id key)
     (when (and (positive? (rect-rows rect))
                (positive? (rect-columns rect)))
       (let ([top (rect-row rect)]
@@ -728,25 +776,53 @@
         (let loop ([column left])
           (when (<= column right)
             (put-character!
-              frame top column
+              frame clip top column
               (if (or (= column left) (= column right)) #\+ #\-)
               faces theme session-id key)
             (when (> bottom top)
               (put-character!
-                frame bottom column
+                frame clip bottom column
                 (if (or (= column left) (= column right)) #\+ #\-)
                 faces theme session-id key))
             (loop (+ column 1))))
         (let loop ([row (+ top 1)])
           (when (< row bottom)
-            (put-character! frame row left #\| faces theme session-id key)
+            (put-character!
+              frame clip row left #\| faces theme session-id key)
             (when (> right left)
-              (put-character! frame row right #\| faces theme session-id key))
+              (put-character!
+                frame clip row right #\| faces theme session-id key))
             (loop (+ row 1)))))))
 
-  (define (paint-arranged! arranged frame theme session-id)
+  (define (paint-custom! node frame rect clip theme session-id)
+    (when (and (positive? (rect-rows rect))
+               (positive? (rect-columns rect)))
+      (let ([local (make-frame (rect-rows rect) (rect-columns rect))])
+        ((cdr (tui-node-content node))
+         local
+         (make-rect 0 0 (rect-rows rect) (rect-columns rect))
+         theme
+         session-id
+         node)
+        (do ([row 0 (+ row 1)])
+            ((= row (rect-rows rect)))
+          (do ([column 0 (+ column 1)])
+              ((= column (rect-columns rect)))
+            (let ([target-row (+ (rect-row rect) row)]
+                  [target-column (+ (rect-column rect) column)]
+                  [cell (frame-cell-ref local row column)])
+              (when (and
+                      (not (cell-continuation? cell))
+                      (inside-frame? frame target-row target-column)
+                      (inside-clip?
+                        clip target-row target-column (cell-width cell)))
+                (frame-put-cell!
+                  frame target-row target-column cell))))))))
+
+  (define (paint-arranged! arranged frame theme session-id clip)
     (let* ([node (tui-arranged-node-node arranged)]
            [rect (tui-arranged-node-rect arranged)]
+           [node-clip (intersect-rect rect clip)]
            [faces
              (if (null? (tui-node-faces node))
                  '(application)
@@ -754,7 +830,7 @@
       (case (tui-node-kind node)
         [(text)
          (paint-string!
-           frame rect (tui-node-content node)
+           frame rect node-clip (tui-node-content node)
            faces theme session-id (tui-node-key node))]
         [(styled-text)
          (let ([column (rect-column rect)])
@@ -771,38 +847,59 @@
                                        (rect-columns rect))
                                     column))))])
                  (paint-string!
-                   frame span-rect text (cadr span)
+                   frame span-rect node-clip text (cadr span)
                    theme session-id (tui-node-key node))
                  (set! column (+ column width))))
              (tui-node-content node)))]
         [(border)
          (paint-border!
-           frame rect faces theme session-id (tui-node-key node))]
+           frame rect node-clip faces theme session-id (tui-node-key node))]
         [(custom)
-         ((cdr (tui-node-content node))
-          frame rect theme session-id node)])
+         (paint-custom!
+           node frame rect node-clip theme session-id)])
       (for-each
         (lambda (child)
-          (paint-arranged! child frame theme session-id))
+          (paint-arranged! child frame theme session-id node-clip))
         (tui-arranged-node-children arranged))))
 
-  (define (collect-focus-ring arranged)
+  (define (collect-focus-ring arranged clip)
     (let* ([node (tui-arranged-node-node arranged)]
+           [node-clip
+             (intersect-rect (tui-arranged-node-rect arranged) clip)]
            [focus (tui-node-focus node)]
            [own
-             (if (and focus (tui-focus-focusable? focus))
+             (if (and focus
+                      (tui-focus-focusable? focus)
+                      (positive? (rect-rows node-clip))
+                      (positive? (rect-columns node-clip)))
                  (list
                    (make-tui-focus-entry
                      (tui-node-key node)
-                     (tui-arranged-node-rect arranged)
+                     node-clip
                      (or (tui-focus-order focus) 0)
                      (tui-focus-enabled? focus)))
                  '())])
       (append
         own
         (apply append
-          (map collect-focus-ring
+          (map (lambda (child) (collect-focus-ring child node-clip))
                (tui-arranged-node-children arranged))))))
+
+  (define (insert-focus-entry entry entries)
+    (cond
+      [(null? entries) (list entry)]
+      [(< (tui-focus-entry-order entry)
+          (tui-focus-entry-order (car entries)))
+       (cons entry entries)]
+      [else
+       (cons (car entries)
+             (insert-focus-entry entry (cdr entries)))]))
+
+  (define (sort-focus-ring entries)
+    (fold-left
+      (lambda (result entry) (insert-focus-entry entry result))
+      '()
+      entries))
 
   (define (tui-render-surface node rows columns theme session-id cursor)
     (unless (and (tui-node? node)
@@ -829,9 +926,11 @@
           (resolve-faces theme '(application))
           #f
           (list (make-cell-source 'application session-id (tui-node-key node)))))
-      (paint-arranged! arranged frame theme session-id)
+      (let ([surface-rect (make-rect 0 0 rows columns)])
+        (paint-arranged!
+          arranged frame theme session-id surface-rect)
       (make-tui-surface
         rows columns frame arranged
-        (collect-focus-ring arranged)
-        cursor)))
+          (sort-focus-ring (collect-focus-ring arranged surface-rect))
+          cursor))))
 )

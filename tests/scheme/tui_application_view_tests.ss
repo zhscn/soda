@@ -106,4 +106,36 @@
 (check duplicate-rejected?
   "siblings must not share a node key")
 
+(define (focusable-row key text order)
+  (tui-node-with-focus
+    (tui-text key text)
+    (make-tui-focus #t 'rows order #t)))
+(define scroll-surface
+  (tui-render-surface
+    (tui-scroll
+      'viewport
+      (tui-column
+        'scroll-content
+        (list
+          (focusable-row 'row-0 "zero" 0)
+          (focusable-row 'row-1 "one" 1)
+          (focusable-row 'row-2 "two" 2)
+          (focusable-row 'row-3 "three" 3)))
+      (cons 2 0))
+    2
+    10
+    default-theme
+    78
+    #f))
+(check
+  (and
+    (string=?
+      (cell-text (frame-cell-ref (tui-surface-frame scroll-surface) 0 0))
+      "t")
+    (equal?
+      (map tui-focus-entry-node-key
+           (tui-surface-focus-ring scroll-surface))
+      '(row-2 row-3)))
+  "Scroll must translate content and exclude clipped nodes from the focus ring")
+
 (display "tui application view tests passed\n")

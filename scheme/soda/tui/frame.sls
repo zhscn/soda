@@ -83,15 +83,18 @@
   (define (exact-non-negative-integer? value)
     (and (integer? value) (exact? value) (not (negative? value))))
 
+  (define (exact-integer? value)
+    (and (integer? value) (exact? value)))
+
   (define (make-rect row column rows columns)
     (unless
-      (and (exact-non-negative-integer? row)
-           (exact-non-negative-integer? column)
+      (and (exact-integer? row)
+           (exact-integer? column)
            (exact-non-negative-integer? rows)
            (exact-non-negative-integer? columns))
       (assertion-violation
         'make-rect
-        "rectangle fields must be non-negative exact integers"
+        "rectangle origin must be exact and extents must be non-negative"
         row
         column
         rows
