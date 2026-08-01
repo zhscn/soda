@@ -13,7 +13,8 @@
           (soda editor scheme-query)
           (soda editor scheme-semantics)
           (soda editor scheme-workspace)
-          (soda editor state))
+          (soda editor state)
+          (soda editor workspace-edit))
 
   (define-record-type pending-rename
     (fields workspace definition new-name resources))
@@ -127,151 +128,34 @@
           (string? resource)
           (editor-buffer-for-resource editor resource)))))
 
+  (define (scheme-edit->workspace-edit editor edit)
+    (let ([buffer (edit-buffer editor edit)])
+      (let ([resource
+              (or (scheme-workspace-text-edit-resource edit)
+                  (and buffer (buffer-resource buffer)))])
+        (unless (and (string? resource) (positive? (string-length resource)))
+          (assertion-violation
+            'scheme.rename
+            "rename edit has no file resource"
+            edit))
+        (make-workspace-text-edit
+          resource
+          (scheme-workspace-text-edit-revision edit)
+          (scheme-workspace-text-edit-start edit)
+          (scheme-workspace-text-edit-end edit)
+          (scheme-workspace-text-edit-text edit)))))
+
+  (define (scheme-edits->workspace-edits editor edits)
+    (map (lambda (edit) (scheme-edit->workspace-edit editor edit)) edits))
+
   (define (unique-missing-resources editor edits)
-    (reverse
-      (fold-left
-        (lambda (result edit)
-          (let ([resource
-                  (scheme-workspace-text-edit-resource edit)])
-            (if
-              (or
-                (edit-buffer editor edit)
-                (not (string? resource))
-                (member resource result))
-              result
-              (cons resource result))))
-        '()
-        edits)))
-
-  (define (edit-before? left right)
-    (> (scheme-workspace-text-edit-start left)
-       (scheme-workspace-text-edit-start right)))
-
-  (define (validate-edit-group! buffer edits)
-    (let ([revision
-            (scheme-workspace-text-edit-revision
-              (car edits))])
-      (unless (= (buffer-revision buffer) revision)
-        (assertion-violation
-          'scheme.rename
-          "rename target changed"
-          (buffer-resource buffer)
-          revision
-          (buffer-revision buffer))))
-    (when (buffer-setting-ref buffer 'read-only? #f)
-      (assertion-violation
-        'scheme.rename
-        "rename target is read-only"
-        (buffer-resource buffer)))
-    (let loop ([ordered (list-sort edit-before? edits)])
-      (when (pair? (cdr ordered))
-        (let ([later (car ordered)]
-              [earlier (cadr ordered)])
-          (when
-            (>
-              (scheme-workspace-text-edit-end earlier)
-              (scheme-workspace-text-edit-start later))
-            (assertion-violation
-              'scheme.rename
-              "rename edits overlap"
-              earlier later)))
-        (loop (cdr ordered)))))
-
-  (define (group-edits editor edits)
-    (let ([groups (make-eqv-hashtable)])
-      (for-each
-        (lambda (edit)
-          (let ([buffer
-                  (or
-                    (edit-buffer editor edit)
-                    (assertion-violation
-                      'scheme.rename
-                      "rename target is not open"
-                      (scheme-workspace-text-edit-resource
-                        edit)))])
-            (hashtable-set!
-              groups
-              (buffer-id buffer)
-              (cons
-                edit
-                (hashtable-ref
-                  groups
-                  (buffer-id buffer)
-                  '())))))
-        edits)
-      groups))
-
-  (define (apply-buffer-edits! buffer edits)
-    (let ([change #f])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (call-with-values
-            (lambda ()
-              (call-with-buffer-transaction
-                buffer
-                (lambda (transaction)
-                  (for-each
-                    (lambda (edit)
-                      (transaction-replace!
-                        transaction
-                        (scheme-workspace-text-edit-start edit)
-                        (scheme-workspace-text-edit-end edit)
-                        (string->utf8
-                          (scheme-workspace-text-edit-text edit))))
-                    (list-sort edit-before? edits)))))
-            (lambda (result committed-change)
-              (set! change committed-change))))
-        (lambda ()
-          (when change
-            (change-close! change))))))
+    (workspace-text-edits-missing-resources
+      editor (scheme-edits->workspace-edits editor edits)))
 
   (define (apply-rename-edits! editor workspace edits new-name)
-    (let ([groups (group-edits editor edits)]
-          [undo-positions (make-eqv-hashtable)]
-          [committed '()])
-      (let-values ([(buffer-ids edit-vectors)
-                    (hashtable-entries groups)])
-        (let validate ([position 0])
-          (when (< position (vector-length buffer-ids))
-            (let* ([buffer-id
-                     (vector-ref buffer-ids position)]
-                   [buffer
-                     (editor-buffer-ref editor buffer-id)]
-                   [buffer-edits
-                     (vector-ref edit-vectors position)])
-              (validate-edit-group! buffer buffer-edits)
-              (hashtable-set!
-                undo-positions
-                buffer-id
-                (document-undo-position
-                  (buffer-document buffer))))
-            (validate (+ position 1))))
-        (guard
-          (condition
-            [else
-             (for-each
-               (lambda (buffer-id)
-                 (guard (rollback-condition [else #f])
-                   (buffer-undo-to!
-                     (editor-buffer-ref editor buffer-id)
-                     (hashtable-ref
-                       undo-positions buffer-id #f))))
-               committed)
-             (raise condition)])
-          (let commit ([position 0])
-            (when (< position (vector-length buffer-ids))
-              (let* ([buffer-id
-                       (vector-ref buffer-ids position)]
-                     [buffer
-                       (editor-buffer-ref editor buffer-id)])
-                (apply-buffer-edits!
-                  buffer
-                  (vector-ref edit-vectors position))
-                (set! committed
-                  (cons buffer-id committed)))
-              (commit (+ position 1))))))
-      (scheme-workspace-sync-editor! workspace editor)
+    (workspace-text-edits-apply!
+      editor (scheme-edits->workspace-edits editor edits))
+    (scheme-workspace-sync-editor! workspace editor)
       (editor-set-status-message!
         editor
         (string-append
@@ -281,7 +165,7 @@
           (number->string (length edits))
           (if (= (length edits) 1) " place" " places")))
       (editor-invalidate! editor 'document)
-      '()))
+      '())
 
   (define (finish-rename!
             editor
