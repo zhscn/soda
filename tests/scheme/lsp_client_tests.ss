@@ -144,6 +144,7 @@
       (cons "documentFormattingProvider" #t)
       (cons "documentRangeFormattingProvider" #t)
       (cons "documentSymbolProvider" #t)
+      (cons "selectionRangeProvider" #t)
       (cons "signatureHelpProvider" #t)
       (cons
         "codeActionProvider"
@@ -735,6 +736,42 @@
     (editor-status-message editor)
     "main(int argc, char** argv)")
   "signature-help did not present the active signature")
+
+(define selection-range-effects
+  (editor-execute-command! editor 'lsp.expand-selection))
+(define selection-range-message
+  (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload (car selection-range-effects))))))
+(check
+  (string=? (json-object-ref selection-range-message "method" #f)
+            "textDocument/selectionRange")
+  "expand-selection used the wrong LSP method")
+(lsp-client-handle-json-message!
+  editor session
+  (make-json-object
+    (list
+      (cons "jsonrpc" "2.0")
+      (cons "id" (json-object-ref selection-range-message "id" #f))
+      (cons "result"
+            (make-json-array
+              (list
+                (make-json-object
+                  (list
+                    (cons "range"
+                          (make-json-object
+                            (list
+                              (cons "start" (make-json-object
+                                               (list (cons "line" 0) (cons "character" 0))))
+                              (cons "end" (make-json-object
+                                             (list (cons "line" 0) (cons "character" 7)))))))))))))))
+(check
+  (and (view-mark-active? (editor-active-view editor))
+       (= (view-mark (editor-active-view editor)) 0)
+       (= (view-caret (editor-active-view editor)) 7))
+  "expand-selection did not apply the language-server range")
 
 (define document-symbol-effects
   (editor-execute-command! editor 'lsp.document-symbols))

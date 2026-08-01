@@ -2218,6 +2218,55 @@
       'type-definition
       "No type definition found"))
 
+  (define (selection-ranges-supported? session)
+    (let ([capability
+            (json-object-ref (lsp-client-session-capabilities session)
+                             "selectionRangeProvider" #f)])
+      (or (eq? capability #t) (json-object? capability))))
+
+  (define (lsp-expand-selection! editor)
+    (let* ([view (editor-active-view editor)]
+           [buffer (view-buffer view)]
+           [revision (buffer-revision buffer)]
+           [session (active-view-lsp-session editor)]
+           [document (and session (find-document session (buffer-id buffer)))]
+           [position (lsp-buffer-position-at buffer (view-caret view))])
+      (if (and session document position (selection-ranges-supported? session)
+               (eq? (lsp-client-session-state session) 'ready))
+          (list
+            (session-request!
+              session "textDocument/selectionRange"
+              (make-json-object
+                (list
+                  (cons "textDocument"
+                        (make-json-object
+                          (list (cons "uri" (lsp-client-document-uri document)))))
+                  (cons "positions"
+                        (make-json-array (list (lsp-position->json position))))))
+              (lambda (response-editor response-session result)
+                (when (and (eq? response-session session)
+                           (= (buffer-revision buffer) revision)
+                           (json-array? result)
+                           (pair? (json-array-values result)))
+                  (let* ([value (car (json-array-values result))]
+                         [range (and (json-object? value)
+                                     (guard (condition [else #f])
+                                       (lsp-range-from-json
+                                         (json-object-ref value "range" #f))))]
+                         [start (and range
+                                     (lsp-buffer-offset-at buffer (lsp-range-start range)))]
+                         [end (and range
+                                   (lsp-buffer-offset-at buffer (lsp-range-end range)))])
+                    (if (and start end (< start end))
+                        (begin (view-set-caret! view end) (view-set-mark! view start))
+                        (editor-set-status-message!
+                          response-editor "No expandable selection range"))))
+                '())))
+          (begin
+            (editor-set-status-message!
+              editor "The language server does not provide selection ranges")
+            '()))))
+
   (define (document-symbols-supported? session)
     (let ([capability
             (json-object-ref
@@ -3156,6 +3205,12 @@
         'lsp.find-references
         (lambda (context) (lsp-find-references! (command-context-editor context)))
         "Find language-server references at point."))
+    (editor-register-command!
+      editor
+      (make-interactive-context-command
+        'lsp.expand-selection
+        (lambda (context) (lsp-expand-selection! (command-context-editor context)))
+        "Expand the active region with a language-server selection range."))
     (editor-register-command!
       editor
       (make-interactive-context-command
