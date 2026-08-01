@@ -20,6 +20,7 @@
 | intent 驱动的统一 display placement policy | 已实现 |
 | LanguageSession registry、attachment 与 display provenance 路由 | 已实现 |
 | LanguageProfile bootstrap hook 与 home attachment 选择 | 已实现 |
+| TUI dashboard 与 Buffer registry 面板 | 部分实现 |
 
 ## 正交概念
 
@@ -147,6 +148,25 @@ origin，而不重新查询 active Workbench、active View 或 focus。只需要
 Project 不拥有 Buffer、View、Window、Workbench、LanguageSession、Scheme semantic
 index 或 process。一个 Buffer 可以通过路径发现 home Project，也可以只是 visitor；
 同一 Project 可以出现在多个 Workbench scope 中。
+
+## Dashboard projection
+
+Dashboard 是 Workbench、Project 和 tooling 关系的显式 TUI projection，不是新的所有权
+层。`dashboard.open` 打开一个普通 application Buffer；基础面板列出 Editor Buffer
+registry，并允许选择、刷新和在 origin View 中访问 Buffer。dashboard session 可以像
+其他 Buffer 一样放入 Window、切换、复用和参与 Workbench MRU。
+
+Project dashboard 以 Project identity 为根节点，关联 Buffer、LanguageSession、Git、
+诊断、搜索结果和 task。关联项保存其真实 identity 或冻结的 target，不依赖 active
+View、启动目录或隐式 current Project。多个独立 Project 可以通过具名 relation 组成更
+高层 workspace dashboard，例如前端、后端和部署 Project 以 `frontend`、`backend`、
+`deployment` relation 归属于同一产品 workspace。relation 表达导航与展示关系，不把
+子 Project 合并成新的 root，也不改变各自的 ResourceContext、settings 或 language
+session 边界。
+
+Dashboard Model 是 registry 与 session 状态的可见投影。刷新重新读取相应 registry，
+选择和 viewport 属于 dashboard session/view state；访问条目仍调用普通 display、
+project command 或 language command，因此 dashboard 不绕过既有路由 policy。
 
 打开 file-backed Buffer 不创建 Project，不递归枚举目录，也不启动 language index。
 显式 project command、adopt 或 language bootstrap 才解析 Project。Project 发现只产生

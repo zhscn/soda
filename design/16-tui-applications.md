@@ -907,3 +907,8 @@ Window 树退化为单一 leaf 并跳过编辑器 chrome 组件。
 
 Debugger、package browser、Buffer list、diagnostic list 和 project task dashboard
 使用同一 framework；这些应用不在 renderer 中增加专用分支。
+
+内建 `dashboard` application 提供 Buffer registry 的基础面板。`dashboard.open`
+打开或复用同一 session，`n`/`p`、`j`/`k` 与方向键移动选择，`RET` 在 origin View
+访问选中的 Buffer，`g` 重新读取 registry。Project、language、Git、诊断和搜索面板
+在该 application Model 上按显式 identity 与 relation 扩展。

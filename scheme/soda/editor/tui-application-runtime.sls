@@ -377,7 +377,12 @@
                       (tui-session-id session)
                       (tui-session-buffer-id session)
                       (tui-message-origin-view-id message)
-                      #f))])
+                      #f
+                      (and
+                        (tui-message-origin-view-id message)
+                        (tui-session-view-state
+                          session
+                          (tui-message-origin-view-id message)))))])
              (unless (tui-update-result? result)
                (assertion-violation
                  'tui-send-message!
