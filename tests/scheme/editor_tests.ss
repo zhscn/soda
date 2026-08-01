@@ -4693,21 +4693,29 @@
             (scheme-diagnostic?
               (location-item-metadata item))))
         (location-list-items locations))
-      (= (length workspace-diagnostic-effects) 1)
-      (eq?
-        (command-effect-kind
-          (car workspace-diagnostic-effects))
-        'file.read)
-      (string=?
-        (open-request-path
-          (command-effect-payload
-            (car workspace-diagnostic-effects)))
-        background-diagnostic-resource))
+      (null? workspace-diagnostic-effects)
+      (let ([results
+              (editor-tui-session-for-buffer
+                project-diagnostic-editor
+                (buffer-id
+                  (view-buffer
+                    (editor-active-view project-diagnostic-editor))))])
+        (and results
+             (eq? (tui-application-definition-name
+                    (tui-session-definition results))
+                  'xref-results))))
     (error
       'editor-tests
       "workspace diagnostics did not include navigable background sources"
       locations
       workspace-diagnostic-effects)))
+(editor-set-active-view!
+  project-diagnostic-editor
+  (view-id
+    (find
+      (lambda (view)
+        (eq? (view-buffer view) project-diagnostic-buffer))
+      (editor-views project-diagnostic-editor))))
 (remove-project-diagnostic-source!
   background-diagnostic-resource)
 (editor-set-current-location-list!
@@ -4941,6 +4949,7 @@
     "*highlight*"
     'scheme-mode))
 (define highlight-editor (make-editor highlight-buffer))
+(define highlight-source-view (editor-active-view highlight-editor))
 (editor-update!
   highlight-editor
   (make-resize-message 4 50))
@@ -5083,11 +5092,20 @@
       (location-list? locations)
       (eq? (location-list-source locations) 'diagnostics)
       (= (length (location-list-items locations)) 2)
-      (= (view-caret
-           (editor-active-view highlight-editor))
-         8))
+      (let ([results
+              (editor-tui-session-for-buffer
+                highlight-editor
+                (buffer-id
+                  (view-buffer (editor-active-view highlight-editor))))])
+        (and results
+             (eq? (tui-application-definition-name
+                    (tui-session-definition results))
+                  'xref-results))))
     (error 'editor-tests
            "diagnostics did not publish a sorted location list")))
+(editor-set-active-view!
+  highlight-editor (view-id highlight-source-view))
+(view-set-caret! highlight-source-view 8)
 (let ([description
         (describe-caret
           highlight-editor
@@ -5137,6 +5155,8 @@
 (editor-update!
   highlight-editor
   (make-command-message 'diagnostics.list #f))
+(editor-set-active-view!
+  highlight-editor (view-id highlight-source-view))
 (unless
   (not (editor-current-location-list highlight-editor))
   (error 'editor-tests
@@ -5170,6 +5190,8 @@
 (editor-update!
   highlight-editor
   (make-command-message 'diagnostics.list #f))
+(editor-set-active-view!
+  highlight-editor (view-id highlight-source-view))
 (unless
   (and
     (= (editor-clear-annotation-sets!

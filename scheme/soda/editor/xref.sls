@@ -5,6 +5,7 @@
           editor-register-xref-backend!
           dispatch-xref
           install-xref-results!
+          editor-show-location-results!
           editor-show-xref-results!)
   (import (rnrs)
           (only (chezscheme) make-weak-eq-hashtable)
@@ -13,6 +14,7 @@
           (soda editor command)
           (soda editor command-runtime)
           (soda editor condition)
+          (soda editor display-placement)
           (soda editor effect)
           (soda editor file)
           (soda editor keymap)
@@ -86,7 +88,7 @@
        context)))
 
   (define-record-type xref-results-model
-    (fields locations origin-view-id))
+    (fields title locations origin-view-id jump-kind))
 
   (define (location-open-position item)
     (let ([metadata (location-item-metadata item)])
@@ -207,7 +209,8 @@
                 (tui-text
                   'xref.title
                   (string-append
-                    "References (" (number->string (length items)) ")")
+                    (xref-results-model-title model)
+                    " (" (number->string (length items)) ")")
                   '(application.heading))
                 (make-tui-layout (tui-flex 1) (tui-fixed 1)))
               (tui-node-with-layout
@@ -249,7 +252,7 @@
           (view-id (command-context-view context))))
       '()))
 
-  (define (visit-location-item! editor view item)
+  (define (visit-location-item! editor view item kind)
     (let ([buffer-id (location-item-buffer-id item)])
       (if buffer-id
           (let ([buffer (editor-buffer-ref editor buffer-id)])
@@ -257,7 +260,7 @@
               (editor-user-error
                 'xref.visit "The selected xref location is stale"))
             (editor-jump-view-to-buffer!
-              editor view buffer (location-item-start item) 'xref)
+              editor view buffer (location-item-start item) kind)
             '())
           (let ([resource (location-item-resource item)]
                 [position
@@ -265,7 +268,7 @@
                       (location-item-start item))])
             (unless (string? resource)
               (editor-user-error 'xref.visit "The selected xref has no resource"))
-            (editor-begin-async-jump! editor view resource 'xref)
+            (editor-begin-async-jump! editor view resource kind)
             (list
               (make-command-effect
                 'file.read
@@ -296,22 +299,60 @@
                      editor (xref-results-model-origin-view-id model))])
             (if selection
                 (visit-location-item!
-                  editor origin-view (list-ref items selection))
+                  editor
+                  origin-view
+                  (list-ref items selection)
+                  (xref-results-model-jump-kind model))
                 '())))))
 
-  (define (editor-show-xref-results! editor locations origin-view-id)
-    (unless (and (location-list? locations)
+  (define (editor-show-location-results!
+            editor title locations origin-view-id jump-kind)
+    (unless (and (string? title)
+                 (positive? (string-length title))
+                 (location-list? locations)
                  (integer? origin-view-id) (exact? origin-view-id)
-                 (positive? origin-view-id))
+                 (positive? origin-view-id)
+                 (symbol? jump-kind))
       (assertion-violation
-        'editor-show-xref-results! "invalid xref result model"
-        locations origin-view-id))
-    (tui-open!
-      editor
-      'xref-results
-      (make-xref-results-model locations origin-view-id)
-      'tools
-      origin-view-id))
+        'editor-show-location-results! "invalid location result model"
+        title locations origin-view-id jump-kind))
+    (let* ([model
+             (make-xref-results-model
+               title locations origin-view-id jump-kind)]
+           [existing
+             (find
+               (lambda (session)
+                 (eq? (tui-application-definition-name
+                        (tui-session-definition session))
+                      'xref-results))
+               (editor-tui-sessions editor))])
+      (if existing
+          (let ([buffer
+                  (editor-buffer-ref
+                    editor (tui-session-buffer-id existing))])
+            (tui-session-set-model! existing model)
+            (for-each
+              (lambda (state)
+                (tui-view-state-set-transient-state! state #f)
+                (tui-view-state-set-viewport! state (cons 0 0)))
+              (tui-session-view-states existing))
+            (editor-display-buffer!
+              editor
+              (make-display-request
+                (buffer-id buffer) 'tools origin-view-id #f
+                (editor-view-resource-context editor origin-view-id)))
+            (editor-invalidate! editor 'application)
+            buffer)
+          (tui-open!
+            editor
+            'xref-results
+            model
+            'tools
+            origin-view-id))))
+
+  (define (editor-show-xref-results! editor locations origin-view-id)
+    (editor-show-location-results!
+      editor "References" locations origin-view-id 'xref))
 
   (define (bind-xref-key! keymap key codepoint command)
     (keymap-bind!
