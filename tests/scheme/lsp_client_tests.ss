@@ -149,6 +149,7 @@
       (cons
         "codeActionProvider"
         (make-json-object (list (cons "resolveProvider" #t))))
+      (cons "codeLensProvider" (make-json-object '()))
       (cons
         "diagnosticProvider"
         (make-json-object

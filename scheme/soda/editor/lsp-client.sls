@@ -2830,6 +2830,66 @@
             actions))
         (lambda (generation) #f))))
 
+  (define (code-lenses-supported? session)
+    (let ([value (json-object-ref (lsp-client-session-capabilities session)
+                                  "codeLensProvider" #f)])
+      (or (eq? value #t) (json-object? value))))
+
+  (define (lsp-code-lens-actions result)
+    (if (json-array? result)
+        (filter
+          (lambda (value) value)
+          (map
+            (lambda (lens)
+              (let ([command (and (json-object? lens)
+                                  (lsp-command-object
+                                    (json-object-ref lens "command" #f)))])
+                (and command
+                     (let ([title (json-object-ref command "title" #f)])
+                       (and (non-empty-string? title)
+                            (make-lsp-code-action title 'code-lens lens #t))))))
+            (json-array-values result)))
+        '()))
+
+  (define (lsp-code-lenses! editor)
+    (let* ([view (editor-active-view editor)]
+           [buffer (view-buffer view)]
+           [revision (buffer-revision buffer)]
+           [session (active-view-lsp-session editor)]
+           [document (and session (find-document session (buffer-id buffer)))])
+      (if (and session document (code-lenses-supported? session)
+               (eq? (lsp-client-session-state session) 'ready))
+          (list
+            (session-request!
+              session "textDocument/codeLens"
+              (make-json-object
+                (list (cons "textDocument"
+                            (make-json-object
+                              (list (cons "uri" (lsp-client-document-uri document)))))))
+              (lambda (response-editor response-session result)
+                (let ([actions (lsp-code-lens-actions result)])
+                  (if (or (not (eq? response-session session))
+                          (not (= (buffer-revision buffer) revision)))
+                      '()
+                      (if (null? actions)
+                          (begin (editor-set-status-message!
+                                   response-editor "No code lenses") '())
+                          (begin
+                            (editor-open-prompt!
+                              response-editor
+                              (make-completing-prompt-request
+                                "Code lens: " "" 'lsp-code-lens
+                                (lsp-code-action-title (car actions))
+                                'must-match (lsp-code-action-choice-source actions)
+                                'lsp.apply-code-action #f
+                                (make-lsp-code-action-context
+                                  session (view-id view) (buffer-id buffer)
+                                  revision actions)))
+                            '())))))))
+          (begin (editor-set-status-message!
+                   editor "The language server does not provide code lenses")
+                 '()))))
+
   (define (lsp-code-action-context-live? editor context)
     (and
       (lsp-code-action-context? context)
@@ -3239,6 +3299,12 @@
         (lambda (context)
           (lsp-request-code-actions! (command-context-editor context)))
         "Select and apply a language-server code action for the region or point."))
+    (editor-register-command!
+      editor
+      (make-interactive-context-command
+        'lsp.code-lenses
+        (lambda (context) (lsp-code-lenses! (command-context-editor context)))
+        "Select and execute a language-server code lens."))
     (let ([implementation
             (lambda (context new-name)
               (lsp-rename! (command-context-editor context) new-name))])

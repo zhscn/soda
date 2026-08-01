@@ -13,7 +13,7 @@
 | LanguageProfile bootstrap hook 与 home attachment 选择 | 已实现 |
 | ProjectWorkspace bootstrap snapshot 与 file-backed Buffer 归属解析 | 已实现 |
 | LSP process transport、ProjectWorkspace bootstrap 与 full-text document synchronization | 已实现 |
-| LSP push/pull diagnostics、completion text edits/resolve、hover、signature help、selection ranges、document symbols、document highlights、formatting、definition、implementation、type definition、references、workspace symbol、rename、code actions 与 workspace/applyEdit | 已实现 |
+| LSP push/pull diagnostics、completion text edits/resolve、hover、signature help、selection ranges、document symbols、document highlights、Code Lens、formatting、definition、implementation、type definition、references、workspace symbol、rename、code actions 与 workspace/applyEdit | 已实现 |
 | LSP semantic tokens full refresh 与 document lifecycle refresh | 已实现 |
 
 ## 分层
@@ -266,6 +266,9 @@ SymbolInformation 都投影为 revision-tagged LocationList，并通过通用 xr
 CodeAction picker 接受带 edit、command 或 data 的 action。只有 data 的 action 在选择后
 使用 `codeAction/resolve` 获取最终内容，并在原始 Buffer revision 与 LanguageSession
 仍有效时应用 edit 或执行 server command。
+
+`lsp.code-lenses` 查询当前 document 的已解析 Code Lens，并在 completing picker 中选择
+其 command；执行路径复用 server command transport。
 
 ## Syntax provider
 
