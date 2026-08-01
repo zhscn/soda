@@ -115,6 +115,8 @@
         "completionProvider"
         (make-json-object (list (cons "resolveProvider" #t))))
       (cons "documentHighlightProvider" #t)
+      (cons "documentFormattingProvider" #t)
+      (cons "documentRangeFormattingProvider" #t)
       (cons
         "semanticTokensProvider"
         (make-json-object
@@ -173,6 +175,55 @@
     (= (language-attachment-session-id external-attachment)
        (language-session-id language-session)))
   "lsp.start must route an external resource through the focused Project")
+(define formatting-effects
+  (editor-execute-interactive-command! editor 'lsp.format))
+(check
+  (and (= (length formatting-effects) 1)
+       (eq? (command-effect-kind (car formatting-effects)) 'managed-process.write))
+  "formatting did not issue an LSP request")
+(define formatting-message
+  (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload (car formatting-effects))))))
+(check
+  (string=?
+    (json-object-ref formatting-message "method" #f)
+    "textDocument/formatting")
+  "formatting used the wrong LSP method")
+(lsp-client-handle-json-message!
+  editor
+  session
+  (make-json-object
+    (list
+      (cons "jsonrpc" "2.0")
+      (cons "id" (json-object-ref formatting-message "id" #f))
+      (cons
+        "result"
+        (make-json-array
+          (list
+            (make-json-object
+              (list
+                (cons
+                  "range"
+                  (make-json-object
+                    (list
+                      (cons
+                        "start"
+                        (make-json-object
+                          (list (cons "line" 0) (cons "character" 0))))
+                      (cons
+                        "end"
+                        (make-json-object
+                          (list (cons "line" 0) (cons "character" 0)))))))
+                (cons "newText" "// formatted\n")))))))))
+(check
+  (bytevector=?
+    (buffer-bytes external)
+    (string->utf8 "// formatted\nstruct Widget {};\n"))
+  "formatting edits were not applied as a buffer transaction")
+(editor-take-tui-effects! editor)
 (editor-set-view-buffer!
   editor
   (view-id (editor-active-view editor))

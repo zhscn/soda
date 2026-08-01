@@ -34,6 +34,7 @@
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
+          (soda editor command-target)
           (soda editor completion)
           (soda editor completion-provider)
           (soda editor condition)
@@ -2209,6 +2210,117 @@
              (when (pair? follow-up-effects)
                (editor-queue-tui-effects! editor follow-up-effects)))]))))
 
+  (define lsp-format-target-reader
+    (make-command-target-reader
+      'lsp.format
+      (make-command-target-selector
+        'prefer #f command-context-buffer-target)))
+
+  (define (lsp-formatting-options buffer)
+    (let ([width (buffer-setting-ref buffer 'tab-width 8)])
+      (make-json-object
+        (list
+          (cons "tabSize" (if (and (integer? width) (positive? width)) width 8))
+          (cons "insertSpaces" #t)))))
+
+  (define (lsp-formatting-supported? session range?)
+    (let ([name
+            (if range?
+                "documentRangeFormattingProvider"
+                "documentFormattingProvider")])
+      (let ([capability
+              (json-object-ref
+                (lsp-client-session-capabilities session) name #f)])
+        (or (eq? capability #t) (json-object? capability)))))
+
+  (define (lsp-format-result-edits buffer result)
+    (and
+      (json-array? result)
+      (lsp-workspace-edits-for-resource
+        (lsp-file-uri (require-file-buffer 'lsp.format buffer))
+        result)))
+
+  (define (lsp-format! context target)
+    (let* ([editor (command-context-editor context)]
+           [view (command-context-view context)]
+           [buffer (view-buffer view)]
+           [session (active-view-lsp-session editor)]
+           [document (and session (find-document session (buffer-id buffer)))]
+           [region? (eq? (command-target-source target) 'region)]
+           [revision (command-target-revision target)])
+      (unless (command-target-current? target buffer)
+        (editor-user-error 'lsp.format "The formatting target is stale"))
+      (if
+        (and session document
+             (eq? (lsp-client-session-state session) 'ready)
+             (lsp-formatting-supported? session region?))
+        (let* ([method
+                 (if region?
+                     "textDocument/rangeFormatting"
+                     "textDocument/formatting")]
+               [parameters
+                 (append
+                   (list
+                     (cons
+                       "textDocument"
+                       (make-json-object
+                         (list (cons "uri" (lsp-client-document-uri document)))))
+                     (cons "options" (lsp-formatting-options buffer)))
+                   (if region?
+                       (let ([start
+                               (lsp-buffer-position-at
+                                 buffer (command-target-start target))]
+                             [end
+                               (lsp-buffer-position-at
+                                 buffer (command-target-end target))])
+                         (if (and start end)
+                             (list
+                               (cons
+                                 "range"
+                                 (lsp-range->json (make-lsp-range start end))))
+                             '()))
+                       '()))])
+          (if (and region? (not (assq "range" parameters)))
+              (begin
+                (editor-set-status-message! editor "The formatting range is invalid")
+                '())
+              (list
+                (session-request!
+                  session
+                  method
+                  (make-json-object parameters)
+                  (lambda (response-editor response-session result)
+                    (let ([edits (lsp-format-result-edits buffer result)])
+                      (cond
+                        [(not edits)
+                         (editor-set-status-message!
+                           response-editor "Language server returned invalid formatting edits")
+                         '()]
+                        [(null? edits)
+                         (editor-set-status-message!
+                           response-editor "No formatting changes")
+                         '()]
+                        [else
+                         (lsp-apply-workspace-edits!
+                           response-editor
+                           (view-id view)
+                           (buffer-id buffer)
+                           revision
+                           edits
+                           "Formatted")])))))))
+        (begin
+          (editor-set-status-message!
+            editor
+            (if region?
+                "The language server does not provide range formatting"
+                "The language server does not provide document formatting"))
+          '()))))
+
+  (define-command (lsp-format-command context target)
+    "Format the active region or the complete Buffer with the language server."
+    (interactive lsp-format-target-reader)
+    (lsp-format! context target))
+
   (define (lsp-code-action-range view)
     (let* ([point (view-caret view)]
            [mark (and (view-mark-active? view) (view-mark view))])
@@ -2553,6 +2665,17 @@
         'lsp.find-definition
         (lambda (context) (lsp-find-definition! (command-context-editor context)))
         "Jump to the language-server definition at point."))
+    (editor-register-command!
+      editor
+      (make-command-definition
+        'lsp.format
+        lsp-format-command
+        (lambda (context arguments)
+          (apply lsp-format-command context arguments))
+        "Format the active region or the complete Buffer with the language server."
+        #f
+        (make-interactive-plan (list lsp-format-target-reader))
+        '()))
     (editor-register-command!
       editor
       (make-interactive-context-command
