@@ -574,6 +574,67 @@
            (= (file-utf16-position-character position) 2))))
   "definition did not preserve an unopened target's UTF-16 position")
 
+(define implementation-effects
+  (editor-execute-command! editor 'lsp.find-implementation))
+(define type-definition-effects
+  (editor-execute-command! editor 'lsp.find-type-definition))
+(define implementation-message
+  (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload (car implementation-effects))))))
+(define type-definition-message
+  (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload (car type-definition-effects))))))
+(check
+  (and
+    (= (length implementation-effects) 1)
+    (= (length type-definition-effects) 1)
+    (string=?
+      (json-object-ref implementation-message "method" #f)
+      "textDocument/implementation")
+    (string=?
+      (json-object-ref type-definition-message "method" #f)
+      "textDocument/typeDefinition"))
+  "implementation and type definition commands used invalid LSP methods")
+(define implementation-open-effects
+  (lsp-client-handle-json-message!
+    editor session
+    (make-json-object
+      (list
+        (cons "jsonrpc" "2.0")
+        (cons "id" (json-object-ref implementation-message "id" #f))
+        (cons
+          "result"
+          (make-json-object
+            (list
+              (cons "targetUri" "file:///workspace/src/widget.cpp")
+              (cons "targetSelectionRange" definition-target-range))))))))
+(define type-definition-open-effects
+  (lsp-client-handle-json-message!
+    editor session
+    (make-json-object
+      (list
+        (cons "jsonrpc" "2.0")
+        (cons "id" (json-object-ref type-definition-message "id" #f))
+        (cons
+          "result"
+          (make-json-object
+            (list
+              (cons "targetUri" "file:///workspace/include/widget.hpp")
+              (cons "targetSelectionRange" definition-target-range))))))))
+(check
+  (and
+    (= (length implementation-open-effects) 1)
+    (= (length type-definition-open-effects) 1)
+    (eq? (command-effect-kind (car implementation-open-effects)) 'file.read)
+    (eq? (command-effect-kind (car type-definition-open-effects)) 'file.read))
+  "implementation and type definition responses did not enter xref navigation")
+
 (view-set-caret! (editor-active-view editor) 7)
 (define lsp-completion-source
   (make-choice-source

@@ -1937,11 +1937,15 @@
                           context))))
                   '()))))))
 
-  (define (lsp-jump-to-location! editor view location)
-    (let ([item (lsp-location-item editor location)])
-      (if item
-          (lsp-jump-to-location-item! editor view item 'definition)
-          '())))
+  (define lsp-jump-to-location!
+    (case-lambda
+      [(editor view location)
+       (lsp-jump-to-location! editor view location 'definition)]
+      [(editor view location kind)
+       (let ([item (lsp-location-item editor location)])
+         (if item
+             (lsp-jump-to-location-item! editor view item kind)
+             '()))]))
 
   (define (lsp-reference-items editor value)
     (if (json-array? value)
@@ -1983,19 +1987,37 @@
                     (location-list-current locations)
                     'xref))))))))
 
-  (define (lsp-find-definition! editor)
+  (define (lsp-find-location! editor method kind absent-message)
     (let ([view (editor-active-view editor)])
       (lsp-request-at-active-point!
         editor
-        "textDocument/definition"
+        method
         '()
         (lambda (response-editor response-session result)
           (let ([location (lsp-first-location result)])
             (if location
-                (lsp-jump-to-location! response-editor view location)
+                (lsp-jump-to-location! response-editor view location kind)
                 (begin
-                  (editor-set-status-message! response-editor "No definition found")
+                  (editor-set-status-message! response-editor absent-message)
                   '())))))))
+
+  (define (lsp-find-definition! editor)
+    (lsp-find-location!
+      editor "textDocument/definition" 'definition "No definition found"))
+
+  (define (lsp-find-implementation! editor)
+    (lsp-find-location!
+      editor
+      "textDocument/implementation"
+      'implementation
+      "No implementation found"))
+
+  (define (lsp-find-type-definition! editor)
+    (lsp-find-location!
+      editor
+      "textDocument/typeDefinition"
+      'type-definition
+      "No type definition found"))
 
   (define (lsp-workspace-edits-for-resource uri values)
     (let ([resource
@@ -2690,6 +2712,20 @@
         (lambda (context)
           (lsp-request-semantic-tokens! (command-context-editor context)))
         "Refresh language-server semantic tokens for the active document."))
+    (editor-register-command!
+      editor
+      (make-interactive-context-command
+        'lsp.find-implementation
+        (lambda (context)
+          (lsp-find-implementation! (command-context-editor context)))
+        "Jump to a language-server implementation at point."))
+    (editor-register-command!
+      editor
+      (make-interactive-context-command
+        'lsp.find-type-definition
+        (lambda (context)
+          (lsp-find-type-definition! (command-context-editor context)))
+        "Jump to a language-server type definition at point."))
     (editor-register-command!
       editor
       (make-interactive-context-command
