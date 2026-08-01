@@ -479,13 +479,22 @@
         (make-lsp-semantic-refresh
           session (buffer-id buffer) (buffer-revision buffer)))))
 
+  (define (pull-diagnostics-supported? session)
+    (json-object?
+      (json-object-ref
+        (lsp-client-session-capabilities session)
+        "diagnosticProvider"
+        #f)))
+
   (define (diagnostic-refresh-effect session buffer)
-    (make-command-effect
-      'command.invoke
-      (make-internal-command-message
-        'lsp.refresh-diagnostics
-        (make-lsp-diagnostic-refresh
-          session (buffer-id buffer) (buffer-revision buffer)))))
+    (and
+      (pull-diagnostics-supported? session)
+      (make-command-effect
+        'command.invoke
+        (make-internal-command-message
+          'lsp.refresh-diagnostics
+          (make-lsp-diagnostic-refresh
+            session (buffer-id buffer) (buffer-revision buffer))))))
 
   (define (lsp-client-sync-buffer! editor session buffer)
     (let ([document (find-document session (buffer-id buffer))])
@@ -499,24 +508,26 @@
             document (+ 1 (lsp-client-document-version document)))
           (lsp-client-document-revision-set! document (buffer-revision buffer))
           (lsp-client-document-diagnostic-result-id-set! document #f)
-          (list
-            (session-notification-effect
-              session
-              "textDocument/didChange"
-              (make-json-object
-                (list
-                  (cons "textDocument"
-                        (make-json-object
-                          (list
-                            (cons "uri" (lsp-client-document-uri document))
-                            (cons "version" (lsp-client-document-version document)))))
-                  (cons "contentChanges"
-                        (make-json-array
-                          (list
+          (let ([diagnostic-refresh (diagnostic-refresh-effect session buffer)])
+            (append
+              (list
+                (session-notification-effect
+                  session
+                  "textDocument/didChange"
+                  (make-json-object
+                    (list
+                      (cons "textDocument"
                             (make-json-object
-                              (list (cons "text" (buffer-text buffer))))))))))
-            (semantic-refresh-effect session buffer)
-            (diagnostic-refresh-effect session buffer))))))
+                              (list
+                                (cons "uri" (lsp-client-document-uri document))
+                                (cons "version" (lsp-client-document-version document)))))
+                      (cons "contentChanges"
+                            (make-json-array
+                              (list
+                                (make-json-object
+                                  (list (cons "text" (buffer-text buffer))))))))))
+                (semantic-refresh-effect session buffer))
+              (if diagnostic-refresh (list diagnostic-refresh) '())))))))
 
   (define (install-document-observer! editor session buffer document)
     (unless (lsp-client-document-observer-name document)
@@ -578,10 +589,13 @@
           (let ([document (ensure-document! session buffer)])
             (if (lsp-client-document-opened? document)
                 '()
-                (list
-                  (did-open-effect editor session buffer document)
-                  (semantic-refresh-effect session buffer)
-                  (diagnostic-refresh-effect session buffer)))))
+                (let ([diagnostic-refresh
+                        (diagnostic-refresh-effect session buffer)])
+                  (append
+                    (list
+                      (did-open-effect editor session buffer document)
+                      (semantic-refresh-effect session buffer))
+                    (if diagnostic-refresh (list diagnostic-refresh) '()))))))
         (session-attached-buffers editor session))))
 
   (define (lsp-client-close-buffer! editor buffer)
@@ -744,14 +758,8 @@
                                   (diagnostic-annotation buffer index (car values)))])
                           (if annotation
                               (cons annotation (loop (cdr values) (+ index 1)))
-                              (loop (cdr values) (+ index 1)))))))))))))))
-
-  (define (pull-diagnostics-supported? session)
-    (json-object?
-      (json-object-ref
-        (lsp-client-session-capabilities session)
-        "diagnosticProvider"
-        #f)))
+                              (loop (cdr values) (+ index 1))))))
+                    #t)))))))))
 
   (define (lsp-request-diagnostics-for-buffer!
             editor session buffer document revision)
@@ -823,13 +831,22 @@
            [buffer (view-buffer view)]
            [session (active-view-lsp-session editor)]
            [document (and session (find-document session (buffer-id buffer)))])
-      (if (and session document (pull-diagnostics-supported? session))
-          (lsp-request-diagnostics-for-buffer!
-            editor session buffer document (buffer-revision buffer))
-          (begin
-            (editor-set-status-message!
-              editor "The language server does not provide pull diagnostics")
-            '()))))
+      (cond
+        [(not session)
+         (editor-set-status-message! editor "No language server is active")
+         '()]
+        [(not document)
+         (editor-set-status-message!
+           editor "No language-server document is active")
+         '()]
+        [(pull-diagnostics-supported? session)
+         (lsp-request-diagnostics-for-buffer!
+           editor session buffer document (buffer-revision buffer))]
+        [else
+         (list
+           (make-command-effect
+             'command.invoke
+             (make-command-message 'diagnostics.list #f)))])))
 
   (define (server-request-error id message)
     (make-json-object

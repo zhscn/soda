@@ -49,6 +49,7 @@
             document
             entries
             decoration-index
+            display-stale?
             (mutable closed?
                      annotation-set-closed?
                      annotation-set-closed?-set!)))
@@ -184,12 +185,13 @@
       [(positive? start) (cons (- start 1) start)]
       [else #f]))
 
-  (define (annotation->decoration-run namespace source-size annotation)
+  (define (annotation-range->decoration-run
+            namespace source-size annotation start end)
     (let ([range
             (render-range-for-size
               source-size
-              (annotation-start annotation)
-              (annotation-end annotation))])
+              start
+              end)])
       (and
         range
         (make-decoration-run
@@ -204,12 +206,21 @@
           namespace
           annotation))))
 
-  (define (make-buffer-annotation-set
+  (define (annotation->decoration-run namespace source-size annotation)
+    (annotation-range->decoration-run
+      namespace
+      source-size
+      annotation
+      (annotation-start annotation)
+      (annotation-end annotation)))
+
+  (define (make-buffer-annotation-set/internal
             buffer
             namespace
             source-revision
             generation
-            annotations)
+            annotations
+            display-stale?)
     (unless (buffer? buffer)
       (assertion-violation
         'make-buffer-annotation-set
@@ -224,6 +235,7 @@
       (and (symbol? namespace)
            (exact-non-negative-integer? source-revision)
            (exact-non-negative-integer? generation)
+           (boolean? display-stale?)
            (list? annotations)
            (for-all annotation? annotations)
            (let unique? ([remaining annotations]
@@ -296,10 +308,20 @@
                     (annotation->decoration-run
                       namespace size annotation))
                   annotations)))
+            display-stale?
             #f))
         (lambda ()
           (unless complete?
             (close-entries! document entries))))))
+
+  (define make-buffer-annotation-set
+    (case-lambda
+      [(buffer namespace source-revision generation annotations)
+       (make-buffer-annotation-set/internal
+         buffer namespace source-revision generation annotations #f)]
+      [(buffer namespace source-revision generation annotations display-stale?)
+       (make-buffer-annotation-set/internal
+         buffer namespace source-revision generation annotations display-stale?)]))
 
   (define (require-open-set who value)
     (unless (annotation-set? value)
@@ -330,6 +352,26 @@
         (annotation-set-document value)
         (annotation-entry-end-anchor entry))))
 
+  (define (stale-decoration-runs value start end)
+    (let ([source-size (snapshot-size (annotation-set-document value))])
+      (decoration-index-runs-in-range
+        (make-decoration-index
+          (filter
+            (lambda (run) run)
+            (map
+              (lambda (entry)
+                (let ([annotation (annotation-entry-annotation entry)]
+                      [range (entry-range value entry)])
+                  (annotation-range->decoration-run
+                    (annotation-set-namespace value)
+                    source-size
+                    annotation
+                    (car range)
+                    (cdr range))))
+              (annotation-set-entries value))))
+        start
+        end)))
+
   (define (annotation-set-decoration-runs
             value
             revision
@@ -349,7 +391,9 @@
         start
         end))
     (if (annotation-set-stale? value revision)
-        '()
+        (if (annotation-set-display-stale? value)
+            (stale-decoration-runs value start end)
+            '())
         (decoration-index-runs-in-range
           (annotation-set-decoration-index value)
           start

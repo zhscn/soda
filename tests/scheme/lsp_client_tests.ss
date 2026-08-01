@@ -1701,6 +1701,60 @@
     (pair? (editor-buffer-language-attachments
              policy-editor (buffer-id policy-source))))
   "on-first-file Projects must start and attach their configured language service")
+(define policy-attachment
+  (car
+    (editor-buffer-language-attachments
+      policy-editor
+      (buffer-id policy-source))))
+(define policy-language-session
+  (language-session-registry-session-ref
+    (editor-language-session-registry policy-editor)
+    (language-attachment-session-id policy-attachment)))
+(define policy-session
+  (editor-lsp-session-for-language-session
+    policy-editor policy-language-session))
+(define policy-initialize-message
+  (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload (cadr policy-start-effects))))))
+(define policy-ready-effects
+  (lsp-client-handle-json-message!
+    policy-editor
+    policy-session
+    (make-json-object
+      (list
+        (cons "jsonrpc" "2.0")
+        (cons "id" (json-object-ref policy-initialize-message "id" #f))
+        (cons "result"
+              (make-json-object
+                (list (cons "capabilities" (make-json-object '())))))))))
+(check
+  (and
+    (= (length policy-ready-effects) 4)
+    (not
+      (exists
+        (lambda (effect)
+          (and
+            (eq? (command-effect-kind effect) 'command.invoke)
+            (eq?
+              (internal-command-message-name
+                (command-effect-payload effect))
+              'lsp.refresh-diagnostics)))
+        policy-ready-effects)))
+  "push-only servers must not schedule pull diagnostic refreshes")
+(define push-diagnostic-effects
+  (editor-execute-command! policy-editor 'lsp.diagnostics))
+(check
+  (and
+    (= (length push-diagnostic-effects) 1)
+    (eq? (command-effect-kind (car push-diagnostic-effects)) 'command.invoke)
+    (let ([message (command-effect-payload (car push-diagnostic-effects))])
+      (and
+        (command-message? message)
+        (eq? (command-message-name message) 'diagnostics.list))))
+  "push-only diagnostics must list current server diagnostics without pull requests")
 (editor-execute-command!
   policy-editor
   'file.apply-open-result

@@ -5184,6 +5184,50 @@
   (error 'editor-tests
          "diagnostic namespace was not cleared"))
 
+(define stale-display-diagnostic-set
+  (make-buffer-annotation-set
+    highlight-buffer
+    'test-stale-display-diagnostics
+    (buffer-revision highlight-buffer)
+    1
+    (list diagnostic-error)
+    #t))
+(unless
+  (editor-publish-annotation-set!
+    highlight-editor
+    stale-display-diagnostic-set)
+  (error 'editor-tests "stale-display diagnostics were rejected"))
+(let ([end (bytevector-length (buffer-bytes highlight-buffer))])
+  (buffer-replace-range!
+    highlight-buffer end end (string->utf8 "; pending diagnostic refresh")))
+(unless
+  (and
+    (annotation-set-stale?
+      stale-display-diagnostic-set
+      (buffer-revision highlight-buffer))
+    (memq
+      'diagnostic-error
+      (cell-faces
+        (frame-cell-ref
+          (render-editor-frame highlight-editor 4 50)
+          0
+          8))))
+  (error
+    'editor-tests
+    "anchor-backed stale diagnostics did not remain visible during refresh"))
+(editor-update!
+  highlight-editor
+  (make-command-message 'diagnostics.list #f))
+(unless
+  (not (editor-current-location-list highlight-editor))
+  (error
+    'editor-tests
+    "stale-display diagnostics remained navigable"))
+(editor-clear-annotation-sets!
+  highlight-editor
+  'test-stale-display-diagnostics
+  (buffer-id highlight-buffer))
+
 (unless
   (and
     (eq? (editor-theme highlight-editor) catppuccin-mocha)
