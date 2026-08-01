@@ -194,6 +194,7 @@
           tui-view-state-height
           tui-view-state-focused?
           tui-view-state-focused-node
+          tui-view-state-focus-ring
           tui-view-state-viewport
           tui-view-state-transient-state
           tui-view-state-cursor
@@ -1443,6 +1444,7 @@
           (soda editor tree-sitter-language)
           (soda editor tree-sitter-languages)
           (soda editor tui-application)
+          (soda editor tui-application-commands)
           (soda editor tui-application-runtime)
           (soda editor update)
           (soda editor window)
@@ -1658,6 +1660,7 @@
       (install-transform-commands! editor)
       (install-navigation-commands! editor)
       (install-buffer-commands! editor)
+      (install-tui-application-commands! editor)
       (install-dashboard! editor)
       (install-configuration-commands! editor)
       (install-theme-commands! editor)

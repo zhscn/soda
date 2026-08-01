@@ -1148,6 +1148,32 @@
                 (+ (rect-column rectangle) column)
                 cell)))))))
 
+  (define (application-surface-key editor session view-state rectangle)
+    (list
+      (tui-session-generation session)
+      (tui-view-state-generation view-state)
+      (theme-generation (editor-theme editor))
+      (rect-rows rectangle)
+      (rect-columns rectangle)))
+
+  (define (normalize-application-focus! view-state surface)
+    (let* ([ring (tui-surface-focus-ring surface)]
+           [enabled
+             (filter tui-focus-entry-enabled? ring)]
+           [current (tui-view-state-focused-node view-state)]
+           [valid?
+             (and current
+                  (exists
+                    (lambda (entry)
+                      (equal? current (tui-focus-entry-node-key entry)))
+                    enabled))])
+      (tui-view-state-set-focus-ring! view-state ring)
+      (unless valid?
+        (tui-view-state-set-focused-node!
+          view-state
+          (and (pair? enabled)
+               (tui-focus-entry-node-key (car enabled)))))))
+
   (define (application-surface context rectangle)
     (let* ([editor (editor-render-context-editor context)]
            [view (editor-render-context-view context)]
@@ -1167,12 +1193,8 @@
         view-state
         (editor-render-context-focused? context))
       (let ([key
-              (list
-                (tui-session-generation session)
-                (tui-view-state-generation view-state)
-                (theme-generation (editor-theme editor))
-                (rect-rows rectangle)
-                (rect-columns rectangle))])
+              (application-surface-key
+                editor session view-state rectangle)])
         (if (and
               (equal? key (tui-view-state-surface-cache-key view-state))
               (tui-view-state-surface-cache view-state))
@@ -1203,7 +1225,12 @@
                         (editor-theme editor)
                         (tui-session-id session)
                         (tui-view-state-cursor view-state))])
-                (tui-view-state-set-surface-cache! view-state key surface)
+                (normalize-application-focus! view-state surface)
+                (tui-view-state-set-surface-cache!
+                  view-state
+                  (application-surface-key
+                    editor session view-state rectangle)
+                  surface)
                 surface))))))
 
   (define (render-application-text-component! context frame rectangle)

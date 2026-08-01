@@ -1647,7 +1647,7 @@
               (list
                 (make-input-state
                   'application
-                  '()
+                  '(tui.application)
                   'application
                   #f)))
             (tui-session-ensure-view-state! session (view-id view)))

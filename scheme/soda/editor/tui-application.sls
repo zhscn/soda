@@ -33,6 +33,7 @@
           tui-view-state-height
           tui-view-state-focused?
           tui-view-state-focused-node
+          tui-view-state-focus-ring
           tui-view-state-viewport
           tui-view-state-transient-state
           tui-view-state-cursor
@@ -42,6 +43,7 @@
           tui-view-state-set-size!
           tui-view-state-set-focused!
           tui-view-state-set-focused-node!
+          tui-view-state-set-focus-ring!
           tui-view-state-set-viewport!
           tui-view-state-set-transient-state!
           tui-view-state-set-cursor!
@@ -376,6 +378,7 @@
             (mutable height)
             (mutable focused?)
             (mutable focused-node)
+            (mutable focus-ring)
             (mutable viewport)
             (mutable transient-state)
             (mutable cursor)
@@ -406,7 +409,7 @@
            "focused state must be boolean"
            focused?))
        (%make-tui-view-state
-         view-id width height focused? focused-node viewport
+         view-id width height focused? focused-node '() viewport
          transient-state cursor 0 #f #f)]))
 
   (define (touch-view-state! state)
@@ -456,6 +459,15 @@
     (unless (equal? node (tui-view-state-focused-node state))
       (tui-view-state-focused-node-set! state node)
       (touch-view-state! state))
+    state)
+
+  (define (tui-view-state-set-focus-ring! state focus-ring)
+    (unless (and (tui-view-state? state) (list? focus-ring))
+      (assertion-violation
+        'tui-view-state-set-focus-ring!
+        "expected a TuiViewState and focus ring"
+        state focus-ring))
+    (tui-view-state-focus-ring-set! state focus-ring)
     state)
 
   (define (tui-view-state-set-viewport! state viewport)

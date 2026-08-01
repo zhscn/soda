@@ -99,7 +99,15 @@
           [else (tui-result model '() '())])))
     (lambda (model context)
       (set! view-count (+ view-count 1))
-      (tui-text 'counter.value (number->string model)))
+      (tui-row
+        'counter.root
+        (list
+          (tui-node-with-focus
+            (tui-text 'counter.value (number->string model))
+            (make-tui-focus #t 'counter 0 #t))
+          (tui-node-with-focus
+            (tui-text 'counter.action "x")
+            (make-tui-focus #t 'counter 1 #t)))))
     (lambda (model context)
       (set! close-count (+ close-count 1)))
     (lambda (model state) (number->string model))
@@ -181,6 +189,31 @@
       "4"))
   "renderer must compose and cache an application surface")
 
+(define application-view-state
+  (tui-session-view-state session (view-id (editor-active-view editor))))
+(check
+  (eq? (tui-view-state-focused-node application-view-state) 'counter.value)
+  "rendering must choose the first enabled component when focus is absent")
+(editor-update!
+  editor
+  (make-key-message
+    (make-key-event 'tab 9 #f #f 0 'press (make-bytevector 0))))
+(check
+  (eq? (tui-view-state-focused-node application-view-state) 'counter.action)
+  "Tab must move through the visible application focus ring")
+(editor-update!
+  editor
+  (make-key-message
+    (make-key-event 'tab 9 #f #f 1 'press (make-bytevector 0))))
+(check
+  (eq? (tui-view-state-focused-node application-view-state) 'counter.value)
+  "Backtab must move backward through the application focus ring")
+(tui-view-state-set-focused-node! application-view-state 'missing.node)
+(render-editor-frame editor 5 30)
+(check
+  (eq? (tui-view-state-focused-node application-view-state) 'counter.value)
+  "rendering must repair focus when the focused component disappears")
+
 (editor-update!
   editor
   (make-input-message
@@ -220,6 +253,7 @@
 (check
   (not (tui-send-message! editor stale-message))
   "messages from another Model generation must be rejected")
+(define view-count-before-model-update view-count)
 (tui-send! editor (tui-session-id session) 'increment active-view-id)
 (check
   (and
@@ -235,7 +269,7 @@
 (define updated-frame (render-editor-frame editor 5 30))
 (check
   (and
-    (= view-count 2)
+    (= view-count (+ view-count-before-model-update 1))
     (string=? (cell-text (frame-cell-ref updated-frame 0 0)) "4")
     (string=? (cell-text (frame-cell-ref updated-frame 0 1)) "2"))
   "publishing a Model generation must invalidate the application surface")
