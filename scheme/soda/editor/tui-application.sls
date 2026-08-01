@@ -94,6 +94,17 @@
           tui-input-event-value
           tui-input-event-prefix
           tui-input-event-focused-node
+          make-tui-focus-event
+          tui-focus-event?
+          tui-focus-event-view-id
+          make-tui-blur-event
+          tui-blur-event?
+          tui-blur-event-view-id
+          make-tui-resize-event
+          tui-resize-event?
+          tui-resize-event-view-id
+          tui-resize-event-width
+          tui-resize-event-height
           make-tui-update-result
           tui-result
           tui-update-result?
@@ -561,6 +572,40 @@
         "unknown application input event kind"
         kind))
     (%make-tui-input-event kind value prefix focused-node))
+
+  (define-record-type
+    (tui-focus-event %make-tui-focus-event tui-focus-event?)
+    (fields view-id))
+
+  (define (make-tui-focus-event view-id)
+    (unless (exact-positive-integer? view-id)
+      (assertion-violation
+        'make-tui-focus-event "view id must be positive" view-id))
+    (%make-tui-focus-event view-id))
+
+  (define-record-type
+    (tui-blur-event %make-tui-blur-event tui-blur-event?)
+    (fields view-id))
+
+  (define (make-tui-blur-event view-id)
+    (unless (exact-positive-integer? view-id)
+      (assertion-violation
+        'make-tui-blur-event "view id must be positive" view-id))
+    (%make-tui-blur-event view-id))
+
+  (define-record-type
+    (tui-resize-event %make-tui-resize-event tui-resize-event?)
+    (fields view-id width height))
+
+  (define (make-tui-resize-event view-id width height)
+    (unless (and (exact-positive-integer? view-id)
+                 (exact-positive-integer? width)
+                 (exact-positive-integer? height))
+      (assertion-violation
+        'make-tui-resize-event
+        "view id and dimensions must be positive"
+        view-id width height))
+    (%make-tui-resize-event view-id width height))
 
   (define-record-type tui-command-completion-message
     (fields session-id command-id value))

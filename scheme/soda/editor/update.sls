@@ -499,7 +499,8 @@
 
   (define (editor-update! editor message)
     (require-open-editor 'editor-update! editor)
-    (let ([completion-response-accepted? #f])
+    (let ([completion-response-accepted? #f]
+          [lifecycle-before (tui-lifecycle-snapshot editor)])
       (let ([result
             (guard
               (condition
@@ -580,4 +581,5 @@
                   [else 'document])])
           (when reason
             (editor-invalidate! editor reason)))
+        (tui-synchronize-view-lifecycle! editor lifecycle-before)
         (append result (editor-take-tui-effects! editor))))))

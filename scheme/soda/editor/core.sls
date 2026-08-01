@@ -211,6 +211,17 @@
           tui-input-event-value
           tui-input-event-prefix
           tui-input-event-focused-node
+          make-tui-focus-event
+          tui-focus-event?
+          tui-focus-event-view-id
+          make-tui-blur-event
+          tui-blur-event?
+          tui-blur-event-view-id
+          make-tui-resize-event
+          tui-resize-event?
+          tui-resize-event-view-id
+          tui-resize-event-width
+          tui-resize-event-height
           make-tui-update-result
           tui-result
           tui-update-result?
@@ -258,6 +269,8 @@
           tui-complete-command!
           tui-take-effects!
           tui-retry!
+          tui-lifecycle-snapshot
+          tui-synchronize-view-lifecycle!
           make-tui-dimension
           tui-dimension?
           tui-dimension-kind

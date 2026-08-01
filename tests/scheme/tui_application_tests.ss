@@ -38,6 +38,7 @@
 (define view-count 0)
 (define input-kinds '())
 (define handler-prefix #f)
+(define lifecycle-events '())
 (define runtime-result #f)
 
 (check
@@ -54,6 +55,12 @@
     (lambda (model message context)
       (let ([payload (tui-message-payload message)])
         (cond
+          [(or (tui-focus-event? payload)
+               (tui-blur-event? payload)
+               (tui-resize-event? payload))
+           (set! lifecycle-events
+             (append lifecycle-events (list payload)))
+           (tui-result model '() '())]
           [(tui-input-event? payload)
            (set! input-kinds
              (append input-kinds (list (tui-input-event-kind payload))))
@@ -164,6 +171,13 @@
         #f)
       'interface))
   "tui-open! must create and display an interface Buffer backed by a session")
+(check
+  (and (= (length lifecycle-events) 2)
+       (tui-resize-event? (car lifecycle-events))
+       (tui-focus-event? (cadr lifecycle-events))
+       (= (tui-resize-event-view-id (car lifecycle-events))
+          (view-id (editor-active-view editor))))
+  "opening an application must publish resize before keyboard focus")
 
 (define (buffer-string buffer)
   (let ([snapshot (document-snapshot (buffer-document buffer))])

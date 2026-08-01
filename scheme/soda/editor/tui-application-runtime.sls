@@ -6,7 +6,9 @@
           tui-send-message!
           tui-complete-command!
           tui-take-effects!
-          tui-retry!)
+          tui-retry!
+          tui-lifecycle-snapshot
+          tui-synchronize-view-lifecycle!)
   (import (rnrs)
           (soda document)
           (soda editor buffer)
@@ -16,7 +18,139 @@
           (soda editor edit)
           (soda editor presentation)
           (soda editor state)
-          (soda editor tui-application))
+          (soda editor tui-application)
+          (soda editor window-runtime))
+
+  (define (lifecycle-entry session view state)
+    (list
+      (tui-session-id session)
+      (view-id view)
+      (tui-view-state-focused? state)
+      (tui-view-state-width state)
+      (tui-view-state-height state)))
+
+  (define (entry-session-id entry) (car entry))
+  (define (entry-view-id entry) (cadr entry))
+  (define (entry-focused? entry) (caddr entry))
+  (define (entry-width entry) (cadddr entry))
+  (define (entry-height entry) (car (cddddr entry)))
+
+  (define (same-entry-identity? left right)
+    (and (= (entry-session-id left) (entry-session-id right))
+         (= (entry-view-id left) (entry-view-id right))))
+
+  (define (tui-lifecycle-snapshot editor)
+    (require-open-editor 'tui-lifecycle-snapshot editor)
+    (fold-right
+      (lambda (view result)
+        (let ([session
+                (editor-tui-session-for-buffer
+                  editor
+                  (buffer-id (view-buffer view)))])
+          (if (and session
+                   (editor-window-for-view editor (view-id view)))
+              (let ([state
+                      (tui-session-ensure-view-state!
+                        session
+                        (view-id view))])
+                (cons (lifecycle-entry session view state) result))
+              result)))
+      '()
+      (editor-views editor)))
+
+  (define (entry-ref entries target)
+    (find
+      (lambda (entry) (same-entry-identity? entry target))
+      entries))
+
+  (define (entry-session editor entry)
+    (tui-application-registry-ref
+      (editor-tui-application-registry editor)
+      (entry-session-id entry)))
+
+  (define (entry-view editor entry)
+    (find
+      (lambda (view) (= (view-id view) (entry-view-id entry)))
+      (editor-views editor)))
+
+  (define (desired-focus? editor entry)
+    (and (not (editor-active-prompt editor))
+         (= (entry-view-id entry)
+            (view-id (editor-active-view editor)))))
+
+  (define (send-lifecycle! editor entry payload)
+    (let ([session (entry-session editor entry)])
+      (and session
+           (tui-send!
+             editor
+             (tui-session-id session)
+             payload
+             (entry-view-id entry)))))
+
+  (define (tui-synchronize-view-lifecycle! editor before)
+    (require-open-editor 'tui-synchronize-view-lifecycle! editor)
+    (unless (list? before)
+      (assertion-violation
+        'tui-synchronize-view-lifecycle!
+        "before snapshot must be a list"
+        before))
+    (let ([after (tui-lifecycle-snapshot editor)])
+      ;; Blur is globally ordered before resize/focus so keyboard ownership
+      ;; never appears to belong to two application Views.
+      (for-each
+        (lambda (old)
+          (let ([current (entry-ref after old)])
+            (when (and (entry-focused? old)
+                       (or (not current)
+                           (not (desired-focus? editor current))))
+              (let ([view (entry-view editor old)])
+                (when view (view-clear-input-handler-pending! view)))
+              (send-lifecycle!
+                editor old (make-tui-blur-event (entry-view-id old))))))
+        before)
+      (for-each
+        (lambda (current)
+          (let* ([old (entry-ref before current)]
+                 [session (entry-session editor current)]
+                 [view (entry-view editor current)]
+                 [state
+                   (and session
+                        (tui-session-view-state
+                          session
+                          (entry-view-id current)))]
+                 [width (and view (view-viewport-columns view))]
+                 [height (and view (view-viewport-rows view))])
+            (when (and state width height
+                       (or (not old)
+                           (not (= width (entry-width old)))
+                           (not (= height (entry-height old)))))
+              (tui-view-state-set-size! state width height)
+              (send-lifecycle!
+                editor
+                current
+                (make-tui-resize-event
+                  (entry-view-id current) width height)))))
+        after)
+      (for-each
+        (lambda (current)
+          (let* ([old (entry-ref before current)]
+                 [session (entry-session editor current)]
+                 [state
+                   (and session
+                        (tui-session-view-state
+                          session
+                          (entry-view-id current)))]
+                 [focused? (desired-focus? editor current)])
+            (when state
+              (tui-view-state-set-focused! state focused?)
+              (when (and focused?
+                         (or (not old) (not (entry-focused? old))))
+                (send-lifecycle!
+                  editor
+                  current
+                  (make-tui-focus-event (entry-view-id current)))))))
+        after)
+      after))
 
   (define (condition->string condition)
     (if (message-condition? condition)
@@ -222,7 +356,8 @@
          (view-id (editor-active-view editor)))]
       [(editor name arguments intent origin-view-id)
        (require-open-editor 'tui-open! editor)
-       (let* ([definition (definition-ref editor name)]
+       (let* ([lifecycle-before (tui-lifecycle-snapshot editor)]
+              [definition (definition-ref editor name)]
               [registry (editor-tui-application-registry editor)]
               [session-id
                 (tui-application-registry-allocate-session-id! registry)]
@@ -296,6 +431,9 @@
                          (view-id view)
                          'tui.init)
                        commands))
+                   (tui-synchronize-view-lifecycle!
+                     editor
+                     lifecycle-before)
                    (editor-invalidate! editor 'application)
                    buffer))))))]))
 
@@ -316,6 +454,20 @@
            [buffer
              (editor-buffer-ref editor (tui-session-buffer-id session))]
            [fallback (fallback-buffer editor buffer)])
+      (for-each
+        (lambda (view)
+          (when (eq? (view-buffer view) buffer)
+            (let ([state
+                    (tui-session-view-state session (view-id view))])
+              (when (and state (tui-view-state-focused? state))
+                (tui-view-state-set-focused! state #f)
+                (view-clear-input-handler-pending! view)
+                (tui-send!
+                  editor
+                  session-id
+                  (make-tui-blur-event (view-id view))
+                  (view-id view))))))
+        (editor-views editor))
       (for-each
         (lambda (view)
           (when (eq? (view-buffer view) buffer)
