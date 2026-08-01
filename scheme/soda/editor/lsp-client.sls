@@ -640,7 +640,12 @@
     (append
       (list
         (session-notification-effect
-          session "initialized" (make-json-object '())))
+          session "initialized" (make-json-object '()))
+        (session-notification-effect
+          session
+          "workspace/didChangeConfiguration"
+          (make-json-object
+            (list (cons "settings" (session-lsp-settings session))))))
       (session-open-attached-documents! editor session)))
 
   (define (take-pending-request! session id)

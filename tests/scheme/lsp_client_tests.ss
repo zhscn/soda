@@ -183,10 +183,35 @@
 (check
   (and
     (eq? (lsp-client-session-state session) 'ready)
-    (= (length ready-effects) 4)
-    (eq? (command-effect-kind (caddr ready-effects)) 'command.invoke)
-    (eq? (command-effect-kind (cadddr ready-effects)) 'command.invoke))
+    (= (length ready-effects) 5)
+    (eq? (command-effect-kind (cadddr ready-effects)) 'command.invoke)
+    (eq? (command-effect-kind (list-ref ready-effects 4)) 'command.invoke))
   "initialize response did not transition the LSP session to ready")
+
+(define initialization-configuration-message
+  (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload (cadr ready-effects))))))
+(check
+  (and
+    (string=?
+      (json-object-ref initialization-configuration-message "method" #f)
+      "workspace/didChangeConfiguration")
+    (string=?
+      (json-object-ref
+        (json-object-ref
+          (json-object-ref
+            (json-object-ref initialization-configuration-message "params" #f)
+            "settings"
+            #f)
+          "clangd"
+          #f)
+        "compilationDatabasePath"
+        #f)
+      "/workspace/build"))
+  "initialize did not publish the Project LSP configuration")
 
 (define configuration-effects
   (lsp-client-handle-json-message!
@@ -471,7 +496,7 @@
     (lsp-json-rpc-decode!
       (make-lsp-json-rpc-decoder)
       (managed-process-write-request-data
-        (command-effect-payload (cadr ready-effects))))))
+        (command-effect-payload (list-ref ready-effects 2))))))
 (define document-params (json-object-ref document-message "params" #f))
 (define text-document (json-object-ref document-params "textDocument" #f))
 (check
