@@ -1154,7 +1154,7 @@
                       (make-open-request
                         (view-id view)
                         path
-                        (make-file-source-position
+                        (make-file-utf16-position
                           (lsp-position-line (lsp-range-start lsp-range))
                           (lsp-position-character (lsp-range-start lsp-range)))
                         'jump

@@ -14,6 +14,10 @@
           file-source-position?
           file-source-position-line
           file-source-position-character
+          make-file-utf16-position
+          file-utf16-position?
+          file-utf16-position-line
+          file-utf16-position-character
           make-open-result
           make-open-result-for-requests
           open-result?
@@ -119,6 +123,12 @@
     (fields line character))
 
   (define-record-type
+    (file-utf16-position
+      %make-file-utf16-position
+      file-utf16-position?)
+    (fields line character))
+
+  (define-record-type
     (open-result %make-open-result open-result?)
     (fields
       requests
@@ -220,7 +230,8 @@
     (or
       (not value)
       (exact-non-negative-integer? value)
-      (file-source-position? value)))
+      (file-source-position? value)
+      (file-utf16-position? value)))
 
   (define (make-file-source-position line character)
     (unless
@@ -233,6 +244,15 @@
         line
         character))
     (%make-file-source-position line character))
+
+  (define (make-file-utf16-position line character)
+    (unless (and (exact-non-negative-integer? line)
+                 (exact-non-negative-integer? character))
+      (assertion-violation
+        'make-file-utf16-position
+        "line and character must be non-negative exact integers"
+        line character))
+    (%make-file-utf16-position line character))
 
   (define make-open-request
     (case-lambda
@@ -962,10 +982,37 @@
               (lambda () (text-close! text)))))
         (lambda () (snapshot-close! snapshot)))))
 
+  (define (utf16-position-offset buffer position)
+    (let ([snapshot (document-snapshot (buffer-document buffer))])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (let ([text (snapshot-text snapshot)])
+            (dynamic-wind
+              (lambda () #f)
+              (lambda ()
+                (let* ([line (min (file-utf16-position-line position)
+                                  (- (text-line-count text) 1))]
+                       [start (text-line-start text line)]
+                       [end (text-line-content-end text line)]
+                       [line-text (utf8->string (text-subbytevector text start end))]
+                       [target (file-utf16-position-character position)])
+                  (let loop ([index 0] [units 0])
+                    (if (or (= index (string-length line-text)) (>= units target))
+                        (+ start (bytevector-length (string->utf8 (substring line-text 0 index))))
+                        (let ([next (+ units (if (> (char->integer (string-ref line-text index)) #xffff) 2 1))])
+                          (if (> next target)
+                              (+ start (bytevector-length (string->utf8 (substring line-text 0 index))))
+                              (loop (+ index 1) next)))))))
+              (lambda () (text-close! text)))))
+        (lambda () (snapshot-close! snapshot)))))
+
   (define (open-target-offset buffer target)
     (cond
       [(file-source-position? target)
        (source-position-offset buffer target)]
+      [(file-utf16-position? target)
+       (utf16-position-offset buffer target)]
       [(integer? target) target]
       [else #f]))
 
