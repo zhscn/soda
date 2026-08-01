@@ -133,6 +133,24 @@ if(CHEZ_SCHEME_EXECUTABLE)
   )
 
   add_test(
+    NAME scheme_json_tests
+    CONFIGURATIONS Debug Release
+    COMMAND
+      ${CHEZ_SCHEME_EXECUTABLE}
+      --libdirs ${PROJECT_SOURCE_DIR}/scheme
+      --program ${CMAKE_CURRENT_SOURCE_DIR}/scheme/json_tests.ss
+  )
+
+  add_test(
+    NAME scheme_lsp_json_rpc_tests
+    CONFIGURATIONS Debug Release
+    COMMAND
+      ${CHEZ_SCHEME_EXECUTABLE}
+      --libdirs ${PROJECT_SOURCE_DIR}/scheme
+      --program ${CMAKE_CURRENT_SOURCE_DIR}/scheme/lsp_json_rpc_tests.ss
+  )
+
+  add_test(
     NAME scheme_regexp_tests
     CONFIGURATIONS Debug Release
     COMMAND
