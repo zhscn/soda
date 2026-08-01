@@ -33,6 +33,8 @@
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
+          (soda editor completion)
+          (soda editor completion-provider)
           (soda editor condition)
           (soda editor effect)
           (soda editor event)
@@ -977,6 +979,83 @@
                   (language-attachment-session-id attachment))])
           (editor-lsp-session-for-language-session editor language-session)))))
 
+  (define (completion-request-session editor request)
+    (and
+      (eq? (completion-request-target-kind request) 'document)
+      (let* ([view (editor-view-ref editor (completion-request-target-view-id request))]
+             [buffer (view-buffer view)])
+        (and
+          (= (document-id (buffer-document buffer))
+             (completion-request-target-id request))
+          (= (buffer-revision buffer)
+             (completion-request-target-revision request))
+          (let ([attachment
+                  (editor-view-language-attachment editor (view-id view))])
+            (and attachment
+                 (editor-lsp-session-for-language-session
+                   editor
+                   (language-session-registry-session-ref
+                     (editor-language-session-registry editor)
+                     (language-attachment-session-id attachment)))))))))
+
+  (define (lsp-completion-items request result)
+    (let ([values
+            (cond
+              [(json-array? result) (json-array-values result)]
+              [(json-object? result)
+               (let ([items (json-object-ref result "items" #f)])
+                 (if (json-array? items) (json-array-values items) '()))]
+              [else '()])])
+      (let loop ([remaining values] [index 0] [items '()])
+        (if (null? remaining)
+            (reverse items)
+            (let ([value (car remaining)])
+              (if (not (json-object? value))
+                  (loop (cdr remaining) (+ index 1) items)
+                  (let* ([label (json-object-ref value "label" #f)]
+                         [insert (json-object-ref value "insertText" label)]
+                         [detail (json-object-ref value "detail" #f)]
+                         [sort (json-object-ref value "sortText" label)])
+                    (if (and (string? label) (string? insert) (string? sort))
+                        (loop
+                          (cdr remaining)
+                          (+ index 1)
+                          (cons
+                            (make-completion-item
+                              (list index label insert)
+                              'lsp
+                              label label insert
+                              'choice detail #f sort #f #f #f value detail "LSP" 0)
+                            items))
+                        (loop (cdr remaining) (+ index 1) items)))))))))
+
+  (define (lsp-start-completion! editor request)
+    (let ([session (completion-request-session editor request)])
+      (if
+        (and session (eq? (lsp-client-session-state session) 'ready))
+        (let* ([view (editor-view-ref editor (completion-request-target-view-id request))]
+               [buffer (view-buffer view)]
+               [document (find-document session (buffer-id buffer))]
+               [position (lsp-buffer-position-at buffer (completion-request-end request))])
+          (if (and document position)
+              (session-request!
+                session
+                "textDocument/completion"
+                (make-json-object
+                  (list
+                    (cons "textDocument"
+                          (make-json-object
+                            (list (cons "uri" (lsp-client-document-uri document)))) )
+                    (cons "position" (lsp-position->json position))))
+                (lambda (response-editor response-session result)
+                  (editor-apply-completion-response!
+                    response-editor
+                    (make-completion-response-for-request
+                      request (lsp-completion-items request result) #t))
+                  '()))
+              '()))
+        '())))
+
   (define (install-lsp-commands! editor)
     (editor-add-hook!
       editor
@@ -985,6 +1064,13 @@
       (lambda (changed-editor reason project generation)
         (reconcile-lsp-project!
           changed-editor reason project generation)))
+    (editor-register-completion-provider!
+      editor
+      (make-completion-provider
+        'lsp
+        (lambda (request)
+          (list (make-internal-command-message 'lsp.completion-request request)))
+        (lambda (request) #f)))
     (editor-register-command!
       editor
       (make-interactive-context-command
@@ -1005,6 +1091,15 @@
                     (command-context-editor context) "No language server is active")
                   '()))))
         "Stop the language server selected by the active view."))
+    (editor-register-internal-command!
+      editor
+      (make-internal-context-command
+        'lsp.completion-request
+        (lambda (context)
+          (lsp-start-completion!
+            (command-context-editor context)
+            (command-context-argument context)))
+        "Start an LSP completion request."))
     (editor-register-internal-command!
       editor
       (make-internal-context-command

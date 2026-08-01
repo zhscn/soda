@@ -88,10 +88,14 @@
       (unless
         (and
           (list? messages)
-          (for-all completion-response-message? messages))
+          (for-all
+            (lambda (message)
+              (or (completion-response-message? message)
+                  (internal-command-message? message)))
+            messages))
         (assertion-violation
           'completion-provider-start
-          "provider start must return completion response messages"
+          "provider start must return completion responses or internal command messages"
           messages))
       messages))
 
