@@ -340,7 +340,25 @@
       'project.switch-buffer)
     (command-registered?
       (editor-command-registry editor)
-      'project.find-other-file))
+      'project.find-other-file)
+    (command-registered?
+      (editor-command-registry editor)
+      'project.add)
+    (command-registered?
+      (editor-command-registry editor)
+      'project.switch-open)
+    (command-registered?
+      (editor-command-registry editor)
+      'project.invalidate-cache)
+    (command-registered?
+      (editor-command-registry editor)
+      'project.invalidate-cache-all)
+    (command-registered?
+      (editor-command-registry editor)
+      'project.root)
+    (command-registered?
+      (editor-command-registry editor)
+      'project.info))
   (error 'editor-tests "project commands were not installed"))
 (define editor-test-project
   (editor-discover-project
