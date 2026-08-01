@@ -19,18 +19,23 @@
     (fields project
             policy
             (mutable generation)
-            (mutable queue)
+            (mutable queue-front)
+            (mutable queue-back)
             directories
             resources
             (mutable scan-source)
             watch-sources
-            (mutable continuation)))
+            (mutable continuation)
+            (mutable completed-directory-count)))
 
   (define-record-type
     (project-resource-runtime
       %make-project-resource-runtime
       project-resource-runtime?)
     (fields runtime executor by-project by-source))
+
+  (define partial-snapshot-batch-size 16)
+  (define project-watch-budget 128)
 
   (define (hidden-name? name)
     (and
@@ -97,54 +102,79 @@
   (define (start-watch! adapter session directory)
     (guard
       (condition [else #f])
-      (let ([source
-              (runtime-watch-path!
-                (project-resource-runtime-runtime adapter)
-                directory)])
-        (hashtable-set!
-          (project-resource-session-watch-sources session)
-          source
-          directory)
-        (hashtable-set!
-          (project-resource-runtime-by-source adapter)
-          source
-          (vector 'watch session directory))
-        source)))
+      (and
+        (< (hashtable-size
+             (project-resource-session-watch-sources session))
+           project-watch-budget)
+        (let ([source
+                (runtime-watch-path!
+                  (project-resource-runtime-runtime adapter)
+                  directory)])
+          (hashtable-set!
+            (project-resource-session-watch-sources session)
+            source
+            directory)
+          (hashtable-set!
+            (project-resource-runtime-by-source adapter)
+            source
+            (vector 'watch session directory))
+          source))))
+
+  (define (queue-empty? session)
+    (and
+      (null? (project-resource-session-queue-front session))
+      (null? (project-resource-session-queue-back session))))
+
+  (define (queue-push! session directory)
+    (project-resource-session-queue-back-set!
+      session
+      (cons directory (project-resource-session-queue-back session))))
+
+  (define (queue-pop! session)
+    (when (null? (project-resource-session-queue-front session))
+      (project-resource-session-queue-front-set!
+        session
+        (reverse (project-resource-session-queue-back session)))
+      (project-resource-session-queue-back-set! session '()))
+    (let ([front (project-resource-session-queue-front session)])
+      (and
+        (pair? front)
+        (begin
+          (project-resource-session-queue-front-set! session (cdr front))
+          (car front)))))
 
   (define (start-next-scan! adapter session)
     (let loop ()
-      (let ([queue (project-resource-session-queue session)])
+      (let ([directory (queue-pop! session)])
         (cond
-          [(null? queue)
+          [(not directory)
            (project-resource-session-scan-source-set! session #f)
            (snapshot-message session #t)]
           [else
-           (let ([directory (car queue)])
-             (project-resource-session-queue-set! session (cdr queue))
-             (if
-               (hashtable-ref
+           (if
+             (hashtable-ref
+               (project-resource-session-directories session)
+               directory
+               #f)
+             (loop)
+             (begin
+               (hashtable-set!
                  (project-resource-session-directories session)
                  directory
-                 #f)
-               (loop)
-               (begin
-                 (hashtable-set!
-                   (project-resource-session-directories session)
-                   directory
-                   #t)
-                 (guard
-                   (condition [else (loop)])
-                   (let ([source
-                           (runtime-scan-directory!
-                             (project-resource-runtime-runtime adapter)
-                             directory)])
-                     (project-resource-session-scan-source-set!
-                       session source)
-                     (hashtable-set!
-                       (project-resource-runtime-by-source adapter)
-                       source
-                       (vector 'scan session directory))
-                     #f)))))]))))
+                 #t)
+               (guard
+                 (condition [else (loop)])
+                 (let ([source
+                         (runtime-scan-directory!
+                           (project-resource-runtime-runtime adapter)
+                           directory)])
+                   (project-resource-session-scan-source-set!
+                     session source)
+                   (hashtable-set!
+                     (project-resource-runtime-by-source adapter)
+                     source
+                     (vector 'scan session directory))
+                   #f))))]))))
 
   (define (enqueue-directory! session directory)
     (unless
@@ -152,11 +182,18 @@
         (project-resource-session-directories session)
         directory
         #f)
-      (project-resource-session-queue-set!
-        session
-        (append
-          (project-resource-session-queue session)
-          (list directory)))))
+      (queue-push! session directory)))
+
+  (define (partial-snapshot-due? session)
+    (let ([count
+            (+ 1
+               (project-resource-session-completed-directory-count
+                 session))])
+      (project-resource-session-completed-directory-count-set!
+        session count)
+      (or
+        (= count 1)
+        (= (mod (- count 1) partial-snapshot-batch-size) 0))))
 
   (define (consume-entry! session directory entry)
     (let* ([name (vfs-entry-name entry)]
@@ -185,21 +222,47 @@
         (lambda (entry)
           (consume-entry! session directory entry))
         (decode-vfs-directory-entries (event-data event))))
-    (or
-      (start-next-scan! adapter session)
-      (snapshot-message session #f)))
+    (let ([next (start-next-scan! adapter session)])
+      (or
+        next
+        (and
+          (partial-snapshot-due? session)
+          (snapshot-message session #f)))))
 
   (define (reset-session! adapter session generation)
     (stop-session! adapter session)
     (project-resource-session-generation-set! session generation)
-    (project-resource-session-queue-set!
+    (project-resource-session-queue-front-set!
       session
       (project-roots (project-resource-session-project session)))
+    (project-resource-session-queue-back-set! session '())
+    (project-resource-session-completed-directory-count-set! session 0)
     (hashtable-clear!
       (project-resource-session-directories session))
     (hashtable-clear!
       (project-resource-session-resources session))
     (start-next-scan! adapter session))
+
+  (define (same-scan-contract? session project policy)
+    (and
+      (eq? (project-resource-session-policy session) policy)
+      (equal?
+        (project-roots (project-resource-session-project session))
+        (project-roots project))))
+
+  (define (make-session project policy generation continuation)
+    (%make-project-resource-session
+      project
+      policy
+      generation
+      (project-roots project)
+      '()
+      (make-hashtable string-hash string=?)
+      (make-hashtable string-hash string=?)
+      #f
+      (make-eqv-hashtable)
+      continuation
+      0))
 
   (define (start-request! adapter request)
     (let* ([project (project-resource-request-project request)]
@@ -209,24 +272,44 @@
                (project-resource-runtime-by-project adapter)
                id
                #f)])
-      (when existing
-        (stop-session! adapter existing))
-      (let ([session
-              (%make-project-resource-session
-                project
-                (project-resource-request-policy request)
-                (project-resource-request-generation request)
-                (project-roots project)
-                (make-hashtable string-hash string=?)
-                (make-hashtable string-hash string=?)
-                #f
-                (make-eqv-hashtable)
-                (project-resource-request-continuation request))])
-        (hashtable-set!
-          (project-resource-runtime-by-project adapter)
-          id
-          session)
-        (start-next-scan! adapter session))))
+      (let ([generation (project-resource-request-generation request)]
+            [policy (project-resource-request-policy request)]
+            [continuation (project-resource-request-continuation request)])
+        (cond
+          [(and
+             existing
+             (same-scan-contract? existing project policy)
+             (< generation
+                (project-resource-session-generation existing)))
+           #f]
+          [(and
+             existing
+             (same-scan-contract? existing project policy)
+             (= generation
+                (project-resource-session-generation existing)))
+           (when continuation
+             (project-resource-session-continuation-set!
+               existing continuation))
+           (and
+             (not (project-resource-session-scan-source existing))
+             (queue-empty? existing)
+             (snapshot-message existing #t))]
+          [(and
+             existing
+             (same-scan-contract? existing project policy))
+           (project-resource-session-continuation-set!
+             existing continuation)
+           (reset-session! adapter existing generation)]
+          [else
+           (when existing (stop-session! adapter existing))
+           (let ([session
+                   (make-session
+                     project policy generation continuation)])
+             (hashtable-set!
+               (project-resource-runtime-by-project adapter)
+               id
+               session)
+             (start-next-scan! adapter session))]))))
 
   (define (stop-project! adapter project-id)
     (let ([session

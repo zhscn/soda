@@ -54,6 +54,23 @@
   (effect-result-continue? start-result)
   "resource enumeration must keep the editor loop running")
 
+(define duplicate-start-result
+  (execute-effects!
+    executor
+    (list
+      (make-command-effect
+        'project.refresh-resources
+        (make-project-resource-request
+          project
+          7
+          default-project-resource-policy
+          #f)))))
+(check
+  (and
+    (effect-result-continue? duplicate-start-result)
+    (null? (effect-result-messages duplicate-start-result)))
+  "an identical in-flight request must reuse the active scan")
+
 (define partial-message #f)
 (define completed-message
   (let loop ()
@@ -134,6 +151,29 @@
     (member (vfs-path-join root "src") directories)
     (member (vfs-path-join root "visible") directories))
   "snapshot must retain the scanned directory set")
+
+(define cached-continuation
+  (make-command-message 'test.resume-cached-project-command #f))
+(define cached-result
+  (execute-effects!
+    executor
+    (list
+      (make-command-effect
+        'project.refresh-resources
+        (make-project-resource-request
+          project
+          7
+          default-project-resource-policy
+          cached-continuation)))))
+(check
+  (let ([messages (effect-result-messages cached-result)])
+    (and
+      (= (length messages) 1)
+      (eq?
+        (project-resource-result-continuation
+          (internal-command-message-argument (car messages)))
+        cached-continuation)))
+  "an identical completed request must reuse the cached snapshot")
 
 (define editor-document (make-document "" 9901))
 (define editor-buffer
