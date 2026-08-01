@@ -19,7 +19,8 @@
           (soda editor scheme-query)
           (soda editor scheme-semantics)
           (soda editor scheme-workspace)
-          (soda editor state))
+          (soda editor state)
+          (soda editor xref))
 
   (define editor-environments
     (make-weak-eq-hashtable))
@@ -250,7 +251,7 @@
                  (view-caret view))])
         (values index buffer snapshot definitions))))
 
-  (define (find-definition-command environments context)
+  (define (scheme-find-definition-command environments context)
     (let ([editor (command-context-editor context)])
       (call-with-values
         (lambda () (semantic-query environments context))
@@ -293,7 +294,7 @@
                      "No definition at point"))
                '()]))))))
 
-  (define (find-references-command environments context)
+  (define (scheme-find-references-command environments context)
     (let ([editor (command-context-editor context)])
       (call-with-values
         (lambda () (semantic-query environments context))
@@ -642,6 +643,17 @@
   (define (install-scheme-xref-commands! editor)
     (let ([environments (make-scheme-environment-registry)])
       (hashtable-set! editor-environments editor environments)
+      (editor-register-xref-backend!
+        editor
+        (make-xref-backend
+          'scheme
+          0
+          (lambda (context)
+            (scheme-buffer? (view-buffer (command-context-view context))))
+          (lambda (context)
+            (scheme-find-definition-command environments context))
+          (lambda (context)
+            (scheme-find-references-command environments context))))
       (for-each
         (lambda (entry)
           (editor-register-command!
@@ -653,13 +665,11 @@
         (list
           (list
             'xref.find-definition
-            (lambda (context)
-              (find-definition-command environments context))
+            (lambda (context) (dispatch-xref context 'xref.find-definition))
             "Jump to the definition at point.")
           (list
             'xref.find-references
-            (lambda (context)
-              (find-references-command environments context))
+            (lambda (context) (dispatch-xref context 'xref.find-references))
             "Publish and visit references for the definition at point.")
           (list
             'xref.next-location

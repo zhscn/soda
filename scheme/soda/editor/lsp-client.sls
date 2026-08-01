@@ -59,6 +59,7 @@
           (soda editor project-workspace)
           (soda editor state)
           (soda editor workspace-edit)
+          (soda editor xref)
           (soda json)
           (soda runtime))
 
@@ -3943,6 +3944,22 @@
 
 
   (define (install-lsp-commands! editor)
+    (editor-register-xref-backend!
+      editor
+      (make-xref-backend
+        'lsp
+        100
+        (lambda (context)
+          (let* ([context-editor (command-context-editor context)]
+                 [buffer (view-buffer (command-context-view context))]
+                 [session (active-view-lsp-session context-editor)])
+            (and session
+                 (eq? (lsp-client-session-state session) 'ready)
+                 (find-document session (buffer-id buffer)))))
+        (lambda (context)
+          (lsp-find-definition! (command-context-editor context)))
+        (lambda (context)
+          (lsp-find-references! (command-context-editor context)))))
     (editor-add-hook!
       editor
       'project-registry-changed

@@ -975,7 +975,7 @@
     "document-symbols did not publish nested symbols as a location list"))
 
 (define definition-effects
-  (editor-execute-command! editor 'lsp.find-definition))
+  (editor-execute-command! editor 'xref.find-definition))
 (check
   (and (= (length definition-effects) 1)
        (eq? (command-effect-kind (car definition-effects)) 'managed-process.write))
@@ -987,6 +987,11 @@
       (make-lsp-json-rpc-decoder)
       (managed-process-write-request-data
         (command-effect-payload (car definition-effects))))))
+(check
+  (string=?
+    (json-object-ref definition-message "method" #f)
+    "textDocument/definition")
+  "generic xref definition command did not route a C++ Buffer to LSP")
 (define definition-target-range
   (make-json-object
     (list
