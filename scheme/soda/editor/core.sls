@@ -721,6 +721,7 @@
           project-workspace-folder-resources
           project-workspace-configuration
           project-workspace-setting-ref
+          project-workspace-language-server-ref
           editor-project-workspace
           editor-project-workspaces-for-resource
           editor-project-workspace-for-resource

@@ -81,6 +81,33 @@
       "/workspace/build"))
   "ProjectWorkspace must freeze folders and declarative settings")
 
+(define language-server-workspace
+  (editor-project-workspace
+    editor
+    (make-project
+      'language-servers
+      '("/language-servers")
+      'manual 'explicit #f
+      (make-project-settings-layer
+        '((language-server . fallback-server)
+          (language-servers . ((cpp . clangd) (scheme . scheme-lsp)))))
+      '())))
+(check
+  (and
+    (eq?
+      (project-workspace-language-server-ref
+        language-server-workspace 'cpp #f)
+      'clangd)
+    (eq?
+      (project-workspace-language-server-ref
+        language-server-workspace 'scheme #f)
+      'scheme-lsp)
+    (eq?
+      (project-workspace-language-server-ref
+        language-server-workspace 'json #f)
+      'fallback-server))
+  "ProjectWorkspace must select a language-specific server before its default")
+
 (define mutable-configuration
   (list
     (cons 'lsp-settings

@@ -204,9 +204,13 @@
                   (cons profile result)
                   result)))))))
 
-  (define (workspace-lsp-server editor workspace language)
+  (define workspace-lsp-server
+    (case-lambda
+      [(editor workspace language)
+       (workspace-lsp-server editor workspace language #f)]
+      [(editor workspace language fallback)
     (let ([configured
-            (project-workspace-setting-ref workspace 'language-server #f)])
+            (project-workspace-language-server-ref workspace language fallback)])
       (cond
         [(not configured)
          (let ([servers (editor-lsp-servers-for-language editor language)])
@@ -230,7 +234,7 @@
            server)]
         [else
          (editor-user-error
-           'lsp.start "Project language-server setting must be a symbol or #f" configured)])))
+           'lsp.start "Project language-server setting must be a symbol or #f" configured)]))]))
 
   (define (lsp-client-capability-json)
     (make-json-object
@@ -927,12 +931,10 @@
            [routes (session-view-routes editor session)]
            [language (session-language session)]
            [profile
-             (let ([configured
-                     (project-workspace-setting-ref
-                       workspace 'language-server #f)])
-               (if configured
-                   (workspace-lsp-server editor workspace language)
-                   (lsp-client-session-server session)))])
+             (workspace-lsp-server
+               editor workspace language
+               (lsp-server-profile-name
+                 (lsp-client-session-server session)))])
       (let-values ([(replacement startup-effects)
                     (ensure-lsp-session! editor workspace language profile)])
         (if

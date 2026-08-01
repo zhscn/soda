@@ -206,8 +206,9 @@ session bootstrap 只在初次关联时使用 resource 和 Project discovery：
 
 Project-backed provider 通过 `editor-project-workspace-for-buffer` 读取一次
 `ProjectWorkspace`。该值冻结 Project revision、具名 workspace folders 与声明式
-configuration，并可转换为 `LanguageSessionKey`。`language-server` Project setting 选择
-已注册的 server profile；缺省时使用唯一的语言 profile。Project descriptor 更新由
+configuration，并可转换为 `LanguageSessionKey`。Project 的 `language-servers` setting 是
+`(language . server-name)` 的 association list，用于按语言选择已注册的 server profile；
+未列出的语言使用 `language-server` 默认值，仍无选择时使用唯一的语言 profile。Project descriptor 更新由
 `project-registry-changed` 通知 transport。identity 不变时 session 刷新 workspace
 snapshot 与 generation；identity 改变时 transport 关闭旧 documents，建立 replacement
 session，并恢复 Buffer attachment 和 View routing。普通语义请求只携带 attachment，

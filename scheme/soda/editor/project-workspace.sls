@@ -11,6 +11,7 @@
           project-workspace-folder-resources
           project-workspace-configuration
           project-workspace-setting-ref
+          project-workspace-language-server-ref
           editor-project-workspace
           editor-project-workspaces-for-resource
           editor-project-workspace-for-resource
@@ -152,6 +153,54 @@
         name))
     (let ([entry (assq name (project-workspace-configuration workspace))])
       (if entry (cdr entry) fallback)))
+
+  (define (project-workspace-language-server-ref workspace language fallback)
+    (unless (project-workspace? workspace)
+      (assertion-violation
+        'project-workspace-language-server-ref
+        "expected a ProjectWorkspace"
+        workspace))
+    (unless (symbol? language)
+      (assertion-violation
+        'project-workspace-language-server-ref
+        "language must be a symbol"
+        language))
+    (unless (or (not fallback) (symbol? fallback))
+      (assertion-violation
+        'project-workspace-language-server-ref
+        "fallback server must be a symbol or #f"
+        fallback))
+    (let ((default
+            (lambda ()
+              (let ((server
+                      (project-workspace-setting-ref
+                        workspace 'language-server fallback)))
+                (unless (or (not server) (symbol? server))
+                  (assertion-violation
+                    'project-workspace-language-server-ref
+                    "language-server must be a symbol or #f"
+                    server))
+                server)))
+          (servers
+            (project-workspace-setting-ref workspace 'language-servers #f)))
+      (cond
+        ((not servers) (default))
+        ((not (list? servers))
+         (assertion-violation
+           'project-workspace-language-server-ref
+           "language-servers must be an association list"
+           servers))
+        (else
+         (let ((entry (assq language servers)))
+           (if entry
+               (let ((server (cdr entry)))
+                 (unless (symbol? server)
+                   (assertion-violation
+                     'project-workspace-language-server-ref
+                     "language server names must be symbols"
+                     server))
+                 server)
+               (default)))))))
 
   (define (root-contains-resource? root resource)
     (let ([root-length (string-length root)]

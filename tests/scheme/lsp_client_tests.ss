@@ -45,7 +45,8 @@
     'workspace
     '("/workspace")
     'manual 'explicit #f
-    (make-project-settings-layer '())
+    (make-project-settings-layer
+      '((language-servers . ((cpp . clangd)))))
     '()))
 (editor-remember-project! editor project)
 (define workspace (editor-project-workspace editor project))
