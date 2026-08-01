@@ -1,0 +1,79 @@
+(library (soda editor tui-projection)
+  (export tui-ensure-session-text-projection!
+          tui-ensure-buffer-text-projection!)
+  (import (rnrs)
+          (soda document)
+          (soda editor buffer)
+          (soda editor edit)
+          (soda editor state)
+          (soda editor tui-application))
+
+  (define (projection-bytes definition model context)
+    (let ([project
+            (tui-application-definition-text-projection definition)])
+      (and
+        project
+        (let ([value (project model context)])
+          (cond
+            [(string? value) (string->utf8 value)]
+            [(bytevector? value) value]
+            [else
+             (assertion-violation
+               'tui.text-projection
+               "text projection must return a string or bytevector"
+               (tui-application-definition-name definition)
+               value)])))))
+
+  (define (buffer-text-size buffer)
+    (let ([snapshot (document-snapshot (buffer-document buffer))])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (let ([text (snapshot-text snapshot)])
+            (dynamic-wind
+              (lambda () #f)
+              (lambda () (text-size text))
+              (lambda () (text-close! text)))))
+        (lambda () (snapshot-close! snapshot)))))
+
+  (define (tui-ensure-session-text-projection! editor session)
+    (require-open-editor 'tui-ensure-session-text-projection! editor)
+    (unless (tui-session? session)
+      (assertion-violation
+        'tui-ensure-session-text-projection!
+        "expected a TuiSession"
+        session))
+    (unless (= (tui-session-projection-generation session)
+               (tui-session-generation session))
+      (let* ([buffer
+               (editor-buffer-ref editor (tui-session-buffer-id session))]
+             [bytes
+               (projection-bytes
+                 (tui-session-definition session)
+                 (tui-session-model session)
+                 (make-tui-application-context
+                   editor
+                   (tui-session-id session)
+                   (tui-session-buffer-id session)
+                   #f
+                   (tui-session-arguments session)))])
+        (when bytes
+          (buffer-replace-range-internal!
+            buffer 0 (buffer-text-size buffer) bytes))
+        (tui-session-set-projection-generation!
+          session
+          (tui-session-generation session))))
+    session)
+
+  (define (tui-ensure-buffer-text-projection! editor buffer)
+    (require-open-editor 'tui-ensure-buffer-text-projection! editor)
+    (unless (buffer? buffer)
+      (assertion-violation
+        'tui-ensure-buffer-text-projection!
+        "expected a Buffer"
+        buffer))
+    (let ([session
+            (editor-tui-session-for-buffer editor (buffer-id buffer))])
+      (when session
+        (tui-ensure-session-text-projection! editor session))
+      buffer)))

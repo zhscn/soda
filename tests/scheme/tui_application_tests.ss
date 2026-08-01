@@ -208,8 +208,11 @@
             (lambda () (text-close! text)))))
       (lambda () (snapshot-close! snapshot)))))
 
+(check (string=? (buffer-string application-buffer) "")
+  "opening an application must leave its text projection lazy")
+(tui-ensure-buffer-text-projection! editor application-buffer)
 (check (string=? (buffer-string application-buffer) "41")
-  "opening an application must publish its initial text projection")
+  "a projection reader must publish the current Model generation")
 
 (define first-frame (render-editor-frame editor 5 30))
 (define second-frame (render-editor-frame editor 5 30))
@@ -431,8 +434,11 @@
         (tui-session-view-state session active-view-id))
       'counter.value))
   "update must atomically publish Model and origin-targeted view actions")
+(check (string=? (buffer-string application-buffer) "41")
+  "a Model update must not eagerly rebuild the text projection")
+(tui-ensure-session-text-projection! editor session)
 (check (string=? (buffer-string application-buffer) "42")
-  "a Model update must publish the matching text projection")
+  "a projection reader must advance to the matching Model generation")
 (define updated-frame (render-editor-frame editor 5 30))
 (check
   (and

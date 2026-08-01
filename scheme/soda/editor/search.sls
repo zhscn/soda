@@ -13,7 +13,8 @@
           (soda editor prompt)
           (soda editor regexp)
           (soda editor setting)
-          (soda editor state))
+          (soda editor state)
+          (soda editor tui-projection))
 
   (define-record-type search-session
     (fields
@@ -163,7 +164,8 @@
           (search-session-program-set! session program)
           program)))
 
-  (define (search-session-source! session buffer)
+  (define (search-session-source! editor session buffer)
+    (tui-ensure-buffer-text-projection! editor buffer)
     (let ([revision (buffer-revision buffer)])
       (if (and
             (search-session-source session)
@@ -190,7 +192,8 @@
         (query-replace-session-program-set! session program)
         program)))
 
-  (define (query-replace-source! session buffer)
+  (define (query-replace-source! editor session buffer)
+    (tui-ensure-buffer-text-projection! editor buffer)
     (let ([revision (buffer-revision buffer)])
       (if (and
             (query-replace-session-source session)
@@ -297,7 +300,7 @@
          (editor-set-status-message! editor #f)]
         [else
          (let* ([program (search-session-program! session query)]
-                [source (search-session-source! session buffer)]
+                [source (search-session-source! editor session buffer)]
                 [size (regexp-source-byte-length source)]
                 [direction (search-session-direction session)]
                 [start
@@ -479,7 +482,7 @@
                (query-replace-session-case-policy session)
                query
                (query-replace-session-regexp? session))]
-           [source (query-replace-source! session buffer)]
+           [source (query-replace-source! editor session buffer)]
            [program (query-replace-program! session)]
            [scan (query-replace-session-scan-position session)]
            [size (regexp-source-byte-length source)]

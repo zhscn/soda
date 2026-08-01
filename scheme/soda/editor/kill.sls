@@ -11,7 +11,8 @@
           (soda editor buffer)
           (soda editor command-target)
           (soda editor edit)
-          (soda editor state))
+          (soda editor state)
+          (soda editor tui-projection))
 
   (define-record-type yank-state
     (fields view-id buffer-id revision start end index))
@@ -235,6 +236,7 @@
 
   (define (editor-copy-buffer-target! editor buffer target)
     (require-open-editor 'editor-copy-buffer-target! editor)
+    (tui-ensure-buffer-text-projection! editor buffer)
     (call-with-values
       (lambda ()
         (read-target

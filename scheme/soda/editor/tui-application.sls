@@ -64,6 +64,7 @@
           tui-session-model
           tui-session-generation
           tui-session-command-generation
+          tui-session-projection-generation
           tui-session-allocate-command-id!
           tui-session-state
           tui-session-pending-commands
@@ -73,6 +74,7 @@
           tui-session-set-state!
           tui-session-set-last-message!
           tui-session-set-replay-recorder!
+          tui-session-set-projection-generation!
           tui-session-advance-generation!
           tui-session-invalidate-commands!
           tui-session-set-pending-commands!
@@ -648,6 +650,7 @@
             (mutable model)
             (mutable generation)
             (mutable command-generation)
+            (mutable projection-generation)
             (mutable next-command-id)
             view-state-table
             (mutable view-state-ids)
@@ -677,7 +680,7 @@
         "display intent must be a symbol"
         display-intent))
     (%make-tui-session
-      id definition buffer-id arguments display-intent model 0 0 1
+      id definition buffer-id arguments display-intent model 0 0 -1 1
       (make-eqv-hashtable) '() '() 'initializing #f #f)]))
 
   (define-record-type tui-session-snapshot
@@ -698,6 +701,17 @@
         recorder))
     (tui-session-replay-recorder-set! session recorder)
     recorder)
+
+  (define (tui-session-set-projection-generation! session generation)
+    (require-session 'tui-session-set-projection-generation! session)
+    (unless (and (integer? generation) (exact? generation)
+                 (not (negative? generation)))
+      (assertion-violation
+        'tui-session-set-projection-generation!
+        "generation must be a non-negative exact integer"
+        generation))
+    (tui-session-projection-generation-set! session generation)
+    generation)
 
   (define-record-type
     (tui-input-event %make-tui-input-event tui-input-event?)

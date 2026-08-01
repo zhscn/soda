@@ -103,6 +103,7 @@
           (soda editor prompt)
           (soda editor resource-context)
           (soda editor state)
+          (soda editor tui-projection)
           (soda editor window)
           (soda editor workbench)
           (soda vfs))
@@ -876,7 +877,8 @@
          "file-line-ending must be lf, crlf, or cr"
          line-ending)]))
 
-  (define (snapshot-save-request buffer path adopt-path?)
+  (define (snapshot-save-request editor buffer path adopt-path?)
+    (tui-ensure-buffer-text-projection! editor buffer)
     (let* ([document (buffer-document buffer)]
            [snapshot (document-snapshot document)])
       (dynamic-wind
@@ -1721,6 +1723,7 @@
          adopt-path?)
        (let ([request
                (snapshot-save-request
+                 editor
                  buffer
                  path
                  adopt-path?)])

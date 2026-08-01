@@ -16,7 +16,9 @@
           tui-lifecycle-snapshot
           tui-synchronize-view-lifecycle!
           tui-route-pointer-event
-          tui-mouse-capability-active?)
+          tui-mouse-capability-active?
+          tui-ensure-session-text-projection!
+          tui-ensure-buffer-text-projection!)
   (import (rnrs)
           (soda document)
           (soda editor buffer)
@@ -28,6 +30,7 @@
           (soda editor presentation)
           (soda editor state)
           (soda editor tui-application)
+          (soda editor tui-projection)
           (soda editor window)
           (soda editor window-runtime)
           (soda tui application)
@@ -504,56 +507,6 @@
       (number->string id)
       "*"))
 
-  (define (projection-bytes definition model context)
-    (let ([project
-            (tui-application-definition-text-projection definition)])
-      (and
-        project
-        (let ([value (project model context)])
-          (cond
-            [(string? value) (string->utf8 value)]
-            [(bytevector? value) value]
-            [else
-             (assertion-violation
-               'tui.text-projection
-               "text projection must return a string or bytevector"
-               (tui-application-definition-name definition)
-               value)])))))
-
-  (define (sync-text-projection! editor session)
-    (let ([bytes
-            (projection-bytes
-              (tui-session-definition session)
-              (tui-session-model session)
-              (make-tui-application-context
-                editor
-                (tui-session-id session)
-                (tui-session-buffer-id session)
-                #f
-                #f))])
-      (when bytes
-        (let ([buffer
-                (editor-buffer-ref
-                  editor
-                  (tui-session-buffer-id session))])
-          (define size
-            (let ([snapshot
-                    (document-snapshot (buffer-document buffer))])
-              (dynamic-wind
-                (lambda () #f)
-                (lambda ()
-                  (let ([text (snapshot-text snapshot)])
-                    (dynamic-wind
-                      (lambda () #f)
-                      (lambda () (text-size text))
-                      (lambda () (text-close! text)))))
-                (lambda () (snapshot-close! snapshot)))))
-          (buffer-replace-range-internal!
-            buffer
-            0
-            size
-            bytes)))))
-
   (define (definition-ref editor name)
     (or
       (tui-application-catalog-ref
@@ -634,7 +587,6 @@
                 (buffer-set-local-setting!
                   buffer 'interaction-class 'interface)
                 (tui-session-set-state! session 'ready)
-                (sync-text-projection! editor session)
                 (let ([view
                         (editor-display-buffer!
                           editor
@@ -920,7 +872,6 @@
              (tui-session-set-model!
                session
                (tui-update-result-model result))
-             (sync-text-projection! editor session)
              (apply-view-actions!
                session
                message

@@ -189,6 +189,7 @@
           tui-session-model
           tui-session-generation
           tui-session-command-generation
+          tui-session-projection-generation
           tui-session-state
           tui-session-pending-commands
           tui-session-last-message
@@ -305,6 +306,8 @@
           tui-snapshot-session
           tui-restore!
           tui-restore-session-view-states!
+          tui-ensure-session-text-projection!
+          tui-ensure-buffer-text-projection!
           tui-session-snapshot?
           tui-session-snapshot-application-name
           tui-session-snapshot-buffer-resource
