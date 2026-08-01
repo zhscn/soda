@@ -5,6 +5,7 @@
         (soda editor display-placement)
         (soda editor location)
         (soda editor project)
+        (soda editor project-target)
         (soda editor resource-context)
         (soda editor state)
         (soda editor window)
@@ -48,6 +49,7 @@
   (and
     (= (length (editor-workbenches editor)) 2)
     (equal? (workbench-scope secondary) '(fixture))
+    (eq? (workbench-focused-project-id secondary) 'fixture)
     (= (length (window-node-leaves (workbench-layout secondary))) 1))
   "creating a workbench must preserve an independent scope and layout")
 
@@ -198,10 +200,64 @@
         context-editor
         (view-id (editor-active-view context-editor)))))
   "multiple Workbench Projects must not produce an implicit Project hint")
+(buffer-set-creation-context!
+  context-buffer
+  (make-resource-context "/work/fixture" #f project #f))
+(editor-focus-workbench-project!
+  context-editor
+  (workbench-id (editor-active-workbench context-editor))
+  other-project)
+(check
+  (and
+    (eq?
+      (editor-resolve-project
+        context-editor
+        (editor-active-view context-editor)
+        'workspace)
+      other-project)
+    (eq?
+      (editor-resolve-project
+        context-editor
+        (editor-active-view context-editor)
+        'resource)
+      project))
+  "Project resolution must separate Workbench focus from View provenance")
+(let ([target
+        (editor-project-target
+          context-editor
+          (editor-active-view context-editor)
+          'workspace)])
+  (check
+    (and
+      (eq? (project-target-project target) other-project)
+      (string=? (project-target-root target) "/other")
+      (=
+        (project-target-origin-workbench-id target)
+        (workbench-id (editor-active-workbench context-editor)))
+      (=
+        (project-target-origin-view-id target)
+        (view-id (editor-active-view context-editor)))
+      (eq?
+        (resource-context-project-hint
+          (project-target-resource-context target))
+        other-project))
+    "ProjectTarget must freeze Project and origin at command dispatch"))
 (editor-workbench-remove-project!
   context-editor
   (workbench-id (editor-active-workbench context-editor))
   (project-id other-project))
+(check
+  (and
+    (not
+      (workbench-focused-project-id
+        (editor-active-workbench context-editor)))
+    (eq?
+      (editor-resolve-project
+        context-editor
+        (editor-active-view context-editor)
+        'workspace)
+      project))
+  "removing the focused Project must clear focus and preserve View provenance")
 
 (define generated
   (editor-create-buffer!

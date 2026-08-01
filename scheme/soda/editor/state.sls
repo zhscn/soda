@@ -31,11 +31,13 @@
           editor-workbench-ref
           editor-active-workbench
           editor-workbench-for-view
+          editor-workbench-focused-project
           editor-create-workbench!
           editor-switch-workbench!
           editor-close-workbench!
           editor-workbench-adopt-project!
           editor-workbench-remove-project!
+          editor-focus-workbench-project!
           editor-prompts
           editor-active-prompt
           editor-open-prompt!
@@ -1939,6 +1941,22 @@
           (window-node-leaves (workbench-layout workbench))))
       (editor-workbenches value)))
 
+  (define (editor-workbench-focused-project value workbench)
+    (require-open-editor
+      'editor-workbench-focused-project
+      value)
+    (unless (workbench? workbench)
+      (assertion-violation
+        'editor-workbench-focused-project
+        "expected a Workbench"
+        workbench))
+    (let ([id (workbench-focused-project-id workbench)])
+      (and
+        id
+        (project-catalog-find-known
+          (editor-project-catalog value)
+          id))))
+
   (define (editor-create-workbench! value name scope)
     (require-open-editor 'editor-create-workbench! value)
     (when (editor-active-prompt value)
@@ -2053,6 +2071,28 @@
       (when removed
         (editor-invalidate! value 'configuration))
       removed))
+
+  (define (editor-focus-workbench-project!
+            value workbench-id project)
+    (require-open-editor
+      'editor-focus-workbench-project!
+      value)
+    (unless (or (not project) (project? project))
+      (assertion-violation
+        'editor-focus-workbench-project!
+        "expected a Project or #f"
+        project))
+    (let ([workbench (editor-workbench-ref value workbench-id)])
+      (if project
+          (begin
+            (editor-remember-project! value project)
+            (workbench-adopt-project! workbench (project-id project))
+            (workbench-set-focused-project!
+              workbench
+              (project-id project)))
+          (workbench-set-focused-project! workbench #f))
+      (editor-invalidate! value 'configuration)
+      project))
 
   (define (editor-set-window-root! value root)
     (require-open-editor 'editor-set-window-root! value)
@@ -3765,6 +3805,10 @@
               (editor-project-catalog value)
               id)])
       (when forgotten
+        (for-each
+          (lambda (workbench)
+            (workbench-remove-project! workbench id))
+          (editor-workbenches value))
         (editor-invalidate! value 'configuration))
       forgotten))
 

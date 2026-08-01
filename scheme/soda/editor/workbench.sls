@@ -4,6 +4,7 @@
           workbench-id
           workbench-name
           workbench-scope
+          workbench-focused-project-id
           workbench-layout
           workbench-active-window-id
           workbench-mru
@@ -19,6 +20,7 @@
           workbench-set-active-window-id!
           workbench-adopt-project!
           workbench-remove-project!
+          workbench-set-focused-project!
           workbench-touch-buffer!
           workbench-replace-mru!
           workbench-set-slot!
@@ -39,6 +41,7 @@
       id
       (mutable name)
       (mutable scope)
+      (mutable focused-project-id)
       (mutable layout)
       (mutable active-window-id)
       (mutable mru)
@@ -67,8 +70,14 @@
                  (cdr remaining)))
           (loop (cdr remaining))))))
 
-  (define (make-workbench
-            id name scope layout active-window-id mru slots pinned-window-ids)
+  (define make-workbench
+    (case-lambda
+      [(id name scope layout active-window-id mru slots pinned-window-ids)
+       (make-workbench
+         id name scope (and (pair? scope) (car scope))
+         layout active-window-id mru slots pinned-window-ids)]
+      [(id name scope focused-project-id
+           layout active-window-id mru slots pinned-window-ids)
     (unless (exact-positive-integer? id)
       (assertion-violation
         'make-workbench
@@ -87,6 +96,15 @@
       (assertion-violation
         'make-workbench
         "scope must contain unique Project ids"
+        scope))
+    (unless
+      (or
+        (not focused-project-id)
+        (member focused-project-id scope))
+      (assertion-violation
+        'make-workbench
+        "focused Project must belong to the Workbench scope"
+        focused-project-id
         scope))
     (unless (window-node? layout)
       (assertion-violation
@@ -142,9 +160,10 @@
         "pinned windows must be unique layout leaves"
         pinned-window-ids))
     (%make-workbench
-      id name scope layout active-window-id mru slots pinned-window-ids
+      id name scope focused-project-id
+      layout active-window-id mru slots pinned-window-ids
       (make-jump-graph)
-      '()))
+      '())]))
 
   (define (require-workbench who value)
     (unless (workbench? value)
@@ -209,6 +228,8 @@
       (workbench-scope-set!
         value
         (append (workbench-scope value) (list project-id))))
+    (unless (workbench-focused-project-id value)
+      (workbench-focused-project-id-set! value project-id))
     (workbench-scope value))
 
   (define (workbench-remove-project! value project-id)
@@ -219,8 +240,24 @@
           value
           (filter
             (lambda (id) (not (equal? id project-id)))
-            (workbench-scope value))))
+            (workbench-scope value)))
+        (when
+          (equal? project-id (workbench-focused-project-id value))
+          (workbench-focused-project-id-set! value #f)))
       (and present? project-id)))
+
+  (define (workbench-set-focused-project! value project-id)
+    (require-workbench 'workbench-set-focused-project! value)
+    (unless
+      (or
+        (not project-id)
+        (member project-id (workbench-scope value)))
+      (assertion-violation
+        'workbench-set-focused-project!
+        "focused Project must belong to the Workbench scope"
+        project-id))
+    (workbench-focused-project-id-set! value project-id)
+    project-id)
 
   (define (workbench-touch-buffer! value buffer-id)
     (require-workbench 'workbench-touch-buffer! value)

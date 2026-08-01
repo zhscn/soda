@@ -95,10 +95,39 @@
 
 (define encoded (workbench-session-encode source))
 (define snapshot (workbench-session-decode encoded))
+(define (datum->bytes value)
+  (call-with-values
+    open-string-output-port
+    (lambda (port extract)
+      (write value port)
+      (string->utf8 (extract)))))
+(define encoded-datum
+  (read (open-string-input-port (utf8->string encoded))))
+(define version-2-datum
+  (list
+    (car encoded-datum)
+    2
+    (caddr encoded-datum)
+    (map
+      (lambda (workbench)
+        (list
+          (list-ref workbench 0)
+          (list-ref workbench 1)
+          (list-ref workbench 3)
+          (list-ref workbench 4)
+          (list-ref workbench 5)
+          (list-ref workbench 6)
+          (list-ref workbench 7)))
+      (cadddr encoded-datum))))
+(define version-2-snapshot
+  (workbench-session-decode (datum->bytes version-2-datum)))
 (define session-resources (workbench-session-resources snapshot))
 (check
   (and
     (= (length session-resources) 3)
+    (equal?
+      session-resources
+      (workbench-session-resources version-2-snapshot))
     (for-all
       (lambda (resource) (member resource session-resources))
       '("/workspace/a.scm" "/workspace/b.scm" "/workspace/c.scm")))
@@ -126,11 +155,15 @@
 (check
   (and
     (= (length (workbench-scope restored-primary)) 1)
+    (workbench-focused-project-id restored-primary)
+    (equal?
+      (workbench-focused-project-id restored-primary)
+      (car (workbench-scope restored-primary)))
     (exists
       (lambda (candidate)
         (string=? (project-primary-root candidate) "/workspace"))
       (editor-known-projects restored)))
-  "restore must rediscover Workbench Project scope")
+  "restore must rediscover Workbench Project scope and focus")
 (check (eq? (editor-active-workbench restored) restored-secondary)
   "restore must select the persisted active Workbench")
 (check (= (length (window-node-leaves (workbench-layout restored-secondary))) 2)

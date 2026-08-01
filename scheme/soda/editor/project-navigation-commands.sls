@@ -10,21 +10,17 @@
           (soda editor file)
           (soda editor project)
           (soda editor project-resource)
+          (soda editor project-target)
           (soda editor prompt)
           (soda editor resource-context)
           (soda editor state)
           (soda vfs))
 
-  (define (context-project context)
-    (let* ([editor (command-context-editor context)]
-           [view (command-context-view context)]
-           [resource-context
-             (editor-view-resource-context editor (view-id view))])
-      (or
-        (resource-context-project-hint resource-context)
-        (editor-discover-project
-          editor
-          (resource-context-base-resource resource-context)))))
+  (define (context-project context policy)
+    (editor-resolve-project
+      (command-context-editor context)
+      (command-context-view context)
+      policy))
 
   (define (project-context editor view project base)
     (let ([current
@@ -135,7 +131,7 @@
       "Project file: "
       (lambda (context)
         (let* ([editor (command-context-editor context)]
-               [project (context-project context)])
+               [project (context-project context 'workspace)])
           (resource-choice-source
             (if project (list project) '())
             'project-file
@@ -166,7 +162,7 @@
       "Project directory: "
       (lambda (context)
         (let* ([editor (command-context-editor context)]
-               [project (context-project context)])
+               [project (context-project context 'workspace)])
           (resource-choice-source
             (if project (list project) '())
             'project-directory
@@ -186,7 +182,7 @@
 
   (define (project-buffer-choice-source context)
     (let* ([editor (command-context-editor context)]
-           [project (context-project context)]
+           [project (context-project context 'workspace)]
            [items
              (if
                (not project)
@@ -267,7 +263,7 @@
 
   (define (find-project-file-dispatch-command context)
     (let* ([editor (command-context-editor context)]
-           [project (context-project context)])
+           [project (context-project context 'workspace)])
       (cond
         [(not project)
          (editor-set-status-message! editor "No Project found")
@@ -320,7 +316,7 @@
     (when buffer
       (let* ([editor (command-context-editor context)]
              [view (command-context-view context)]
-             [project (context-project context)])
+             [project (context-project context 'workspace)])
         (editor-display-buffer!
           editor
           (make-display-request
@@ -337,7 +333,7 @@
   (define (cycle-project-buffer! context delta)
     (let* ([editor (command-context-editor context)]
            [view (command-context-view context)]
-           [project (context-project context)]
+           [project (context-project context 'workspace)]
            [buffers (if project (project-buffers editor project) '())]
            [current (view-buffer view)])
       (cond
@@ -403,12 +399,12 @@
                       (loop (+ position 1)))))))
             markers)))))
 
-  (define (contextual-resource-reader prompt history selector)
+  (define (contextual-resource-reader prompt history policy selector)
     (interactive-completing-read
       prompt
       (lambda (context)
         (let* ([editor (command-context-editor context)]
-               [project (context-project context)])
+               [project (context-project context policy)])
           (resource-choice-source
             (if project (list project) '())
             history
@@ -423,6 +419,7 @@
     (contextual-resource-reader
       "Other project file: "
       'project-other-file
+      'resource
       (lambda (editor project context)
         (let ([resource
                 (buffer-resource
@@ -435,6 +432,7 @@
     (contextual-resource-reader
       "Project test file: "
       'project-test-file
+      'resource
       (lambda (editor project context)
         (filter test-resource? (project-resources editor project)))))
 

@@ -9,6 +9,8 @@
 | 异步 file/display 请求的冻结 origin | 已实现 |
 | 通用 `ResourceContext`、View origin 与文件选择上下文冻结 | 已实现 |
 | Project identity、发现缓存与 known registry | 已实现 |
+| Workbench Project focus 与命令解析 policy | 已实现 |
+| ProjectTarget dispatch 值与 origin 冻结 | 已实现 |
 | Project resource 流式枚举、snapshot 与 watch lifecycle | 已实现 |
 | Project settings layer、task definition 与 comint runtime | 已实现 |
 | Workbench lifecycle、scope、MRU、slot 与 pinned window | 已实现 |
@@ -26,7 +28,7 @@
 - **Project** 是资源发现、配置、任务和构建入口的边界。
 - **LanguageSession** 是某个语言服务实例及其语义环境。
 - **Window layout** 是屏幕上的 View 排布，不属于某个 Project。
-- **Workbench** 组合 Project scope、layout 和一次工作会话的 recency。
+- **Workbench** 组合 Project scope、focused Project、layout 和一次工作会话的 recency。
 
 Project、LanguageSession 和 Workbench 可以相互引用，但不拥有彼此。编辑器没有全局
 `current-project`，进程启动目录也不定义当前 Project。
@@ -41,7 +43,7 @@ View ──> ResourceContext? ──> Project hint?
   │             └──────────> explicit process/file request cwd
   └──> LanguageAttachment ──> LanguageSession
 
-Workbench = Project scope + WindowLayout + MRU + placement slots
+Workbench = Project scope + focused Project? + WindowLayout + MRU + placement slots
 ```
 
 ## ResourceContext
@@ -66,8 +68,9 @@ ResourceContext {
 4. Workbench scope 中唯一且适用的 Project；
 5. editor 启动目录。
 
-存在多个可用 Project 时，命令通过 completing-read 选择，不按最近一次命令或全局
-cwd 猜测。异步 file、directory、process 和 language 请求在创建时冻结 context；
+存在多个可用 Project 时，资源归属不从 Workbench focus 推断。workspace 命令可以使用
+Workbench focus，resource 命令优先使用 Buffer 的 home Project。异步 file、directory、
+process 和 language 请求在创建时冻结 context；
 完成时不重新读取 active View，因此切换 Buffer、Window 或 Workbench 不会改变请求
 落点和 working directory。
 
@@ -96,9 +99,9 @@ Project {
 远程或暂时不可访问的 resource 不缓存失败。显式 known-project registry 独立保存用户
 选择过的 root，使 project switch 不依赖当前 Buffer 或启动目录。
 
-project switch 是“选择 Project 并在其 ResourceContext 中执行 action”，不改变全局
-cwd，不替换 WindowLayout，也不把所有后续 Buffer 归入该 Project。Project commands
-可以从 active resource 发现 Project，也可以直接从 known registry 选择。
+project focus 是 Workbench 的命令路由状态。它不改变全局 cwd、WindowLayout、View 的
+ResourceContext 或 Buffer 的 home Project。Project commands 可以从 active resource
+发现 Project，也可以使用 Workbench focus 或直接从 known registry 选择。
 
 Project 拥有：
 
@@ -112,9 +115,34 @@ fallback 读取。task definition 使用稳定 symbol id，携带显示名、arg
 working directory 与可选 comint prompt。任务的相对 working directory 以 Project
 primary root 解析，并通过 managed process/comint 执行。
 
-`project.switch` 从 known-project registry 选择 Project，把 origin View 的
-ResourceContext 切换到目标 root 后启动 `find-file`。`project.run-task` 选择 Project
-task 并在定义的 working directory 中启动 process interaction；两者都不修改进程 cwd。
+`project.focus` 从 known-project registry 选择 Project 并更新 active Workbench 的
+focus。`project.switch` 执行相同的 focus 更新，然后在目标 Project 中启动
+`project.find-file`。`project.run-task` 选择 Project task 并在定义的 working directory
+中启动 process interaction。这些命令都不修改进程 cwd 或 origin View 的 provenance。
+
+Project 解析使用两种显式 policy：
+
+```text
+workspace: explicit -> Workbench focus -> View home -> unique scope
+resource:  explicit -> View home -> Workbench focus -> unique scope
+```
+
+文件选择、搜索、构建和 shell 等 workspace 操作使用 `workspace`。other-file、test-file
+以及面向当前资源的语义操作使用 `resource`。需要跨越异步边界的操作把解析结果冻结为：
+
+```text
+ProjectTarget {
+  project,
+  root,
+  origin_workbench_id,
+  origin_view_id,
+  resource_context
+}
+```
+
+ProjectTarget 为异步 project command 提供 dispatch 值；callback 可以从中读取目标与
+origin，而不重新查询 active Workbench、active View 或 focus。只需要 Project identity
+的内部请求可以直接携带不可变 Project 值。
 
 Project 不拥有 Buffer、View、Window、Workbench、LanguageSession、Scheme semantic
 index 或 process。一个 Buffer 可以通过路径发现 home Project，也可以只是 visitor；
@@ -146,6 +174,7 @@ Workbench {
   id,
   name,
   scope: ordered ProjectId set,
+  focused_project: ProjectId?,
   layout: WindowLayout,
   active_window,
   mru: BufferId list,
@@ -156,6 +185,10 @@ Workbench {
 
 编辑器始终有一个 active Workbench。只有一个 Workbench 时不要求额外操作或 UI。
 Workbench 不提供自己的 cwd，也不把 scope 合成为单一 Project。
+
+focused Project 必须属于 scope。adopt 第一个 Project 时它成为默认 focus；移除 focused
+Project 时 focus 清空。focus 只影响 workspace 命令的默认目标，不参与 Buffer 归属、
+LanguageAttachment 或 display placement。
 
 某 Workbench 可见的 Buffer 集合是：
 
@@ -234,7 +267,7 @@ bootstrap、配置和 task discovery。SchemeEnvironment 不从 Project root 推
 
 Workbench session 使用稳定 resource 与结构值序列化：
 
-- name、scope roots 与 MRU resources；
+- name、scope roots、focused Project root 与 MRU resources；
 - WindowLayout、role、pinned 与 active leaf；
 - 每个 View 的 resource、selection fallback、viewport 与可恢复 context hint；
 - 有界 jump walk 和 durable jump graph。
@@ -244,10 +277,10 @@ Workbench session 使用稳定 resource 与结构值序列化：
 
 ## 设计依据
 
-Emacs Buffer 的 `default-directory` 和 Projectile 的 root finder 表明 Project 应从
-当前资源发现，known-project registry 与启动 cwd 保持独立；project switch 只是以
-目标 root 执行 action。Soda 使用显式 ResourceContext 代替动态目录绑定，使异步请求
-不受 active Buffer 变化影响。
+Emacs Buffer 的 `default-directory` 和 Projectile 的 root finder 表明资源归属应从
+当前 Buffer provenance 发现，known-project registry 与启动 cwd 保持独立。Soda 使用
+Workbench focus 表达 workspace 命令目标，使用显式 ResourceContext 和 ProjectTarget
+保证异步请求不受 active Buffer 或 focus 变化影响。
 
 Emacs `display-buffer` 说明显示需要 policy，但在显示时按 Buffer 名和窗口几何恢复
 调用意图会产生不可预测的 fallback。Kakoune 的具名 tools/jump client 表明意图可以

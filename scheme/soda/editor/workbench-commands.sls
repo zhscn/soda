@@ -5,8 +5,8 @@
           (soda editor command-runtime)
           (soda editor completion)
           (soda editor project)
+          (soda editor project-target)
           (soda editor prompt)
-          (soda editor resource-context)
           (soda editor state)
           (soda editor workbench))
 
@@ -92,12 +92,8 @@
   (define (adopt-current-project-command context)
     (let* ([editor (command-context-editor context)]
            [view (command-context-view context)]
-           [resource-context
-             (editor-view-resource-context editor (view-id view))]
            [project
-             (editor-discover-project
-               editor
-               (resource-context-base-resource resource-context))])
+             (editor-resolve-project editor view 'resource)])
       (if project
           (begin
             (editor-workbench-adopt-project!

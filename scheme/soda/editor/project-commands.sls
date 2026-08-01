@@ -10,9 +10,11 @@
           (soda editor process-comint)
           (soda editor project)
           (soda editor project-resource)
+          (soda editor project-target)
           (soda editor prompt)
           (soda editor resource-context)
           (soda editor state)
+          (soda editor workbench)
           (soda vfs))
 
   (define-record-type
@@ -246,14 +248,11 @@
             (and candidate
                  (completion-item-payload candidate)))))))
 
-  (define (current-project editor view)
-    (let ([context
-            (editor-view-resource-context editor (view-id view))])
-      (or
-        (resource-context-project-hint context)
-        (editor-discover-project
-          editor
-          (resource-context-base-resource context)))))
+  (define (workspace-project editor view)
+    (editor-resolve-project editor view 'workspace))
+
+  (define (resource-project editor view)
+    (editor-resolve-project editor view 'resource))
 
   (define (project-resource-refresh-effect editor project)
     (let* ([current
@@ -276,7 +275,7 @@
     (interactive)
     (let* ([editor (command-context-editor context)]
            [project
-             (current-project
+             (resource-project
                editor
                (command-context-view context))])
       (if project
@@ -323,7 +322,7 @@
     (interactive)
     (let* ([editor (command-context-editor context)]
            [project
-             (current-project
+             (workspace-project
                editor
                (command-context-view context))])
       (if project
@@ -340,36 +339,39 @@
             (editor-set-status-message! editor "No Project found")
             '()))))
 
-  (define-command (switch-project-command context project)
-    "Select a known Project and find a file from its root context."
+  (define (focus-project! context project)
+    (and
+      project
+      (let* ([editor (command-context-editor context)]
+             [view (command-context-view context)]
+             [workbench
+               (editor-workbench-for-view editor (view-id view))])
+        (editor-focus-workbench-project!
+          editor
+          (workbench-id workbench)
+          project)
+        (editor-set-status-message!
+          editor
+          (string-append
+            "Focused Project: "
+            (project-primary-root project)))
+        project)))
+
+  (define-command (focus-project-command context project)
+    "Select the focused Project for the current Workbench."
     (interactive known-project-reader)
-    (if (not project)
-        '()
-        (let* ([editor (command-context-editor context)]
-               [view (command-context-view context)]
-               [old-context
-                 (editor-view-resource-context
-                   editor
-                   (view-id view))])
-          (editor-remember-project! editor project)
-          (editor-set-view-resource-context!
-            editor
-            (view-id view)
-            (make-resource-context
-              (project-primary-root project)
-              (view-id view)
-              project
-              (resource-context-language-context old-context)))
-          (append
-            (if
-              (editor-project-resource-snapshot
-                editor (project-id project))
-              '()
-              (list (project-resource-refresh-effect editor project)))
-            (list
-              (make-command-effect
-                'command.invoke
-                (make-command-message 'file.find #f)))))))
+    (focus-project! context project)
+    '())
+
+  (define-command (switch-project-command context project)
+    "Focus a known Project and find a file from its root."
+    (interactive known-project-reader)
+    (if (focus-project! context project)
+        (list
+          (make-command-effect
+            'command.invoke
+            (make-command-message 'project.find-file #f)))
+        '()))
 
   (define-command (switch-open-project-command context project)
     "Select a known Project that currently owns an open Buffer."
@@ -424,7 +426,7 @@
 
   (define (remove-current-project-command context)
     (let* ([editor (command-context-editor context)]
-           [project (current-project editor (command-context-view context))])
+           [project (workspace-project editor (command-context-view context))])
       (if project
           (forget-project-command context project)
           (begin
@@ -448,7 +450,7 @@
 
   (define (invalidate-current-project-command context)
     (let* ([editor (command-context-editor context)]
-           [project (current-project editor (command-context-view context))])
+           [project (workspace-project editor (command-context-view context))])
       (if
         project
         (begin
@@ -487,7 +489,7 @@
   (define (open-project-root-command context)
     (let* ([editor (command-context-editor context)]
            [view (command-context-view context)]
-           [project (current-project editor view)])
+           [project (workspace-project editor view)])
       (if
         (not project)
         (begin
@@ -510,7 +512,7 @@
 
   (define (project-info-command context)
     (let* ([editor (command-context-editor context)]
-           [project (current-project editor (command-context-view context))]
+           [project (workspace-project editor (command-context-view context))]
            [snapshot
              (and
                project
@@ -558,7 +560,7 @@
   (define (run-lifecycle-command state phase context)
     (let* ([editor (command-context-editor context)]
            [project
-             (current-project editor (command-context-view context))])
+             (workspace-project editor (command-context-view context))])
       (cond
         [(not project)
          (editor-set-status-message! editor "No Project found")
@@ -603,7 +605,7 @@
       (interactive-string "Run in Project root: " 'project-command))
     (let* ([editor (command-context-editor context)]
            [project
-             (current-project editor (command-context-view context))])
+             (workspace-project editor (command-context-view context))])
       (if project
           (profile-effect
             (project-profile
@@ -618,7 +620,7 @@
       (interactive-string "Search Project regexp: " 'project-search))
     (let* ([editor (command-context-editor context)]
            [project
-             (current-project editor (command-context-view context))])
+             (workspace-project editor (command-context-view context))])
       (cond
         [(zero? (string-length query))
          (editor-set-status-message! editor "Project search is empty")
@@ -647,7 +649,7 @@
   (define (open-project-program-command context name arguments prompt)
     (let* ([editor (command-context-editor context)]
            [project
-             (current-project editor (command-context-view context))])
+             (workspace-project editor (command-context-view context))])
       (if project
           (profile-effect
             (project-profile project name arguments prompt 'pty))
@@ -665,7 +667,7 @@
   (define (open-project-repl-command context)
     (let* ([editor (command-context-editor context)]
            [project
-             (current-project editor (command-context-view context))])
+             (workspace-project editor (command-context-view context))])
       (cond
         [(not project)
          (editor-set-status-message! editor "No Project found")
@@ -769,6 +771,12 @@
         'project.refresh-resources
         refresh-project-resources-command
         "Refresh the current Project resource snapshot."))
+    (editor-register-command!
+      editor
+      (make-interactive-context-command
+        'project.focus
+        focus-project-command
+        "Select the focused Project for the current Workbench."))
     (editor-register-command!
       editor
       (make-interactive-context-command

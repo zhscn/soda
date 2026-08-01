@@ -33,6 +33,7 @@
         (soda editor prompt)
         (only (soda editor project-resource)
               project-resource-request?
+              project-resource-request-project
               project-resource-request-continuation)
         (soda editor repl)
         (soda editor save-place-store)
@@ -351,6 +352,12 @@
       'project.add)
     (command-registered?
       (editor-command-registry editor)
+      'project.focus)
+    (command-registered?
+      (editor-command-registry editor)
+      'project.switch)
+    (command-registered?
+      (editor-command-registry editor)
       'project.switch-open)
     (command-registered?
       (editor-command-registry editor)
@@ -477,6 +484,74 @@
   editor
   (view-id (editor-active-view editor))
   editor-test-resource-context)
+(define editor-switch-project
+  (make-project
+    'editor-switch-project
+    '("/virtual/other-project")
+    'manual
+    'manual
+    #f #f '()))
+(editor-remember-project! editor editor-switch-project)
+(let* ([context
+         (make-command-context
+           editor (editor-active-view editor) #f #f #f)]
+       [effects
+         (execute-command!
+           (editor-command-registry editor)
+           'project.switch
+           context
+           (list editor-switch-project))]
+       [message
+         (and
+           (= (length effects) 1)
+           (eq? (command-effect-kind (car effects)) 'command.invoke)
+           (command-effect-payload (car effects)))])
+  (unless
+    (and
+      (eq?
+        (editor-workbench-focused-project
+          editor
+          (editor-active-workbench editor))
+        editor-switch-project)
+      (eq?
+        (resource-context-project-hint
+          (editor-view-resource-context
+            editor
+            (view-id (editor-active-view editor))))
+        editor-test-project)
+      (command-message? message)
+      (eq? (command-message-name message) 'project.find-file))
+    (error
+      'editor-tests
+      "Project switch conflated Workbench focus with View context"
+      effects))
+  (let* ([find-effects
+           (execute-command!
+             (editor-command-registry editor)
+             'project.find-file
+             context
+             '())]
+         [request
+           (and
+             (pair? find-effects)
+             (eq?
+               (command-effect-kind (car find-effects))
+               'project.refresh-resources)
+             (command-effect-payload (car find-effects)))])
+    (unless
+      (and
+        (project-resource-request? request)
+        (eq?
+          (project-resource-request-project request)
+          editor-switch-project))
+      (error
+        'editor-tests
+        "Project command ignored the Workbench focus"
+        find-effects))))
+(editor-focus-workbench-project!
+  editor
+  (workbench-id (editor-active-workbench editor))
+  editor-test-project)
 (editor-clear-project-resource-snapshot!
   editor
   (project-id editor-test-project))

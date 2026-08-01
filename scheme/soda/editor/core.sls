@@ -53,16 +53,19 @@
           editor-workbench-ref
           editor-active-workbench
           editor-workbench-for-view
+          editor-workbench-focused-project
           editor-create-workbench!
           editor-switch-workbench!
           editor-close-workbench!
           editor-workbench-adopt-project!
           editor-workbench-remove-project!
+          editor-focus-workbench-project!
           make-workbench
           workbench?
           workbench-id
           workbench-name
           workbench-scope
+          workbench-focused-project-id
           workbench-layout
           workbench-active-window-id
           workbench-mru
@@ -74,6 +77,7 @@
           workbench-set-current-location-list!
           workbench-replace-location-lists!
           workbench-set-name!
+          workbench-set-focused-project!
           workbench-set-slot!
           workbench-replace-mru!
           workbench-clear-slot!
@@ -373,6 +377,16 @@
           project-task-definition-prompt
           project-find-task
           project-contains-resource?
+          make-project-target
+          project-target?
+          project-target-project
+          project-target-root
+          project-target-origin-workbench-id
+          project-target-origin-view-id
+          project-target-resource-context
+          editor-view-home-project
+          editor-resolve-project
+          editor-project-target
           make-project-finder
           make-marker-project-finder
           project-finder?
@@ -1213,6 +1227,7 @@
           (soda editor project-commands)
           (soda editor project-navigation-commands)
           (soda editor project-resource)
+          (soda editor project-target)
           (soda editor repl)
           (soda editor resource-context)
           (soda editor scheme-completion)

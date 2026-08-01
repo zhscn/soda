@@ -23,7 +23,7 @@
           (soda editor workbench))
 
   (define schema-name 'soda-workbench-session)
-  (define schema-version 2)
+  (define schema-version 3)
 
   (define-record-type
     (workbench-session-snapshot
@@ -217,6 +217,11 @@
           (map
             (lambda (id) (project-root-for-id editor id))
             (workbench-scope workbench)))
+        (and
+          (workbench-focused-project-id workbench)
+          (project-root-for-id
+            editor
+            (workbench-focused-project-id workbench)))
         (filter
           (lambda (value) value)
           (map
@@ -386,17 +391,52 @@
   (define (valid-workbench-datum? value)
     (and
       (list? value)
-      (= (length value) 7)
+      (= (length value) 8)
       (non-empty-string? (list-ref value 0))
       (list? (list-ref value 1))
       (for-all stable-resource? (list-ref value 1))
-      (list? (list-ref value 2))
-      (for-all stable-resource? (list-ref value 2))
-      (exact-non-negative-integer? (list-ref value 3))
-      (valid-layout-datum? (list-ref value 4))
-      (valid-jump-graph-datum? (list-ref value 5))
-      (list? (list-ref value 6))
-      (for-all valid-location-list-datum? (list-ref value 6))))
+      (or
+        (not (list-ref value 2))
+        (member (list-ref value 2) (list-ref value 1)))
+      (list? (list-ref value 3))
+      (for-all stable-resource? (list-ref value 3))
+      (exact-non-negative-integer? (list-ref value 4))
+      (valid-layout-datum? (list-ref value 5))
+      (valid-jump-graph-datum? (list-ref value 6))
+      (list? (list-ref value 7))
+      (for-all valid-location-list-datum? (list-ref value 7))))
+
+  (define (upgrade-v2-workbench-datum value)
+    (unless (and (list? value) (= (length value) 7))
+      (assertion-violation
+        'workbench-session-decode
+        "malformed version 2 Workbench session state"
+        value))
+    (let ([roots (list-ref value 1)])
+      (list
+        (list-ref value 0)
+        roots
+        (and (list? roots)
+             (= (length roots) 1)
+             (car roots))
+        (list-ref value 2)
+        (list-ref value 3)
+        (list-ref value 4)
+        (list-ref value 5)
+        (list-ref value 6))))
+
+  (define (normalize-session-datum datum)
+    (if (and (list? datum)
+             (= (length datum) 4)
+             (eq? (car datum) schema-name)
+             (eqv? (cadr datum) 2)
+             (list? (cadddr datum)))
+        (list
+          schema-name
+          schema-version
+          (caddr datum)
+          (map upgrade-v2-workbench-datum (cadddr datum)))
+        datum))
 
   (define (workbench-session-decode bytes)
     (unless (bytevector? bytes)
@@ -412,7 +452,7 @@
            "invalid Workbench session state"
            condition)])
       (let* ([port (open-string-input-port (utf8->string bytes))]
-             [datum (read port)]
+             [datum (normalize-session-datum (read port))]
              [trailing (read port)])
         (unless
           (and
@@ -477,16 +517,16 @@
         (fold-left
           (lambda (result workbench)
             (append
-              (list-ref workbench 2)
-              (map cadr (car (list-ref workbench 5)))
+              (list-ref workbench 3)
+              (map cadr (car (list-ref workbench 6)))
               (apply
                 append
                 (map
                   (lambda (locations)
                     (map car (list-ref locations 2)))
-                  (list-ref workbench 6)))
+                  (list-ref workbench 7)))
               (collect-layout-resources
-                (list-ref workbench 4)
+                (list-ref workbench 5)
                 result)))
           '()
           (workbench-session-snapshot-workbenches snapshot)))))
@@ -738,7 +778,7 @@
            [layout
              (restore-layout!
                editor
-               (list-ref datum 4)
+               (list-ref datum 5)
                buffer-loader
                fallback-buffer
                projects
@@ -746,7 +786,7 @@
            [leaves (vector-ref metadata 0)]
            [active-index
              (min
-               (list-ref datum 3)
+               (list-ref datum 4)
                (- (length leaves) 1))]
            [active-window-id
              (window-leaf-id (list-ref leaves active-index))])
@@ -772,6 +812,19 @@
             workbench
             (project-id project)))
         projects)
+      (let ([focused-root (list-ref datum 2)])
+        (let ([focused-project
+                (and
+                  focused-root
+                  (find
+                    (lambda (project)
+                      (string=?
+                        focused-root
+                        (project-primary-root project)))
+                    projects))])
+          (workbench-set-focused-project!
+            workbench
+            (and focused-project (project-id focused-project)))))
       (for-each
         (lambda (entry)
           (workbench-set-slot! workbench (car entry) (cdr entry)))
@@ -788,17 +841,17 @@
             (lambda (resource)
               (let ([buffer (buffer-loader resource)])
                 (and buffer (buffer-id buffer))))
-            (list-ref datum 2))))
+            (list-ref datum 3))))
       (restore-jump-graph!
         (workbench-jump-graph workbench)
         buffer-loader
-        (list-ref datum 5))
+        (list-ref datum 6))
       (workbench-replace-location-lists!
         workbench
         (map
           (lambda (locations)
             (restore-location-list buffer-loader locations))
-          (list-ref datum 6)))
+          (list-ref datum 7)))
       (for-each
         (lambda (view-id) (editor-close-view! editor view-id))
         old-view-ids)
