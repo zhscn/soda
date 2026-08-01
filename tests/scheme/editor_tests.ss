@@ -4293,6 +4293,8 @@
 (editor-update!
   xref-editor
   (make-command-message 'xref.results-next #f))
+(unless (= (location-list-index (editor-current-location-list xref-editor)) 1)
+  (error 'editor-tests "xref results did not synchronize location selection"))
 (editor-update!
   xref-editor
   (make-command-message 'xref.preview #f))

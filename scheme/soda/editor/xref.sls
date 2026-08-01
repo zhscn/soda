@@ -155,12 +155,18 @@
 
   (define (xref-results-selection model state)
     (let* ([items (location-list-items (xref-results-model-locations model))]
-           [stored (and state (tui-view-state-transient-state state))])
+           [stored (and state (tui-view-state-transient-state state))]
+           [location-index
+             (location-list-index (xref-results-model-locations model))])
       (and (pair? items)
-           (if (and (integer? stored) (exact? stored)
-                    (<= 0 stored) (< stored (length items)))
-               stored
-               0))))
+           (cond
+             [(and (integer? stored) (exact? stored)
+                   (<= 0 stored) (< stored (length items)))
+              stored]
+             [(and (integer? location-index) (exact? location-index)
+                   (<= 0 location-index) (< location-index (length items)))
+              location-index]
+             [else 0]))))
 
   (define (xref-results-move model delta context)
     (let* ([items (location-list-items (xref-results-model-locations model))]
@@ -177,8 +183,10 @@
                    (cond
                      [(< selection old-viewport) selection]
                      [(>= selection (+ old-viewport rows))
-                      (+ 1 (- selection rows))]
+                     (+ 1 (- selection rows))]
                      [else old-viewport])])
+            (location-list-set-index!
+              (xref-results-model-locations model) selection)
             (tui-result
               model
               '()
@@ -314,6 +322,12 @@
            [effects
              (visit-location-item!
                editor origin-view item (xref-results-model-jump-kind model))])
+      (location-list-set-index!
+        (xref-results-model-locations model)
+        (xref-results-selection
+          model
+          (tui-session-view-state
+            session (view-id (command-context-view context)))))
       (when select-origin?
         (editor-select-view-window! editor (view-id origin-view)))
       (when close-results?
