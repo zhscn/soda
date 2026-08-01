@@ -1651,17 +1651,8 @@
   (and
     (eq? (lsp-client-session-state replacement-session) 'stopping)
     (= (length stop-effects) 1)
-    (string=?
-      (json-object-ref
-        (car
-          (lsp-json-rpc-decode!
-            (make-lsp-json-rpc-decoder)
-            (managed-process-write-request-data
-              (command-effect-payload (car stop-effects)))))
-        "method"
-        #f)
-      "shutdown"))
-  "stopping an LSP session must request shutdown before closing transport")
+    (eq? (command-effect-kind (car stop-effects)) 'managed-process.signal))
+  "stopping an initializing LSP session must terminate its process")
 
 (editor-close! editor)
 

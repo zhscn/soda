@@ -1113,9 +1113,19 @@
                                 initialize-response!)
                               effects)))
                         (begin
+                          (lsp-client-session-pending-set! session '())
+                          (for-each
+                            (lambda (document)
+                              (lsp-client-document-opened?-set! document #f))
+                            (lsp-client-session-documents session))
                           (unless (eq? (lsp-client-session-state session) 'failed)
-                            (lsp-client-session-state-set! session 'exited)
-                            (editor-set-status-message! editor "Language server exited"))
+                            (let ([stopping?
+                                    (eq? (lsp-client-session-state session)
+                                         'stopping)])
+                              (lsp-client-session-state-set! session 'exited)
+                              (unless stopping?
+                                (editor-set-status-message!
+                                  editor "Language server exited"))))
                           (loop (+ index 1) effects))))))))))
 
   (define (lsp-session-key workspace language profile)
@@ -1482,7 +1492,16 @@
       (assertion-violation
         'lsp-client-stop! "expected an LSP client session" session))
     (case (lsp-client-session-state session)
-      [(starting ready)
+      [(starting)
+       (lsp-client-session-state-set! session 'stopping)
+       (lsp-client-session-pending-set! session '())
+       (list
+         (make-command-effect
+           'managed-process.signal
+           (make-managed-process-signal-request
+             (lsp-client-session-process session)
+             15)))]
+      [(ready)
        (lsp-client-session-state-set! session 'stopping)
        (list
          (session-request!
