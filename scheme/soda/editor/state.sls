@@ -3087,7 +3087,7 @@
 
   (define (completion-primary-edit item target mode)
     (let ([edit (completion-item-edit item)])
-      (if edit
+      (if (and edit (completion-edit-compatible? edit target))
           (case mode
             [(insert) (completion-edit-insert edit)]
             [(replace) (completion-edit-replace edit)]
@@ -3113,26 +3113,17 @@
     (let ([edit (completion-item-edit item)])
       (if edit (completion-edit-additional-edits edit) '())))
 
-  (define (validate-completion-item-edit! item target)
-    (let ([edit (completion-item-edit item)])
-      (when edit
-        (let ([insert (completion-edit-insert edit)]
-              [replace (completion-edit-replace edit)]
-              [caret (document-completion-target-end target)])
-          (unless
-            (and
-              (<= (completion-text-edit-start insert) caret)
-              (<= caret (completion-text-edit-end insert))
-              (<= (completion-text-edit-start replace)
-                  (completion-text-edit-start insert))
-              (<= (completion-text-edit-end insert)
-                  (completion-text-edit-end replace)))
-            (assertion-violation
-              'editor-accept-completion!
-              "completion insert and replace ranges are incompatible"
-              insert
-              replace
-              caret))))))
+  (define (completion-edit-compatible? edit target)
+    (let ([insert (completion-edit-insert edit)]
+          [replace (completion-edit-replace edit)]
+          [caret (document-completion-target-end target)])
+      (and
+        (<= (completion-text-edit-start insert) caret)
+        (<= caret (completion-text-edit-end insert))
+        (<= (completion-text-edit-start replace)
+            (completion-text-edit-start insert))
+        (<= (completion-text-edit-end insert)
+            (completion-text-edit-end replace)))))
 
   (define (text-edit-size edit)
     (bytevector-length
@@ -3336,11 +3327,8 @@
                           item)))
                   (and
                     resolved
-                    (let ((caret
-                            (begin
-                              (validate-completion-item-edit!
-                                resolved
-                                target)
+                    (let ([caret
+                            (guard (condition [else #f])
                               (apply-completion-edits!
                                 buffer
                                 (completion-primary-edit
@@ -3348,10 +3336,18 @@
                                   target
                                   mode)
                                 (completion-additional-edits
-                                  resolved)))))
-                      (view-set-caret! view caret)
-                      (cancel-view-completion! value view)
-                      resolved))))))))]))
+                                  resolved)))])
+                      (if caret
+                          (begin
+                            (view-set-caret! view caret)
+                            (cancel-view-completion! value view)
+                            resolved)
+                          (begin
+                            (cancel-view-completion! value view)
+                            (editor-set-status-message!
+                              value
+                              "Completion edit no longer applies")
+                            #f))))))))))]))
 
   (define (editor-completion-next! value)
     (require-open-editor 'editor-completion-next! value)

@@ -8062,6 +8062,60 @@
          "multi-edit completion did not undo atomically"))
 (editor-close! edit-completion-editor)
 
+(define stale-edit-document
+  (make-document (string->utf8 "alpha a") 946))
+(define stale-edit-buffer
+  (make-buffer 946 stale-edit-document #f 'fundamental-mode))
+(define stale-edit-editor (make-editor stale-edit-buffer))
+(define stale-edit-decoder (make-input-decoder))
+(define stale-edit-source
+  (make-choice-source
+    'stale-edit
+    '((category . stale-edit)
+      (preselect . #t))
+    (lambda (input point) (cons 6 point))
+    (lambda (query)
+      (list
+        (make-completion-item
+          'alpha
+          'stale-edit
+          "alpha"
+          "alpha"
+          "alpha"
+          'text
+          #f
+          (make-completion-edit
+            (make-completion-text-edit 6 7 "alpha")
+            (make-completion-text-edit 6 7 "alpha")
+            '())
+          "alpha"
+          #f
+          #t
+          #f
+          #f
+          #f
+          #f)))
+    (lambda (value) (string=? value "alpha"))
+    (lambda (generation) #f)))
+(view-set-caret! (editor-active-view stale-edit-editor) 7)
+(editor-start-document-completion!
+  stale-edit-editor
+  stale-edit-source
+  6
+  7)
+(send! stale-edit-editor stale-edit-decoder (string->utf8 "lp"))
+(editor-accept-completion! stale-edit-editor)
+(unless
+  (and
+    (bytevector=?
+      (buffer-bytes stale-edit-buffer)
+      (string->utf8 "alpha alpha"))
+    (not (editor-active-completion stale-edit-editor)))
+  (error
+    'editor-tests
+    "completion did not rebase a reusable stale text edit onto its current target"))
+(editor-close! stale-edit-editor)
+
 (define ranked-scheme-document
   (make-document
     (string->utf8
