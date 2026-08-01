@@ -24,6 +24,8 @@
           managed-process-event-data
           managed-process-event-restarted?
           make-managed-process-write-request
+          managed-process-write-request-process
+          managed-process-write-request-data
           make-managed-process-signal-request
           make-managed-process-resize-request
           install-managed-process-runtime!

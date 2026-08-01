@@ -466,6 +466,8 @@
           managed-process-event-data
           managed-process-event-restarted?
           make-managed-process-write-request
+          managed-process-write-request-process
+          managed-process-write-request-data
           make-managed-process-signal-request
           make-managed-process-resize-request
           editor-evaluator
@@ -534,6 +536,28 @@
           editor-set-view-language-attachment!
           editor-view-language-attachment
           editor-bootstrap-view-language-session!
+          make-lsp-server-profile
+          lsp-server-profile?
+          lsp-server-profile-name
+          lsp-server-profile-languages
+          lsp-server-profile-command
+          lsp-server-profile-initialization-options
+          lsp-server-profile-settings
+          lsp-server-profile-supports-language?
+          editor-register-lsp-server!
+          editor-lsp-server
+          editor-lsp-servers-for-language
+          lsp-client-session?
+          lsp-client-session-language-session
+          lsp-client-session-workspace
+          lsp-client-session-server
+          lsp-client-session-process
+          lsp-client-session-state
+          lsp-client-session-capabilities
+          editor-lsp-session-for-language-session
+          editor-start-lsp-session!
+          editor-start-lsp-for-active-view!
+          lsp-client-stop!
           scheme-environment-registry?
           scheme-environment?
           scheme-environment-id
@@ -1553,6 +1577,7 @@
           (soda editor jump-graph)
           (soda editor kill)
           (soda editor language-session)
+          (soda editor lsp-client)
           (soda editor location)
           (soda editor managed-process)
           (soda editor minor-mode)
@@ -1826,6 +1851,7 @@
       (install-comint-commands! editor)
       (install-process-comint-commands! editor)
       (install-completion-commands! editor)
+      (install-lsp-commands! editor)
       (editor-register-completion-provider!
         editor
         (make-scheme-static-completion-provider
