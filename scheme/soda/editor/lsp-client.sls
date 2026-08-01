@@ -117,8 +117,12 @@
   (define-record-type lsp-code-action-context
     (fields session view-id buffer-id revision actions))
 
+  (define-record-type lsp-completion-data
+    (fields session completion-id generation buffer-id revision raw))
+
   (define editor-lsp-registries (make-eq-hashtable))
   (define pending-lsp-workspace-edits (make-weak-eq-hashtable))
+  (define pending-lsp-completion-resolutions (make-weak-eq-hashtable))
 
   (define (exact-non-negative-integer? value)
     (and (integer? value) (exact? value) (not (negative? value))))
@@ -1275,6 +1279,44 @@
            (and (string? contents) contents))]
         [else #f])))
 
+  (define (lsp-completion-resolve-supported? session)
+    (let ([provider
+            (json-object-ref
+              (lsp-client-session-capabilities session)
+              "completionProvider"
+              #f)])
+      (and (json-object? provider)
+           (eq? (json-object-ref provider "resolveProvider" #f) #t))))
+
+  (define (json-object-merge primary fallback)
+    (make-json-object
+      (append
+        (json-object-entries primary)
+        (filter
+          (lambda (entry)
+            (not (json-object-has-key? primary (car entry))))
+          (json-object-entries fallback)))))
+
+  (define (lsp-completion-item
+            buffer id value resolved? provider-data)
+    (let* ([label (json-object-ref value "label" #f)]
+           [edit (and buffer (lsp-completion-edit buffer value))]
+           [insert (lsp-completion-insert-text value edit label)]
+           [filter (json-object-ref value "filterText" label)]
+           [detail (json-object-ref value "detail" #f)]
+           [sort (json-object-ref value "sortText" label)]
+           [documentation (lsp-completion-documentation value)])
+      (and (string? label)
+           (string? insert)
+           (string? filter)
+           (string? sort)
+           (make-completion-item
+             id
+             'lsp
+             filter label insert
+             'choice detail edit sort #f resolved?
+             documentation provider-data detail "LSP" 0))))
+
   (define (lsp-completion-items editor request result)
     (let ([values
             (cond
@@ -1283,7 +1325,8 @@
                (let ([items (json-object-ref result "items" #f)])
                  (if (json-array? items) (json-array-values items) '()))]
               [else '()])]
-          [buffer (completion-request-buffer editor request)])
+          [buffer (completion-request-buffer editor request)]
+          [session (completion-request-session editor request)])
       (let loop ([remaining values] [index 0] [items '()])
         (if (null? remaining)
             (reverse items)
@@ -1291,29 +1334,110 @@
               (if (not (json-object? value))
                   (loop (cdr remaining) (+ index 1) items)
                   (let* ([label (json-object-ref value "label" #f)]
-                         [edit
-                           (and buffer (lsp-completion-edit buffer value))]
-                         [insert (lsp-completion-insert-text value edit label)]
-                         [filter (json-object-ref value "filterText" label)]
-                         [detail (json-object-ref value "detail" #f)]
-                         [sort (json-object-ref value "sortText" label)]
-                         [documentation (lsp-completion-documentation value)])
-                    (if (and (string? label)
+                         [insert (json-object-ref value "insertText" label)]
+                         [data
+                           (and session
+                                buffer
+                                (make-lsp-completion-data
+                                  session
+                                  (completion-request-session-id request)
+                                  (completion-request-generation request)
+                                  (buffer-id buffer)
+                                  (buffer-revision buffer)
+                                  value))]
+                         [item
+                           (and
+                             (string? label)
                              (string? insert)
-                             (string? filter)
-                             (string? sort))
-                        (loop
-                          (cdr remaining)
-                          (+ index 1)
-                          (cons
-                            (make-completion-item
-                              (list index label insert)
-                              'lsp
-                              filter label insert
-                              'choice detail edit sort #f #t
-                              documentation value detail "LSP" 0)
-                            items))
-                        (loop (cdr remaining) (+ index 1) items)))))))))
+                             (lsp-completion-item
+                               buffer
+                               (list index label insert)
+                               value
+                               (not (and data
+                                         (lsp-completion-resolve-supported? session)))
+                               (or data value)))])
+                    (loop
+                      (cdr remaining)
+                      (+ index 1)
+                      (if item (cons item items) items)))))))))
+
+  (define (lsp-completion-resolution-current?
+            editor data original)
+    (let ([completion
+            (editor-completion-ref
+              editor (lsp-completion-data-completion-id data))])
+      (and completion
+           (= (completion-session-generation completion)
+              (lsp-completion-data-generation data))
+           (guard
+             (condition [else #f])
+             (= (buffer-revision
+                  (editor-buffer-ref
+                    editor (lsp-completion-data-buffer-id data)))
+                (lsp-completion-data-revision data)))
+           (exists
+             (lambda (item)
+               (and
+                 (eq? (completion-item-provider item) 'lsp)
+                 (equal? (completion-item-id item)
+                         (completion-item-id original))))
+             (completion-session-items completion)))))
+
+  (define (lsp-apply-completion-resolution!
+            editor data original result)
+    (hashtable-delete! pending-lsp-completion-resolutions original)
+    (when (and (json-object? result)
+               (lsp-completion-resolution-current? editor data original))
+      (let* ([buffer
+               (editor-buffer-ref editor (lsp-completion-data-buffer-id data))]
+             [value
+               (json-object-merge
+                 result (lsp-completion-data-raw data))]
+             [replacement
+               (lsp-completion-item
+                 buffer
+                 (completion-item-id original)
+                 value
+                 #t
+                 (make-lsp-completion-data
+                   (lsp-completion-data-session data)
+                   (lsp-completion-data-completion-id data)
+                   (lsp-completion-data-generation data)
+                   (lsp-completion-data-buffer-id data)
+                   (lsp-completion-data-revision data)
+                   value))]
+             [completion
+               (editor-completion-ref
+                 editor (lsp-completion-data-completion-id data))])
+        (when replacement
+          (completion-session-replace-item!
+            completion original replacement)))))
+
+  (define (lsp-resolve-completion-item! editor item)
+    (let ([data (completion-item-provider-data item)])
+      (if (not (lsp-completion-data? data))
+          #f
+          (if (hashtable-ref pending-lsp-completion-resolutions item #f)
+              'pending
+              (let ([session (lsp-completion-data-session data)])
+                (if (or (not (eq? (lsp-client-session-state session) 'ready))
+                        (not (lsp-completion-resolution-current? editor data item)))
+                    #f
+                    (begin
+                      (hashtable-set!
+                        pending-lsp-completion-resolutions item #t)
+                      (editor-queue-tui-effects!
+                        editor
+                        (list
+                          (session-request!
+                            session
+                            "completionItem/resolve"
+                            (lsp-completion-data-raw data)
+                            (lambda (response-editor response-session result)
+                              (lsp-apply-completion-resolution!
+                                response-editor data item result)
+                              '()))))
+                      'pending)))))))
 
   (define (lsp-start-completion! editor request)
     (let ([session (completion-request-session editor request)])
@@ -2106,7 +2230,9 @@
         'lsp
         (lambda (request)
           (list (make-internal-command-message 'lsp.completion-request request)))
-        (lambda (request) #f)))
+        (lambda (request) #f)
+        (lambda (item)
+          (lsp-resolve-completion-item! editor item))))
     (editor-register-command!
       editor
       (make-interactive-context-command

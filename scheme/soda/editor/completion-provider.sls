@@ -142,6 +142,7 @@
       (unless
         (or
           (not resolved)
+          (eq? resolved 'pending)
           (and
             (completion-item? resolved)
             (completion-item-resolved? resolved)

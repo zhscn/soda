@@ -116,7 +116,15 @@
         (cons "id" 1)
         (cons "result"
               (make-json-object
-                (list (cons "capabilities" (make-json-object '())))))))))
+                (list
+                  (cons
+                    "capabilities"
+                    (make-json-object
+                      (list
+                        (cons
+                          "completionProvider"
+                          (make-json-object
+                            (list (cons "resolveProvider" #t))))))))))))))
 (check
   (and
     (eq? (lsp-client-session-state session) 'ready)
@@ -401,10 +409,42 @@
       (cons "jsonrpc" "2.0")
       (cons "id" (json-object-ref lsp-completion-message "id" #f))
       (cons "result" (make-json-array (list completion-item))))))
+(define completion-resolve-effects (editor-take-tui-effects! editor))
+(check
+  (and (= (length completion-resolve-effects) 1)
+       (eq? (command-effect-kind (car completion-resolve-effects))
+            'managed-process.write))
+  "unresolved LSP completion did not request completionItem/resolve"
+  completion-resolve-effects)
+(define completion-resolve-message
+  (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload (car completion-resolve-effects))))))
+(check
+  (string=?
+    (json-object-ref completion-resolve-message "method" #f)
+    "completionItem/resolve")
+  "LSP completion resolver sent an invalid request")
+(lsp-client-handle-json-message!
+  editor session
+  (make-json-object
+    (list
+      (cons "jsonrpc" "2.0")
+      (cons "id" (json-object-ref completion-resolve-message "id" #f))
+      (cons "result"
+            (make-json-object
+              (list
+                (cons "documentation" "Resolved SodaWidget documentation")))))))
 (let* ([completion (editor-active-completion editor)]
        [item (and completion (completion-session-selected-item completion))])
   (check
     (and item
+         (completion-item-resolved? item)
+         (string=?
+           (completion-item-documentation item)
+           "Resolved SodaWidget documentation")
          (completion-item-edit item)
          (= (length
               (completion-edit-additional-edits (completion-item-edit item)))

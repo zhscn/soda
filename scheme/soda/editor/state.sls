@@ -59,6 +59,7 @@
           editor-completion-next!
           editor-completion-previous!
           editor-apply-completion-response!
+          editor-completion-ref
           editor-completion-provider-catalog
           editor-register-completion-provider!
           editor-take-completion-effects!
@@ -3256,16 +3257,18 @@
                   (and
                     provider
                     (completion-provider-resolve provider item))))])
-        (if resolved
-            (completion-session-replace-item!
-              completion
-              item
-              resolved)
-            (begin
-              (editor-set-status-message!
-                value
-                "Unable to resolve completion candidate")
-              #f)))))
+        (cond
+          [(eq? resolved 'pending) #f]
+          [resolved
+           (completion-session-replace-item!
+             completion
+             item
+             resolved)]
+          [else
+           (editor-set-status-message!
+             value
+             "Unable to resolve completion candidate")
+           #f]))))
 
   (define editor-accept-completion!
     (case-lambda
