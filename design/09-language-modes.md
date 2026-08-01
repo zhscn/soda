@@ -13,7 +13,7 @@
 | LanguageProfile bootstrap hook 与 home attachment 选择 | 已实现 |
 | ProjectWorkspace bootstrap snapshot 与 file-backed Buffer 归属解析 | 已实现 |
 | LSP process transport、ProjectWorkspace bootstrap 与 full-text document synchronization | 已实现 |
-| LSP diagnostics、completion text edits/resolve、hover、signature help、document symbols、document highlights、formatting、definition、implementation、type definition、references、workspace symbol、rename、code actions 与 workspace/applyEdit | 已实现 |
+| LSP push/pull diagnostics、completion text edits/resolve、hover、signature help、document symbols、document highlights、formatting、definition、implementation、type definition、references、workspace symbol、rename、code actions 与 workspace/applyEdit | 已实现 |
 | LSP semantic tokens full refresh 与 document lifecycle refresh | 已实现 |
 
 ## 分层
@@ -235,6 +235,11 @@ LanguageSession。
 支持 `semanticTokens/full` 的 LanguageSession 在 `didOpen` 和每次 `didChange` 后排入
 revision-tagged refresh。请求只携带该 Buffer 的 session document；响应仅在 Buffer 仍为
 同一 revision 时发布 semantic annotation，迟到结果不会覆盖当前 decoration。
+
+支持 `diagnosticProvider` 的 LanguageSession 在相同 document lifecycle 节点请求
+`textDocument/diagnostic`。full report 进入与 push diagnostics 相同的 annotation
+namespace；previous result id 仅在同一 document revision 内复用，编辑后清除，避免旧报告
+覆盖新 snapshot。 `lsp.diagnostics` 可显式刷新当前 document。
 
 `textDocument/documentHighlight` 由显式命令查询 point，并在同一 revision 上发布独立的
 search-layer annotation set。空结果替换该 session 的已有高亮，其他语言服务和本地语义

@@ -112,10 +112,26 @@
     (string=? (json-object-ref initialize-message "method" #f) "initialize")
     (string=?
       (json-object-ref
-        (json-object-ref initialize-message "params" #f)
+      (json-object-ref initialize-message "params" #f)
         "rootUri"
         #f)
-      "file:///workspace"))
+      "file:///workspace")
+    (let ([diagnostic-capability
+            (json-object-ref
+              (json-object-ref
+                (json-object-ref
+                  (json-object-ref initialize-message "params" #f)
+                  "capabilities"
+                  #f)
+                "textDocument"
+                #f)
+              "diagnostic"
+              #f)])
+      (and
+        (json-object? diagnostic-capability)
+        (eq?
+          (json-object-ref diagnostic-capability "dynamicRegistration" #t)
+          #f))))
   "initialize did not use the ProjectWorkspace root")
 
 (define lsp-capabilities
@@ -129,6 +145,11 @@
       (cons "documentRangeFormattingProvider" #t)
       (cons "documentSymbolProvider" #t)
       (cons "signatureHelpProvider" #t)
+      (cons
+        "diagnosticProvider"
+        (make-json-object
+          (list (cons "interFileDependencies" #f)
+                (cons "workspaceDiagnostics" #f))))
       (cons
         "semanticTokensProvider"
         (make-json-object
@@ -157,8 +178,9 @@
 (check
   (and
     (eq? (lsp-client-session-state session) 'ready)
-    (= (length ready-effects) 3)
-    (eq? (command-effect-kind (caddr ready-effects)) 'command.invoke))
+    (= (length ready-effects) 4)
+    (eq? (command-effect-kind (caddr ready-effects)) 'command.invoke)
+    (eq? (command-effect-kind (cadddr ready-effects)) 'command.invoke))
   "initialize response did not transition the LSP session to ready")
 
 (define configuration-effects
@@ -220,9 +242,10 @@
   (car (editor-buffer-language-attachments editor (buffer-id external))))
 (check
   (and
-    (= (length external-start-effects) 2)
+    (= (length external-start-effects) 3)
     (eq? (command-effect-kind (car external-start-effects)) 'managed-process.write)
     (eq? (command-effect-kind (cadr external-start-effects)) 'command.invoke)
+    (eq? (command-effect-kind (caddr external-start-effects)) 'command.invoke)
     (eq? (language-attachment-provenance external-attachment) 'inherited)
     (= (language-attachment-session-id external-attachment)
        (language-session-id language-session)))
@@ -462,7 +485,7 @@
 (define change-effects (editor-take-tui-effects! editor))
 (check
   (and
-    (= (length change-effects) 2)
+    (= (length change-effects) 3)
     (string=?
       (json-object-ref
         (car
@@ -524,6 +547,61 @@
     (list
       (cons "uri" "file:///workspace/src/main.cpp")
       (cons "diagnostics" (make-json-array (list diagnostic-value))))))
+(define automatic-diagnostic-effects
+  (editor-execute-command!
+    editor
+    (internal-command-message-name
+      (command-effect-payload (caddr change-effects)))
+    #f
+    (internal-command-message-argument
+      (command-effect-payload (caddr change-effects)))))
+(define automatic-diagnostic-message
+  (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload (car automatic-diagnostic-effects))))))
+(check
+  (and
+    (= (length automatic-diagnostic-effects) 1)
+    (string=?
+      (json-object-ref automatic-diagnostic-message "method" #f)
+      "textDocument/diagnostic"))
+  "a synchronized document did not refresh pull diagnostics")
+(lsp-client-handle-json-message!
+  editor session
+  (make-json-object
+    (list
+      (cons "jsonrpc" "2.0")
+      (cons "id" (json-object-ref automatic-diagnostic-message "id" #f))
+      (cons
+        "result"
+        (make-json-object
+          (list
+            (cons "kind" "full")
+            (cons "resultId" "diagnostic-result-1")
+            (cons "items" (make-json-array (list diagnostic-value)))))))))
+(define explicit-diagnostic-effects
+  (editor-execute-command! editor 'lsp.diagnostics))
+(define explicit-diagnostic-message
+  (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload (car explicit-diagnostic-effects))))))
+(check
+  (and
+    (= (length explicit-diagnostic-effects) 1)
+    (string=?
+      (json-object-ref explicit-diagnostic-message "method" #f)
+      "textDocument/diagnostic")
+    (string=?
+      (json-object-ref
+        (json-object-ref explicit-diagnostic-message "params" #f)
+        "previousResultId"
+        #f)
+      "diagnostic-result-1"))
+  "explicit pull diagnostics did not reuse the current result id")
 (lsp-client-handle-json-message!
   editor session
   (make-json-object

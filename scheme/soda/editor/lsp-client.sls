@@ -65,6 +65,9 @@
     (fields buffer-id uri
             (mutable version lsp-client-document-version lsp-client-document-version-set!)
             (mutable revision lsp-client-document-revision lsp-client-document-revision-set!)
+            (mutable diagnostic-result-id
+                     lsp-client-document-diagnostic-result-id
+                     lsp-client-document-diagnostic-result-id-set!)
             (mutable opened? lsp-client-document-opened? lsp-client-document-opened?-set!)
             (mutable observer-name
                      lsp-client-document-observer-name
@@ -123,6 +126,9 @@
     (fields session completion-id generation buffer-id revision raw))
 
   (define-record-type lsp-semantic-refresh
+    (fields session buffer-id revision))
+
+  (define-record-type lsp-diagnostic-refresh
     (fields session buffer-id revision))
 
   (define editor-lsp-registries (make-eq-hashtable))
@@ -262,10 +268,16 @@
                           (list
                             (cons "completionItem"
                                   (make-json-object
-                                    (list (cons "snippetSupport" #t)))))))))))))
+                                    (list (cons "snippetSupport" #t)))))))
+                  (cons "diagnostic"
+                        (make-json-object
+                          (list
+                            (cons "dynamicRegistration" #f)
+                            (cons "relatedDocumentSupport" #f))))))))))
 
   (define lsp-client-capability-identity
-    '(workspace-configuration workspace-folders utf-16 completion-snippets))
+    '(workspace-configuration workspace-folders utf-16 completion-snippets
+      pull-diagnostics))
 
   (define (profile-session-configuration workspace profile)
     (list
@@ -384,6 +396,7 @@
                 1
                 (buffer-revision buffer)
                 #f
+                #f
                 #f)])
         (lsp-client-session-documents-set!
           session
@@ -405,6 +418,14 @@
         (make-lsp-semantic-refresh
           session (buffer-id buffer) (buffer-revision buffer)))))
 
+  (define (diagnostic-refresh-effect session buffer)
+    (make-command-effect
+      'command.invoke
+      (make-internal-command-message
+        'lsp.refresh-diagnostics
+        (make-lsp-diagnostic-refresh
+          session (buffer-id buffer) (buffer-revision buffer)))))
+
   (define (lsp-client-sync-buffer! editor session buffer)
     (let ([document (find-document session (buffer-id buffer))])
       (if
@@ -416,6 +437,7 @@
           (lsp-client-document-version-set!
             document (+ 1 (lsp-client-document-version document)))
           (lsp-client-document-revision-set! document (buffer-revision buffer))
+          (lsp-client-document-diagnostic-result-id-set! document #f)
           (list
             (session-notification-effect
               session
@@ -432,7 +454,8 @@
                           (list
                             (make-json-object
                               (list (cons "text" (buffer-text buffer))))))))))
-            (semantic-refresh-effect session buffer))))))
+            (semantic-refresh-effect session buffer)
+            (diagnostic-refresh-effect session buffer))))))
 
   (define (install-document-observer! editor session buffer document)
     (unless (lsp-client-document-observer-name document)
@@ -462,6 +485,7 @@
           'did-open-effect "Buffer has no language profile" buffer))
       (lsp-client-document-opened?-set! document #t)
       (lsp-client-document-revision-set! document (buffer-revision buffer))
+      (lsp-client-document-diagnostic-result-id-set! document #f)
       (install-document-observer! editor session buffer document)
       (session-notification-effect
         session
@@ -495,7 +519,8 @@
                 '()
                 (list
                   (did-open-effect editor session buffer document)
-                  (semantic-refresh-effect session buffer)))))
+                  (semantic-refresh-effect session buffer)
+                  (diagnostic-refresh-effect session buffer)))))
         (session-attached-buffers editor session))))
 
   (define (lsp-client-close-buffer! editor buffer)
@@ -651,6 +676,91 @@
                           (if annotation
                               (cons annotation (loop (cdr values) (+ index 1)))
                               (loop (cdr values) (+ index 1)))))))))))))))
+
+  (define (pull-diagnostics-supported? session)
+    (json-object?
+      (json-object-ref
+        (lsp-client-session-capabilities session)
+        "diagnosticProvider"
+        #f)))
+
+  (define (lsp-request-diagnostics-for-buffer!
+            editor session buffer document revision)
+    (if (and (pull-diagnostics-supported? session)
+             (eq? (lsp-client-session-state session) 'ready)
+             (= (buffer-revision buffer) revision)
+             (= (lsp-client-document-revision document) revision))
+        (list
+          (session-request!
+            session
+            "textDocument/diagnostic"
+            (make-json-object
+              (append
+                (list
+                  (cons "textDocument"
+                        (make-json-object
+                          (list (cons "uri" (lsp-client-document-uri document))))))
+                (let ([previous
+                        (lsp-client-document-diagnostic-result-id document)])
+                  (if (string? previous)
+                      (list (cons "previousResultId" previous))
+                      '()))))
+            (lambda (response-editor response-session result)
+              (when
+                (and (eq? response-session session)
+                     (= (buffer-revision buffer) revision)
+                     (= (lsp-client-document-revision document) revision)
+                     (json-object? result))
+                (let ([kind (json-object-ref result "kind" #f)])
+                  (when (string? (json-object-ref result "resultId" #f))
+                    (lsp-client-document-diagnostic-result-id-set!
+                      document (json-object-ref result "resultId" #f)))
+                  (when (and (string? kind) (string=? kind "full"))
+                    (lsp-client-publish-diagnostics!
+                      response-editor
+                      session
+                      (make-json-object
+                        (list
+                          (cons "uri" (lsp-client-document-uri document))
+                          (cons
+                            "diagnostics"
+                            (json-object-ref result "items"
+                                             (make-json-array '())))))))))
+              '())))
+        '()))
+
+  (define (lsp-refresh-diagnostics-command context)
+    (let* ([editor (command-context-editor context)]
+           [refresh (command-context-argument context)])
+      (if (not (lsp-diagnostic-refresh? refresh))
+          '()
+          (guard (condition [else '()])
+            (let* ([session (lsp-diagnostic-refresh-session refresh)]
+                   [buffer
+                     (editor-buffer-ref
+                       editor (lsp-diagnostic-refresh-buffer-id refresh))]
+                   [document (find-document session (buffer-id buffer))])
+              (if document
+                  (lsp-request-diagnostics-for-buffer!
+                    editor
+                    session
+                    buffer
+                    document
+                    (lsp-diagnostic-refresh-revision refresh))
+                  '()))))))
+
+  (define (lsp-request-diagnostics! editor)
+    (let* ([view (editor-active-view editor)]
+           [buffer (view-buffer view)]
+           [session (active-view-lsp-session editor)]
+           [document (and session (find-document session (buffer-id buffer)))])
+      (if (and session document (pull-diagnostics-supported? session))
+          (lsp-request-diagnostics-for-buffer!
+            editor session buffer document (buffer-revision buffer))
+          (begin
+            (editor-set-status-message!
+              editor "The language server does not provide pull diagnostics")
+            '()))))
 
   (define (server-request-error id message)
     (make-json-object
@@ -2952,6 +3062,13 @@
     (editor-register-command!
       editor
       (make-interactive-context-command
+        'lsp.diagnostics
+        (lambda (context)
+          (lsp-request-diagnostics! (command-context-editor context)))
+        "Refresh pull diagnostics for the active document."))
+    (editor-register-command!
+      editor
+      (make-interactive-context-command
         'lsp.find-implementation
         (lambda (context)
           (lsp-find-implementation! (command-context-editor context)))
@@ -3049,6 +3166,12 @@
         'lsp.refresh-semantic-tokens
         lsp-refresh-semantic-tokens-command
         "Refresh semantic tokens for a synchronized language-server document."))
+    (editor-register-internal-command!
+      editor
+      (make-internal-context-command
+        'lsp.refresh-diagnostics
+        lsp-refresh-diagnostics-command
+        "Refresh pull diagnostics for a synchronized language-server document."))
     (editor-register-internal-command!
       editor
       (make-internal-context-command
