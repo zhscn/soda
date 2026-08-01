@@ -741,21 +741,31 @@
       (let-values ([(ids sessions)
                     (hashtable-entries
                       (lsp-client-registry-sessions (editor-lsp-registry editor)))])
-        (let loop ([index 0])
-          (unless (= index (vector-length sessions))
-            (let ([session (vector-ref sessions index)])
-              (when (and (eq? process (lsp-client-session-process session))
-                         (= (managed-process-event-generation event)
-                            (managed-process-generation process)))
-                (lsp-client-session-state-set!
-                  session
-                  (if (managed-process-event-restarted? event)
-                      'starting
-                      'exited))
-                (when (not (managed-process-event-restarted? event))
-                  (editor-set-status-message! editor "Language server exited")))
-              (loop (+ index 1)))))))
-    '())
+        (let loop ([index 0] [effects '()])
+          (if (= index (vector-length sessions))
+              (reverse effects)
+              (let ([session (vector-ref sessions index)])
+                (if (not (eq? process (lsp-client-session-process session)))
+                    (loop (+ index 1) effects)
+                    (if (managed-process-event-restarted? event)
+                        (begin
+                          (lsp-client-session-state-set! session 'starting)
+                          (lsp-client-session-pending-set! session '())
+                          (for-each
+                            (lambda (document)
+                              (lsp-client-document-opened?-set! document #f))
+                            (lsp-client-session-documents session))
+                          (loop
+                            (+ index 1)
+                            (cons
+                              (session-request!
+                                session "initialize" (initialize-params session)
+                                initialize-response!)
+                              effects)))
+                        (begin
+                          (lsp-client-session-state-set! session 'exited)
+                          (editor-set-status-message! editor "Language server exited")
+                          (loop (+ index 1) effects))))))))))
 
   (define (lsp-session-key workspace language profile)
     (project-workspace-language-session-key
