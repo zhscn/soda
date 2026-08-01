@@ -34,7 +34,13 @@
            (tui-session-definition session))
          'dashboard)
     (= (length (dashboard-model-entries model)) 3)
-    (= (dashboard-model-selection model) 0)
+    (= (dashboard-model-workbench-id model)
+       (workbench-id (editor-active-workbench editor)))
+    (= (dashboard-view-selection
+         model
+         (tui-session-view-state
+           session (view-id (editor-active-view editor))))
+       0)
     (eq? (buffer-major-mode-name
            (view-buffer (editor-active-view editor)))
          'dashboard-mode))
@@ -53,7 +59,11 @@
   (make-key-message
     (make-key-event 'down #f #f #f 0 'press (make-bytevector 0))))
 (check
-  (= (dashboard-model-selection (tui-session-model session)) 1)
+  (= (dashboard-view-selection
+       (tui-session-model session)
+       (tui-session-view-state
+         session (view-id (editor-active-view editor))))
+     1)
   "dashboard-mode-map must route navigation through the command registry")
 
 (editor-update!
@@ -84,6 +94,30 @@
            (editor-tui-sessions editor)))
        1))
   "opening the dashboard again must reuse and refresh its session")
+
+(define primary-workbench (editor-active-workbench editor))
+(define secondary-workbench
+  (editor-create-workbench! editor "dashboard-secondary" '()))
+(editor-switch-workbench! editor (workbench-id secondary-workbench))
+(editor-update! editor (make-command-message 'dashboard.open #f))
+(define secondary-dashboard (tui-active-session editor))
+(check
+  (and
+    (not (= (tui-session-id secondary-dashboard)
+            (tui-session-id session)))
+    (= (dashboard-model-workbench-id
+         (tui-session-model secondary-dashboard))
+       (workbench-id secondary-workbench))
+    (= (length
+         (filter
+           (lambda (candidate)
+             (eq? (tui-application-definition-name
+                    (tui-session-definition candidate))
+                  'dashboard))
+           (editor-tui-sessions editor)))
+       2))
+  "each Workbench must own an independent dashboard session")
+(editor-switch-workbench! editor (workbench-id primary-workbench))
 
 (define project-root (getenv "SODA_DASHBOARD_PROJECT_FIXTURE"))
 (define project-buffer

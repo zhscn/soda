@@ -3,7 +3,8 @@
           dashboard-definition
           dashboard-model?
           dashboard-model-entries
-          dashboard-model-selection
+          dashboard-model-workbench-id
+          dashboard-view-selection
           dashboard-entry?
           dashboard-entry-buffer-id
           dashboard-entry-label
@@ -13,18 +14,20 @@
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
+          (soda editor display-placement)
           (soda editor keymap)
           (soda editor language)
           (soda editor state)
           (soda editor tui-application)
           (soda editor tui-application-runtime)
+          (soda editor workbench)
           (soda tui application))
 
   (define-record-type dashboard-entry
     (fields buffer-id label mode modified?))
 
   (define-record-type dashboard-model
-    (fields entries selection viewport))
+    (fields entries workbench-id))
 
   (define (buffer-label buffer)
     (or (buffer-resource buffer)
@@ -42,11 +45,28 @@
         (lambda (buffer) (not (= (buffer-id buffer) own-buffer-id)))
         (editor-buffers editor))))
 
-  (define (selected-entry model)
-    (and (pair? (dashboard-model-entries model))
-         (list-ref
-           (dashboard-model-entries model)
-           (dashboard-model-selection model))))
+  (define (dashboard-view-selection model state)
+    (let* ([entries (dashboard-model-entries model)]
+           [selected-id
+             (and state (tui-view-state-transient-state state))])
+      (if
+        (null? entries)
+        #f
+        (let loop ([remaining entries] [index 0])
+          (cond
+            [(null? remaining) 0]
+            [(and selected-id
+                  (= selected-id
+                     (dashboard-entry-buffer-id (car remaining))))
+             index]
+            [else (loop (cdr remaining) (+ index 1))])))))
+
+  (define (selected-entry model state)
+    (let ([selection
+            (dashboard-view-selection
+              model state)])
+      (and selection
+           (list-ref (dashboard-model-entries model) selection))))
 
   (define (visible-row-count context)
     (let ([state (tui-application-context-view-state context)])
@@ -56,37 +76,52 @@
     (let* ([entries (dashboard-model-entries model)]
            [count (length entries)])
       (if (zero? count)
-          model
-          (let* ([selection
-                   (mod (+ (dashboard-model-selection model) delta) count)]
+          (tui-result model '() '())
+          (let* ([state (tui-application-context-view-state context)]
+                 [current (or (dashboard-view-selection model state) 0)]
+                 [selection (mod (+ current delta) count)]
                  [rows (visible-row-count context)]
-                 [old-viewport (dashboard-model-viewport model)]
+                 [old-viewport
+                   (if state
+                       (car (tui-view-state-viewport state))
+                       0)]
                  [viewport
                    (cond
                      [(< selection old-viewport) selection]
                      [(>= selection (+ old-viewport rows))
                       (+ 1 (- selection rows))]
-                     [else old-viewport])])
-            (make-dashboard-model entries selection viewport)))))
+                     [else old-viewport])]
+                 [selected-id
+                   (dashboard-entry-buffer-id
+                     (list-ref entries selection))])
+            (tui-result
+              model
+              '()
+              (list
+                (make-tui-view-action
+                  'origin 'transient selected-id)
+                (make-tui-view-action
+                  'origin 'scroll (cons viewport 0))))))))
 
   (define (refresh-model model context)
     (let* ([editor (tui-application-context-editor context)]
            [own-buffer-id (tui-application-context-buffer-id context)]
-           [selected (selected-entry model)]
-           [selected-id (and selected (dashboard-entry-buffer-id selected))]
-           [entries (editor-buffer-entries editor own-buffer-id)]
-           [selection
-             (let loop ([remaining entries] [index 0])
-               (cond
-                 [(null? remaining) 0]
-                 [(and selected-id
-                       (= selected-id
-                          (dashboard-entry-buffer-id (car remaining))))
-                  index]
-                 [else (loop (cdr remaining) (+ index 1))]))])
+           [entries (editor-buffer-entries editor own-buffer-id)])
       (make-dashboard-model
-        entries selection
-        (min selection (dashboard-model-viewport model)))))
+        entries
+        (dashboard-model-workbench-id model))))
+
+  (define (context-workbench-id context arguments)
+    (if
+      (and (integer? arguments) (exact? arguments) (positive? arguments))
+      arguments
+      (let* ([editor (tui-application-context-editor context)]
+             [origin-id (tui-application-context-view-id context)]
+             [workbench
+               (and origin-id
+                    (editor-workbench-for-view editor origin-id))])
+        (workbench-id
+          (or workbench (editor-active-workbench editor))))))
 
   (define (entry-row entry)
     (string-append
@@ -103,18 +138,22 @@
             (editor-buffer-entries
               (tui-application-context-editor context)
               (tui-application-context-buffer-id context))
-            0 0)
+            (context-workbench-id context arguments))
           '()))
       (lambda (model message context)
         (case (tui-message-payload message)
-          [(next) (tui-result (move-selection model 1 context) '() '())]
-          [(previous) (tui-result (move-selection model -1 context) '() '())]
+          [(next) (move-selection model 1 context)]
+          [(previous) (move-selection model -1 context)]
           [(refresh) (tui-result (refresh-model model context) '() '())]
           [else (tui-result model '() '())]))
       (lambda (model context)
-        (tui-column
-          'dashboard.root
-          (list
+        (let* ([state (tui-application-context-view-state context)]
+               [selection (dashboard-view-selection model state)]
+               [viewport
+                 (if state (tui-view-state-viewport state) (cons 0 0))])
+          (tui-column
+            'dashboard.root
+            (list
             (tui-node-with-layout
               (tui-text 'dashboard.title "Buffers" '(application.heading))
               (make-tui-layout (tui-flex 1) (tui-fixed 1)))
@@ -124,10 +163,9 @@
                 (tui-list
                   'dashboard.buffers
                   (map entry-row (dashboard-model-entries model))
-                  (and (pair? (dashboard-model-entries model))
-                       (dashboard-model-selection model)))
-                (cons (dashboard-model-viewport model) 0))
-              (make-tui-layout (tui-flex 1) (tui-flex 1))))))
+                  selection)
+                viewport)
+              (make-tui-layout (tui-flex 1) (tui-flex 1)))))))
       #f
       (lambda (model context)
         (apply string-append
@@ -156,26 +194,46 @@
 
   (define (open-dashboard-command context)
     (let* ([editor (command-context-editor context)]
+           [view (command-context-view context)]
+           [workbench
+             (editor-workbench-for-view editor (view-id view))]
+           [workbench-id (workbench-id workbench)]
            [existing
              (find
                (lambda (session)
-                 (eq? (tui-application-definition-name
-                        (tui-session-definition session))
-                      'dashboard))
+                 (and
+                   (eq? (tui-application-definition-name
+                          (tui-session-definition session))
+                        'dashboard)
+                   (equal? (tui-session-arguments session) workbench-id)))
                (editor-tui-sessions editor))])
       (if existing
-          (editor-set-view-buffer!
-            editor
-            (view-id (command-context-view context))
-            (tui-session-buffer-id existing))
-          (tui-open! editor 'dashboard #f 'edit
-                     (view-id (command-context-view context))))
+          (let ([buffer
+                  (editor-buffer-ref
+                    editor (tui-session-buffer-id existing))])
+            (editor-display-buffer!
+              editor
+              (make-display-request
+                (buffer-id buffer)
+                'edit
+                (view-id view)
+                #f
+                (buffer-creation-context buffer))))
+          (tui-open! editor 'dashboard workbench-id 'edit
+                     (view-id view)))
       (send-dashboard! context 'refresh)))
 
   (define (visit-buffer-command context)
     (let* ([editor (command-context-editor context)]
            [session (active-dashboard-session editor)]
-           [entry (and session (selected-entry (tui-session-model session)))])
+           [entry
+             (and
+               session
+               (selected-entry
+                 (tui-session-model session)
+                 (tui-session-view-state
+                   session
+                   (view-id (command-context-view context)))))])
       (when entry
         (editor-set-view-buffer!
           editor
