@@ -69,9 +69,13 @@
     (hashtable-clear!
       (project-resource-session-watch-sources session)))
 
-  (define (snapshot-message session)
-    (let ([continuation (project-resource-session-continuation session)])
-      (project-resource-session-continuation-set! session #f)
+  (define (snapshot-message session complete?)
+    (let ([continuation
+            (and
+              complete?
+              (project-resource-session-continuation session))])
+      (when complete?
+        (project-resource-session-continuation-set! session #f))
       (make-internal-command-message
         'project.apply-resource-snapshot
         (make-project-resource-result
@@ -113,7 +117,7 @@
         (cond
           [(null? queue)
            (project-resource-session-scan-source-set! session #f)
-           (snapshot-message session)]
+           (snapshot-message session #t)]
           [else
            (let ([directory (car queue)])
              (project-resource-session-queue-set! session (cdr queue))
@@ -181,7 +185,9 @@
         (lambda (entry)
           (consume-entry! session directory entry))
         (decode-vfs-directory-entries (event-data event))))
-    (start-next-scan! adapter session))
+    (or
+      (start-next-scan! adapter session)
+      (snapshot-message session #f)))
 
   (define (reset-session! adapter session generation)
     (stop-session! adapter session)

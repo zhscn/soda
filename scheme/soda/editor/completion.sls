@@ -115,6 +115,7 @@
           completion-session-set-viewport-rows!
           completion-session-selected-item
           completion-session-refresh!
+          completion-session-invalidate-source!
           completion-session-apply-response!
           completion-session-replace-item!
           completion-session-select-next!
@@ -1477,6 +1478,28 @@
                    synchronous-results)))
            (rebuild-session-items! session selected)))
        session]))
+
+  (define (completion-session-invalidate-source! session)
+    (unless (completion-session? session)
+      (assertion-violation
+        'completion-session-invalidate-source!
+        "expected a completion session"
+        session))
+    (let ([query (completion-session-query session)])
+      (when (string? query)
+        (let* ([selected (completion-session-selected-item session)]
+               [items
+                 (choice-source-candidates
+                   (completion-session-source session)
+                   query)]
+               [synchronous-results
+                 (provider-groups->results
+                   (items->provider-results items))])
+          (completion-session-provider-results-set!
+            session
+            (merge-refilter-results session synchronous-results))
+          (rebuild-session-items! session selected))))
+    session)
 
   (define (completion-session-provider-request-active?
             session

@@ -168,6 +168,12 @@ session 分别保存用于匹配的 query 和 source context identity。多字�
 input 和 point 构成，Document completion 使用 document target 与 revision
 约束上下文。
 
+长期存在的同步 choice source 可以显式通知 session 其候选集合已经变化。source
+invalidation 使用当前 query 重新读取候选并重建排序，不增加 query generation、
+不取消 provider request，也不重启 source producer；当前 selection 按稳定 item
+identity 恢复。Project resource picker 用这一入口把目录扫描批次接入同一个
+minibuffer session。
+
 filesystem provider 通过 VFS runtime 异步扫描当前目录。每个 scan source 与
 completion request identity 绑定；generation 更新或 session 关闭时取消 source 并
 移除关联。取消后已经进入 native event queue 的结果也因关联已删除而被忽略。

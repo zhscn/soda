@@ -718,9 +718,11 @@
            [continuation
              (and
                (project-resource-result? argument)
-               (project-resource-result-continuation argument))])
-      (when
-        (editor-apply-project-resource-snapshot! editor snapshot)
+               (project-resource-result-continuation argument))]
+           [applied?
+             (editor-apply-project-resource-snapshot!
+               editor snapshot)])
+      (when applied?
         (editor-set-status-message!
           editor
           (string-append
@@ -728,6 +730,21 @@
             (number->string
               (length
                 (project-resource-snapshot-resources snapshot))))))
+      (when applied?
+        (let ([completion (editor-active-prompt-completion editor)])
+          (when completion
+            (let* ([source (completion-session-source completion)]
+                   [entry
+                     (assq
+                       'resource-project-ids
+                       (choice-source-metadata source))])
+              (when
+                (and
+                  entry
+                  (member
+                    (project-resource-snapshot-project-id snapshot)
+                    (cdr entry)))
+                (editor-invalidate-prompt-completion! editor))))))
       (if continuation
           (list (make-command-effect 'command.invoke continuation))
           '())))

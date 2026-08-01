@@ -9,7 +9,7 @@
 | 异步 file/display 请求的冻结 origin | 已实现 |
 | 通用 `ResourceContext`、View origin 与文件选择上下文冻结 | 已实现 |
 | Project identity、发现缓存与 known registry | 已实现 |
-| Project resource enumerator 与 watch lifecycle | 已实现 |
+| Project resource 流式枚举、snapshot 与 watch lifecycle | 已实现 |
 | Project settings layer、task definition 与 comint runtime | 已实现 |
 | Workbench lifecycle、scope、MRU、slot 与 pinned window | 已实现 |
 | Workbench session 稳定资源持久化与恢复 | 已实现 |
@@ -125,12 +125,19 @@ index 或 process。一个 Buffer 可以通过路径发现 home Project，也可
 描述值，LanguageSession 是否启动由 language policy 决定。
 
 resource enumerator 由 Project 操作按需启动，通过 libuv directory scan 逐层展开
-目录并产生路径 snapshot。需要内容的调用方通过异步 file read 单独读取资源。隐藏目录、
-VCS metadata、构建输出和依赖目录由枚举 policy 排除。enumerator 不为后台索引创建
-Buffer；用户访问资源时才由普通文件打开流程建立 Buffer identity。
+目录。每个目录批次都发布同一 scan generation 的累计路径 snapshot；picker 立即用
+已有候选响应输入，并在 snapshot 增长时按当前 query 重新过滤。候选更新按稳定
+resource identity 保留 selection 和 viewport，不重启目录扫描。
 
-目录 watch 只承担失效通知。合并后的异步重扫定义 resource 集合，接入新增子目录并
-撤销已删除目录子树的 watch。关闭请求该 enumerator 的 operation 会释放全部 watch。
+枚举 session 属于 Editor 的 Project resource cache，不属于启动它的 minibuffer。
+接受或取消 picker 只结束交互 session；枚举可以继续完成并服务下一次命令。重复命令
+复用已有 snapshot 或在途 session，Project 切换后的批次只更新引用同一 Project id 的
+picker。forget Project 和 Editor close 释放 scan source 与全部目录 watch。
+
+需要内容的调用方通过异步 file read 单独读取资源。隐藏目录、VCS metadata、构建输出
+和依赖目录由枚举 policy 排除。enumerator 不为后台索引创建 Buffer；用户访问资源时
+才由普通文件打开流程建立 Buffer identity。目录 watch 只承担失效通知；文件系统变化
+启动新 generation 的异步重扫，并以累计 snapshot 替换旧集合。
 
 ## Workbench
 

@@ -113,6 +113,8 @@
       (make-choice-source
         kind
         `((category . ,kind)
+          (resource-project-ids
+            . ,(map project-id projects))
           (styles . (fzf))
           (preselect . #t))
         (lambda (input point) (cons 0 (string-length input)))
@@ -283,9 +285,9 @@
              "Scanning Project: "
              (project-primary-root project)))
          (list
-           (project-refresh-effect
-             editor
-             project
+           (project-refresh-effect editor project #f)
+           (make-command-effect
+             'command.invoke
              (make-command-message 'project.select-file #f)))])))
 
   (define-command (find-file-in-known-projects-command context selection)

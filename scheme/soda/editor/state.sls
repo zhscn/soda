@@ -58,6 +58,7 @@
           editor-register-completion-provider!
           editor-take-completion-effects!
           editor-refresh-prompt-completion!
+          editor-invalidate-prompt-completion!
           editor-prompt-completion-next!
           editor-prompt-completion-previous!
           editor-prompt-history-previous!
@@ -3218,6 +3219,20 @@
           value
           (active-prompt-session
             'editor-refresh-prompt-completion!
+            value)))
+      completion))
+
+  (define (editor-invalidate-prompt-completion! value)
+    (require-open-editor
+      'editor-invalidate-prompt-completion!
+      value)
+    (let ([completion (editor-active-prompt-completion value)])
+      (when completion
+        (completion-session-invalidate-source! completion)
+        (configure-prompt-view-viewport!
+          value
+          (active-prompt-session
+            'editor-invalidate-prompt-completion!
             value)))
       completion))
 

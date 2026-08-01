@@ -54,6 +54,7 @@
   (effect-result-continue? start-result)
   "resource enumeration must keep the editor loop running")
 
+(define partial-message #f)
 (define completed-message
   (let loop ()
     (let find ([events (runtime-poll! runtime)])
@@ -64,9 +65,14 @@
                  (project-resource-runtime-handle-event
                    adapter
                    (car events))])
-           (if message
-               message
-               (find (cdr events))))]))))
+           (cond
+             [(not message) (find (cdr events))]
+             [(project-resource-result-continuation
+                (internal-command-message-argument message))
+              message]
+             [else
+              (set! partial-message message)
+              (find (cdr events))]))]))))
 
 (check
   (and
@@ -75,6 +81,15 @@
       (internal-command-message-name completed-message)
       'project.apply-resource-snapshot))
   "enumeration must publish a snapshot command")
+(check
+  (and
+    (internal-command-message? partial-message)
+    (project-resource-result?
+      (internal-command-message-argument partial-message))
+    (not
+      (project-resource-result-continuation
+        (internal-command-message-argument partial-message))))
+  "enumeration must publish partial snapshots while scanning")
 
 (define completed-result
   (internal-command-message-argument completed-message))

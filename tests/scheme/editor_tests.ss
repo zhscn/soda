@@ -7,6 +7,8 @@
         (soda editor command)
         (only (soda editor completion)
               completion-session-apply-response!
+              completion-session-invalidate-source!
+              completion-session-select-next!
               completion-session-schedule-requests!)
         (soda editor core)
         (soda editor cpp-language)
@@ -489,22 +491,27 @@
            '())]
        [request
          (and
-           (= (length effects) 1)
+           (= (length effects) 2)
            (eq?
              (command-effect-kind (car effects))
              'project.refresh-resources)
            (command-effect-payload (car effects)))]
-       [continuation
+       [open-message
          (and
-           (project-resource-request? request)
-           (project-resource-request-continuation request))])
+           (= (length effects) 2)
+           (eq?
+             (command-effect-kind (cadr effects))
+             'command.invoke)
+           (command-effect-payload (cadr effects)))])
   (unless
     (and
-      (command-message? continuation)
-      (eq? (command-message-name continuation) 'project.select-file))
+      (project-resource-request? request)
+      (not (project-resource-request-continuation request))
+      (command-message? open-message)
+      (eq? (command-message-name open-message) 'project.select-file))
     (error
       'editor-tests
-      "Project file command did not defer until resource scanning"
+      "Project file command did not open while resource scanning"
       effects)))
 (editor-apply-project-resource-snapshot!
   editor
@@ -6861,6 +6868,50 @@
     (= (length (completion-session-items session)) 1)
     (error 'editor-tests
            "semantically equivalent completion items were not deduplicated")))
+
+(let* ([candidate-names '("alpha" "beta")]
+       [source
+         (make-choice-source
+           'streaming-source-test
+           '((category . streaming-source-test)
+             (styles . (fzf)))
+           (lambda (input point) (cons 0 point))
+           (lambda (query)
+             (map
+               (lambda (name)
+                 (make-completion-item
+                   name
+                   'streaming-source-test
+                   name name name #f #f name))
+               candidate-names))
+           (lambda (value) #f)
+           (lambda (generation) #f))]
+       [session
+         (make-completion-session
+           936
+           (make-prompt-completion-target 936 0 0)
+           source
+           '()
+           (make-completion-selection-policy
+             'candidates 'first #t))])
+  (completion-session-refresh! session "")
+  (completion-session-select-next! session)
+  (let ([generation (completion-session-generation session)]
+        [selected
+          (completion-item-id
+            (completion-session-selected-item session))])
+    (set! candidate-names '("aardvark" "alpha" "beta"))
+    (completion-session-invalidate-source! session)
+    (unless
+      (and
+        (= generation (completion-session-generation session))
+        (equal?
+          selected
+          (completion-item-id
+            (completion-session-selected-item session))))
+      (error
+        'editor-tests
+        "streaming source invalidation lost completion selection"))))
 
 (let* ([query (make-string 200 #\a)]
        [candidate (string-append query "b")]
