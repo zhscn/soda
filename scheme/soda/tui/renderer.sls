@@ -31,6 +31,12 @@
             line-count
             focused?))
 
+  (define-record-type
+    (completion-popup-layout
+      %make-completion-popup-layout
+      completion-popup-layout?)
+    (fields candidates documentation))
+
   (define (resolve-faces theme faces)
     (let ([spec (theme-resolve-faces theme faces)])
       (make-style
@@ -1626,16 +1632,19 @@
 
   (define (completion-documentation-summary item)
     (let ([documentation (completion-item-documentation item)])
-      (and (string? documentation)
-           (positive? (string-length documentation))
+      (and (completion-documentation? documentation)
+           (positive?
+             (string-length
+               (completion-documentation-text documentation)))
            (call-with-values
              open-string-output-port
              (lambda (port extract)
-               (let loop ([index 0] [emitted? #f] [separator? #f])
-                 (if (= index (string-length documentation))
+               (let ([text (completion-documentation-text documentation)])
+                 (let loop ([index 0] [emitted? #f] [separator? #f])
+                 (if (= index (string-length text))
                      (let ([summary (extract)])
                        (and (positive? (string-length summary)) summary))
-                     (let ([character (string-ref documentation index)])
+                     (let ([character (string-ref text index)])
                        (if (or (char-whitespace? character)
                                (eq? (char-general-category character) 'Cc))
                            (loop (+ index 1) emitted? emitted?)
@@ -1643,9 +1652,9 @@
                              (when (and emitted? separator?)
                                (write-char #\space port))
                              (write-char character port)
-                             (loop (+ index 1) #t #f)))))))))))
+                             (loop (+ index 1) #t #f))))))))))))
 
-  (define (completion-documentation-lines documentation columns limit)
+  (define (completion-documentation-lines documentation format columns limit)
     (define (finish-line characters lines)
       (let ([line (list->string (reverse characters))])
         (if (null? lines)
@@ -1700,23 +1709,34 @@
                    (cons (truncate-cells word columns) result))]
                 [else
                  (loop remaining "" (cons line result))])))))
-    (let loop ([remaining (source-lines documentation)] [result '()])
+    (define (fence? value)
+      (and (>= (string-length value) 3)
+           (string=? (substring value 0 3) "```")))
+    (let loop ([remaining (source-lines documentation)]
+               [result '()]
+               [code? #f])
       (if (or (null? remaining) (>= (length result) limit))
           (reverse result)
           (let ([line (car remaining)])
-            (let ([wrapped
-                    (if (string=? line "")
-                        '("")
-                        (wrap-line line))])
-              (loop
-                (cdr remaining)
-                (fold-left
-                  (lambda (lines value)
-                    (if (< (length lines) limit)
-                        (cons value lines)
-                        lines))
-                  result
-                  wrapped)))))))
+            (cond
+              [(and (eq? format 'markdown) (fence? line))
+               (loop (cdr remaining) result (not code?))]
+              [else
+               (let ([wrapped
+                       (cond
+                         [code? (list (truncate-cells line columns))]
+                         [(string=? line "") '("")]
+                         [else (wrap-line line)])])
+                 (loop
+                   (cdr remaining)
+                   (fold-left
+                     (lambda (lines value)
+                       (if (< (length lines) limit)
+                           (cons value lines)
+                           lines))
+                     result
+                     wrapped)
+                   code?))])))))
 
   (define (truncate-cells value width)
     (if (<= (string-cell-width value 8) width)
@@ -1818,6 +1838,20 @@
                 (resolve-faces theme documentation-faces)
                 sources)))))))
 
+  (define (completion-viewport-start completion rows)
+    (let* ([count (length (completion-session-items completion))]
+           [selected (completion-session-selected-index completion)]
+           [maximum-start (max 0 (- count rows))]
+           [start
+             (min (completion-session-viewport-start completion)
+                  maximum-start)])
+      (cond
+        [(zero? rows) 0]
+        [(not selected) 0]
+        [(< selected start) selected]
+        [(>= selected (+ start rows)) (- selected (- rows 1))]
+        [else start])))
+
   (define (render-completions-component! context frame rectangle)
     (let* ([editor (editor-render-context-editor context)]
            [theme (editor-theme editor)]
@@ -1856,27 +1890,9 @@
             (let* ([document-target?
                      (document-completion-target?
                        (completion-session-target completion))]
-                   [selected-item
-                     (completion-session-selected-item completion)]
-                   [documentation
-                     (and selected-item
-                          (completion-item-documentation selected-item))]
-                   [documentation?
-                     (and
-                       document-target?
-                       (string? documentation)
-                       (positive? (string-length documentation))
-                       (> (rect-rows rectangle) 1))]
-                   [candidate-rows
-                     (if document-target?
-                         (completion-session-viewport-rows completion)
-                         (rect-rows rectangle))]
+                   [candidate-rows (rect-rows rectangle)]
                    [start
-                     (begin
-                       (completion-session-set-viewport-rows!
-                         completion
-                         candidate-rows)
-                       (completion-session-viewport-start completion))]
+                     (completion-viewport-start completion candidate-rows)]
                    [visible
                      (let loop ([remaining (list-tail items start)]
                                 [count candidate-rows]
@@ -2040,46 +2056,6 @@
                             '(popup popup.scrollbar))
                           #f
                           background-sources))))))
-              (when documentation?
-                (let ([lines
-                        (completion-documentation-lines
-                          documentation
-                          (rect-columns rectangle)
-                          (- (rect-rows rectangle) candidate-rows))])
-                  (do ([index 0 (+ index 1)])
-                      ((= index (length lines)))
-                    (let ([row
-                            (+
-                              (rect-row rectangle)
-                              candidate-rows
-                              index)])
-                      (frame-fill-rect!
-                        frame
-                        (make-rect
-                          row
-                          (rect-column rectangle)
-                          1
-                          (rect-columns rectangle))
-                        (make-cell
-                          " "
-                          1
-                          '(popup popup.documentation)
-                          (resolve-faces
-                            theme
-                            '(popup popup.documentation))
-                          #f
-                          background-sources))
-                      (draw-string!
-                        frame
-                        row
-                        (rect-column rectangle)
-                        (rect-columns rectangle)
-                        (list-ref lines index)
-                        '(popup popup.documentation)
-                        (resolve-faces
-                          theme
-                          '(popup popup.documentation))
-                        background-sources))))
               (when indicator
                 (draw-string!
                   frame
@@ -2089,7 +2065,7 @@
                   indicator
                   '(popup)
                   (resolve-faces theme '(popup))
-                  background-sources)))))))))
+                  background-sources))))))))
 
   (define editor-text-component
     (make-component 'editor.text render-text-component!))
@@ -2103,12 +2079,51 @@
   (define editor-completions-component
     (make-component 'editor.completions render-completions-component!))
 
+  (define (render-completion-documentation-component! context frame rectangle)
+    (let* ([editor (editor-render-context-editor context)]
+           [completion (view-completion (editor-render-context-view context))]
+           [selected
+             (and completion
+                  (completion-session-selected-item completion))]
+           [documentation
+             (and selected (completion-item-documentation selected))]
+           [theme (editor-theme editor)]
+           [faces '(popup popup.documentation)]
+           [style (resolve-faces theme faces)]
+           [sources
+             (list
+               (make-cell-source 'chrome 'completion-documentation #f)
+               (component-source 'editor.completion-documentation))])
+      (frame-fill-rect!
+        frame rectangle (make-cell " " 1 faces style #f sources))
+      (when (completion-documentation? documentation)
+        (let ([lines
+                (completion-documentation-lines
+                  (completion-documentation-text documentation)
+                  (completion-documentation-format documentation)
+                  (rect-columns rectangle)
+                  (rect-rows rectangle))])
+          (do ([index 0 (+ index 1)])
+              ((= index (length lines)))
+            (draw-string!
+              frame
+              (+ (rect-row rectangle) index)
+              (rect-column rectangle)
+              (rect-columns rectangle)
+              (list-ref lines index)
+              faces style sources))))))
+
+  (define editor-completion-documentation-component
+    (make-component
+      'editor.completion-documentation
+      render-completion-documentation-component!))
+
   (define (make-editor-component-tree
             rows
             columns
             minibuffer?
             prompt-completion-rows
-            document-completion-rectangle)
+            document-completion-layout)
     (let* ([root-rectangle (make-rect 0 0 rows columns)]
            [rectangles
              (layout-split
@@ -2156,16 +2171,56 @@
                         '()))
                     '()))
               '())
-          (if document-completion-rectangle
-              (list
-                (make-component-node
-                  'editor.completions
-                  document-completion-rectangle
-                  editor-completions-component
-                  '()))
+          (if document-completion-layout
+              (append
+                (list
+                  (make-component-node
+                    'editor.completions
+                    (completion-popup-layout-candidates
+                      document-completion-layout)
+                    editor-completions-component
+                    '()))
+                (if (completion-popup-layout-documentation
+                      document-completion-layout)
+                    (list
+                      (make-component-node
+                        'editor.completion-documentation
+                        (completion-popup-layout-documentation
+                          document-completion-layout)
+                        editor-completion-documentation-component
+                        '()))
+                    '()))
               '())))))
 
-  (define (document-completion-rectangle
+  (define (completion-popup-width items documentation columns)
+    (min
+      columns
+      (max
+        12
+        (fold-left
+          (lambda (width item)
+            (max width (+ 2 (string-cell-width (completion-row-text item) 8))))
+          0
+          items))))
+
+  (define (documentation-popup-width documentation columns)
+    (min
+      columns
+      (max
+        24
+        (min
+          72
+          (fold-left
+            (lambda (width line)
+              (max width (string-cell-width line 8)))
+            0
+            (completion-documentation-lines
+              (completion-documentation-text documentation)
+              (completion-documentation-format documentation)
+              72
+              1))))))
+
+  (define (document-completion-layout
             completion
             rows
             columns
@@ -2177,70 +2232,21 @@
            [documentation
              (and selected (completion-item-documentation selected))]
            [documentation?
-             (and
-               (string? documentation)
-               (positive? (string-length documentation)))]
+             (and (completion-documentation? documentation)
+                  (positive?
+                    (string-length
+                      (completion-documentation-text documentation))))]
            [available-rows (max 0 (- rows 1))]
-           [candidate-width
-             (fold-left
-               (lambda (width item)
-                 (max
-                   width
-                   (+ 2
-                      (string-cell-width
-                        (completion-row-text item)
-                        8))))
-               12
-               items)]
-           [documentation-width
-             (if documentation?
-                 (min
-                   72
-                   (max
-                     24
-                     (fold-left
-                       (lambda (width line)
-                         (max width (string-cell-width line 8)))
-                       0
-                       (completion-documentation-lines
-                         documentation
-                         72
-                         1))))
-                 0)]
-           [popup-columns
-             (min columns (max candidate-width documentation-width))]
-           [documentation-rows
-             (if documentation?
-                 (length
-                   (completion-documentation-lines
-                     documentation
-                     popup-columns
-                     (max 0 (min 5 (- available-rows 1)))))
-                 0)]
            [candidate-rows
              (min
                completion-window-max-rows
                (length items)
-               (max 0 (- available-rows documentation-rows)))]
-           [popup-rows (+ candidate-rows documentation-rows)])
+               available-rows)]
+           [popup-columns
+             (completion-popup-width items documentation columns)])
       (and (positive? candidate-rows)
-           (begin
-             (completion-session-set-viewport-rows!
-               completion
-               candidate-rows)
-             (let* ([desired-width
-                 (fold-left
-                   (lambda (width item)
-                     (max
-                       width
-                       (+ 2
-                          (string-cell-width
-                            (completion-row-text item)
-                            8))))
-                   12
-                   items)]
-               [popup-columns (min columns (max desired-width documentation-width))]
-               [text-rows (- rows 1)]
+           (let* ([text-rows (- rows 1)]
+                  [popup-rows candidate-rows]
                [screen-row (max 0 (min caret-row (- text-rows 1)))]
                [below (- text-rows (+ screen-row 1))]
                [popup-row
@@ -2250,12 +2256,91 @@
                [screen-column
                  (max 0 (min caret-column (- columns 1)))]
                [popup-column
-                 (min screen-column (- columns popup-columns))])
-               (make-rect
-                 popup-row
-                 popup-column
-                 popup-rows
-                 popup-columns))))))
+                 (min screen-column (- columns popup-columns))]
+               [candidates
+                 (make-rect popup-row popup-column popup-rows popup-columns)]
+               [right-column (+ popup-column popup-columns 1)]
+               [right-space (- columns right-column)]
+               [documentation-columns
+                 (and documentation?
+                      (documentation-popup-width documentation
+                        (if (>= right-space 24) right-space columns)))]
+               [documentation-rows
+                 (and documentation?
+                      (min 8 (- text-rows popup-row)))]
+               [documentation-rectangle
+                 (and documentation-columns documentation-rows
+                      (positive? documentation-rows)
+                      (cond
+                        [(>= right-space 24)
+                         (make-rect
+                           popup-row
+                           right-column
+                           documentation-rows
+                           documentation-columns)]
+                        [(>= below 2)
+                         (make-rect
+                           (+ popup-row popup-rows)
+                           popup-column
+                           (min 5 below)
+                           popup-columns)]
+                        [(>= popup-row 2)
+                         (make-rect
+                           (max 0 (- popup-row 5))
+                           popup-column
+                           (min 5 popup-row)
+                           popup-columns)]
+                        [else #f]))])
+             (%make-completion-popup-layout
+               candidates documentation-rectangle)))))
+
+  (define (translate-completion-rectangle rectangle text-rectangle gutter-width)
+    (and rectangle
+         (make-rect
+           (+ (rect-row text-rectangle) (rect-row rectangle))
+           (+ (rect-column text-rectangle)
+              gutter-width
+              (rect-column rectangle))
+           (rect-rows rectangle)
+           (rect-columns rectangle))))
+
+  (define (make-document-completion-nodes context completion text-node)
+    (let* ([text-rectangle (component-node-rect text-node)]
+           [gutter-width
+             (render-context-gutter-width
+               context
+               (rect-columns text-rectangle))]
+           [layout
+             (document-completion-layout
+               completion
+               (+ (rect-rows text-rectangle) 1)
+               (- (rect-columns text-rectangle) gutter-width)
+               (- (editor-render-context-caret-line context)
+                  (editor-render-context-first-line context))
+               (- (editor-render-context-caret-column context)
+                  (editor-render-context-first-column context)))])
+      (and layout
+           (let ([documentation
+                   (translate-completion-rectangle
+                     (completion-popup-layout-documentation layout)
+                     text-rectangle gutter-width)])
+             (append
+               (list
+                 (make-component-node
+                   'editor.completions
+                   (translate-completion-rectangle
+                     (completion-popup-layout-candidates layout)
+                     text-rectangle gutter-width)
+                   editor-completions-component
+                   '()))
+               (if documentation
+                   (list
+                     (make-component-node
+                       'editor.completion-documentation
+                       documentation
+                       editor-completion-documentation-component
+                       '()))
+                   '()))))))
 
   (define (render-single-editor-frame editor rows columns)
     (unless (editor? editor)
@@ -2331,33 +2416,43 @@
                          (and
                            (not (editor-active-prompt editor))
                            (view-completion view))]
-                       [local-completion-rectangle
+                       [local-completion-layout
                          (and
                            document-completion
-                           (document-completion-rectangle
+                           (document-completion-layout
                              document-completion
                              rows
                              (- columns gutter-width)
                              (- caret-line first-line)
                              (- caret-column first-column)))]
-                       [completion-rectangle
+                       [completion-layout
                          (and
-                           local-completion-rectangle
-                           (make-rect
-                             (rect-row local-completion-rectangle)
-                             (+ gutter-width
-                                (rect-column
-                                  local-completion-rectangle))
-                             (rect-rows local-completion-rectangle)
-                             (rect-columns
-                               local-completion-rectangle)))]
+                           local-completion-layout
+                           (%make-completion-popup-layout
+                             (let ([rectangle
+                                     (completion-popup-layout-candidates
+                                       local-completion-layout)])
+                               (make-rect
+                                 (rect-row rectangle)
+                                 (+ gutter-width (rect-column rectangle))
+                                 (rect-rows rectangle)
+                                 (rect-columns rectangle)))
+                             (let ([rectangle
+                                     (completion-popup-layout-documentation
+                                       local-completion-layout)])
+                               (and rectangle
+                                    (make-rect
+                                      (rect-row rectangle)
+                                      (+ gutter-width (rect-column rectangle))
+                                      (rect-rows rectangle)
+                                      (rect-columns rectangle))))))]
                        [component-tree
                          (make-editor-component-tree
                            rows
                            columns
                            (and (editor-active-prompt editor) #t)
                            prompt-completion-rows
-                           completion-rectangle)])
+                           completion-layout)])
                   (frame-set-layout! frame component-tree)
                   (component-node-render!
                     component-tree
@@ -2581,47 +2676,14 @@
                    (and
                      (not prompt)
                      (view-completion active-view))]
-                 [document-completion-node
+                 [document-completion-nodes
                    (and
                      document-completion
                      active-text-node
-                     (let* ([text-rectangle
-                              (component-node-rect
-                                active-text-node)]
-                            [gutter-width
-                              (render-context-gutter-width
-                                root-context
-                                (rect-columns text-rectangle))]
-                            [local
-                              (document-completion-rectangle
-                                document-completion
-                                (+ (rect-rows text-rectangle) 1)
-                                (- (rect-columns text-rectangle)
-                                   gutter-width)
-                                (-
-                                  (editor-render-context-caret-line
-                                    root-context)
-                                  (editor-render-context-first-line
-                                    root-context))
-                                (-
-                                  (editor-render-context-caret-column
-                                    root-context)
-                                  (editor-render-context-first-column
-                                    root-context)))])
-                       (and
-                         local
-                         (make-component-node
-                           'editor.completions
-                           (make-rect
-                             (+ (rect-row text-rectangle)
-                                (rect-row local))
-                             (+ (rect-column text-rectangle)
-                                gutter-width
-                                (rect-column local))
-                             (rect-rows local)
-                             (rect-columns local))
-                           editor-completions-component
-                           '()))))]
+                     (make-document-completion-nodes
+                       root-context
+                       document-completion
+                       active-text-node))]
                  [completion-node
                    (and
                      prompt
@@ -2652,9 +2714,7 @@
                        (if minibuffer-node
                            (list minibuffer-node)
                            '())
-                       (if document-completion-node
-                           (list document-completion-node)
-                           '())))])
+                       (or document-completion-nodes '())))])
             (frame-set-layout! frame tree)
             (component-node-render!
               tree root-context frame)

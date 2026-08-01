@@ -1068,14 +1068,24 @@
       (cons "result"
             (make-json-object
               (list
-                (cons "documentation" "Resolved SodaWidget documentation")))))))
+                (cons
+                  "documentation"
+                  (make-json-object
+                    (list
+                      (cons "kind" "markdown")
+                      (cons "value" "Resolved SodaWidget documentation"))))))))))
 (let* ([completion (editor-active-completion editor)]
        [item (and completion (completion-session-selected-item completion))])
   (check
     (and item
          (completion-item-resolved? item)
+         (eq?
+           (completion-documentation-format
+             (completion-item-documentation item))
+           'markdown)
          (string=?
-           (completion-item-documentation item)
+           (completion-documentation-text
+             (completion-item-documentation item))
            "Resolved SodaWidget documentation")
          (completion-item-edit item)
          (= (length

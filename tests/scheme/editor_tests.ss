@@ -7703,7 +7703,9 @@
         (completion-item-sort-text item)
         #f
         #t
-        "From `<concepts>`\n\n[concepts.arithmetic], arithmetic concepts"
+        (make-completion-documentation
+          'markdown
+          "From `<concepts>`\n\n[concepts.arithmetic], arithmetic concepts\n\n```cpp\n  value();\n```")
         (completion-item-provider-data item)
         #f
         #f))))
@@ -7737,8 +7739,9 @@
       item
       (completion-item-resolved? item)
       (string=?
-        (completion-item-documentation item)
-        "From `<concepts>`\n\n[concepts.arithmetic], arithmetic concepts")
+        (completion-documentation-text
+          (completion-item-documentation item))
+        "From `<concepts>`\n\n[concepts.arithmetic], arithmetic concepts\n\n```cpp\n  value();\n```")
       (=
         (length
           (completion-edit-additional-edits
@@ -7746,8 +7749,8 @@
         1))
     (error 'editor-tests
            "completion provider did not resolve the selected item")))
-(editor-update! resolve-editor (make-resize-message 6 80))
-(let ([frame (render-editor-frame resolve-editor 6 80)])
+(editor-update! resolve-editor (make-resize-message 10 80))
+(let ([frame (render-editor-frame resolve-editor 10 80)])
   (let ([rows
           (let loop ([row 0] [result '()])
             (if (= row (frame-rows frame))
@@ -7757,6 +7760,7 @@
     (unless
       (and (exists (lambda (text) (string-contains? text "From `<concepts>`")) rows)
            (exists (lambda (text) (string-contains? text "[concepts.arithmetic]")) rows)
+           (exists (lambda (text) (string-contains? text "  value();")) rows)
            (not
              (exists
                (lambda (text)
@@ -8666,7 +8670,8 @@
     (and
       candidate
       (string=?
-        (completion-item-documentation candidate)
+        (completion-documentation-text
+          (completion-item-documentation candidate))
         "Render a documented frame."))
     (error
       'editor-tests
@@ -10435,7 +10440,8 @@
     (and
       extended
       (equal? (completion-item-annotation extended) "M-x")
-      (string? (completion-item-documentation extended))
+      (completion-documentation?
+        (completion-item-documentation extended))
       find-file
       (equal? (completion-item-annotation find-file) "C-x C-f"))
     (error 'editor-tests

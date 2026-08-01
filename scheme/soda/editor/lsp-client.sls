@@ -1745,10 +1745,15 @@
   (define (lsp-completion-documentation value)
     (let ([documentation (json-object-ref value "documentation" #f)])
       (cond
-        [(string? documentation) documentation]
+        [(string? documentation)
+         (make-completion-documentation 'plaintext documentation)]
         [(json-object? documentation)
-         (let ([contents (json-object-ref documentation "value" #f)])
-           (and (string? contents) contents))]
+         (let ([contents (json-object-ref documentation "value" #f)]
+               [kind (json-object-ref documentation "kind" "plaintext")])
+           (and (string? contents)
+                (make-completion-documentation
+                  (if (string=? kind "markdown") 'markdown 'plaintext)
+                  contents)))]
         [else #f])))
 
   (define (lsp-completion-resolve-supported? session)

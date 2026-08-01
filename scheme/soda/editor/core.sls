@@ -1388,6 +1388,10 @@
           completion-item-snippet?
           completion-item-resolved?
           completion-item-documentation
+          make-completion-documentation
+          completion-documentation?
+          completion-documentation-format
+          completion-documentation-text
           completion-item-provider-data
           completion-item-payload
           make-completion-text-edit

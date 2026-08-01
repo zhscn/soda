@@ -17,6 +17,10 @@
           completion-item-snippet?
           completion-item-resolved?
           completion-item-documentation
+          make-completion-documentation
+          completion-documentation?
+          completion-documentation-format
+          completion-documentation-text
           completion-item-provider-data
           completion-item-payload
           make-completion-text-edit
@@ -125,6 +129,12 @@
           (soda editor fuzzy))
 
   (define-record-type
+    (completion-documentation
+      %make-completion-documentation
+      completion-documentation?)
+    (fields format text))
+
+  (define-record-type
     (completion-item %make-completion-item completion-item?)
     (fields id
             provider
@@ -142,6 +152,30 @@
             documentation
             provider-data
             priority))
+
+  (define (make-completion-documentation format text)
+    (unless (memq format '(plaintext markdown))
+      (assertion-violation
+        'make-completion-documentation
+        "format must be plaintext or markdown"
+        format))
+    (unless (string? text)
+      (assertion-violation
+        'make-completion-documentation
+        "text must be a string"
+        text))
+    (%make-completion-documentation format text))
+
+  (define (normalize-completion-documentation value)
+    (cond
+      [(not value) #f]
+      [(completion-documentation? value) value]
+      [(string? value) (make-completion-documentation 'plaintext value)]
+      [else
+       (assertion-violation
+         'make-completion-item
+         "documentation must be a completion documentation value, string, or #f"
+         value)]))
 
   (define-record-type
     (completion-text-edit %make-completion-text-edit completion-text-edit?)
@@ -506,7 +540,7 @@
          sort-text
          snippet?
          resolved?
-         documentation
+         (normalize-completion-documentation documentation)
          provider-data
          annotation
          group
@@ -593,7 +627,7 @@
          group
          snippet?
          resolved?
-         documentation
+         (normalize-completion-documentation documentation)
          provider-data
          priority)]))
 
