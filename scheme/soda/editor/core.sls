@@ -399,6 +399,9 @@
           tui-focus-entry-rect
           tui-focus-entry-order
           tui-focus-entry-enabled?
+          tui-focus-entry-group
+          tui-focus-entry-path
+          tui-focus-ring-repair
           make-tui-cursor
           tui-cursor?
           tui-cursor-node-key

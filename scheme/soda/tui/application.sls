@@ -74,6 +74,9 @@
           tui-focus-entry-rect
           tui-focus-entry-order
           tui-focus-entry-enabled?
+          tui-focus-entry-group
+          tui-focus-entry-path
+          tui-focus-ring-repair
           make-tui-cursor
           tui-cursor?
           tui-cursor-node-key
@@ -752,7 +755,78 @@
               (loop (cdr children)))))))
 
   (define-record-type tui-focus-entry
-    (fields node-key rect order enabled?))
+    (fields node-key rect order enabled? group path))
+
+  (define (focus-entry-for-key entries key)
+    (and key
+         (find
+           (lambda (entry)
+             (equal? key (tui-focus-entry-node-key entry)))
+           entries)))
+
+  (define (common-prefix-length left right)
+    (let loop ([left left] [right right] [length 0])
+      (if (and (pair? left) (pair? right)
+               (equal? (car left) (car right)))
+          (loop (cdr left) (cdr right) (+ length 1))
+          length)))
+
+  (define (parent-path path)
+    (if (null? path) '() (reverse (cdr (reverse path)))))
+
+  (define (same-group-successor old-entry enabled)
+    (let* ([group (tui-focus-entry-group old-entry)]
+           [members
+             (filter
+               (lambda (entry)
+                 (equal? group (tui-focus-entry-group entry)))
+               enabled)]
+           [later
+             (find
+               (lambda (entry)
+                 (> (tui-focus-entry-order entry)
+                    (tui-focus-entry-order old-entry)))
+               members)])
+      (or later (and (pair? members) (car members)))))
+
+  (define (parent-scope-successor old-entry enabled)
+    (let ([old-parent (parent-path (tui-focus-entry-path old-entry))])
+      (let loop ([remaining enabled] [best #f] [best-score 0])
+        (if (null? remaining)
+            best
+            (let* ([entry (car remaining)]
+                   [score
+                     (common-prefix-length
+                       old-parent
+                       (parent-path (tui-focus-entry-path entry)))])
+              (if (> score best-score)
+                  (loop (cdr remaining) entry score)
+                  (loop (cdr remaining) best best-score)))))))
+
+  (define (tui-focus-ring-repair current old-ring new-ring)
+    (unless (and (list? old-ring) (list? new-ring)
+                 (for-all tui-focus-entry? old-ring)
+                 (for-all tui-focus-entry? new-ring))
+      (assertion-violation
+        'tui-focus-ring-repair "expected focus rings" old-ring new-ring))
+    (let* ([enabled (filter tui-focus-entry-enabled? new-ring)]
+           [current-entry (focus-entry-for-key enabled current)])
+      (cond
+        [current-entry current]
+        [(not current)
+         (and (pair? enabled)
+              (tui-focus-entry-node-key (car enabled)))]
+        [(focus-entry-for-key old-ring current)
+         =>
+         (lambda (old-entry)
+           (let ([replacement
+                   (or (same-group-successor old-entry enabled)
+                       (parent-scope-successor old-entry enabled))])
+             (and replacement
+                  (tui-focus-entry-node-key replacement))))]
+        [else
+         (and (pair? enabled)
+              (tui-focus-entry-node-key (car enabled)))])))
 
   (define-record-type
     (tui-cursor %make-tui-cursor tui-cursor?)
@@ -986,8 +1060,9 @@
           (paint-arranged! child frame theme session-id node-clip))
         (tui-arranged-node-children arranged))))
 
-  (define (collect-focus-ring arranged clip)
+  (define (collect-focus-ring arranged clip parent-path)
     (let* ([node (tui-arranged-node-node arranged)]
+           [path (append parent-path (list (tui-node-key node)))]
            [node-clip
              (intersect-rect (tui-arranged-node-rect arranged) clip)]
            [focus (tui-node-focus node)]
@@ -1001,12 +1076,14 @@
                      (tui-node-key node)
                      node-clip
                      (or (tui-focus-order focus) 0)
-                     (tui-focus-enabled? focus)))
+                     (tui-focus-enabled? focus)
+                     (tui-focus-group focus)
+                     path))
                  '())])
       (append
         own
         (apply append
-          (map (lambda (child) (collect-focus-ring child node-clip))
+          (map (lambda (child) (collect-focus-ring child node-clip path))
                (tui-arranged-node-children arranged))))))
 
   (define (insert-focus-entry entry entries)
@@ -1062,6 +1139,6 @@
           #f
           (list (arranged->component-tree arranged session-id '())))
           arranged
-          (sort-focus-ring (collect-focus-ring arranged surface-rect))
+          (sort-focus-ring (collect-focus-ring arranged surface-rect '()))
           cursor))))
 )

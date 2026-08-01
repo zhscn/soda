@@ -56,8 +56,46 @@
     (eq?
       (tui-focus-entry-node-key
         (car (tui-surface-focus-ring surface)))
-      'title))
+      'title)
+    (eq?
+      (tui-focus-entry-group
+        (car (tui-surface-focus-ring surface)))
+      'main)
+    (equal?
+      (tui-focus-entry-path
+        (car (tui-surface-focus-ring surface)))
+      '(focused-root title)))
   "surface must retain component and focus metadata")
+
+(define focus-rect (make-rect 0 0 1 1))
+(define old-focus-ring
+  (list
+    (make-tui-focus-entry 'field-a focus-rect 0 #t 'form
+                          '(root form field-a))))
+(define same-group-ring
+  (list
+    (make-tui-focus-entry 'field-b focus-rect 1 #t 'form
+                          '(root form field-b))))
+(define parent-scope-ring
+  (list
+    (make-tui-focus-entry 'form-action focus-rect 0 #t 'actions
+                          '(root form form-action))))
+(check
+  (and
+    (eq? (tui-focus-ring-repair
+           'field-a old-focus-ring same-group-ring)
+         'field-b)
+    (eq? (tui-focus-ring-repair
+           'field-a old-focus-ring parent-scope-ring)
+         'form-action)
+    (not
+      (tui-focus-ring-repair
+        'field-a
+        old-focus-ring
+        (list
+          (make-tui-focus-entry
+            'unrelated focus-rect 0 #t 'other '(other unrelated))))))
+  "focus repair must prefer the same group, then the nearest parent scope")
 
 (define first-cell
   (frame-cell-ref (tui-surface-frame surface) 0 0))

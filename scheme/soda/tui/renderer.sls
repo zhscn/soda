@@ -1209,15 +1209,9 @@
 
   (define (normalize-application-focus! view-state surface)
     (let* ([ring (tui-surface-focus-ring surface)]
-           [enabled
-             (filter tui-focus-entry-enabled? ring)]
+           [old-ring (tui-view-state-focus-ring view-state)]
            [current (tui-view-state-focused-node view-state)]
-           [valid?
-             (and current
-                  (exists
-                    (lambda (entry)
-                      (equal? current (tui-focus-entry-node-key entry)))
-                    enabled))])
+           [repaired (tui-focus-ring-repair current old-ring ring)])
       (tui-view-state-set-focus-ring! view-state ring)
       (let ([capture (tui-view-state-pointer-capture view-state)])
         (when (and capture
@@ -1226,11 +1220,10 @@
                        (tui-surface-arranged-tree surface)
                        capture)))
           (tui-view-state-set-pointer-capture! view-state #f)))
-      (unless valid?
+      (unless (equal? current repaired)
         (tui-view-state-set-focused-node!
           view-state
-          (and (pair? enabled)
-               (tui-focus-entry-node-key (car enabled)))))))
+          repaired))))
 
   (define (same-rect? left right)
     (and (= (rect-row left) (rect-row right))
