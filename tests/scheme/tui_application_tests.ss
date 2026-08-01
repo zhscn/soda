@@ -635,5 +635,54 @@
     (buffer-closed? failing-close-buffer))
   "a failing close hook must not interrupt idempotent session cleanup")
 
+(define persistent-definition
+  (make-tui-application-definition
+    'persistent
+    (lambda (context arguments) (values arguments '()))
+    (lambda (model message context) (tui-result model '() '()))
+    (lambda (model context)
+      (tui-text 'persistent.value (number->string model)))
+    #f
+    #f
+    'fundamental-mode
+    'tools
+    '(timer)
+    (lambda (model context) (list 'persistent-model model))
+    (lambda (datum context) (cadr datum))
+    (lambda (model context) (list (tui-command 'timer 0)))))
+(editor-register-tui-application! editor persistent-definition)
+(define persistent-buffer (tui-open! editor 'persistent 17 'edit))
+(define persistent-session (tui-active-session editor))
+(define persistent-view-state
+  (car (tui-session-view-states persistent-session)))
+(tui-view-state-set-viewport! persistent-view-state (cons 3 2))
+(tui-view-state-set-focused-node! persistent-view-state 'persistent.value)
+(define persistent-snapshot
+  (tui-snapshot-session editor (tui-session-id persistent-session)))
+(tui-close! editor (tui-session-id persistent-session))
+(define restored-buffer (tui-restore! editor persistent-snapshot))
+(define restored-session
+  (editor-tui-session-for-buffer editor (buffer-id restored-buffer)))
+(define restored-view-state
+  (car (tui-session-view-states restored-session)))
+(check
+  (and
+    (eq? (tui-session-snapshot-application-name persistent-snapshot)
+         'persistent)
+    (tui-session-snapshot-serialized-model? persistent-snapshot)
+    (equal? (tui-session-snapshot-model persistent-snapshot)
+            '(persistent-model 17))
+    (= (tui-session-model restored-session) 17)
+    (= (tui-session-arguments restored-session) 17)
+    (eq? (tui-session-display-intent restored-session) 'edit)
+    (equal? (tui-view-state-viewport restored-view-state) (cons 3 2))
+    (eq? (tui-view-state-focused-node restored-view-state)
+         'persistent.value)
+    (= (length (tui-session-pending-commands restored-session)) 1)
+    (eq? (tui-command-kind
+           (car (tui-session-pending-commands restored-session)))
+         'timer))
+  "restoring a serialized session must use durable view state and fresh resume commands")
+
 (editor-close! editor)
 (display "tui application tests passed\n")

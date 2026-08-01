@@ -170,6 +170,9 @@
           tui-application-definition-default-mode
           tui-application-definition-default-display-intent
           tui-application-definition-capabilities
+          tui-application-definition-serializer
+          tui-application-definition-deserializer
+          tui-application-definition-resume
           editor-tui-application-catalog
           editor-register-tui-application!
           editor-remove-tui-application!
@@ -181,6 +184,8 @@
           tui-session-id
           tui-session-definition
           tui-session-buffer-id
+          tui-session-arguments
+          tui-session-display-intent
           tui-session-model
           tui-session-generation
           tui-session-command-generation
@@ -297,6 +302,16 @@
           tui-start-recording!
           tui-stop-recording!
           tui-replay!
+          tui-snapshot-session
+          tui-restore!
+          tui-session-snapshot?
+          tui-session-snapshot-application-name
+          tui-session-snapshot-buffer-resource
+          tui-session-snapshot-display-intent
+          tui-session-snapshot-arguments
+          tui-session-snapshot-serialized-model?
+          tui-session-snapshot-model
+          tui-session-snapshot-view-states
           tui-lifecycle-snapshot
           tui-synchronize-view-lifecycle!
           tui-route-pointer-event

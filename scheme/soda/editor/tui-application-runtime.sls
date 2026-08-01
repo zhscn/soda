@@ -10,6 +10,8 @@
           tui-start-recording!
           tui-stop-recording!
           tui-replay!
+          tui-snapshot-session
+          tui-restore!
           tui-lifecycle-snapshot
           tui-synchronize-view-lifecycle!
           tui-route-pointer-event
@@ -576,6 +578,78 @@
             commands))
         (values model commands))))
 
+  (define (open-with-initializer!
+            editor name arguments intent origin-view-id initializer)
+    (require-open-editor 'tui-open! editor)
+    (let* ([lifecycle-before (tui-lifecycle-snapshot editor)]
+           [definition (definition-ref editor name)]
+           [registry (editor-tui-application-registry editor)]
+           [session-id
+             (tui-application-registry-allocate-session-id! registry)]
+           [buffer
+             (editor-create-buffer!
+               editor
+               (application-resource name session-id)
+               (tui-application-definition-default-mode definition)
+               "")]
+           [registered? #f])
+      (guard
+        (condition
+          [else
+           (when registered?
+             (editor-close-tui-session! editor session-id))
+           (when
+             (and
+               (not (buffer-closed? buffer))
+               (not
+                 (exists
+                   (lambda (view) (eq? (view-buffer view) buffer))
+                   (editor-views editor))))
+             (editor-remove-buffer! editor (buffer-id buffer)))
+           (raise condition)])
+        (let ([context
+                (make-tui-application-context
+                  editor session-id (buffer-id buffer)
+                  origin-view-id arguments)])
+          (call-with-values
+            (lambda () (initializer definition context arguments))
+            (lambda (model commands)
+              (unless (and (list? commands) (for-all tui-command? commands))
+                (assertion-violation
+                  'tui-open!
+                  "application initializer must return TuiCommand values"
+                  name commands))
+              (let ([session
+                      (make-tui-session
+                        session-id definition (buffer-id buffer)
+                        arguments intent model)])
+                (tui-application-registry-add! registry session)
+                (set! registered? #t)
+                (buffer-set-presentation!
+                  buffer (make-tui-presentation session-id))
+                (buffer-set-local-setting! buffer 'track-modified? #f)
+                (buffer-set-local-setting! buffer 'read-only? #t)
+                (buffer-set-local-setting! buffer 'confirm-on-exit? #f)
+                (buffer-set-local-setting!
+                  buffer 'interaction-class 'interface)
+                (tui-session-set-state! session 'ready)
+                (sync-text-projection! editor session)
+                (let ([view
+                        (editor-display-buffer!
+                          editor
+                          (make-display-request
+                            (buffer-id buffer) intent origin-view-id
+                            #f #f))])
+                  (enqueue-commands!
+                    editor session
+                    (make-tui-message
+                      session-id (tui-session-generation session)
+                      (view-id view) 'tui.init)
+                    commands))
+                (tui-synchronize-view-lifecycle! editor lifecycle-before)
+                (editor-invalidate! editor 'application)
+                buffer)))))))
+
   (define tui-open!
     (case-lambda
       [(editor name arguments)
@@ -594,87 +668,93 @@
          intent
          (view-id (editor-active-view editor)))]
       [(editor name arguments intent origin-view-id)
-       (require-open-editor 'tui-open! editor)
-       (let* ([lifecycle-before (tui-lifecycle-snapshot editor)]
+       (open-with-initializer!
+         editor name arguments intent origin-view-id initialize)]))
+
+  (define (durable-view-state state)
+    (list
+      (tui-view-state-viewport state)
+      (tui-view-state-focused-node state)))
+
+  (define (tui-snapshot-session editor session-id)
+    (require-open-editor 'tui-snapshot-session editor)
+    (let* ([session (editor-tui-session-ref editor session-id)]
+           [definition (tui-session-definition session)]
+           [serializer (tui-application-definition-serializer definition)]
+           [buffer (editor-buffer-ref editor (tui-session-buffer-id session))]
+           [context
+             (make-tui-application-context
+               editor session-id (buffer-id buffer) #f
+               (tui-session-arguments session))]
+           [model
+             (and serializer
+                  (serializer (tui-session-model session) context))])
+      (make-tui-session-snapshot
+        (tui-application-definition-name definition)
+        (buffer-resource buffer)
+        (tui-session-display-intent session)
+        (tui-session-arguments session)
+        (and serializer #t)
+        model
+        (map durable-view-state (tui-session-view-states session)))))
+
+  (define (restore-view-state! state datum)
+    (when (and (list? datum) (= (length datum) 2))
+      (let ([viewport (car datum)] [focused-node (cadr datum)])
+        (when (and (pair? viewport)
+                   (integer? (car viewport))
+                   (integer? (cdr viewport)))
+          (tui-view-state-set-viewport! state viewport))
+        (tui-view-state-set-focused-node! state focused-node))))
+
+  (define tui-restore!
+    (case-lambda
+      [(editor snapshot)
+       (tui-restore!
+         editor snapshot (view-id (editor-active-view editor)))]
+      [(editor snapshot origin-view-id)
+       (unless (tui-session-snapshot? snapshot)
+         (assertion-violation
+           'tui-restore! "expected a TuiSessionSnapshot" snapshot))
+       (let* ([name (tui-session-snapshot-application-name snapshot)]
               [definition (definition-ref editor name)]
-              [registry (editor-tui-application-registry editor)]
-              [session-id
-                (tui-application-registry-allocate-session-id! registry)]
-              [buffer
-                (editor-create-buffer!
-                  editor
-                  (application-resource name session-id)
-                  (tui-application-definition-default-mode definition)
-                  "")]
-              [registered? #f])
-         (guard
-           (condition
-             [else
-              (when registered?
-                (editor-close-tui-session! editor session-id))
-              (when
-                (and
-                  (not (buffer-closed? buffer))
-                  (not
-                    (exists
-                      (lambda (view)
-                        (eq? (view-buffer view) buffer))
-                      (editor-views editor))))
-                (editor-remove-buffer! editor (buffer-id buffer)))
-              (raise condition)])
-           (let* ([context
-                    (make-tui-application-context
-                      editor
-                      session-id
-                      (buffer-id buffer)
-                      origin-view-id
-                      arguments)])
-             (call-with-values
-               (lambda () (initialize definition context arguments))
-               (lambda (model commands)
-                 (let ([session
-                         (make-tui-session
-                           session-id
-                           definition
-                           (buffer-id buffer)
-                           model)])
-                   (tui-application-registry-add! registry session)
-                   (set! registered? #t)
-                   (buffer-set-presentation!
-                     buffer
-                     (make-tui-presentation session-id))
-                   (buffer-set-local-setting!
-                     buffer 'track-modified? #f)
-                   (buffer-set-local-setting! buffer 'read-only? #t)
-                   (buffer-set-local-setting!
-                     buffer 'confirm-on-exit? #f)
-                   (buffer-set-local-setting!
-                     buffer 'interaction-class 'interface)
-                   (tui-session-set-state! session 'ready)
-                   (sync-text-projection! editor session)
-                   (let ([view
-                           (editor-display-buffer!
-                             editor
-                             (make-display-request
-                               (buffer-id buffer)
-                               intent
-                               origin-view-id
-                               #f
-                               #f))])
-                     (enqueue-commands!
-                       editor
-                       session
-                       (make-tui-message
-                         session-id
-                         (tui-session-generation session)
-                         (view-id view)
-                         'tui.init)
-                       commands))
-                   (tui-synchronize-view-lifecycle!
-                     editor
-                     lifecycle-before)
-                   (editor-invalidate! editor 'application)
-                   buffer))))))]))
+              [initializer
+                (lambda (definition context arguments)
+                  (if (tui-session-snapshot-serialized-model? snapshot)
+                      (let ([deserializer
+                              (tui-application-definition-deserializer
+                                definition)])
+                        (unless deserializer
+                          (assertion-violation
+                            'tui-restore!
+                            "application no longer provides a deserializer"
+                            name))
+                        (let* ([model
+                                 (deserializer
+                                   (tui-session-snapshot-model snapshot)
+                                   context)]
+                               [resume
+                                 (tui-application-definition-resume
+                                   definition)]
+                               [commands
+                                 (if resume (resume model context) '())])
+                          (values model commands)))
+                      (initialize definition context arguments)))])
+         (let* ([buffer
+                  (open-with-initializer!
+                    editor name
+                    (tui-session-snapshot-arguments snapshot)
+                    (tui-session-snapshot-display-intent snapshot)
+                    origin-view-id initializer)]
+                [session
+                  (editor-tui-session-for-buffer editor (buffer-id buffer))])
+           (let loop ([states (tui-session-view-states session)]
+                      [data (tui-session-snapshot-view-states snapshot)])
+             (unless (or (null? states) (null? data))
+               (restore-view-state! (car states) (car data))
+               (loop (cdr states) (cdr data))))
+           (editor-invalidate! editor 'application)
+           buffer))]))
 
   (define (fallback-buffer editor target)
     (or

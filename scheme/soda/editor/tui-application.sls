@@ -11,6 +11,9 @@
           tui-application-definition-default-mode
           tui-application-definition-default-display-intent
           tui-application-definition-capabilities
+          tui-application-definition-serializer
+          tui-application-definition-deserializer
+          tui-application-definition-resume
           make-tui-application-catalog
           tui-application-catalog?
           tui-application-catalog-generation
@@ -56,6 +59,8 @@
           tui-session-id
           tui-session-definition
           tui-session-buffer-id
+          tui-session-arguments
+          tui-session-display-intent
           tui-session-model
           tui-session-generation
           tui-session-command-generation
@@ -76,6 +81,15 @@
           tui-session-ensure-view-state!
           tui-session-remove-view-state!
           tui-session-close!
+          make-tui-session-snapshot
+          tui-session-snapshot?
+          tui-session-snapshot-application-name
+          tui-session-snapshot-buffer-resource
+          tui-session-snapshot-display-intent
+          tui-session-snapshot-arguments
+          tui-session-snapshot-serialized-model?
+          tui-session-snapshot-model
+          tui-session-snapshot-view-states
           make-tui-application-registry
           tui-application-registry?
           tui-application-registry-catalog
@@ -199,11 +213,20 @@
             text-projection
             default-mode
             default-display-intent
-            capabilities))
+            capabilities
+            serializer
+            deserializer
+            resume))
 
-  (define (make-tui-application-definition
-            name init update view close text-projection default-mode
-            default-display-intent capabilities)
+  (define make-tui-application-definition
+    (case-lambda
+      [(name init update view close text-projection default-mode
+             default-display-intent capabilities)
+       (make-tui-application-definition
+         name init update view close text-projection default-mode
+         default-display-intent capabilities #f #f #f)]
+      [(name init update view close text-projection default-mode
+             default-display-intent capabilities serializer deserializer resume)
     (unless (symbol? name)
       (assertion-violation
         'make-tui-application-definition
@@ -241,13 +264,51 @@
         'make-tui-application-definition
         "capabilities must contain unique symbols"
         capabilities))
+    (unless (or (not serializer) (procedure? serializer))
+      (assertion-violation
+        'make-tui-application-definition
+        "serializer must be a procedure or #f"
+        serializer))
+    (unless (or (not deserializer) (procedure? deserializer))
+      (assertion-violation
+        'make-tui-application-definition
+        "deserializer must be a procedure or #f"
+        deserializer))
+    (unless (eq? (and serializer #t) (and deserializer #t))
+      (assertion-violation
+        'make-tui-application-definition
+        "serializer and deserializer must be provided together"
+        serializer deserializer))
+    (unless (or (not resume) (procedure? resume))
+      (assertion-violation
+        'make-tui-application-definition
+        "resume must be a procedure or #f"
+        resume))
     (%make-tui-application-definition
       name init update view close text-projection default-mode
-      default-display-intent capabilities))
+      default-display-intent capabilities serializer deserializer resume)]))
 
   (define-syntax define-tui-application
     (syntax-rules (init update view close text-projection mode
-                        display-intent capabilities)
+                        display-intent capabilities serialize deserialize resume)
+      [(_ name
+          (init init-procedure)
+          (update update-procedure)
+          (view view-procedure)
+          (close close-procedure)
+          (text-projection projection-procedure)
+          (serialize serializer-procedure)
+          (deserialize deserializer-procedure)
+          (resume resume-procedure)
+          (mode mode-name)
+          (display-intent intent)
+          (capabilities capability-list))
+       (define name
+         (make-tui-application-definition
+           'name init-procedure update-procedure view-procedure
+           close-procedure projection-procedure mode-name intent
+           capability-list serializer-procedure deserializer-procedure
+           resume-procedure))]
       [(_ name
           (init init-procedure)
           (update update-procedure)
@@ -582,6 +643,8 @@
     (fields id
             definition
             buffer-id
+            arguments
+            display-intent
             (mutable model)
             (mutable generation)
             (mutable command-generation)
@@ -593,7 +656,14 @@
             (mutable last-message)
             (mutable replay-recorder)))
 
-  (define (make-tui-session id definition buffer-id model)
+  (define make-tui-session
+    (case-lambda
+      [(id definition buffer-id model)
+       (make-tui-session
+         id definition buffer-id #f
+         (tui-application-definition-default-display-intent definition)
+         model)]
+      [(id definition buffer-id arguments display-intent model)
     (unless (and (exact-positive-integer? id)
                  (tui-application-definition? definition)
                  (exact-positive-integer? buffer-id))
@@ -601,9 +671,23 @@
         'make-tui-session
         "invalid session identity"
         id definition buffer-id))
+    (unless (symbol? display-intent)
+      (assertion-violation
+        'make-tui-session
+        "display intent must be a symbol"
+        display-intent))
     (%make-tui-session
-      id definition buffer-id model 0 0 1
-      (make-eqv-hashtable) '() '() 'initializing #f #f))
+      id definition buffer-id arguments display-intent model 0 0 1
+      (make-eqv-hashtable) '() '() 'initializing #f #f)]))
+
+  (define-record-type tui-session-snapshot
+    (fields application-name
+            buffer-resource
+            display-intent
+            arguments
+            serialized-model?
+            model
+            view-states))
 
   (define (tui-session-set-replay-recorder! session recorder)
     (require-session 'tui-session-set-replay-recorder! session)
