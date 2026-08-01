@@ -16,11 +16,21 @@
           (soda editor state)
           (soda vfs))
 
+  (define (context-project-target context policy)
+    (let ([argument (command-context-argument context)])
+      (if (project-target? argument)
+          argument
+          (editor-project-target
+            (command-context-editor context)
+            (command-context-view context)
+            policy))))
+
   (define (context-project context policy)
-    (editor-resolve-project
-      (command-context-editor context)
-      (command-context-view context)
-      policy))
+    (let ([target (context-project-target context policy)])
+      (and target (project-target-project target))))
+
+  (define (project-origin-view editor id)
+    (find (lambda (view) (= (view-id view) id)) (editor-views editor)))
 
   (define (project-context editor view project base)
     (let ([current
@@ -83,7 +93,8 @@
           (and resource (project-contains-resource? project resource))))
       (editor-buffers editor)))
 
-  (define (resource-item project resource kind)
+  (define (resource-item target resource kind)
+    (let ([project (project-target-project target)])
     (let ([label (project-relative-resource project resource)])
       (make-completion-item
         (cons (project-id project) resource)
@@ -93,25 +104,29 @@
         label
         (project-primary-root project)
         #f
-        (vector project resource))))
+        (vector target resource)))))
 
-  (define (resource-choice-source projects kind resources)
+  (define (resource-choice-source targets kind resources)
     (define (current-items)
       (apply
         append
         (map
-          (lambda (project)
+          (lambda (target)
+            (let ([project (project-target-project target)])
             (map
               (lambda (resource)
-                (resource-item project resource kind))
-              (resources project)))
-          projects)))
+                (resource-item target resource kind))
+              (resources project))))
+          targets)))
     (let ()
       (make-choice-source
         kind
         `((category . ,kind)
           (resource-project-ids
-            . ,(map project-id projects))
+            . ,(map
+                  (lambda (target)
+                    (project-id (project-target-project target)))
+                  targets))
           (styles . (fzf))
           (preselect . #t))
         (lambda (input point) (cons 0 (string-length input)))
@@ -132,9 +147,9 @@
       "Project file: "
       (lambda (context)
         (let* ([editor (command-context-editor context)]
-               [project (context-project context 'workspace)])
+               [target (context-project-target context 'workspace)])
           (resource-choice-source
-            (if project (list project) '())
+            (if target (list target) '())
             'project-file
             (lambda (project) (project-resources editor project)))))
       'must-match
@@ -149,7 +164,14 @@
       (lambda (context)
         (let ([editor (command-context-editor context)])
           (resource-choice-source
-            (editor-known-projects editor)
+            (map
+              (lambda (project)
+                (editor-project-target
+                  editor
+                  (command-context-view context)
+                  'workspace
+                  project))
+              (editor-known-projects editor))
             'project-file
             (lambda (project) (project-resources editor project)))))
       'must-match
@@ -163,9 +185,9 @@
       "Project directory: "
       (lambda (context)
         (let* ([editor (command-context-editor context)]
-               [project (context-project context 'workspace)])
+               [target (context-project-target context 'workspace)])
           (resource-choice-source
-            (if project (list project) '())
+            (if target (list target) '())
             'project-directory
             (lambda (project) (project-directories editor project)))))
       'must-match
@@ -183,7 +205,8 @@
 
   (define (project-buffer-choice-source context)
     (let* ([editor (command-context-editor context)]
-           [project (context-project context 'workspace)]
+           [target (context-project-target context 'workspace)]
+           [project (and target (project-target-project target))]
            [items
              (if
                (not project)
@@ -197,7 +220,7 @@
                        label label label
                        (symbol->string (buffer-major-mode-name buffer))
                        #f
-                       buffer)))
+                       (vector target buffer))))
                  (project-buffers editor project)))])
       (make-choice-source
         'project-buffer
@@ -228,14 +251,21 @@
       (not selection)
       '()
       (let* ([editor (command-context-editor context)]
-             [view (command-context-view context)]
-             [project (vector-ref selection 0)]
+             [target (vector-ref selection 0)]
+             [view
+               (project-origin-view
+                 editor (project-target-origin-view-id target))]
+             [project (project-target-project target)]
              [resource (vector-ref selection 1)]
-             [resource-context
-               (project-context
-                 editor view project (project-primary-root project))]
+             [resource-context (project-target-resource-context target)]
              [buffer (editor-buffer-for-resource editor resource)])
         (if
+          (not view)
+          (begin
+            (editor-set-status-message!
+              editor "Project command origin is no longer available")
+            '())
+          (if
           buffer
           (begin
             (editor-display-buffer!
@@ -255,7 +285,7 @@
                 resource
                 #f
                 'edit
-                resource-context)))))))
+                resource-context))))))))
 
   (define-command (find-project-file-command context selection)
     "Find a file in the current Project resource snapshot."
@@ -264,7 +294,8 @@
 
   (define (find-project-file-dispatch-command context)
     (let* ([editor (command-context-editor context)]
-           [project (context-project context 'workspace)])
+           [target (context-project-target context 'workspace)]
+           [project (and target (project-target-project target))])
       (cond
         [(not project)
          (editor-set-status-message! editor "No Project found")
@@ -273,7 +304,7 @@
          (list
            (make-command-effect
              'command.invoke
-             (make-command-message 'project.select-file #f)))]
+             (make-command-message 'project.select-file target)))]
         [else
          (editor-remember-project! editor project)
          (editor-set-status-message!
@@ -285,7 +316,7 @@
            (project-refresh-effect editor project #f)
            (make-command-effect
              'command.invoke
-             (make-command-message 'project.select-file #f)))])))
+             (make-command-message 'project.select-file target)))])))
 
   (define-command (find-file-in-known-projects-command context selection)
     "Find a file in any known Project resource snapshot."
@@ -299,25 +330,39 @@
       (not selection)
       '()
       (let* ([editor (command-context-editor context)]
-             [view (command-context-view context)]
-             [project (vector-ref selection 0)]
+             [target (vector-ref selection 0)]
+             [view
+               (project-origin-view
+                 editor (project-target-origin-view-id target))]
+             [project (project-target-project target)]
              [directory (vector-ref selection 1)])
-        (editor-set-view-resource-context!
-          editor
-          (view-id view)
-          (project-context editor view project directory))
-        (list
-          (make-command-effect
-            'command.invoke
-            (make-command-message 'file.find #f))))))
+        (if
+          (not view)
+          (begin
+            (editor-set-status-message!
+              editor "Project command origin is no longer available")
+            '())
+          (begin
+            (editor-set-view-resource-context!
+              editor
+              (view-id view)
+              (project-context editor view project directory))
+            (list
+              (make-command-effect
+                'command.invoke
+                (make-command-message 'file.find #f))))))))
 
-  (define-command (switch-project-buffer-command context buffer)
+  (define-command (switch-project-buffer-command context selection)
     "Switch to an open Buffer belonging to the current Project."
     (interactive project-buffer-reader)
-    (when buffer
+    (when selection
       (let* ([editor (command-context-editor context)]
-             [view (command-context-view context)]
-             [project (context-project context 'workspace)])
+             [target (vector-ref selection 0)]
+             [buffer (vector-ref selection 1)]
+             [view
+               (project-origin-view
+                 editor (project-target-origin-view-id target))])
+        (when view
         (editor-display-buffer!
           editor
           (make-display-request
@@ -325,10 +370,7 @@
             'edit
             (view-id view)
             #f
-            (and
-              project
-              (project-context
-                editor view project (project-primary-root project)))))))
+            (project-target-resource-context target))))))
     '())
 
   (define (cycle-project-buffer! context delta)
@@ -405,9 +447,9 @@
       prompt
       (lambda (context)
         (let* ([editor (command-context-editor context)]
-               [project (context-project context policy)])
+               [target (context-project-target context policy)])
           (resource-choice-source
-            (if project (list project) '())
+            (if target (list target) '())
             history
             (lambda (project) (selector editor project context)))))
       'must-match

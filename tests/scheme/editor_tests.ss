@@ -434,7 +434,11 @@
            context
            (list
              (vector
-               editor-test-project
+               (editor-project-target
+                 editor
+                 (editor-active-view editor)
+                 'workspace
+                 editor-test-project)
                "/virtual/repository/src/main.cpp")))]
        [request
          (and
@@ -583,7 +587,15 @@
       (project-resource-request? request)
       (not (project-resource-request-continuation request))
       (command-message? open-message)
-      (eq? (command-message-name open-message) 'project.select-file))
+      (eq? (command-message-name open-message) 'project.select-file)
+      (project-target? (command-message-argument open-message))
+      (eq?
+        (project-target-project (command-message-argument open-message))
+        editor-test-project)
+      (=
+        (project-target-origin-view-id
+          (command-message-argument open-message))
+        (view-id (editor-active-view editor))))
     (error
       'editor-tests
       "Project file command did not open while resource scanning"

@@ -93,24 +93,30 @@
              [(workspace) (or focused home unique)]
              [(resource) (or home focused unique)])))]))
 
-  (define (editor-project-target editor view policy)
-    (let ([project (editor-resolve-project editor view policy)])
-      (and
-        project
-        (let* ([workbench
-                 (editor-workbench-for-view editor (view-id view))]
-               [current
-                 (editor-view-resource-context editor (view-id view))]
-               [context
-                 (make-resource-context
-                   (project-primary-root project)
-                   (view-id view)
-                   project
-                   (resource-context-language-context current))])
-          (make-project-target
-            project
-            (project-primary-root project)
-            (and workbench (workbench-id workbench))
-            (view-id view)
-            context)))))
+  (define editor-project-target
+    (case-lambda
+      [(editor view policy)
+       (editor-project-target editor view policy #f)]
+      [(editor view policy explicit-project)
+       (let ([project
+               (editor-resolve-project
+                 editor view policy explicit-project)])
+         (and
+           project
+           (let* ([workbench
+                    (editor-workbench-for-view editor (view-id view))]
+                  [current
+                    (editor-view-resource-context editor (view-id view))]
+                  [context
+                    (make-resource-context
+                      (project-primary-root project)
+                      (view-id view)
+                      project
+                      (resource-context-language-context current))])
+             (make-project-target
+               project
+               (project-primary-root project)
+               (and workbench (workbench-id workbench))
+               (view-id view)
+               context))))]))
 )
