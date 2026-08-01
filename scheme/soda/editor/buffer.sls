@@ -5,6 +5,8 @@
           buffer-document
           buffer-resource
           buffer-set-resource!
+          buffer-presentation
+          buffer-set-presentation!
           buffer-creation-context
           buffer-set-creation-context!
           buffer-closed?
@@ -52,6 +54,7 @@
           (soda editor injection)
           (soda editor injection-highlighting)
           (soda editor language)
+          (soda editor presentation)
           (soda editor resource-context)
           (soda editor setting)
           (soda editor structure))
@@ -78,6 +81,9 @@
       (immutable id buffer-id)
       (immutable document buffer-document)
       (mutable resource buffer-resource buffer-resource-set!)
+      (mutable presentation
+               buffer-presentation
+               buffer-presentation-set!)
       (mutable creation-context
                buffer-creation-context
                buffer-creation-context-set!)
@@ -221,6 +227,7 @@
                  id
                  document
                  resource
+                 (make-document-presentation)
                  #f
                  (make-eq-hashtable)
                  catalog
@@ -238,6 +245,16 @@
                  #f)])
          (install-major-mode! value mode-name)
          value)]))
+
+  (define (buffer-set-presentation! value presentation)
+    (require-open-buffer 'buffer-set-presentation! value)
+    (unless (buffer-presentation? presentation)
+      (assertion-violation
+        'buffer-set-presentation!
+        "expected a BufferPresentation"
+        presentation))
+    (buffer-presentation-set! value presentation)
+    presentation)
 
   (define (buffer-set-creation-context! value context)
     (require-open-buffer 'buffer-set-creation-context! value)

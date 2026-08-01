@@ -70,6 +70,14 @@
           editor-interaction-ref
           editor-interaction-for-buffer
           editor-register-interaction!
+          editor-tui-application-registry
+          editor-tui-application-catalog
+          editor-register-tui-application!
+          editor-remove-tui-application!
+          editor-tui-sessions
+          editor-tui-session-ref
+          editor-tui-session-for-buffer
+          editor-close-tui-session!
           editor-evaluator
           editor-set-evaluator!
           editor-debugger
@@ -286,10 +294,12 @@
           (soda editor prompt)
           (soda editor project)
           (soda editor project-resource)
+          (soda editor presentation)
           (soda editor resource-context)
           (soda editor setting)
           (soda editor theme)
           (soda editor themes catppuccin)
+          (soda editor tui-application)
           (soda editor window)
           (soda editor workbench)
           (soda vfs))
@@ -391,6 +401,7 @@
       (mutable next-interaction-id
                editor-next-interaction-id
                editor-next-interaction-id-set!)
+      (immutable tui-applications editor-tui-application-registry)
       (mutable evaluator editor-evaluator editor-evaluator-set!)
       (mutable debugger editor-debugger editor-debugger-set!)
       (immutable commands editor-command-registry)
@@ -1323,6 +1334,11 @@
         value
         'before-buffer-removed
         buffer)
+      (when (tui-presentation? (buffer-presentation buffer))
+        (editor-close-tui-session!
+          value
+          (tui-presentation-session-id
+            (buffer-presentation buffer))))
       (editor-clear-buffer-global-marks! value buffer)
       (editor-clear-buffer-changes! value buffer)
       (editor-detach-buffer-bookmarks! value buffer)
@@ -1472,9 +1488,123 @@
         (editor-next-interaction-id-set! value (+ id 1))
         session)))
 
+  (define (editor-tui-application-catalog value)
+    (require-open-editor 'editor-tui-application-catalog value)
+    (tui-application-registry-catalog
+      (editor-tui-application-registry value)))
+
+  (define (editor-register-tui-application! value definition)
+    (require-open-editor 'editor-register-tui-application! value)
+    (let ([result
+            (tui-application-catalog-register!
+              (editor-tui-application-catalog value)
+              definition)])
+      (editor-invalidate! value 'configuration)
+      result))
+
+  (define (editor-remove-tui-application! value name)
+    (require-open-editor 'editor-remove-tui-application! value)
+    (let ([result
+            (tui-application-catalog-remove!
+              (editor-tui-application-catalog value)
+              name)])
+      (when result
+        (editor-invalidate! value 'configuration))
+      result))
+
+  (define (editor-tui-sessions value)
+    (require-open-editor 'editor-tui-sessions value)
+    (tui-application-registry-sessions
+      (editor-tui-application-registry value)))
+
+  (define (editor-tui-session-ref value id)
+    (require-open-editor 'editor-tui-session-ref value)
+    (unless (exact-non-negative-integer? id)
+      (assertion-violation
+        'editor-tui-session-ref
+        "session id must be a non-negative exact integer"
+        id))
+    (or
+      (tui-application-registry-ref
+        (editor-tui-application-registry value)
+        id)
+      (assertion-violation
+        'editor-tui-session-ref
+        "unknown TUI application session"
+        id)))
+
+  (define (editor-tui-session-for-buffer value buffer-id)
+    (require-open-editor 'editor-tui-session-for-buffer value)
+    (tui-application-registry-for-buffer
+      (editor-tui-application-registry value)
+      buffer-id))
+
+  (define (editor-close-tui-session! value id)
+    (require-open-editor 'editor-close-tui-session! value)
+    (let* ([registry (editor-tui-application-registry value)]
+           [session (tui-application-registry-ref registry id)])
+      (when session
+        (let ([failure #f]
+              [buffer
+                (hashtable-ref
+                  (editor-buffer-table value)
+                  (tui-session-buffer-id session)
+                  #f)])
+          (guard
+            (condition
+              [else
+               (set! failure condition)
+               (tui-session-set-state! session 'closed)])
+            (tui-session-close!
+              session
+              (make-tui-application-context
+                value
+                id
+                (tui-session-buffer-id session)
+                #f
+                #f)))
+          (when
+            (and
+              buffer
+              (tui-presentation? (buffer-presentation buffer))
+              (=
+                id
+                (tui-presentation-session-id
+                  (buffer-presentation buffer))))
+            (buffer-set-presentation!
+              buffer
+              (make-document-presentation)))
+          (tui-application-registry-remove! registry id)
+          (when failure
+            (editor-set-status-message!
+              value
+              "TUI application close failed"
+              'error))))
+      session))
+
   (define (editor-views value)
     (require-open-editor 'editor-views value)
     (table-values (editor-view-table value) (editor-view-ids value)))
+
+  (define (view-tui-session value view)
+    (let ([presentation (buffer-presentation (view-buffer view))])
+      (and
+        (tui-presentation? presentation)
+        (tui-application-registry-ref
+          (editor-tui-application-registry value)
+          (tui-presentation-session-id presentation)))))
+
+  (define (attach-tui-view-state! value view)
+    (let ([session (view-tui-session value view)])
+      (and
+        session
+        (tui-session-ensure-view-state! session (view-id view)))))
+
+  (define (detach-tui-view-state! value view)
+    (let ([session (view-tui-session value view)])
+      (and
+        session
+        (tui-session-remove-view-state! session (view-id view)))))
 
   (define (editor-view-ref value id)
     (require-open-editor 'editor-view-ref value)
@@ -1839,6 +1969,7 @@
         value
         (append (editor-view-ids value) (list id)))
       (editor-next-view-id-set! value (+ id 1))
+      (attach-tui-view-state! value view)
       view)]))
 
   (define (prompt-for-view value id)
@@ -1850,6 +1981,7 @@
 
   (define (close-view-unchecked! value id)
     (let ([view (editor-view-ref value id)])
+      (detach-tui-view-state! value view)
       (when
         (exists
           (lambda (workbench)
@@ -2183,6 +2315,7 @@
     (let ([view (editor-view-ref value view-id)]
           [buffer (editor-buffer-ref value buffer-id)])
       (editor-capture-view-place! value view)
+      (detach-tui-view-state! value view)
       (cancel-view-completion! value view)
       (for-each fold-close! (view-folds view))
       (view-folds-set! view '())
@@ -2224,6 +2357,7 @@
       (view-caret-display-affinity-set! view #f)
       (view-reset-input-states! view)
       (view-pending-keys-set! view '())
+      (attach-tui-view-state! value view)
       (editor-restore-view-place! value view)
       (when
         (eq? (editor-workbench-for-view value view-id)
@@ -5895,6 +6029,7 @@
                interactions
                '()
                1
+               (make-tui-application-registry)
                #f
                #f
                (make-command-registry)
@@ -6008,6 +6143,10 @@
         (lambda ()
           (editor-rebuilding-extensions?-set! value #f)))
       (cancel-queued-completion-effects-now! value)
+      (for-each
+        (lambda (session)
+          (editor-close-tui-session! value (tui-session-id session)))
+        (editor-tui-sessions value))
       (for-each
         (lambda (session)
           (when (prompt-session-completion session)

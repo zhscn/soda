@@ -12,6 +12,13 @@
           editor-set-buffer-resource!
           buffer-creation-context
           buffer-set-creation-context!
+          buffer-presentation
+          buffer-set-presentation!
+          make-document-presentation
+          document-presentation?
+          make-tui-presentation
+          tui-presentation?
+          tui-presentation-session-id
           editor-views
           editor-view-ref
           editor-open-view!
@@ -151,6 +158,47 @@
           editor-interactions
           editor-interaction-ref
           editor-interaction-for-buffer
+          make-tui-application-definition
+          define-tui-application
+          tui-application-definition?
+          tui-application-definition-name
+          tui-application-definition-init
+          tui-application-definition-update
+          tui-application-definition-view
+          tui-application-definition-close
+          tui-application-definition-text-projection
+          tui-application-definition-default-mode
+          tui-application-definition-default-display-intent
+          tui-application-definition-capabilities
+          editor-tui-application-catalog
+          editor-register-tui-application!
+          editor-remove-tui-application!
+          editor-tui-sessions
+          editor-tui-session-ref
+          editor-tui-session-for-buffer
+          tui-session?
+          tui-session-id
+          tui-session-definition
+          tui-session-buffer-id
+          tui-session-model
+          tui-session-generation
+          tui-session-command-generation
+          tui-session-state
+          tui-session-pending-commands
+          tui-session-view-states
+          tui-session-view-state
+          tui-view-state?
+          tui-view-state-view-id
+          tui-view-state-width
+          tui-view-state-height
+          tui-view-state-focused?
+          tui-view-state-focused-node
+          tui-view-state-viewport
+          tui-view-state-transient-state
+          tui-view-state-cursor
+          tui-open!
+          tui-close!
+          tui-active-session
           make-process-comint-profile
           process-comint-profile?
           process-comint-profile-name
@@ -1223,6 +1271,7 @@
           (soda editor prefix)
           (soda editor prefix-commands)
           (soda editor process-comint)
+          (soda editor presentation)
           (soda editor project)
           (soda editor project-commands)
           (soda editor project-navigation-commands)
@@ -1251,6 +1300,8 @@
           (soda editor themes catppuccin)
           (soda editor tree-sitter-language)
           (soda editor tree-sitter-languages)
+          (soda editor tui-application)
+          (soda editor tui-application-runtime)
           (soda editor update)
           (soda editor window)
           (soda editor window-runtime)
