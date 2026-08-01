@@ -176,6 +176,7 @@
           editor-tui-sessions
           editor-tui-session-ref
           editor-tui-session-for-buffer
+          editor-release-view-pointer-capture!
           tui-session?
           tui-session-id
           tui-session-definition
@@ -198,6 +199,7 @@
           tui-view-state-viewport
           tui-view-state-transient-state
           tui-view-state-cursor
+          tui-view-state-pointer-capture
           make-tui-message
           tui-message?
           tui-message-session-id
@@ -222,6 +224,16 @@
           tui-resize-event-view-id
           tui-resize-event-width
           tui-resize-event-height
+          make-tui-pointer
+          tui-pointer?
+          tui-pointer-view-id
+          tui-pointer-node-key
+          tui-pointer-component-path
+          tui-pointer-local-row
+          tui-pointer-local-column
+          tui-pointer-button
+          tui-pointer-modifiers
+          tui-pointer-type
           make-tui-update-result
           tui-result
           tui-update-result?
@@ -271,6 +283,8 @@
           tui-retry!
           tui-lifecycle-snapshot
           tui-synchronize-view-lifecycle!
+          tui-route-pointer-event
+          tui-mouse-capability-active?
           make-tui-dimension
           tui-dimension?
           tui-dimension-kind
@@ -944,6 +958,14 @@
           text-input-event?
           text-input-event-kind
           text-input-event-text
+          make-pointer-event
+          pointer-event?
+          pointer-event-row
+          pointer-event-column
+          pointer-event-button
+          pointer-event-modifiers
+          pointer-event-type
+          pointer-event-modifier?
           input-event?
           make-resize-message
           resize-message?

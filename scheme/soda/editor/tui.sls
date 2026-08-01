@@ -315,6 +315,8 @@
           [output-state (make-terminal-output-state)]
           [output-source #f]
           [cursor-color #f]
+          [mouse-enabled? #f]
+          [last-frame #f]
           [decoder (make-input-decoder)]
           [executor (make-effect-executor)]
           [evaluation-adapter #f]
@@ -388,6 +390,18 @@
             (set! cursor-color color)
             (queue-control-output!
               (cursor-color-control color)))))
+      (define (sync-mouse-mode!)
+        (let ([enabled? (tui-mouse-capability-active? editor)])
+          (unless (eq? enabled? mouse-enabled?)
+            (set! mouse-enabled? enabled?)
+            (queue-control-output!
+              (if enabled?
+                  (string-append
+                    (ansi "[?1002h")
+                    (ansi "[?1006h"))
+                  (string-append
+                    (ansi "[?1006l")
+                    (ansi "[?1002l")))))))
       (define (drain-output!)
         (let loop ()
           (when (terminal-output-pending? output-state)
@@ -423,11 +437,14 @@
             (set! rendered-generation generation)
             (editor-take-dirty-reasons! editor)
             (sync-cursor-color!)
-            (queue-frame!
-              (render-editor-frame
-                editor
-                terminal-rows
-                terminal-columns)))))
+            (sync-mouse-mode!)
+            (let ([frame
+                    (render-editor-frame
+                      editor
+                      terminal-rows
+                      terminal-columns)])
+              (set! last-frame frame)
+              (queue-frame! frame)))))
       (define (arm-flush-timer!)
         (cancel-flush-timer!)
         (when (input-decoder-pending? decoder)
@@ -452,8 +469,15 @@
           (if (null? events)
               #t
               (and
-                (handle-session-message!
-                  (make-input-message (car events)))
+                (if (pointer-event? (car events))
+                    (let ([message
+                            (and last-frame
+                                 (tui-route-pointer-event
+                                   editor last-frame (car events)))])
+                      (or (not message)
+                          (handle-session-message! message)))
+                    (handle-session-message!
+                      (make-input-message (car events))))
                 (loop (cdr events))))))
       (define (handle-input!)
         (let ([input (terminal-read terminal)])
@@ -670,6 +694,11 @@
                 (string-append
                   (if cursor-color
                       (string-append (ansi "]112") "\a")
+                      "")
+                  (if mouse-enabled?
+                      (string-append
+                        (ansi "[?1006l")
+                        (ansi "[?1002l"))
                       "")
                   (ansi "[<u")
                   (ansi "[?2004l")

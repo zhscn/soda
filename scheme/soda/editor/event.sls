@@ -13,6 +13,14 @@
           text-input-event?
           text-input-event-kind
           text-input-event-text
+          make-pointer-event
+          pointer-event?
+          pointer-event-row
+          pointer-event-column
+          pointer-event-button
+          pointer-event-modifiers
+          pointer-event-type
+          pointer-event-modifier?
           input-event?
           make-input-message
           input-message?
@@ -57,6 +65,10 @@
   (define-record-type
     (text-input-event %make-text-input-event text-input-event?)
     (fields kind text))
+
+  (define-record-type
+    (pointer-event %make-pointer-event pointer-event?)
+    (fields row column button modifiers type))
 
   (define-record-type
     (input-message %make-input-message input-message?)
@@ -165,8 +177,23 @@
         text))
     (%make-text-input-event kind text))
 
+  (define (make-pointer-event row column button modifiers type)
+    (unless (and (exact-non-negative-integer? row)
+                 (exact-non-negative-integer? column)
+                 (memq button
+                   '(left middle right none wheel-up wheel-down))
+                 (exact-non-negative-integer? modifiers)
+                 (memq type '(press release move scroll)))
+      (assertion-violation
+        'make-pointer-event
+        "invalid pointer event"
+        row column button modifiers type))
+    (%make-pointer-event row column button modifiers type))
+
   (define (input-event? value)
-    (or (key-event? value) (text-input-event? value)))
+    (or (key-event? value)
+        (text-input-event? value)
+        (pointer-event? value)))
 
   (define (make-input-message event)
     (unless (input-event? event)
@@ -185,4 +212,18 @@
           'key-event-modifier?
           "unknown modifier"
           modifier))
-      (not (zero? (bitwise-and (key-event-modifiers event) (cdr entry)))))))
+      (not (zero? (bitwise-and (key-event-modifiers event) (cdr entry))))))
+
+  (define (pointer-event-modifier? event modifier)
+    (unless (pointer-event? event)
+      (assertion-violation
+        'pointer-event-modifier? "expected a pointer event" event))
+    (let ([entry (assq modifier modifier-bits)])
+      (unless entry
+        (assertion-violation
+          'pointer-event-modifier? "unknown modifier" modifier))
+      (not
+        (zero?
+          (bitwise-and
+            (pointer-event-modifiers event)
+            (cdr entry)))))))

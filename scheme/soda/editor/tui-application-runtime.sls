@@ -8,7 +8,9 @@
           tui-take-effects!
           tui-retry!
           tui-lifecycle-snapshot
-          tui-synchronize-view-lifecycle!)
+          tui-synchronize-view-lifecycle!
+          tui-route-pointer-event
+          tui-mouse-capability-active?)
   (import (rnrs)
           (soda document)
           (soda editor buffer)
@@ -16,10 +18,224 @@
           (soda editor condition)
           (soda editor display-placement)
           (soda editor edit)
+          (soda editor event)
           (soda editor presentation)
           (soda editor state)
           (soda editor tui-application)
-          (soda editor window-runtime))
+          (soda editor window)
+          (soda editor window-runtime)
+          (soda tui application)
+          (soda tui component)
+          (soda tui frame))
+
+  (define (session-mouse-capable? session)
+    (memq
+      'mouse
+      (tui-application-definition-capabilities
+        (tui-session-definition session))))
+
+  (define (tui-mouse-capability-active? editor)
+    (require-open-editor 'tui-mouse-capability-active? editor)
+    (exists
+      (lambda (view)
+        (let ([session
+                (editor-tui-session-for-buffer
+                  editor
+                  (buffer-id (view-buffer view)))])
+          (and session (session-mouse-capable? session))))
+      (editor-visible-views editor)))
+
+  (define (window-component-id id)
+    (string->symbol
+      (string-append "editor.window." (number->string id))))
+
+  (define (view-text-node editor frame view)
+    (let* ([layout (frame-layout frame)]
+           [window (editor-window-for-view editor (view-id view))]
+           [window-node
+             (and layout window
+                  (component-node-find
+                    layout
+                    (window-component-id (window-leaf-id window))))])
+      (or (and window-node
+               (component-node-find window-node 'editor.text))
+          (and (= (length (editor-visible-views editor)) 1)
+               layout
+               (component-node-find layout 'editor.text)))))
+
+  (define (application-source-at frame event)
+    (and (< (pointer-event-row event) (frame-rows frame))
+         (< (pointer-event-column event) (frame-columns frame))
+         (find
+           (lambda (source)
+             (eq? (cell-source-layer source) 'application))
+           (cell-sources
+             (frame-cell-ref
+               frame
+               (pointer-event-row event)
+               (pointer-event-column event))))))
+
+  (define (captured-target editor)
+    (let session-loop
+      ([sessions
+         (tui-application-registry-sessions
+           (editor-tui-application-registry editor))])
+      (and
+        (pair? sessions)
+        (or
+          (let view-loop
+            ([states (tui-session-view-states (car sessions))])
+            (and
+              (pair? states)
+              (or
+                (and (tui-view-state-pointer-capture (car states))
+                     (let ([view
+                             (find
+                               (lambda (candidate)
+                                 (= (view-id candidate)
+                                    (tui-view-state-view-id (car states))))
+                               (editor-visible-views editor))])
+                       (and view
+                            (list
+                              (car sessions)
+                              view
+                              (car states)
+                              (tui-view-state-pointer-capture
+                                (car states))))))
+                (view-loop (cdr states)))))
+          (session-loop (cdr sessions))))))
+
+  (define (hit-target editor frame event)
+    (let ([source (application-source-at frame event)])
+      (and source
+           (let* ([session
+                    (tui-application-registry-ref
+                      (editor-tui-application-registry editor)
+                      (cell-source-owner source))]
+                  [view
+                    (and session
+                         (find
+                           (lambda (candidate)
+                             (let ([node
+                                     (view-text-node editor frame candidate)]
+                                   [presentation
+                                     (buffer-presentation
+                                       (view-buffer candidate))])
+                               (and
+                                 node
+                                 (tui-presentation? presentation)
+                                 (= (tui-presentation-session-id
+                                      presentation)
+                                    (tui-session-id session))
+                                 (rect-contains?
+                                   (component-node-rect node)
+                                   (pointer-event-row event)
+                                   (pointer-event-column event)))))
+                           (editor-visible-views editor)))])
+             (and session view
+                  (list
+                    session
+                    view
+                    (tui-session-view-state session (view-id view))
+                    (cell-source-detail source)))))))
+
+  (define (pointer-local-rect editor frame target event)
+    (let* ([state (caddr target)]
+           [captured-key (tui-view-state-pointer-capture state)]
+           [surface (tui-view-state-surface-cache state)]
+           [view (cadr target)]
+           [base (view-text-node editor frame view)]
+           [arranged
+             (and captured-key surface
+                  (tui-arranged-node-find
+                    (tui-surface-arranged-tree surface)
+                    captured-key))]
+           [entry
+             (and captured-key
+                  (find
+                    (lambda (candidate)
+                      (equal?
+                        captured-key
+                        (tui-focus-entry-node-key candidate)))
+                    (tui-view-state-focus-ring state)))]
+           [local
+             (cond
+               [arranged (tui-arranged-node-rect arranged)]
+               [entry (tui-focus-entry-rect entry)]
+               [else #f])])
+      (cond
+        [(and base local)
+         (make-rect
+           (+ (rect-row (component-node-rect base)) (rect-row local))
+           (+ (rect-column (component-node-rect base)) (rect-column local))
+           (rect-rows local)
+           (rect-columns local))]
+        [else
+         (let* ([layout (frame-layout frame)]
+                [path
+                  (and layout
+                       (< (pointer-event-row event) (frame-rows frame))
+                       (< (pointer-event-column event) (frame-columns frame))
+                       (component-node-path-at
+                         layout
+                         (pointer-event-row event)
+                         (pointer-event-column event)))])
+           (and (pair? path)
+                (component-node-rect (car (reverse path)))))])))
+
+  (define (tui-route-pointer-event editor frame event)
+    (require-open-editor 'tui-route-pointer-event editor)
+    (unless (frame? frame)
+      (assertion-violation
+        'tui-route-pointer-event "expected a Frame" frame))
+    (unless (pointer-event? event)
+      (assertion-violation
+        'tui-route-pointer-event "expected a PointerEvent" event))
+    (let* ([target (or (captured-target editor)
+                       (hit-target editor frame event))]
+           [session (and target (car target))])
+      (and target
+           (session-mouse-capable? session)
+           (let* ([view (cadr target)]
+                  [state (caddr target)]
+                  [node-key (list-ref target 3)]
+                  [rectangle
+                    (pointer-local-rect editor frame target event)]
+                  [path
+                    (let ([layout (frame-layout frame)])
+                      (if (and layout
+                               (< (pointer-event-row event)
+                                  (frame-rows frame))
+                               (< (pointer-event-column event)
+                                  (frame-columns frame)))
+                          (map
+                            component-node-id
+                            (component-node-path-at
+                              layout
+                              (pointer-event-row event)
+                              (pointer-event-column event)))
+                          '()))]
+                  [payload
+                    (make-tui-pointer
+                      (view-id view)
+                      node-key
+                      path
+                      (if rectangle
+                          (- (pointer-event-row event)
+                             (rect-row rectangle))
+                          (pointer-event-row event))
+                      (if rectangle
+                          (- (pointer-event-column event)
+                             (rect-column rectangle))
+                          (pointer-event-column event))
+                      (pointer-event-button event)
+                      (pointer-event-modifiers event)
+                      (pointer-event-type event))])
+             (make-tui-message
+               (tui-session-id session)
+               (tui-session-generation session)
+               (view-id view)
+               payload)))))
 
   (define (lifecycle-entry session view state)
     (list
@@ -105,6 +321,14 @@
                            (not (desired-focus? editor current))))
               (let ([view (entry-view editor old)])
                 (when view (view-clear-input-handler-pending! view)))
+              (let* ([session (entry-session editor old)]
+                     [state
+                       (and session
+                            (tui-session-view-state
+                              session
+                              (entry-view-id old)))])
+                (when state
+                  (tui-view-state-set-pointer-capture! state #f)))
               (send-lifecycle!
                 editor old (make-tui-blur-event (entry-view-id old))))))
         before)
@@ -241,6 +465,10 @@
        (tui-view-state-set-cursor!
          state
          (tui-view-action-payload action))]
+      [(pointer-capture)
+       (tui-view-state-set-pointer-capture!
+         state
+         (tui-view-action-payload action))]
       [(overlay transient)
        (tui-view-state-set-transient-state!
          state
@@ -249,9 +477,17 @@
   (define (apply-view-actions! session message actions)
     (for-each
       (lambda (action)
-        (for-each
-          (lambda (state) (apply-view-action! state action))
-          (target-view-states session message action)))
+        (let ([targets (target-view-states session message action)])
+          (when (and (eq? (tui-view-action-kind action) 'pointer-capture)
+                     (tui-view-action-payload action))
+            (for-each
+              (lambda (state)
+                (unless (memq state targets)
+                  (tui-view-state-set-pointer-capture! state #f)))
+              (tui-session-view-states session)))
+          (for-each
+            (lambda (state) (apply-view-action! state action))
+            targets)))
       actions))
 
   (define (application-resource name id)
@@ -551,6 +787,17 @@
                session
                message
                (tui-update-result-view-actions result))
+             (when (and (tui-pointer? (tui-message-payload message))
+                        (eq? (tui-pointer-type
+                               (tui-message-payload message))
+                             'release)
+                        (tui-message-origin-view-id message))
+               (let ([state
+                       (tui-session-view-state
+                         session
+                         (tui-message-origin-view-id message))])
+                 (when state
+                   (tui-view-state-set-pointer-capture! state #f))))
              (tui-session-advance-generation! session)
              (enqueue-commands!
                editor

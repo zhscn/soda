@@ -7,7 +7,8 @@
         (only (soda editor event)
               make-key-event
               key-event?
-              key-event-key)
+              key-event-key
+              make-pointer-event)
         (soda editor presentation)
         (soda editor tui-application)
         (soda editor tui-application-host)
@@ -39,6 +40,7 @@
 (define input-kinds '())
 (define handler-prefix #f)
 (define lifecycle-events '())
+(define last-pointer #f)
 (define runtime-result #f)
 
 (check
@@ -61,6 +63,17 @@
            (set! lifecycle-events
              (append lifecycle-events (list payload)))
            (tui-result model '() '())]
+          [(tui-pointer? payload)
+           (set! last-pointer payload)
+           (tui-result
+             model
+             '()
+             (if (eq? (tui-pointer-type payload) 'press)
+                 (list
+                   (make-tui-view-action
+                     'origin 'pointer-capture
+                     (tui-pointer-node-key payload)))
+                 '()))]
           [(tui-input-event? payload)
            (set! input-kinds
              (append input-kinds (list (tui-input-event-kind payload))))
@@ -130,7 +143,7 @@
     (lambda (model state) (number->string model))
     'fundamental-mode
     'edit
-    '(timer)))
+    '(timer mouse)))
 (editor-register-tui-application! editor definition)
 
 (define application-buffer (tui-open! editor 'counter 41))
@@ -278,6 +291,35 @@
       (character-description-sources application-description))
     (string? (character-description->string application-description)))
   "describe-caret must expose the focused application component")
+(define pointer-press-message
+  (tui-route-pointer-event
+    editor
+    first-frame
+    (make-pointer-event 0 0 'left 0 'press)))
+(check
+  (and pointer-press-message
+       (tui-mouse-capability-active? editor))
+  "mouse capability must enable pointer routing")
+(editor-update! editor pointer-press-message)
+(check
+  (and (tui-pointer? last-pointer)
+       (eq? (tui-pointer-node-key last-pointer) 'counter.value)
+       (= (tui-pointer-local-row last-pointer) 0)
+       (= (tui-pointer-local-column last-pointer) 0)
+       (eq? (tui-view-state-pointer-capture application-view-state)
+            'counter.value))
+  "pointer press must resolve the application node and establish capture")
+(define pointer-release-message
+  (tui-route-pointer-event
+    editor
+    first-frame
+    (make-pointer-event 4 29 'left 0 'release)))
+(check pointer-release-message
+  "captured pointer must route outside the application node")
+(editor-update! editor pointer-release-message)
+(check
+  (not (tui-view-state-pointer-capture application-view-state))
+  "pointer release must clear capture after application update")
 (editor-update!
   editor
   (make-key-message

@@ -16,6 +16,13 @@
           text-input-event?
           text-input-event-kind
           text-input-event-text
+          pointer-event?
+          pointer-event-row
+          pointer-event-column
+          pointer-event-button
+          pointer-event-modifiers
+          pointer-event-type
+          pointer-event-modifier?
           input-event?)
   (import (rnrs)
           (soda editor event))
@@ -193,6 +200,57 @@
       'press
       (make-bytevector 0)))
 
+  (define (sgr-mouse-modifiers encoded)
+    (bitwise-ior
+      (if (zero? (bitwise-and encoded 4)) 0 1)
+      (if (zero? (bitwise-and encoded 8)) 0 2)
+      (if (zero? (bitwise-and encoded 16)) 0 4)))
+
+  (define (parse-sgr-mouse parameters final)
+    (let* ([body
+             (if (and (positive? (string-length parameters))
+                      (char=? (string-ref parameters 0) #\<))
+                 (substring parameters 1 (string-length parameters))
+                 parameters)]
+           [fields (split-string body #\;)]
+           [encoded
+             (or (optional-number (list-ref/default fields 0 "")) 0)]
+           [column
+             (max 0
+               (- (or (optional-number
+                        (list-ref/default fields 1 "1"))
+                      1)
+                  1))]
+           [row
+             (max 0
+               (- (or (optional-number
+                        (list-ref/default fields 2 "1"))
+                      1)
+                  1))]
+           [wheel? (not (zero? (bitwise-and encoded 64)))]
+           [motion? (not (zero? (bitwise-and encoded 32)))]
+           [button-code (bitwise-and encoded 3)]
+           [button
+             (if wheel?
+                 (if (zero? button-code) 'wheel-up 'wheel-down)
+                 (case button-code
+                   [(0) 'left]
+                   [(1) 'middle]
+                   [(2) 'right]
+                   [else 'none]))]
+           [type
+             (cond
+               [wheel? 'scroll]
+               [(char=? final #\m) 'release]
+               [motion? 'move]
+               [else 'press])])
+      (make-pointer-event
+        row
+        column
+        button
+        (sgr-mouse-modifiers encoded)
+        type)))
+
   (define (legacy-tilde parameters)
     (let* ([fields (split-string parameters #\;)]
            [number (or (optional-number (car fields)) 0)])
@@ -237,6 +295,10 @@
            [parameters
              (utf8->string (bytevector-slice bytes start end))])
       (cond
+        [(and (or (char=? final #\M) (char=? final #\m))
+              (positive? (string-length parameters))
+              (char=? (string-ref parameters 0) #\<))
+         (parse-sgr-mouse parameters final)]
         [(char=? final #\u) (parse-kitty parameters)]
         [(char=? final #\~) (legacy-tilde parameters)]
         [else (legacy-functional final parameters)])))

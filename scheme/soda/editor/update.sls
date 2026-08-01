@@ -385,6 +385,7 @@
          editor
          event
          (text-input-event-text event))]
+      [(pointer-event? event) '()]
       [else
        (assertion-violation
          'editor-update!

@@ -1168,6 +1168,13 @@
                       (equal? current (tui-focus-entry-node-key entry)))
                     enabled))])
       (tui-view-state-set-focus-ring! view-state ring)
+      (let ([capture (tui-view-state-pointer-capture view-state)])
+        (when (and capture
+                   (not
+                     (tui-arranged-node-find
+                       (tui-surface-arranged-tree surface)
+                       capture)))
+          (tui-view-state-set-pointer-capture! view-state #f)))
       (unless valid?
         (tui-view-state-set-focused-node!
           view-state

@@ -1917,6 +1917,7 @@
         [else
          (view-deactivate-mark! view)
          (view-reset-input-states! view)
+         (editor-release-view-pointer-capture! editor view)
          (editor-set-pending-keys! editor '())
          (editor-set-status-message! editor #f)
          '()])))

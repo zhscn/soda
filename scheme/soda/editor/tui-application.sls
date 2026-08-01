@@ -37,6 +37,7 @@
           tui-view-state-viewport
           tui-view-state-transient-state
           tui-view-state-cursor
+          tui-view-state-pointer-capture
           tui-view-state-generation
           tui-view-state-surface-cache-key
           tui-view-state-surface-cache
@@ -47,6 +48,7 @@
           tui-view-state-set-viewport!
           tui-view-state-set-transient-state!
           tui-view-state-set-cursor!
+          tui-view-state-set-pointer-capture!
           tui-view-state-set-surface-cache!
           tui-view-state-clear-surface-cache!
           make-tui-session
@@ -105,6 +107,16 @@
           tui-resize-event-view-id
           tui-resize-event-width
           tui-resize-event-height
+          make-tui-pointer
+          tui-pointer?
+          tui-pointer-view-id
+          tui-pointer-node-key
+          tui-pointer-component-path
+          tui-pointer-local-row
+          tui-pointer-local-column
+          tui-pointer-button
+          tui-pointer-modifiers
+          tui-pointer-type
           make-tui-update-result
           tui-result
           tui-update-result?
@@ -394,6 +406,7 @@
             (mutable viewport)
             (mutable transient-state)
             (mutable cursor)
+            (mutable pointer-capture)
             (mutable generation)
             (mutable surface-cache-key)
             (mutable surface-cache)))
@@ -401,9 +414,14 @@
   (define make-tui-view-state
     (case-lambda
       [(view-id)
-       (make-tui-view-state view-id 0 0 #f #f '(0 . 0) #f #f)]
+       (make-tui-view-state view-id 0 0 #f #f '(0 . 0) #f #f #f)]
       [(view-id width height focused? focused-node viewport
                 transient-state cursor)
+       (make-tui-view-state
+         view-id width height focused? focused-node viewport
+         transient-state cursor #f)]
+      [(view-id width height focused? focused-node viewport
+                transient-state cursor pointer-capture)
        (unless (exact-positive-integer? view-id)
          (assertion-violation
            'make-tui-view-state
@@ -422,7 +440,7 @@
            focused?))
        (%make-tui-view-state
          view-id width height focused? focused-node '() viewport
-         transient-state cursor 0 #f #f)]))
+         transient-state cursor pointer-capture 0 #f #f)]))
 
   (define (touch-view-state! state)
     (tui-view-state-generation-set!
@@ -512,6 +530,17 @@
         state))
     (unless (equal? cursor (tui-view-state-cursor state))
       (tui-view-state-cursor-set! state cursor)
+      (touch-view-state! state))
+    state)
+
+  (define (tui-view-state-set-pointer-capture! state node-key)
+    (unless (tui-view-state? state)
+      (assertion-violation
+        'tui-view-state-set-pointer-capture!
+        "expected a TuiViewState"
+        state))
+    (unless (equal? node-key (tui-view-state-pointer-capture state))
+      (tui-view-state-pointer-capture-set! state node-key)
       (touch-view-state! state))
     state)
 
@@ -606,6 +635,32 @@
         "view id and dimensions must be positive"
         view-id width height))
     (%make-tui-resize-event view-id width height))
+
+  (define-record-type
+    (tui-pointer %make-tui-pointer tui-pointer?)
+    (fields view-id node-key component-path local-row local-column
+            button modifiers type))
+
+  (define (make-tui-pointer
+            view-id node-key component-path local-row local-column
+            button modifiers type)
+    (unless (and (exact-positive-integer? view-id)
+                 (list? component-path)
+                 (integer? local-row) (exact? local-row)
+                 (integer? local-column) (exact? local-column)
+                 (memq button
+                   '(left middle right none wheel-up wheel-down))
+                 (integer? modifiers) (exact? modifiers)
+                 (not (negative? modifiers))
+                 (memq type '(press release move scroll)))
+      (assertion-violation
+        'make-tui-pointer
+        "invalid application pointer"
+        view-id node-key component-path local-row local-column
+        button modifiers type))
+    (%make-tui-pointer
+      view-id node-key component-path local-row local-column
+      button modifiers type))
 
   (define-record-type tui-command-completion-message
     (fields session-id command-id value))
@@ -878,7 +933,8 @@
         'make-tui-view-action
         "target must be origin, all-views, or a View id"
         target))
-    (unless (memq kind '(focus scroll cursor overlay transient))
+    (unless (memq kind
+                  '(focus scroll cursor pointer-capture overlay transient))
       (assertion-violation
         'make-tui-view-action
         "unknown view action"

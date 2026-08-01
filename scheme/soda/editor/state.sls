@@ -77,6 +77,7 @@
           editor-tui-sessions
           editor-tui-session-ref
           editor-tui-session-for-buffer
+          editor-release-view-pointer-capture!
           editor-close-tui-session!
           editor-queue-tui-effects!
           editor-take-tui-effects!
@@ -1548,6 +1549,23 @@
     (tui-application-registry-for-buffer
       (editor-tui-application-registry value)
       buffer-id))
+
+  (define (editor-release-view-pointer-capture! value view)
+    (require-open-editor 'editor-release-view-pointer-capture! value)
+    (unless (view? view)
+      (assertion-violation
+        'editor-release-view-pointer-capture!
+        "expected a view"
+        view))
+    (let* ([session
+             (editor-tui-session-for-buffer
+               value
+               (buffer-id (view-buffer view)))]
+           [state
+             (and session
+                  (tui-session-view-state session (view-id view)))])
+      (when state
+        (tui-view-state-set-pointer-capture! state #f))))
 
   (define (editor-close-tui-session! value id)
     (require-open-editor 'editor-close-tui-session! value)

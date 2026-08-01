@@ -45,6 +45,35 @@
              (key-event-modifier? (car left) 'ctrl))
   (error 'input-tests "modified legacy arrow differs" left))
 
+(define pointer-press
+  (input-decoder-feed! decoder (ascii "\x1b;[<20;12;7M")))
+(unless
+  (and (= (length pointer-press) 1)
+       (pointer-event? (car pointer-press))
+       (= (pointer-event-row (car pointer-press)) 6)
+       (= (pointer-event-column (car pointer-press)) 11)
+       (eq? (pointer-event-button (car pointer-press)) 'left)
+       (eq? (pointer-event-type (car pointer-press)) 'press)
+       (pointer-event-modifier? (car pointer-press) 'shift)
+       (pointer-event-modifier? (car pointer-press) 'ctrl))
+  (error 'input-tests "SGR mouse press differs" pointer-press))
+
+(define pointer-release
+  (input-decoder-feed! decoder (ascii "\x1b;[<0;12;7m")))
+(unless
+  (and (pointer-event? (car pointer-release))
+       (eq? (pointer-event-button (car pointer-release)) 'left)
+       (eq? (pointer-event-type (car pointer-release)) 'release))
+  (error 'input-tests "SGR mouse release differs" pointer-release))
+
+(define pointer-scroll
+  (input-decoder-feed! decoder (ascii "\x1b;[<65;3;2M")))
+(unless
+  (and (pointer-event? (car pointer-scroll))
+       (eq? (pointer-event-button (car pointer-scroll)) 'wheel-down)
+       (eq? (pointer-event-type (car pointer-scroll)) 'scroll))
+  (error 'input-tests "SGR mouse wheel differs" pointer-scroll))
+
 (define legacy-backtab
   (input-decoder-feed! decoder (bytes #x1b #x5b #x5a)))
 (unless
