@@ -1595,6 +1595,33 @@
       (editor-invalidate! value 'configuration)
       attachment))
 
+  (define (buffer-home-language-attachments value buffer)
+    (filter
+      (lambda (attachment)
+        (eq? (language-attachment-provenance attachment) 'home))
+      (editor-buffer-language-attachments value (buffer-id buffer))))
+
+  (define (bootstrap-buffer-home-language-attachment!
+            value buffer context origin-view-id)
+    (let* ([profile (buffer-language-profile buffer)]
+           [bootstrap (and profile (language-profile-bootstrap profile))]
+           [key (and bootstrap (bootstrap value buffer context))])
+      (and
+        key
+        (begin
+          (unless (language-session-key? key)
+            (assertion-violation
+              'editor-bootstrap-view-language-session!
+              "bootstrap policy must return a LanguageSession key or #f"
+              key))
+          (let ([session (editor-ensure-language-session! value key)])
+            (editor-attach-language-session!
+              value
+              (buffer-id buffer)
+              session
+              'home
+              origin-view-id))))))
+
   (define (editor-bootstrap-view-language-session! value view-id)
     (require-open-editor 'editor-bootstrap-view-language-session! value)
     (let* ([view (editor-view-ref value view-id)]
@@ -1602,48 +1629,23 @@
       (or
         selected
         (let* ([buffer (view-buffer view)]
-               [home
-                 (filter
-                   (lambda (attachment)
-                     (eq? (language-attachment-provenance attachment) 'home))
-                   (editor-buffer-language-attachments
-                     value
-                     (buffer-id buffer)))])
+               [home (buffer-home-language-attachments value buffer)])
           (cond
             [(= (length home) 1)
              (editor-set-view-language-attachment!
                value view-id (car home))]
             [(pair? home) #f]
             [else
-             (let* ([profile (buffer-language-profile buffer)]
-                    [bootstrap
-                      (and profile (language-profile-bootstrap profile))]
-                    [key
-                      (and
-                        bootstrap
-                        (bootstrap
-                          value
-                          buffer
-                          (editor-view-resource-context value view-id)))])
-               (if (not key)
+             (let ([attachment
+                     (bootstrap-buffer-home-language-attachment!
+                       value
+                       buffer
+                       (editor-view-resource-context value view-id)
+                       view-id)])
+               (if (not attachment)
                    #f
-                   (begin
-                     (unless (language-session-key? key)
-                       (assertion-violation
-                         'editor-bootstrap-view-language-session!
-                         "bootstrap policy must return a LanguageSession key or #f"
-                         key))
-                     (let* ([session
-                              (editor-ensure-language-session! value key)]
-                            [attachment
-                              (editor-attach-language-session!
-                                value
-                                (buffer-id buffer)
-                                session
-                                'home
-                                view-id)])
-                       (editor-set-view-language-attachment!
-                         value view-id attachment)))))])))))
+                   (editor-set-view-language-attachment!
+                     value view-id attachment)))])))))
 
   (define (adapt-language-context-to-buffer value context buffer)
     (let ([language-context
@@ -1654,22 +1656,39 @@
                  [source
                    (language-session-registry-attachment-ref
                      registry
-                     (view-language-context-attachment-id language-context))])
-            (if (= (language-attachment-buffer-id source)
-                   (buffer-id buffer))
-                context
-                (let ([target
-                        (language-session-registry-attach!
-                          registry
-                          (buffer-id buffer)
-                          (language-attachment-session-id source)
-                          'inherited
-                          (resource-context-origin-view-id context)
-                          (buffer-revision buffer))])
-                  (resource-context-with-language-context
-                    context
-                    (make-view-language-context
-                      (language-attachment-id target)))))))))
+                     (view-language-context-attachment-id language-context))]
+                 [homes (buffer-home-language-attachments value buffer)]
+                 [home
+                   (cond
+                     [(= (length homes) 1) (car homes)]
+                     [(pair? homes) #f]
+                     [else
+                      (bootstrap-buffer-home-language-attachment!
+                        value
+                        buffer
+                        context
+                        (resource-context-origin-view-id context))])]
+                 [target
+                   (cond
+                     [home home]
+                     [(pair? homes) #f]
+                     [(= (language-attachment-buffer-id source)
+                         (buffer-id buffer))
+                      source]
+                     [else
+                      (language-session-registry-attach!
+                        registry
+                        (buffer-id buffer)
+                        (language-attachment-session-id source)
+                        'inherited
+                        (resource-context-origin-view-id context)
+                        (buffer-revision buffer))])])
+            (resource-context-with-language-context
+              context
+              (and
+                target
+                (make-view-language-context
+                  (language-attachment-id target))))))))
 
   (define (editor-view-resource-context value view-id)
     (require-open-editor 'editor-view-resource-context value)

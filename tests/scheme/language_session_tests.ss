@@ -169,14 +169,16 @@
     '()))
 (buffer-set-major-mode! buffer-c 'bootstrap-test-mode)
 (define bootstrap-view
-  (editor-open-view!
+  (editor-display-buffer!
     editor
-    (buffer-id buffer-c)
-    (make-resource-context "/workspace")))
+    (make-display-request
+      (buffer-id buffer-c)
+      'jump
+      (view-id target)
+      #f
+      (editor-view-resource-context editor (view-id target)))))
 (define bootstrapped
-  (editor-bootstrap-view-language-session!
-    editor
-    (view-id bootstrap-view)))
+  (editor-view-language-attachment editor (view-id bootstrap-view)))
 (check
   (and
     bootstrapped
@@ -187,8 +189,11 @@
          (editor-view-language-attachment
            editor
            (view-id bootstrap-view))))
-  "a language profile must bootstrap and select a home attachment")
-(editor-close-view! editor (view-id bootstrap-view))
+  "display must prefer a bootstrapped home attachment over inheritance")
+(editor-set-view-buffer!
+  editor
+  (view-id bootstrap-view)
+  (buffer-id buffer-a))
 (editor-remove-buffer! editor (buffer-id buffer-c))
 (check
   (null?
