@@ -222,6 +222,86 @@
     (string=? (annotation-message (car lsp-annotations)) "invalid prefix"))
   "publishDiagnostics did not publish an LSP diagnostic annotation")
 
+(view-set-caret! (editor-active-view editor) 12)
+(define hover-effects
+  (editor-execute-command! editor 'lsp.hover))
+(check
+  (and (= (length hover-effects) 1)
+       (eq? (command-effect-kind (car hover-effects)) 'managed-process.write))
+  "hover did not issue an LSP request"
+  hover-effects)
+(define hover-message
+  (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload (car hover-effects))))))
+(check
+  (string=? (json-object-ref hover-message "method" #f) "textDocument/hover")
+  "hover sent the wrong LSP method")
+(lsp-client-handle-json-message!
+  editor session
+  (make-json-object
+    (list
+      (cons "jsonrpc" "2.0")
+      (cons "id" (json-object-ref hover-message "id" #f))
+      (cons "result"
+            (make-json-object
+              (list
+                (cons "contents"
+                      (make-json-object
+                        (list (cons "kind" "plaintext")
+                              (cons "value" "int main()"))))))))))
+(check
+  (string=? (editor-status-message editor) "int main()")
+  "hover result was not presented to the user")
+
+(define definition-effects
+  (editor-execute-command! editor 'lsp.find-definition))
+(check
+  (and (= (length definition-effects) 1)
+       (eq? (command-effect-kind (car definition-effects)) 'managed-process.write))
+  "find-definition did not issue an LSP request"
+  definition-effects)
+(define definition-message
+  (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload (car definition-effects))))))
+(define definition-target-range
+  (make-json-object
+    (list
+      (cons "start"
+            (make-json-object
+              (list (cons "line" 3) (cons "character" 2))))
+      (cons "end"
+            (make-json-object
+              (list (cons "line" 3) (cons "character" 5)))))))
+(define definition-open-effects
+  (lsp-client-handle-json-message!
+    editor session
+    (make-json-object
+      (list
+        (cons "jsonrpc" "2.0")
+        (cons "id" (json-object-ref definition-message "id" #f))
+        (cons "result"
+              (make-json-object
+                (list
+                  (cons "targetUri" "file:///workspace/include/api.hpp")
+                  (cons "targetSelectionRange" definition-target-range))))))))
+(check
+  (and
+    (= (length definition-open-effects) 1)
+    (eq? (command-effect-kind (car definition-open-effects)) 'file.read)
+    (let ([position
+            (open-request-offset
+              (command-effect-payload (car definition-open-effects)))])
+      (and (file-utf16-position? position)
+           (= (file-utf16-position-line position) 3)
+           (= (file-utf16-position-character position) 2))))
+  "definition did not preserve an unopened target's UTF-16 position")
+
 (view-set-caret! (editor-active-view editor) 7)
 (define lsp-completion-source
   (make-choice-source
