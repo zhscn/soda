@@ -318,6 +318,8 @@
            'lsp.start "Project language-server setting must be a symbol or #f" configured)]))]))
 
   (define (lsp-client-capability-json)
+    (define no-dynamic
+      (make-json-object (list (cons "dynamicRegistration" #f))))
     (make-json-object
       (list
         (cons "workspace"
@@ -332,12 +334,78 @@
         (cons "textDocument"
               (make-json-object
                 (list
+                  (cons "synchronization" no-dynamic)
                   (cons "completion"
                         (make-json-object
                           (list
+                            (cons "dynamicRegistration" #f)
                             (cons "completionItem"
                                   (make-json-object
-                                    (list (cons "snippetSupport" #t)))))))
+                                    (list
+                                      (cons "snippetSupport" #f)
+                                      (cons "insertReplaceSupport" #t)
+                                      (cons
+                                        "documentationFormat"
+                                        (make-json-array
+                                          (list "markdown" "plaintext")))
+                                      (cons
+                                        "resolveSupport"
+                                        (make-json-object
+                                          (list
+                                            (cons
+                                              "properties"
+                                              (make-json-array
+                                                (list
+                                                  "documentation"
+                                                  "detail"
+                                                  "additionalTextEdits"
+                                                  "textEdit")))))))))
+                            (cons
+                              "completionList"
+                              (make-json-object
+                                (list
+                                  (cons
+                                    "itemDefaults"
+                                    (make-json-array
+                                      (list
+                                        "editRange"
+                                        "insertTextFormat"
+                                        "data")))))))))
+                  (cons "hover"
+                        (make-json-object
+                          (list
+                            (cons "dynamicRegistration" #f)
+                            (cons "contentFormat"
+                                  (make-json-array
+                                    (list "markdown" "plaintext"))))))
+                  (cons "signatureHelp" no-dynamic)
+                  (cons "documentHighlight" no-dynamic)
+                  (cons "documentSymbol" no-dynamic)
+                  (cons "formatting" no-dynamic)
+                  (cons "rangeFormatting" no-dynamic)
+                  (cons "selectionRange" no-dynamic)
+                  (cons "codeAction" no-dynamic)
+                  (cons "codeLens" no-dynamic)
+                  (cons
+                    "semanticTokens"
+                    (make-json-object
+                      (list
+                        (cons "dynamicRegistration" #f)
+                        (cons "requests"
+                              (make-json-object
+                                (list (cons "full" #t))))
+                        (cons "tokenTypes"
+                              (make-json-array
+                                (list
+                                  "namespace" "type" "class" "enum"
+                                  "interface" "struct" "typeParameter"
+                                  "parameter" "variable" "enumMember"
+                                  "property" "event" "function" "method"
+                                  "macro" "keyword" "modifier" "comment"
+                                  "string" "regexp" "number" "boolean"
+                                  "operator" "decorator")))
+                        (cons "tokenModifiers" (make-json-array '()))
+                        (cons "formats" (make-json-array (list "relative"))))))
                   (cons "diagnostic"
                         (make-json-object
                           (list
@@ -345,8 +413,9 @@
                             (cons "relatedDocumentSupport" #f))))))))))
 
   (define lsp-client-capability-identity
-    '(workspace-configuration workspace-folders utf-16 completion-snippets
-      pull-diagnostics))
+    '(workspace-configuration workspace-folders utf-16
+      completion-insert-replace completion-list-defaults
+      semantic-tokens pull-diagnostics))
 
   (define (profile-session-configuration workspace profile)
     (list
@@ -1137,7 +1206,8 @@
                     '())])
          (server-request-result id (make-json-array values)))]
       [(string=? method "client/registerCapability")
-       (server-request-result id json-null)]
+       (server-request-error
+         id "Soda does not support dynamic capability registration")]
       [(string=? method "workspace/applyEdit")
        (server-workspace-apply-edit-response! editor id params)]
       [else (server-request-error id "Soda does not implement this server request")]))
@@ -1940,8 +2010,8 @@
           (null? remaining)
           (null? (cdr remaining))
           (and
-            (< (completion-text-edit-end (car remaining))
-               (completion-text-edit-start (cadr remaining)))
+            (<= (completion-text-edit-end (car remaining))
+                (completion-text-edit-start (cadr remaining)))
             (loop (cdr remaining)))))))
 
   (define (text-edits-disjoint-from? edit others)
@@ -2027,6 +2097,58 @@
             (not (json-object-has-key? primary (car entry))))
           (json-object-entries fallback)))))
 
+  (define (completion-item-default value defaults key)
+    (if (json-object-has-key? value key)
+        '()
+        (if (and
+              (json-object? defaults)
+              (json-object-has-key? defaults key))
+            (list (cons key (json-object-ref defaults key #f)))
+            '())))
+
+  (define (completion-default-text-edit value defaults)
+    (and
+      (not (json-object-has-key? value "textEdit"))
+      (json-object? defaults)
+      (let* ([range (json-object-ref defaults "editRange" #f)]
+             [label (json-object-ref value "label" #f)]
+             [text
+               (or
+                 (json-object-ref value "textEditText" #f)
+                 (json-object-ref value "insertText" #f)
+                 label)])
+        (and
+          (json-object? range)
+          (string? text)
+          (cond
+            [(and
+               (json-object-has-key? range "start")
+               (json-object-has-key? range "end"))
+             (make-json-object
+               (list (cons "range" range) (cons "newText" text)))]
+            [(and
+               (json-object-has-key? range "insert")
+               (json-object-has-key? range "replace"))
+             (make-json-object
+               (list
+                 (cons "insert" (json-object-ref range "insert" #f))
+                 (cons "replace" (json-object-ref range "replace" #f))
+                 (cons "newText" text)))]
+            [else #f])))))
+
+  (define (completion-item-with-defaults value defaults)
+    (let ([text-edit (completion-default-text-edit value defaults)])
+      (make-json-object
+        (append
+          (json-object-entries value)
+          (completion-item-default value defaults "insertTextFormat")
+          (completion-item-default value defaults "data")
+          (if text-edit (list (cons "textEdit" text-edit)) '())))))
+
+  (define (plain-completion-item? value)
+    (let ([format (json-object-ref value "insertTextFormat" 1)])
+      (and (integer? format) (exact? format) (= format 1))))
+
   (define (lsp-completion-item
             buffer id value resolved? provider-data)
     (let* ([label (json-object-ref value "label" #f)]
@@ -2036,7 +2158,8 @@
            [detail (json-object-ref value "detail" #f)]
            [sort (json-object-ref value "sortText" label)]
            [documentation (lsp-completion-documentation value)])
-      (and (string? label)
+      (and (plain-completion-item? value)
+           (string? label)
            (string? insert)
            (string? filter)
            (string? sort)
@@ -2055,6 +2178,10 @@
                (let ([items (json-object-ref result "items" #f)])
                  (if (json-array? items) (json-array-values items) '()))]
               [else '()])]
+          [defaults
+            (if (json-object? result)
+                (json-object-ref result "itemDefaults" #f)
+                #f)]
           [buffer (completion-request-buffer editor request)]
           [session (completion-request-session editor request)])
       (let loop ([remaining values] [index 0] [items '()])
@@ -2063,8 +2190,10 @@
             (let ([value (car remaining)])
               (if (not (json-object? value))
                   (loop (cdr remaining) (+ index 1) items)
-                  (let* ([label (json-object-ref value "label" #f)]
-                         [insert (json-object-ref value "insertText" label)]
+                  (let* ([effective
+                           (completion-item-with-defaults value defaults)]
+                         [label (json-object-ref effective "label" #f)]
+                         [insert (json-object-ref effective "insertText" label)]
                          [data
                            (and session
                                 buffer
@@ -2074,7 +2203,7 @@
                                   (completion-request-generation request)
                                   (buffer-id buffer)
                                   (buffer-revision buffer)
-                                  value))]
+                                  effective))]
                          [item
                            (and
                              (string? label)
@@ -2082,14 +2211,20 @@
                              (lsp-completion-item
                                buffer
                                (list index label insert)
-                               value
+                               effective
                                (not (and data
                                          (lsp-completion-resolve-supported? session)))
-                               (or data value)))])
+                               (or data effective)))])
                     (loop
                       (cdr remaining)
                       (+ index 1)
                       (if item (cons item items) items)))))))))
+
+  (define (lsp-completion-result-complete? result)
+    (not
+      (and
+        (json-object? result)
+        (eq? (json-object-ref result "isIncomplete" #f) #t))))
 
   (define (lsp-completion-resolution-current?
             editor data original)
@@ -2211,7 +2346,9 @@
                     (editor-apply-completion-response!
                       response-editor
                       (make-completion-response-for-request
-                        request (lsp-completion-items response-editor request result) #t))
+                        request
+                        (lsp-completion-items response-editor request result)
+                        (lsp-completion-result-complete? result)))
                     '())
                   (lambda (response-editor response-session error context)
                     (complete-failed-lsp-request!

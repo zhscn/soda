@@ -108,6 +108,19 @@
       frame-decoder
       (managed-process-write-request-data
         (command-effect-payload (cadr start-effects))))))
+(define initialize-capabilities
+  (json-object-ref
+    (json-object-ref initialize-message "params" #f)
+    "capabilities"
+    #f))
+(define initialize-text-document-capabilities
+  (json-object-ref initialize-capabilities "textDocument" #f))
+(define initialize-completion-capabilities
+  (json-object-ref initialize-text-document-capabilities "completion" #f))
+(define initialize-completion-item-capabilities
+  (json-object-ref initialize-completion-capabilities "completionItem" #f))
+(define initialize-completion-list-capabilities
+  (json-object-ref initialize-completion-capabilities "completionList" #f))
 (check
   (and
     (string=? (json-object-ref initialize-message "method" #f) "initialize")
@@ -134,6 +147,21 @@
           (json-object-ref diagnostic-capability "dynamicRegistration" #t)
           #f))))
   "initialize did not use the ProjectWorkspace root")
+(check
+  (and
+    (eq?
+      (json-object-ref initialize-completion-item-capabilities "snippetSupport" #t)
+      #f)
+    (eq?
+      (json-object-ref
+        initialize-completion-item-capabilities "insertReplaceSupport" #f)
+      #t)
+    (member
+      "editRange"
+      (json-array-values
+        (json-object-ref
+          initialize-completion-list-capabilities "itemDefaults" #f))))
+  "initialize advertised unsupported or incomplete completion capabilities")
 
 (define lsp-capabilities
   (make-json-object
@@ -257,6 +285,33 @@
       (json-object-ref
         (cadr configuration-values) "clangd" #f)))
   "workspace/configuration did not use Project LSP settings")
+
+(define dynamic-registration-effects
+  (lsp-client-handle-json-message!
+    editor
+    session
+    (make-json-object
+      (list
+        (cons "jsonrpc" "2.0")
+        (cons "id" 3)
+        (cons "method" "client/registerCapability")
+        (cons "params" (make-json-object '()))))))
+(define dynamic-registration-response
+  (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload (car dynamic-registration-effects))))))
+(check
+  (and
+    (= (length dynamic-registration-effects) 1)
+    (=
+      (json-object-ref
+        (json-object-ref dynamic-registration-response "error" #f)
+        "code"
+        0)
+      -32601))
+  "dynamic LSP capability registration was silently accepted")
 
 (editor-workbench-adopt-project!
   editor
@@ -1107,10 +1162,7 @@
     (list
       (cons "label" "SodaWidget")
       (cons "filterText" "Soda")
-      (cons "textEdit"
-            (make-json-object
-              (list (cons "range" completion-primary-range)
-                    (cons "newText" "Widget"))))
+      (cons "textEditText" "Widget")
       (cons "additionalTextEdits"
             (make-json-array
               (list
@@ -1123,7 +1175,20 @@
     (list
       (cons "jsonrpc" "2.0")
       (cons "id" (json-object-ref lsp-completion-message "id" #f))
-      (cons "result" (make-json-array (list completion-item))))))
+      (cons
+        "result"
+        (make-json-object
+          (list
+            (cons "isIncomplete" #f)
+            (cons
+              "itemDefaults"
+              (make-json-object
+                (list
+                  (cons "editRange" completion-primary-range)
+                  (cons "insertTextFormat" 1)
+                  (cons "data"
+                        (make-json-object (list (cons "source" "test")))))))
+            (cons "items" (make-json-array (list completion-item)))))))))
 (define completion-resolve-effects (editor-take-tui-effects! editor))
 (check
   (and (= (length completion-resolve-effects) 1)
