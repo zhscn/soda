@@ -147,6 +147,21 @@
       'interface))
   "tui-open! must create and display an interface Buffer backed by a session")
 
+(define (buffer-string buffer)
+  (let ([snapshot (document-snapshot (buffer-document buffer))])
+    (dynamic-wind
+      (lambda () #f)
+      (lambda ()
+        (let ([text (snapshot-text snapshot)])
+          (dynamic-wind
+            (lambda () #f)
+            (lambda () (utf8->string (text->bytevector text)))
+            (lambda () (text-close! text)))))
+      (lambda () (snapshot-close! snapshot)))))
+
+(check (string=? (buffer-string application-buffer) "41")
+  "opening an application must publish its initial text projection")
+
 (define first-frame (render-editor-frame editor 5 30))
 (define second-frame (render-editor-frame editor 5 30))
 (define application-cell (frame-cell-ref first-frame 0 0))
@@ -215,6 +230,8 @@
         (tui-session-view-state session active-view-id))
       'counter.value))
   "update must atomically publish Model and origin-targeted view actions")
+(check (string=? (buffer-string application-buffer) "42")
+  "a Model update must publish the matching text projection")
 (define updated-frame (render-editor-frame editor 5 30))
 (check
   (and
