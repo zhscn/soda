@@ -1624,17 +1624,26 @@
             annotation)
           (completion-item-label item))))
 
-  (define (completion-documentation-line item)
+  (define (completion-documentation-summary item)
     (let ([documentation (completion-item-documentation item)])
       (and (string? documentation)
            (positive? (string-length documentation))
-           (let loop ([index 0])
-             (cond
-               [(= index (string-length documentation))
-                documentation]
-               [(char=? (string-ref documentation index) #\newline)
-                (substring documentation 0 index)]
-               [else (loop (+ index 1))])))))
+           (call-with-values
+             open-string-output-port
+             (lambda (port extract)
+               (let loop ([index 0] [emitted? #f] [separator? #f])
+                 (if (= index (string-length documentation))
+                     (let ([summary (extract)])
+                       (and (positive? (string-length summary)) summary))
+                     (let ([character (string-ref documentation index)])
+                       (if (or (char-whitespace? character)
+                               (eq? (char-general-category character) 'Cc))
+                           (loop (+ index 1) emitted? emitted?)
+                           (begin
+                             (when (and emitted? separator?)
+                               (write-char #\space port))
+                             (write-char character port)
+                             (loop (+ index 1) #t #f))))))))))
 
   (define (truncate-cells value width)
     (if (<= (string-cell-width value 8) width)
@@ -1721,7 +1730,7 @@
               (resolve-faces theme annotation-faces)
               sources))))
       (when documentation-column
-        (let ([documentation (completion-documentation-line item)]
+        (let ([documentation (completion-documentation-summary item)]
               [width (- columns documentation-column)])
           (when (and documentation (>= width 2))
             (let ([documentation-faces
@@ -1779,7 +1788,7 @@
                    [documentation
                      (and
                        selected-item
-                       (completion-item-documentation selected-item))]
+                       (completion-documentation-summary selected-item))]
                    [documentation?
                      (and
                        document-target?
@@ -2086,7 +2095,7 @@
            [selected
              (completion-session-selected-item completion)]
            [documentation
-             (and selected (completion-item-documentation selected))]
+             (and selected (completion-documentation-summary selected))]
            [documentation?
              (and
                (string? documentation)
