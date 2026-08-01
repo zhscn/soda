@@ -40,6 +40,7 @@
           project-catalog-discover
           project-catalog-clear-discovery-cache!
           project-catalog-known-projects
+          project-catalog-project-ref
           project-catalog-remember!
           project-catalog-forget!
           project-catalog-find-known
@@ -579,6 +580,15 @@
     (and
       (member id (project-catalog-known-ids catalog))
       (hashtable-ref (project-catalog-projects catalog) id #f)))
+
+  (define (project-catalog-project-ref catalog id)
+    (require-catalog 'project-catalog-project-ref catalog)
+    (unless (valid-id? id)
+      (assertion-violation
+        'project-catalog-project-ref
+        "id must be a symbol or non-empty string"
+        id))
+    (hashtable-ref (project-catalog-projects catalog) id #f))
 
   (define (project-catalog-known-projects catalog)
     (require-catalog 'project-catalog-known-projects catalog)

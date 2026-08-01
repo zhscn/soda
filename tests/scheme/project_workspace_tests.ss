@@ -1,0 +1,154 @@
+#!r6rs
+(import (rnrs)
+        (soda document)
+        (soda editor buffer)
+        (soda editor language-session)
+        (soda editor project)
+        (soda editor project-workspace)
+        (soda editor state))
+
+(define (check condition message . irritants)
+  (unless condition
+    (apply assertion-violation
+      'project-workspace-tests message irritants)))
+
+(define document (make-document "" 18001))
+(define buffer
+  (make-buffer 18002 document "*project-workspace*" 'fundamental-mode))
+(define editor (make-editor-state buffer))
+(for-each
+  (lambda (finder) (editor-register-project-finder! editor finder))
+  (built-in-project-finders))
+
+(define outer
+  (make-project
+    'outer
+    '("/workspace")
+    'manual 'explicit #f
+    (make-project-settings-layer
+      '((language-server . clangd)
+        (clangd-arguments . ("--background-index"))))
+    '()))
+(define inner
+  (make-project
+    'inner
+    '("/workspace/component" "/workspace/generated")
+    'manual 'explicit #f
+    (make-project-settings-layer
+      '((language-server . clangd)
+        (compile-commands . "/workspace/build")))
+    '()))
+(editor-remember-project! editor outer)
+(editor-remember-project! editor inner)
+
+(define nested-workspaces
+  (editor-project-workspaces-for-resource
+    editor
+    "/workspace/component/src/main.cpp"
+    #f
+    (lambda (path) 'absent)))
+(check
+  (equal?
+    (map project-workspace-project-id nested-workspaces)
+    '(inner outer))
+  "resource ownership must prefer the most specific Project root")
+
+(define hinted-workspace
+  (editor-project-workspace-for-resource
+    editor
+    "/workspace/component/src/main.cpp"
+    outer
+    (lambda (path) 'absent)))
+(check
+  (eq? (project-workspace-project-id hinted-workspace) 'outer)
+  "an applicable frozen Project hint must take precedence")
+
+(define inner-workspace
+  (editor-project-workspace editor inner))
+(check
+  (and
+    (equal?
+      (project-workspace-folder-resources inner-workspace)
+      '("/workspace/component" "/workspace/generated"))
+    (equal?
+      (map project-workspace-folder-name
+           (project-workspace-folders inner-workspace))
+      '("component" "generated"))
+    (string=?
+      (project-workspace-setting-ref
+        inner-workspace 'compile-commands "")
+      "/workspace/build"))
+  "ProjectWorkspace must freeze folders and declarative settings")
+
+(define inner-generation (project-workspace-generation inner-workspace))
+(define updated-inner
+  (make-project
+    'inner
+    '("/workspace/component" "/workspace/generated")
+    'manual 'updated #f
+    (make-project-settings-layer
+      '((language-server . clangd)
+        (compile-commands . "/workspace/out")))
+    '()))
+(editor-remember-project! editor updated-inner)
+(define updated-workspace
+  (editor-project-workspace editor inner))
+(check
+  (and
+    (= (project-workspace-generation updated-workspace)
+       (+ inner-generation 1))
+    (eq? (project-workspace-project updated-workspace) updated-inner)
+    (string=?
+      (project-workspace-setting-ref
+        updated-workspace 'compile-commands "")
+      "/workspace/out"))
+  "a workspace snapshot must use the current canonical Project revision")
+
+(define language-key
+  (project-workspace-language-session-key
+    updated-workspace
+    'cpp
+    'clangd
+    '((compile-commands . "/workspace/out"))
+    '("clang" "22")
+    '(completion diagnostics semantic-tokens)))
+(check
+  (and
+    (equal?
+      (language-session-key-workspace-folders language-key)
+      '("/workspace/component" "/workspace/generated"))
+    (equal?
+      (language-session-key-configuration language-key)
+      '((compile-commands . "/workspace/out")))
+    (equal?
+      (language-session-key-environment-fingerprint language-key)
+      '("clang" "22")))
+  "ProjectWorkspace must build a complete LanguageSession identity")
+
+(define discovered-workspace
+  (editor-project-workspace-for-resource
+    editor
+    "/new-project/src/main.c"
+    #f
+    (lambda (path)
+      (if (string=? path "/new-project/.git") 'present 'absent))))
+(check
+  (and
+    discovered-workspace
+    (string=?
+      (project-workspace-folder-resource
+        (car (project-workspace-folders discovered-workspace)))
+      "/new-project"))
+  "workspace resolution must discover an unregistered resource Project")
+
+(check
+  (not
+    (editor-project-workspace-for-resource
+      editor
+      "/standalone/file.txt"
+      #f
+      (lambda (path) 'absent)))
+  "a standalone resource must remain explicitly outside Project scope")
+
+(editor-close! editor)
+(display "project workspace tests passed\n")

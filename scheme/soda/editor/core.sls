@@ -672,6 +672,7 @@
           project-catalog-generation
           project-catalog-project-generation
           project-catalog-finders
+          project-catalog-project-ref
           project-catalog-find-finder
           project-discovery-unavailable
           default-project-marker-probe
@@ -682,6 +683,22 @@
           editor-known-projects
           editor-remember-project!
           editor-forget-project!
+          make-project-workspace-folder
+          project-workspace-folder?
+          project-workspace-folder-name
+          project-workspace-folder-resource
+          project-workspace?
+          project-workspace-project
+          project-workspace-project-id
+          project-workspace-generation
+          project-workspace-folders
+          project-workspace-folder-resources
+          project-workspace-configuration
+          project-workspace-setting-ref
+          editor-project-workspace
+          editor-project-workspaces-for-resource
+          editor-project-workspace-for-resource
+          project-workspace-language-session-key
           make-project-resource-policy
           project-resource-policy?
           project-resource-policy-include-hidden?
@@ -1552,6 +1569,7 @@
           (soda editor project-navigation-commands)
           (soda editor project-resource)
           (soda editor project-target)
+          (soda editor project-workspace)
           (soda editor repl)
           (soda editor resource-context)
           (soda editor scheme-completion)
