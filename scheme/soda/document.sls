@@ -299,14 +299,23 @@
   (define (native-error who)
     (error who (%last-error)))
 
+  (define (null-pointer? pointer)
+    (or (not pointer)
+        (and (integer? pointer) (zero? pointer))))
+
   (define (check-status who status)
     (when (negative? status)
       (native-error who)))
 
   (define (check-pointer who pointer)
-    (unless pointer
+    (when (null-pointer? pointer)
       (native-error who))
     pointer)
+
+  (define (check-revision who revision)
+    (if (= revision revision-none)
+        (native-error who)
+        revision))
 
   (define (as-bytevector who value)
     (cond
@@ -317,7 +326,7 @@
   (define (require-open who predicate pointer value)
     (unless (predicate value)
       (assertion-violation who "unexpected handle type" value))
-    (unless (pointer value)
+    (when (null-pointer? (pointer value))
       (assertion-violation who "handle is closed" value)))
 
   (define (bytevector->text data)
@@ -330,7 +339,8 @@
     (bytevector->text (as-bytevector 'string->text value)))
 
   (define (text-close! value)
-    (when (and (text? value) (text-pointer value))
+    (when (and (text? value)
+               (not (null-pointer? (text-pointer value))))
       (%text-destroy (text-pointer value))
       (text-pointer-set! value #f)))
 
@@ -441,7 +451,8 @@
       [(value id) (make-document-from-text value id)]))
 
   (define (document-close! value)
-    (when (and (document? value) (document-pointer value))
+    (when (and (document? value)
+               (not (null-pointer? (document-pointer value))))
       (%document-destroy (document-pointer value))
       (document-pointer-set! value #f)))
 
@@ -451,7 +462,9 @@
 
   (define (document-revision value)
     (require-open 'document-revision document? document-pointer value)
-    (%document-revision (document-pointer value)))
+    (check-revision
+      'document-revision
+      (%document-revision (document-pointer value))))
 
   (define (document-snapshot value)
     (require-open 'document-snapshot document? document-pointer value)
@@ -479,10 +492,10 @@
                     (%document-can-redo (document-pointer value))))
 
   (define (optional-change who pointer)
-    (if pointer
-        (%make-change pointer)
+    (if (null-pointer? pointer)
         (let ([message (%last-error)])
-          (if (string=? message "") #f (error who message)))))
+          (if (string=? message "") #f (error who message)))
+        (%make-change pointer)))
 
   (define (document-undo! value)
     (require-open 'document-undo! document? document-pointer value)
@@ -575,7 +588,8 @@
         (if offset offset text-npos))))
 
   (define (snapshot-close! value)
-    (when (and (snapshot? value) (snapshot-pointer value))
+    (when (and (snapshot? value)
+               (not (null-pointer? (snapshot-pointer value))))
       (%snapshot-destroy (snapshot-pointer value))
       (snapshot-pointer-set! value #f)))
 
@@ -585,7 +599,9 @@
 
   (define (snapshot-revision value)
     (require-open 'snapshot-revision snapshot? snapshot-pointer value)
-    (%snapshot-revision (snapshot-pointer value)))
+    (check-revision
+      'snapshot-revision
+      (%snapshot-revision (snapshot-pointer value))))
 
   (define (snapshot-text value)
     (require-open 'snapshot-text snapshot? snapshot-pointer value)
@@ -593,7 +609,8 @@
       (check-pointer 'snapshot-text (%snapshot-text (snapshot-pointer value)))))
 
   (define (transaction-close! value)
-    (when (and (transaction? value) (transaction-pointer value))
+    (when (and (transaction? value)
+               (not (null-pointer? (transaction-pointer value))))
       (%transaction-destroy (transaction-pointer value))
       (transaction-pointer-set! value #f)))
 
@@ -720,7 +737,7 @@
   (define (transaction-commit! value)
     (require-open 'transaction-commit! transaction? transaction-pointer value)
     (let ([pointer (%transaction-commit (transaction-pointer value))])
-      (unless pointer
+      (when (null-pointer? pointer)
         (native-error 'transaction-commit!))
       (%transaction-destroy (transaction-pointer value))
       (transaction-pointer-set! value #f)
@@ -734,17 +751,22 @@
     (transaction-pointer-set! value #f))
 
   (define (change-close! value)
-    (when (and (change? value) (change-pointer value))
+    (when (and (change? value)
+               (not (null-pointer? (change-pointer value))))
       (%change-destroy (change-pointer value))
       (change-pointer-set! value #f)))
 
   (define (change-old-revision value)
     (require-open 'change-old-revision change? change-pointer value)
-    (%change-old-revision (change-pointer value)))
+    (check-revision
+      'change-old-revision
+      (%change-old-revision (change-pointer value))))
 
   (define (change-new-revision value)
     (require-open 'change-new-revision change? change-pointer value)
-    (%change-new-revision (change-pointer value)))
+    (check-revision
+      'change-new-revision
+      (%change-new-revision (change-pointer value))))
 
   (define (change-edit-count value)
     (require-open 'change-edit-count change? change-pointer value)

@@ -3,6 +3,10 @@
         (soda document))
 
 (define document (make-document "a\r\nb" 9))
+(unless (not (document-undo! document))
+  (error 'document-tests "a fresh document unexpectedly produced an undo change"))
+(unless (not (document-redo! document))
+  (error 'document-tests "a fresh document unexpectedly produced a redo change"))
 (define before (document-snapshot document))
 (define transaction (document-begin-transaction document))
 
