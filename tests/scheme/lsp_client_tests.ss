@@ -12,6 +12,7 @@
         (soda editor project)
         (soda editor project-workspace)
         (soda editor state)
+        (soda editor workbench)
         (soda editor core)
         (soda json))
 
@@ -130,6 +131,38 @@
     (eq? (lsp-client-session-state session) 'ready)
     (= (length ready-effects) 2))
   "initialize response did not transition the LSP session to ready")
+
+(editor-workbench-adopt-project!
+  editor
+  (workbench-id (editor-active-workbench editor))
+  project)
+(define external
+  (editor-create-buffer!
+    editor "/toolchain/include/widget.hpp" 'cpp-mode "struct Widget {};\n"))
+(buffer-set-file-path! external "/toolchain/include/widget.hpp")
+(editor-set-view-buffer!
+  editor
+  (view-id (editor-active-view editor))
+  (buffer-id external))
+(editor-set-view-language-attachment!
+  editor (view-id (editor-active-view editor)) #f)
+(define external-start-effects (editor-start-lsp-for-active-view! editor))
+(define external-attachment
+  (car (editor-buffer-language-attachments editor (buffer-id external))))
+(check
+  (and
+    (= (length external-start-effects) 1)
+    (eq? (command-effect-kind (car external-start-effects)) 'managed-process.write)
+    (eq? (language-attachment-provenance external-attachment) 'inherited)
+    (= (language-attachment-session-id external-attachment)
+       (language-session-id language-session)))
+  "lsp.start must route an external resource through the focused Project")
+(editor-set-view-buffer!
+  editor
+  (view-id (editor-active-view editor))
+  (buffer-id source))
+(editor-set-view-language-attachment!
+  editor (view-id (editor-active-view editor)) attachment)
 
 (define workspace-folder-response
   (lsp-client-handle-json-message!

@@ -198,8 +198,11 @@ session bootstrap 只在初次关联时使用 resource 和 Project discovery：
 
 1. resource 明确属于一个可启动的 home session 时建立 `home` attachment；
 2. 导航落点没有 home session 时，继承 origin View 的 attachment；
-3. 两者都不存在时保持无 attachment，由显式 language command 或用户选择建立；
-4. 已存在其他 attachment 不阻止增加新的 attachment，也不覆盖其他 View 的 context。
+3. 显式启动语言服务时，先解析资源的 home Project；没有 home Project 则使用资源路由
+   选择的 Workbench Project。后者建立 `inherited` attachment，使外部头文件、生成源码
+   和依赖缓存可以由用户选定的 workspace 服务；
+4. 两者都不存在时保持无 attachment，由显式 language command 或用户选择建立；
+5. 已存在其他 attachment 不阻止增加新的 attachment，也不覆盖其他 View 的 context。
 
 Project-backed provider 通过 `editor-project-workspace-for-buffer` 读取一次
 `ProjectWorkspace`。该值冻结 Project revision、具名 workspace folders 与声明式

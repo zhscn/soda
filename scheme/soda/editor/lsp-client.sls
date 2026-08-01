@@ -50,6 +50,7 @@
           (soda editor navigation)
           (soda editor prompt)
           (soda editor project)
+          (soda editor project-target)
           (soda editor project-workspace)
           (soda editor state)
           (soda editor workspace-edit)
@@ -1044,44 +1045,69 @@
                 (initialize-params session)
                 initialize-response!)))))))
 
-  (define (editor-start-lsp-session! editor buffer workspace profile)
-    (unless (and (buffer? buffer) (project-workspace? workspace)
-                 (lsp-server-profile? profile))
-      (assertion-violation
-        'editor-start-lsp-session! "invalid LSP session inputs"
-        buffer workspace profile))
-    (let ([language (buffer-language buffer)])
-      (unless language
-        (editor-user-error 'editor-start-lsp-session! "Buffer has no language profile"))
-      (unless (lsp-server-profile-supports-language? profile language)
-        (editor-user-error
-          'editor-start-lsp-session! "Language server does not support this buffer"))
-      (let-values ([(session effects)
-                    (ensure-lsp-session! editor workspace language profile)])
-        (let ([attachment
-                (editor-attach-language-session!
-                  editor
-                  (buffer-id buffer)
-                  (lsp-client-session-language-session session)
-                  'home
-                  #f)])
-          (when (eq? (view-buffer (editor-active-view editor)) buffer)
-            (editor-set-view-language-attachment!
-              editor (view-id (editor-active-view editor)) attachment)))
-        (enable-lsp-completion! buffer)
-        (append
-          effects
-          (if (eq? (lsp-client-session-state session) 'ready)
-              (session-open-attached-documents! editor session)
-              '())))))
+  (define editor-start-lsp-session!
+    (case-lambda
+      [(editor buffer workspace profile)
+       (editor-start-lsp-session! editor buffer workspace profile 'home #f)]
+      [(editor buffer workspace profile provenance origin-view-id)
+       (unless (and (buffer? buffer) (project-workspace? workspace)
+                    (lsp-server-profile? profile))
+         (assertion-violation
+           'editor-start-lsp-session! "invalid LSP session inputs"
+           buffer workspace profile))
+       (unless (memq provenance '(home inherited))
+         (assertion-violation
+           'editor-start-lsp-session!
+           "attachment provenance must be home or inherited"
+           provenance))
+       (let ([language (buffer-language buffer)])
+         (unless language
+           (editor-user-error 'editor-start-lsp-session! "Buffer has no language profile"))
+         (unless (lsp-server-profile-supports-language? profile language)
+           (editor-user-error
+             'editor-start-lsp-session! "Language server does not support this buffer"))
+         (let-values ([(session effects)
+                       (ensure-lsp-session! editor workspace language profile)])
+           (let ([attachment
+                   (editor-attach-language-session!
+                     editor
+                     (buffer-id buffer)
+                     (lsp-client-session-language-session session)
+                     provenance
+                     origin-view-id)])
+             (when (eq? (view-buffer (editor-active-view editor)) buffer)
+               (editor-set-view-language-attachment!
+                 editor (view-id (editor-active-view editor)) attachment)))
+           (enable-lsp-completion! buffer)
+           (append
+             effects
+             (if (eq? (lsp-client-session-state session) 'ready)
+                 (session-open-attached-documents! editor session)
+                 '()))))]))
+
+  (define (lsp-workspace-for-view editor view)
+    (let* ([buffer (view-buffer view)]
+           [context (editor-view-resource-context editor (view-id view))]
+           [home
+             (editor-project-workspace-for-buffer editor buffer context)])
+      (or
+        home
+        (let ([project (editor-resolve-project editor view 'resource)])
+          (and project (editor-project-workspace editor project))))))
+
+  (define (lsp-start-provenance buffer workspace)
+    (let ([resource (buffer-file-path buffer)])
+      (if (and resource
+               (project-contains-resource?
+                 (project-workspace-project workspace) resource))
+          'home
+          'inherited)))
 
   (define (editor-start-lsp-for-active-view! editor)
     (let* ([view (editor-active-view editor)]
            [buffer (view-buffer view)]
            [language (buffer-language buffer)]
-           [workspace
-             (editor-project-workspace-for-buffer
-               editor buffer (editor-view-resource-context editor (view-id view)))]
+           [workspace (lsp-workspace-for-view editor view)]
            [server
              (and language workspace
                   (workspace-lsp-server editor workspace language))])
@@ -1089,7 +1115,10 @@
         (editor-user-error 'lsp.start "No Project workspace for the active buffer"))
       (unless server
         (editor-user-error 'lsp.start "No language server is configured for this language"))
-      (editor-start-lsp-session! editor buffer workspace server)))
+      (editor-start-lsp-session!
+        editor buffer workspace server
+        (lsp-start-provenance buffer workspace)
+        (view-id view))))
 
   (define (lsp-client-stop! editor session)
     (unless (lsp-client-session? session)
