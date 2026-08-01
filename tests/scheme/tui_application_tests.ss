@@ -354,9 +354,16 @@
           (input-dispatch-application 'handler-event)
           (input-pass)))
     'block
-    #f
+    "APP"
     #f
     #f))
+(define application-indicator-frame (render-editor-frame editor 5 30))
+(check
+  (and
+    (string=? (cell-text (frame-cell-ref application-indicator-frame 4 1)) "A")
+    (string=? (cell-text (frame-cell-ref application-indicator-frame 4 2)) "P")
+    (string=? (cell-text (frame-cell-ref application-indicator-frame 4 3)) "P"))
+  "interface modelines must render the active InputState indicator instead of RO")
 (editor-update!
   editor
   (make-key-message

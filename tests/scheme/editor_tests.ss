@@ -1575,6 +1575,11 @@
       (set! input-lifecycle (append input-lifecycle '(durable-enter))))
     (lambda (view state)
       (set! input-lifecycle (append input-lifecycle '(durable-exit))))))
+(define input-state-cursor-frame (render-editor-frame editor 8 40))
+(unless
+  (and (frame-cursor-visible? input-state-cursor-frame)
+       (eq? (frame-cursor-shape input-state-cursor-frame) 'bar))
+  (error 'editor-tests "durable InputState cursor was not rendered"))
 (view-push-input-state!
   (editor-active-view editor)
   (make-input-state

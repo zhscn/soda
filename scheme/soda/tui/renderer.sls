@@ -661,18 +661,38 @@
              (substring text 0 3)
              text))]))
 
+  (define (input-state-indicator-text view)
+    (let* ([state (view-current-input-state view)]
+           [indicator (input-state-indicator state)]
+           [value
+             (cond
+               [(procedure? indicator) (indicator view state)]
+               [else indicator])])
+      (unless (or (not value) (string? value))
+        (assertion-violation
+          'render-editor-frame
+          "InputState indicator procedure must return a string or #f"
+          value))
+      value))
+
+  (define (interface-buffer? buffer)
+    (eq? (buffer-setting-ref buffer 'interaction-class #f) 'interface))
+
   (define (modeline-state-label context buffer)
-    (if (buffer-setting-ref buffer 'read-only? #f)
+    (if (and (buffer-setting-ref buffer 'read-only? #f)
+             (not (interface-buffer? buffer)))
         "RO"
-        (input-state-label
-          (input-state-name
-            (view-current-input-state
-              (editor-render-context-view context))))))
+        (let ([view (editor-render-context-view context)])
+          (or
+            (input-state-indicator-text view)
+            (input-state-label
+              (input-state-name (view-current-input-state view)))))))
 
   (define (modeline-state-face context buffer label)
     (cond
       [(not (editor-render-context-focused? context)) #f]
-      [(buffer-setting-ref buffer 'read-only? #f)
+      [(and (buffer-setting-ref buffer 'read-only? #f)
+            (not (interface-buffer? buffer)))
        'modeline.state.read-only]
       [(string=? label "INS") 'modeline.state]
       [else 'modeline.state.transient]))
@@ -1124,11 +1144,18 @@
                    cursor-column)
                  (< cursor-row (frame-rows frame))
                  (< cursor-column (frame-columns frame)))
-            (frame-set-cursor!
-              frame
-              cursor-row
-              cursor-column
-              #t)
+            (let ([cursor
+                    (input-state-cursor
+                      (view-current-input-state view))])
+              (frame-set-cursor!
+                frame
+                cursor-row
+                cursor-column
+                (not (eq? cursor 'hidden))
+                (case cursor
+                  [(beam) 'bar]
+                  [(underline) 'underline]
+                  [else 'block])))
             (when (editor-render-context-focused? context)
               (frame-set-cursor! frame 0 0 #f))))))
 
