@@ -511,6 +511,48 @@
       (string->utf8 "int Gadget;\n")))
   "LSP WorkspaceEdit did not commit all rename targets atomically")
 
+(define server-apply-edit
+  (make-json-object
+    (list
+      (cons "changes"
+            (make-json-object
+              (list
+                (cons "file:///workspace/src/other.cpp"
+                      (make-json-array
+                        (list
+                          (make-json-object
+                            (list (cons "range" rename-target-range)
+                                  (cons "newText" "Server"))))))))))))
+(define server-apply-effects
+  (lsp-client-handle-json-message!
+    editor session
+    (make-json-object
+      (list
+        (cons "jsonrpc" "2.0")
+        (cons "id" 92)
+        (cons "method" "workspace/applyEdit")
+        (cons "params"
+              (make-json-object
+                (list (cons "edit" server-apply-edit))))))))
+(define server-apply-response
+  (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload (car server-apply-effects))))))
+(check
+  (and
+    (= (length server-apply-effects) 1)
+    (eq? (json-object-ref
+           (json-object-ref server-apply-response "result" #f)
+           "applied"
+           #f)
+         #t)
+    (bytevector=?
+      (buffer-bytes rename-target)
+      (string->utf8 "int Server;\n")))
+  "workspace/applyEdit did not apply a server workspace edit")
+
 (define lsp-reference-effects
   (editor-execute-command! editor 'lsp.find-references))
 (check

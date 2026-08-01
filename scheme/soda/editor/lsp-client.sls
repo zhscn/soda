@@ -636,7 +636,57 @@
           (reverse values)
           (loop (- remaining 1) (cons value values)))))
 
-  (define (server-request-response session id method params)
+  (define (workspace-apply-edit-result applied failure-reason)
+    (make-json-object
+      (append
+        (list (cons "applied" applied))
+        (if failure-reason
+            (list (cons "failureReason" failure-reason))
+            '()))))
+
+  (define (server-workspace-apply-edit-response! editor id params)
+    (let* ([workspace-edit
+             (and (json-object? params)
+                  (json-object-ref params "edit" #f))]
+           [edits (lsp-workspace-edits workspace-edit)])
+      (cond
+        [(not edits)
+         (server-request-result
+           id
+           (workspace-apply-edit-result
+             #f "Soda supports only text-document workspace edits"))]
+        [(null? edits)
+         (server-request-result id (workspace-apply-edit-result #t #f))]
+        [(pair? (lsp-workspace-edit-missing-resources editor edits))
+         (server-request-result
+           id
+           (workspace-apply-edit-result
+             #f "Workspace edit targets must already be open"))]
+        [else
+         (let ([resolved (lsp-resolve-workspace-edits editor edits)])
+           (if (not resolved)
+               (server-request-result
+                 id
+                 (workspace-apply-edit-result
+                   #f "Workspace edit contains an invalid document range"))
+               (guard
+                 (condition
+                   [else
+                    (server-request-result
+                      id
+                      (workspace-apply-edit-result
+                        #f "Workspace edit could not be applied"))])
+                 (workspace-text-edits-apply! editor resolved)
+                 (editor-set-status-message!
+                   editor
+                   (string-append
+                     "Applied language-server workspace edit in "
+                     (number->string (length resolved))
+                     (if (= (length resolved) 1) " place" " places")))
+                 (server-request-result
+                   id (workspace-apply-edit-result #t #f)))))])))
+
+  (define (server-request-response editor session id method params)
     (cond
       [(string=? method "workspace/workspaceFolders")
        (server-request-result
@@ -651,6 +701,8 @@
          (server-request-result id (make-json-array (repeated-json-value count settings))))]
       [(string=? method "client/registerCapability")
        (server-request-result id json-null)]
+      [(string=? method "workspace/applyEdit")
+       (server-workspace-apply-edit-response! editor id params)]
       [else (server-request-error id "Soda does not implement this server request")]))
 
   (define (lsp-client-handle-json-message! editor session message)
@@ -693,7 +745,7 @@
                         (lsp-client-session-process session)
                         (lsp-json-rpc-frame
                           (server-request-response
-                            session id method (json-object-ref message "params" #f))))))
+                            editor session id method (json-object-ref message "params" #f))))))
                   '()))]
            [else '()]))]
       [else
