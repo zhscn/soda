@@ -3,10 +3,13 @@
         (soda document)
         (soda editor buffer)
         (soda editor core)
+        (soda editor effect)
         (only (soda editor event) make-key-event)
         (soda editor presentation)
         (soda editor tui-application)
+        (soda editor tui-application-host)
         (soda editor tui-application-runtime)
+        (soda runtime)
         (soda tui frame)
         (soda tui renderer))
 
@@ -28,6 +31,7 @@
 (define fail-next? #t)
 (define view-count 0)
 (define input-kinds '())
+(define runtime-result #f)
 
 (check
   (document-presentation? (buffer-presentation initial-buffer))
@@ -74,11 +78,18 @@
                  'view
                  (tui-message-origin-view-id message)))
              '())]
-          [(tui-command-result? payload)
+          [(eq? payload 'timer-request)
            (tui-result
-             (tui-command-result-value payload)
-             '()
+             model
+             (list (tui-command 'timer 0))
              '())]
+          [(tui-command-result? payload)
+           (let ([value (tui-command-result-value payload)])
+             (if (tui-runtime-result? value)
+                 (begin
+                   (set! runtime-result value)
+                   (tui-result model '() '()))
+                 (tui-result value '() '())))]
           [(eq? payload 'fail-once)
            (if fail-next?
                (begin
@@ -289,6 +300,41 @@
   (and (tui-retry! editor (tui-session-id session))
        (eq? (tui-session-state session) 'ready))
   "retry must replay the failed message through update")
+
+(let ([runtime (make-runtime)]
+      [executor (make-effect-executor)]
+      [host #f])
+  (dynamic-wind
+    (lambda () #f)
+    (lambda ()
+      (set! host (install-tui-application-host! executor runtime))
+      (tui-send! editor (tui-session-id session) 'timer-request active-view-id)
+      (execute-effects! executor (tui-take-effects! editor))
+      (let wait ()
+        (let ([events (runtime-poll! runtime)])
+          (let ([event
+                  (find
+                    (lambda (candidate)
+                      (tui-application-host-event? host candidate))
+                    events)])
+            (if event
+                (editor-update!
+                  editor
+                  (tui-application-host-handle-event host event))
+                (wait))))))
+    (lambda ()
+      (when host (tui-application-host-close! host))
+      (runtime-close! runtime))))
+(check
+  (and
+    (tui-runtime-result? runtime-result)
+    (eq? (tui-runtime-result-kind runtime-result) 'timer)
+    (zero? (tui-runtime-result-status runtime-result))
+    (not
+      (exists
+        (lambda (command) (eq? (tui-command-kind command) 'timer))
+        (tui-session-pending-commands session))))
+  "the application host must complete libuv effects through the command loop")
 
 (define replacement-definition
   (make-tui-application-definition

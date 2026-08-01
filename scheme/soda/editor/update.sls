@@ -413,6 +413,13 @@
                 [(tui-message? message)
                  (tui-send-message! editor message)
                  '()]
+                [(tui-command-completion-message? message)
+                 (tui-complete-command!
+                   editor
+                   (tui-command-completion-message-session-id message)
+                   (tui-command-completion-message-command-id message)
+                   (tui-command-completion-message-value message))
+                 '()]
                 [else
                  (assertion-violation
                    'editor-update!
@@ -426,6 +433,7 @@
                   [(or (input-message? message) (key-message? message))
                    'cursor]
                   [(tui-message? message) 'application]
+                  [(tui-command-completion-message? message) 'application]
                   [else 'document])])
           (when reason
             (editor-invalidate! editor reason)))

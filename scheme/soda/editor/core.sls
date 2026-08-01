@@ -237,6 +237,17 @@
           tui-command-dispatch?
           tui-command-dispatch-session-id
           tui-command-dispatch-command
+          make-tui-command-completion-message
+          tui-command-completion-message?
+          tui-command-completion-message-session-id
+          tui-command-completion-message-command-id
+          tui-command-completion-message-value
+          make-tui-runtime-result
+          tui-runtime-result?
+          tui-runtime-result-kind
+          tui-runtime-result-status
+          tui-runtime-result-flags
+          tui-runtime-result-data
           tui-open!
           tui-close!
           tui-active-session

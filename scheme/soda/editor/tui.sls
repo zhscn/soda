@@ -21,6 +21,7 @@
           (soda editor save-place-store)
           (soda editor scheme-interface-runtime)
           (soda editor scheme-project-build-runtime)
+          (soda editor tui-application-host)
           (soda editor vfs-runtime)
           (soda editor workbench-session)
           (soda runtime)
@@ -322,6 +323,7 @@
           [scheme-project-build-adapter #f]
           [managed-process-adapter #f]
           [project-resource-adapter #f]
+          [tui-application-host #f]
           [vfs-adapter #f])
       (define (cancel-flush-timer!)
         (when flush-timer
@@ -496,6 +498,8 @@
         (editor-completion-provider-catalog editor))
       (install-prompt-effect-handler! executor)
       (install-command-effect-handler! executor)
+      (set! tui-application-host
+        (install-tui-application-host! executor runtime))
       (dynamic-wind
         (lambda () #f)
         (lambda ()
@@ -532,6 +536,22 @@
                         (eq? (event-kind (car events)) 'fd-ready))
                    (flush-output!)
                    (process (cdr events) continue?)]
+                  [(and
+                     tui-application-host
+                     (tui-application-host-event?
+                       tui-application-host
+                       (car events)))
+                   (let ([message
+                           (tui-application-host-handle-event
+                             tui-application-host
+                             (car events))])
+                     (process
+                       (cdr events)
+                       (and
+                         continue?
+                         (or
+                           (not message)
+                           (handle-session-message! message)))))]
                   [(and
                      evaluation-adapter
                      (evaluation-runtime-event?
@@ -638,6 +658,9 @@
             (guard (condition [else #f])
               (project-resource-runtime-close!
                 project-resource-adapter)))
+          (when tui-application-host
+            (guard (condition [else #f])
+              (tui-application-host-close! tui-application-host)))
           (guard (condition [else #f])
             (drain-output!))
           (when screen?

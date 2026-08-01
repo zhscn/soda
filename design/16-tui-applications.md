@@ -236,6 +236,13 @@ TuiCommand {
 `command-effect`，由已注册的 effect handler 执行。文件、目录、timer、process、
 build、language service 和其他 libuv 操作均沿用这一入口。
 
+标准 terminal host 直接处理 `timer`、`file.read`、`file.write`、
+`directory.scan` 与 `path.stat`。这些 command 的 payload 分别使用毫秒数、路径、
+路径与 bytevector 对、目录路径，以及路径或路径与 follow-symlinks 对。完成值是包含
+runtime event kind、status、flags 与 data 的 `TuiRuntimeResult`；启动阶段的失败使用
+`effect-error` kind 返回，因此 command 仍会退役，不会遗留永久 pending 状态。其他
+command kind 由插件在普通 effect executor 注册 host adapter。
+
 effect 完成后产生 `TuiCommandResult`。框架在调用 update 之前验证：
 
 - session 仍存在且未关闭；

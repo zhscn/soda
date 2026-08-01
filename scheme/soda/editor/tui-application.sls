@@ -119,7 +119,18 @@
           make-tui-command-dispatch
           tui-command-dispatch?
           tui-command-dispatch-session-id
-          tui-command-dispatch-command)
+          tui-command-dispatch-command
+          make-tui-command-completion-message
+          tui-command-completion-message?
+          tui-command-completion-message-session-id
+          tui-command-completion-message-command-id
+          tui-command-completion-message-value
+          make-tui-runtime-result
+          tui-runtime-result?
+          tui-runtime-result-kind
+          tui-runtime-result-status
+          tui-runtime-result-flags
+          tui-runtime-result-data)
   (import (rnrs))
 
   (define (exact-positive-integer? value)
@@ -537,6 +548,12 @@
         "unknown application input event kind"
         kind))
     (%make-tui-input-event kind value prefix focused-node))
+
+  (define-record-type tui-command-completion-message
+    (fields session-id command-id value))
+
+  (define-record-type tui-runtime-result
+    (fields kind status flags data))
 
   (define (require-session who session)
     (unless (tui-session? session)
