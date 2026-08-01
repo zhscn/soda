@@ -87,6 +87,7 @@
           tui-message-session-generation
           tui-message-origin-view-id
           tui-message-payload
+          tui-message-prefix
           make-tui-input-event
           tui-input-event?
           tui-input-event-kind
@@ -777,23 +778,27 @@
 
   (define-record-type
     (tui-message %make-tui-message tui-message?)
-    (fields session-id session-generation origin-view-id payload))
+    (fields session-id session-generation origin-view-id payload prefix))
 
-  (define (make-tui-message
-            session-id session-generation origin-view-id payload)
-    (unless (and
-              (exact-positive-integer? session-id)
-              (integer? session-generation)
-              (exact? session-generation)
-              (not (negative? session-generation))
-              (or (not origin-view-id)
-                  (exact-positive-integer? origin-view-id)))
-      (assertion-violation
-        'make-tui-message
-        "invalid TuiMessage identity"
-        session-id session-generation origin-view-id))
-    (%make-tui-message
-      session-id session-generation origin-view-id payload))
+  (define make-tui-message
+    (case-lambda
+      [(session-id session-generation origin-view-id payload)
+       (make-tui-message
+         session-id session-generation origin-view-id payload #f)]
+      [(session-id session-generation origin-view-id payload prefix)
+       (unless (and
+                 (exact-positive-integer? session-id)
+                 (integer? session-generation)
+                 (exact? session-generation)
+                 (not (negative? session-generation))
+                 (or (not origin-view-id)
+                     (exact-positive-integer? origin-view-id)))
+         (assertion-violation
+           'make-tui-message
+           "invalid TuiMessage identity"
+           session-id session-generation origin-view-id))
+       (%make-tui-message
+         session-id session-generation origin-view-id payload prefix)]))
 
   (define-record-type
     (tui-update-result %make-tui-update-result tui-update-result?)

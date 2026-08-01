@@ -1553,7 +1553,22 @@
     'accept
     'edit.self-insert
     #f
-    #f
+    (lambda (event context)
+      (if (and (key-event? event)
+               (eq? (key-event-key event) 'character))
+          (case (key-event-codepoint event)
+            [(104) (input-consume)]
+            [(100) (input-dispatch-command 'test.durable-input)]
+            [(112)
+             (input-pending
+               '(p)
+               '((x . "execute"))
+               (lambda (next-event next-context)
+                 (if (= (key-event-codepoint next-event) 120)
+                     (input-dispatch-command 'test.durable-input)
+                     (input-pass))))]
+            [else (input-pass)])
+          (input-pass)))
     'beam
     "EDIT"
     (lambda (view state)
@@ -1576,10 +1591,16 @@
     (lambda (view state)
       (set! input-lifecycle (append input-lifecycle '(transient-exit))))))
 (send! editor decoder (string->utf8 "r"))
-(unless (and (= durable-input-count 1)
+(define bytes-before-handler (buffer-bytes buffer))
+(send! editor decoder (string->utf8 "h"))
+(send! editor decoder (string->utf8 "d"))
+(send! editor decoder (string->utf8 "px"))
+(unless (and (= durable-input-count 3)
+             (bytevector=? bytes-before-handler (buffer-bytes buffer))
+             (not (view-input-handler-pending (editor-active-view editor)))
              (equal? input-lifecycle '(durable-enter transient-enter)))
   (error 'editor-tests
-         "active transient input omitted the durable state"
+         "InputState handler disposition or durable participation differs"
          input-lifecycle))
 (define before-ignored-text (buffer-bytes buffer))
 (send! editor decoder (string->utf8 "z"))

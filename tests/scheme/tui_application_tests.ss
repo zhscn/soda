@@ -4,7 +4,10 @@
         (soda editor buffer)
         (soda editor core)
         (soda editor effect)
-        (only (soda editor event) make-key-event)
+        (only (soda editor event)
+              make-key-event
+              key-event?
+              key-event-key)
         (soda editor presentation)
         (soda editor tui-application)
         (soda editor tui-application-host)
@@ -34,6 +37,7 @@
 (define fail-next? #t)
 (define view-count 0)
 (define input-kinds '())
+(define handler-prefix #f)
 (define runtime-result #f)
 
 (check
@@ -60,6 +64,9 @@
              '()
              (list
                (make-tui-view-action 'origin 'focus 'counter.value)))]
+          [(eq? payload 'handler-event)
+           (set! handler-prefix (tui-message-prefix message))
+           (tui-result model '() '())]
           [(eq? payload 'refresh)
            (tui-result
              model
@@ -276,6 +283,36 @@
 (check
   (eq? (tui-view-state-focused-node application-view-state) 'counter.value)
   "rendering must repair focus when the focused component disappears")
+
+(view-replace-durable-input-state!
+  (editor-active-view editor)
+  (make-input-state
+    'application
+    '(tui.application)
+    'application
+    #f
+    #f
+    (lambda (event context)
+      (if (and (key-event? event)
+               (eq? (key-event-key event) 'f14))
+          (input-dispatch-application 'handler-event)
+          (input-pass)))
+    'block
+    #f
+    #f
+    #f))
+(editor-update!
+  editor
+  (make-key-message
+    (make-key-event
+      'character 117 #f #f 4 'press (make-bytevector 0))))
+(editor-update!
+  editor
+  (make-key-message
+    (make-key-event 'f14 #f #f #f 0 'press (make-bytevector 0))))
+(check
+  (and handler-prefix (= (prefix-argument-value handler-prefix) 4))
+  "DispatchApplication must preserve and consume the prefix argument")
 
 (editor-update!
   editor

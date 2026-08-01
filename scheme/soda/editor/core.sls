@@ -204,6 +204,7 @@
           tui-message-session-generation
           tui-message-origin-view-id
           tui-message-payload
+          tui-message-prefix
           make-tui-input-event
           tui-input-event?
           tui-input-event-kind
@@ -974,6 +975,7 @@
           view-viewport-columns
           view-keymap-layers
           view-input-states
+          view-input-handler-pending
           view-display-map
           view-folds
           fold?
@@ -989,6 +991,8 @@
           view-pop-input-state!
           view-reset-input-states!
           view-replace-durable-input-state!
+          view-set-input-handler-pending!
+          view-clear-input-handler-pending!
           view-set-first-line!
           view-set-first-visual-row!
           view-set-keymap-layers!
@@ -1004,6 +1008,32 @@
           input-state-indicator
           input-state-on-enter
           input-state-on-exit
+          make-input-context
+          input-context?
+          input-context-editor-id
+          input-context-workbench-id
+          input-context-window-id
+          input-context-view-id
+          input-context-buffer-id
+          input-context-presentation
+          input-context-input-state-stack
+          input-context-pending-sequence
+          input-context-prefix-argument
+          input-context-application-session-id
+          input-context-focused-node
+          input-disposition?
+          input-disposition-kind
+          input-disposition-command
+          input-disposition-argument
+          input-disposition-payload
+          input-disposition-sequence
+          input-disposition-hints
+          input-disposition-continuation
+          input-pass
+          input-consume
+          input-dispatch-command
+          input-dispatch-application
+          input-pending
           interaction-session?
           interaction-session-id
           interaction-session-kind

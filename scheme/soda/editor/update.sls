@@ -17,7 +17,9 @@
           (soda editor state)
           (soda editor tui-application)
           (soda editor tui-application-runtime)
-          (soda editor window))
+          (soda editor window)
+          (soda editor window-runtime)
+          (soda editor workbench))
 
   (define (condition->string condition)
     (if
@@ -62,22 +64,23 @@
          "invalid keymap layer"
          layer)]))
 
-  (define (effective-keymaps editor)
-    (let* ([view (editor-active-view editor)]
-           [buffer (view-buffer view)]
-           [states (view-input-states view)]
+  (define (active-input-states view)
+    (let* ([states (view-input-states view)]
            [durable
              (let loop ([remaining states])
                (if (null? (cdr remaining))
                    (car remaining)
-                   (loop (cdr remaining))))]
-           [active-states
-             (if (eq? (car states) durable)
-                 (list durable)
-                 (list (car states) durable))]
+                   (loop (cdr remaining))))])
+      (if (eq? (car states) durable)
+          (list durable)
+          (list (car states) durable))))
+
+  (define (effective-keymaps editor)
+    (let* ([view (editor-active-view editor)]
+           [buffer (view-buffer view)]
+           [active-states (active-input-states view)]
            [layers
              (append
-               (list 'editor.override)
                (if (editor-pending-prefix editor)
                    (list 'editor.prefix)
                    '())
@@ -90,6 +93,120 @@
                  (buffer-major-mode-name buffer))
                (list 'editor.default))])
       (map (lambda (layer) (catalog-keymap editor layer)) layers)))
+
+  (define (input-context-for editor view)
+    (let* ([buffer (view-buffer view)]
+           [session
+             (editor-tui-session-for-buffer editor (buffer-id buffer))]
+           [view-state
+             (and session
+                  (tui-session-view-state session (view-id view)))]
+           [window (editor-window-for-view editor (view-id view))]
+           [workbench (editor-workbench-for-view editor (view-id view))])
+      (make-input-context
+        0
+        (and workbench (workbench-id workbench))
+        (and window (window-leaf-id window))
+        (view-id view)
+        (buffer-id buffer)
+        (buffer-presentation buffer)
+        (view-input-states view)
+        (editor-pending-keys editor)
+        (editor-pending-prefix editor)
+        (and session (tui-session-id session))
+        (and view-state (tui-view-state-focused-node view-state)))))
+
+  (define (require-input-disposition value)
+    (unless (input-disposition? value)
+      (assertion-violation
+        'input-state.handler
+        "handler must return an InputDisposition"
+        value))
+    value)
+
+  (define (run-handler-chain editor view event)
+    (let* ([context (input-context-for editor view)]
+           [pending (view-input-handler-pending view)]
+           [pending-result
+             (and pending
+                  (begin
+                    (view-clear-input-handler-pending! view)
+                    (require-input-disposition
+                      ((input-disposition-continuation (cdr pending))
+                       event
+                       context))))])
+      (if (and pending-result
+               (not (eq? (input-disposition-kind pending-result) 'pass)))
+          (cons (car pending) pending-result)
+          (let loop ([states (active-input-states view)])
+            (if (null? states)
+                #f
+                (let ([handler (input-state-handler (car states))])
+                  (if (not handler)
+                      (loop (cdr states))
+                      (let ([result
+                              (require-input-disposition
+                                (handler event context))])
+                        (if (eq? (input-disposition-kind result) 'pass)
+                            (loop (cdr states))
+                            (cons (car states) result))))))))))
+
+  (define (dispatch-handler-result! editor view event handled)
+    (let* ([state (car handled)]
+           [result (cdr handled)]
+           [kind (input-disposition-kind result)])
+      (case kind
+        [(consume)
+         (editor-set-pending-keys! editor '())
+         (values #t '())]
+        [(dispatch-command)
+         (view-clear-input-handler-pending! view)
+         (editor-set-pending-keys! editor '())
+         (values
+           #t
+           (run-interactive-command
+             editor
+             (input-disposition-command result)
+             event
+             (input-disposition-argument result)
+             #f))]
+        [(dispatch-application)
+         (view-clear-input-handler-pending! view)
+         (editor-set-pending-keys! editor '())
+         (let ([session
+                 (editor-tui-session-for-buffer
+                   editor
+                   (buffer-id (view-buffer view)))])
+           (if session
+               (begin
+                 (tui-send!
+                   editor
+                   (tui-session-id session)
+                   (input-disposition-payload result)
+                   (view-id view)
+                   (editor-take-pending-prefix! editor))
+                 (values #t '()))
+               (begin
+                 (editor-clear-pending-prefix! editor)
+                 (editor-set-status-message!
+                   editor
+                   "No active TUI application")
+                 (values #t '()))))]
+        [(pending)
+         (editor-set-pending-keys! editor '())
+         (view-set-input-handler-pending! view state result)
+         (values #t '())]
+        [else
+         (assertion-violation
+           'input-state.handler
+           "unsupported InputDisposition"
+           kind)])))
+
+  (define (run-input-handlers! editor view event)
+    (let ([handled (run-handler-chain editor view event)])
+      (if handled
+          (dispatch-handler-result! editor view event handled)
+          (values #f '()))))
 
   (define (active-application-target editor)
     (let* ([view (editor-active-view editor)]
@@ -159,95 +276,111 @@
          '()]
         [else '()])))
 
+  (define (handle-keymap-resolution!
+            editor event view state capture pending sequence status command)
+    (cond
+      [(and capture (eq? status 'prefix))
+       (editor-set-pending-keys! editor sequence)
+       '()]
+      [capture
+       (editor-set-pending-keys! editor '())
+       (run-interactive-command
+         editor capture event (list status command sequence) #f)]
+      [else
+       (case status
+         [(prefix)
+          (editor-set-pending-keys! editor sequence)
+          '()]
+         [(command)
+          (view-clear-input-handler-pending! view)
+          (editor-set-pending-keys! editor '())
+          (run-interactive-command editor command event #f #f)]
+         [(undefined)
+          (view-clear-input-handler-pending! view)
+          (editor-set-pending-keys! editor '())
+          (editor-clear-pending-prefix! editor)
+          (editor-set-last-command-class! editor #f)
+          (editor-set-status-message! editor "Undefined key")
+          '()]
+         [else
+          (editor-set-pending-keys! editor '())
+          (if (and (null? pending)
+                   (positive? (bytevector-length (key-event-text event))))
+              (dispatch-text! editor event (key-event-text event))
+              (if (and
+                    (null? pending)
+                    (eq? (input-state-text-policy state) 'application)
+                    (dispatch-application-input!
+                      editor
+                      (if (eq? (key-event-type event) 'repeat)
+                          'key-repeat
+                          'key-press)
+                      event))
+                  '()
+                  (begin
+                    (editor-set-last-command-class! editor #f)
+                    (editor-clear-pending-prefix! editor)
+                    (when (pair? pending)
+                      (editor-set-status-message!
+                        editor
+                        "Undefined key sequence"))
+                    '())))])]))
+
   (define (handle-key-event! editor event)
     (unless (key-event? event)
       (assertion-violation
         'editor-update!
         "key message must contain a key event"
         event))
-    (if (eq? (key-event-type event) 'release)
-        (begin
-          (when
-            (eq?
-              (input-state-text-policy
-                (view-current-input-state (editor-active-view editor)))
-              'application)
-            (dispatch-application-input! editor 'key-release event))
-          '())
-        (let* ([view (editor-active-view editor)]
-               [state (view-current-input-state view)]
-               [capture
-                 (input-state-key-capture-command state)]
-               [pending (editor-pending-keys editor)]
-               [sequence
-                 (append pending (list (key-event->key-stroke event)))])
+    (let* ([view (editor-active-view editor)]
+           [state (view-current-input-state view)])
+      (if (eq? (key-event-type event) 'release)
           (call-with-values
-            (lambda ()
-              (keymaps-resolve (effective-keymaps editor) sequence))
-            (lambda (status command)
-              (cond
-                [(and capture (eq? status 'prefix))
-                 (editor-set-pending-keys! editor sequence)
-                 '()]
-                [capture
-                 (editor-set-pending-keys! editor '())
-                 (run-interactive-command
-                   editor
-                   capture
-                   event
-                   (list status command sequence)
-                   #f)]
-                [else
-                 (case status
-                   [(prefix)
-                    (editor-set-pending-keys! editor sequence)
-                    '()]
-                   [(command)
-                    (editor-set-pending-keys! editor '())
-                    (run-interactive-command editor command event #f #f)]
-                   [(undefined)
-                    (editor-set-pending-keys! editor '())
-                    (editor-clear-pending-prefix! editor)
-                    (editor-set-last-command-class! editor #f)
-                    (editor-set-status-message!
-                      editor
-                      "Undefined key")
-                    '()]
-                   [else
-                    (editor-set-pending-keys! editor '())
-                    (if (and (null? pending)
-                             (positive?
-                               (bytevector-length (key-event-text event))))
-                        (dispatch-text!
-                          editor
-                          event
-                          (key-event-text event))
-                        (if (and
-                              (null? pending)
-                              (eq?
-                                (input-state-text-policy state)
-                                'application)
-                              (dispatch-application-input!
-                                editor
-                                (if (eq? (key-event-type event) 'repeat)
-                                    'key-repeat
-                                    'key-press)
-                                event))
-                            '()
-                            (begin
-                              (editor-set-last-command-class! editor #f)
-                              (editor-clear-pending-prefix! editor)
-                              (when (pair? pending)
-                                (editor-set-status-message!
-                                  editor
-                                  "Undefined key sequence"))
-                              '())))])]))))))
+            (lambda () (run-input-handlers! editor view event))
+            (lambda (handled? effects)
+              (if handled?
+                  effects
+                  (begin
+                    (when
+                      (eq? (input-state-text-policy state) 'application)
+                      (dispatch-application-input!
+                        editor 'key-release event))
+                    '()))))
+          (let* ([capture (input-state-key-capture-command state)]
+                 [pending (editor-pending-keys editor)]
+                 [sequence
+                   (append pending (list (key-event->key-stroke event)))])
+            (call-with-values
+              (lambda ()
+                (keymaps-resolve
+                  (list (catalog-keymap editor 'editor.override))
+                  sequence))
+              (lambda (override-status override-command)
+                (if (not (eq? override-status 'none))
+                    (handle-keymap-resolution!
+                      editor event view state #f pending sequence
+                      override-status override-command)
+                    (call-with-values
+                      (lambda () (run-input-handlers! editor view event))
+                      (lambda (handled? effects)
+                        (if handled?
+                            effects
+                            (call-with-values
+                              (lambda ()
+                                (keymaps-resolve
+                                  (effective-keymaps editor)
+                                  sequence))
+                              (lambda (status command)
+                                (handle-keymap-resolution!
+                                  editor event view state capture pending
+                                  sequence status command)))))))))))))
 
   (define (handle-input-event! editor event)
     (cond
       [(key-event? event) (handle-key-event! editor event)]
       [(text-input-event? event)
        (editor-set-pending-keys! editor '())
+       (view-clear-input-handler-pending! (editor-active-view editor))
        (dispatch-text!
          editor
          event

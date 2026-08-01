@@ -411,8 +411,10 @@
   (define tui-send!
     (case-lambda
       [(editor session-id payload)
-       (tui-send! editor session-id payload #f)]
+       (tui-send! editor session-id payload #f #f)]
       [(editor session-id payload origin-view-id)
+       (tui-send! editor session-id payload origin-view-id #f)]
+      [(editor session-id payload origin-view-id prefix)
        (let ([session (editor-tui-session-ref editor session-id)])
          (tui-send-message!
            editor
@@ -420,7 +422,8 @@
              session-id
              (tui-session-generation session)
              origin-view-id
-             payload)))]))
+             payload
+             prefix)))]))
 
   (define (retire-command! session command-id)
     (let ([command

@@ -245,6 +245,7 @@
           view-viewport-columns
           view-keymap-layers
           view-input-states
+          view-input-handler-pending
           view-display-map
           view-effective-display-map
           view-visible-visual-lines
@@ -259,6 +260,8 @@
           view-pop-input-state!
           view-reset-input-states!
           view-replace-durable-input-state!
+          view-set-input-handler-pending!
+          view-clear-input-handler-pending!
           view-set-caret!
           view-set-vertical-caret!
           view-set-visual-caret!
@@ -334,6 +337,9 @@
                view-viewport-columns-set!)
       (mutable keymap-layers view-keymap-layers view-keymap-layers-set!)
       (mutable input-states view-input-states view-input-states-set!)
+      (mutable input-handler-pending
+               view-input-handler-pending
+               view-input-handler-pending-set!)
       (mutable completion view-completion view-completion-set!)
       (mutable pending-keys view-pending-keys view-pending-keys-set!)
       (mutable display-map view-display-map view-display-map-set!)
@@ -2017,6 +2023,7 @@
                    'editing
                    '()
                    'accept))
+               #f
                #f
                '()
                #f
@@ -5664,10 +5671,31 @@
     (let ([hook (input-state-on-exit state)])
       (when hook (hook value state))))
 
+  (define (view-set-input-handler-pending! value state disposition)
+    (unless (view? value)
+      (assertion-violation
+        'view-set-input-handler-pending! "expected a view" value))
+    (unless (and (input-state? state)
+                 (input-disposition? disposition)
+                 (eq? (input-disposition-kind disposition) 'pending))
+      (assertion-violation
+        'view-set-input-handler-pending!
+        "expected an input state and pending disposition"
+        state
+        disposition))
+    (view-input-handler-pending-set! value (cons state disposition)))
+
+  (define (view-clear-input-handler-pending! value)
+    (unless (view? value)
+      (assertion-violation
+        'view-clear-input-handler-pending! "expected a view" value))
+    (view-input-handler-pending-set! value #f))
+
   (define (replace-view-input-states! value states)
     (let ([removed (view-input-states value)])
       (view-input-states-set! value states)
       (view-pending-keys-set! value '())
+      (view-clear-input-handler-pending! value)
       (for-each
         (lambda (state) (run-input-state-exit! value state))
         removed)
@@ -5690,6 +5718,7 @@
       value
       (cons state (view-input-states value)))
     (view-pending-keys-set! value '())
+    (view-clear-input-handler-pending! value)
     (run-input-state-enter! value state)
     state)
 
@@ -5705,6 +5734,7 @@
           (begin
             (view-input-states-set! value (cdr states))
             (view-pending-keys-set! value '())
+            (view-clear-input-handler-pending! value)
             (run-input-state-exit! value (car states))
             (car states)))))
 
@@ -5737,6 +5767,7 @@
         value
         (replace-last-input-state states state))
       (view-pending-keys-set! value '())
+      (view-clear-input-handler-pending! value)
       (run-input-state-exit! value removed)
       (run-input-state-enter! value state)
       state))
@@ -5752,6 +5783,7 @@
            [removed (reverse (cdr (reverse states)))])
       (view-input-states-set! value (list durable))
       (view-pending-keys-set! value '())
+      (view-clear-input-handler-pending! value)
       (for-each
         (lambda (state) (run-input-state-exit! value state))
         removed)))
@@ -6109,6 +6141,7 @@
                    'editing
                    '()
                    'accept))
+               #f
                #f
                '()
                #f

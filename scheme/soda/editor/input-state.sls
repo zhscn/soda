@@ -10,7 +10,33 @@
           input-state-cursor
           input-state-indicator
           input-state-on-enter
-          input-state-on-exit)
+          input-state-on-exit
+          make-input-context
+          input-context?
+          input-context-editor-id
+          input-context-workbench-id
+          input-context-window-id
+          input-context-view-id
+          input-context-buffer-id
+          input-context-presentation
+          input-context-input-state-stack
+          input-context-pending-sequence
+          input-context-prefix-argument
+          input-context-application-session-id
+          input-context-focused-node
+          input-disposition?
+          input-disposition-kind
+          input-disposition-command
+          input-disposition-argument
+          input-disposition-payload
+          input-disposition-sequence
+          input-disposition-hints
+          input-disposition-continuation
+          input-pass
+          input-consume
+          input-dispatch-command
+          input-dispatch-application
+          input-pending)
   (import (rnrs)
           (soda editor keymap))
 
@@ -27,6 +53,59 @@
       indicator
       on-enter
       on-exit))
+
+  (define-record-type input-context
+    (fields editor-id
+            workbench-id
+            window-id
+            view-id
+            buffer-id
+            presentation
+            input-state-stack
+            pending-sequence
+            prefix-argument
+            application-session-id
+            focused-node))
+
+  (define-record-type
+    (input-disposition %make-input-disposition input-disposition?)
+    (fields kind command argument payload sequence hints continuation))
+
+  (define pass-disposition
+    (%make-input-disposition 'pass #f #f #f '() '() #f))
+
+  (define consume-disposition
+    (%make-input-disposition 'consume #f #f #f '() '() #f))
+
+  (define (input-pass) pass-disposition)
+  (define (input-consume) consume-disposition)
+
+  (define input-dispatch-command
+    (case-lambda
+      [(command) (input-dispatch-command command #f)]
+      [(command argument)
+       (unless (symbol? command)
+         (assertion-violation
+           'input-dispatch-command "command must be a symbol" command))
+       (%make-input-disposition
+         'dispatch-command command argument #f '() '() #f)]))
+
+  (define (input-dispatch-application payload)
+    (%make-input-disposition
+      'dispatch-application #f #f payload '() '() #f))
+
+  (define (input-pending sequence hints continuation)
+    (unless (list? sequence)
+      (assertion-violation
+        'input-pending "sequence must be a list" sequence))
+    (unless (list? hints)
+      (assertion-violation
+        'input-pending "hints must be a list" hints))
+    (unless (procedure? continuation)
+      (assertion-violation
+        'input-pending "continuation must be a procedure" continuation))
+    (%make-input-disposition
+      'pending #f #f #f sequence hints continuation))
 
   (define make-input-state
     (case-lambda
