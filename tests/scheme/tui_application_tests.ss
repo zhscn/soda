@@ -22,6 +22,7 @@
     'fundamental-mode))
 (define editor (make-editor initial-buffer))
 (define close-count 0)
+(define fail-next? #t)
 
 (check
   (document-presentation? (buffer-presentation initial-buffer))
@@ -31,8 +32,51 @@
   (make-tui-application-definition
     'counter
     (lambda (context arguments)
-      (values arguments '(initial-command)))
-    (lambda (model message context) model)
+      (values
+        arguments
+        (list (tui-command 'counter.load 'initial))))
+    (lambda (model message context)
+      (let ([payload (tui-message-payload message)])
+        (cond
+          [(eq? payload 'increment)
+           (tui-result
+             (+ model 1)
+             '()
+             (list
+               (make-tui-view-action 'origin 'focus 'counter.value)))]
+          [(eq? payload 'refresh)
+           (tui-result
+             model
+             (list
+               (tui-command
+                 'counter.load
+                 'refresh
+                 'session
+                 #f
+                 'counter.load))
+             '())]
+          [(eq? payload 'view-request)
+           (tui-result
+             model
+             (list
+               (tui-command
+                 'counter.view
+                 'refresh
+                 'view
+                 (tui-message-origin-view-id message)))
+             '())]
+          [(tui-command-result? payload)
+           (tui-result
+             (tui-command-result-value payload)
+             '()
+             '())]
+          [(eq? payload 'fail-once)
+           (if fail-next?
+               (begin
+                 (set! fail-next? #f)
+                 (error 'counter "failed once"))
+               (tui-result model '() '()))]
+          [else (tui-result model '() '())])))
     (lambda (model context) model)
     (lambda (model context)
       (set! close-count (+ close-count 1)))
@@ -45,6 +89,11 @@
 (define application-buffer (tui-open! editor 'counter 41))
 (define presentation (buffer-presentation application-buffer))
 (define session (tui-active-session editor))
+(define initial-effects (tui-take-effects! editor))
+(define initial-dispatch
+  (command-effect-payload (car initial-effects)))
+(define initial-command
+  (tui-command-dispatch-command initial-dispatch))
 
 (check
   (and
@@ -53,7 +102,12 @@
        (tui-session-id session))
     (= (tui-session-model session) 41)
     (eq? (tui-session-state session) 'ready)
-    (equal? (tui-session-pending-commands session) '(initial-command))
+    (= (length initial-effects) 1)
+    (eq? (command-effect-kind (car initial-effects)) 'tui.command)
+    (= (tui-command-dispatch-session-id initial-dispatch)
+       (tui-session-id session))
+    (= (tui-command-id initial-command) 1)
+    (= (length (tui-session-pending-commands session)) 1)
     (eq? (tui-session-definition session) definition)
     (eq? (view-buffer (editor-active-view editor)) application-buffer)
     (not (buffer-modified? application-buffer))
@@ -71,6 +125,63 @@
       'interface))
   "tui-open! must create and display an interface Buffer backed by a session")
 
+(define active-view-id (view-id (editor-active-view editor)))
+(define stale-message
+  (make-tui-message
+    (tui-session-id session)
+    (+ 1 (tui-session-generation session))
+    active-view-id
+    'increment))
+(check
+  (not (tui-send-message! editor stale-message))
+  "messages from another Model generation must be rejected")
+(tui-send! editor (tui-session-id session) 'increment active-view-id)
+(check
+  (and
+    (= (tui-session-model session) 42)
+    (= (tui-session-generation session) 1)
+    (eq?
+      (tui-view-state-focused-node
+        (tui-session-view-state session active-view-id))
+      'counter.value))
+  "update must atomically publish Model and origin-targeted view actions")
+
+(tui-send! editor (tui-session-id session) 'refresh active-view-id)
+(define first-refresh-effect (car (tui-take-effects! editor)))
+(define first-refresh-command
+  (tui-command-dispatch-command
+    (command-effect-payload first-refresh-effect)))
+(tui-send! editor (tui-session-id session) 'refresh active-view-id)
+(define second-refresh-effect (car (tui-take-effects! editor)))
+(define second-refresh-command
+  (tui-command-dispatch-command
+    (command-effect-payload second-refresh-effect)))
+(check
+  (and
+    (= (length (tui-session-pending-commands session)) 2)
+    (not
+      (exists
+        (lambda (command)
+          (= (tui-command-id command)
+             (tui-command-id first-refresh-command)))
+        (tui-session-pending-commands session)))
+    (not
+      (tui-complete-command!
+        editor
+        (tui-session-id session)
+        (tui-command-id first-refresh-command)
+        100)))
+  "a cancellation key must supersede the older pending command")
+(check
+  (tui-complete-command!
+    editor
+    (tui-session-id session)
+    (tui-command-id second-refresh-command)
+    50)
+  "the latest command result must enter update")
+(check (= (tui-session-model session) 50)
+  "command result update must publish its Model")
+
 (define second-view
   (editor-open-view!
     editor
@@ -78,10 +189,40 @@
 (check
   (= (length (tui-session-view-states session)) 2)
   "one session must own independent state for every displaying View")
+(tui-send!
+  editor
+  (tui-session-id session)
+  'view-request
+  (view-id second-view))
+(define view-effect (car (tui-take-effects! editor)))
+(define view-command
+  (tui-command-dispatch-command (command-effect-payload view-effect)))
 (editor-close-view! editor (view-id second-view))
 (check
-  (= (length (tui-session-view-states session)) 1)
+  (and
+    (= (length (tui-session-view-states session)) 1)
+    (not
+      (tui-complete-command!
+        editor
+        (tui-session-id session)
+        (tui-command-id view-command)
+        99))
+    (not
+      (exists
+        (lambda (command)
+          (= (tui-command-id command) (tui-command-id view-command)))
+        (tui-session-pending-commands session))))
   "closing a View must release only its application view state")
+
+(guard
+  (condition [else #f])
+  (tui-send! editor (tui-session-id session) 'fail-once active-view-id))
+(check (eq? (tui-session-state session) 'failed)
+  "an unhandled update condition must fail the session")
+(check
+  (and (tui-retry! editor (tui-session-id session))
+       (eq? (tui-session-state session) 'ready))
+  "retry must replay the failed message through update")
 
 (define replacement-definition
   (make-tui-application-definition

@@ -185,6 +185,7 @@
           tui-session-command-generation
           tui-session-state
           tui-session-pending-commands
+          tui-session-last-message
           tui-session-view-states
           tui-session-view-state
           tui-view-state?
@@ -196,9 +197,48 @@
           tui-view-state-viewport
           tui-view-state-transient-state
           tui-view-state-cursor
+          make-tui-message
+          tui-message?
+          tui-message-session-id
+          tui-message-session-generation
+          tui-message-origin-view-id
+          tui-message-payload
+          make-tui-update-result
+          tui-result
+          tui-update-result?
+          tui-update-result-model
+          tui-update-result-commands
+          tui-update-result-view-actions
+          make-tui-view-action
+          tui-view-action?
+          tui-view-action-target
+          tui-view-action-kind
+          tui-view-action-payload
+          make-tui-command
+          tui-command
+          tui-command?
+          tui-command-id
+          tui-command-kind
+          tui-command-payload
+          tui-command-scope
+          tui-command-origin-view-id
+          tui-command-generation
+          tui-command-cancellation-key
+          make-tui-command-result
+          tui-command-result?
+          tui-command-result-command-id
+          tui-command-result-value
+          tui-command-dispatch?
+          tui-command-dispatch-session-id
+          tui-command-dispatch-command
           tui-open!
           tui-close!
           tui-active-session
+          tui-send!
+          tui-send-message!
+          tui-complete-command!
+          tui-take-effects!
+          tui-retry!
           make-process-comint-profile
           process-comint-profile?
           process-comint-profile-name

@@ -49,6 +49,7 @@
           tui-session-model
           tui-session-generation
           tui-session-command-generation
+          tui-session-allocate-command-id!
           tui-session-state
           tui-session-pending-commands
           tui-session-last-message
@@ -71,7 +72,42 @@
           tui-application-registry-for-buffer
           tui-application-registry-allocate-session-id!
           tui-application-registry-add!
-          tui-application-registry-remove!)
+          tui-application-registry-remove!
+          make-tui-message
+          tui-message?
+          tui-message-session-id
+          tui-message-session-generation
+          tui-message-origin-view-id
+          tui-message-payload
+          make-tui-update-result
+          tui-result
+          tui-update-result?
+          tui-update-result-model
+          tui-update-result-commands
+          tui-update-result-view-actions
+          make-tui-view-action
+          tui-view-action?
+          tui-view-action-target
+          tui-view-action-kind
+          tui-view-action-payload
+          make-tui-command
+          tui-command
+          tui-command?
+          tui-command-id
+          tui-command-kind
+          tui-command-payload
+          tui-command-scope
+          tui-command-origin-view-id
+          tui-command-generation
+          tui-command-cancellation-key
+          make-tui-command-result
+          tui-command-result?
+          tui-command-result-command-id
+          tui-command-result-value
+          make-tui-command-dispatch
+          tui-command-dispatch?
+          tui-command-dispatch-session-id
+          tui-command-dispatch-command)
   (import (rnrs))
 
   (define (exact-positive-integer? value)
@@ -404,6 +440,7 @@
             (mutable model)
             (mutable generation)
             (mutable command-generation)
+            (mutable next-command-id)
             view-state-table
             (mutable view-state-ids)
             (mutable pending-commands)
@@ -419,7 +456,7 @@
         "invalid session identity"
         id definition buffer-id))
     (%make-tui-session
-      id definition buffer-id model 0 0
+      id definition buffer-id model 0 0 1
       (make-eqv-hashtable) '() '() 'initializing #f))
 
   (define (require-session who session)
@@ -461,12 +498,18 @@
     (tui-session-pending-commands-set! session '())
     (tui-session-command-generation session))
 
+  (define (tui-session-allocate-command-id! session)
+    (require-session 'tui-session-allocate-command-id! session)
+    (let ([id (tui-session-next-command-id session)])
+      (tui-session-next-command-id-set! session (+ id 1))
+      id))
+
   (define (tui-session-set-pending-commands! session commands)
     (require-session 'tui-session-set-pending-commands! session)
-    (unless (list? commands)
+    (unless (and (list? commands) (for-all tui-command? commands))
       (assertion-violation
         'tui-session-set-pending-commands!
-        "pending commands must be a list"
+        "pending commands must contain TuiCommand values"
         commands))
     (tui-session-pending-commands-set! session commands)
     commands)
@@ -622,4 +665,141 @@
         (tui-application-registry-session-ids-set!
           registry
           (remv id (tui-application-registry-session-ids registry))))
-      session)))
+      session))
+
+  (define-record-type
+    (tui-message %make-tui-message tui-message?)
+    (fields session-id session-generation origin-view-id payload))
+
+  (define (make-tui-message
+            session-id session-generation origin-view-id payload)
+    (unless (and
+              (exact-positive-integer? session-id)
+              (integer? session-generation)
+              (exact? session-generation)
+              (not (negative? session-generation))
+              (or (not origin-view-id)
+                  (exact-positive-integer? origin-view-id)))
+      (assertion-violation
+        'make-tui-message
+        "invalid TuiMessage identity"
+        session-id session-generation origin-view-id))
+    (%make-tui-message
+      session-id session-generation origin-view-id payload))
+
+  (define-record-type
+    (tui-update-result %make-tui-update-result tui-update-result?)
+    (fields model commands view-actions))
+
+  (define (make-tui-update-result model commands view-actions)
+    (unless (and (list? commands)
+                 (for-all tui-command? commands))
+      (assertion-violation
+        'make-tui-update-result
+        "commands must contain TuiCommand values"
+        commands))
+    (unless (and (list? view-actions)
+                 (for-all tui-view-action? view-actions))
+      (assertion-violation
+        'make-tui-update-result
+        "view actions must contain TuiViewAction values"
+        view-actions))
+    (%make-tui-update-result model commands view-actions))
+
+  (define tui-result make-tui-update-result)
+
+  (define-record-type
+    (tui-view-action %make-tui-view-action tui-view-action?)
+    (fields target kind payload))
+
+  (define (make-tui-view-action target kind payload)
+    (unless
+      (or (memq target '(origin all-views))
+          (exact-positive-integer? target))
+      (assertion-violation
+        'make-tui-view-action
+        "target must be origin, all-views, or a View id"
+        target))
+    (unless (memq kind '(focus scroll cursor overlay transient))
+      (assertion-violation
+        'make-tui-view-action
+        "unknown view action"
+        kind))
+    (%make-tui-view-action target kind payload))
+
+  (define-record-type
+    (%tui-command %make-tui-command tui-command?)
+    (fields (immutable id tui-command-id)
+            (immutable kind tui-command-kind)
+            (immutable payload tui-command-payload)
+            (immutable scope tui-command-scope)
+            (immutable origin-view-id tui-command-origin-view-id)
+            (immutable generation tui-command-generation)
+            (immutable cancellation-key tui-command-cancellation-key)))
+
+  (define (make-tui-command
+            id kind payload scope origin-view-id generation cancellation-key)
+    (unless (or (not id) (exact-positive-integer? id))
+      (assertion-violation
+        'make-tui-command
+        "id must be a positive exact integer or #f"
+        id))
+    (unless (symbol? kind)
+      (assertion-violation
+        'make-tui-command
+        "kind must be a symbol"
+        kind))
+    (unless (memq scope '(session view))
+      (assertion-violation
+        'make-tui-command
+        "scope must be session or view"
+        scope))
+    (unless (or (not origin-view-id)
+                (exact-positive-integer? origin-view-id))
+      (assertion-violation
+        'make-tui-command
+        "origin View id must be a positive exact integer or #f"
+        origin-view-id))
+    (when (and (eq? scope 'view) (not origin-view-id))
+      (assertion-violation
+        'make-tui-command
+        "view-scoped commands require an origin View"
+        kind))
+    (unless
+      (or
+        (not generation)
+        (and (integer? generation)
+             (exact? generation)
+             (not (negative? generation))))
+      (assertion-violation
+        'make-tui-command
+        "generation must be a non-negative exact integer or #f"
+        generation))
+    (%make-tui-command
+      id kind payload scope origin-view-id generation cancellation-key))
+
+  (define (tui-command kind payload . options)
+    (let ([scope (if (pair? options) (car options) 'session)]
+          [origin-view-id
+            (if (and (pair? options) (pair? (cdr options)))
+                (cadr options)
+                #f)]
+          [cancellation-key
+            (if (and (pair? options)
+                     (pair? (cdr options))
+                     (pair? (cddr options)))
+                (caddr options)
+                #f)])
+      (when (> (length options) 3)
+        (assertion-violation
+          'tui-command
+          "too many command options"
+          options))
+      (make-tui-command
+        #f kind payload scope origin-view-id #f cancellation-key)))
+
+  (define-record-type tui-command-result
+    (fields command-id value))
+
+  (define-record-type tui-command-dispatch
+    (fields session-id command)))

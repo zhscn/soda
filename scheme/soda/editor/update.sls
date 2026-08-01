@@ -15,6 +15,8 @@
           (soda editor minor-mode-runtime)
           (soda editor prompt)
           (soda editor state)
+          (soda editor tui-application)
+          (soda editor tui-application-runtime)
           (soda editor window))
 
   (define (condition->string condition)
@@ -318,6 +320,7 @@
                       (command-message-name message)]
                      [(internal-command-message? message)
                       (internal-command-message-name message)]
+                     [(tui-message? message) 'tui.update]
                      [else 'editor-update])
                    condition)
                  '()])
@@ -347,6 +350,9 @@
                    completion-response-accepted?
                    (editor-apply-completion-response! editor message))
                  '()]
+                [(tui-message? message)
+                 (tui-send-message! editor message)
+                 '()]
                 [else
                  (assertion-violation
                    'editor-update!
@@ -359,7 +365,8 @@
                    (and completion-response-accepted? 'overlay)]
                   [(or (input-message? message) (key-message? message))
                    'cursor]
+                  [(tui-message? message) 'application]
                   [else 'document])])
           (when reason
             (editor-invalidate! editor reason)))
-        result))))
+        (append result (editor-take-tui-effects! editor))))))

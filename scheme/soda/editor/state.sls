@@ -78,6 +78,8 @@
           editor-tui-session-ref
           editor-tui-session-for-buffer
           editor-close-tui-session!
+          editor-queue-tui-effects!
+          editor-take-tui-effects!
           editor-evaluator
           editor-set-evaluator!
           editor-debugger
@@ -402,6 +404,7 @@
                editor-next-interaction-id
                editor-next-interaction-id-set!)
       (immutable tui-applications editor-tui-application-registry)
+      (mutable tui-effects editor-tui-effects editor-tui-effects-set!)
       (mutable evaluator editor-evaluator editor-evaluator-set!)
       (mutable debugger editor-debugger editor-debugger-set!)
       (immutable commands editor-command-registry)
@@ -1581,6 +1584,47 @@
               "TUI application close failed"
               'error))))
       session))
+
+  (define (editor-queue-tui-effects! value effects)
+    (require-open-editor 'editor-queue-tui-effects! value)
+    (unless (and (list? effects) (for-all command-effect? effects))
+      (assertion-violation
+        'editor-queue-tui-effects!
+        "expected command effects"
+        effects))
+    (editor-tui-effects-set!
+      value
+      (append (editor-tui-effects value) effects))
+    effects)
+
+  (define (editor-take-tui-effects! value)
+    (require-open-editor 'editor-take-tui-effects! value)
+    (let ([effects
+            (filter
+              (lambda (effect)
+                (if (eq? (command-effect-kind effect) 'tui.command)
+                    (let* ([dispatch (command-effect-payload effect)]
+                           [session
+                             (and
+                               (tui-command-dispatch? dispatch)
+                               (tui-application-registry-ref
+                                 (editor-tui-application-registry value)
+                                 (tui-command-dispatch-session-id dispatch)))]
+                           [command
+                             (and
+                               session
+                               (tui-command-dispatch-command dispatch))])
+                      (and
+                        command
+                        (exists
+                          (lambda (pending)
+                            (= (tui-command-id pending)
+                               (tui-command-id command)))
+                          (tui-session-pending-commands session))))
+                    #t))
+              (editor-tui-effects value))])
+      (editor-tui-effects-set! value '())
+      effects))
 
   (define (editor-views value)
     (require-open-editor 'editor-views value)
@@ -6030,6 +6074,7 @@
                '()
                1
                (make-tui-application-registry)
+               '()
                #f
                #f
                (make-command-registry)
@@ -6147,6 +6192,7 @@
         (lambda (session)
           (editor-close-tui-session! value (tui-session-id session)))
         (editor-tui-sessions value))
+      (editor-tui-effects-set! value '())
       (for-each
         (lambda (session)
           (when (prompt-session-completion session)
