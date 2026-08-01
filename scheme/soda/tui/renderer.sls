@@ -2225,8 +2225,8 @@
             completion
             rows
             columns
-            caret-row
-            caret-column)
+            anchor-row
+            anchor-column)
     (let* ([items (completion-session-items completion)]
            [selected
              (completion-session-selected-item completion)]
@@ -2247,14 +2247,14 @@
       (and (positive? candidate-rows)
            (let* ([text-rows (- rows 1)]
                   [popup-rows candidate-rows]
-               [screen-row (max 0 (min caret-row (- text-rows 1)))]
+               [screen-row (max 0 (min anchor-row (- text-rows 1)))]
                [below (- text-rows (+ screen-row 1))]
                [popup-row
                  (if (>= below popup-rows)
                      (+ screen-row 1)
                      (max 0 (- screen-row popup-rows)))]
                [screen-column
-                 (max 0 (min caret-column (- columns 1)))]
+                 (max 0 (min anchor-column (- columns 1)))]
                [popup-column
                  (min screen-column (- columns popup-columns))]
                [candidates
@@ -2304,6 +2304,39 @@
            (rect-rows rectangle)
            (rect-columns rectangle))))
 
+  (define (document-completion-anchor-from-text
+            completion
+            text
+            tab-width
+            first-line
+            first-column
+            caret-line
+            caret-column)
+    (let ([target (completion-session-target completion)])
+      (if (document-completion-target? target)
+          (let* ([start (document-completion-target-start target)]
+                 [position (text-position text start)])
+            (cons
+              (- (car position) first-line)
+              (- (text-cell-column
+                   text
+                   start
+                   tab-width)
+                 first-column)))
+          (cons
+            (- caret-line first-line)
+            (- caret-column first-column)))))
+
+  (define (document-completion-anchor context completion)
+    (document-completion-anchor-from-text
+      completion
+      (editor-render-context-text context)
+      (editor-render-context-tab-width context)
+      (editor-render-context-first-line context)
+      (editor-render-context-first-column context)
+      (editor-render-context-caret-line context)
+      (editor-render-context-caret-column context)))
+
   (define (make-document-completion-nodes context completion text-node)
     (let* ([text-rectangle (component-node-rect text-node)]
            [gutter-width
@@ -2311,14 +2344,13 @@
                context
                (rect-columns text-rectangle))]
            [layout
-             (document-completion-layout
-               completion
-               (+ (rect-rows text-rectangle) 1)
-               (- (rect-columns text-rectangle) gutter-width)
-               (- (editor-render-context-caret-line context)
-                  (editor-render-context-first-line context))
-               (- (editor-render-context-caret-column context)
-                  (editor-render-context-first-column context)))])
+             (let ([anchor (document-completion-anchor context completion)])
+               (document-completion-layout
+                 completion
+                 (+ (rect-rows text-rectangle) 1)
+                 (- (rect-columns text-rectangle) gutter-width)
+                 (car anchor)
+                 (cdr anchor)))])
       (and layout
            (let ([documentation
                    (translate-completion-rectangle
@@ -2416,6 +2448,17 @@
                          (and
                            (not (editor-active-prompt editor))
                            (view-completion view))]
+                       [document-completion-anchor
+                         (and
+                           document-completion
+                           (document-completion-anchor-from-text
+                             document-completion
+                             text
+                             tab-width
+                             first-line
+                             first-column
+                             caret-line
+                             caret-column))]
                        [local-completion-layout
                          (and
                            document-completion
@@ -2423,8 +2466,8 @@
                              document-completion
                              rows
                              (- columns gutter-width)
-                             (- caret-line first-line)
-                             (- caret-column first-column)))]
+                             (car document-completion-anchor)
+                             (cdr document-completion-anchor)))]
                        [completion-layout
                          (and
                            local-completion-layout

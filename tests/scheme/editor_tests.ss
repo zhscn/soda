@@ -7644,7 +7644,7 @@
 (editor-close! completion-editor)
 
 (define resolve-document
-  (make-document (string->utf8 "fo\n") 944))
+  (make-document (string->utf8 "12345678fo\n") 944))
 (define resolve-buffer
   (make-buffer
     944
@@ -7652,6 +7652,7 @@
     #f
     'fundamental-mode))
 (define resolve-editor (make-editor resolve-buffer))
+(buffer-set-local-setting! resolve-buffer 'show-line-numbers? #f)
 (define resolve-label (string-append "foo-" (make-string 120 #\x)))
 (define resolve-source
   (make-choice-source
@@ -7697,10 +7698,10 @@
         (completion-item-kind item)
         "resolved detail"
         (make-completion-edit
-          (make-completion-text-edit 0 2 "foo")
-          (make-completion-text-edit 0 2 "foo")
+          (make-completion-text-edit 8 10 "foo")
+          (make-completion-text-edit 8 10 "foo")
           (list
-            (make-completion-text-edit 3 3 "resolved\n")))
+            (make-completion-text-edit 11 11 "resolved\n")))
         (completion-item-sort-text item)
         #f
         #t
@@ -7713,13 +7714,13 @@
 (editor-register-completion-provider!
   resolve-editor
   resolve-provider)
-(view-set-caret! (editor-active-view resolve-editor) 2)
+(view-set-caret! (editor-active-view resolve-editor) 10)
 (editor-start-document-completion!
   resolve-editor
   resolve-source
-  0
-  2
-  2
+  8
+  10
+  10
   '(resolve-test))
 (define resolve-executor (make-effect-executor))
 (install-completion-effect-handlers!
@@ -7764,6 +7765,7 @@
                       (cons (frame-row-text frame row) result))))])
     (unless
       (and completion-node
+           (= (rect-column (component-node-rect completion-node)) 8)
            (<=
              (rect-columns (component-node-rect completion-node))
              56)
@@ -7799,7 +7801,7 @@
 (unless
   (bytevector=?
     (buffer-bytes resolve-buffer)
-    (string->utf8 "foo\nresolved\n"))
+    (string->utf8 "12345678foo\nresolved\n"))
   (error 'editor-tests
          "resolved completion edits were not committed atomically"))
 (editor-close! resolve-editor)
