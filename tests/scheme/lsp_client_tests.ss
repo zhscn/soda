@@ -17,6 +17,18 @@
   (unless condition
     (apply assertion-violation 'lsp-client-tests message irritants)))
 
+(define (buffer-bytes buffer)
+  (let ([snapshot (document-snapshot (buffer-document buffer))])
+    (dynamic-wind
+      (lambda () #f)
+      (lambda ()
+        (let ([text (snapshot-text snapshot)])
+          (dynamic-wind
+            (lambda () #f)
+            (lambda () (text->bytevector text))
+            (lambda () (text-close! text)))))
+      (lambda () (snapshot-close! snapshot)))))
+
 (define scratch-document (make-document "" 42001))
 (define scratch-buffer
   (make-buffer 42002 scratch-document "*lsp-scratch*" 'fundamental-mode))
@@ -43,6 +55,11 @@
     (make-json-object '())))
 (editor-register-lsp-server! editor server)
 
+(editor-set-view-buffer!
+  editor
+  (view-id (editor-active-view editor))
+  (buffer-id source))
+
 (define start-effects
   (editor-start-lsp-session! editor source workspace server))
 (check
@@ -63,6 +80,11 @@
 (check
   (and session (eq? (lsp-client-session-state session) 'starting))
   "LSP session was not registered against its LanguageSession")
+(check
+  (eq?
+    (editor-view-language-attachment editor (view-id (editor-active-view editor)))
+    attachment)
+  "starting LSP did not route the active view through its language attachment")
 
 (define frame-decoder (make-lsp-json-rpc-decoder))
 (define initialize-message
@@ -198,6 +220,121 @@
     (eq? (annotation-severity (car lsp-annotations)) 'error)
     (string=? (annotation-message (car lsp-annotations)) "invalid prefix"))
   "publishDiagnostics did not publish an LSP diagnostic annotation")
+
+(view-set-caret! (editor-active-view editor) 7)
+(define lsp-completion-source
+  (make-choice-source
+    'lsp-test
+    '((category . lsp-test))
+    (lambda (input point) (cons 0 point))
+    (lambda (query) '())
+    (lambda (value) #f)
+    (lambda (generation) #f)))
+(editor-start-document-completion!
+  editor lsp-completion-source 3 7 7 '(lsp))
+(define lsp-completion-request-effects
+  (editor-take-completion-effects! editor))
+(check
+  (and (= (length lsp-completion-request-effects) 1)
+       (eq? (command-effect-kind (car lsp-completion-request-effects))
+            'completion.request))
+  "LSP completion provider did not schedule a completion request"
+  lsp-completion-request-effects)
+(define lsp-completion-request-effect
+  (car lsp-completion-request-effects))
+(define lsp-completion-request
+  (command-effect-payload lsp-completion-request-effect))
+(check
+  (and
+    (eq? (completion-request-target-kind lsp-completion-request) 'document)
+    (= (completion-request-target-view-id lsp-completion-request)
+       (view-id (editor-active-view editor)))
+    (= (completion-request-target-id lsp-completion-request)
+       (document-id (buffer-document source)))
+    (= (completion-request-target-revision lsp-completion-request)
+       (buffer-revision source))
+    (eq?
+      (editor-lsp-session-for-language-session editor language-session)
+      session)
+    (eq? (lsp-client-session-state session) 'ready))
+  "LSP completion request did not retain its document and session identity")
+(define lsp-completion-effects
+  (editor-update!
+    editor
+    (make-internal-command-message
+      'lsp.completion-request
+      lsp-completion-request)))
+(define lsp-completion-message
+  (begin
+    (check
+      (= (length lsp-completion-effects) 1)
+      "LSP completion command did not emit one server request"
+      lsp-completion-effects)
+    (car
+      (lsp-json-rpc-decode!
+        (make-lsp-json-rpc-decoder)
+        (managed-process-write-request-data
+          (command-effect-payload (car lsp-completion-effects)))))))
+(check
+  (string=? (json-object-ref lsp-completion-message "method" #f)
+            "textDocument/completion")
+  "LSP completion request did not reach the managed process")
+(define completion-primary-range
+  (make-json-object
+    (list
+      (cons "start"
+            (make-json-object
+              (list (cons "line" 0) (cons "character" 3))))
+      (cons "end"
+            (make-json-object
+              (list (cons "line" 0) (cons "character" 7)))))))
+(define completion-additional-range
+  (make-json-object
+    (list
+      (cons "start"
+            (make-json-object
+              (list (cons "line" 1) (cons "character" 0))))
+      (cons "end"
+            (make-json-object
+              (list (cons "line" 1) (cons "character" 0)))))))
+(define completion-item
+  (make-json-object
+    (list
+      (cons "label" "SodaWidget")
+      (cons "filterText" "Soda")
+      (cons "textEdit"
+            (make-json-object
+              (list (cons "range" completion-primary-range)
+                    (cons "newText" "Widget"))))
+      (cons "additionalTextEdits"
+            (make-json-array
+              (list
+                (make-json-object
+                  (list (cons "range" completion-additional-range)
+                        (cons "newText" "// Generated\n")))))))))
+(lsp-client-handle-json-message!
+  editor session
+  (make-json-object
+    (list
+      (cons "jsonrpc" "2.0")
+      (cons "id" (json-object-ref lsp-completion-message "id" #f))
+      (cons "result" (make-json-array (list completion-item))))))
+(let* ([completion (editor-active-completion editor)]
+       [item (and completion (completion-session-selected-item completion))])
+  (check
+    (and item
+         (completion-item-edit item)
+         (= (length
+              (completion-edit-additional-edits (completion-item-edit item)))
+            1))
+    "LSP CompletionItem text edits were not converted to editor completion edits"))
+(editor-accept-completion! editor)
+(check
+  (bytevector=?
+    (buffer-bytes source)
+    (string->utf8 "// Widget\n// Generated\nint main() {}\n"))
+  "accepting an LSP completion did not apply its primary and additional edits"
+  (utf8->string (buffer-bytes source)))
 
 (define updated-project
   (make-project

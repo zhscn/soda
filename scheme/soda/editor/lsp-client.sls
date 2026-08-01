@@ -1063,14 +1063,152 @@
                      (editor-language-session-registry editor)
                      (language-attachment-session-id attachment)))))))))
 
-  (define (lsp-completion-items request result)
+  (define (completion-request-buffer editor request)
+    (guard (condition [else #f])
+      (and
+        (eq? (completion-request-target-kind request) 'document)
+        (let ([view
+                (editor-view-ref
+                  editor
+                  (completion-request-target-view-id request))])
+          (let ([buffer (view-buffer view)])
+            (and
+              (= (document-id (buffer-document buffer))
+                 (completion-request-target-id request))
+              buffer))))))
+
+  (define (lsp-range-offsets buffer value)
+    (guard (condition [else #f])
+      (let* ([range (lsp-range-from-json value)]
+             [start
+               (lsp-buffer-offset-at buffer (lsp-range-start range))]
+             [end
+               (lsp-buffer-offset-at buffer (lsp-range-end range))])
+        (and start end (<= start end) (cons start end)))))
+
+  (define (lsp-text-edit-from-json buffer value)
+    (and
+      (json-object? value)
+      (let ([new-text (json-object-ref value "newText" #f)]
+            [offsets
+              (lsp-range-offsets buffer (json-object-ref value "range" #f))])
+        (and offsets
+             (string? new-text)
+             (make-completion-text-edit (car offsets) (cdr offsets) new-text)))))
+
+  (define (lsp-insert-replace-edit-from-json buffer value)
+    (and
+      (json-object? value)
+      (let ([new-text (json-object-ref value "newText" #f)]
+            [insert-range
+              (lsp-range-offsets buffer (json-object-ref value "insert" #f))]
+            [replace-range
+              (lsp-range-offsets buffer (json-object-ref value "replace" #f))])
+        (and
+          (string? new-text)
+          insert-range
+          replace-range
+          (make-completion-edit
+            (make-completion-text-edit
+              (car insert-range) (cdr insert-range) new-text)
+            (make-completion-text-edit
+              (car replace-range) (cdr replace-range) new-text)
+            '())))))
+
+  (define (lsp-additional-text-edits buffer value)
+    (if (json-array? value)
+        (let loop ([values (json-array-values value)] [edits '()])
+          (if (null? values)
+              (reverse edits)
+              (let ([edit (lsp-text-edit-from-json buffer (car values))])
+                (and edit (loop (cdr values) (cons edit edits))))))
+        '()))
+
+  (define (text-edits-disjoint? edits)
+    (let ([ordered
+            (list-sort
+              (lambda (left right)
+                (< (completion-text-edit-start left)
+                   (completion-text-edit-start right)))
+              edits)])
+      (let loop ([remaining ordered])
+        (or
+          (null? remaining)
+          (null? (cdr remaining))
+          (and
+            (< (completion-text-edit-end (car remaining))
+               (completion-text-edit-start (cadr remaining)))
+            (loop (cdr remaining)))))))
+
+  (define (text-edits-disjoint-from? edit others)
+    (for-all
+      (lambda (other)
+        (cond
+          [(< (completion-text-edit-start edit)
+              (completion-text-edit-start other))
+           (<= (completion-text-edit-end edit)
+               (completion-text-edit-start other))]
+          [(< (completion-text-edit-start other)
+              (completion-text-edit-start edit))
+           (<= (completion-text-edit-end other)
+               (completion-text-edit-start edit))]
+          [else #f]))
+      others))
+
+  (define (lsp-completion-edit buffer value)
+    (let* ([text-edit (json-object-ref value "textEdit" #f)]
+           [primary
+             (or
+               (let ([edit (lsp-text-edit-from-json buffer text-edit)])
+                 (and edit (make-completion-edit edit edit '())))
+               (lsp-insert-replace-edit-from-json buffer text-edit))]
+           [additional
+             (lsp-additional-text-edits
+               buffer
+               (json-object-ref value "additionalTextEdits" #f))])
+      (and
+        primary
+        (let ([edit
+                (make-completion-edit
+                  (completion-edit-insert primary)
+                  (completion-edit-replace primary)
+                  additional)])
+          (and
+            (text-edits-disjoint? additional)
+            (for-all
+              (lambda (additional-edit)
+                (text-edits-disjoint-from?
+                  additional-edit
+                  (list (completion-edit-insert edit)
+                        (completion-edit-replace edit))))
+              additional)
+            edit)))))
+
+  (define (lsp-completion-insert-text value edit label)
+    (let ([insert (json-object-ref value "insertText" #f)])
+      (cond
+        [(string? insert) insert]
+        [edit (completion-text-edit-new-text (completion-edit-insert edit))]
+        [else label])))
+
+  (define (lsp-completion-documentation value)
+    (let ([documentation (json-object-ref value "documentation" #f)])
+      (cond
+        [(string? documentation) documentation]
+        [(json-object? documentation)
+         (let ([contents (json-object-ref documentation "value" #f)])
+           (and (string? contents) contents))]
+        [else #f])))
+
+  (define (lsp-completion-items editor request result)
     (let ([values
             (cond
               [(json-array? result) (json-array-values result)]
               [(json-object? result)
                (let ([items (json-object-ref result "items" #f)])
                  (if (json-array? items) (json-array-values items) '()))]
-              [else '()])])
+              [else '()])]
+          [buffer (completion-request-buffer editor request)])
       (let loop ([remaining values] [index 0] [items '()])
         (if (null? remaining)
             (reverse items)
@@ -1078,10 +1216,17 @@
               (if (not (json-object? value))
                   (loop (cdr remaining) (+ index 1) items)
                   (let* ([label (json-object-ref value "label" #f)]
-                         [insert (json-object-ref value "insertText" label)]
+                         [edit
+                           (and buffer (lsp-completion-edit buffer value))]
+                         [insert (lsp-completion-insert-text value edit label)]
+                         [filter (json-object-ref value "filterText" label)]
                          [detail (json-object-ref value "detail" #f)]
-                         [sort (json-object-ref value "sortText" label)])
-                    (if (and (string? label) (string? insert) (string? sort))
+                         [sort (json-object-ref value "sortText" label)]
+                         [documentation (lsp-completion-documentation value)])
+                    (if (and (string? label)
+                             (string? insert)
+                             (string? filter)
+                             (string? sort))
                         (loop
                           (cdr remaining)
                           (+ index 1)
@@ -1089,8 +1234,9 @@
                             (make-completion-item
                               (list index label insert)
                               'lsp
-                              label label insert
-                              'choice detail #f sort #f #f #f value detail "LSP" 0)
+                              filter label insert
+                              'choice detail edit sort #f #t
+                              documentation value detail "LSP" 0)
                             items))
                         (loop (cdr remaining) (+ index 1) items)))))))))
 
@@ -1103,21 +1249,22 @@
                [document (find-document session (buffer-id buffer))]
                [position (lsp-buffer-position-at buffer (completion-request-end request))])
           (if (and document position)
-              (session-request!
-                session
-                "textDocument/completion"
-                (make-json-object
-                  (list
-                    (cons "textDocument"
-                          (make-json-object
-                            (list (cons "uri" (lsp-client-document-uri document)))) )
-                    (cons "position" (lsp-position->json position))))
-                (lambda (response-editor response-session result)
-                  (editor-apply-completion-response!
-                    response-editor
-                    (make-completion-response-for-request
-                      request (lsp-completion-items request result) #t))
-                  '()))
+              (list
+                (session-request!
+                  session
+                  "textDocument/completion"
+                  (make-json-object
+                    (list
+                      (cons "textDocument"
+                            (make-json-object
+                              (list (cons "uri" (lsp-client-document-uri document)))) )
+                      (cons "position" (lsp-position->json position))))
+                  (lambda (response-editor response-session result)
+                    (editor-apply-completion-response!
+                      response-editor
+                      (make-completion-response-for-request
+                        request (lsp-completion-items response-editor request result) #t))
+                    '())))
               '()))
         '())))
 
@@ -1130,15 +1277,16 @@
                           (lsp-buffer-position-at buffer (view-caret view)))])
       (if (and session document position
                (eq? (lsp-client-session-state session) 'ready))
-          (session-request!
-            session method
-            (make-json-object
-              (list
-                (cons "textDocument"
-                      (make-json-object
-                        (list (cons "uri" (lsp-client-document-uri document)))))
-                (cons "position" (lsp-position->json position))))
-            continuation)
+          (list
+            (session-request!
+              session method
+              (make-json-object
+                (list
+                  (cons "textDocument"
+                        (make-json-object
+                          (list (cons "uri" (lsp-client-document-uri document)))))
+                  (cons "position" (lsp-position->json position))))
+              continuation))
           (begin
             (editor-set-status-message! editor "No ready language server at point")
             '()))))
