@@ -139,6 +139,10 @@
   (make-json-object
     (list
       (cons
+        "textDocumentSync"
+        (make-json-object
+          (list (cons "openClose" #t) (cons "change" 2))))
+      (cons
         "completionProvider"
         (make-json-object (list (cons "resolveProvider" #t))))
       (cons "documentHighlightProvider" #t)
@@ -514,19 +518,27 @@
   (lambda (transaction)
     (transaction-insert! transaction 0 "// Soda\n")))
 (define change-effects (editor-take-tui-effects! editor))
+(define change-message
+  (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload (car change-effects))))))
+(define content-changes
+  (json-array-values
+    (json-object-ref
+      (json-object-ref change-message "params" #f)
+      "contentChanges"
+      #f)))
 (check
   (and
     (= (length change-effects) 3)
     (string=?
-      (json-object-ref
-        (car
-          (lsp-json-rpc-decode!
-            (make-lsp-json-rpc-decoder)
-            (managed-process-write-request-data
-              (command-effect-payload (car change-effects)))))
-        "method"
-        #f)
+      (json-object-ref change-message "method" #f)
       "textDocument/didChange")
+    (= (length content-changes) 1)
+    (string=? (json-object-ref (car content-changes) "text" #f) "// Soda\n")
+    (json-object? (json-object-ref (car content-changes) "range" #f))
     (eq? (command-effect-kind (cadr change-effects)) 'command.invoke)
     (internal-command-message?
       (command-effect-payload (cadr change-effects)))
@@ -1876,7 +1888,11 @@
         (cons "id" (json-object-ref policy-initialize-message "id" #f))
         (cons "result"
               (make-json-object
-                (list (cons "capabilities" (make-json-object '())))))))))
+                (list
+                  (cons
+                    "capabilities"
+                    (make-json-object
+                      (list (cons "textDocumentSync" 1)))))))))))
 (check
   (and
     (= (length policy-ready-effects) 4)
@@ -1902,6 +1918,35 @@
         (command-message? message)
         (eq? (command-message-name message) 'diagnostics.list))))
   "push-only diagnostics must list current server diagnostics without pull requests")
+(call-with-buffer-transaction
+  policy-source
+  (lambda (transaction)
+    (transaction-insert! transaction 0 " ")))
+(define full-sync-effects (editor-take-tui-effects! policy-editor))
+(define full-sync-message
+  (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload (car full-sync-effects))))))
+(define full-sync-change
+  (car
+    (json-array-values
+      (json-object-ref
+        (json-object-ref full-sync-message "params" #f)
+        "contentChanges"
+        #f))))
+(check
+  (and
+    (= (length full-sync-effects) 2)
+    (string=?
+      (json-object-ref full-sync-message "method" #f)
+      "textDocument/didChange")
+    (string=?
+      (json-object-ref full-sync-change "text" #f)
+      " int main() {}\n")
+    (not (json-object-ref full-sync-change "range" #f)))
+  "full document synchronization emitted an incremental content change")
 (editor-execute-command!
   policy-editor
   'file.apply-open-result

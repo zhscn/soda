@@ -74,6 +74,9 @@
                      lsp-client-document-diagnostic-result-id
                      lsp-client-document-diagnostic-result-id-set!)
             (mutable opened? lsp-client-document-opened? lsp-client-document-opened?-set!)
+            (mutable text-map
+                     lsp-client-document-text-map
+                     lsp-client-document-text-map-set!)
             (mutable observer-name
                      lsp-client-document-observer-name
                      lsp-client-document-observer-name-set!)))
@@ -511,6 +514,7 @@
                 (buffer-revision buffer)
                 #f
                 #f
+                #f
                 #f)])
         (lsp-client-session-documents-set!
           session
@@ -549,38 +553,114 @@
           (make-lsp-diagnostic-refresh
             session (buffer-id buffer) (buffer-revision buffer))))))
 
-  (define (lsp-client-sync-buffer! editor session buffer)
-    (let ([document (find-document session (buffer-id buffer))])
-      (if
-        (or (not document)
-            (not (lsp-client-document-opened? document))
-            (not (eq? (lsp-client-session-state session) 'ready)))
-        '()
-        (begin
-          (lsp-client-document-version-set!
-            document (+ 1 (lsp-client-document-version document)))
-          (lsp-client-document-revision-set! document (buffer-revision buffer))
-          (lsp-client-document-diagnostic-result-id-set! document #f)
-          (let ([diagnostic-refresh (diagnostic-refresh-effect session buffer)])
-            (append
-              (list
-                (session-notification-effect
-                  session
-                  "textDocument/didChange"
-                  (make-json-object
-                    (list
-                      (cons "textDocument"
-                            (make-json-object
-                              (list
-                                (cons "uri" (lsp-client-document-uri document))
-                                (cons "version" (lsp-client-document-version document)))))
-                      (cons "contentChanges"
-                            (make-json-array
-                              (list
-                                (make-json-object
-                                  (list (cons "text" (buffer-text buffer))))))))))
-                (semantic-refresh-effect session buffer))
-              (if diagnostic-refresh (list diagnostic-refresh) '())))))))
+  (define (text-document-sync-kind session)
+    (let ([capability
+            (json-object-ref
+              (lsp-client-session-capabilities session)
+              "textDocumentSync"
+              0)])
+      (let ([kind
+              (if (json-object? capability)
+                  (json-object-ref capability "change" 0)
+                  capability)])
+        (if (and (integer? kind) (exact? kind) (<= 0 kind 2))
+            kind
+            0))))
+
+  (define (text-document-open-close? session)
+    (let ([capability
+            (json-object-ref
+              (lsp-client-session-capabilities session)
+              "textDocumentSync"
+              0)])
+      (if (json-object? capability)
+          (eq? (json-object-ref capability "openClose" #f) #t)
+          (and (integer? capability) (not (zero? capability))))))
+
+  (define (full-content-change buffer)
+    (make-json-object (list (cons "text" (buffer-text buffer)))))
+
+  (define (change-edit->json text-map change index)
+    (let* ([range (change-edit-range change index)]
+           [start (lsp-text-map-position-at text-map (car range))]
+           [end (lsp-text-map-position-at text-map (cdr range))])
+      (and
+        start
+        end
+        (make-json-object
+          (list
+            (cons "range"
+                  (lsp-range->json (make-lsp-range start end)))
+            (cons "text" (utf8->string (change-edit-text change index))))))))
+
+  (define (incremental-changes document change buffer)
+    (let ([text-map (lsp-client-document-text-map document)])
+      (and
+        change
+        text-map
+        (= (lsp-text-map-revision text-map) (change-old-revision change))
+        (= (change-new-revision change) (buffer-revision buffer))
+        (let loop ([index (- (change-edit-count change) 1)] [result '()])
+          (if (negative? index)
+              (reverse result)
+              (let ([entry (change-edit->json text-map change index)])
+                (and entry (loop (- index 1) (cons entry result)))))))))
+
+  (define lsp-client-sync-buffer!
+    (case-lambda
+      [(editor session buffer)
+       (lsp-client-sync-buffer! editor session buffer #f)]
+      [(editor session buffer change)
+       (let ([document (find-document session (buffer-id buffer))])
+         (if
+           (or (not document)
+               (not (lsp-client-document-opened? document))
+               (not (eq? (lsp-client-session-state session) 'ready)))
+           '()
+           (let* ([sync-kind (text-document-sync-kind session)]
+                  [incremental
+                    (and
+                      (= sync-kind 2)
+                      (incremental-changes document change buffer))]
+                  [content-changes
+                    (if incremental
+                        incremental
+                        (list (full-content-change buffer)))])
+             (lsp-client-document-revision-set!
+               document
+               (buffer-revision buffer))
+             (lsp-client-document-text-map-set!
+               document
+               (lsp-buffer-text-map buffer))
+             (lsp-client-document-diagnostic-result-id-set! document #f)
+             (if (zero? sync-kind)
+                 '()
+                 (begin
+                   (lsp-client-document-version-set!
+                     document
+                     (+ 1 (lsp-client-document-version document)))
+                   (let ([diagnostic-refresh
+                           (diagnostic-refresh-effect session buffer)])
+                     (append
+                       (list
+                         (session-notification-effect
+                           session
+                           "textDocument/didChange"
+                           (make-json-object
+                             (list
+                               (cons
+                                 "textDocument"
+                                 (make-json-object
+                                   (list
+                                     (cons "uri" (lsp-client-document-uri document))
+                                     (cons "version" (lsp-client-document-version document)))))
+                               (cons
+                                 "contentChanges"
+                                 (make-json-array content-changes)))))
+                         (semantic-refresh-effect session buffer))
+                       (if diagnostic-refresh
+                           (list diagnostic-refresh)
+                           '()))))))))]))
 
   (define (install-document-observer! editor session buffer document)
     (unless (lsp-client-document-observer-name document)
@@ -589,7 +669,9 @@
           buffer
           name
           (lambda (changed-buffer change)
-            (let ([effects (lsp-client-sync-buffer! editor session changed-buffer)])
+            (let ([effects
+                    (lsp-client-sync-buffer!
+                      editor session changed-buffer change)])
               (when (pair? effects)
                 (editor-queue-tui-effects! editor effects)))))
         (editor-add-buffer-hook!
@@ -611,6 +693,9 @@
       (lsp-client-document-opened?-set! document #t)
       (lsp-client-document-revision-set! document (buffer-revision buffer))
       (lsp-client-document-diagnostic-result-id-set! document #f)
+      (lsp-client-document-text-map-set!
+        document
+        (lsp-buffer-text-map buffer))
       (install-document-observer! editor session buffer document)
       (session-notification-effect
         session
@@ -640,7 +725,9 @@
       (map
         (lambda (buffer)
           (let ([document (ensure-document! session buffer)])
-            (if (lsp-client-document-opened? document)
+            (if (or
+                  (lsp-client-document-opened? document)
+                  (not (text-document-open-close? session)))
                 '()
                 (let ([diagnostic-refresh
                         (diagnostic-refresh-effect session buffer)])
