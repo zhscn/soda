@@ -13,6 +13,7 @@
 | LanguageProfile bootstrap hook 与 home attachment 选择 | 已实现 |
 | ProjectWorkspace bootstrap snapshot 与 file-backed Buffer 归属解析 | 已实现 |
 | LSP process transport、ProjectWorkspace bootstrap 与 full-text document synchronization | 已实现 |
+| Eglot 风格 server profile registry、Project activation policy 与自动 document attachment | 已实现 |
 | LSP push/pull diagnostics、completion text edits/resolve、hover、signature help、selection ranges、document symbols、document highlights、Code Lens、formatting、definition、implementation、type definition、references、workspace symbol、rename、code actions 与 workspace/applyEdit | 已实现 |
 | LSP semantic tokens full refresh 与 document lifecycle refresh | 已实现 |
 
@@ -214,9 +215,47 @@ snapshot 与 generation；identity 改变时 transport 关闭旧 documents，建
 session，并恢复 Buffer attachment 和 View routing。普通语义请求只携带 attachment，
 不重新运行 Project discovery。
 
-Project 的 `lsp-settings` 是 `(server-name . json-value)` 的 association list。选中的
-server 按名称读取其 JSON value，覆盖 profile 的默认 settings；`workspace/configuration`
-请求的每个 section 从该 JSON value 查询，空 section 返回整个 value。
+LSP server profile 是全局的具名配置，形式为：
+
+```text
+LspServerProfile {
+  name,
+  languages,
+  command,
+  initialization_options,
+  settings
+}
+```
+
+内建 registry 提供 `clangd`、`rust-analyzer`、`gopls`、`pyright`、
+`typescript-language-server`、VS Code JSON/CSS/HTML server、
+`bash-language-server`、`yaml-language-server` 与 `lua-language-server` 的 contact
+command。profile 注册不启动子进程；用户 init 或 extension 以同名 profile 替换内建值，
+并可注册任意额外 server。
+
+Project 的 `language-servers` 是 `(language . server-name)` 的 association list，选择
+profile。未声明语言时，单个支持该语言的已注册 profile 是默认选择。`lsp-settings` 是
+`(server-name . json-value)` 的 association list；选中的 server 按名称读取其 JSON
+value，覆盖 profile 的默认 settings；`workspace/configuration` 请求的每个 section 从该
+JSON value 查询，空 section 返回整个 value。
+
+Project settings 的 `lsp-activation` 定义 service 生命周期：
+
+```text
+disabled        不启动或附着 Project language service
+manual          由 project.lsp.start 或 lsp.start 启动
+on-first-file   第一个 file-backed Buffer 进入 Project 时启动对应语言 service
+on-project-open Project 登记时启动 language-servers 中显式声明的 service
+```
+
+默认策略为 `manual`。`project.lsp.start` 从 selected Project 启动 active language 的
+service；在没有 language Buffer 的 Project Dashboard 中，它启动 `language-servers` 中
+显式声明的 service。`project.lsp.stop` 停止该 Project workspace 的所有 active service。
+`lsp.start` 保留为 active Buffer 的 document-oriented 入口。
+
+service 启动后，同一 home Project、同一语言的 file-backed Buffer 自动建立 home
+attachment 并参与 document lifecycle。Project 外的导航落点继续使用 origin View 的
+inherited attachment，不从落点路径重启 service。
 
 `LanguageSessionKey` 对 workspace folders、configuration、environment fingerprint 和
 client capabilities 使用按值快照。嵌套的 list、vector、string 与 bytevector 在建立 key

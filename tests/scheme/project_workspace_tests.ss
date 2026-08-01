@@ -119,6 +119,30 @@
         language-server-workspace 'json #f)
       'fallback-server))
   "ProjectWorkspace must select a language-specific server before its default")
+(check
+  (and
+    (equal?
+      (project-workspace-language-server-bindings language-server-workspace)
+      '((cpp . clangd) (scheme . scheme-lsp)))
+    (eq?
+      (project-workspace-lsp-activation-policy language-server-workspace)
+      'manual))
+  "ProjectWorkspace must expose declared language services and default activation")
+(define automatic-language-server-workspace
+  (editor-project-workspace
+    editor
+    (make-project
+      'automatic-language-servers
+      '("/automatic-language-servers")
+      'manual 'explicit #f
+      (make-project-settings-layer
+        '((lsp-activation . on-first-file)))
+      '())))
+(check
+  (eq?
+    (project-workspace-lsp-activation-policy automatic-language-server-workspace)
+    'on-first-file)
+  "ProjectWorkspace must preserve the Project LSP activation policy")
 (let ([settings
         (project-workspace-lsp-settings-ref
           language-server-workspace

@@ -544,7 +544,9 @@
           lsp-server-profile-initialization-options
           lsp-server-profile-settings
           lsp-server-profile-supports-language?
+          built-in-lsp-server-profiles
           editor-register-lsp-server!
+          editor-install-built-in-lsp-server-profiles!
           editor-lsp-server
           editor-lsp-servers-for-language
           lsp-client-session?
@@ -555,6 +557,8 @@
           lsp-client-session-state
           lsp-client-session-capabilities
           editor-lsp-session-for-language-session
+          editor-start-project-lsp!
+          editor-start-project-lsp-for-active-view!
           editor-start-lsp-session!
           editor-start-lsp-for-active-view!
           lsp-client-stop!
@@ -721,8 +725,10 @@
           project-workspace-folder-resources
           project-workspace-configuration
           project-workspace-setting-ref
+          project-workspace-language-server-bindings
           project-workspace-language-server-ref
           project-workspace-lsp-settings-ref
+          project-workspace-lsp-activation-policy
           editor-project-workspace
           editor-project-workspaces-for-resource
           editor-project-workspace-for-resource
@@ -1832,6 +1838,7 @@
           '((soda editor core))))
       (install-core-auto-modes! editor)
       (install-core-project-finders! editor)
+      (editor-install-built-in-lsp-server-profiles! editor)
       (install-project-commands! editor)
       (install-project-navigation-commands! editor)
       (install-command-runtime-commands! editor)

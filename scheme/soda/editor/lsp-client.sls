@@ -7,7 +7,9 @@
           lsp-server-profile-initialization-options
           lsp-server-profile-settings
           lsp-server-profile-supports-language?
+          built-in-lsp-server-profiles
           editor-register-lsp-server!
+          editor-install-built-in-lsp-server-profiles!
           editor-lsp-server
           editor-lsp-servers-for-language
           lsp-client-session?
@@ -18,6 +20,8 @@
           lsp-client-session-state
           lsp-client-session-capabilities
           editor-lsp-session-for-language-session
+          editor-start-project-lsp!
+          editor-start-project-lsp-for-active-view!
           editor-start-lsp-session!
           editor-start-lsp-for-active-view!
           lsp-client-handle-json-message!
@@ -170,6 +174,53 @@
         'lsp-server-profile-supports-language? "language must be a symbol" language))
     (memq language (lsp-server-profile-languages profile)))
 
+  ;; Built-in profiles declare contact commands without starting processes.
+  (define (empty-json-object) (make-json-object '()))
+
+  (define (built-in-lsp-server-profiles)
+    (list
+      (make-lsp-server-profile
+        'clangd '(c cpp objective-c objective-cpp) '("clangd")
+        (empty-json-object) (empty-json-object))
+      (make-lsp-server-profile
+        'rust-analyzer '(rust) '("rust-analyzer")
+        (empty-json-object) (empty-json-object))
+      (make-lsp-server-profile
+        'gopls '(go gomod gowork) '("gopls")
+        (empty-json-object) (empty-json-object))
+      (make-lsp-server-profile
+        'pyright '(python) '("pyright-langserver" "--stdio")
+        (empty-json-object) (empty-json-object))
+      (make-lsp-server-profile
+        'typescript-language-server
+        '(javascript typescript tsx)
+        '("typescript-language-server" "--stdio")
+        (empty-json-object) (empty-json-object))
+      (make-lsp-server-profile
+        'vscode-json-language-server '(json)
+        '("vscode-json-language-server" "--stdio")
+        (empty-json-object) (empty-json-object))
+      (make-lsp-server-profile
+        'vscode-css-language-server '(css)
+        '("vscode-css-language-server" "--stdio")
+        (empty-json-object) (empty-json-object))
+      (make-lsp-server-profile
+        'vscode-html-language-server '(html)
+        '("vscode-html-language-server" "--stdio")
+        (empty-json-object) (empty-json-object))
+      (make-lsp-server-profile
+        'bash-language-server '(bash)
+        '("bash-language-server" "start")
+        (empty-json-object) (empty-json-object))
+      (make-lsp-server-profile
+        'yaml-language-server '(yaml)
+        '("yaml-language-server" "--stdio")
+        (empty-json-object) (empty-json-object))
+      (make-lsp-server-profile
+        'lua-language-server '(lua)
+        '("lua-language-server")
+        (empty-json-object) (empty-json-object))))
+
   (define (make-lsp-client-registry)
     (%make-lsp-client-registry (make-eq-hashtable) (make-eqv-hashtable)))
 
@@ -191,6 +242,15 @@
         (lsp-server-profile-name profile)
         profile)
       profile))
+
+  (define (editor-install-built-in-lsp-server-profiles! editor)
+    (for-each
+      (lambda (profile)
+        ;; Preserve an already registered profile with the same name.
+        (unless (editor-lsp-server editor (lsp-server-profile-name profile))
+          (editor-register-lsp-server! editor profile)))
+      (built-in-lsp-server-profiles))
+    editor)
 
   (define (editor-lsp-server editor name)
     (unless (symbol? name)
@@ -1210,6 +1270,90 @@
                 (initialize-params session)
                 initialize-response!)))))))
 
+  (define (same-project-workspace? left right)
+    (and (project-workspace? left)
+         (project-workspace? right)
+         (equal? (project-workspace-project-id left)
+                 (project-workspace-project-id right))))
+
+  (define (buffer-home-workspace editor buffer)
+    (editor-project-workspace-for-buffer editor buffer #f))
+
+  (define (attach-home-buffer-to-session! editor session buffer)
+    (let* ([workspace (lsp-client-session-workspace session)]
+           [profile (lsp-client-session-server session)]
+           [language (buffer-language buffer)]
+           [home (and (buffer-file-path buffer)
+                      (buffer-home-workspace editor buffer))])
+      (if (not (and language home
+                    (same-project-workspace? home workspace)
+                    (lsp-server-profile-supports-language? profile language)))
+          '()
+          (begin
+            (editor-attach-language-session!
+              editor
+              (buffer-id buffer)
+              (lsp-client-session-language-session session)
+              'home
+              #f)
+            (enable-lsp-completion! buffer)
+            (if (eq? (lsp-client-session-state session) 'ready)
+                (session-open-attached-documents! editor session)
+                '())))))
+
+  (define (attach-project-home-buffers! editor session)
+    (apply append
+      (map
+        (lambda (buffer)
+          (attach-home-buffer-to-session! editor session buffer))
+        (editor-buffers editor))))
+
+  (define (auto-attach-buffer-to-active-lsp-sessions! editor buffer)
+    (let-values
+      ([(ids sessions)
+        (hashtable-entries
+          (lsp-client-registry-sessions (editor-lsp-registry editor)))])
+      (let loop ([index 0] [effects '()])
+        (if (= index (vector-length sessions))
+            (reverse effects)
+            (let ([session (vector-ref sessions index)])
+              (loop
+                (+ index 1)
+                (if (memq (lsp-client-session-state session) '(starting ready))
+                    (append
+                      (reverse (attach-home-buffer-to-session! editor session buffer))
+                      effects)
+                    effects)))))))
+
+  (define (editor-start-project-lsp! editor workspace language profile)
+    (unless (and (project-workspace? workspace)
+                 (symbol? language)
+                 (lsp-server-profile? profile))
+      (assertion-violation
+        'editor-start-project-lsp!
+        "expected a ProjectWorkspace, language symbol, and LSP server profile"
+        workspace language profile))
+    (unless (lsp-server-profile-supports-language? profile language)
+      (editor-user-error
+        'project.lsp.start "Language server does not support the selected language"
+        (lsp-server-profile-name profile) language))
+    (let-values ([(session effects)
+                  (ensure-lsp-session! editor workspace language profile)])
+      (append effects (attach-project-home-buffers! editor session))))
+
+  (define (configured-project-lsp-effects editor workspace)
+    (apply append
+      (map
+        (lambda (binding)
+          (let* ([language (car binding)]
+                 [name (cdr binding)]
+                 [profile (editor-lsp-server editor name)])
+            (unless profile
+              (editor-user-error
+                'project.lsp.start "Project selects an unregistered language server" name))
+            (editor-start-project-lsp! editor workspace language profile)))
+        (project-workspace-language-server-bindings workspace))))
+
   (define editor-start-lsp-session!
     (case-lambda
       [(editor buffer workspace profile)
@@ -1268,7 +1412,7 @@
           'home
           'inherited)))
 
-  (define (editor-start-lsp-for-active-view! editor)
+  (define (editor-start-project-lsp-for-active-view! editor)
     (let* ([view (editor-active-view editor)]
            [buffer (view-buffer view)]
            [language (buffer-language buffer)]
@@ -1284,6 +1428,10 @@
         editor buffer workspace server
         (lsp-start-provenance buffer workspace)
         (view-id view))))
+
+  ;; Retained as the document-oriented spelling of project activation.
+  (define (editor-start-lsp-for-active-view! editor)
+    (editor-start-project-lsp-for-active-view! editor))
 
   (define (lsp-client-stop! editor session)
     (unless (lsp-client-session? session)
@@ -1305,6 +1453,97 @@
                  'managed-process.close-input
                  (lsp-client-session-process response-session))))))]
       [else '()]))
+
+  (define (auto-start-lsp-for-buffer! editor buffer)
+    (let ([workspace (and (buffer-file-path buffer)
+                          (buffer-home-workspace editor buffer))])
+      (when workspace
+        (let ([policy (project-workspace-lsp-activation-policy workspace)])
+          (unless (eq? policy 'disabled)
+            (let ([attachment-effects
+                    (auto-attach-buffer-to-active-lsp-sessions! editor buffer)])
+              (when (pair? attachment-effects)
+                (editor-queue-tui-effects! editor attachment-effects)))
+            (when (eq? policy 'on-first-file)
+              (let* ([language (buffer-language buffer)]
+                     [server
+                       (and language
+                            (workspace-lsp-server editor workspace language))])
+                (when server
+                  (let ([effects
+                          (editor-start-lsp-session!
+                            editor buffer workspace server 'home #f)])
+                    (when (pair? effects)
+                      (editor-queue-tui-effects! editor effects)))))))))))
+
+  (define (auto-start-lsp-for-project! editor reason project)
+    (when (and (memq reason '(remembered discovered))
+               (project? project))
+      (let ([workspace (editor-project-workspace editor project)])
+        (when (eq? (project-workspace-lsp-activation-policy workspace)
+                   'on-project-open)
+          (let ([effects (configured-project-lsp-effects editor workspace)])
+            (when (pair? effects)
+              (editor-queue-tui-effects! editor effects)))))))
+
+  (define (project-lsp-workspace editor view)
+    (or (lsp-workspace-for-view editor view)
+        (editor-user-error 'project.lsp.start "No Project workspace is selected")))
+
+  (define (project-lsp-start-command context)
+    (let* ([editor (command-context-editor context)]
+           [view (command-context-view context)]
+           [buffer (view-buffer view)]
+           [workspace (project-lsp-workspace editor view)]
+           [language (buffer-language buffer)])
+      (if language
+          (let ([server (workspace-lsp-server editor workspace language)])
+            (unless server
+              (editor-user-error
+                'project.lsp.start "No language server is configured for the active language"))
+            (append
+              (editor-start-project-lsp! editor workspace language server)
+              (editor-start-lsp-session!
+                editor buffer workspace server
+                (lsp-start-provenance buffer workspace)
+                (view-id view))))
+          (let ([effects (configured-project-lsp-effects editor workspace)])
+            (if (pair? effects)
+                effects
+                (editor-user-error
+                  'project.lsp.start
+                  "Project has no configured language servers; visit a language buffer or set language-servers"))))))
+
+  (define (project-lsp-stop-command context)
+    (let* ([editor (command-context-editor context)]
+           [workspace
+             (project-lsp-workspace editor (command-context-view context))]
+           [project-id (project-workspace-project-id workspace)])
+      (let-values
+        ([(ids sessions)
+          (hashtable-entries
+            (lsp-client-registry-sessions (editor-lsp-registry editor)))])
+        (let loop ([index 0] [effects '()] [count 0])
+          (if (= index (vector-length sessions))
+              (begin
+                (editor-set-status-message!
+                  editor
+                  (if (zero? count)
+                      "No language server is active for this Project"
+                      (string-append
+                        "Stopping " (number->string count)
+                        " language server" (if (= count 1) "" "s"))))
+                (reverse effects))
+              (let ([session (vector-ref sessions index)])
+                (if (and
+                      (equal? project-id
+                              (project-workspace-project-id
+                                (lsp-client-session-workspace session)))
+                      (memq (lsp-client-session-state session) '(starting ready)))
+                    (loop (+ index 1)
+                          (append (reverse (lsp-client-stop! editor session)) effects)
+                          (+ count 1))
+                    (loop (+ index 1) effects count))))))))
 
   (define (active-view-lsp-session editor)
     (let ([attachment
@@ -2606,6 +2845,14 @@
     (let* ([editor (command-context-editor context)]
            [pending (hashtable-ref pending-lsp-workspace-edits editor #f)]
            [result (command-context-argument context)])
+      (when (and (open-result? result)
+                 (zero? (open-result-status result))
+                 (not (eq? (open-result-kind result) 'directory)))
+        (let ([buffer
+                (editor-buffer-for-resource editor (open-result-path result))])
+          (when buffer
+            ;; file.apply-open-result has assigned the stable file path.
+            (auto-start-lsp-for-buffer! editor buffer))))
       (when (and pending
                  (open-result? result)
                  (member (open-result-path result)
@@ -2630,6 +2877,16 @@
                      (lsp-pending-workspace-edit-after-apply pending))])
              (when (pair? follow-up-effects)
                (editor-queue-tui-effects! editor follow-up-effects)))]))))
+
+  (define (lsp-after-save-result context arguments effects)
+    (let* ([editor (command-context-editor context)]
+           [result (command-context-argument context)])
+      (when (and (save-result? result)
+                 (zero? (save-result-status result))
+                 (save-result-adopt-path? result))
+        (let ([buffer
+                (editor-buffer-ref editor (save-result-buffer-id result))])
+          (auto-start-lsp-for-buffer! editor buffer)))))
 
   (define lsp-format-target-reader
     (make-command-target-reader
@@ -3184,7 +3441,15 @@
       'lsp.client.workspace
       (lambda (changed-editor reason project generation)
         (reconcile-lsp-project!
-          changed-editor reason project generation)))
+          changed-editor reason project generation)
+        (auto-start-lsp-for-project! changed-editor reason project)))
+    (editor-add-hook!
+      editor
+      'buffer-registry-changed
+      'lsp.client.auto-attach
+      (lambda (changed-editor buffer reason generation)
+        (when (memq reason '(created resource-changed))
+          (auto-start-lsp-for-buffer! changed-editor buffer))))
     (editor-register-completion-provider!
       editor
       (make-completion-provider
@@ -3321,6 +3586,18 @@
     (editor-register-command!
       editor
       (make-interactive-context-command
+        'project.lsp.start
+        project-lsp-start-command
+        "Start the configured language service for the selected Project."))
+    (editor-register-command!
+      editor
+      (make-interactive-context-command
+        'project.lsp.stop
+        project-lsp-stop-command
+        "Stop every language service started for the selected Project."))
+    (editor-register-command!
+      editor
+      (make-interactive-context-command
         'lsp.start
         (lambda (context)
           (editor-start-lsp-for-active-view! (command-context-editor context)))
@@ -3389,6 +3666,13 @@
       'lsp-workspace-edit-resume
       'after
       lsp-after-open-result
+      0)
+    (command-add-advice!
+      (editor-command-registry editor)
+      'file.apply-save-result
+      'lsp-project-attachment-after-save
+      'after
+      lsp-after-save-result
       0)
     editor)
 )

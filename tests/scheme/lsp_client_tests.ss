@@ -1629,4 +1629,93 @@
   "stopping an LSP session must request shutdown before closing transport")
 
 (editor-close! editor)
+
+(define policy-scratch-document (make-document "" 43001))
+(define policy-scratch-buffer
+  (make-buffer 43002 policy-scratch-document "*policy-scratch*" 'fundamental-mode))
+(define policy-editor (make-editor policy-scratch-buffer))
+(check
+  (lsp-server-profile?
+    (editor-lsp-server policy-editor 'clangd))
+  "a fresh editor must register the built-in Eglot-style server profiles")
+(define policy-server
+  (make-lsp-server-profile
+    'policy-clangd '(cpp) '("/bin/cat")
+    (make-json-object '()) (make-json-object '())))
+(editor-register-lsp-server! policy-editor policy-server)
+(define policy-project
+  (make-project
+    'policy-project
+    '("/policy-project")
+    'manual 'explicit #f
+    (make-project-settings-layer
+      '((lsp-activation . on-first-file)
+        (language-servers . ((cpp . policy-clangd)))))
+    '()))
+(editor-remember-project! policy-editor policy-project)
+(editor-execute-command!
+  policy-editor
+  'file.apply-open-result
+  #f
+  (make-open-result
+    (view-id (editor-active-view policy-editor))
+    "/policy-project/main.cpp"
+    0
+    (string->utf8 "int main() {}\n")
+    #f
+    #f))
+(define policy-source
+  (editor-buffer-for-resource policy-editor "/policy-project/main.cpp"))
+(define policy-start-effects (editor-take-tui-effects! policy-editor))
+(check
+  (and
+    (= (length policy-start-effects) 2)
+    (eq? (command-effect-kind (car policy-start-effects)) 'managed-process.start)
+    (eq? (command-effect-kind (cadr policy-start-effects)) 'managed-process.write)
+    (pair? (editor-buffer-language-attachments
+             policy-editor (buffer-id policy-source))))
+  "on-first-file Projects must start and attach their configured language service")
+(editor-execute-command!
+  policy-editor
+  'file.apply-open-result
+  #f
+  (make-open-result
+    (view-id (editor-active-view policy-editor))
+    "/policy-project/sibling.cpp"
+    0
+    (string->utf8 "void sibling() {}\n")
+    #f
+    #f))
+(define policy-sibling
+  (editor-buffer-for-resource policy-editor "/policy-project/sibling.cpp"))
+(check
+  (pair? (editor-buffer-language-attachments
+           policy-editor (buffer-id policy-sibling)))
+  "a running Project language service must attach later matching Buffers")
+(editor-close! policy-editor)
+
+(define eager-scratch-document (make-document "" 44001))
+(define eager-scratch-buffer
+  (make-buffer 44002 eager-scratch-document "*eager-scratch*" 'fundamental-mode))
+(define eager-editor (make-editor eager-scratch-buffer))
+(editor-register-lsp-server! eager-editor policy-server)
+(editor-remember-project!
+  eager-editor
+  (make-project
+    'eager-project
+    '("/eager-project")
+    'manual 'explicit #f
+    (make-project-settings-layer
+      '((lsp-activation . on-project-open)
+        (language-servers . ((cpp . policy-clangd)))))
+    '()))
+(define eager-effects (editor-take-tui-effects! eager-editor))
+(check
+  (and
+    (= (length eager-effects) 2)
+    (eq? (command-effect-kind (car eager-effects)) 'managed-process.start)
+    (eq? (command-effect-kind (cadr eager-effects)) 'managed-process.write))
+  "on-project-open Projects must bootstrap configured services without a Buffer")
+(editor-close! eager-editor)
+
 (display "lsp client tests passed\n")

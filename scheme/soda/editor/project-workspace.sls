@@ -11,8 +11,10 @@
           project-workspace-folder-resources
           project-workspace-configuration
           project-workspace-setting-ref
+          project-workspace-language-server-bindings
           project-workspace-language-server-ref
           project-workspace-lsp-settings-ref
+          project-workspace-lsp-activation-policy
           editor-project-workspace
           editor-project-workspaces-for-resource
           editor-project-workspace-for-resource
@@ -156,6 +158,49 @@
     (let ([entry (assq name (project-workspace-configuration workspace))])
       (if entry (cdr entry) fallback)))
 
+  (define (project-workspace-language-server-bindings workspace)
+    (unless (project-workspace? workspace)
+      (assertion-violation
+        'project-workspace-language-server-bindings
+        "expected a ProjectWorkspace"
+        workspace))
+    (let ([servers
+            (project-workspace-setting-ref workspace 'language-servers #f)])
+      (cond
+        [(not servers) '()]
+        [(not (list? servers))
+         (assertion-violation
+           'project-workspace-language-server-bindings
+           "language-servers must be an association list"
+           servers)]
+        [else
+         (for-each
+           (lambda (entry)
+             (unless (and (pair? entry)
+                          (symbol? (car entry))
+                          (symbol? (cdr entry)))
+               (assertion-violation
+                 'project-workspace-language-server-bindings
+                 "language-servers entries must associate language symbols with server symbols"
+                 entry)))
+           servers)
+         servers])))
+
+  (define (project-workspace-lsp-activation-policy workspace)
+    (unless (project-workspace? workspace)
+      (assertion-violation
+        'project-workspace-lsp-activation-policy
+        "expected a ProjectWorkspace"
+        workspace))
+    (let ([policy
+            (project-workspace-setting-ref workspace 'lsp-activation 'manual)])
+      (unless (memq policy '(disabled manual on-first-file on-project-open))
+        (assertion-violation
+          'project-workspace-lsp-activation-policy
+          "lsp-activation must be disabled, manual, on-first-file, or on-project-open"
+          policy))
+      policy))
+
   (define (project-workspace-language-server-ref workspace language fallback)
     (unless (project-workspace? workspace)
       (assertion-violation
@@ -184,14 +229,9 @@
                     server))
                 server)))
           (servers
-            (project-workspace-setting-ref workspace 'language-servers #f)))
+          (project-workspace-language-server-bindings workspace)))
       (cond
-        ((not servers) (default))
-        ((not (list? servers))
-         (assertion-violation
-           'project-workspace-language-server-ref
-           "language-servers must be an association list"
-           servers))
+        ((null? servers) (default))
         (else
          (let ((entry (assq language servers)))
            (if entry
