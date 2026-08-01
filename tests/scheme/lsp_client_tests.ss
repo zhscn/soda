@@ -99,6 +99,30 @@
     (= (length ready-effects) 2))
   "initialize response did not transition the LSP session to ready")
 
+(define workspace-folder-response
+  (lsp-client-handle-json-message!
+    editor session
+    (make-json-object
+      (list
+        (cons "jsonrpc" "2.0")
+        (cons "id" 91)
+        (cons "method" "workspace/workspaceFolders")
+        (cons "params" (make-json-object '()))))))
+(define workspace-folder-message
+  (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload (car workspace-folder-response))))))
+(check
+  (string=?
+    (json-object-ref
+      (car (json-array-values (json-object-ref workspace-folder-message "result" #f)))
+      "uri"
+      #f)
+    "file:///workspace")
+  "workspaceFolders server request did not use the session workspace snapshot")
+
 (define document-message
   (car
     (lsp-json-rpc-decode!
