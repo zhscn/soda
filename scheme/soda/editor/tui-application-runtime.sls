@@ -7,6 +7,7 @@
           tui-complete-command!
           tui-take-effects!
           tui-retry!
+          tui-reload!
           tui-start-recording!
           tui-stop-recording!
           tui-replay!
@@ -811,6 +812,84 @@
           (tui-session-model session))
         (lambda ()
           (tui-session-set-replay-recorder! session recorder)))))
+
+  (define (reload-initializer old-definition new-definition model context arguments)
+    (let ([serializer
+            (tui-application-definition-serializer old-definition)]
+          [deserializer
+            (tui-application-definition-deserializer new-definition)])
+      (if (and serializer deserializer)
+          (let* ([datum (serializer model context)]
+                 [new-model (deserializer datum context)]
+                 [resume (tui-application-definition-resume new-definition)])
+            (values
+              new-model
+              (if resume (resume new-model context) '())))
+          (initialize new-definition context arguments))))
+
+  (define tui-reload!
+    (case-lambda
+      [(editor session-id)
+       (tui-reload! editor session-id reload-initializer)]
+      [(editor session-id migrate)
+       (require-open-editor 'tui-reload! editor)
+       (unless (procedure? migrate)
+         (assertion-violation
+           'tui-reload! "migration must be a procedure" migrate))
+       (let* ([session (editor-tui-session-ref editor session-id)]
+              [old-definition (tui-session-definition session)]
+              [name (tui-application-definition-name old-definition)]
+              [new-definition (definition-ref editor name)])
+         (if (eq? old-definition new-definition)
+             session
+             (let* ([buffer
+                      (editor-buffer-ref editor (tui-session-buffer-id session))]
+                    [context
+                      (make-tui-application-context
+                        editor session-id (buffer-id buffer) #f
+                        (tui-session-arguments session))])
+               (call-with-values
+                 (lambda ()
+                   (migrate
+                     old-definition
+                     new-definition
+                     (tui-session-model session)
+                     context
+                     (tui-session-arguments session)))
+                 (lambda (model commands)
+                   (unless (and (list? commands) (for-all tui-command? commands))
+                     (assertion-violation
+                       'tui-reload!
+                       "migration commands must contain TuiCommand values"
+                       commands))
+                   (let ([close
+                           (tui-application-definition-close old-definition)])
+                     (when close
+                       (close (tui-session-model session) context)))
+                   (tui-session-invalidate-commands! session)
+                   (tui-session-set-definition! session new-definition)
+                   (tui-session-set-model! session model)
+                   (tui-session-advance-generation! session)
+                   (tui-session-set-state! session 'ready)
+                   (tui-session-set-last-message! session #f)
+                   (for-each
+                     tui-view-state-clear-surface-cache!
+                     (tui-session-view-states session))
+                   (buffer-set-major-mode!
+                     buffer
+                     (tui-application-definition-default-mode
+                       new-definition))
+                   (enqueue-commands!
+                     editor
+                     session
+                     (make-tui-message
+                       session-id
+                       (tui-session-generation session)
+                       #f
+                       'tui.reload)
+                     commands)
+                   (editor-invalidate! editor 'application)
+                   session)))))]))
 
   (define (tui-send-message! editor message)
     (require-open-editor 'tui-send-message! editor)

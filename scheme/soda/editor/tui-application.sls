@@ -70,6 +70,7 @@
           tui-session-pending-commands
           tui-session-last-message
           tui-session-replay-recorder
+          tui-session-set-definition!
           tui-session-set-model!
           tui-session-set-state!
           tui-session-set-last-message!
@@ -643,7 +644,7 @@
   (define-record-type
     (tui-session %make-tui-session tui-session?)
     (fields id
-            definition
+            (mutable definition)
             buffer-id
             arguments
             display-intent
@@ -801,6 +802,16 @@
     (require-session 'tui-session-set-model! session)
     (tui-session-model-set! session model)
     model)
+
+  (define (tui-session-set-definition! session definition)
+    (require-session 'tui-session-set-definition! session)
+    (unless (tui-application-definition? definition)
+      (assertion-violation
+        'tui-session-set-definition!
+        "expected a TuiApplicationDefinition"
+        definition))
+    (tui-session-definition-set! session definition)
+    definition)
 
   (define (tui-session-set-state! session state)
     (require-session 'tui-session-set-state! session)

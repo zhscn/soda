@@ -607,8 +607,12 @@
   (make-tui-application-definition
     'counter
     (lambda (context arguments) (values 0 '()))
-    (lambda (model message context) model)
-    (lambda (model context) model)
+    (lambda (model message context)
+      (when (tui-close-event? (tui-message-payload message))
+        (set! close-message-count (+ close-message-count 1)))
+      (tui-result model '() '()))
+    (lambda (model context)
+      (tui-text 'replacement.counter (number->string model)))
     #f
     #f
     'fundamental-mode
@@ -624,6 +628,22 @@
       replacement-definition)
     (eq? (tui-session-definition session) definition))
   "definition replacement must not mutate running session identity")
+
+(define reload-command-generation
+  (tui-session-command-generation session))
+(define reload-model-generation (tui-session-generation session))
+(tui-reload! editor (tui-session-id session))
+(check
+  (and
+    (eq? (tui-session-definition session) replacement-definition)
+    (= (tui-session-model session) 0)
+    (= (tui-session-command-generation session)
+       (+ reload-command-generation 1))
+    (= (tui-session-generation session)
+       (+ reload-model-generation 1))
+    (null? (tui-session-pending-commands session))
+    (eq? (tui-session-state session) 'ready))
+  "explicit reload must migrate state and invalidate old asynchronous commands")
 
 (tui-close! editor (tui-session-id session))
 (check

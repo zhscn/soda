@@ -194,6 +194,7 @@
           tui-session-pending-commands
           tui-session-last-message
           tui-session-replay-recorder
+          tui-session-set-definition!
           tui-session-view-states
           tui-session-view-state
           tui-view-state?
@@ -302,6 +303,7 @@
           tui-complete-command!
           tui-take-effects!
           tui-retry!
+          tui-reload!
           tui-start-recording!
           tui-stop-recording!
           tui-replay!
