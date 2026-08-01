@@ -250,6 +250,7 @@
           view-first-column
           view-viewport-rows
           view-viewport-columns
+          view-viewport-ready?
           view-keymap-layers
           view-input-states
           view-input-handler-pending
@@ -276,8 +277,13 @@
           view-set-first-visual-row!
           view-set-first-column!
           view-set-viewport!
+          view-invalidate-viewport!
           view-set-keymap-layers!
-          ensure-view-visible!)
+          ensure-view-visible!
+          editor-frame-rows
+          editor-frame-columns
+          editor-layout-ready?
+          editor-reconcile-viewports!)
   (import (rnrs)
           (only (chezscheme) current-directory)
           (soda document)
@@ -345,6 +351,9 @@
       (mutable viewport-columns
                view-viewport-columns
                view-viewport-columns-set!)
+      (mutable viewport-ready?
+               view-viewport-ready?
+               view-viewport-ready?-set!)
       (mutable keymap-layers view-keymap-layers view-keymap-layers-set!)
       (mutable input-states view-input-states view-input-states-set!)
       (mutable input-handler-pending
@@ -491,6 +500,10 @@
                editor-global-minor-modes-set!)
       (immutable theme-catalog editor-theme-catalog)
       (mutable theme editor-theme editor-theme-set!)
+      (mutable frame-rows editor-frame-rows editor-frame-rows-set!)
+      (mutable frame-columns
+               editor-frame-columns
+               editor-frame-columns-set!)
       (mutable render-generation
                editor-render-generation
                editor-render-generation-set!)
@@ -2088,6 +2101,7 @@
                0
                1
                1
+               #f
                '()
                (list
                  (make-input-state
@@ -2274,7 +2288,8 @@
             (window-leaf-id (car (window-node-leaves layout)))))
         (workbench-set-active-window-id!
           workbench
-          (editor-active-window-id value)))
+          (editor-active-window-id value))
+        (editor-reconcile-viewports! value))
       (editor-invalidate! value 'layout)
       layout))
 
@@ -2352,6 +2367,7 @@
           (editor-active-view-id-set!
             value
             (window-leaf-view-id leaf)))
+        (editor-reconcile-viewports! value)
         (editor-invalidate! value 'layout))
       target))
 
@@ -3734,6 +3750,7 @@
       (editor-active-view-id-set! value (view-id view))
       (editor-set-status-message! value #f)
       (editor-refresh-prompt-completion! value)
+      (editor-reconcile-viewports! value)
       session)))
 
   (define (history-for value id create?)
@@ -3818,6 +3835,7 @@
       (close-view-unchecked! value view-id)
       (editor-remove-buffer! value buffer-id)
       (editor-set-status-message! value #f)
+      (editor-reconcile-viewports! value)
       (and command (make-prompt-reply command result))))
 
   (define (replace-prompt-completion-field!
@@ -5851,7 +5869,16 @@
         rows
         columns))
     (view-viewport-rows-set! value rows)
-    (view-viewport-columns-set! value columns))
+    (view-viewport-columns-set! value columns)
+    (view-viewport-ready?-set! value #t))
+
+  (define (view-invalidate-viewport! value)
+    (unless (view? value)
+      (assertion-violation
+        'view-invalidate-viewport!
+        "expected a view"
+        value))
+    (view-viewport-ready?-set! value #f))
 
   (define (view-set-keymap-layers! value layers)
     (unless (view? value)
@@ -6148,7 +6175,8 @@
         'ensure-view-visible!
         "expected a view"
         view))
-    (let* ([buffer (view-buffer view)]
+    (when (view-viewport-ready? view)
+      (let* ([buffer (view-buffer view)]
            [document (buffer-document buffer)]
            [tab-width
              (let ([setting (buffer-setting-ref buffer 'tab-width 8)])
@@ -6313,7 +6341,103 @@
               [(>= caret-column (+ first-column columns))
                (view-first-column-set!
                  view
-                 (- caret-column (- columns 1)))])))))
+                 (- caret-column (- columns 1)))]))))))
+
+  (define (editor-layout-ready? value)
+    (require-open-editor 'editor-layout-ready? value)
+    (and (editor-frame-rows value)
+         (editor-frame-columns value)
+         #t))
+
+  (define editor-reconcile-viewports!
+    (case-lambda
+      [(value)
+       (require-open-editor 'editor-reconcile-viewports! value)
+       (and
+         (editor-layout-ready? value)
+         (editor-reconcile-viewports!
+           value
+           (editor-frame-rows value)
+           (editor-frame-columns value)))]
+      [(value rows columns)
+       (require-open-editor 'editor-reconcile-viewports! value)
+       (unless
+         (and
+           (integer? rows)
+           (exact? rows)
+           (>= rows 2)
+           (integer? columns)
+           (exact? columns)
+           (positive? columns))
+         (assertion-violation
+           'editor-reconcile-viewports!
+           "frame dimensions are invalid"
+           rows
+           columns))
+       (editor-frame-rows-set! value rows)
+       (editor-frame-columns-set! value columns)
+       (let* ([session (editor-active-prompt value)]
+              [completion (editor-active-prompt-completion value)]
+              [completion-rows
+                (if completion
+                    (min
+                      completion-window-max-rows
+                      (max 0 (- rows 2)))
+                    0)]
+              [body-rows
+                (max
+                  1
+                  (- rows
+                     (if session
+                         (+ 1 completion-rows)
+                         0)))])
+         (when completion
+           (completion-session-set-viewport-rows!
+             completion
+             completion-rows))
+         (let allocate
+           ([node (editor-window-root value)]
+            [available-rows body-rows]
+            [available-columns columns])
+           (if (window-leaf? node)
+               (let ([view
+                       (editor-view-ref
+                         value
+                         (window-leaf-view-id node))])
+                 (view-set-viewport!
+                   view
+                   (max 1 (- available-rows 1))
+                   (max 1 available-columns))
+                 (ensure-view-visible! view))
+               (let* ([children (window-split-children node)]
+                      [count (length children)]
+                      [vertical?
+                        (eq?
+                          (window-split-orientation node)
+                          'vertical)]
+                      [total
+                        (if vertical?
+                            available-rows
+                            available-columns)]
+                      [base (div total count)]
+                      [extra (mod total count)])
+                 (let loop ([children children] [index 0])
+                   (unless (null? children)
+                     (let ([amount
+                             (+ base
+                                (if (< index extra) 1 0))])
+                       (allocate
+                         (car children)
+                         (if vertical?
+                             amount
+                             available-rows)
+                         (if vertical?
+                             available-columns
+                             amount))
+                       (loop (cdr children) (+ index 1))))))))
+         (when session
+           (configure-prompt-view-viewport! value session))
+         #t)]))
 
   (define (make-editor-state buffer)
     (unless (buffer? buffer)
@@ -6351,6 +6475,7 @@
                0
                1
                1
+               #f
                '()
                (list
                  (make-input-state
@@ -6433,6 +6558,8 @@
                '()
                (make-default-theme-catalog)
                default-theme
+               #f
+               #f
                0
                '(initial)
                #f

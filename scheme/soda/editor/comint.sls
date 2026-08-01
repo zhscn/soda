@@ -42,40 +42,8 @@
               (lambda () (text-close! text)))))
         (lambda () (snapshot-close! snapshot)))))
 
-  (define (buffer-end-viewport-minimum buffer)
-    (let ([snapshot
-            (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda ()
-                (let* ([end (text-size text)]
-                       [position (text-position text end)]
-                       [tab-width
-                         (let ([setting
-                                 (buffer-setting-ref
-                                   buffer
-                                   'tab-width
-                                   8)])
-                           (if
-                             (and
-                               (integer? setting)
-                               (exact? setting)
-                               (positive? setting))
-                             setting
-                             8))])
-                  (cons
-                    (+ (car position) 1)
-                    (+ (text-cell-column text end tab-width) 1))))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
-
   (define (activate-interaction-view! editor session keymap-layers)
     (let* ([buffer-id (interaction-session-buffer-id session)]
-           [reference (editor-base-view editor)]
            [origin-view-id (view-id (editor-active-view editor))]
            [request
              (make-display-request
@@ -90,17 +58,6 @@
            [view
              (editor-display-buffer! editor request)])
       (unless (eq? (display-plan-action plan) 'reuse)
-        (let ([minimum
-                (buffer-end-viewport-minimum
-                  (view-buffer view))])
-          (view-set-viewport!
-            view
-            (max
-              (view-viewport-rows reference)
-              (car minimum))
-            (max
-              (view-viewport-columns reference)
-              (cdr minimum))))
         (view-set-first-line! view 0)
         (view-set-first-column! view 0))
       (view-set-keymap-layers! view keymap-layers)

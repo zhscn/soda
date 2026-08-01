@@ -191,6 +191,10 @@
               #f)
             (buffer-set-local-setting!
               buffer
+              'truncate-lines
+              #f)
+            (buffer-set-local-setting!
+              buffer
               'interaction-continuation-prompt
               repl-continuation-prompt)
             (buffer-set-local-setting!

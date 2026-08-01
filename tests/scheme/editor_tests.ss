@@ -1532,8 +1532,9 @@
          "caret visibility did not update the horizontal viewport"))
 (define unicode-frame (render-editor-frame unicode-editor 3 2))
 (unless
-  (and (string=? (cell-text (frame-cell-ref unicode-frame 0 0)) "x")
+  (and (string=? (cell-text (frame-cell-ref unicode-frame 1 0)) "x")
        (frame-cursor-visible? unicode-frame)
+       (= (frame-cursor-row unicode-frame) 1)
        (= (frame-cursor-column unicode-frame) 1))
   (error 'editor-tests
          "renderer did not apply the horizontal viewport"))
@@ -4140,8 +4141,8 @@
              lower-right-path))
          1)
       (frame-cursor-visible? multi-window-frame)
-      (= (frame-cursor-row multi-window-frame) 3)
-      (= (frame-cursor-column multi-window-frame) 0))
+      (= (frame-cursor-row multi-window-frame) 4)
+      (= (frame-cursor-column multi-window-frame) 5))
     (error 'editor-tests
            "multi-window renderer did not preserve pane geometry and focus"
            (cell-text (frame-cell-ref multi-window-frame 0 0))
@@ -6022,6 +6023,7 @@
            "editing within one prompt field restarted its provider")))
 (send! prompt-editor prompt-decoder (bytes 7))
 
+(editor-update! prompt-editor (make-resize-message 10 40))
 (send! prompt-editor prompt-decoder (bytes 27 120))
 (define full-completion-height
   (rect-rows

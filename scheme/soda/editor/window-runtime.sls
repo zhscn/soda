@@ -60,10 +60,12 @@
       target
       (view-first-visual-row source))
     (view-set-first-column! target (view-first-column source))
-    (view-set-viewport!
-      target
-      (view-viewport-rows source)
-      (view-viewport-columns source))
+    (if (view-viewport-ready? source)
+        (view-set-viewport!
+          target
+          (view-viewport-rows source)
+          (view-viewport-columns source))
+        (view-invalidate-viewport! target))
     (view-set-keymap-layers!
       target
       (view-keymap-layers source))

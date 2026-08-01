@@ -808,6 +808,10 @@
           editor-register-theme!
           editor-theme
           editor-set-theme!
+          editor-frame-rows
+          editor-frame-columns
+          editor-layout-ready?
+          editor-reconcile-viewports!
           editor-render-generation
           editor-dirty-reasons
           editor-invalidate!
@@ -1120,6 +1124,7 @@
           view-first-column
           view-viewport-rows
           view-viewport-columns
+          view-viewport-ready?
           view-keymap-layers
           view-input-states
           view-input-handler-pending

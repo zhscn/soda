@@ -135,6 +135,15 @@
             (effect-result-messages result)
             (cdr messages)))))))
 
+(dispatch! (make-resize-message 24 80))
+(unless
+  (and (editor-layout-ready? editor)
+       (= (editor-frame-rows editor) 24)
+       (= (editor-frame-columns editor) 80)
+       (view-viewport-ready? (editor-active-view editor)))
+  (error 'repl-tests
+         "resize did not establish the editor viewport layout"))
+
 (dispatch! (make-command-message 'scheme.open-repl #f))
 (define session (car (editor-interactions editor)))
 (define repl-buffer
@@ -194,6 +203,10 @@
        (= (interaction-session-prompt-end session)
           (interaction-session-input-start session))
        (zero? (view-first-column (editor-active-view editor)))
+       (not (buffer-setting-ref repl-buffer 'truncate-lines #t))
+       (view-viewport-ready? (editor-active-view editor))
+       (= (view-viewport-rows (editor-active-view editor)) 11)
+       (= (view-viewport-columns (editor-active-view editor)) 80)
        (not (buffer-modified? repl-buffer))
        (string=? (buffer-string repl-buffer)
                  "Soda Chez Scheme REPL\n> ")
@@ -213,6 +226,17 @@
          (interaction-session-input-start session)
          (document-editable-start
            (buffer-document repl-buffer))))
+
+(dispatch! (make-resize-message 24 12))
+(let ([frame (render-editor-frame editor 24 12)])
+  (unless
+    (and
+      (frame-has-row-prefix? frame 24 12 "Soda Chez   ")
+      (frame-has-row-prefix? frame 24 12 "Scheme REPL ")
+      (frame-has-row-prefix? frame 24 12 ">           "))
+    (error 'repl-tests
+           "REPL transcript did not soft-wrap to its viewport")))
+(dispatch! (make-resize-message 24 80))
 
 (insert-text! "(def")
 (press-key! 'character (char->integer #\/) 2)
