@@ -603,7 +603,9 @@
         (condition
           [else
            (when registered?
-             (editor-close-tui-session! editor session-id))
+             (guard
+               (close-condition [else #f])
+               (editor-close-tui-session! editor session-id)))
            (when
              (and
                (not (buffer-closed? buffer))

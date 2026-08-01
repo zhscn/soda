@@ -1319,7 +1319,8 @@
   (define (editor-remove-buffer! value id)
     (require-open-editor 'editor-remove-buffer! value)
     (require-buffer-topology-mutable 'editor-remove-buffer! value)
-    (let ([buffer (editor-buffer-ref value id)])
+    (let ([buffer (editor-buffer-ref value id)]
+          [close-failure #f])
       (when
         (exists
           (lambda (session)
@@ -1346,10 +1347,12 @@
         'before-buffer-removed
         buffer)
       (when (tui-presentation? (buffer-presentation buffer))
-        (editor-close-tui-session!
-          value
-          (tui-presentation-session-id
-            (buffer-presentation buffer))))
+        (guard
+          (condition [else (set! close-failure condition)])
+          (editor-close-tui-session!
+            value
+            (tui-presentation-session-id
+              (buffer-presentation buffer)))))
       (editor-clear-buffer-global-marks! value buffer)
       (editor-clear-buffer-changes! value buffer)
       (editor-detach-buffer-bookmarks! value buffer)
@@ -1416,7 +1419,8 @@
       (hook-registry-clear-buffer!
         (editor-hook-registry value)
         id)
-      (buffer-close! buffer)))
+      (buffer-close! buffer)
+      (when close-failure (raise close-failure))))
 
   (define (editor-interactions value)
     (require-open-editor 'editor-interactions value)
@@ -1612,7 +1616,8 @@
             (editor-set-status-message!
               value
               "TUI application close failed"
-              'error))))
+              'error)
+            (raise failure))))
       session))
 
   (define (editor-queue-tui-effects! value effects)
@@ -6320,7 +6325,9 @@
       (cancel-queued-completion-effects-now! value)
       (for-each
         (lambda (session)
-          (editor-close-tui-session! value (tui-session-id session)))
+          (guard
+            (condition [else #f])
+            (editor-close-tui-session! value (tui-session-id session))))
         (editor-tui-sessions value))
       (editor-tui-effects-set! value '())
       (for-each

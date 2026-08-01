@@ -720,9 +720,13 @@
 (editor-register-tui-application! editor failing-close-definition)
 (define failing-close-buffer (tui-open! editor 'failing-close 'model))
 (define failing-close-session (tui-active-session editor))
-(tui-close! editor (tui-session-id failing-close-session))
+(define failing-close-condition #f)
+(guard
+  (condition [else (set! failing-close-condition condition)])
+  (tui-close! editor (tui-session-id failing-close-session)))
 (check
   (and
+    failing-close-condition
     (eq? (tui-session-state failing-close-session) 'closed)
     (null? (tui-session-view-states failing-close-session))
     (null? (tui-session-pending-commands failing-close-session))
@@ -731,7 +735,7 @@
         editor
         (buffer-id failing-close-buffer)))
     (buffer-closed? failing-close-buffer))
-  "a failing close hook must not interrupt idempotent session cleanup")
+  "a failing close hook must surface its condition after idempotent cleanup")
 
 (define persistent-definition
   (make-tui-application-definition
@@ -806,6 +810,26 @@
     (lambda (effect) (eq? (command-effect-kind effect) 'quit))
     sole-host-quit-effects)
   "the sole-host C-g escape path must terminate the shared command loop")
+
+(define debugger-close-buffer
+  (tui-open! editor 'failing-close 'debugger-close 'edit))
+(define debugger-close-session (tui-active-session editor))
+(editor-register-command!
+  editor
+  (make-interactive-context-command
+    'test.close-failing-application
+    (lambda (context)
+      (tui-close! editor (tui-session-id debugger-close-session))
+      '())))
+(editor-update!
+  editor
+  (make-command-message 'test.close-failing-application #f))
+(check
+  (and
+    (editor-debugger editor)
+    (buffer-closed? debugger-close-buffer)
+    (eq? (tui-session-state debugger-close-session) 'closed))
+  "the command loop must capture a close condition after completing cleanup")
 
 (editor-close! editor)
 (display "tui application tests passed\n")
