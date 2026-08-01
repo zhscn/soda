@@ -1010,6 +1010,28 @@
               '())]
            [else '()]))]))
 
+  (define (lsp-protocol-failure! editor session condition)
+    (let* ([profile (lsp-client-session-server session)]
+           [process (lsp-client-session-process session)]
+           [detail (condition-message condition)])
+      (lsp-client-session-state-set! session 'failed)
+      (lsp-client-session-pending-set! session '())
+      (editor-set-status-message!
+        editor
+        (string-append
+          "Language server "
+          (symbol->string (lsp-server-profile-name profile))
+          " sent invalid LSP output"
+          (if (and (string? detail) (positive? (string-length detail)))
+              (string-append ": " detail)
+              "")))
+      (if (memq (managed-process-state process) '(running stopping))
+          (list
+            (make-command-effect
+              'managed-process.signal
+              (make-managed-process-signal-request process 15)))
+          '())))
+
   (define (lsp-client-handle-process-output! editor event)
     (unless (managed-process-event? event)
       (assertion-violation
@@ -1032,13 +1054,16 @@
                     (managed-process-generation process)))
             (not (eq? (managed-process-event-kind event) 'process-output)))
         '()
-        (apply append
-          (map
-            (lambda (message)
-              (lsp-client-handle-json-message! editor session message))
-            (lsp-json-rpc-decode!
-              (lsp-client-session-decoder session)
-              (managed-process-event-data event)))))))
+        (guard
+          (condition
+            [else (lsp-protocol-failure! editor session condition)])
+          (apply append
+            (map
+              (lambda (message)
+                (lsp-client-handle-json-message! editor session message))
+              (lsp-json-rpc-decode!
+                (lsp-client-session-decoder session)
+                (managed-process-event-data event))))))))
 
   (define (lsp-client-handle-process-exit! editor event)
     (unless (managed-process-event? event)
@@ -1070,8 +1095,9 @@
                                 initialize-response!)
                               effects)))
                         (begin
-                          (lsp-client-session-state-set! session 'exited)
-                          (editor-set-status-message! editor "Language server exited")
+                          (unless (eq? (lsp-client-session-state session) 'failed)
+                            (lsp-client-session-state-set! session 'exited)
+                            (editor-set-status-message! editor "Language server exited"))
                           (loop (+ index 1) effects))))))))))
 
   (define (lsp-session-key workspace language profile)
