@@ -173,6 +173,17 @@ if(CHEZ_SCHEME_EXECUTABLE)
   )
 
   add_test(
+    NAME scheme_lsp_position_tests
+    CONFIGURATIONS Debug Release
+    COMMAND
+      ${CMAKE_COMMAND} -E env
+      SODA_DOCUMENT_LIBRARY=${SODA_SCHEME_NATIVE_LIBRARY}
+      ${CHEZ_SCHEME_EXECUTABLE}
+      --libdirs ${PROJECT_SOURCE_DIR}/scheme
+      --program ${CMAKE_CURRENT_SOURCE_DIR}/scheme/lsp_position_tests.ss
+  )
+
+  add_test(
     NAME scheme_regexp_tests
     CONFIGURATIONS Debug Release
     COMMAND
