@@ -261,7 +261,8 @@
       (if
         (eq? workbench (editor-active-workbench editor))
         (editor-set-window-root! editor layout)
-        (workbench-set-layout! workbench layout))
+        (editor-set-workbench-layout!
+          editor (workbench-id workbench) layout))
       (when role
         (workbench-set-slot!
           workbench

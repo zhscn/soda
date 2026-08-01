@@ -905,7 +905,8 @@
               (window-leaf-view-id
                 (window-node-find layout active-window-id))))
           (begin
-            (workbench-set-layout! workbench layout)
+            (editor-set-workbench-layout!
+              editor (workbench-id workbench) layout)
             (workbench-set-active-window-id! workbench active-window-id)))
       (for-each
         (lambda (project)

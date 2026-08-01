@@ -53,6 +53,23 @@
     (= (length (window-node-leaves (workbench-layout secondary))) 1))
   "creating a workbench must preserve an independent scope and layout")
 
+(define secondary-view-id
+  (window-leaf-view-id
+    (car (window-node-leaves (workbench-layout secondary)))))
+(check
+  (and
+    (= (view-workbench-id (editor-active-view editor))
+       (workbench-id primary))
+    (= (view-workbench-id (editor-view-ref editor secondary-view-id))
+       (workbench-id secondary))
+    (eq? (editor-workbench-for-view editor secondary-view-id) secondary))
+  "each displayed View must have one explicit Workbench owner")
+(check
+  (guard (condition [else #t])
+    (editor-set-active-view! editor secondary-view-id)
+    #f)
+  "a View owned by another Workbench must not enter the active layout")
+
 (define primary-locations
   (make-location-list
     'primary

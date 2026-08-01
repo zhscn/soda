@@ -25,6 +25,7 @@
           editor-root-viewport-columns
           editor-active-window-id
           editor-set-window-root!
+          editor-set-workbench-layout!
           editor-set-active-window-id!
           editor-allocate-window-id!
           editor-workbenches
@@ -226,6 +227,7 @@
           editor-record-command!
           view?
           view-id
+          view-workbench-id
           view-buffer
           view-caret
           view-mark
@@ -314,6 +316,9 @@
   (define-record-type (view %make-view view?)
     (fields
       (immutable id view-id)
+      (mutable workbench-id
+               view-workbench-id
+               view-workbench-id-set!)
       (mutable buffer view-buffer view-buffer-set!)
       (mutable caret-anchor view-caret-anchor view-caret-anchor-set!)
       (mutable mark-anchor view-mark-anchor view-mark-anchor-set!)
@@ -2030,6 +2035,7 @@
            [view
              (%make-view
                id
+               #f
                buffer
                (document-create-anchor!
                  (buffer-document buffer)
@@ -2164,14 +2170,76 @@
 
   (define (editor-workbench-for-view value view-id)
     (require-open-editor 'editor-workbench-for-view value)
-    (editor-view-ref value view-id)
-    (find
-      (lambda (workbench)
-        (exists
-          (lambda (leaf)
-            (= (window-leaf-view-id leaf) view-id))
-          (window-node-leaves (workbench-layout workbench))))
-      (editor-workbenches value)))
+    (let* ([view (editor-view-ref value view-id)]
+           [workbench-id (view-workbench-id view)])
+      (and workbench-id (editor-workbench-ref value workbench-id))))
+
+  (define (layout-view-ids layout)
+    (map window-leaf-view-id (window-node-leaves layout)))
+
+  (define (unique-view-ids? ids)
+    (let loop ([remaining ids])
+      (or
+        (null? remaining)
+        (and
+          (not (memv (car remaining) (cdr remaining)))
+          (loop (cdr remaining))))))
+
+  (define (replace-workbench-layout! value workbench layout)
+    (let* ([workbench-id (workbench-id workbench)]
+           [old-ids (layout-view-ids (workbench-layout workbench))]
+           [new-ids (layout-view-ids layout)])
+      (unless (unique-view-ids? new-ids)
+        (assertion-violation
+          'editor-set-workbench-layout!
+          "a View may appear only once in a Workbench layout"
+          new-ids))
+      (for-each
+        (lambda (view-id)
+          (let ([owner
+                  (view-workbench-id (editor-view-ref value view-id))])
+            (when (and owner (not (= owner workbench-id)))
+              (assertion-violation
+                'editor-set-workbench-layout!
+                "View belongs to another Workbench"
+                view-id owner workbench-id))))
+        new-ids)
+      (for-each
+        (lambda (view-id)
+          (unless (memv view-id new-ids)
+            (view-workbench-id-set!
+              (editor-view-ref value view-id)
+              #f)))
+        old-ids)
+      (for-each
+        (lambda (view-id)
+          (view-workbench-id-set!
+            (editor-view-ref value view-id)
+            workbench-id))
+        new-ids)
+      (workbench-set-layout! workbench layout)))
+
+  (define (editor-set-workbench-layout! value workbench-id layout)
+    (require-open-editor 'editor-set-workbench-layout! value)
+    (unless (window-node? layout)
+      (assertion-violation
+        'editor-set-workbench-layout!
+        "expected a window node"
+        layout))
+    (let ([workbench (editor-workbench-ref value workbench-id)])
+      (replace-workbench-layout! value workbench layout)
+      (when (= workbench-id (editor-active-workbench-id value))
+        (editor-window-root-set! value layout)
+        (unless
+          (window-node-find layout (editor-active-window-id value))
+          (editor-active-window-id-set!
+            value
+            (window-leaf-id (car (window-node-leaves layout)))))
+        (workbench-set-active-window-id!
+          workbench
+          (editor-active-window-id value)))
+      (editor-invalidate! value 'layout)
+      layout))
 
   (define (editor-workbench-focused-project value workbench)
     (require-open-editor
@@ -2217,6 +2285,7 @@
         (editor-workbench-table value)
         id
         workbench)
+      (view-workbench-id-set! view id)
       (editor-workbench-ids-set!
         value
         (append (editor-workbench-ids value) (list id)))
@@ -2272,6 +2341,9 @@
         (remv id (editor-workbench-ids value)))
       (for-each
         (lambda (view-id)
+          (view-workbench-id-set!
+            (editor-view-ref value view-id)
+            #f)
           (editor-close-view! value view-id))
         view-ids)
       (jump-graph-close! (workbench-jump-graph target))
@@ -2337,17 +2409,10 @@
       (lambda (leaf)
         (editor-view-ref value (window-leaf-view-id leaf)))
       (window-node-leaves root))
-    (editor-window-root-set! value root)
-    (unless
-      (window-node-find root (editor-active-window-id value))
-      (editor-active-window-id-set!
-        value
-        (window-leaf-id (car (window-node-leaves root)))))
-    (let ([workbench (editor-active-workbench value)])
-      (workbench-set-layout! workbench root)
-      (workbench-set-active-window-id!
-        workbench
-        (editor-active-window-id value))))
+    (editor-set-workbench-layout!
+      value
+      (editor-active-workbench-id value)
+      root))
 
   (define (editor-set-active-window-id! value id)
     (require-open-editor 'editor-set-active-window-id! value)
@@ -2370,7 +2435,14 @@
 
   (define (editor-set-active-view! value id)
     (require-open-editor 'editor-set-active-view! value)
-    (editor-view-ref value id)
+    (let* ([target (editor-view-ref value id)]
+           [owner (view-workbench-id target)]
+           [active-workbench-id (editor-active-workbench-id value)])
+      (when (and owner (not (= owner active-workbench-id)))
+        (assertion-violation
+          'editor-set-active-view!
+          "View belongs to another Workbench"
+          id owner active-workbench-id)))
     (let ([session (editor-active-prompt value)])
       (when (and session (not (= id (prompt-session-view-id session))))
         (assertion-violation
@@ -2398,7 +2470,19 @@
             (window-leaf-set-view-id!
               other
               (window-leaf-view-id window)))
-          (window-leaf-set-view-id! window id))))
+          (let ([old-view-id (window-leaf-view-id window)])
+            (window-leaf-set-view-id! window id)
+            (view-workbench-id-set!
+              (editor-view-ref value id)
+              (editor-active-workbench-id value))
+            (unless
+              (exists
+                (lambda (leaf)
+                  (= (window-leaf-view-id leaf) old-view-id))
+                (window-node-leaves root))
+              (view-workbench-id-set!
+                (editor-view-ref value old-view-id)
+                #f))))))
     (let ([workbench (editor-workbench-for-view value id)])
       (when workbench
         (workbench-touch-buffer!
@@ -6147,6 +6231,7 @@
            [keymaps (make-keymap-catalog)]
            [view
              (%make-view
+               1
                1
                buffer
                (document-create-anchor!
