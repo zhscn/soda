@@ -214,6 +214,7 @@ if(CHEZ_SCHEME_EXECUTABLE)
     COMMAND
       ${CMAKE_COMMAND} -E env
       SODA_DOCUMENT_LIBRARY=${SODA_SCHEME_NATIVE_LIBRARY}
+      SODA_DASHBOARD_PROJECT_FIXTURE=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/project_resource
       ${CHEZ_SCHEME_EXECUTABLE}
       --libdirs ${PROJECT_SOURCE_DIR}/scheme
       --program ${CMAKE_CURRENT_SOURCE_DIR}/scheme/dashboard_tests.ss

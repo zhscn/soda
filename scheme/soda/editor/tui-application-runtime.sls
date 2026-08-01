@@ -33,6 +33,8 @@
           (soda editor event)
           (soda editor keymap)
           (soda editor presentation)
+          (soda editor project-target)
+          (soda editor resource-context)
           (soda editor state)
           (soda editor tui-application)
           (soda editor tui-projection)
@@ -584,10 +586,26 @@
         (validate-command-capabilities! 'tui-open! definition commands)
         (values model commands))))
 
+  (define (application-origin-context editor origin-view-id)
+    (let* ([view
+             (if origin-view-id
+                 (editor-view-ref editor origin-view-id)
+                 (editor-active-view editor))]
+           [context
+             (editor-view-resource-context editor (view-id view))]
+           [project (editor-view-home-project editor view)])
+      (make-resource-context
+        (resource-context-base-resource context)
+        (view-id view)
+        project
+        (resource-context-language-context context))))
+
   (define (open-with-initializer!
             editor name arguments intent origin-view-id initializer)
     (require-open-editor 'tui-open! editor)
     (let* ([lifecycle-before (tui-lifecycle-snapshot editor)]
+           [origin-context
+             (application-origin-context editor origin-view-id)]
            [definition (definition-ref editor name)]
            [registry (editor-tui-application-registry editor)]
            [session-id
@@ -597,7 +615,8 @@
                editor
                (application-resource name session-id)
                (tui-application-definition-default-mode definition)
-               "")]
+               ""
+               origin-context)]
            [registered? #f])
       (guard
         (condition
@@ -648,7 +667,7 @@
                           editor
                           (make-display-request
                             (buffer-id buffer) intent origin-view-id
-                            #f #f))])
+                            #f origin-context))])
                   (enqueue-commands!
                     editor session
                     (make-tui-message

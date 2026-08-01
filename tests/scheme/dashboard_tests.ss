@@ -1,9 +1,11 @@
 #!r6rs
 (import (rnrs)
+        (only (chezscheme) getenv)
         (soda document)
         (soda editor buffer)
         (soda editor core)
         (soda editor dashboard)
+        (soda editor project-target)
         (only (soda editor event) make-key-event)
         (soda tui frame)
         (soda tui renderer))
@@ -81,6 +83,43 @@
            (editor-tui-sessions editor)))
        1))
   "opening the dashboard again must reuse and refresh its session")
+
+(define project-path
+  (string-append
+    (getenv "SODA_DASHBOARD_PROJECT_FIXTURE")
+    "/src/library.ss"))
+(define project-buffer
+  (make-buffer
+    17101
+    (make-document "project" 17102)
+    project-path
+    'scheme-mode))
+(buffer-set-file-path! project-buffer project-path)
+(define project-editor (make-editor project-buffer))
+(define project-before-dashboard
+  (editor-resolve-project
+    project-editor (editor-active-view project-editor) 'workspace))
+(check project-before-dashboard
+       "fixture Buffer must discover its owning Project")
+(editor-update! project-editor (make-command-message 'dashboard.open #f))
+(check
+  (eq?
+    (editor-resolve-project
+      project-editor (editor-active-view project-editor) 'workspace)
+    project-before-dashboard)
+  "dashboard must retain the originating Project context")
+(let ([effects
+        (editor-update!
+          project-editor
+          (make-command-message 'project.find-file #f))])
+  (check
+    (and
+      (pair? effects)
+      (eq? (command-effect-kind (car effects))
+           'project.refresh-resources))
+    "project.find-file must start from a dashboard Buffer"
+    effects))
+(editor-close! project-editor)
 
 (editor-close! editor)
 (display "dashboard tests passed\n")
