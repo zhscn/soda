@@ -12,6 +12,7 @@
         (soda runtime)
         (soda tui component)
         (soda tui frame)
+        (soda tui inspect)
         (soda tui renderer))
 
 (define (check condition message . irritants)
@@ -206,6 +207,32 @@
 (check
   (eq? (tui-view-state-focused-node application-view-state) 'counter.value)
   "rendering must choose the first enabled component when focus is absent")
+(define application-description (describe-caret editor first-frame))
+(check
+  (and
+    (= (character-description-session-id application-description)
+       (tui-session-id session))
+    (eq? (character-description-node-key application-description)
+         'counter.value)
+    (= (character-description-screen-row application-description) 0)
+    (= (character-description-screen-column application-description) 0)
+    (= (character-description-local-row application-description) 0)
+    (= (character-description-local-column application-description) 0)
+    (member 'application
+            (character-description-faces application-description))
+    (member
+      (string->symbol
+        (string-append
+          "application."
+          (number->string (tui-session-id session))))
+      (character-description-component-path application-description))
+    (exists
+      (lambda (source)
+        (and (eq? (cell-source-layer source) 'application)
+             (eq? (cell-source-detail source) 'counter.value)))
+      (character-description-sources application-description))
+    (string? (character-description->string application-description)))
+  "describe-caret must expose the focused application component")
 (editor-update!
   editor
   (make-key-message
