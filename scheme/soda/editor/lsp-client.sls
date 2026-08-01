@@ -927,12 +927,16 @@
           'editor-start-lsp-session! "Language server does not support this buffer"))
       (let-values ([(session effects)
                     (ensure-lsp-session! editor workspace language profile)])
-        (editor-attach-language-session!
-          editor
-          (buffer-id buffer)
-          (lsp-client-session-language-session session)
-          'home
-          #f)
+        (let ([attachment
+                (editor-attach-language-session!
+                  editor
+                  (buffer-id buffer)
+                  (lsp-client-session-language-session session)
+                  'home
+                  #f)])
+          (when (eq? (view-buffer (editor-active-view editor)) buffer)
+            (editor-set-view-language-attachment!
+              editor (view-id (editor-active-view editor)) attachment)))
         (enable-lsp-completion! buffer)
         (append
           effects
@@ -1065,6 +1069,55 @@
               '()))
         '())))
 
+  (define (lsp-request-at-active-point! editor method continuation)
+    (let* ([view (editor-active-view editor)]
+           [buffer (view-buffer view)]
+           [session (active-view-lsp-session editor)]
+           [document (and session (find-document session (buffer-id buffer)))]
+           [position (and (buffer? buffer)
+                          (lsp-buffer-position-at buffer (view-caret view)))])
+      (if (and session document position
+               (eq? (lsp-client-session-state session) 'ready))
+          (session-request!
+            session method
+            (make-json-object
+              (list
+                (cons "textDocument"
+                      (make-json-object
+                        (list (cons "uri" (lsp-client-document-uri document)))))
+                (cons "position" (lsp-position->json position))))
+            continuation)
+          (begin
+            (editor-set-status-message! editor "No ready language server at point")
+            '()))))
+
+  (define (hover-text value)
+    (cond
+      [(string? value) value]
+      [(json-array? value)
+       (let ([parts (filter string? (json-array-values value))])
+         (and (pair? parts) (apply string-append parts)))]
+      [(json-object? value)
+       (let ([contents (json-object-ref value "contents" #f)])
+         (cond
+           [(string? contents) contents]
+           [(json-object? contents)
+            (let ([text (json-object-ref contents "value" #f)])
+              (and (string? text) text))]
+           [(json-array? contents) (hover-text contents)]
+           [else #f]))]
+      [else #f]))
+
+  (define (lsp-hover! editor)
+    (lsp-request-at-active-point!
+      editor
+      "textDocument/hover"
+      (lambda (response-editor response-session result)
+        (editor-set-status-message!
+          response-editor
+          (or (hover-text result) "No hover information"))
+        '())))
+
   (define (install-lsp-commands! editor)
     (editor-add-hook!
       editor
@@ -1080,6 +1133,12 @@
         (lambda (request)
           (list (make-internal-command-message 'lsp.completion-request request)))
         (lambda (request) #f)))
+    (editor-register-command!
+      editor
+      (make-interactive-context-command
+        'lsp.hover
+        (lambda (context) (lsp-hover! (command-context-editor context)))
+        "Show language-server hover information at point."))
     (editor-register-command!
       editor
       (make-interactive-context-command
