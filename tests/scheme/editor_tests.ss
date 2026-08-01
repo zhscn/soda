@@ -4279,24 +4279,33 @@
     (and
       (location-list? locations)
       (eq? (location-list-source locations) 'scheme-references)
-      (= (length (location-list-items locations)) 2)
-      (= (view-caret xref-view) 21))
+      (= (length (location-list-items locations)) 3)
+      (let ([results
+              (editor-tui-session-for-buffer
+                xref-editor
+                (buffer-id
+                  (view-buffer (editor-active-view xref-editor))))])
+        (and results
+             (eq? (tui-application-definition-name
+                    (tui-session-definition results))
+                  'xref-results))))
     (error 'editor-tests "Scheme xref did not publish references")))
 (editor-update!
   xref-editor
-  (make-command-message 'xref.next-location #f))
-(unless (= (view-caret xref-view) 28)
-  (error 'editor-tests "xref next did not visit the next use"))
+  (make-command-message 'xref.results-next #f))
 (editor-update!
   xref-editor
-  (make-command-message 'xref.next-location #f))
+  (make-command-message 'xref.visit #f))
 (unless (= (view-caret xref-view) 21)
-  (error 'editor-tests "xref next did not wrap to the first use"))
+  (error 'editor-tests "xref results did not visit the first use"))
 (editor-update!
   xref-editor
-  (make-command-message 'xref.previous-location #f))
+  (make-command-message 'xref.results-next #f))
+(editor-update!
+  xref-editor
+  (make-command-message 'xref.visit #f))
 (unless (= (view-caret xref-view) 28)
-  (error 'editor-tests "xref previous did not reverse the location list"))
+  (error 'editor-tests "xref results did not visit the next use"))
 (buffer-replace-range!
   xref-buffer
   (bytevector-length (buffer-bytes xref-buffer))
@@ -4304,13 +4313,10 @@
   (string->utf8 "; changed"))
 (editor-update!
   xref-editor
-  (make-command-message 'xref.next-location #f))
+  (make-command-message 'xref.visit #f))
 (unless
   (and
     (= (view-caret xref-view) 28)
-    (= (location-list-index
-         (editor-current-location-list xref-editor))
-       1)
     (string? (editor-status-message xref-editor)))
   (error 'editor-tests
          "xref moved through a stale location list"

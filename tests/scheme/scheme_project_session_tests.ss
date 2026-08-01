@@ -455,14 +455,14 @@
 
 (define compiled-reference-shadow
   (make-buffer
-    101
+    10001
     (make-document
       (string-append
         "(library (fixture compiled-indexed-consumer)\n"
         "  (export call-compiled)\n"
         "  (import (rnrs))\n"
         "  (define (call-compiled value) value))\n")
-      101)
+      10001)
     compiled-indexed-consumer-resource
     'scheme-mode))
 (editor-add-buffer! editor compiled-reference-shadow)
@@ -488,6 +488,12 @@
   (error
     'scheme-project-session-tests
     "compiled references remained active behind a live Buffer revision"))
+(for-each
+  (lambda (view)
+    (when (eq? (view-buffer view) compiled-reference-shadow)
+      (editor-set-view-buffer!
+        editor (view-id view) (buffer-id scratch))))
+  (editor-views editor))
 (editor-remove-buffer!
   editor
   (buffer-id compiled-reference-shadow))
@@ -666,6 +672,12 @@
   (error
     'scheme-project-session-tests
     "unloading the Scheme environment retained its session owner"))
+(for-each
+  (lambda (view)
+    (when (eq? (view-buffer view) compiled-consumer-buffer)
+      (editor-set-view-buffer!
+        editor (view-id view) (buffer-id scratch))))
+  (editor-views editor))
 (editor-remove-buffer!
   editor
   (buffer-id compiled-consumer-buffer))

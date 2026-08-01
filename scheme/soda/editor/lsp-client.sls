@@ -2913,7 +2913,7 @@
         (list
           (cons "context"
                 (make-json-object
-                  (list (cons "includeDeclaration" #f)))))
+                  (list (cons "includeDeclaration" #t)))))
         (lambda (response-editor response-session result)
           (let ([items (lsp-reference-items response-editor result)])
             (if (null? items)
@@ -2928,11 +2928,16 @@
                     (string-append
                       "References: "
                       (number->string (length items))))
-                  (lsp-jump-to-location-item!
-                    response-editor
-                    view
-                    (location-list-current locations)
-                    'xref))))))))
+                  (if (> (length items) 1)
+                      (begin
+                        (editor-show-xref-results!
+                          response-editor locations (view-id view))
+                        '())
+                      (lsp-jump-to-location-item!
+                        response-editor
+                        view
+                        (location-list-current locations)
+                        'xref)))))))))
 
   (define (lsp-find-location! editor method kind absent-message)
     (let ([view (editor-active-view editor)])

@@ -223,12 +223,18 @@
             #f)
           (let ([locations (make-location-list source items)])
             (editor-set-current-location-list! editor locations)
-            (jump-to-item!
-              context
-              (location-list-current locations)
-              (if (eq? source 'scheme-definition)
-                  'definition
-                  'xref))))))
+            (if (and (eq? source 'scheme-references)
+                     (> (length items) 1))
+                (begin
+                  (editor-show-xref-results!
+                    editor locations (view-id view))
+                  #f)
+                (jump-to-item!
+                  context
+                  (location-list-current locations)
+                  (if (eq? source 'scheme-definition)
+                      'definition
+                      'xref)))))))
 
   (define (semantic-query environments context)
     (let* ([editor (command-context-editor context)]
@@ -306,20 +312,24 @@
                   editor
                   "No definition at point"))
               (let* ([definition (car definitions)]
+                     [declaration
+                       (definition-location editor definition)]
                      [references
                        (scheme-workspace-references
                          index
                          editor
                          definition)]
                      [items
-                       (map
-                         (lambda (reference)
-                           (use-location
-                             (scheme-workspace-reference-buffer-id reference)
-                             (scheme-workspace-reference-resource reference)
-                             (scheme-workspace-reference-revision reference)
-                             (scheme-workspace-reference-use reference)))
-                         references)])
+                       (append
+                         (if declaration (list declaration) '())
+                         (map
+                           (lambda (reference)
+                             (use-location
+                               (scheme-workspace-reference-buffer-id reference)
+                               (scheme-workspace-reference-resource reference)
+                               (scheme-workspace-reference-revision reference)
+                               (scheme-workspace-reference-use reference)))
+                           references))])
                 (let ([effect
                         (publish-and-jump!
                           context
@@ -634,6 +644,7 @@
 
   (define (install-scheme-xref-commands! editor)
     (let ([environments (make-scheme-environment-registry)])
+      (install-xref-results! editor)
       (hashtable-set! editor-environments editor environments)
       (editor-register-xref-backend!
         editor

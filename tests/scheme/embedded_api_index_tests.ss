@@ -981,6 +981,12 @@
     'embedded-api-index-tests
     "xref references did not include source and consumer buffers"))
 
+(editor-set-active-view!
+  xref-editor
+  (view-id
+    (find
+      (lambda (view) (eq? (view-buffer view) xref-buffer))
+      (editor-views xref-editor))))
 (editor-update!
   xref-editor
   (make-command-message 'xref.find-symbol #f))

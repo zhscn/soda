@@ -1781,8 +1781,8 @@
           "context"
           #f)
         "includeDeclaration"
-        #t)
-      #f))
+        #f)
+      #t))
   "find-references request has an invalid LSP payload")
 (define reference-source-range
   (make-json-object
@@ -1822,10 +1822,18 @@
     (and locations
          (eq? (location-list-source locations) 'lsp-references)
          (= (length (location-list-items locations)) 2)
-         (= (view-caret (editor-active-view editor)) 3))
+         (let ([results
+                 (editor-tui-session-for-buffer
+                   editor
+                   (buffer-id (view-buffer (editor-active-view editor))))])
+           (and results
+                (eq? (tui-application-definition-name
+                       (tui-session-definition results))
+                     'xref-results))))
     "LSP references did not publish a navigable location list"))
+(editor-execute-command! editor 'xref.results-next)
 (define reference-next-effects
-  (editor-execute-command! editor 'xref.next-location))
+  (editor-execute-command! editor 'xref.visit))
 (check
   (and
     (= (length reference-next-effects) 1)
