@@ -48,6 +48,15 @@
 (check
   (document-presentation? (buffer-presentation initial-buffer))
   "ordinary buffers must use DocumentPresentation")
+(check
+  (and
+    (tui-init-event? (make-tui-init-event))
+    (let ([timer (make-tui-timer-event 7 42)])
+      (and
+        (tui-timer-event? timer)
+        (= (tui-timer-event-timer-id timer) 7)
+        (= (tui-timer-event-instant timer) 42))))
+  "built-in lifecycle payloads must use typed application events")
 
 (define definition
   (make-tui-application-definition

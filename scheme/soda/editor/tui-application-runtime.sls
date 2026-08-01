@@ -651,7 +651,7 @@
                     editor session
                     (make-tui-message
                       session-id (tui-session-generation session)
-                      (view-id view) 'tui.init)
+                      (view-id view) (make-tui-init-event))
                     commands))
                 (tui-synchronize-view-lifecycle! editor lifecycle-before)
                 (editor-invalidate! editor 'application)

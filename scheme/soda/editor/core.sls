@@ -234,6 +234,8 @@
           tui-input-event-value
           tui-input-event-prefix
           tui-input-event-focused-node
+          make-tui-init-event
+          tui-init-event?
           make-tui-focus-event
           tui-focus-event?
           tui-focus-event-view-id
@@ -245,6 +247,10 @@
           tui-resize-event-view-id
           tui-resize-event-width
           tui-resize-event-height
+          make-tui-timer-event
+          tui-timer-event?
+          tui-timer-event-timer-id
+          tui-timer-event-instant
           make-tui-close-event
           tui-close-event?
           make-tui-pointer

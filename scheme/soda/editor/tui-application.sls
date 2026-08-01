@@ -126,6 +126,8 @@
           tui-input-event-value
           tui-input-event-prefix
           tui-input-event-focused-node
+          make-tui-init-event
+          tui-init-event?
           make-tui-focus-event
           tui-focus-event?
           tui-focus-event-view-id
@@ -137,6 +139,10 @@
           tui-resize-event-view-id
           tui-resize-event-width
           tui-resize-event-height
+          make-tui-timer-event
+          tui-timer-event?
+          tui-timer-event-timer-id
+          tui-timer-event-instant
           make-tui-close-event
           tui-close-event?
           make-tui-pointer
@@ -764,6 +770,11 @@
     (%make-tui-input-event kind value prefix focused-node))
 
   (define-record-type
+    (tui-init-event %make-tui-init-event tui-init-event?))
+
+  (define (make-tui-init-event) (%make-tui-init-event))
+
+  (define-record-type
     (tui-focus-event %make-tui-focus-event tui-focus-event?)
     (fields view-id))
 
@@ -796,6 +807,22 @@
         "view id and dimensions must be positive"
         view-id width height))
     (%make-tui-resize-event view-id width height))
+
+  (define-record-type
+    (tui-timer-event %make-tui-timer-event tui-timer-event?)
+    (fields timer-id instant))
+
+  (define (make-tui-timer-event timer-id instant)
+    (unless (exact-positive-integer? timer-id)
+      (assertion-violation
+        'make-tui-timer-event "timer id must be positive" timer-id))
+    (unless (and (integer? instant) (exact? instant)
+                 (not (negative? instant)))
+      (assertion-violation
+        'make-tui-timer-event
+        "instant must be a non-negative exact integer"
+        instant))
+    (%make-tui-timer-event timer-id instant))
 
   (define-record-type (tui-close-event make-tui-close-event tui-close-event?))
 
