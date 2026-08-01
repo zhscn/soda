@@ -28,6 +28,7 @@
           lsp-client-stop!
           install-lsp-commands!)
   (import (rnrs)
+          (only (chezscheme) make-weak-eq-hashtable)
           (soda document)
           (soda editor annotation)
           (soda editor buffer)
@@ -47,9 +48,11 @@
           (soda editor lsp-protocol)
           (soda editor managed-process)
           (soda editor navigation)
+          (soda editor prompt)
           (soda editor project)
           (soda editor project-workspace)
           (soda editor state)
+          (soda editor workspace-edit)
           (soda json))
 
   (define-record-type
@@ -96,7 +99,14 @@
     (lsp-client-registry %make-lsp-client-registry lsp-client-registry?)
     (fields profiles sessions))
 
+  (define-record-type lsp-workspace-text-edit
+    (fields resource range text))
+
+  (define-record-type lsp-pending-workspace-edit
+    (fields view-id source-buffer-id source-revision edits resources description))
+
   (define editor-lsp-registries (make-eq-hashtable))
+  (define pending-lsp-workspace-edits (make-weak-eq-hashtable))
 
   (define (exact-non-negative-integer? value)
     (and (integer? value) (exact? value) (not (negative? value))))
@@ -1484,6 +1494,201 @@
                   (editor-set-status-message! response-editor "No definition found")
                   '())))))))
 
+  (define (lsp-workspace-edits-for-resource uri values)
+    (let ([resource
+            (and (string? uri)
+                 (guard (condition [else #f]) (lsp-uri-file-path uri)))])
+      (and
+        resource
+        (json-array? values)
+        (let loop ([remaining (json-array-values values)] [edits '()])
+          (if (null? remaining)
+              (reverse edits)
+              (let ([value (car remaining)])
+                (if (not (json-object? value))
+                    #f
+                    (let ([range
+                            (guard
+                              (condition [else #f])
+                              (lsp-range-from-json
+                                (json-object-ref value "range" #f)))]
+                          [text (json-object-ref value "newText" #f)])
+                      (and range
+                           (string? text)
+                           (loop
+                             (cdr remaining)
+                             (cons
+                               (make-lsp-workspace-text-edit resource range text)
+                               edits)))))))))))
+
+  (define (lsp-workspace-edits result)
+    (and
+      (json-object? result)
+      (let ([changes (json-object-ref result "changes" #f)])
+        (and
+          (json-object? changes)
+          (let loop ([entries (json-object-entries changes)] [edits '()])
+            (if (null? entries)
+                (reverse edits)
+                (let ([resource-edits
+                        (lsp-workspace-edits-for-resource
+                          (caar entries) (cdar entries))])
+                  (and resource-edits
+                       (loop (cdr entries) (append (reverse resource-edits) edits))))))))))
+
+  (define (lsp-workspace-edit-resources edits)
+    (reverse
+      (fold-left
+        (lambda (resources edit)
+          (let ([resource (lsp-workspace-text-edit-resource edit)])
+            (if (member resource resources) resources (cons resource resources))))
+        '()
+        edits)))
+
+  (define (lsp-workspace-edit-missing-resources editor edits)
+    (filter
+      (lambda (resource) (not (editor-buffer-for-resource editor resource)))
+      (lsp-workspace-edit-resources edits)))
+
+  (define (lsp-resolve-workspace-edits editor edits)
+    (let loop ([remaining edits] [resolved '()])
+      (if (null? remaining)
+          (reverse resolved)
+          (let* ([edit (car remaining)]
+                 [buffer
+                   (editor-buffer-for-resource
+                     editor (lsp-workspace-text-edit-resource edit))]
+                 [range (lsp-workspace-text-edit-range edit)]
+                 [start
+                   (and buffer
+                        (lsp-buffer-offset-at buffer (lsp-range-start range)))]
+                 [end
+                   (and buffer
+                        (lsp-buffer-offset-at buffer (lsp-range-end range)))])
+            (and buffer start end (<= start end)
+                 (loop
+                   (cdr remaining)
+                   (cons
+                     (make-workspace-text-edit
+                       (lsp-workspace-text-edit-resource edit)
+                       (buffer-revision buffer)
+                       start
+                       end
+                       (lsp-workspace-text-edit-text edit))
+                     resolved)))))))
+
+  (define (lsp-apply-workspace-edits!
+            editor view-id source-buffer-id source-revision edits description)
+    (let ([source (editor-buffer-ref editor source-buffer-id)])
+      (if (not (= (buffer-revision source) source-revision))
+          (begin
+            (editor-set-status-message!
+              editor "Language-server workspace edit is stale")
+            '())
+          (let ([missing (lsp-workspace-edit-missing-resources editor edits)])
+            (if (pair? missing)
+                (begin
+                  (hashtable-set!
+                    pending-lsp-workspace-edits
+                    editor
+                    (make-lsp-pending-workspace-edit
+                      view-id source-buffer-id source-revision edits missing description))
+                  (editor-set-status-message!
+                    editor
+                    (string-append
+                      "Reading "
+                      (number->string (length missing))
+                      " workspace edit target"
+                      (if (= (length missing) 1) "" "s")))
+                  (map
+                    (lambda (resource)
+                      (make-command-effect
+                        'file.read (make-open-request #f resource 0)))
+                    missing))
+                (let ([resolved (lsp-resolve-workspace-edits editor edits)])
+                  (if (not resolved)
+                      (begin
+                        (editor-set-status-message!
+                          editor "Language-server workspace edit has invalid ranges")
+                        '())
+                      (begin
+                        (workspace-text-edits-apply! editor resolved)
+                        (editor-set-status-message!
+                          editor
+                          (string-append
+                            description
+                            " in "
+                            (number->string (length resolved))
+                            (if (= (length resolved) 1) " place" " places")))
+                        '()))))))))
+
+  (define (lsp-after-open-result context arguments effects)
+    (let* ([editor (command-context-editor context)]
+           [pending (hashtable-ref pending-lsp-workspace-edits editor #f)]
+           [result (command-context-argument context)])
+      (when (and pending
+                 (open-result? result)
+                 (member (open-result-path result)
+                         (lsp-pending-workspace-edit-resources pending)))
+        (cond
+          [(or (not (zero? (open-result-status result)))
+               (eq? (open-result-kind result) 'directory))
+           (hashtable-delete! pending-lsp-workspace-edits editor)
+           (editor-set-status-message! editor "Language-server workspace edit cancelled")]
+          [(null?
+             (lsp-workspace-edit-missing-resources
+               editor (lsp-pending-workspace-edit-edits pending)))
+           (hashtable-delete! pending-lsp-workspace-edits editor)
+           (lsp-apply-workspace-edits!
+             editor
+             (lsp-pending-workspace-edit-view-id pending)
+             (lsp-pending-workspace-edit-source-buffer-id pending)
+             (lsp-pending-workspace-edit-source-revision pending)
+             (lsp-pending-workspace-edit-edits pending)
+             (lsp-pending-workspace-edit-description pending))]))))
+
+  (define (lsp-rename-reader)
+    (make-interactive-reader
+      'lsp-rename-name
+      (lambda (context)
+        (make-interactive-suspend
+          (make-prompt-request
+            "Rename to: " "" 'lsp-rename #f 'free non-empty-string?
+            'command.resume-interactive 'command.abort-interactive)
+          (lambda (result)
+            (unless (and (prompt-result? result)
+                         (eq? (prompt-result-status result) 'accepted)
+                         (non-empty-string? (prompt-result-value result)))
+              (assertion-violation 'lsp.rename "expected a non-empty name" result))
+            (list (prompt-result-value result)))))))
+
+  (define (lsp-rename! editor new-name)
+    (let* ([view (editor-active-view editor)]
+           [buffer (view-buffer view)]
+           [revision (buffer-revision buffer)])
+      (lsp-request-at-active-point!
+        editor
+        "textDocument/rename"
+        (list (cons "newName" new-name))
+        (lambda (response-editor response-session result)
+          (let ([edits (lsp-workspace-edits result)])
+            (cond
+              [(not edits)
+               (editor-set-status-message!
+                 response-editor "Language server returned an unsupported workspace edit")
+               '()]
+              [(null? edits)
+               (editor-set-status-message! response-editor "No rename edits")
+               '()]
+              [else
+               (lsp-apply-workspace-edits!
+                 response-editor
+                 (view-id view)
+                 (buffer-id buffer)
+                 revision
+                 edits
+                 "Renamed")]))))))
+
 
   (define (install-lsp-commands! editor)
     (editor-add-hook!
@@ -1518,6 +1723,19 @@
         'lsp.find-references
         (lambda (context) (lsp-find-references! (command-context-editor context)))
         "Find language-server references at point."))
+    (let ([implementation
+            (lambda (context new-name)
+              (lsp-rename! (command-context-editor context) new-name))])
+      (editor-register-command!
+        editor
+        (make-command-definition
+          'lsp.rename
+          implementation
+          (lambda (context arguments) (apply implementation context arguments))
+          "Rename the language-server symbol at point."
+          #f
+          (make-interactive-plan (list (lsp-rename-reader)))
+          '())))
     (editor-register-command!
       editor
       (make-interactive-context-command
@@ -1565,5 +1783,12 @@
             (command-context-editor context)
             (command-context-argument context)))
         "Handle lifecycle changes from an LSP managed process."))
+    (command-add-advice!
+      (editor-command-registry editor)
+      'file.apply-open-result
+      'lsp-workspace-edit-resume
+      'after
+      lsp-after-open-result
+      0)
     editor)
 )

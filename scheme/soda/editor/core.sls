@@ -1851,7 +1851,6 @@
       (install-comint-commands! editor)
       (install-process-comint-commands! editor)
       (install-completion-commands! editor)
-      (install-lsp-commands! editor)
       (editor-register-completion-provider!
         editor
         (make-scheme-static-completion-provider
@@ -1863,6 +1862,7 @@
         editor
         (make-scheme-runtime-completion-provider editor))
       (install-file-commands! editor)
+      (install-lsp-commands! editor)
       (install-scheme-interface-commands!
         editor scheme-environments)
       (install-scheme-project-session-commands!
