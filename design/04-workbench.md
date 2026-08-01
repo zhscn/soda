@@ -11,6 +11,7 @@
 | Project identity、发现缓存与 known registry | 已实现 |
 | Workbench Project focus 与命令解析 policy | 已实现 |
 | ProjectTarget dispatch 值与 origin 冻结 | 已实现 |
+| ProjectWorkspace snapshot、per-Project revision 与生命周期通知 | 已实现 |
 | Project resource 流式枚举、snapshot 与 watch lifecycle | 已实现 |
 | Project settings layer、task definition 与 comint runtime | 已实现 |
 | Workbench lifecycle、scope、MRU、slot 与 pinned window | 已实现 |
@@ -100,6 +101,13 @@ Project {
 远程或暂时不可访问的 resource 不缓存失败。显式 known-project registry 独立保存用户
 选择过的 root，使 project switch 不依赖当前 Buffer 或启动目录。
 
+catalog 为每个 Project id 维护独立、单调递增的 descriptor revision。`remember` 只把
+Project 纳入 known registry，并返回当前 canonical descriptor；`update` 显式替换同 id
+的 roots、settings、task 等 descriptor 内容并推进 revision。这样冻结在异步请求中的旧
+Project 值可以继续完成原操作，而不会在后续登记时覆盖新配置。发现、登记、更新、遗忘
+和 finder policy 变化通过 `project-registry-changed` hook 发布；订阅者以 Project id 与
+revision 对在途结果去重。
+
 project focus 是 Workbench 的命令路由状态。它不改变全局 cwd、WindowLayout、View 的
 ResourceContext 或 Buffer 的 home Project。Project commands 可以从 active resource
 发现 Project，也可以使用 Workbench focus 或直接从 known registry 选择。
@@ -144,6 +152,30 @@ ProjectTarget {
 ProjectTarget 为异步 project command 提供 dispatch 值；callback 可以从中读取目标与
 origin，而不重新查询 active Workbench、active View 或 focus。只需要 Project identity
 的内部请求可以直接携带不可变 Project 值。
+
+语言服务启动使用独立的不可变投影：
+
+```text
+ProjectWorkspace {
+  project,
+  project_id,
+  generation,
+  folders: [{ name, resource }],
+  configuration
+}
+```
+
+folder 来自 Project roots，configuration 是 Project settings layer 的结构快照。
+资源解析优先采用仍覆盖目标文件的冻结 Project hint；否则执行 Project discovery，并在
+多个 known Project 都包含资源时选择匹配 root 最长者。调用方也可以取得全部匹配
+workspace。file-backed Buffer 通过 `(Buffer, ResourceContext)` 使用同一解析入口；
+generated、REPL 和 application Buffer 不产生 home workspace。
+
+`ProjectWorkspace` 可以直接建立 `LanguageSessionKey` 的 workspace folders 和
+configuration 输入；workspace generation 用于 transport reconcile 与迟到结果校验。
+语言 profile 仍负责选择 provider、裁剪 provider-specific 配置、计算 environment
+fingerprint 和声明 client capabilities；Project 层不启动 server，也不拥有
+LanguageSession。
 
 Project 不拥有 Buffer、View、Window、Workbench、LanguageSession、Scheme semantic
 index 或 process。一个 Buffer 可以通过路径发现 home Project，也可以只是 visitor；

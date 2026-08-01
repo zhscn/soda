@@ -11,6 +11,7 @@
 | 各分发语言的 query 覆盖 | 部分实现 |
 | LanguageSession registry、per-View attachment 与 provenance 路由 | 已实现 |
 | LanguageProfile bootstrap hook 与 home attachment 选择 | 已实现 |
+| ProjectWorkspace bootstrap snapshot 与 file-backed Buffer 归属解析 | 已实现 |
 | provider-specific session transport lifecycle | 未实现 |
 
 ## 分层
@@ -197,6 +198,13 @@ session bootstrap 只在初次关联时使用 resource 和 Project discovery：
 2. 导航落点没有 home session 时，继承 origin View 的 attachment；
 3. 两者都不存在时保持无 attachment，由显式 language command 或用户选择建立；
 4. 已存在其他 attachment 不阻止增加新的 attachment，也不覆盖其他 View 的 context。
+
+Project-backed provider 通过 `editor-project-workspace-for-buffer` 读取一次
+`ProjectWorkspace`。该值冻结 Project revision、具名 workspace folders 与声明式
+configuration，并可转换为 `LanguageSessionKey`。Project descriptor 更新由
+`project-registry-changed` 通知 transport；transport 根据新 workspace snapshot 决定发送
+workspace folder/configuration 变化或建立新 session。普通语义请求只携带 attachment，
+不重新运行 Project discovery。
 
 definition、reference、diagnostic 和其他异步导航请求冻结 origin attachment。打开落点
 Buffer 后，目标 View 选择该 attachment，后续查询继续沿相同 session 路由；请求不再
