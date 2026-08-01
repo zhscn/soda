@@ -96,16 +96,17 @@
         (vector project resource))))
 
   (define (resource-choice-source projects kind resources)
-    (let ([items
-            (apply
-              append
-              (map
-                (lambda (project)
-                  (map
-                    (lambda (resource)
-                      (resource-item project resource kind))
-                    (resources project)))
-                projects))])
+    (define (current-items)
+      (apply
+        append
+        (map
+          (lambda (project)
+            (map
+              (lambda (resource)
+                (resource-item project resource kind))
+              (resources project)))
+          projects)))
+    (let ()
       (make-choice-source
         kind
         `((category . ,kind)
@@ -114,12 +115,12 @@
           (styles . (fzf))
           (preselect . #t))
         (lambda (input point) (cons 0 (string-length input)))
-        (lambda (query) items)
+        (lambda (query) (current-items))
         (lambda (value)
           (exists
             (lambda (item)
               (string=? value (completion-item-insert-text item)))
-            items))
+            (current-items)))
         (lambda (generation) #f))))
 
   (define (candidate-payload result)

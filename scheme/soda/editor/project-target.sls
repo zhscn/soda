@@ -41,8 +41,9 @@
   (define (editor-view-home-project editor view)
     (let* ([buffer (view-buffer view)]
            ;; buffer-resource is also the identity of generated buffers such
-           ;; as *scratch*.  Only a visited file establishes path ownership;
-           ;; generated buffers inherit the Project captured at creation.
+           ;; as *scratch*.  Visited files establish path ownership directly;
+           ;; generated buffers discover from their local resource base after
+           ;; consulting any Project captured at creation.
            [resource (buffer-file-path buffer)]
            [context
              (editor-view-resource-context editor (view-id view))]
@@ -54,7 +55,11 @@
               (project-contains-resource? hint resource)
               hint)
             (editor-discover-project editor resource))
-          hint)))
+          (or
+            hint
+            (editor-discover-project
+              editor
+              (resource-context-base-resource context))))))
 
   (define editor-resolve-project
     (case-lambda

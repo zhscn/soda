@@ -3,6 +3,7 @@
         (only (chezscheme) getenv)
         (soda document)
         (soda editor buffer)
+        (soda editor completion)
         (soda editor core)
         (soda editor dashboard)
         (soda editor project-target)
@@ -84,17 +85,16 @@
        1))
   "opening the dashboard again must reuse and refresh its session")
 
-(define project-path
-  (string-append
-    (getenv "SODA_DASHBOARD_PROJECT_FIXTURE")
-    "/src/library.ss"))
+(define project-root (getenv "SODA_DASHBOARD_PROJECT_FIXTURE"))
 (define project-buffer
   (make-buffer
     17101
     (make-document "project" 17102)
-    project-path
-    'scheme-mode))
-(buffer-set-file-path! project-buffer project-path)
+    "*project-context*"
+    'fundamental-mode))
+(buffer-set-creation-context!
+  project-buffer
+  (make-resource-context project-root))
 (define project-editor (make-editor project-buffer))
 (define project-before-dashboard
   (editor-resolve-project
@@ -119,6 +119,31 @@
            'project.refresh-resources))
     "project.find-file must start from a dashboard Buffer"
     effects))
+(editor-update!
+  project-editor
+  (make-command-message 'project.select-file #f))
+(let ([completion (editor-active-prompt-completion project-editor)])
+  (check
+    (and completion (null? (completion-session-items completion)))
+    "project picker must allow its resource snapshot to arrive asynchronously"))
+(editor-update!
+  project-editor
+  (make-internal-command-message
+    'project.apply-resource-snapshot
+    (make-project-resource-snapshot
+      (project-id project-before-dashboard)
+      0
+      (list (string-append project-root "/src/library.ss"))
+      (list project-root))))
+(let ([completion (editor-active-prompt-completion project-editor)])
+  (check
+    (and completion
+         (= (length (completion-session-items completion)) 1)
+         (string=?
+           (completion-item-label
+             (car (completion-session-items completion)))
+           "src/library.ss"))
+    "an active project picker must observe an arriving resource snapshot"))
 (editor-close! project-editor)
 
 (editor-close! editor)
