@@ -203,6 +203,12 @@
           tui-message-session-generation
           tui-message-origin-view-id
           tui-message-payload
+          make-tui-input-event
+          tui-input-event?
+          tui-input-event-kind
+          tui-input-event-value
+          tui-input-event-prefix
+          tui-input-event-focused-node
           make-tui-update-result
           tui-result
           tui-update-result?

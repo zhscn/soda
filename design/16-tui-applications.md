@@ -7,7 +7,7 @@
 | 所依赖的 Buffer/View/Window、Frame、Theme 与基础 InputState | 已实现 |
 | `TuiApplicationDefinition`、catalog、session 与 lifecycle | 部分实现 |
 | message/update/effect 与 generation 模型 | 部分实现 |
-| application input handler、focus、pointer 与 replay | 未实现 |
+| application input handler、focus、pointer 与 replay | 部分实现 |
 | 声明式 node、layout、surface 与 Frame composition | 部分实现 |
 | text projection、inspection、persistence 与 sole host | 未实现 |
 

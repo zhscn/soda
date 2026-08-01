@@ -85,6 +85,12 @@
           tui-message-session-generation
           tui-message-origin-view-id
           tui-message-payload
+          make-tui-input-event
+          tui-input-event?
+          tui-input-event-kind
+          tui-input-event-value
+          tui-input-event-prefix
+          tui-input-event-focused-node
           make-tui-update-result
           tui-result
           tui-update-result?
@@ -519,6 +525,18 @@
     (%make-tui-session
       id definition buffer-id model 0 0 1
       (make-eqv-hashtable) '() '() 'initializing #f))
+
+  (define-record-type
+    (tui-input-event %make-tui-input-event tui-input-event?)
+    (fields kind value prefix focused-node))
+
+  (define (make-tui-input-event kind value prefix focused-node)
+    (unless (memq kind '(key-press key-repeat key-release text paste))
+      (assertion-violation
+        'make-tui-input-event
+        "unknown application input event kind"
+        kind))
+    (%make-tui-input-event kind value prefix focused-node))
 
   (define (require-session who session)
     (unless (tui-session? session)

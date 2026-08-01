@@ -3,6 +3,7 @@
         (soda document)
         (soda editor buffer)
         (soda editor core)
+        (only (soda editor event) make-key-event)
         (soda editor presentation)
         (soda editor tui-application)
         (soda editor tui-application-runtime)
@@ -26,6 +27,7 @@
 (define close-count 0)
 (define fail-next? #t)
 (define view-count 0)
+(define input-kinds '())
 
 (check
   (document-presentation? (buffer-presentation initial-buffer))
@@ -41,6 +43,10 @@
     (lambda (model message context)
       (let ([payload (tui-message-payload message)])
         (cond
+          [(tui-input-event? payload)
+           (set! input-kinds
+             (append input-kinds (list (tui-input-event-kind payload))))
+           (tui-result model '() '())]
           [(eq? payload 'increment)
            (tui-result
              (+ model 1)
@@ -149,6 +155,35 @@
       "4"))
   "renderer must compose and cache an application surface")
 
+(editor-update!
+  editor
+  (make-input-message
+    (make-key-event
+      'f13 #f #f #f 0 'press (make-bytevector 0))))
+(editor-update!
+  editor
+  (make-input-message
+    (make-key-event
+      'f13 #f #f #f 0 'release (make-bytevector 0))))
+(editor-update!
+  editor
+  (make-input-message
+    (make-key-event
+      'character 120 88 120 0 'press (string->utf8 "x"))))
+(editor-update!
+  editor
+  (make-input-message
+    (make-text-input-event 'paste (string->utf8 "pasted"))))
+(check
+  (and
+    (eq?
+      (input-state-text-policy
+        (view-current-input-state (editor-active-view editor)))
+      'application)
+    (equal? input-kinds '(key-press key-release text paste)))
+  "an application View must receive normalized key, text, and paste input")
+(define input-generation (tui-session-generation session))
+
 (define active-view-id (view-id (editor-active-view editor)))
 (define stale-message
   (make-tui-message
@@ -163,7 +198,7 @@
 (check
   (and
     (= (tui-session-model session) 42)
-    (= (tui-session-generation session) 1)
+    (= (tui-session-generation session) (+ input-generation 1))
     (eq?
       (tui-view-state-focused-node
         (tui-session-view-state session active-view-id))

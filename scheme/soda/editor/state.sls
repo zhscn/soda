@@ -1640,9 +1640,24 @@
 
   (define (attach-tui-view-state! value view)
     (let ([session (view-tui-session value view)])
-      (and
-        session
-        (tui-session-ensure-view-state! session (view-id view)))))
+      (if session
+          (begin
+            (view-input-states-set!
+              view
+              (list
+                (make-input-state
+                  'application
+                  '()
+                  'application
+                  #f)))
+            (tui-session-ensure-view-state! session (view-id view)))
+          (when
+            (eq?
+              (input-state-name (view-current-input-state view))
+              'application)
+            (view-input-states-set!
+              view
+              (list (make-input-state 'editing '() 'accept)))))))
 
   (define (detach-tui-view-state! value view)
     (let ([session (view-tui-session value view)])

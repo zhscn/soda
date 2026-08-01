@@ -53,10 +53,10 @@
            'make-input-state
            "keymap layers must contain keymaps or keymap names"
            keymap-layers))
-       (unless (memq text-policy '(accept ignore))
+       (unless (memq text-policy '(accept ignore application))
          (assertion-violation
            'make-input-state
-           "text policy must be accept or ignore"
+           "text policy must be accept, ignore, or application"
            text-policy))
        (unless
          (if (eq? text-policy 'accept)
