@@ -35,7 +35,8 @@
   (let ([remaining
           (compile-whole-program
             program-wpo
-            whole-program-object)])
+            whole-program-object
+            #t)])
     (unless (null? remaining)
       (error
         'build-soda-boot
