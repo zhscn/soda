@@ -7652,6 +7652,7 @@
     #f
     'fundamental-mode))
 (define resolve-editor (make-editor resolve-buffer))
+(define resolve-label (string-append "foo-" (make-string 120 #\x)))
 (define resolve-source
   (make-choice-source
     'resolve-test
@@ -7671,7 +7672,7 @@
             (make-completion-item
               'foo
               'resolve-test
-              "foo"
+              resolve-label
               "foo"
               "foo"
               'function
@@ -7751,14 +7752,22 @@
            "completion provider did not resolve the selected item")))
 (editor-update! resolve-editor (make-resize-message 10 80))
 (let ([frame (render-editor-frame resolve-editor 10 80)])
-  (let ([rows
+  (let ([completion-node
+          (component-node-find
+            (frame-layout frame)
+            'editor.completions)]
+        [rows
           (let loop ([row 0] [result '()])
             (if (= row (frame-rows frame))
                 (reverse result)
                 (loop (+ row 1)
                       (cons (frame-row-text frame row) result))))])
     (unless
-      (and (exists (lambda (text) (string-contains? text "From `<concepts>`")) rows)
+      (and completion-node
+           (<=
+             (rect-columns (component-node-rect completion-node))
+             56)
+           (exists (lambda (text) (string-contains? text "From `<concepts>`")) rows)
            (exists (lambda (text) (string-contains? text "[concepts.arithmetic]")) rows)
            (exists (lambda (text) (string-contains? text "  value();")) rows)
            (not

@@ -1777,13 +1777,14 @@
             annotation-column
             documentation-column)
     (let* ([label (completion-item-label item)]
+           [visible-label (truncate-cells label columns)]
            [highlight?
              (string=?
                label
                (completion-item-filter-text item))])
       (let loop ([index 0] [cell-column 0])
-        (unless (= index (string-length label))
-          (let* ([character (string-ref label index)]
+        (unless (= index (string-length visible-label))
+          (let* ([character (string-ref visible-label index)]
                  [width (character-cell-width character)]
                  [matched?
                    (and
@@ -1855,7 +1856,11 @@
   (define (render-completions-component! context frame rectangle)
     (let* ([editor (editor-render-context-editor context)]
            [theme (editor-theme editor)]
-           [completion (editor-active-completion editor)]
+           [completion
+             (if (editor-active-prompt editor)
+                 (editor-active-prompt-completion editor)
+                 (view-completion
+                   (editor-render-context-view context)))]
            [component-id 'editor.completions]
            [background-sources
              (list
@@ -2081,7 +2086,11 @@
 
   (define (render-completion-documentation-component! context frame rectangle)
     (let* ([editor (editor-render-context-editor context)]
-           [completion (view-completion (editor-render-context-view context))]
+           [completion
+             (if (editor-active-prompt editor)
+                 (editor-active-prompt-completion editor)
+                 (view-completion
+                   (editor-render-context-view context)))]
            [selected
              (and completion
                   (completion-session-selected-item completion))]
@@ -2192,16 +2201,8 @@
                     '()))
               '())))))
 
-  (define (completion-popup-width items documentation columns)
-    (min
-      columns
-      (max
-        12
-        (fold-left
-          (lambda (width item)
-            (max width (+ 2 (string-cell-width (completion-row-text item) 8))))
-          0
-          items))))
+  (define (completion-popup-width columns)
+    (min columns (max 24 (min 56 (div columns 3)))))
 
   (define (documentation-popup-width documentation columns)
     (min
@@ -2242,8 +2243,7 @@
                completion-window-max-rows
                (length items)
                available-rows)]
-           [popup-columns
-             (completion-popup-width items documentation columns)])
+           [popup-columns (completion-popup-width columns)])
       (and (positive? candidate-rows)
            (let* ([text-rows (- rows 1)]
                   [popup-rows candidate-rows]
