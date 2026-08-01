@@ -146,6 +146,9 @@
       (cons "documentSymbolProvider" #t)
       (cons "signatureHelpProvider" #t)
       (cons
+        "codeActionProvider"
+        (make-json-object (list (cons "resolveProvider" #t))))
+      (cons
         "diagnosticProvider"
         (make-json-object
           (list (cons "interFileDependencies" #f)
@@ -1290,6 +1293,89 @@
       (buffer-bytes rename-target)
       (string->utf8 "int Action;\n")))
   "code action did not apply its edit before executing its command")
+
+(define unresolved-code-action-effects
+  (editor-execute-command! editor 'lsp.code-actions))
+(define unresolved-code-action-message
+  (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload (car unresolved-code-action-effects))))))
+(lsp-client-handle-json-message!
+  editor session
+  (make-json-object
+    (list
+      (cons "jsonrpc" "2.0")
+      (cons "id" (json-object-ref unresolved-code-action-message "id" #f))
+      (cons
+        "result"
+        (make-json-array
+          (list
+            (make-json-object
+              (list
+                (cons "title" "Resolve only")
+                (cons "kind" "quickfix")
+                (cons
+                  "data"
+                  (make-json-object
+                    (list (cons "action" "resolve-only"))))))))))))
+(define unresolved-code-action-reply (editor-accept-prompt! editor))
+(define code-action-resolve-effects
+  (editor-update!
+    editor
+    (make-internal-command-message
+      (prompt-reply-command unresolved-code-action-reply)
+      (prompt-reply-result unresolved-code-action-reply))))
+(define code-action-resolve-message
+  (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload (car code-action-resolve-effects))))))
+(check
+  (and
+    (= (length code-action-resolve-effects) 1)
+    (string=?
+      (json-object-ref code-action-resolve-message "method" #f)
+      "codeAction/resolve"))
+  "unresolved code action did not request codeAction/resolve")
+(define resolved-code-action-effects
+  (lsp-client-handle-json-message!
+    editor session
+    (make-json-object
+      (list
+        (cons "jsonrpc" "2.0")
+        (cons "id" (json-object-ref code-action-resolve-message "id" #f))
+        (cons
+          "result"
+          (make-json-object
+            (list
+              (cons
+                "command"
+                (make-json-object
+                  (list
+                    (cons "title" "Resolved action")
+                    (cons "command" "soda.test.resolved")))))))))))
+(define resolved-code-action-message
+  (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload (car resolved-code-action-effects))))))
+(check
+  (and
+    (= (length resolved-code-action-effects) 1)
+    (string=?
+      (json-object-ref resolved-code-action-message "method" #f)
+      "workspace/executeCommand")
+    (string=?
+      (json-object-ref
+        (json-object-ref resolved-code-action-message "params" #f)
+        "command"
+        #f)
+      "soda.test.resolved"))
+  "resolved code action did not execute the server command")
 
 (define workspace-symbol-effects
   ((command-procedure (editor-command-registry editor) 'lsp.workspace-symbol)

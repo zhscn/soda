@@ -259,6 +259,10 @@ signature label。
 `lsp.document-symbols` 查询当前 document 的结构符号。层级 DocumentSymbol 与扁平
 SymbolInformation 都投影为 revision-tagged LocationList，并通过通用 xref 跳转。
 
+CodeAction picker 接受带 edit、command 或 data 的 action。只有 data 的 action 在选择后
+使用 `codeAction/resolve` 获取最终内容，并在原始 Buffer revision 与 LanguageSession
+仍有效时应用 edit 或执行 server command。
+
 ## Syntax provider
 
 provider contract：

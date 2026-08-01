@@ -117,7 +117,7 @@
             after-apply))
 
   (define-record-type lsp-code-action
-    (fields title kind raw))
+    (fields title kind raw resolved?))
 
   (define-record-type lsp-code-action-context
     (fields session view-id buffer-id revision actions))
@@ -2726,17 +2726,21 @@
       annotation-payload
       (lsp-code-action-diagnostics editor session buffer start end)))
 
-  (define (lsp-code-action-from-json value)
-    (and
-      (json-object? value)
-      (not (json-object-has-key? value "disabled"))
-      (let ([title (json-object-ref value "title" #f)]
-            [kind (json-object-ref value "kind" #f)])
-        (and (non-empty-string? title)
-             (make-lsp-code-action
-               title
-               (if (string? kind) kind "command")
-               value)))))
+  (define lsp-code-action-from-json
+    (case-lambda
+      [(value) (lsp-code-action-from-json value #f)]
+      [(value resolved?)
+       (and
+         (json-object? value)
+         (not (json-object-has-key? value "disabled"))
+         (let ([title (json-object-ref value "title" #f)]
+               [kind (json-object-ref value "kind" #f)])
+           (and (non-empty-string? title)
+                (make-lsp-code-action
+                  title
+                  (if (string? kind) kind "command")
+                  value
+                  resolved?))))]))
 
   (define (lsp-code-actions-from-result result)
     (if (json-array? result)
@@ -2815,6 +2819,21 @@
           (or (lsp-workspace-edits (json-object-ref raw "edit" #f)) 'invalid)
           'none)))
 
+  (define (lsp-code-action-resolve-supported? session)
+    (let ([provider
+            (json-object-ref
+              (lsp-client-session-capabilities session)
+              "codeActionProvider"
+              #f)])
+      (and (json-object? provider)
+           (eq? (json-object-ref provider "resolveProvider" #f) #t))))
+
+  (define (lsp-code-action-needs-resolution? action)
+    (and (not (lsp-code-action-resolved? action))
+         (json-object-has-key? (lsp-code-action-raw action) "data")
+         (eq? (lsp-code-action-workspace-edits action) 'none)
+         (not (lsp-code-action-command action))))
+
   (define (lsp-execute-server-command! editor session command title)
     (if (not (eq? (lsp-client-session-state session) 'ready))
         (begin
@@ -2837,10 +2856,45 @@
                   (string-append "Applied code action: " title))
                 '()))))))
 
+  (define (lsp-resolve-code-action! editor context action)
+    (let ([session (lsp-code-action-context-session context)])
+      (if (not (lsp-code-action-resolve-supported? session))
+          (begin
+            (editor-set-status-message!
+              editor "Language server cannot resolve this code action")
+            '())
+          (list
+            (session-request!
+              session
+              "codeAction/resolve"
+              (lsp-code-action-raw action)
+              (lambda (response-editor response-session result)
+                (if (and (eq? response-session session)
+                         (lsp-code-action-context-live?
+                           response-editor context))
+                    (let ([resolved
+                            (lsp-code-action-from-json
+                              (if (json-object? result)
+                                  (json-object-merge
+                                    result (lsp-code-action-raw action))
+                                  result)
+                              #t)])
+                      (if resolved
+                          (lsp-apply-code-action!
+                            response-editor context resolved)
+                          (begin
+                            (editor-set-status-message!
+                              response-editor
+                              "Language server returned an invalid code action")
+                            '())))
+                    '())))))))
+
   (define (lsp-apply-code-action! editor context action)
     (let ([edits (lsp-code-action-workspace-edits action)]
           [command (lsp-code-action-command action)])
       (cond
+        [(lsp-code-action-needs-resolution? action)
+         (lsp-resolve-code-action! editor context action)]
         [(eq? edits 'invalid)
          (editor-set-status-message!
            editor "Language server returned an unsupported code action edit")
