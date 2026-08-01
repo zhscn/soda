@@ -135,10 +135,59 @@
       "textDocument/didChange"))
   "buffer edits did not enqueue an LSP didChange notification")
 
-(define stop-effects (lsp-client-stop! editor session))
+(define updated-project
+  (make-project
+    'workspace
+    '("/workspace")
+    'manual 'updated #f
+    (make-project-settings-layer
+      '((language-server . clangd)
+        (compile-commands . "/workspace/build")))
+    '()))
+(editor-update-project! editor updated-project)
+(define reconcile-effects (editor-take-tui-effects! editor))
+(define (effect-method effect)
+  (and
+    (eq? (command-effect-kind effect) 'managed-process.write)
+    (json-object-ref
+      (car
+        (lsp-json-rpc-decode!
+          (make-lsp-json-rpc-decoder)
+          (managed-process-write-request-data
+            (command-effect-payload effect))))
+      "method"
+      #f)))
 (check
   (and
     (eq? (lsp-client-session-state session) 'stopping)
+    (member "textDocument/didClose" (map effect-method reconcile-effects))
+    (member "shutdown" (map effect-method reconcile-effects))
+    (member "initialize" (map effect-method reconcile-effects))
+    (exists
+      (lambda (effect)
+        (eq? (command-effect-kind effect) 'managed-process.start))
+      reconcile-effects))
+  "Project descriptor updates did not recreate the LSP workspace session")
+
+(define replacement-attachment
+  (car (editor-buffer-language-attachments editor (buffer-id source))))
+(define replacement-language-session
+  (language-session-registry-session-ref
+    (editor-language-session-registry editor)
+    (language-attachment-session-id replacement-attachment)))
+(define replacement-session
+  (editor-lsp-session-for-language-session editor replacement-language-session))
+(check
+  (and
+    replacement-session
+    (not (eq? replacement-session session))
+    (= (project-workspace-generation (lsp-client-session-workspace replacement-session)) 1))
+  "Project updates did not publish a new workspace snapshot to the replacement session")
+
+(define stop-effects (lsp-client-stop! editor replacement-session))
+(check
+  (and
+    (eq? (lsp-client-session-state replacement-session) 'stopping)
     (= (length stop-effects) 1)
     (string=?
       (json-object-ref

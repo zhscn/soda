@@ -12,7 +12,7 @@
 | LanguageSession registry、per-View attachment 与 provenance 路由 | 已实现 |
 | LanguageProfile bootstrap hook 与 home attachment 选择 | 已实现 |
 | ProjectWorkspace bootstrap snapshot 与 file-backed Buffer 归属解析 | 已实现 |
-| provider-specific session transport lifecycle | 未实现 |
+| LSP process transport、ProjectWorkspace bootstrap 与 full-text document synchronization | 已实现 |
 
 ## 分层
 
@@ -201,9 +201,11 @@ session bootstrap 只在初次关联时使用 resource 和 Project discovery：
 
 Project-backed provider 通过 `editor-project-workspace-for-buffer` 读取一次
 `ProjectWorkspace`。该值冻结 Project revision、具名 workspace folders 与声明式
-configuration，并可转换为 `LanguageSessionKey`。Project descriptor 更新由
-`project-registry-changed` 通知 transport；transport 根据新 workspace snapshot 决定发送
-workspace folder/configuration 变化或建立新 session。普通语义请求只携带 attachment，
+configuration，并可转换为 `LanguageSessionKey`。`language-server` Project setting 选择
+已注册的 server profile；缺省时使用唯一的语言 profile。Project descriptor 更新由
+`project-registry-changed` 通知 transport。identity 不变时 session 刷新 workspace
+snapshot 与 generation；identity 改变时 transport 关闭旧 documents，建立 replacement
+session，并恢复 Buffer attachment 和 View routing。普通语义请求只携带 attachment，
 不重新运行 Project discovery。
 
 `LanguageSessionKey` 对 workspace folders、configuration、environment fingerprint 和
