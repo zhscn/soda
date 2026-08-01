@@ -13,8 +13,8 @@
 | LanguageProfile bootstrap hook 与 home attachment 选择 | 已实现 |
 | ProjectWorkspace bootstrap snapshot 与 file-backed Buffer 归属解析 | 已实现 |
 | LSP process transport、ProjectWorkspace bootstrap 与 full-text document synchronization | 已实现 |
-| LSP diagnostics、completion text edits、hover、definition、references、rename 与 workspace/applyEdit | 已实现 |
-| LSP completion resolve、code actions 与 semantic tokens | 未实现 |
+| LSP diagnostics、completion text edits、hover、definition、references、rename、code actions 与 workspace/applyEdit | 已实现 |
+| LSP completion resolve 与 semantic tokens | 未实现 |
 
 ## 分层
 

@@ -103,7 +103,19 @@
     (fields resource range text))
 
   (define-record-type lsp-pending-workspace-edit
-    (fields view-id source-buffer-id source-revision edits resources description))
+    (fields view-id
+            source-buffer-id
+            source-revision
+            edits
+            resources
+            description
+            after-apply))
+
+  (define-record-type lsp-code-action
+    (fields title kind raw))
+
+  (define-record-type lsp-code-action-context
+    (fields session view-id buffer-id revision actions))
 
   (define editor-lsp-registries (make-eq-hashtable))
   (define pending-lsp-workspace-edits (make-weak-eq-hashtable))
@@ -1658,50 +1670,77 @@
                        (lsp-workspace-text-edit-text edit))
                      resolved)))))))
 
-  (define (lsp-apply-workspace-edits!
-            editor view-id source-buffer-id source-revision edits description)
-    (let ([source (editor-buffer-ref editor source-buffer-id)])
-      (if (not (= (buffer-revision source) source-revision))
-          (begin
-            (editor-set-status-message!
-              editor "Language-server workspace edit is stale")
-            '())
-          (let ([missing (lsp-workspace-edit-missing-resources editor edits)])
-            (if (pair? missing)
-                (begin
-                  (hashtable-set!
-                    pending-lsp-workspace-edits
-                    editor
-                    (make-lsp-pending-workspace-edit
-                      view-id source-buffer-id source-revision edits missing description))
-                  (editor-set-status-message!
-                    editor
-                    (string-append
-                      "Reading "
-                      (number->string (length missing))
-                      " workspace edit target"
-                      (if (= (length missing) 1) "" "s")))
-                  (map
-                    (lambda (resource)
-                      (make-command-effect
-                        'file.read (make-open-request #f resource 0)))
-                    missing))
-                (let ([resolved (lsp-resolve-workspace-edits editor edits)])
-                  (if (not resolved)
-                      (begin
-                        (editor-set-status-message!
-                          editor "Language-server workspace edit has invalid ranges")
-                        '())
-                      (begin
-                        (workspace-text-edits-apply! editor resolved)
-                        (editor-set-status-message!
-                          editor
-                          (string-append
-                            description
-                            " in "
-                            (number->string (length resolved))
-                            (if (= (length resolved) 1) " place" " places")))
-                        '()))))))))
+  (define lsp-apply-workspace-edits!
+    (case-lambda
+      [(editor view-id source-buffer-id source-revision edits description)
+       (lsp-apply-workspace-edits!
+         editor
+         view-id
+         source-buffer-id
+         source-revision
+         edits
+         description
+         (lambda (current-editor) '()))]
+      [(editor
+         view-id
+         source-buffer-id
+         source-revision
+         edits
+         description
+         after-apply)
+       (unless (procedure? after-apply)
+         (assertion-violation
+           'lsp-apply-workspace-edits!
+           "after-apply must be a procedure"
+           after-apply))
+       (let ([source (editor-buffer-ref editor source-buffer-id)])
+         (if (not (= (buffer-revision source) source-revision))
+             (begin
+               (editor-set-status-message!
+                 editor "Language-server workspace edit is stale")
+               '())
+             (let ([missing (lsp-workspace-edit-missing-resources editor edits)])
+               (if (pair? missing)
+                   (begin
+                     (hashtable-set!
+                       pending-lsp-workspace-edits
+                       editor
+                       (make-lsp-pending-workspace-edit
+                         view-id
+                         source-buffer-id
+                         source-revision
+                         edits
+                         missing
+                         description
+                         after-apply))
+                     (editor-set-status-message!
+                       editor
+                       (string-append
+                         "Reading "
+                         (number->string (length missing))
+                         " workspace edit target"
+                         (if (= (length missing) 1) "" "s")))
+                     (map
+                       (lambda (resource)
+                         (make-command-effect
+                           'file.read (make-open-request #f resource 0)))
+                       missing))
+                   (let ([resolved (lsp-resolve-workspace-edits editor edits)])
+                     (if (not resolved)
+                         (begin
+                           (editor-set-status-message!
+                             editor "Language-server workspace edit has invalid ranges")
+                           '())
+                         (begin
+                           (workspace-text-edits-apply! editor resolved)
+                           (editor-set-status-message!
+                             editor
+                             (string-append
+                               description
+                               " in "
+                               (number->string (length resolved))
+                               (if (= (length resolved) 1) " place" " places")))
+                           (after-apply editor))))))))]))
 
   (define (lsp-after-open-result context arguments effects)
     (let* ([editor (command-context-editor context)]
@@ -1720,13 +1759,295 @@
              (lsp-workspace-edit-missing-resources
                editor (lsp-pending-workspace-edit-edits pending)))
            (hashtable-delete! pending-lsp-workspace-edits editor)
-           (lsp-apply-workspace-edits!
-             editor
-             (lsp-pending-workspace-edit-view-id pending)
-             (lsp-pending-workspace-edit-source-buffer-id pending)
-             (lsp-pending-workspace-edit-source-revision pending)
-             (lsp-pending-workspace-edit-edits pending)
-             (lsp-pending-workspace-edit-description pending))]))))
+           (let ([follow-up-effects
+                   (lsp-apply-workspace-edits!
+                     editor
+                     (lsp-pending-workspace-edit-view-id pending)
+                     (lsp-pending-workspace-edit-source-buffer-id pending)
+                     (lsp-pending-workspace-edit-source-revision pending)
+                     (lsp-pending-workspace-edit-edits pending)
+                     (lsp-pending-workspace-edit-description pending)
+                     (lsp-pending-workspace-edit-after-apply pending))])
+             (when (pair? follow-up-effects)
+               (editor-queue-tui-effects! editor follow-up-effects)))]))))
+
+  (define (lsp-code-action-range view)
+    (let* ([point (view-caret view)]
+           [mark (and (view-mark-active? view) (view-mark view))])
+      (if mark
+          (cons (min point mark) (max point mark))
+          (cons point point))))
+
+  (define (lsp-code-action-diagnostics editor session buffer start end)
+    (let ([namespace (session-diagnostic-namespace session)]
+          [revision (buffer-revision buffer)])
+      (fold-right
+        append
+        '()
+        (map
+          (lambda (set)
+            (if (and (eq? (annotation-set-namespace set) namespace)
+                     (not (annotation-set-stale? set revision)))
+                (filter
+                  (lambda (annotation)
+                    (and (eq? (annotation-kind annotation) 'diagnostic)
+                         (json-object? (annotation-payload annotation))
+                         (<= (annotation-start annotation) end)
+                         (<= start (annotation-end annotation))))
+                  (annotation-set-annotations set))
+                '()))
+          (editor-annotation-sets-for-buffer editor (buffer-id buffer))))))
+
+  (define (lsp-code-action-diagnostic-payloads
+            editor session buffer start end)
+    (map
+      annotation-payload
+      (lsp-code-action-diagnostics editor session buffer start end)))
+
+  (define (lsp-code-action-from-json value)
+    (and
+      (json-object? value)
+      (not (json-object-has-key? value "disabled"))
+      (let ([title (json-object-ref value "title" #f)]
+            [kind (json-object-ref value "kind" #f)])
+        (and (non-empty-string? title)
+             (make-lsp-code-action
+               title
+               (if (string? kind) kind "command")
+               value)))))
+
+  (define (lsp-code-actions-from-result result)
+    (if (json-array? result)
+        (let loop ([remaining (json-array-values result)] [actions '()])
+          (if (null? remaining)
+              (reverse actions)
+              (let ([action (lsp-code-action-from-json (car remaining))])
+                (loop
+                  (cdr remaining)
+                  (if action (cons action actions) actions)))))
+        '()))
+
+  (define (lsp-code-action-choice-source actions)
+    (let ([items
+            (map
+              (lambda (action)
+                (make-completion-item
+                  (lsp-code-action-title action)
+                  'lsp-code-action
+                  (lsp-code-action-title action)
+                  (lsp-code-action-title action)
+                  (lsp-code-action-title action)
+                  (lsp-code-action-kind action)
+                  "LSP"
+                  action))
+              actions)])
+      (make-choice-source
+        'lsp-code-action
+        '((category . lsp-code-action)
+          (styles . (fzf))
+          (preselect . #t))
+        (lambda (input point) (cons 0 (string-length input)))
+        (lambda (query) items)
+        (lambda (value)
+          (exists
+            (lambda (action)
+              (string=? value (lsp-code-action-title action)))
+            actions))
+        (lambda (generation) #f))))
+
+  (define (lsp-code-action-context-live? editor context)
+    (and
+      (lsp-code-action-context? context)
+      (eq? editor
+           (guard (condition [else #f])
+             (let ([buffer
+                     (editor-buffer-ref
+                       editor (lsp-code-action-context-buffer-id context))])
+               (and
+                 (= (buffer-revision buffer)
+                    (lsp-code-action-context-revision context))
+                 editor))))
+      (eq? (lsp-client-session-state (lsp-code-action-context-session context))
+           'ready)))
+
+  (define (lsp-command-object value)
+    (and
+      (json-object? value)
+      (let ([name (json-object-ref value "command" #f)]
+            [arguments (json-object-ref value "arguments" json-null)])
+        (and (non-empty-string? name)
+             (or (eq? arguments json-null) (json-array? arguments))
+             value))))
+
+  (define (lsp-code-action-command action)
+    (let* ([raw (lsp-code-action-raw action)]
+           [value (json-object-ref raw "command" #f)])
+      (cond
+        [(json-object? value) (lsp-command-object value)]
+        [(string? value) (lsp-command-object raw)]
+        [else #f])))
+
+  (define (lsp-code-action-workspace-edits action)
+    (let ([raw (lsp-code-action-raw action)])
+      (if (json-object-has-key? raw "edit")
+          (or (lsp-workspace-edits (json-object-ref raw "edit" #f)) 'invalid)
+          'none)))
+
+  (define (lsp-execute-server-command! editor session command title)
+    (if (not (eq? (lsp-client-session-state session) 'ready))
+        (begin
+          (editor-set-status-message! editor "Language server is no longer ready")
+          '())
+        (let ([arguments (json-object-ref command "arguments" json-null)])
+          (list
+            (session-request!
+              session
+              "workspace/executeCommand"
+              (make-json-object
+                (append
+                  (list (cons "command" (json-object-ref command "command" #f)))
+                  (if (json-array? arguments)
+                      (list (cons "arguments" arguments))
+                      '())))
+              (lambda (response-editor response-session result)
+                (editor-set-status-message!
+                  response-editor
+                  (string-append "Applied code action: " title))
+                '()))))))
+
+  (define (lsp-apply-code-action! editor context action)
+    (let ([edits (lsp-code-action-workspace-edits action)]
+          [command (lsp-code-action-command action)])
+      (cond
+        [(eq? edits 'invalid)
+         (editor-set-status-message!
+           editor "Language server returned an unsupported code action edit")
+         '()]
+        [(and (eq? edits 'none) (not command))
+         (editor-set-status-message!
+           editor "Language server returned an empty code action")
+         '()]
+        [(eq? edits 'none)
+         (lsp-execute-server-command!
+           editor
+           (lsp-code-action-context-session context)
+           command
+           (lsp-code-action-title action))]
+        [(null? edits)
+         (if command
+             (lsp-execute-server-command!
+               editor
+               (lsp-code-action-context-session context)
+               command
+               (lsp-code-action-title action))
+             (begin
+               (editor-set-status-message!
+                 editor "Code action has no document changes")
+               '()))]
+        [else
+         (lsp-apply-workspace-edits!
+           editor
+           (lsp-code-action-context-view-id context)
+           (lsp-code-action-context-buffer-id context)
+           (lsp-code-action-context-revision context)
+           edits
+           (string-append "Applied code action: " (lsp-code-action-title action))
+           (lambda (current-editor)
+             (if command
+                 (lsp-execute-server-command!
+                   current-editor
+                   (lsp-code-action-context-session context)
+                   command
+                   (lsp-code-action-title action))
+                 '())))])))
+
+  (define (lsp-request-code-actions! editor)
+    (let* ([view (editor-active-view editor)]
+           [buffer (view-buffer view)]
+           [session (active-view-lsp-session editor)]
+           [document (and session (find-document session (buffer-id buffer)))]
+           [range (lsp-code-action-range view)]
+           [start (lsp-buffer-position-at buffer (car range))]
+           [end (lsp-buffer-position-at buffer (cdr range))])
+      (if (and session
+               document
+               start
+               end
+               (eq? (lsp-client-session-state session) 'ready))
+          (let ([source-revision (buffer-revision buffer)])
+            (list
+              (session-request!
+                session
+                "textDocument/codeAction"
+                (make-json-object
+                  (list
+                    (cons "textDocument"
+                          (make-json-object
+                            (list (cons "uri" (lsp-client-document-uri document)))))
+                    (cons "range"
+                          (make-json-object
+                            (list
+                              (cons "start" (lsp-position->json start))
+                              (cons "end" (lsp-position->json end)))))
+                    (cons "context"
+                          (make-json-object
+                            (list
+                              (cons
+                                "diagnostics"
+                                (make-json-array
+                                  (lsp-code-action-diagnostic-payloads
+                                    editor
+                                    session
+                                    buffer
+                                    (car range)
+                                    (cdr range)))))))))
+                (lambda (response-editor response-session result)
+                  (let ([actions (lsp-code-actions-from-result result)])
+                    (if (or (not (= (buffer-revision buffer) source-revision))
+                            (not (eq? response-session session)))
+                        '()
+                        (if (null? actions)
+                            (begin
+                              (editor-set-status-message!
+                                response-editor "No code actions")
+                              '())
+                            (begin
+                              (editor-open-prompt!
+                                response-editor
+                                (make-completing-prompt-request
+                                  "Code action: "
+                                  ""
+                                  'lsp-code-action
+                                  (lsp-code-action-title (car actions))
+                                  'must-match
+                                  (lsp-code-action-choice-source actions)
+                                  'lsp.apply-code-action
+                                  #f
+                                  (make-lsp-code-action-context
+                                    session
+                                    (view-id view)
+                                    (buffer-id buffer)
+                                    source-revision
+                                    actions)))
+                              '()))))))))
+          (begin
+            (editor-set-status-message! editor "No ready language server at point")
+            '()))))
+
+  (define (lsp-apply-code-action-command context)
+    (let* ([editor (command-context-editor context)]
+           [result (command-context-argument context)]
+           [candidate
+             (and (prompt-result? result) (prompt-result-candidate result))]
+           [action
+             (and candidate
+                  (completion-item-payload candidate))]
+           [saved
+             (and (prompt-result? result) (prompt-result-data result))])
+      (if (and (lsp-code-action? action)
+               (lsp-code-action-context-live? editor saved))
+          (lsp-apply-code-action! editor saved action)
+          '())))
 
   (define (lsp-rename-reader)
     (make-interactive-reader
@@ -1804,6 +2125,13 @@
         'lsp.find-references
         (lambda (context) (lsp-find-references! (command-context-editor context)))
         "Find language-server references at point."))
+    (editor-register-command!
+      editor
+      (make-interactive-context-command
+        'lsp.code-actions
+        (lambda (context)
+          (lsp-request-code-actions! (command-context-editor context)))
+        "Select and apply a language-server code action for the region or point."))
     (let ([implementation
             (lambda (context new-name)
               (lsp-rename! (command-context-editor context) new-name))])
@@ -1837,6 +2165,12 @@
                     (command-context-editor context) "No language server is active")
                   '()))))
         "Stop the language server selected by the active view."))
+    (editor-register-internal-command!
+      editor
+      (make-internal-context-command
+        'lsp.apply-code-action
+        lsp-apply-code-action-command
+        "Apply the language-server code action selected by the minibuffer."))
     (editor-register-internal-command!
       editor
       (make-internal-context-command

@@ -8,6 +8,7 @@
         (soda editor language-session)
         (soda editor lsp-client)
         (soda editor lsp-json-rpc)
+        (soda editor prompt)
         (soda editor project)
         (soda editor project-workspace)
         (soda editor state)
@@ -552,6 +553,112 @@
       (buffer-bytes rename-target)
       (string->utf8 "int Server;\n")))
   "workspace/applyEdit did not apply a server workspace edit")
+
+(define code-action-effects
+  (editor-execute-command! editor 'lsp.code-actions))
+(check
+  (and (= (length code-action-effects) 1)
+       (eq? (command-effect-kind (car code-action-effects))
+            'managed-process.write))
+  "code-actions did not issue an LSP request"
+  code-action-effects)
+(define code-action-message
+  (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload (car code-action-effects))))))
+(check
+  (and
+    (string=? (json-object-ref code-action-message "method" #f)
+              "textDocument/codeAction")
+    (json-array?
+      (json-object-ref
+        (json-object-ref
+          (json-object-ref code-action-message "params" #f)
+          "context"
+          #f)
+        "diagnostics"
+        #f)))
+  "code-actions request has an invalid LSP payload")
+(define code-action-edit
+  (make-json-object
+    (list
+      (cons "changes"
+            (make-json-object
+              (list
+                (cons "file:///workspace/src/other.cpp"
+                      (make-json-array
+                        (list
+                          (make-json-object
+                            (list (cons "range" rename-target-range)
+                                  (cons "newText" "Action"))))))))))))
+(define code-action-result
+  (make-json-array
+    (list
+      (make-json-object
+        (list
+          (cons "title" "Replace Server")
+          (cons "kind" "quickfix")
+          (cons "edit" code-action-edit)
+          (cons "command"
+                (make-json-object
+                  (list
+                    (cons "title" "Notify server")
+                    (cons "command" "soda.test.notify")
+                    (cons "arguments" (make-json-array (list "Action")))))))))))
+(lsp-client-handle-json-message!
+  editor session
+  (make-json-object
+    (list
+      (cons "jsonrpc" "2.0")
+      (cons "id" (json-object-ref code-action-message "id" #f))
+      (cons "result" code-action-result))))
+(define code-action-prompt (editor-active-prompt editor))
+(check
+  (and code-action-prompt
+       (string=?
+         (prompt-request-prompt (prompt-session-request code-action-prompt))
+         "Code action: "))
+  "code action response did not open an action selector")
+(define code-action-reply (editor-accept-prompt! editor))
+(define code-action-apply-effects
+  (editor-update!
+    editor
+    (make-internal-command-message
+      (prompt-reply-command code-action-reply)
+      (prompt-reply-result code-action-reply))))
+(define code-action-messages
+  (map
+    (lambda (effect)
+      (car
+        (lsp-json-rpc-decode!
+          (make-lsp-json-rpc-decoder)
+          (managed-process-write-request-data
+            (command-effect-payload effect)))))
+    (filter
+      (lambda (effect)
+        (eq? (command-effect-kind effect) 'managed-process.write))
+      code-action-apply-effects)))
+(check
+  (and
+    (exists
+      (lambda (message)
+        (and
+          (string=?
+            (json-object-ref message "method" #f)
+            "workspace/executeCommand")
+          (string=?
+            (json-object-ref
+              (json-object-ref message "params" #f)
+              "command"
+              #f)
+            "soda.test.notify")))
+      code-action-messages)
+    (bytevector=?
+      (buffer-bytes rename-target)
+      (string->utf8 "int Action;\n")))
+  "code action did not apply its edit before executing its command")
 
 (define lsp-reference-effects
   (editor-execute-command! editor 'lsp.find-references))
