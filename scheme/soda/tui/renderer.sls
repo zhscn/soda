@@ -2550,8 +2550,54 @@
               tree root-context frame)
             frame)))))
 
+  (define (render-sole-host-frame editor rows columns)
+    (unless (and (integer? rows) (exact? rows) (positive? rows)
+                 (integer? columns) (exact? columns) (positive? columns))
+      (assertion-violation
+        'render-editor-frame
+        "sole-host frame dimensions must be positive"
+        rows columns))
+    (let* ([view (editor-active-view editor)]
+           [buffer (view-buffer view)]
+           [presentation (buffer-presentation buffer)]
+           [leaf (editor-window-for-view editor (view-id view))]
+           [rectangle (make-rect 0 0 rows columns)]
+           [frame (make-frame rows columns)])
+      (unless (and leaf (tui-presentation? presentation))
+        (assertion-violation
+          'render-editor-frame
+          "sole host requires an active TUI application View"
+          (buffer-resource buffer)))
+      (call-with-view-render-context
+        editor view #t
+        (lambda (context)
+          (let* ([window-id
+                   (window-component-id
+                     "editor.window." (window-leaf-id leaf))]
+                 [window-component
+                   (make-component
+                     window-id
+                     (lambda (ignored target ignored-rectangle)
+                       (render-text-component!
+                         context target rectangle)))]
+                 [text-node
+                   (make-component-node
+                     'editor.text rectangle #f '())]
+                 [window-node
+                   (make-component-node
+                     window-id rectangle window-component
+                     (list text-node))]
+                 [tree
+                   (make-component-node
+                     'editor.root rectangle #f (list window-node))])
+            (frame-set-layout! frame tree)
+            (component-node-render! tree context frame)
+            frame)))))
+
   (define (render-editor-frame editor rows columns)
-    (if (null? (cdr (editor-window-leaves editor)))
-        (render-single-editor-frame editor rows columns)
-        (render-multi-window-frame editor rows columns)))
+    (if (eq? (editor-global-setting-ref editor 'tui-host-mode) 'sole)
+        (render-sole-host-frame editor rows columns)
+        (if (null? (cdr (editor-window-leaves editor)))
+            (render-single-editor-frame editor rows columns)
+            (render-multi-window-frame editor rows columns))))
 )

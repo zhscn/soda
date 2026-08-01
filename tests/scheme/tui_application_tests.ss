@@ -684,5 +684,30 @@
          'timer))
   "restoring a serialized session must use durable view state and fresh resume commands")
 
+(editor-set-global-setting! editor 'tui-host-mode 'sole)
+(define sole-host-frame (render-editor-frame editor 4 20))
+(define sole-host-text-node
+  (component-node-find (frame-layout sole-host-frame) 'editor.text))
+(check
+  (and
+    sole-host-text-node
+    (= (rect-rows (component-node-rect sole-host-text-node)) 4)
+    (not (component-node-find
+           (frame-layout sole-host-frame)
+           'editor.modeline)))
+  "sole host must give one application View the full terminal without chrome")
+(define sole-host-quit-effects
+  (editor-update!
+    editor
+    (make-key-message
+      (make-key-event
+        'character (char->integer #\g) #f #f 4
+        'press (make-bytevector 0)))))
+(check
+  (exists
+    (lambda (effect) (eq? (command-effect-kind effect) 'quit))
+    sole-host-quit-effects)
+  "the sole-host C-g escape path must terminate the shared command loop")
+
 (editor-close! editor)
 (display "tui application tests passed\n")

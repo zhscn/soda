@@ -1903,6 +1903,8 @@
     (let ([editor (command-context-editor context)]
           [view (command-context-view context)])
       (cond
+        [(eq? (editor-global-setting-ref editor 'tui-host-mode) 'sole)
+         (list (make-command-effect 'quit #f))]
         [(editor-active-prompt editor)
          (let ([reply (editor-abort-prompt! editor)])
            (if reply

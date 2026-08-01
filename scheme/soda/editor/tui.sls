@@ -1,5 +1,5 @@
 (library (soda editor tui)
-  (export run-tui-editor render-editor-frame)
+  (export run-tui-editor run-sole-tui-application render-editor-frame)
   (import (rnrs)
           (only (chezscheme) current-directory)
           (soda document)
@@ -772,4 +772,31 @@
                         runtime editor save-place-path))
                     (guard (condition [else #f])
                       (persist-workbench-session!
-                        runtime editor workbench-session-path))))))))))))
+                        runtime editor workbench-session-path)))))))))))
+
+  (define (run-sole-tui-application definition arguments)
+    (unless (tui-application-definition? definition)
+      (assertion-violation
+        'run-sole-tui-application
+        "expected a TuiApplicationDefinition"
+        definition))
+    (call-with-runtime
+      (lambda (runtime)
+        (call-with-editor
+          (make-bytevector 0)
+          "*sole-host*"
+          #f
+          #f
+          (lambda (editor)
+            (editor-register-tui-application! editor definition)
+            (editor-set-global-setting! editor 'tui-host-mode 'sole)
+            (tui-open!
+              editor
+              (tui-application-definition-name definition)
+              arguments
+              'edit
+              (view-id (editor-active-view editor)))
+            (call-with-terminal
+              (lambda (terminal)
+                (run-editor-session runtime terminal editor))))))))
+)

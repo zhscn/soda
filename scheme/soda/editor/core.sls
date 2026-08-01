@@ -1659,6 +1659,12 @@
           "Whether a modified buffer participates in exit confirmation."
           'chrome)
         (make-setting-definition
+          'tui-host-mode
+          'embedded
+          (lambda (value) (and (memq value '(embedded sole)) #t))
+          "Terminal host layout used for editor and application Views."
+          'chrome)
+        (make-setting-definition
           'completion-providers
           '()
           symbol-list?
