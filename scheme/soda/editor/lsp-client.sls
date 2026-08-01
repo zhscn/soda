@@ -38,12 +38,14 @@
           (soda editor condition)
           (soda editor effect)
           (soda editor event)
+          (soda editor file)
           (soda editor language)
           (soda editor language-session)
           (soda editor lsp-json-rpc)
           (soda editor lsp-position)
           (soda editor lsp-protocol)
           (soda editor managed-process)
+          (soda editor navigation)
           (soda editor project)
           (soda editor project-workspace)
           (soda editor state)
@@ -1118,6 +1120,61 @@
           (or (hover-text result) "No hover information"))
         '())))
 
+  (define (lsp-first-location value)
+    (cond
+      [(json-array? value)
+       (and (pair? (json-array-values value)) (car (json-array-values value)))]
+      [(json-object? value) value]
+      [else #f]))
+
+  (define (lsp-jump-to-location! editor view location)
+    (guard (condition [else '()])
+      (let* ([uri (or (json-object-ref location "uri" #f)
+                      (json-object-ref location "targetUri" #f))]
+             [range (or (json-object-ref location "range" #f)
+                        (json-object-ref location "targetSelectionRange" #f))]
+             [path (and (string? uri) (lsp-uri-file-path uri))]
+             [lsp-range (lsp-range-from-json range)]
+             [buffer (and path (editor-buffer-for-resource editor path))]
+             [context (editor-view-resource-context editor (view-id view))])
+        (if buffer
+            (let ([offset
+                    (lsp-buffer-offset-at buffer (lsp-range-start lsp-range))])
+              (if offset
+                  (begin
+                    (editor-jump-to-buffer! editor buffer offset 'definition context)
+                    '())
+                  '()))
+            (if path
+                (begin
+                  (editor-begin-async-jump! editor view path 'definition)
+                  (list
+                    (make-command-effect
+                      'file.read
+                      (make-open-request
+                        (view-id view)
+                        path
+                        (make-file-source-position
+                          (lsp-position-line (lsp-range-start lsp-range))
+                          (lsp-position-character (lsp-range-start lsp-range)))
+                        'jump
+                        context))))
+                '())))))
+
+  (define (lsp-find-definition! editor)
+    (let ([view (editor-active-view editor)])
+      (lsp-request-at-active-point!
+        editor
+        "textDocument/definition"
+        (lambda (response-editor response-session result)
+          (let ([location (lsp-first-location result)])
+            (if location
+                (lsp-jump-to-location! response-editor view location)
+                (begin
+                  (editor-set-status-message! response-editor "No definition found")
+                  '())))))))
+
+
   (define (install-lsp-commands! editor)
     (editor-add-hook!
       editor
@@ -1133,6 +1190,12 @@
         (lambda (request)
           (list (make-internal-command-message 'lsp.completion-request request)))
         (lambda (request) #f)))
+    (editor-register-command!
+      editor
+      (make-interactive-context-command
+        'lsp.find-definition
+        (lambda (context) (lsp-find-definition! (command-context-editor context)))
+        "Jump to the language-server definition at point."))
     (editor-register-command!
       editor
       (make-interactive-context-command
