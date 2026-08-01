@@ -2213,7 +2213,7 @@
       [(string=? type "decorator") 'attribute]
       [else 'default]))
 
-  (define (semantic-token-annotations buffer types data)
+  (define (semantic-token-annotations text-map types data)
     (and
       (list? types)
       (json-array? data)
@@ -2252,12 +2252,12 @@
                             (+ character delta-start)
                             delta-start)]
                       [start
-                        (lsp-buffer-offset-at
-                          buffer
+                        (lsp-text-map-offset-at
+                          text-map
                           (make-lsp-position next-line next-character))]
                       [end
-                        (lsp-buffer-offset-at
-                          buffer
+                        (lsp-text-map-offset-at
+                          text-map
                           (make-lsp-position
                             next-line (+ next-character token-length)))])
                  (if (or (not start) (not end))
@@ -2288,7 +2288,7 @@
         (let ([annotations
                 (and (json-object? result)
                      (semantic-token-annotations
-                       buffer
+                       (lsp-buffer-text-map buffer)
                        (semantic-token-types session)
                        (json-object-ref result "data" #f)))])
           (when annotations
