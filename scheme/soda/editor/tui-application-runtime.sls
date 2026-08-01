@@ -18,7 +18,9 @@
           tui-route-pointer-event
           tui-mouse-capability-active?
           tui-ensure-session-text-projection!
-          tui-ensure-buffer-text-projection!)
+          tui-ensure-buffer-text-projection!
+          tui-focused-accessibility
+          tui-focused-copy-bytes)
   (import (rnrs)
           (soda document)
           (soda editor buffer)

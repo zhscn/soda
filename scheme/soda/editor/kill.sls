@@ -3,6 +3,7 @@
           editor-record-kill!
           editor-current-kill
           editor-copy-buffer-target!
+          editor-copy-focused-application!
           editor-kill-buffer-target!
           editor-yank!
           editor-yank-pop!)
@@ -252,6 +253,17 @@
               bytes
               direction)
             bytes)))))
+
+  (define (editor-copy-focused-application! editor view)
+    (require-open-editor 'editor-copy-focused-application! editor)
+    (unless (view? view)
+      (assertion-violation
+        'editor-copy-focused-application! "expected a View" view))
+    (let ([bytes (tui-focused-copy-bytes editor (view-id view))])
+      (and bytes
+           (begin
+             (editor-record-kill! editor bytes 'forward)
+             bytes))))
 
   (define (editor-kill-buffer-target! editor buffer target)
     (require-open-editor 'editor-kill-buffer-target! editor)

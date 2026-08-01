@@ -207,6 +207,8 @@
           tui-view-state-transient-state
           tui-view-state-cursor
           tui-view-state-pointer-capture
+          tui-view-state-surface-cache-key
+          tui-view-state-surface-cache
           make-tui-message
           tui-message?
           tui-message-session-id
@@ -308,6 +310,8 @@
           tui-restore-session-view-states!
           tui-ensure-session-text-projection!
           tui-ensure-buffer-text-projection!
+          tui-focused-accessibility
+          tui-focused-copy-bytes
           tui-session-snapshot?
           tui-session-snapshot-application-name
           tui-session-snapshot-buffer-resource
@@ -346,6 +350,8 @@
           tui-accessibility-label
           tui-accessibility-value
           tui-accessibility-description
+          tui-accessibility-selection
+          tui-accessibility-copy-value
           tui-accessibility-commands
           tui-accessibility-keymap
           make-tui-node
@@ -361,6 +367,8 @@
           tui-node-accessibility
           tui-node-with-layout
           tui-node-with-focus
+          tui-node-with-accessibility
+          tui-node-find
           tui-text
           tui-styled-text
           tui-row
@@ -798,6 +806,7 @@
           editor-record-kill!
           editor-current-kill
           editor-copy-buffer-target!
+          editor-copy-focused-application!
           editor-kill-buffer-target!
           editor-yank!
           editor-yank-pop!

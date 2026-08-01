@@ -12,7 +12,8 @@
   (define copy-target-reader
     (make-command-target-reader
       'clipboard-copy-target
-      (make-command-target-selector 'require #f #f)))
+      (make-command-target-selector
+        'prefer #t command-context-point-target)))
 
   (define paste-target-reader
     (make-command-target-reader
@@ -29,7 +30,10 @@
       (unless (command-target-current? target buffer)
         (editor-user-error
           'clipboard.copy-region "The clipboard target is stale"))
-      (let ([bytes (editor-copy-buffer-target! editor buffer target)])
+      (let ([bytes
+              (if (command-target-empty? target)
+                  (editor-copy-focused-application! editor view)
+                  (editor-copy-buffer-target! editor buffer target))])
         (if (not bytes)
             (begin
               (editor-set-status-message! editor "Region is empty")

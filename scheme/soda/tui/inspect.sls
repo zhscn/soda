@@ -13,6 +13,7 @@
           character-description-component-path
           character-description-session-id
           character-description-node-key
+          character-description-accessibility
           character-description-local-row
           character-description-local-column
           character-description-faces
@@ -42,6 +43,7 @@
             component-path
             session-id
             node-key
+            accessibility
             local-row
             local-column
             faces
@@ -231,6 +233,18 @@
                       (application-source cell session-id)))]
            [resolved-node-key
              (or node-key (and source (cell-source-detail source)))]
+           [accessibility
+             (let* ([surface
+                      (and view-state
+                           (tui-view-state-surface-cache view-state))]
+                    [arranged
+                      (and surface resolved-node-key
+                           (tui-arranged-node-find
+                             (tui-surface-arranged-tree surface)
+                             resolved-node-key))])
+               (and arranged
+                    (tui-node-accessibility
+                      (tui-arranged-node-node arranged))))]
            [text (and cell (cell-text cell))]
            [character
              (and text
@@ -246,6 +260,7 @@
         (map component-node-id path)
         session-id
         resolved-node-key
+        accessibility
         (and leaf row (- row (rect-row (component-node-rect leaf))))
         (and leaf column (- column (rect-column (component-node-rect leaf))))
         (if cell (cell-faces cell) '(application))
@@ -309,7 +324,7 @@
                     visible-row screen-column
                     (and cell (cell-text cell))
                     component-path
-                    #f #f #f #f
+                    #f #f #f #f #f
                     (if cell (cell-faces cell) '(default))
                     (if cell (cell-style cell) default-style)
                     (if cell (cell-sources cell) '()))))
@@ -381,6 +396,21 @@
           (string-append "/" (value->string (cell-source-detail source)))
           "")))
 
+  (define (accessibility->string metadata)
+    (if (not metadata)
+        ""
+        (string-append
+          "; accessibility role="
+          (value->string (tui-accessibility-role metadata))
+          " label="
+          (value->string (tui-accessibility-label metadata))
+          " value="
+          (value->string (tui-accessibility-value metadata))
+          " selection="
+          (value->string (tui-accessibility-selection metadata))
+          " commands="
+          (value->string (tui-accessibility-commands metadata)))))
+
   (define (character-description->string value)
     (unless (character-description? value)
       (assertion-violation
@@ -423,6 +453,11 @@
                            0)
                          1)))
                   "unknown"))
+            "")
+        (accessibility->string
+          (character-description-accessibility value))
+        (if (character-description-session-id value)
+            ""
             (string-append
               "; byte "
               (number->string (character-description-position value))

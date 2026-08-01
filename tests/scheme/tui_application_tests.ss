@@ -136,9 +136,19 @@
       (tui-row
         'counter.root
         (list
-          (tui-node-with-focus
-            (tui-text 'counter.value (number->string model))
-            (make-tui-focus #t 'counter 0 #t))
+          (tui-node-with-accessibility
+            (tui-node-with-focus
+              (tui-text 'counter.value (number->string model))
+              (make-tui-focus #t 'counter 0 #t))
+            (make-tui-accessibility
+              'value
+              "Counter value"
+              (number->string model)
+              "Current counter value"
+              #f
+              (number->string model)
+              '(edit.copy-region)
+              #f))
           (tui-node-with-focus
             (tui-text 'counter.action "x")
             (make-tui-focus #t 'counter 1 #t)))))
@@ -279,6 +289,14 @@
        (tui-session-id session))
     (eq? (character-description-node-key application-description)
          'counter.value)
+    (let ([metadata
+            (character-description-accessibility
+              application-description)])
+      (and metadata
+           (eq? (tui-accessibility-role metadata) 'value)
+           (string=?
+             (tui-accessibility-label metadata)
+             "Counter value")))
     (= (character-description-screen-row application-description) 0)
     (= (character-description-screen-column application-description) 0)
     (= (character-description-local-row application-description) 0)
@@ -298,6 +316,13 @@
       (character-description-sources application-description))
     (string? (character-description->string application-description)))
   "describe-caret must expose the focused application component")
+(editor-update!
+  editor
+  (make-command-message 'edit.copy-region #f))
+(check
+  (and (string=? (utf8->string (editor-current-kill editor)) "41")
+       (string=? (editor-status-message editor) "Component copied"))
+  "copy-region must prefer the focused component's semantic copy value")
 (define pointer-press-message
   (tui-route-pointer-event
     editor

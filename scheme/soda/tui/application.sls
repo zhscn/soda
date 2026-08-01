@@ -25,6 +25,8 @@
           tui-accessibility-label
           tui-accessibility-value
           tui-accessibility-description
+          tui-accessibility-selection
+          tui-accessibility-copy-value
           tui-accessibility-commands
           tui-accessibility-keymap
           make-tui-node
@@ -40,6 +42,8 @@
           tui-node-accessibility
           tui-node-with-layout
           tui-node-with-focus
+          tui-node-with-accessibility
+          tui-node-find
           tui-text
           tui-styled-text
           tui-row
@@ -172,8 +176,46 @@
         focusable? group order enabled?))
     (%make-tui-focus focusable? group order enabled?))
 
-  (define-record-type tui-accessibility
-    (fields role label value description commands keymap))
+  (define-record-type
+    (tui-accessibility %make-tui-accessibility tui-accessibility?)
+    (fields role label value description selection copy-value commands keymap))
+
+  (define make-tui-accessibility
+    (case-lambda
+      [(role label value description commands keymap)
+       (make-tui-accessibility
+         role label value description #f #f commands keymap)]
+      [(role label value description selection copy-value commands keymap)
+       (unless (or (not role) (symbol? role))
+         (assertion-violation
+           'make-tui-accessibility "role must be a symbol or #f" role))
+       (for-each
+         (lambda (entry)
+           (unless (or (not (cdr entry)) (string? (cdr entry)))
+             (assertion-violation
+               'make-tui-accessibility
+               "text metadata must be a string or #f"
+               (car entry)
+               (cdr entry))))
+         (list
+           (cons 'label label)
+           (cons 'value value)
+           (cons 'description description)
+           (cons 'selection selection)))
+       (unless (or (not copy-value)
+                   (string? copy-value)
+                   (bytevector? copy-value))
+         (assertion-violation
+           'make-tui-accessibility
+           "copy value must be a string, bytevector, or #f"
+           copy-value))
+       (unless (and (list? commands) (for-all symbol? commands))
+         (assertion-violation
+           'make-tui-accessibility
+           "commands must contain symbols"
+           commands))
+       (%make-tui-accessibility
+         role label value description selection copy-value commands keymap)]))
 
   (define-record-type
     (tui-node %make-tui-node tui-node?)
@@ -249,6 +291,37 @@
       (assertion-violation
         'tui-node-with-focus "expected a TuiNode" node))
     (rebuild-node node (tui-node-layout node) focus))
+
+  (define (tui-node-with-accessibility node accessibility)
+    (unless (tui-node? node)
+      (assertion-violation
+        'tui-node-with-accessibility "expected a TuiNode" node))
+    (unless (or (not accessibility) (tui-accessibility? accessibility))
+      (assertion-violation
+        'tui-node-with-accessibility
+        "expected accessibility metadata or #f"
+        accessibility))
+    (make-tui-node
+      (tui-node-key node)
+      (tui-node-kind node)
+      (tui-node-layout node)
+      (tui-node-faces node)
+      (tui-node-content node)
+      (tui-node-children node)
+      (tui-node-focus node)
+      (tui-node-semantic-source node)
+      accessibility))
+
+  (define (tui-node-find node key)
+    (unless (tui-node? node)
+      (assertion-violation 'tui-node-find "expected a TuiNode" node))
+    (if (equal? (tui-node-key node) key)
+        node
+        (let loop ([children (tui-node-children node)])
+          (and
+            (pair? children)
+            (or (tui-node-find (car children) key)
+                (loop (cdr children)))))))
 
   (define tui-text
     (case-lambda

@@ -1488,16 +1488,24 @@
       'region-target
       required-region-target-selector))
 
+  (define copy-target-reader
+    (make-command-target-reader
+      'copy-target
+      (make-command-target-selector
+        'prefer #t command-context-point-target)))
+
   (define-command (copy-region-command context target)
     "Copy the active region to the kill ring."
-    (interactive required-region-target-reader)
+    (interactive copy-target-reader)
     (let* ([editor (command-context-editor context)]
            [view (context-view context)]
            [buffer
              (require-current-target
                'edit.copy-region context target)])
       (if (command-target-empty? target)
-          (editor-set-status-message! editor "Region is empty")
+          (if (editor-copy-focused-application! editor view)
+              (editor-set-status-message! editor "Component copied")
+              (editor-set-status-message! editor "Region is empty"))
           (begin
             (editor-copy-buffer-target!
               editor

@@ -1,12 +1,15 @@
 (library (soda editor tui-projection)
   (export tui-ensure-session-text-projection!
-          tui-ensure-buffer-text-projection!)
+          tui-ensure-buffer-text-projection!
+          tui-focused-accessibility
+          tui-focused-copy-bytes)
   (import (rnrs)
           (soda document)
           (soda editor buffer)
           (soda editor edit)
           (soda editor state)
-          (soda editor tui-application))
+          (soda editor tui-application)
+          (soda tui application))
 
   (define (projection-bytes definition model context)
     (let ([project
@@ -76,4 +79,54 @@
             (editor-tui-session-for-buffer editor (buffer-id buffer))])
       (when session
         (tui-ensure-session-text-projection! editor session))
-      buffer)))
+      buffer))
+
+  (define (focused-node editor session view-id)
+    (let* ([state (tui-session-view-state session view-id)]
+           [key (and state (tui-view-state-focused-node state))])
+      (and
+        key
+        (let ([node
+                ((tui-application-definition-view
+                   (tui-session-definition session))
+                 (tui-session-model session)
+                 (make-tui-application-context
+                   editor
+                   (tui-session-id session)
+                   (tui-session-buffer-id session)
+                   view-id
+                   (tui-session-arguments session)
+                   state))])
+          (unless (tui-node? node)
+            (assertion-violation
+              'tui-focused-accessibility
+              "application view must return a TuiNode"
+              (tui-application-definition-name
+                (tui-session-definition session))
+              node))
+          (tui-node-find node key)))))
+
+  (define (tui-focused-accessibility editor view-id)
+    (require-open-editor 'tui-focused-accessibility editor)
+    (let* ([view (editor-view-ref editor view-id)]
+           [session
+             (editor-tui-session-for-buffer
+               editor
+               (buffer-id (view-buffer view)))]
+           [node (and session (focused-node editor session view-id))])
+      (and node (tui-node-accessibility node))))
+
+  (define (copy-bytevector value)
+    (let ([copy (make-bytevector (bytevector-length value))])
+      (bytevector-copy! value 0 copy 0 (bytevector-length value))
+      copy))
+
+  (define (tui-focused-copy-bytes editor view-id)
+    (let ([metadata (tui-focused-accessibility editor view-id)])
+      (and
+        metadata
+        (let ([value (tui-accessibility-copy-value metadata)])
+          (cond
+            [(string? value) (string->utf8 value)]
+            [(bytevector? value) (copy-bytevector value)]
+            [else #f]))))))
