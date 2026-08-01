@@ -286,6 +286,22 @@ if(CHEZ_SCHEME_EXECUTABLE)
       --program ${CMAKE_CURRENT_SOURCE_DIR}/scheme/scheme_semantics_tests.ss
   )
 
+  set(SODA_SCHEME_API_CACHE_TEST_ROOT
+    "${CMAKE_CURRENT_BINARY_DIR}/scheme_api_index_cache_test"
+  )
+  file(MAKE_DIRECTORY "${SODA_SCHEME_API_CACHE_TEST_ROOT}/sources")
+  add_test(
+    NAME scheme_api_index_cache_tests
+    CONFIGURATIONS Debug Release
+    COMMAND
+      ${CMAKE_COMMAND} -E env
+      SODA_SCHEME_API_CACHE_TEST_ROOT=${SODA_SCHEME_API_CACHE_TEST_ROOT}
+      SODA_SCHEME_SOURCE_ROOT=${PROJECT_SOURCE_DIR}/scheme
+      ${CHEZ_SCHEME_EXECUTABLE}
+      --libdirs ${PROJECT_SOURCE_DIR}/scheme
+      --program ${CMAKE_CURRENT_SOURCE_DIR}/scheme/scheme_api_index_cache_tests.ss
+  )
+
   add_test(
     NAME scheme_file_tests
     CONFIGURATIONS Debug Release

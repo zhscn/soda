@@ -7,6 +7,7 @@
 | 文档 syntax view、scope/binding 与 diagnostics | 已实现 |
 | completion、signature/help、definition、references 与 rename | 已实现 |
 | 构建期 Soda API index 与 runtime catalog | 已实现 |
+| Soda API index 的文件级增量构建缓存 | 已实现 |
 | Scheme interface artifact、异步 build 与显式安装 | 已实现 |
 | 显式 SchemeEnvironment、Document attachment 与隔离的跨文档索引 | 已实现 |
 | 任意用户宏的可执行展开与完整 phase 分析 | 未实现 |
@@ -278,12 +279,35 @@ surface。它提供稳定的补全与 hover，不依赖当前进程是否已经 
 library identity 来自 catalog，procedure arity 和值类别可以由对应 Scheme
 implementation 的构建期反射补充；源码定义仍拥有更具体的 resource 与 range。
 
-Soda 的公共 library metadata 在应用构建时从 Scheme source tree 生成。索引器读取
+Soda 的公共 library metadata 在应用构建时从 Scheme source tree 生成。CMake 以全部
+Scheme source 为 dependency，负责在文件集合发生变化时调用 Scheme 构建入口；Scheme
+索引器负责源码枚举、内容失效判断、语义提取、catalog 聚合与产物编码。索引器读取
 R6RS `library` 与 `export` form，归一化直接导出和 rename，并把 re-export 关联到
 可用的源码定义。生成结果同时包含独立的 library catalog 和 export symbol
 catalog。library catalog 保存没有 export 的 library，因此 import 解析不需要从
 补全符号反推 library 是否存在。两个 catalog 都是只含不可变 datum 的 Scheme
 library，随 whole-program editor boot 一起编译和嵌入。
+
+每个 `.sls` 文件独立投影为可序列化的 `SchemeApiSourceSummary`：
+
+```text
+SchemeApiSourceSummary {
+  format_version,
+  resource,
+  library,
+  imports,
+  exports,
+  root_definitions
+}
+```
+
+构建缓存以 analyzer fingerprint 和 `resource + content fingerprint` 为键。analyzer
+fingerprint 覆盖摘要生成器与 Scheme semantic scanner；不匹配时废弃全部文件摘要。
+单个源码内容变化时只重新分析该文件，未变化文件直接复用不可变摘要。文件删除或改名
+通过本次源码集合自然移除旧摘要。最终 library/export catalog 每次从当前摘要全集重新
+聚合，因此被依赖 library 的 export、rename 或 re-export 变化会传播到 consumer，
+而不要求重新解析 consumer 文本。缓存只影响构建成本，不改变生成 catalog 的身份、
+排序或可见性语义。
 
 构建同时从当前 Chez runtime 的 `(rnrs)` 与 `(chezscheme)` library 生成独立的
 top-environment catalog。`library-exports` 提供稳定的 library surface；每个 binding

@@ -1,12 +1,73 @@
 (library (soda editor scheme-api-indexer)
   (export scheme-sources-api-index
           scheme-sources-library-index
-          scheme-sources-api+library-index)
+          scheme-sources-api+library-index
+          scheme-source-api-summary
+          scheme-api-source-summary?
+          scheme-api-summaries-api+library-index)
   (import (rnrs)
           (soda editor scheme-semantics))
 
-  (define-record-type library-source
-    (fields resource name imports exports definitions))
+  (define summary-tag 'soda-scheme-api-source)
+  (define summary-version 1)
+
+  (define (exact-non-negative-integer? value)
+    (and (integer? value) (exact? value) (not (negative? value))))
+
+  (define (export-summary? value)
+    (and
+      (pair? value)
+      (symbol? (car value))
+      (symbol? (cdr value))))
+
+  (define (definition-summary? value)
+    (and
+      (list? value)
+      (= (length value) 6)
+      (string? (list-ref value 0))
+      (symbol? (list-ref value 1))
+      (exact-non-negative-integer? (list-ref value 2))
+      (exact-non-negative-integer? (list-ref value 3))
+      (list? (list-ref value 4))
+      (or
+        (not (list-ref value 5))
+        (string? (list-ref value 5)))))
+
+  (define (scheme-api-source-summary? value)
+    (and
+      (list? value)
+      (= (length value) 7)
+      (eq? (list-ref value 0) summary-tag)
+      (equal? (list-ref value 1) summary-version)
+      (string? (list-ref value 2))
+      (list? (list-ref value 3))
+      (list? (list-ref value 4))
+      (list? (list-ref value 5))
+      (for-all export-summary? (list-ref value 5))
+      (list? (list-ref value 6))
+      (for-all definition-summary? (list-ref value 6))))
+
+  (define (summary-resource summary) (list-ref summary 2))
+  (define (summary-name summary) (list-ref summary 3))
+  (define (summary-imports summary) (list-ref summary 4))
+  (define (summary-exports summary) (list-ref summary 5))
+  (define (summary-definitions summary) (list-ref summary 6))
+
+  (define (definition-summary definition)
+    (list
+      (scheme-definition-name definition)
+      (scheme-definition-kind definition)
+      (scheme-definition-start definition)
+      (scheme-definition-end definition)
+      (scheme-definition-signature-formals definition)
+      (scheme-definition-documentation definition)))
+
+  (define (definition-name definition) (list-ref definition 0))
+  (define (definition-kind definition) (list-ref definition 1))
+  (define (definition-start definition) (list-ref definition 2))
+  (define (definition-end definition) (list-ref definition 3))
+  (define (definition-formals definition) (list-ref definition 4))
+  (define (definition-documentation definition) (list-ref definition 5))
 
   (define (read-library-form text)
     (guard (condition [else #f])
@@ -81,108 +142,122 @@
       '()
       clauses))
 
-  (define (source-metadata source)
-    (let* ([resource (car source)]
-           [bytes (cdr source)]
-           [form (library-form bytes)])
+  (define (scheme-source-api-summary resource bytes)
+    (unless (string? resource)
+      (assertion-violation
+        'scheme-source-api-summary
+        "resource must be a string"
+        resource))
+    (unless (bytevector? bytes)
+      (assertion-violation
+        'scheme-source-api-summary
+        "source must be a bytevector"
+        bytes))
+    (let* ([form (library-form bytes)])
       (and
         form
         (let ([snapshot
                 (make-scheme-semantic-snapshot 0 0 bytes)])
-          (make-library-source
+          (list
+            summary-tag
+            summary-version
             resource
             (cadr form)
             (scheme-semantic-snapshot-imports snapshot)
             (export-pairs (cddr form))
-            (scheme-semantic-snapshot-root-definitions snapshot))))))
+            (map
+              definition-summary
+              (scheme-semantic-snapshot-root-definitions snapshot)))))))
+
+  (define (source-metadata source)
+    (let* ([resource (car source)]
+           [bytes (cdr source)])
+      (scheme-source-api-summary resource bytes)))
 
   (define (definitions-named name definitions)
     (filter
       (lambda (definition)
         (string=?
           name
-          (scheme-definition-name definition)))
+          (definition-name definition)))
       definitions))
 
-  (define (source-for-library sources library)
-    (find
-      (lambda (source)
-        (equal?
-          (library-source-name source)
-          library))
-      sources))
+  (define (library-source-table sources)
+    (let ([table (make-hashtable equal-hash equal?)])
+      (for-each
+        (lambda (source)
+          (unless (hashtable-contains? table (summary-name source))
+            (hashtable-set! table (summary-name source) source)))
+        sources)
+      table))
 
   (define (find-definition sources preferred name)
     (let search ([source preferred] [visited '()])
       (and
         source
-        (not (member (library-source-name source) visited))
+        (not (member (summary-name source) visited))
         (let ([local
                 (find
                   (lambda (definition)
                     (string=?
                       name
-                      (scheme-definition-name definition)))
-                  (library-source-definitions source))])
+                      (definition-name definition)))
+                  (summary-definitions source))])
           (if local
               (cons source local)
               (let loop
                 ([imports
-                   (library-source-imports source)])
+                   (summary-imports source)])
                 (and
                   (pair? imports)
                   (or
                     (search
-                      (source-for-library
-                        sources
-                        (car imports))
+                      (hashtable-ref sources (car imports) #f)
                       (cons
-                        (library-source-name source)
+                        (summary-name source)
                         visited))
                     (loop (cdr imports))))))))))
 
   (define (entry-signatures owner+definition)
     (if (not owner+definition)
         '()
-        (scheme-definition-signature-formals
-          (cdr owner+definition))))
+        (definition-formals (cdr owner+definition))))
 
   (define (entry source export owner+definition)
     (let ([external-name (symbol->string (cdr export))])
       (list
         external-name
         (if owner+definition
-            (scheme-definition-kind (cdr owner+definition))
+            (definition-kind (cdr owner+definition))
             'binding)
-        (library-source-name source)
+        (summary-name source)
         (and owner+definition
-             (library-source-resource
-               (car owner+definition)))
+             (summary-resource (car owner+definition)))
         (and
           owner+definition
-          (scheme-definition-start (cdr owner+definition)))
+          (definition-start (cdr owner+definition)))
         (and
           owner+definition
-          (scheme-definition-end (cdr owner+definition)))
+          (definition-end (cdr owner+definition)))
         (entry-signatures owner+definition)
         (and
           owner+definition
-          (scheme-definition-documentation
+          (definition-documentation
             (cdr owner+definition))))))
 
-  (define (same-entry? left right)
-    (and
-      (string=? (car left) (car right))
-      (equal? (caddr left) (caddr right))))
-
   (define (deduplicate entries)
-    (fold-left
-      (lambda (result value)
-        (if (exists (lambda (item) (same-entry? item value)) result)
-            result
-            (append result (list value))))
-      '()
-      entries))
+    (let ([seen (make-hashtable equal-hash equal?)])
+      (reverse
+        (fold-left
+          (lambda (result value)
+            (let ([key (cons (car value) (caddr value))])
+              (if (hashtable-contains? seen key)
+                  result
+                  (begin
+                    (hashtable-set! seen key #t)
+                    (cons value result)))))
+          '()
+          entries))))
 
   (define (entry<? left right)
     (let ([left-name (car left)]
@@ -232,47 +307,57 @@
       (map source-metadata sources)))
 
   (define (metadata-api-index metadata)
-    (list-sort
-      entry<?
-      (deduplicate
-        (apply
-          append
-          (map
-            (lambda (source)
-              (map
-                (lambda (export)
-                  (entry
-                    source
-                    export
-                    (find-definition
-                      metadata
+    (let ([sources (library-source-table metadata)])
+      (list-sort
+        entry<?
+        (deduplicate
+          (apply
+            append
+            (map
+              (lambda (source)
+                (map
+                  (lambda (export)
+                    (entry
                       source
-                      (symbol->string (car export)))))
-                (library-source-exports source)))
-            metadata)))))
+                      export
+                      (find-definition
+                        sources
+                        source
+                        (symbol->string (car export)))))
+                  (summary-exports source)))
+              metadata))))))
 
   (define (metadata-library-index metadata)
-    (fold-left
-      (lambda (result source)
-        (if
-          (member
-            (library-source-name source)
-            result)
-          result
-          (append
-            result
-            (list (library-source-name source)))))
-      '()
-      metadata))
+    (let ([seen (make-hashtable equal-hash equal?)])
+      (reverse
+        (fold-left
+          (lambda (result source)
+            (let ([name (summary-name source)])
+              (if (hashtable-contains? seen name)
+                  result
+                  (begin
+                    (hashtable-set! seen name #t)
+                    (cons name result)))))
+          '()
+          metadata))))
+
+  (define (scheme-api-summaries-api+library-index summaries)
+    (unless
+      (and (list? summaries) (for-all scheme-api-source-summary? summaries))
+      (assertion-violation
+        'scheme-api-summaries-api+library-index
+        "expected Scheme API source summaries"
+        summaries))
+    (values
+      (metadata-api-index summaries)
+      (metadata-library-index summaries)))
 
   (define (scheme-sources-api+library-index sources)
     (validate-sources
       'scheme-sources-api+library-index
       sources)
-    (let ([metadata (sources-metadata sources)])
-      (values
-        (metadata-api-index metadata)
-        (metadata-library-index metadata))))
+    (scheme-api-summaries-api+library-index
+      (sources-metadata sources)))
 
   (define (scheme-sources-api-index sources)
     (call-with-values
