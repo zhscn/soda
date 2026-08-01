@@ -48,6 +48,27 @@
       (tui-application-definition-capabilities
         (tui-session-definition session))))
 
+  (define (command-required-capability command)
+    (case (tui-command-kind command)
+      [(timer) 'timer]
+      [(file.read file.write directory.scan path.stat) 'vfs]
+      [else #f]))
+
+  (define (validate-command-capabilities! who definition commands)
+    (let ([capabilities
+            (tui-application-definition-capabilities definition)])
+      (for-each
+        (lambda (command)
+          (let ([required (command-required-capability command)])
+            (when (and required (not (memq required capabilities)))
+              (assertion-violation
+                who
+                "TUI command requires an undeclared capability"
+                (tui-application-definition-name definition)
+                (tui-command-kind command)
+                required))))
+        commands)))
+
   (define (tui-mouse-capability-active? editor)
     (require-open-editor 'tui-mouse-capability-active? editor)
     (exists
@@ -560,6 +581,7 @@
             "application init commands must contain TuiCommand values"
             (tui-application-definition-name definition)
             commands))
+        (validate-command-capabilities! 'tui-open! definition commands)
         (values model commands))))
 
   (define (open-with-initializer!
@@ -603,6 +625,8 @@
                   'tui-open!
                   "application initializer must return TuiCommand values"
                   name commands))
+              (validate-command-capabilities!
+                'tui-open! definition commands)
               (let ([session
                       (make-tui-session
                         session-id definition (buffer-id buffer)
@@ -889,6 +913,8 @@
                        'tui-reload!
                        "migration commands must contain TuiCommand values"
                        commands))
+                   (validate-command-capabilities!
+                     'tui-reload! new-definition commands)
                    (let ([close
                            (tui-application-definition-close old-definition)])
                      (when close
@@ -976,6 +1002,10 @@
                  (tui-application-definition-name
                    (tui-session-definition session))
                  result))
+             (validate-command-capabilities!
+               'tui-send-message!
+               (tui-session-definition session)
+               (tui-update-result-commands result))
              (tui-session-set-last-message! session message)
              (tui-session-set-model!
                session

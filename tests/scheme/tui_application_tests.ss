@@ -162,6 +162,28 @@
     '(editor.override)))
 (editor-register-tui-application! editor definition)
 
+(define missing-capability-definition
+  (make-tui-application-definition
+    'missing-capability
+    (lambda (context arguments)
+      (values arguments (list (tui-command 'timer 0))))
+    (lambda (model message context) (tui-result model '() '()))
+    (lambda (model context)
+      (tui-text 'missing-capability.root "invalid"))
+    #f #f 'fundamental-mode 'edit '()))
+(editor-register-tui-application! editor missing-capability-definition)
+(define buffers-before-capability-check (length (editor-buffers editor)))
+(define missing-capability-rejected? #f)
+(guard
+  (condition [else (set! missing-capability-rejected? #t)])
+  (tui-open! editor 'missing-capability #f))
+(check
+  (and
+    missing-capability-rejected?
+    (= (length (editor-buffers editor)) buffers-before-capability-check)
+    (null? (editor-tui-sessions editor)))
+  "opening must reject undeclared runtime capabilities without leaking a session")
+
 (define application-buffer (tui-open! editor 'counter 41))
 (define presentation (buffer-presentation application-buffer))
 (define session (tui-active-session editor))
