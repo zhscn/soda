@@ -988,6 +988,7 @@
           view-push-input-state!
           view-pop-input-state!
           view-reset-input-states!
+          view-replace-durable-input-state!
           view-set-first-line!
           view-set-first-visual-row!
           view-set-keymap-layers!
@@ -998,6 +999,11 @@
           input-state-text-policy
           input-state-text-command
           input-state-key-capture-command
+          input-state-handler
+          input-state-cursor
+          input-state-indicator
+          input-state-on-enter
+          input-state-on-exit
           interaction-session?
           interaction-session-id
           interaction-session-kind

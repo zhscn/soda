@@ -5,7 +5,12 @@
           input-state-keymap-layers
           input-state-text-policy
           input-state-text-command
-          input-state-key-capture-command)
+          input-state-key-capture-command
+          input-state-handler
+          input-state-cursor
+          input-state-indicator
+          input-state-on-enter
+          input-state-on-exit)
   (import (rnrs)
           (soda editor keymap))
 
@@ -16,7 +21,12 @@
       keymap-layers
       text-policy
       text-command
-      key-capture-command))
+      key-capture-command
+      handler
+      cursor
+      indicator
+      on-enter
+      on-exit))
 
   (define make-input-state
     (case-lambda
@@ -26,19 +36,36 @@
          keymap-layers
          text-policy
          (and (eq? text-policy 'accept) 'edit.self-insert)
-         #f)]
+         #f #f 'block #f #f #f)]
       [(name keymap-layers text-policy text-command)
        (make-input-state
          name
          keymap-layers
          text-policy
          text-command
-         #f)]
+         #f #f 'block #f #f #f)]
       [(name
          keymap-layers
          text-policy
          text-command
          key-capture-command)
+       (make-input-state
+         name
+         keymap-layers
+         text-policy
+         text-command
+         key-capture-command
+         #f 'block #f #f #f)]
+      [(name
+         keymap-layers
+         text-policy
+         text-command
+         key-capture-command
+         handler
+         cursor
+         indicator
+         on-enter
+         on-exit)
        (unless (symbol? name)
          (assertion-violation
            'make-input-state
@@ -72,9 +99,39 @@
            'make-input-state
            "key capture command must be a symbol or #f"
            key-capture-command))
+       (unless (or (not handler) (procedure? handler))
+         (assertion-violation
+           'make-input-state
+           "handler must be a procedure or #f"
+           handler))
+       (unless (memq cursor '(beam block underline hidden))
+         (assertion-violation
+           'make-input-state
+           "cursor must be beam, block, underline, or hidden"
+           cursor))
+       (unless (or (not indicator) (string? indicator) (procedure? indicator))
+         (assertion-violation
+           'make-input-state
+           "indicator must be a string, procedure, or #f"
+           indicator))
+       (unless (or (not on-enter) (procedure? on-enter))
+         (assertion-violation
+           'make-input-state
+           "on-enter must be a procedure or #f"
+           on-enter))
+       (unless (or (not on-exit) (procedure? on-exit))
+         (assertion-violation
+           'make-input-state
+           "on-exit must be a procedure or #f"
+           on-exit))
        (%make-input-state
          name
          keymap-layers
          text-policy
          text-command
-         key-capture-command)])))
+         key-capture-command
+         handler
+         cursor
+         indicator
+         on-enter
+         on-exit)])))

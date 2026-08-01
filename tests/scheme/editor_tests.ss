@@ -1527,12 +1527,60 @@
   (editor-keymap-catalog editor)
   'test.transient
   transient-map)
+(define durable-input-count 0)
+(define input-lifecycle '())
+(editor-register-command!
+  editor
+  (make-interactive-context-command
+    'test.durable-input
+    (lambda (context)
+      (set! durable-input-count (+ durable-input-count 1))
+      '())))
+(define durable-input-map (make-keymap))
+(keymap-bind!
+  durable-input-map
+  (list (make-key-stroke 'character (char->integer #\r) 0))
+  'test.durable-input)
+(keymap-catalog-register!
+  (editor-keymap-catalog editor)
+  'test.durable-input
+  durable-input-map)
+(view-replace-durable-input-state!
+  (editor-active-view editor)
+  (make-input-state
+    'editing
+    '(test.durable-input)
+    'accept
+    'edit.self-insert
+    #f
+    #f
+    'beam
+    "EDIT"
+    (lambda (view state)
+      (set! input-lifecycle (append input-lifecycle '(durable-enter))))
+    (lambda (view state)
+      (set! input-lifecycle (append input-lifecycle '(durable-exit))))))
 (view-push-input-state!
   (editor-active-view editor)
   (make-input-state
     'test-capture
     '(test.transient)
-    'ignore))
+    'ignore
+    #f
+    #f
+    #f
+    'block
+    #f
+    (lambda (view state)
+      (set! input-lifecycle (append input-lifecycle '(transient-enter))))
+    (lambda (view state)
+      (set! input-lifecycle (append input-lifecycle '(transient-exit))))))
+(send! editor decoder (string->utf8 "r"))
+(unless (and (= durable-input-count 1)
+             (equal? input-lifecycle '(durable-enter transient-enter)))
+  (error 'editor-tests
+         "active transient input omitted the durable state"
+         input-lifecycle))
 (define before-ignored-text (buffer-bytes buffer))
 (send! editor decoder (string->utf8 "z"))
 (unless (bytevector=? (buffer-bytes buffer) before-ignored-text)
@@ -1549,6 +1597,9 @@
                     (view-current-input-state
                       (editor-active-view editor)))
                   'editing)
+             (equal?
+               input-lifecycle
+               '(durable-enter transient-enter transient-exit))
              (not (editor-status-message editor)))
   (error 'editor-tests "keyboard.quit did not reset transient input"))
 

@@ -65,14 +65,24 @@
   (define (effective-keymaps editor)
     (let* ([view (editor-active-view editor)]
            [buffer (view-buffer view)]
+           [states (view-input-states view)]
+           [durable
+             (let loop ([remaining states])
+               (if (null? (cdr remaining))
+                   (car remaining)
+                   (loop (cdr remaining))))]
+           [active-states
+             (if (eq? (car states) durable)
+                 (list durable)
+                 (list (car states) durable))]
            [layers
              (append
                (list 'editor.override)
                (if (editor-pending-prefix editor)
                    (list 'editor.prefix)
                    '())
-               (input-state-keymap-layers
-                 (view-current-input-state view))
+               (apply append
+                 (map input-state-keymap-layers active-states))
                (view-keymap-layers view)
                (editor-minor-mode-keymap-layers editor buffer)
                (major-mode-keymaps

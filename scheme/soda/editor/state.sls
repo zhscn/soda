@@ -258,6 +258,7 @@
           view-push-input-state!
           view-pop-input-state!
           view-reset-input-states!
+          view-replace-durable-input-state!
           view-set-caret!
           view-set-vertical-caret!
           view-set-visual-caret!
@@ -1642,7 +1643,7 @@
     (let ([session (view-tui-session value view)])
       (if session
           (begin
-            (view-input-states-set!
+            (replace-view-input-states!
               view
               (list
                 (make-input-state
@@ -1655,7 +1656,7 @@
             (eq?
               (input-state-name (view-current-input-state view))
               'application)
-            (view-input-states-set!
+            (replace-view-input-states!
               view
               (list (make-input-state 'editing '() 'accept)))))))
 
@@ -2059,6 +2060,11 @@
           'editor-close-view!
           "an open editor requires at least one view"
           id))
+      (let ([states (view-input-states view)])
+        (view-input-states-set! view '())
+        (for-each
+          (lambda (state) (run-input-state-exit! view state))
+          states))
       (cancel-view-completion! value view)
       (for-each fold-close! (view-folds view))
       (view-folds-set! view '())
@@ -5650,6 +5656,25 @@
         value))
     (car (view-input-states value)))
 
+  (define (run-input-state-enter! value state)
+    (let ([hook (input-state-on-enter state)])
+      (when hook (hook value state))))
+
+  (define (run-input-state-exit! value state)
+    (let ([hook (input-state-on-exit state)])
+      (when hook (hook value state))))
+
+  (define (replace-view-input-states! value states)
+    (let ([removed (view-input-states value)])
+      (view-input-states-set! value states)
+      (view-pending-keys-set! value '())
+      (for-each
+        (lambda (state) (run-input-state-exit! value state))
+        removed)
+      (for-each
+        (lambda (state) (run-input-state-enter! value state))
+        (reverse states))))
+
   (define (view-push-input-state! value state)
     (unless (view? value)
       (assertion-violation
@@ -5665,6 +5690,7 @@
       value
       (cons state (view-input-states value)))
     (view-pending-keys-set! value '())
+    (run-input-state-enter! value state)
     state)
 
   (define (view-pop-input-state! value)
@@ -5679,6 +5705,7 @@
           (begin
             (view-input-states-set! value (cdr states))
             (view-pending-keys-set! value '())
+            (run-input-state-exit! value (car states))
             (car states)))))
 
   (define (last-input-state states)
@@ -5686,16 +5713,48 @@
         (car states)
         (last-input-state (cdr states))))
 
+  (define (replace-last-input-state states replacement)
+    (if (null? (cdr states))
+        (list replacement)
+        (cons
+          (car states)
+          (replace-last-input-state (cdr states) replacement))))
+
+  (define (view-replace-durable-input-state! value state)
+    (unless (view? value)
+      (assertion-violation
+        'view-replace-durable-input-state!
+        "expected a view"
+        value))
+    (unless (input-state? state)
+      (assertion-violation
+        'view-replace-durable-input-state!
+        "expected an input state"
+        state))
+    (let* ([states (view-input-states value)]
+           [removed (last-input-state states)])
+      (view-input-states-set!
+        value
+        (replace-last-input-state states state))
+      (view-pending-keys-set! value '())
+      (run-input-state-exit! value removed)
+      (run-input-state-enter! value state)
+      state))
+
   (define (view-reset-input-states! value)
     (unless (view? value)
       (assertion-violation
         'view-reset-input-states!
         "expected a view"
         value))
-    (view-input-states-set!
-      value
-      (list (last-input-state (view-input-states value))))
-    (view-pending-keys-set! value '()))
+    (let* ([states (view-input-states value)]
+           [durable (last-input-state states)]
+           [removed (reverse (cdr (reverse states)))])
+      (view-input-states-set! value (list durable))
+      (view-pending-keys-set! value '())
+      (for-each
+        (lambda (state) (run-input-state-exit! value state))
+        removed)))
 
   (define (with-document-text document procedure)
     (let ([snapshot (document-snapshot document)])
