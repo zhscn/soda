@@ -415,7 +415,7 @@
     '("/virtual/lifecycle" "/virtual/lifecycle-generated")
     'manual 'updated #f #f '()))
 (editor-remember-project! editor lifecycle-project)
-(editor-remember-project! editor lifecycle-project-update)
+(editor-update-project! editor lifecycle-project-update)
 (editor-forget-project! editor (project-id lifecycle-project))
 (unless
   (and

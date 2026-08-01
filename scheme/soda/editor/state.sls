@@ -128,6 +128,7 @@
           editor-discover-project
           editor-known-projects
           editor-remember-project!
+          editor-update-project!
           editor-forget-project!
           editor-project-resource-snapshot
           editor-apply-project-resource-snapshot!
@@ -4186,6 +4187,28 @@
           remembered
           (project-catalog-generation catalog)))
       remembered))
+
+  (define (editor-update-project! value project)
+    (require-open-editor 'editor-update-project! value)
+    (unless (project? project)
+      (assertion-violation
+        'editor-update-project!
+        "expected a Project"
+        project))
+    (let* ([catalog (editor-project-catalog value)]
+           [before
+             (project-catalog-find-known catalog (project-id project))]
+           [updated (project-catalog-update! catalog project)])
+      (editor-invalidate! value 'configuration)
+      (unless (eq? before updated)
+        (editor-run-hooks!
+          value
+          'project-registry-changed
+          value
+          (if before 'updated 'remembered)
+          updated
+          (project-catalog-generation catalog)))
+      updated))
 
   (define (editor-forget-project! value id)
     (require-open-editor 'editor-forget-project! value)

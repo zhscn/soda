@@ -42,6 +42,7 @@
           project-catalog-known-projects
           project-catalog-project-ref
           project-catalog-remember!
+          project-catalog-update!
           project-catalog-forget!
           project-catalog-find-known
           project-catalog-snapshot
@@ -606,15 +607,32 @@
         'project-catalog-remember!
         "expected a project"
         value))
+    (let* ([id (project-id value)]
+           [canonical
+             (or
+               (hashtable-ref (project-catalog-projects catalog) id #f)
+               (intern-project! catalog value))])
+      (unless (member id (project-catalog-known-ids catalog))
+        (project-catalog-known-ids-set!
+          catalog
+          (append (project-catalog-known-ids catalog) (list id)))
+        (bump-catalog-generation! catalog))
+      canonical))
+
+  (define (project-catalog-update! catalog value)
+    (require-catalog 'project-catalog-update! catalog)
+    (unless (project? value)
+      (assertion-violation
+        'project-catalog-update!
+        "expected a Project"
+        value))
     (let* ([canonical (intern-project! catalog value)]
            [id (project-id canonical)])
       (unless (member id (project-catalog-known-ids catalog))
         (project-catalog-known-ids-set!
           catalog
           (append (project-catalog-known-ids catalog) (list id)))
-        (project-catalog-generation-set!
-          catalog
-          (+ (project-catalog-generation catalog) 1)))
+        (bump-catalog-generation! catalog))
       canonical))
 
   (define (project-catalog-forget! catalog id)

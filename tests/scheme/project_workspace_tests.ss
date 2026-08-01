@@ -91,7 +91,7 @@
       '((language-server . clangd)
         (compile-commands . "/workspace/out")))
     '()))
-(editor-remember-project! editor updated-inner)
+(editor-update-project! editor updated-inner)
 (define updated-workspace
   (editor-project-workspace editor inner))
 (check

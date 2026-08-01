@@ -139,7 +139,7 @@
     '()))
 (check
   (eq?
-    (project-catalog-remember! catalog updated-discovered)
+    (project-catalog-update! catalog updated-discovered)
     updated-discovered)
   "remembering a refreshed descriptor must replace its canonical Project")
 (check
@@ -152,6 +152,15 @@
     (project-catalog-find-known catalog (project-id discovered))
     updated-discovered)
   "known lookup must expose the refreshed Project descriptor")
+(check
+  (and
+    (eq?
+      (project-catalog-remember! catalog discovered)
+      updated-discovered)
+    (= (project-catalog-project-generation
+         catalog (project-id discovered))
+       (+ discovered-generation 1)))
+  "remembering a stale Project value must not roll back its descriptor")
 
 (define snapshot (project-catalog-snapshot catalog))
 (project-catalog-forget! catalog (project-id discovered))

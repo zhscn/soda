@@ -673,6 +673,7 @@
           project-catalog-project-generation
           project-catalog-finders
           project-catalog-project-ref
+          project-catalog-update!
           project-catalog-find-finder
           project-discovery-unavailable
           default-project-marker-probe
@@ -682,6 +683,7 @@
           editor-discover-project
           editor-known-projects
           editor-remember-project!
+          editor-update-project!
           editor-forget-project!
           make-project-workspace-folder
           project-workspace-folder?
