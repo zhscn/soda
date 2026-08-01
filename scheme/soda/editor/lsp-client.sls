@@ -128,6 +128,7 @@
   (define pending-lsp-workspace-edits (make-weak-eq-hashtable))
   (define pending-lsp-completion-resolutions (make-weak-eq-hashtable))
   (define lsp-semantic-generations (make-weak-eq-hashtable))
+  (define lsp-document-highlight-generations (make-weak-eq-hashtable))
 
   (define (exact-non-negative-integer? value)
     (and (integer? value) (exact? value) (not (negative? value))))
@@ -1736,6 +1737,87 @@
                     editor session buffer (lsp-semantic-refresh-revision refresh))
                   '()))))))
 
+  (define (session-document-highlight-namespace session)
+    (string->symbol
+      (string-append
+        "lsp.document-highlight."
+        (number->string
+          (language-session-id (lsp-client-session-language-session session))))))
+
+  (define (document-highlights-supported? session)
+    (let ([capability
+            (json-object-ref
+              (lsp-client-session-capabilities session)
+              "documentHighlightProvider"
+              #f)])
+      (or (eq? capability #t) (json-object? capability))))
+
+  (define (document-highlight-annotation buffer index value)
+    (guard (condition [else #f])
+      (let* ([range
+               (lsp-range-from-json (json-object-ref value "range" #f))]
+             [start (lsp-buffer-offset-at buffer (lsp-range-start range))]
+             [end (lsp-buffer-offset-at buffer (lsp-range-end range))])
+        (and start end
+             (make-annotation
+               (list index start end (json-object-ref value "kind" 1))
+               start end
+               'document-highlight
+               'symbol-highlight
+               #f #f
+               value)))))
+
+  (define (publish-document-highlights! editor session buffer revision result)
+    (guard (condition [else #f])
+      (when
+        (and (= (buffer-revision buffer) revision)
+             (json-array? result))
+        (let ([generation
+                (+ 1
+                   (hashtable-ref
+                     lsp-document-highlight-generations session 0))]
+              [annotations
+                (let loop ([values (json-array-values result)] [index 0])
+                  (if (null? values)
+                      '()
+                      (let ([annotation
+                              (and
+                                (json-object? (car values))
+                                (document-highlight-annotation
+                                  buffer index (car values)))])
+                        (if annotation
+                            (cons annotation (loop (cdr values) (+ index 1)))
+                            (loop (cdr values) (+ index 1))))))])
+          (hashtable-set!
+            lsp-document-highlight-generations session generation)
+          (editor-publish-annotation-set!
+            editor
+            (make-buffer-annotation-set
+              buffer
+              (session-document-highlight-namespace session)
+              revision
+              generation
+              annotations))))))
+
+  (define (lsp-document-highlights! editor)
+    (let* ([view (editor-active-view editor)]
+           [buffer (view-buffer view)]
+           [revision (buffer-revision buffer)]
+           [session (active-view-lsp-session editor)])
+      (if (and session (document-highlights-supported? session))
+          (lsp-request-at-active-point!
+            editor
+            "textDocument/documentHighlight"
+            '()
+            (lambda (response-editor response-session result)
+              (publish-document-highlights!
+                response-editor response-session buffer revision result)
+              '()))
+          (begin
+            (editor-set-status-message!
+              editor "The language server does not provide document highlights")
+            '()))))
+
   (define (hover-text value)
     (cond
       [(string? value) value]
@@ -2471,6 +2553,13 @@
         'lsp.find-definition
         (lambda (context) (lsp-find-definition! (command-context-editor context)))
         "Jump to the language-server definition at point."))
+    (editor-register-command!
+      editor
+      (make-interactive-context-command
+        'lsp.document-highlights
+        (lambda (context)
+          (lsp-document-highlights! (command-context-editor context)))
+        "Highlight language-server references to the symbol at point."))
     (editor-register-command!
       editor
       (make-interactive-context-command

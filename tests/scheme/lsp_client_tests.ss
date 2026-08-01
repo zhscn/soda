@@ -114,6 +114,7 @@
       (cons
         "completionProvider"
         (make-json-object (list (cons "resolveProvider" #t))))
+      (cons "documentHighlightProvider" #t)
       (cons
         "semanticTokensProvider"
         (make-json-object
@@ -234,6 +235,81 @@
              (= (annotation-end annotation) 8)))
       semantic-annotations))
   "semantic token delta positions did not publish faces for the current revision")
+
+(define document-highlight-effects
+  (editor-execute-command! editor 'lsp.document-highlights))
+(check
+  (and (= (length document-highlight-effects) 1)
+       (eq? (command-effect-kind (car document-highlight-effects))
+            'managed-process.write))
+  "document highlights did not issue an LSP request")
+(define document-highlight-message
+  (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload (car document-highlight-effects))))))
+(check
+  (string=?
+    (json-object-ref document-highlight-message "method" #f)
+    "textDocument/documentHighlight")
+  "document highlights used the wrong LSP method")
+(lsp-client-handle-json-message!
+  editor
+  session
+  (make-json-object
+    (list
+      (cons "jsonrpc" "2.0")
+      (cons "id" (json-object-ref document-highlight-message "id" #f))
+      (cons
+        "result"
+        (make-json-array
+          (list
+            (make-json-object
+              (list
+                (cons
+                  "range"
+                  (make-json-object
+                    (list
+                      (cons
+                        "start"
+                        (make-json-object
+                          (list (cons "line" 0) (cons "character" 0))))
+                      (cons
+                        "end"
+                        (make-json-object
+                          (list (cons "line" 0) (cons "character" 3)))))))
+                (cons "kind" 1)))
+            (make-json-object
+              (list
+                (cons
+                  "range"
+                  (make-json-object
+                    (list
+                      (cons
+                        "start"
+                        (make-json-object
+                          (list (cons "line" 0) (cons "character" 4))))
+                      (cons
+                        "end"
+                        (make-json-object
+                          (list (cons "line" 0) (cons "character" 8)))))))
+                (cons "kind" 2)))))))))
+(define document-highlight-annotations
+  (filter
+    (lambda (annotation)
+      (eq? (annotation-kind annotation) 'document-highlight))
+    (apply append
+      (map
+        annotation-set-annotations
+        (editor-annotation-sets-for-buffer editor (buffer-id source))))))
+(check
+  (and (= (length document-highlight-annotations) 2)
+       (for-all
+         (lambda (annotation)
+           (eq? (annotation-face annotation) 'symbol-highlight))
+         document-highlight-annotations))
+  "document highlights did not publish ephemeral symbol annotations")
 
 (define workspace-folder-response
   (lsp-client-handle-json-message!
