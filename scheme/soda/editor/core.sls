@@ -722,6 +722,7 @@
           project-workspace-configuration
           project-workspace-setting-ref
           project-workspace-language-server-ref
+          project-workspace-lsp-settings-ref
           editor-project-workspace
           editor-project-workspaces-for-resource
           editor-project-workspace-for-resource

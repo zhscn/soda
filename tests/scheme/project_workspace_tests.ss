@@ -6,7 +6,8 @@
         (soda editor project)
         (soda editor project-workspace)
         (soda editor resource-context)
-        (soda editor state))
+        (soda editor state)
+        (soda json))
 
 (define (check condition message . irritants)
   (unless condition
@@ -81,6 +82,14 @@
       "/workspace/build"))
   "ProjectWorkspace must freeze folders and declarative settings")
 
+(define clangd-project-settings
+  (make-json-object
+    (list
+      (cons
+        "clangd"
+        (make-json-object
+          (list
+            (cons "compilationDatabasePath" "/language-servers/build")))))))
 (define language-server-workspace
   (editor-project-workspace
     editor
@@ -89,8 +98,11 @@
       '("/language-servers")
       'manual 'explicit #f
       (make-project-settings-layer
-        '((language-server . fallback-server)
-          (language-servers . ((cpp . clangd) (scheme . scheme-lsp)))))
+        (list
+          (cons 'language-server 'fallback-server)
+          (cons 'language-servers '((cpp . clangd) (scheme . scheme-lsp)))
+          (cons 'lsp-settings
+                (list (cons 'clangd clangd-project-settings)))))
       '())))
 (check
   (and
@@ -107,6 +119,19 @@
         language-server-workspace 'json #f)
       'fallback-server))
   "ProjectWorkspace must select a language-specific server before its default")
+(let ([settings
+        (project-workspace-lsp-settings-ref
+          language-server-workspace
+          'clangd
+          (make-json-object '()))])
+  (check
+    (string=?
+      (json-object-ref
+        (json-object-ref settings "clangd" #f)
+        "compilationDatabasePath"
+        #f)
+      "/language-servers/build")
+    "ProjectWorkspace must expose server-specific JSON settings"))
 
 (define mutable-configuration
   (list

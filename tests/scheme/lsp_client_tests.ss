@@ -40,13 +40,23 @@
   (editor-create-buffer!
     editor "/workspace/src/main.cpp" 'cpp-mode "int main() {}\n"))
 (buffer-set-file-path! source "/workspace/src/main.cpp")
+(define project-lsp-settings
+  (make-json-object
+    (list
+      (cons
+        "clangd"
+        (make-json-object
+          (list
+            (cons "compilationDatabasePath" "/workspace/build")))))))
 (define project
   (make-project
     'workspace
     '("/workspace")
     'manual 'explicit #f
     (make-project-settings-layer
-      '((language-servers . ((cpp . clangd)))))
+      (list
+        (cons 'language-servers '((cpp . clangd)))
+        (cons 'lsp-settings (list (cons 'clangd project-lsp-settings)))))
     '()))
 (editor-remember-project! editor project)
 (define workspace (editor-project-workspace editor project))
@@ -148,6 +158,46 @@
     (= (length ready-effects) 3)
     (eq? (command-effect-kind (caddr ready-effects)) 'command.invoke))
   "initialize response did not transition the LSP session to ready")
+
+(define configuration-effects
+  (lsp-client-handle-json-message!
+    editor
+    session
+    (make-json-object
+      (list
+        (cons "jsonrpc" "2.0")
+        (cons "id" 2)
+        (cons "method" "workspace/configuration")
+        (cons
+          "params"
+          (make-json-object
+            (list
+              (cons
+                "items"
+                (make-json-array
+                  (list
+                    (make-json-object
+                      (list
+                        (cons "section" "clangd.compilationDatabasePath")))
+                    (make-json-object '())))))))))))
+(define configuration-response
+  (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload (car configuration-effects))))))
+(define configuration-values
+  (json-array-values
+    (json-object-ref configuration-response "result" #f)))
+(check
+  (and
+    (= (length configuration-effects) 1)
+    (= (length configuration-values) 2)
+    (string=? (car configuration-values) "/workspace/build")
+    (json-object?
+      (json-object-ref
+        (cadr configuration-values) "clangd" #f)))
+  "workspace/configuration did not use Project LSP settings")
 
 (editor-workbench-adopt-project!
   editor

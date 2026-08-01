@@ -668,12 +668,6 @@
             (cons "id" id)
             (cons "result" result))))
 
-  (define (repeated-json-value count value)
-    (let loop ([remaining count] [values '()])
-      (if (zero? remaining)
-          (reverse values)
-          (loop (- remaining 1) (cons value values)))))
-
   (define (workspace-apply-edit-result applied failure-reason)
     (make-json-object
       (append
@@ -681,6 +675,37 @@
         (if failure-reason
             (list (cons "failureReason" failure-reason))
             '()))))
+
+  (define (json-configuration-section settings section)
+    (if (and (string? section)
+             (positive? (string-length section)))
+        (let loop ([value settings] [start 0])
+          (let ([end
+                  (let find ([index start])
+                    (if (or (= index (string-length section))
+                            (char=? (string-ref section index) #\.))
+                        index
+                        (find (+ index 1))))])
+            (if (= start end)
+                json-null
+                (let ([next
+                        (if (json-object? value)
+                            (json-object-ref
+                              value (substring section start end) json-null)
+                            json-null)])
+                  (if (or (json-null? next)
+                          (= end (string-length section)))
+                      next
+                      (loop next (+ end 1)))))))
+        settings))
+
+  (define (session-lsp-settings session)
+    (let ([workspace (lsp-client-session-workspace session)]
+          [profile (lsp-client-session-server session)])
+      (project-workspace-lsp-settings-ref
+        workspace
+        (lsp-server-profile-name profile)
+        (lsp-server-profile-settings profile))))
 
   (define (server-workspace-apply-edit-response! editor id params)
     (let* ([workspace-edit
@@ -732,11 +757,19 @@
       [(string=? method "workspace/configuration")
        (let* ([items (and (json-object? params)
                           (json-object-ref params "items" #f))]
-              [count (if (json-array? items)
-                         (length (json-array-values items))
-                         0)]
-              [settings (lsp-server-profile-settings (lsp-client-session-server session))])
-         (server-request-result id (make-json-array (repeated-json-value count settings))))]
+              [settings (session-lsp-settings session)]
+              [values
+                (if (json-array? items)
+                    (map
+                      (lambda (item)
+                        (json-configuration-section
+                          settings
+                          (and
+                            (json-object? item)
+                            (json-object-ref item "section" #f))))
+                      (json-array-values items))
+                    '())])
+         (server-request-result id (make-json-array values)))]
       [(string=? method "client/registerCapability")
        (server-request-result id json-null)]
       [(string=? method "workspace/applyEdit")

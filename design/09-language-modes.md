@@ -214,6 +214,10 @@ snapshot 与 generation；identity 改变时 transport 关闭旧 documents，建
 session，并恢复 Buffer attachment 和 View routing。普通语义请求只携带 attachment，
 不重新运行 Project discovery。
 
+Project 的 `lsp-settings` 是 `(server-name . json-value)` 的 association list。选中的
+server 按名称读取其 JSON value，覆盖 profile 的默认 settings；`workspace/configuration`
+请求的每个 section 从该 JSON value 查询，空 section 返回整个 value。
+
 `LanguageSessionKey` 对 workspace folders、configuration、environment fingerprint 和
 client capabilities 使用按值快照。嵌套的 list、vector、string 与 bytevector 在建立 key
 和读取 key 时独立复制，使异步 transport 的 identity 不受调用方后续原地修改影响。

@@ -12,6 +12,7 @@
           project-workspace-configuration
           project-workspace-setting-ref
           project-workspace-language-server-ref
+          project-workspace-lsp-settings-ref
           editor-project-workspace
           editor-project-workspaces-for-resource
           editor-project-workspace-for-resource
@@ -23,6 +24,7 @@
           (soda editor project)
           (soda editor resource-context)
           (soda editor state)
+          (soda json)
           (soda vfs))
 
   (define-record-type
@@ -201,6 +203,43 @@
                      server))
                  server)
                (default)))))))
+
+  (define (project-workspace-lsp-settings-ref workspace server fallback)
+    (unless (project-workspace? workspace)
+      (assertion-violation
+        'project-workspace-lsp-settings-ref
+        "expected a ProjectWorkspace"
+        workspace))
+    (unless (symbol? server)
+      (assertion-violation
+        'project-workspace-lsp-settings-ref
+        "server name must be a symbol"
+        server))
+    (unless (json-value? fallback)
+      (assertion-violation
+        'project-workspace-lsp-settings-ref
+        "fallback settings must be a JSON value"
+        fallback))
+    (let ([settings
+            (project-workspace-setting-ref workspace 'lsp-settings #f)])
+      (cond
+        [(not settings) fallback]
+        [(not (list? settings))
+         (assertion-violation
+           'project-workspace-lsp-settings-ref
+           "lsp-settings must be an association list"
+           settings)]
+        [else
+         (let ([entry (assq server settings)])
+           (if entry
+               (let ([value (cdr entry)])
+                 (unless (json-value? value)
+                   (assertion-violation
+                     'project-workspace-lsp-settings-ref
+                     "language-server settings must be JSON values"
+                     value))
+                 value)
+               fallback))])))
 
   (define (root-contains-resource? root resource)
     (let ([root-length (string-length root)]
