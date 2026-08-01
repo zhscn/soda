@@ -338,6 +338,7 @@
           tui-surface-columns
           tui-surface-frame
           tui-surface-component-tree
+          tui-surface-arranged-tree
           tui-surface-focus-ring
           tui-surface-cursor
           tui-render-surface

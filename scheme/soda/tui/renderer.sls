@@ -1174,6 +1174,60 @@
           (and (pair? enabled)
                (tui-focus-entry-node-key (car enabled)))))))
 
+  (define (same-rect? left right)
+    (and (= (rect-row left) (rect-row right))
+         (= (rect-column left) (rect-column right))
+         (= (rect-rows left) (rect-rows right))
+         (= (rect-columns left) (rect-columns right))))
+
+  (define (component-node-find-rect node id rectangle)
+    (and
+      (component-node? node)
+      (or
+        (and (eq? (component-node-id node) id)
+             (same-rect? (component-node-rect node) rectangle)
+             node)
+        (let loop ([children (component-node-children node)])
+          (and
+            (pair? children)
+            (or
+              (component-node-find-rect
+                (car children) id rectangle)
+              (loop (cdr children))))))))
+
+  (define (translate-component-tree node row-offset column-offset)
+    (let ([rectangle (component-node-rect node)])
+      (make-component-node
+        (component-node-id node)
+        (make-rect
+          (+ row-offset (rect-row rectangle))
+          (+ column-offset (rect-column rectangle))
+          (rect-rows rectangle)
+          (rect-columns rectangle))
+        (component-node-component node)
+        (map
+          (lambda (child)
+            (translate-component-tree child row-offset column-offset))
+          (component-node-children node)))))
+
+  (define (graft-application-component-tree! frame rectangle surface)
+    (let* ([layout (frame-layout frame)]
+           [text-node
+             (and layout
+                  (component-node-find-rect
+                    layout 'editor.text rectangle))]
+           [application-tree
+             (translate-component-tree
+               (tui-surface-component-tree surface)
+               (rect-row rectangle)
+               (rect-column rectangle))])
+      (when text-node
+        (component-node-set-children!
+          text-node
+          (append
+            (component-node-children text-node)
+            (list application-tree))))))
+
   (define (application-surface context rectangle)
     (let* ([editor (editor-render-context-editor context)]
            [view (editor-render-context-view context)]
@@ -1236,12 +1290,13 @@
   (define (render-application-text-component! context frame rectangle)
     (let* ([surface (application-surface context rectangle)]
            [cursor (tui-surface-cursor surface)])
+      (graft-application-component-tree! frame rectangle surface)
       (copy-application-surface! surface frame rectangle)
       (when (editor-render-context-focused? context)
         (if (and cursor (tui-cursor-visible? cursor))
             (let ([node
                     (tui-arranged-node-find
-                      (tui-surface-component-tree surface)
+                      (tui-surface-arranged-tree surface)
                       (tui-cursor-node-key cursor))])
               (if node
                   (let* ([node-rect (tui-arranged-node-rect node)]

@@ -83,12 +83,14 @@
           tui-surface-columns
           tui-surface-frame
           tui-surface-component-tree
+          tui-surface-arranged-tree
           tui-surface-focus-ring
           tui-surface-cursor
           tui-render-surface)
   (import (rnrs)
           (soda editor display)
           (soda editor theme)
+          (soda tui component)
           (soda tui frame))
 
   (define (exact-non-negative-integer? value)
@@ -683,7 +685,34 @@
     (fields node-key local-row local-column shape visible?))
 
   (define-record-type tui-surface
-    (fields rows columns frame component-tree focus-ring cursor))
+    (fields rows columns frame component-tree arranged-tree focus-ring cursor))
+
+  (define (datum->string value)
+    (call-with-values
+      open-string-output-port
+      (lambda (port extract)
+        (write value port)
+        (extract))))
+
+  (define (application-component-id session-id path)
+    (string->symbol
+      (string-append
+        "application."
+        (number->string session-id)
+        "."
+        (datum->string path))))
+
+  (define (arranged->component-tree arranged session-id path)
+    (let* ([node (tui-arranged-node-node arranged)]
+           [node-path (append path (list (tui-node-key node)))])
+      (make-component-node
+        (application-component-id session-id node-path)
+        (tui-arranged-node-rect arranged)
+        #f
+        (map
+          (lambda (child)
+            (arranged->component-tree child session-id node-path))
+          (tui-arranged-node-children arranged)))))
 
   (define (resolve-faces theme faces)
     (let ([spec (theme-resolve-faces theme faces)])
@@ -930,7 +959,14 @@
         (paint-arranged!
           arranged frame theme session-id surface-rect)
       (make-tui-surface
-        rows columns frame arranged
+        rows columns frame
+        (make-component-node
+          (string->symbol
+            (string-append "application." (number->string session-id)))
+          (make-rect 0 0 rows columns)
+          #f
+          (list (arranged->component-tree arranged session-id '())))
+          arranged
           (sort-focus-ring (collect-focus-ring arranged surface-rect))
           cursor))))
 )

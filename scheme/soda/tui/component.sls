@@ -8,6 +8,7 @@
           component-node-rect
           component-node-component
           component-node-children
+          component-node-set-children!
           component-node-render!
           component-node-find
           component-node-at
@@ -20,7 +21,10 @@
 
   (define-record-type
     (component-node %make-component-node component-node?)
-    (fields id rect component children))
+    (fields id rect component
+            (mutable children
+                     component-node-children
+                     component-node-children-set!)))
 
   (define (make-component id render)
     (unless (symbol? id)
@@ -64,6 +68,18 @@
         id
         (component-id component)))
     (%make-component-node id rectangle component children))
+
+  (define (component-node-set-children! node children)
+    (unless (component-node? node)
+      (assertion-violation
+        'component-node-set-children! "expected a component node" node))
+    (unless (and (list? children) (for-all component-node? children))
+      (assertion-violation
+        'component-node-set-children!
+        "children must be a list of component nodes"
+        children))
+    (component-node-children-set! node children)
+    children)
 
   (define (component-node-render! node context frame)
     (unless (component-node? node)

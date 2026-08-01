@@ -10,6 +10,7 @@
         (soda editor tui-application-host)
         (soda editor tui-application-runtime)
         (soda runtime)
+        (soda tui component)
         (soda tui frame)
         (soda tui renderer))
 
@@ -173,6 +174,10 @@
 (define first-frame (render-editor-frame editor 5 30))
 (define second-frame (render-editor-frame editor 5 30))
 (define application-cell (frame-cell-ref first-frame 0 0))
+(define application-component-path
+  (map
+    component-node-id
+    (component-node-path-at (frame-layout first-frame) 0 0)))
 (check
   (and
     (= view-count 1)
@@ -186,7 +191,14 @@
       (cell-sources application-cell))
     (string=?
       (cell-text (frame-cell-ref second-frame 0 0))
-      "4"))
+      "4")
+    (member
+      (string->symbol
+        (string-append
+          "application."
+          (number->string (tui-session-id session))))
+      application-component-path)
+    (>= (length application-component-path) 5))
   "renderer must compose and cache an application surface")
 
 (define application-view-state
