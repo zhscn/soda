@@ -141,6 +141,9 @@
   (define-record-type lsp-diagnostic-refresh
     (fields session buffer-id revision))
 
+  (define-record-type lsp-document-request-context
+    (fields kind buffer-id revision))
+
   (define editor-lsp-registries (make-eq-hashtable))
   (define pending-lsp-workspace-edits (make-weak-eq-hashtable))
   (define pending-lsp-completion-resolutions (make-weak-eq-hashtable))
@@ -462,6 +465,20 @@
   (define (terminate-all-pending-requests! editor session reason)
     (terminate-pending-requests!
       editor session reason #f (lambda (request) #t)))
+
+  (define (cancel-superseded-document-requests!
+            editor session kind buffer-id)
+    (terminate-pending-requests!
+      editor
+      session
+      'superseded
+      #t
+      (lambda (request)
+        (let ([context (lsp-client-pending-request-context request)])
+          (and
+            (lsp-document-request-context? context)
+            (eq? (lsp-document-request-context-kind context) kind)
+            (= (lsp-document-request-context-buffer-id context) buffer-id))))))
 
   (define (session-notification-effect session method params)
     (make-command-effect
@@ -911,8 +928,13 @@
              (eq? (lsp-client-session-state session) 'ready)
              (= (buffer-revision buffer) revision)
              (= (lsp-client-document-revision document) revision))
-        (list
-          (session-request!
+        (let ([cancel-effects
+                (cancel-superseded-document-requests!
+                  editor session 'diagnostics (buffer-id buffer))])
+          (append
+            cancel-effects
+            (list
+              (session-request!
             session
             "textDocument/diagnostic"
             (make-json-object
@@ -947,7 +969,11 @@
                             "diagnostics"
                             (json-object-ref result "items"
                                              (make-json-array '())))))))))
-              '())))
+              '())
+            default-request-error
+            default-request-cancel
+            (make-lsp-document-request-context
+              'diagnostics (buffer-id buffer) revision)))))
         '()))
 
   (define (lsp-refresh-diagnostics-command context)
@@ -2222,8 +2248,12 @@
                 (+ index 1)
                 (append (reverse cancelled) effects)))))))
 
-  (define (lsp-request-at-active-point!
-            editor method additional-parameters continuation)
+  (define lsp-request-at-active-point!
+    (case-lambda
+      [(editor method additional-parameters continuation)
+       (lsp-request-at-active-point!
+         editor method additional-parameters continuation #f)]
+      [(editor method additional-parameters continuation request-context)
     (unless (and (list? additional-parameters)
                  (for-all
                    (lambda (entry)
@@ -2254,10 +2284,13 @@
                             (list (cons "uri" (lsp-client-document-uri document)))))
                     (cons "position" (lsp-position->json position)))
                   additional-parameters))
-              continuation))
+              continuation
+              default-request-error
+              default-request-cancel
+              request-context))
           (begin
             (editor-set-status-message! editor "No ready language server at point")
-            '()))))
+            '())))]))
 
   (define (session-semantic-namespace session)
     (string->symbol
@@ -2398,8 +2431,13 @@
       (if (and document types
                (= (buffer-revision buffer) revision)
                (eq? (lsp-client-session-state session) 'ready))
-          (list
-            (session-request!
+          (let ([cancel-effects
+                  (cancel-superseded-document-requests!
+                    editor session 'semantic-tokens (buffer-id buffer))])
+            (append
+              cancel-effects
+              (list
+                (session-request!
               session
               "textDocument/semanticTokens/full"
               (make-json-object
@@ -2410,7 +2448,11 @@
               (lambda (response-editor response-session result)
                 (publish-semantic-tokens!
                   response-editor response-session buffer revision result)
-                '())))
+                '())
+              default-request-error
+              default-request-cancel
+              (make-lsp-document-request-context
+                'semantic-tokens (buffer-id buffer) revision)))))
           '())))
 
   (define (lsp-request-semantic-tokens! editor)
@@ -2513,14 +2555,21 @@
            [revision (buffer-revision buffer)]
            [session (active-view-lsp-session editor)])
       (if (and session (document-highlights-supported? session))
-          (lsp-request-at-active-point!
-            editor
-            "textDocument/documentHighlight"
-            '()
-            (lambda (response-editor response-session result)
-              (publish-document-highlights!
-                response-editor response-session buffer revision result)
-              '()))
+          (let ([cancel-effects
+                  (cancel-superseded-document-requests!
+                    editor session 'document-highlights (buffer-id buffer))])
+            (append
+              cancel-effects
+              (lsp-request-at-active-point!
+                editor
+                "textDocument/documentHighlight"
+                '()
+                (lambda (response-editor response-session result)
+                  (publish-document-highlights!
+                    response-editor response-session buffer revision result)
+                  '())
+                (make-lsp-document-request-context
+                  'document-highlights (buffer-id buffer) revision))))
           (begin
             (editor-set-status-message!
               editor "The language server does not provide document highlights")

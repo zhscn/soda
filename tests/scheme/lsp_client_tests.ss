@@ -344,15 +344,19 @@
 (define semantic-effects
   (editor-execute-command! editor 'lsp.semantic-tokens))
 (check
-  (and (= (length semantic-effects) 1)
-       (eq? (command-effect-kind (car semantic-effects)) 'managed-process.write))
+  (and
+    (pair? semantic-effects)
+    (for-all
+      (lambda (effect)
+        (eq? (command-effect-kind effect) 'managed-process.write))
+      semantic-effects))
   "semantic tokens did not issue an LSP request")
 (define semantic-message
   (car
     (lsp-json-rpc-decode!
       (make-lsp-json-rpc-decoder)
       (managed-process-write-request-data
-        (command-effect-payload (car semantic-effects))))))
+        (command-effect-payload (car (reverse semantic-effects)))))))
 (check
   (string=?
     (json-object-ref semantic-message "method" #f)
@@ -569,6 +573,47 @@
       (json-object-ref automatic-semantic-message "method" #f)
       "textDocument/semanticTokens/full"))
   "a synchronized document did not refresh semantic tokens")
+
+(define replacement-semantic-effects
+  (editor-execute-command! editor 'lsp.semantic-tokens))
+(define replacement-semantic-messages
+  (map
+    (lambda (effect)
+      (car
+        (lsp-json-rpc-decode!
+          (make-lsp-json-rpc-decoder)
+          (managed-process-write-request-data
+            (command-effect-payload effect)))))
+    replacement-semantic-effects))
+(check
+  (and
+    (= (length replacement-semantic-messages) 2)
+    (string=?
+      (json-object-ref (car replacement-semantic-messages) "method" #f)
+      "$/cancelRequest")
+    (=
+      (json-object-ref
+        (json-object-ref
+          (car replacement-semantic-messages) "params" #f)
+        "id"
+        #f)
+      (json-object-ref automatic-semantic-message "id" #f))
+    (string=?
+      (json-object-ref (cadr replacement-semantic-messages) "method" #f)
+      "textDocument/semanticTokens/full"))
+  "a newer semantic-token request did not cancel its predecessor")
+(lsp-client-handle-json-message!
+  editor
+  session
+  (make-json-object
+    (list
+      (cons "jsonrpc" "2.0")
+      (cons "id"
+            (json-object-ref
+              (cadr replacement-semantic-messages) "id" #f))
+      (cons "result"
+            (make-json-object
+              (list (cons "data" (make-json-array '()))))))))
 
 (define diagnostic-range
   (make-json-object
