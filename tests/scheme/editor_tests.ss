@@ -4279,23 +4279,23 @@
     (and
       (location-list? locations)
       (eq? (location-list-source locations) 'scheme-references)
-      (= (length (location-list-items locations)) 3)
-      (= (view-caret xref-view) 8))
+      (= (length (location-list-items locations)) 2)
+      (= (view-caret xref-view) 21))
     (error 'editor-tests "Scheme xref did not publish references")))
 (editor-update!
   xref-editor
   (make-command-message 'xref.next-location #f))
-(unless (= (view-caret xref-view) 21)
-  (error 'editor-tests "xref next did not visit the first use"))
+(unless (= (view-caret xref-view) 28)
+  (error 'editor-tests "xref next did not visit the next use"))
 (editor-update!
   xref-editor
   (make-command-message 'xref.next-location #f))
-(unless (= (view-caret xref-view) 28)
-  (error 'editor-tests "xref next did not visit the second use"))
+(unless (= (view-caret xref-view) 21)
+  (error 'editor-tests "xref next did not wrap to the first use"))
 (editor-update!
   xref-editor
   (make-command-message 'xref.previous-location #f))
-(unless (= (view-caret xref-view) 21)
+(unless (= (view-caret xref-view) 28)
   (error 'editor-tests "xref previous did not reverse the location list"))
 (buffer-replace-range!
   xref-buffer
@@ -4307,7 +4307,7 @@
   (make-command-message 'xref.next-location #f))
 (unless
   (and
-    (= (view-caret xref-view) 21)
+    (= (view-caret xref-view) 28)
     (= (location-list-index
          (editor-current-location-list xref-editor))
        1)

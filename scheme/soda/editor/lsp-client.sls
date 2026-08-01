@@ -2913,7 +2913,7 @@
         (list
           (cons "context"
                 (make-json-object
-                  (list (cons "includeDeclaration" #t)))))
+                  (list (cons "includeDeclaration" #f)))))
         (lambda (response-editor response-session result)
           (let ([items (lsp-reference-items response-editor result)])
             (if (null? items)

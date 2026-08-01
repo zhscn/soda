@@ -1781,8 +1781,8 @@
           "context"
           #f)
         "includeDeclaration"
-        #f)
-      #t))
+        #t)
+      #f))
   "find-references request has an invalid LSP payload")
 (define reference-source-range
   (make-json-object

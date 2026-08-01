@@ -306,28 +306,20 @@
                   editor
                   "No definition at point"))
               (let* ([definition (car definitions)]
-                     [declaration
-                       (definition-location editor definition)]
                      [references
                        (scheme-workspace-references
                          index
                          editor
                          definition)]
                      [items
-                       (append
-                         (if declaration (list declaration) '())
-                         (map
-                           (lambda (reference)
-                             (use-location
-                               (scheme-workspace-reference-buffer-id
-                                 reference)
-                               (scheme-workspace-reference-resource
-                                 reference)
-                               (scheme-workspace-reference-revision
-                                 reference)
-                               (scheme-workspace-reference-use
-                                 reference)))
-                           references))])
+                       (map
+                         (lambda (reference)
+                           (use-location
+                             (scheme-workspace-reference-buffer-id reference)
+                             (scheme-workspace-reference-resource reference)
+                             (scheme-workspace-reference-revision reference)
+                             (scheme-workspace-reference-use reference)))
+                         references)])
                 (let ([effect
                         (publish-and-jump!
                           context
