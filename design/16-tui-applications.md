@@ -5,11 +5,11 @@
 | 能力 | 状态 |
 |---|---|
 | 所依赖的 Buffer/View/Window、Frame、Theme 与基础 InputState | 已实现 |
-| `TuiApplicationDefinition`、catalog、session 与 lifecycle | 部分实现 |
-| message/update/effect 与 generation 模型 | 部分实现 |
-| application input handler、focus、pointer 与 replay | 部分实现 |
-| 声明式 node、layout、surface 与 Frame composition | 部分实现 |
-| text projection、inspection、persistence 与 sole host | 部分实现 |
+| `TuiApplicationDefinition`、catalog、session 与 lifecycle | 已实现 |
+| message/update/effect 与 generation 模型 | 已实现 |
+| application input handler、focus、pointer 与 replay | 已实现 |
+| 声明式 node、layout、surface 与 Frame composition | 已实现 |
+| text projection、inspection、persistence 与 sole host | 已实现 |
 
 ## 定位
 
@@ -97,7 +97,11 @@ TuiApplicationDefinition {
   text_projection?,
   default_mode,
   default_display_intent,
-  capabilities
+  capabilities,
+  host_passthrough_keymaps,
+  serializer?,
+  deserializer?,
+  resume?
 }
 ```
 
@@ -107,11 +111,17 @@ TuiApplicationDefinition {
 - `close` 释放由应用持有、但不属于 effect runtime 的资源；
 - `text_projection` 产生可复制、可搜索和可测试的纯文本快照；
 - `default_mode` 提供 application keymap、interaction class 和 Buffer settings；
-- `capabilities` 声明应用使用的 runtime service。
+- `capabilities` 声明应用使用的 runtime service；标准 `timer` command 需要
+  `timer` capability，文件、目录与 stat command 需要 `vfs` capability；
+- `host_passthrough_keymaps` 声明自定义 input handler 应交还 Workbench 的键位层；
+- `serializer`、`deserializer` 与 `resume` 定义持久化和 definition reload 时的
+  Model 恢复边界。
 
 应用定义可由内建 Scheme library、用户配置或插件注册。重载定义只影响后续创建的
-session；正在运行的 session 保持其 definition identity，显式 reload command
-负责状态迁移。
+session；正在运行的 session 保持其 definition identity。`tui-reload!` 显式将运行中
+session 迁移到 catalog 中的新 definition：serializer/deserializer 可迁移 Model，
+缺少序列化契约时重新运行 init；切换成功时推进 generation、失效在途 command、
+刷新 major mode，并由 resume 返回新的 commands。
 
 ## Session、Model 与 View state
 
@@ -122,9 +132,12 @@ TuiSession {
   id,
   definition,
   buffer_id,
+  arguments,
+  display_intent,
   model,
   generation,
   command_generation,
+  projection_generation,
   view_states: ViewId -> TuiViewState,
   pending_commands,
   state: initializing | ready | failed | closed
@@ -190,6 +203,7 @@ TuiCommandResult  { command_id, result }
 TuiTimer          { timer_id, instant }
 TuiUserMessage    { datum }
 TuiClose
+TuiQuitRequest
 ```
 
 terminal decoder 只产生规范 InputEvent。TUI framework 在焦点和 session identity
@@ -496,13 +510,16 @@ FocusEntry {
   node_key,
   rect,
   order,
-  enabled?
+  enabled?,
+  group,
+  path
 }
 ```
 
 应用 update 处理 Tab、Backtab、方向导航或自定义消息，并通过 view action 改变
 focused node。节点消失或 disabled 时，框架按同组下一个可用节点、父 focus scope、
 无 focus 的顺序回退。focus identity 使用 node key，不使用上一次 frame 的坐标。
+FocusEntry 保留 group 与稳定 node path，动态列表变化时不依赖旧坐标推断 scope。
 
 focused component 不直接接收 terminal bytes。application update 根据
 `origin_view_id` 和 `focused_node` 把 TuiKeyPress、TuiTextInput 与 TuiPaste 路由给
@@ -764,7 +781,8 @@ status/notification message，不能自行切换 active Workbench。
 
   (mode 'package-browser-mode)
   (display-intent 'tools)
-  (capabilities '(vfs timer)))
+  (capabilities '(vfs timer))
+  (host-passthrough-keymaps '(editor.override editor.default)))
 ```
 
 打开和投递消息：
@@ -810,6 +828,8 @@ role
 label
 value
 description
+selection
+copy_value
 commands
 keymap
 ```
@@ -878,7 +898,8 @@ runtime、第二个事件循环或递归 REPL。
   terminal session 建立后挂载单一 application window，占据整个终端，无
   modeline、minibuffer 等编辑器 chrome；minibuffer 类交互由应用自身的
   prompt child 组件承担。退出语义由应用声明：默认 `C-g` 仍走 editor
-  override 的逃生路径并终止进程，应用可通过 `confirm-on-exit?` 接管。
+  override 的逃生路径并终止进程；声明 `confirm-on-exit` capability 的应用接收
+  `TuiQuitRequest`，由自身 Model 显示确认界面，并通过普通 `editor.quit` 命令完成退出。
 
 两种模式共享 lifecycle、消息循环、渲染管线和输入分发；sole host 只是把
 Window 树退化为单一 leaf 并跳过编辑器 chrome 组件。
@@ -903,7 +924,10 @@ Window 树退化为单一 leaf 并跳过编辑器 chrome 组件。
 
 - counter 验证 key、Model update、多 View 和 repaint；
 - 异步 list 验证 command result、generation、scroll、focus 和取消；
-- form 验证文本提交、paste、prompt child、Tab focus 和 host key passthrough。
+- form 验证文本提交、paste、Tab focus 和 host key passthrough。
+
+`(soda tui examples)` 提供这三个 definition。样例通过普通 catalog 注册，不在 Editor
+启动时自动打开或占用全局命令名。
 
 Debugger、package browser、Buffer list、diagnostic list 和 project task dashboard
 使用同一 framework；这些应用不在 renderer 中增加专用分支。
