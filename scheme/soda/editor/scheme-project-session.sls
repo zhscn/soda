@@ -2,6 +2,8 @@
   (export install-scheme-project-session-commands!
           scheme-project-manifest?
           scheme-project-manifest-path
+          scheme-project-manifest-name
+          scheme-project-manifest-dialect
           scheme-project-manifest-interface-path
           scheme-project-manifest-build-arguments
           scheme-project-manifest-working-directory
@@ -9,9 +11,13 @@
           make-scheme-project-load-request
           scheme-project-load-request?
           scheme-project-load-request-path
+          scheme-project-load-request-origin-view-id
+          scheme-project-load-request-origin-buffer-id
           make-scheme-project-load-result
           scheme-project-load-result?
           scheme-project-load-result-path
+          scheme-project-load-result-origin-view-id
+          scheme-project-load-result-origin-buffer-id
           scheme-project-load-result-status
           scheme-project-load-result-data
           scheme-project-load-result-detail
@@ -21,6 +27,8 @@
           scheme-project-build-request-interface-path
           scheme-project-build-request-arguments
           scheme-project-build-request-working-directory
+          scheme-project-build-request-environment-id
+          scheme-project-build-request-origin-view-id
           make-scheme-project-build-result
           scheme-project-build-result?
           scheme-project-build-result-request
@@ -37,6 +45,7 @@
           (soda editor display)
           (soda editor file)
           (soda editor resource-context)
+          (soda editor scheme-environment)
           (soda editor scheme-interface-commands)
           (soda editor scheme-workspace)
           (soda editor state)
@@ -48,6 +57,8 @@
   (define-record-type scheme-project-manifest
     (fields
       path
+      name
+      dialect
       interface-path
       build-arguments
       working-directory))
@@ -56,13 +67,13 @@
     (scheme-project-load-request
       %make-scheme-project-load-request
       scheme-project-load-request?)
-    (fields path))
+    (fields path origin-view-id origin-buffer-id))
 
   (define-record-type
     (scheme-project-load-result
       %make-scheme-project-load-result
       scheme-project-load-result?)
-    (fields path status data detail))
+    (fields path origin-view-id origin-buffer-id status data detail))
 
   (define-record-type
     (scheme-project-build-request
@@ -72,7 +83,9 @@
       manifest-path
       interface-path
       arguments
-      working-directory))
+      working-directory
+      environment-id
+      origin-view-id))
 
   (define-record-type
     (scheme-project-build-result
@@ -81,26 +94,56 @@
     (fields request kind status flags data))
 
   (define-record-type scheme-project-session-state
-    (fields workspace manifests builds))
+    (fields environments manifests builds))
 
   (define (non-empty-string? value)
     (and
       (string? value)
       (positive? (string-length value))))
 
-  (define (make-scheme-project-load-request path)
-    (unless (non-empty-string? path)
-      (assertion-violation
-        'make-scheme-project-load-request
-        "path must be a non-empty string"
-        path))
-    (%make-scheme-project-load-request path))
+  (define (editor-find-view editor id)
+    (and
+      id
+      (find
+        (lambda (view) (= (view-id view) id))
+        (editor-views editor))))
 
-  (define (make-scheme-project-load-result
-            path
-            status
-            data
-            detail)
+  (define make-scheme-project-load-request
+    (case-lambda
+      [(path) (make-scheme-project-load-request path #f #f)]
+      [(path origin-view-id)
+       (make-scheme-project-load-request path origin-view-id #f)]
+      [(path origin-view-id origin-buffer-id)
+       (unless
+         (and
+           (non-empty-string? path)
+           (or
+             (not origin-view-id)
+             (and
+               (integer? origin-view-id)
+               (exact? origin-view-id)
+               (not (negative? origin-view-id))))
+           (or
+             (not origin-buffer-id)
+             (and
+               (integer? origin-buffer-id)
+               (exact? origin-buffer-id)
+               (positive? origin-buffer-id))))
+         (assertion-violation
+           'make-scheme-project-load-request
+           "invalid Scheme environment manifest load request"
+           path origin-view-id origin-buffer-id))
+       (%make-scheme-project-load-request
+         path origin-view-id origin-buffer-id)]))
+
+  (define make-scheme-project-load-result
+    (case-lambda
+      [(path status data detail)
+       (make-scheme-project-load-result path #f #f status data detail)]
+      [(path origin-view-id status data detail)
+       (make-scheme-project-load-result
+         path origin-view-id #f status data detail)]
+      [(path origin-view-id origin-buffer-id status data detail)
     (unless
       (and
         (non-empty-string? path)
@@ -110,16 +153,22 @@
         (or (not detail) (string? detail)))
       (assertion-violation
         'make-scheme-project-load-result
-        "invalid Scheme project load result"
+        "invalid Scheme environment load result"
         path status data detail))
-    (%make-scheme-project-load-result
-      path status data detail))
+       (%make-scheme-project-load-result
+         path origin-view-id origin-buffer-id status data detail)]))
 
-  (define (make-scheme-project-build-request
-            manifest-path
-            interface-path
-            arguments
-            working-directory)
+  (define make-scheme-project-build-request
+    (case-lambda
+      [(manifest-path interface-path arguments working-directory)
+       (make-scheme-project-build-request
+         manifest-path interface-path arguments working-directory #f #f)]
+      [(manifest-path
+         interface-path
+         arguments
+         working-directory
+         environment-id
+         origin-view-id)
     (unless
       (and
         (non-empty-string? manifest-path)
@@ -128,19 +177,31 @@
         (list? arguments)
         (non-empty-string? (car arguments))
         (for-all string? arguments)
-        (non-empty-string? working-directory))
+        (non-empty-string? working-directory)
+        (or (not environment-id)
+            (and (integer? environment-id)
+                 (exact? environment-id)
+                 (positive? environment-id)))
+        (or (not origin-view-id)
+            (and (integer? origin-view-id)
+                 (exact? origin-view-id)
+                 (not (negative? origin-view-id)))))
       (assertion-violation
         'make-scheme-project-build-request
-        "invalid Scheme project build request"
+        "invalid Scheme environment build request"
         manifest-path
         interface-path
         arguments
-        working-directory))
-    (%make-scheme-project-build-request
-      manifest-path
-      interface-path
-      arguments
-      working-directory))
+        working-directory
+        environment-id
+        origin-view-id))
+       (%make-scheme-project-build-request
+         manifest-path
+         interface-path
+         arguments
+         working-directory
+         environment-id
+         origin-view-id)]))
 
   (define (make-scheme-project-build-result
             request
@@ -160,7 +221,7 @@
         (bytevector? data))
       (assertion-violation
         'make-scheme-project-build-result
-        "invalid Scheme project build result"
+        "invalid Scheme environment build result"
         request kind status flags data))
     (%make-scheme-project-build-result
       request kind status flags data))
@@ -196,7 +257,7 @@
         [else
          (assertion-violation
            'scheme-project-manifest-decode
-           "invalid Scheme project manifest"
+           "invalid Scheme environment manifest"
            condition)])
       (call-with-port
         (open-string-input-port
@@ -207,7 +268,7 @@
             (unless (eof-object? trailing)
               (assertion-violation
                 'scheme-project-manifest-decode
-                "Scheme project manifest contains trailing data"))
+                "Scheme environment manifest contains trailing data"))
             datum)))))
 
   (define (scheme-project-manifest-decode
@@ -228,8 +289,12 @@
              (and
                (pair? datum)
                (list? datum)
-               (eq? (car datum) 'soda-scheme-project)
+               (eq? (car datum) 'soda-scheme-environment)
                (manifest-field datum 'format-version))]
+           [name
+             (and version (manifest-field datum 'name))]
+           [dialect
+             (and version (manifest-field datum 'dialect))]
            [interface-path
              (and
                version
@@ -249,6 +314,8 @@
           (equal?
             version
             project-manifest-format-version)
+          (non-empty-string? name)
+          (symbol? dialect)
           (non-empty-string? interface-path)
           (<=
             (manifest-field-count datum 'build-command)
@@ -274,10 +341,12 @@
             (not working-directory)))
         (assertion-violation
           'scheme-project-manifest-decode
-          "incompatible Scheme project manifest"
+          "incompatible Scheme environment manifest"
           datum))
       (make-scheme-project-manifest
         path
+        name
+        dialect
         (vfs-resolve-path
           manifest-directory
           interface-path)
@@ -290,26 +359,30 @@
     (editor-set-status-message!
       (command-context-editor context)
       (string-append
-        "Loading Scheme project "
+        "Loading Scheme environment "
         path))
     (list
       (make-command-effect
-        'scheme.project-read
-        (make-scheme-project-load-request path))))
+        'scheme.environment-read
+        (make-scheme-project-load-request
+          path
+          (view-id (command-context-view context))
+          (buffer-id
+            (view-buffer (command-context-view context)))))))
 
   (define-command
     (load-project-command context path)
     "Load a Scheme language session manifest."
     (interactive
       (interactive-file-name
-        "Load Scheme project: "))
+        "Load Scheme environment: "))
     (start-project-load! context path))
 
   (define (load-project-path-command context)
     (let ([path (command-context-argument context)])
       (unless (non-empty-string? path)
         (assertion-violation
-          'scheme.load-project-path
+          'scheme.load-environment-path
           "expected a non-empty path"
           path))
       (start-project-load! context path)))
@@ -319,8 +392,8 @@
            [result (command-context-argument context)])
       (unless (scheme-project-load-result? result)
         (assertion-violation
-          'scheme.apply-project
-          "expected a Scheme project load result"
+          'scheme.apply-environment
+          "expected a Scheme environment load result"
           result))
       (cond
         [(not
@@ -329,7 +402,7 @@
          (editor-set-status-message!
            editor
            (string-append
-             "Cannot load Scheme project "
+             "Cannot load Scheme environment "
              (scheme-project-load-result-path result)
              (let ([detail
                      (scheme-project-load-result-detail
@@ -345,7 +418,7 @@
               (editor-set-status-message!
                 editor
                 (string-append
-                  "Invalid Scheme project manifest "
+                  "Invalid Scheme environment manifest "
                   (scheme-project-load-result-path
                     result)))
               '()])
@@ -355,14 +428,47 @@
                        result)
                      (scheme-project-load-result-data
                        result))])
-             (hashtable-set!
+             (let* ([environments
+                      (scheme-project-session-state-environments state)]
+                    [environment
+                      (scheme-environment-registry-ensure!
+                        environments
+                        (scheme-project-manifest-name manifest)
+                        (scheme-project-manifest-dialect manifest))]
+                    [origin-view-id
+                      (or
+                        (scheme-project-load-result-origin-view-id result)
+                        (view-id (command-context-view context)))])
+               (let* ([origin-buffer-id
+                        (or
+                          (scheme-project-load-result-origin-buffer-id result)
+                          (buffer-id
+                            (view-buffer
+                              (command-context-view context))))]
+                      [attachment
+                        (scheme-environment-attach-buffer!
+                          environments
+                          editor
+                          origin-buffer-id
+                          environment
+                          origin-view-id)]
+                      [origin-view
+                        (editor-find-view editor origin-view-id)])
+                 (when
+                   (and
+                     origin-view
+                     (= origin-buffer-id
+                        (buffer-id (view-buffer origin-view))))
+                   (editor-set-view-language-attachment!
+                     editor origin-view-id attachment)))
+               (hashtable-set!
                (scheme-project-session-state-manifests state)
                (scheme-project-manifest-path manifest)
                manifest)
              (editor-set-status-message!
                editor
                (string-append
-                 "Loading Scheme project interfaces "
+                 "Loading Scheme environment interfaces "
                  (scheme-project-manifest-interface-path
                    manifest)))
              (list
@@ -370,7 +476,9 @@
                  'scheme.interface-index-read
                  (make-scheme-interface-load-request
                    (scheme-project-manifest-interface-path
-                     manifest))))))])))
+                     manifest)
+                   origin-view-id
+                   (scheme-environment-id environment)))))))])))
 
   (define (buffer-size buffer)
     (let ([snapshot
@@ -502,16 +610,16 @@
                #f)])
       (unless manifest
         (assertion-violation
-          'scheme.build-project
-          "Scheme project manifest is not loaded"
+          'scheme.build-environment
+          "Scheme environment manifest is not loaded"
           manifest-path))
       (let ([arguments
               (scheme-project-manifest-build-arguments
                 manifest)])
         (unless arguments
           (assertion-violation
-            'scheme.build-project
-            "Scheme project manifest has no build command"
+            'scheme.build-environment
+            "Scheme environment manifest has no build command"
             manifest-path))
         (if
           (hashtable-contains?
@@ -521,12 +629,23 @@
             (editor-set-status-message!
               editor
               (string-append
-                "Scheme project build is already running "
+                "Scheme environment build is already running "
                 manifest-path))
             '())
           (let* ([working-directory
                    (scheme-project-manifest-working-directory
                      manifest)]
+                 [environment
+                   (or
+                     (scheme-environment-registry-find
+                       (scheme-project-session-state-environments state)
+                       (scheme-project-manifest-name manifest))
+                     (assertion-violation
+                       'scheme.build-environment
+                       "SchemeEnvironment is not loaded"
+                       (scheme-project-manifest-name manifest)))]
+                 [origin-view-id
+                   (view-id (command-context-view context))]
                  [buffer
                    (project-build-buffer editor working-directory)]
                  [header
@@ -548,17 +667,19 @@
             (editor-set-status-message!
               editor
               (string-append
-                "Building Scheme project "
+                "Building Scheme environment "
                 manifest-path))
             (list
               (make-command-effect
-                'scheme.project-build
+                'scheme.environment-build
                 (make-scheme-project-build-request
                   manifest-path
                   (scheme-project-manifest-interface-path
                     manifest)
                   arguments
-                  working-directory))))))))
+                  working-directory
+                  (scheme-environment-id environment)
+                  origin-view-id))))))))
 
   (define (apply-project-build-result!
             state
@@ -567,8 +688,8 @@
            [result (command-context-argument context)])
       (unless (scheme-project-build-result? result)
         (assertion-violation
-          'scheme.apply-project-build-result
-          "expected a Scheme project build result"
+          'scheme.apply-environment-build-result
+          "expected a Scheme environment build result"
           result))
       (let* ([request
                (scheme-project-build-result-request
@@ -674,19 +795,23 @@
                    'scheme.interface-index-read
                    (make-scheme-interface-load-request
                      (scheme-project-build-request-interface-path
-                       request))))
+                       request)
+                     (scheme-project-build-request-origin-view-id request)
+                     (scheme-project-build-request-environment-id request))))
                '())))]
           [else
            (assertion-violation
-             'scheme.apply-project-build-result
-             "unknown Scheme project build result kind"
+             'scheme.apply-environment-build-result
+             "unknown Scheme environment build result kind"
              (scheme-project-build-result-kind
                result))]))))
 
-  (define (project-owner-choice-source workspace)
+  (define (project-owner-choice-source environments)
     (let* ([owners
-             (scheme-workspace-interface-index-owners
-               workspace)]
+             (map
+               scheme-environment-name
+               (scheme-environment-registry-environments
+                 environments))]
            [items
              (map
                (lambda (owner)
@@ -812,16 +937,16 @@
               (start-project-build!
                 state context manifest-path))])
       (make-command-definition
-        'scheme.build-project
+        'scheme.build-environment
         implementation
         (lambda (context arguments)
           (apply implementation context arguments))
-        "Build a loaded Scheme project and refresh its interface index."
+        "Build a loaded Scheme environment and refresh its interface index."
         #f
         (make-interactive-plan
           (list
             (interactive-completing-read
-              "Build Scheme project: "
+              "Build Scheme environment: "
               (lambda (context)
                 (project-manifest-choice-source
                   state))
@@ -838,17 +963,17 @@
         (scheme-project-session-state-builds state)
         manifest-path)
       (assertion-violation
-        'scheme.cancel-project-build
-        "Scheme project build is not running"
+        'scheme.cancel-environment-build
+        "Scheme environment build is not running"
         manifest-path))
     (editor-set-status-message!
       (command-context-editor context)
       (string-append
-        "Cancelling Scheme project build "
+        "Cancelling Scheme environment build "
         manifest-path))
     (list
       (make-command-effect
-        'scheme.project-build-cancel
+        'scheme.environment-build-cancel
         manifest-path)))
 
   (define (make-cancel-project-build-command state)
@@ -857,16 +982,16 @@
               (cancel-project-build!
                 state context manifest-path))])
       (make-command-definition
-        'scheme.cancel-project-build
+        'scheme.cancel-environment-build
         implementation
         (lambda (context arguments)
           (apply implementation context arguments))
-        "Cancel a running Scheme project build."
+        "Cancel a running Scheme environment build."
         #f
         (make-interactive-plan
           (list
             (interactive-completing-read
-              "Cancel Scheme project build: "
+              "Cancel Scheme environment build: "
               (lambda (context)
                 (active-build-choice-source
                   state))
@@ -875,38 +1000,41 @@
         '())))
 
   (define (unload-project!
-            workspace
+            environments
             context
             owner)
     (unless (non-empty-string? owner)
       (assertion-violation
-        'scheme.unload-project
+        'scheme.unload-environment
         "expected a non-empty interface owner"
         owner))
     (let ([editor (command-context-editor context)])
-      (scheme-workspace-remove-interface-index!
-        workspace
-        owner)
-      (when
-        (scheme-workspace-session-active?
-          workspace)
-        (scheme-workspace-sync-editor!
-          workspace
-          editor))
+      (let ([environment
+              (or
+                (scheme-environment-registry-find
+                  environments owner)
+                (assertion-violation
+                  'scheme.unload-environment
+                  "unknown SchemeEnvironment"
+                  owner))])
+        (scheme-environment-registry-remove!
+          environments
+          editor
+          (scheme-environment-id environment)))
       (editor-set-status-message!
         editor
         (string-append
-          "Unloaded Scheme project "
+          "Unloaded Scheme environment "
           owner))
       '()))
 
-  (define (make-unload-project-command workspace)
+  (define (make-unload-project-command environments)
     (let ([implementation
             (lambda (context owner)
               (unload-project!
-                workspace context owner))])
+                environments context owner))])
       (make-command-definition
-        'scheme.unload-project
+        'scheme.unload-environment
         implementation
         (lambda (context arguments)
           (apply implementation context arguments))
@@ -915,31 +1043,31 @@
         (make-interactive-plan
           (list
             (interactive-completing-read
-              "Unload Scheme project: "
+              "Unload Scheme environment: "
               (lambda (context)
                 (project-owner-choice-source
-                  workspace))
+                  environments))
               'must-match
               'scheme-project-owner)))
         '())))
 
   (define (install-scheme-project-session-commands!
             editor
-            workspace)
-    (unless (scheme-workspace-index? workspace)
+            environments)
+    (unless (scheme-environment-registry? environments)
       (assertion-violation
         'install-scheme-project-session-commands!
-        "expected a Scheme workspace index"
-        workspace))
+        "expected a SchemeEnvironment registry"
+        environments))
     (let ([state
             (make-scheme-project-session-state
-              workspace
+              environments
               (make-hashtable string-hash string=?)
               (make-hashtable string-hash string=?))])
       (editor-register-command!
         editor
         (make-interactive-context-command
-          'scheme.load-project
+          'scheme.load-environment
           load-project-command
           "Load a Scheme language session manifest."))
       (editor-register-command!
@@ -951,56 +1079,56 @@
           state))
       (editor-register-command!
         editor
-        (make-unload-project-command workspace))
+        (make-unload-project-command environments))
       (editor-register-internal-command!
         editor
         (make-internal-context-command
-          'scheme.load-project-path
+          'scheme.load-environment-path
           load-project-path-command
           "Load a Scheme language session manifest from a supplied path."))
       (editor-register-internal-command!
         editor
         (make-internal-context-command
-          'scheme.apply-project
+          'scheme.apply-environment
           (lambda (context)
             (apply-project-load-command
               state context))
-          "Apply a Scheme project manifest read result."))
+          "Apply a Scheme environment manifest read result."))
       (editor-register-internal-command!
         editor
         (make-internal-context-command
-          'scheme.build-project-path
+          'scheme.build-environment-path
           (lambda (context)
             (start-project-build!
               state
               context
               (command-context-argument context)))
-          "Build a loaded Scheme project from a supplied manifest path."))
+          "Build a loaded Scheme environment from a supplied manifest path."))
       (editor-register-internal-command!
         editor
         (make-internal-context-command
-          'scheme.cancel-project-build-path
+          'scheme.cancel-environment-build-path
           (lambda (context)
             (cancel-project-build!
               state
               context
               (command-context-argument context)))
-          "Cancel a running Scheme project build by manifest path."))
+          "Cancel a running Scheme environment build by manifest path."))
       (editor-register-internal-command!
         editor
         (make-internal-context-command
-          'scheme.apply-project-build-result
+          'scheme.apply-environment-build-result
           (lambda (context)
             (apply-project-build-result!
               state context))
-          "Apply process output or completion from a Scheme project build."))
+          "Apply process output or completion from a Scheme environment build."))
       (editor-register-internal-command!
         editor
         (make-internal-context-command
-          'scheme.unload-project-owner
+          'scheme.unload-environment-owner
           (lambda (context)
             (unload-project!
-              workspace
+              environments
               context
               (command-context-argument context)))
           "Unload a Scheme language session by interface owner.")))

@@ -9,12 +9,46 @@
         (soda editor file)
         (soda editor file-runtime)
         (soda editor prompt)
+        (soda editor scheme-environment)
+        (soda editor scheme-query)
         (soda editor scheme-interface-index)
         (soda editor scheme-semantics)
         (soda editor scheme-workspace)
         (soda editor scheme-xref)
         (soda editor state)
         (soda runtime))
+
+(define (test-scheme-environment-index editor)
+  (let* ([view (editor-active-view editor)]
+         [environment
+           (scheme-environment-registry-ensure!
+             (editor-scheme-environments editor)
+             (string-append
+               "test-"
+               (number->string
+                 (buffer-id (view-buffer view))))
+             'r6rs)])
+    (scheme-environment-attach-view!
+      (editor-scheme-environments editor)
+      editor
+      (view-id view)
+      environment)
+    (for-each
+      (lambda (buffer)
+        (when (scheme-buffer? buffer)
+          (scheme-workspace-attach-buffer!
+            (scheme-environment-index environment)
+            buffer)))
+      (editor-buffers editor))
+    (scheme-environment-index environment)))
+
+(define (test-sync-environment! index editor)
+  (for-each
+    (lambda (buffer)
+      (when (scheme-buffer? buffer)
+        (scheme-workspace-attach-buffer! index buffer)))
+    (editor-buffers editor))
+  (scheme-workspace-sync-editor! index editor))
 
 (define owner-source
   (string-append
@@ -86,8 +120,8 @@
 (editor-add-buffer! editor alias)
 
 (define workspace
-  (editor-scheme-workspace editor))
-(scheme-workspace-sync-editor! workspace editor)
+  (test-scheme-environment-index editor))
+(test-sync-environment! workspace editor)
 (define owner-snapshot
   (scheme-workspace-snapshot-for-buffer
     workspace owner))
@@ -249,7 +283,7 @@
 (define conflict-editor
   (make-editor conflict-buffer))
 (define conflict-workspace
-  (editor-scheme-workspace conflict-editor))
+  (test-scheme-environment-index conflict-editor))
 (define conflict-snapshot
   (scheme-workspace-snapshot-for-buffer
     conflict-workspace conflict-buffer))
@@ -289,7 +323,7 @@
 (define generated-editor
   (make-editor generated-buffer))
 (define generated-workspace
-  (editor-scheme-workspace generated-editor))
+  (test-scheme-environment-index generated-editor))
 (define generated-snapshot
   (scheme-workspace-snapshot-for-buffer
     generated-workspace generated-buffer))
@@ -331,7 +365,7 @@
 (define syntax-pattern-editor
   (make-editor syntax-pattern-buffer))
 (define syntax-pattern-workspace
-  (editor-scheme-workspace syntax-pattern-editor))
+  (test-scheme-environment-index syntax-pattern-editor))
 (define syntax-pattern-snapshot
   (scheme-workspace-snapshot-for-buffer
     syntax-pattern-workspace
@@ -406,7 +440,7 @@
 (define syntax-case-editor
   (make-editor syntax-case-buffer))
 (define syntax-case-workspace
-  (editor-scheme-workspace syntax-case-editor))
+  (test-scheme-environment-index syntax-case-editor))
 (define syntax-case-snapshot
   (scheme-workspace-snapshot-for-buffer
     syntax-case-workspace
@@ -483,7 +517,7 @@
 (define local-syntax-editor
   (make-editor local-syntax-buffer))
 (define local-syntax-workspace
-  (editor-scheme-workspace local-syntax-editor))
+  (test-scheme-environment-index local-syntax-editor))
 (define local-syntax-snapshot
   (scheme-workspace-snapshot-for-buffer
     local-syntax-workspace
@@ -568,7 +602,7 @@
 (define identifier-syntax-editor
   (make-editor identifier-syntax-buffer))
 (define identifier-syntax-workspace
-  (editor-scheme-workspace
+  (test-scheme-environment-index
     identifier-syntax-editor))
 (define identifier-syntax-snapshot
   (scheme-workspace-snapshot-for-buffer
@@ -645,7 +679,7 @@
 (define fluid-let-syntax-editor
   (make-editor fluid-let-syntax-buffer))
 (define fluid-let-syntax-workspace
-  (editor-scheme-workspace
+  (test-scheme-environment-index
     fluid-let-syntax-editor))
 (define fluid-let-syntax-snapshot
   (scheme-workspace-snapshot-for-buffer
@@ -722,7 +756,7 @@
 (define define-values-editor
   (make-editor define-values-buffer))
 (define define-values-workspace
-  (editor-scheme-workspace
+  (test-scheme-environment-index
     define-values-editor))
 (define define-values-snapshot
   (scheme-workspace-snapshot-for-buffer
@@ -790,7 +824,7 @@
 (define fluid-let-editor
   (make-editor fluid-let-buffer))
 (define fluid-let-workspace
-  (editor-scheme-workspace fluid-let-editor))
+  (test-scheme-environment-index fluid-let-editor))
 (define fluid-let-snapshot
   (scheme-workspace-snapshot-for-buffer
     fluid-let-workspace
@@ -860,7 +894,7 @@
 (define dynamic-top-level-editor
   (make-editor dynamic-top-level-buffer))
 (define dynamic-top-level-workspace
-  (editor-scheme-workspace
+  (test-scheme-environment-index
     dynamic-top-level-editor))
 (define dynamic-top-level-snapshot
   (scheme-workspace-snapshot-for-buffer
@@ -972,11 +1006,11 @@
 (define compiled-editor
   (make-editor compiled-initiator))
 (define compiled-workspace
-  (editor-scheme-workspace compiled-editor))
+  (test-scheme-environment-index compiled-editor))
 (scheme-workspace-install-interface-index!
   compiled-workspace
   compiled-rename-index)
-(scheme-workspace-sync-editor!
+(test-sync-environment!
   compiled-workspace
   compiled-editor)
 (define compiled-initiator-snapshot
@@ -1147,11 +1181,11 @@
 (define stale-editor
   (make-editor stale-owner))
 (define stale-workspace
-  (editor-scheme-workspace stale-editor))
+  (test-scheme-environment-index stale-editor))
 (scheme-workspace-install-interface-index!
   stale-workspace
   compiled-rename-index)
-(scheme-workspace-sync-editor!
+(test-sync-environment!
   stale-workspace
   stale-editor)
 (define stale-compiled-rename-rejected? #f)

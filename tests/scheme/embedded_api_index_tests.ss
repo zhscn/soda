@@ -206,6 +206,12 @@
   (error
     'embedded-api-index-tests
     "a new Scheme workspace started a language session"))
+(scheme-workspace-attach-buffer!
+  workspace-index
+  workspace-consumer-buffer)
+(scheme-workspace-attach-buffer!
+  workspace-index
+  workspace-source-buffer)
 (scheme-workspace-sync-editor! workspace-index workspace-editor)
 (when (scheme-workspace-session-active? workspace-index)
   (error

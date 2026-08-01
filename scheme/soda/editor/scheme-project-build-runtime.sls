@@ -22,7 +22,7 @@
 
   (define (failed-build-message request condition)
     (make-internal-command-message
-      'scheme.apply-project-build-result
+      'scheme.apply-environment-build-result
       (make-scheme-project-build-result
         request
         'exit
@@ -61,7 +61,7 @@
         (string? manifest-path)
         (positive? (string-length manifest-path)))
       (assertion-violation
-        'scheme.project-build-cancel
+        'scheme.environment-build-cancel
         "expected a non-empty manifest path"
         manifest-path))
     (let-values
@@ -73,8 +73,8 @@
         (cond
           [(= index (vector-length sources))
            (assertion-violation
-             'scheme.project-build-cancel
-             "Scheme project build is not running"
+             'scheme.environment-build-cancel
+             "Scheme environment build is not running"
              manifest-path)]
           [(string=?
              manifest-path
@@ -86,8 +86,8 @@
                  adapter)
                (vector-ref sources index))
              (assertion-violation
-               'scheme.project-build-cancel
-               "Scheme project process could not be cancelled"
+               'scheme.environment-build-cancel
+               "Scheme environment process could not be cancelled"
                manifest-path))
            (make-effect-result #t '())]
           [else
@@ -112,17 +112,17 @@
               (make-eqv-hashtable))])
       (register-effect-handler!
         executor
-        'scheme.project-build
+        'scheme.environment-build
         (lambda (request)
           (unless (scheme-project-build-request? request)
             (assertion-violation
-              'scheme.project-build
-              "expected a Scheme project build request"
+              'scheme.environment-build
+              "expected a Scheme environment build request"
               request))
           (start-build! adapter request)))
       (register-effect-handler!
         executor
-        'scheme.project-build-cancel
+        'scheme.environment-build-cancel
         (lambda (manifest-path)
           (cancel-build!
             adapter manifest-path)))
@@ -134,7 +134,7 @@
     (unless (scheme-project-build-runtime? adapter)
       (assertion-violation
         'scheme-project-build-runtime-handle-event
-        "expected a Scheme project build runtime"
+        "expected a Scheme environment build runtime"
         adapter))
     (unless (event? event)
       (assertion-violation
@@ -164,7 +164,7 @@
                 pending
                 (event-source event)))
             (make-internal-command-message
-              'scheme.apply-project-build-result
+              'scheme.apply-environment-build-result
               (make-scheme-project-build-result
                 request
                 (if

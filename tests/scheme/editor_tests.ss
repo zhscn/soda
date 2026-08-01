@@ -34,6 +34,7 @@
         (soda editor scheme-interface-index)
         (soda editor scheme-semantics)
         (soda editor scheme-document-highlight)
+        (soda editor scheme-environment)
         (soda editor scheme-workspace)
         (soda editor scheme-xref)
         (only (soda editor state)
@@ -58,6 +59,23 @@
         (soda tui output)
         (soda tui presenter)
         (soda tui renderer))
+
+(define (test-scheme-environment-index editor)
+  (let* ([view (editor-active-view editor)]
+         [environment
+           (scheme-environment-registry-ensure!
+             (editor-scheme-environments editor)
+             (string-append
+               "test-"
+               (number->string
+                 (buffer-id (view-buffer view))))
+             'r6rs)])
+    (scheme-environment-attach-view!
+      (editor-scheme-environments editor)
+      editor
+      (view-id view)
+      environment)
+    (scheme-environment-index environment)))
 
 (define (decode decoder bytes)
   (input-decoder-feed! decoder bytes))
@@ -4090,8 +4108,10 @@
 (define project-diagnostic-editor
   (make-editor project-diagnostic-buffer))
 (define project-diagnostic-workspace
-  (editor-scheme-workspace
+  (test-scheme-environment-index
     project-diagnostic-editor))
+(editor-refresh-scheme-diagnostics!
+  project-diagnostic-editor)
 (define (project-diagnostic-set)
   (find
     (lambda (set)
@@ -4175,7 +4195,7 @@
       project-diagnostic-set-before-command))
   (error
     'editor-tests
-    "ordinary commands forced a pending Scheme project catalog rebuild"
+    "ordinary commands forced a pending SchemeEnvironment catalog rebuild"
     project-diagnostic-generation-before-command
     (scheme-workspace-generation
       project-diagnostic-workspace)

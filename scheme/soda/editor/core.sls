@@ -252,6 +252,18 @@
           editor-set-view-language-attachment!
           editor-view-language-attachment
           editor-bootstrap-view-language-session!
+          scheme-environment-registry?
+          scheme-environment?
+          scheme-environment-id
+          scheme-environment-name
+          scheme-environment-dialect
+          scheme-environment-registry-environments
+          scheme-environment-registry-ensure!
+          scheme-environment-registry-find
+          scheme-environment-attach-buffer!
+          scheme-environment-attach-view!
+          scheme-environment-for-view
+          editor-scheme-environments
           make-auto-mode-rule
           make-file-suffix-auto-mode-rule
           auto-mode-rule?
@@ -1064,6 +1076,7 @@
           completion-request-generation
           completion-request-provider
           completion-request-target-kind
+          completion-request-target-view-id
           completion-request-target-id
           completion-request-target-revision
           completion-request-start
@@ -1203,6 +1216,7 @@
           (soda editor scheme-completion)
           (soda editor scheme-commands)
           (soda editor scheme-document-highlight)
+          (soda editor scheme-environment)
           (soda editor scheme-help)
           (soda editor scheme-interface-commands)
           (soda editor scheme-project-session)
@@ -1400,7 +1414,7 @@
 
   (define (make-editor buffer)
     (let* ([editor (make-editor-state buffer)]
-           [scheme-workspace
+           [scheme-environments
              (install-scheme-xref-commands! editor)])
       (editor-set-evaluator! editor (make-chez-evaluator))
       (install-core-settings! editor)
@@ -1440,7 +1454,7 @@
       (editor-register-completion-provider!
         editor
         (make-scheme-static-completion-provider
-          editor scheme-workspace))
+          editor scheme-environments))
       (editor-register-completion-provider!
         editor
         (make-scheme-repl-completion-provider editor))
@@ -1449,22 +1463,22 @@
         (make-scheme-runtime-completion-provider editor))
       (install-file-commands! editor)
       (install-scheme-interface-commands!
-        editor scheme-workspace)
+        editor scheme-environments)
       (install-scheme-project-session-commands!
-        editor scheme-workspace)
+        editor scheme-environments)
       (install-scheme-rename-command!
-        editor scheme-workspace)
+        editor scheme-environments)
       (install-interaction-commands! editor)
       (install-prompt-commands! editor)
       (install-search-commands! editor)
       (install-window-commands! editor)
       (install-workbench-commands! editor)
       (install-scheme-help-commands!
-        editor scheme-workspace)
+        editor scheme-environments)
       (install-scheme-document-highlights!
-        editor scheme-workspace)
+        editor scheme-environments)
       (install-diagnostic-commands!
-        editor scheme-workspace)
+        editor scheme-environments)
       (install-scheme-commands! editor)
       (install-source-debug-commands! editor)
       (install-cpp-commands! editor)

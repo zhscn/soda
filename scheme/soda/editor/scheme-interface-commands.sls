@@ -3,16 +3,24 @@
           make-scheme-interface-load-request
           scheme-interface-load-request?
           scheme-interface-load-request-path
+          scheme-interface-load-request-origin-view-id
+          scheme-interface-load-request-origin-buffer-id
+          scheme-interface-load-request-environment-id
           make-scheme-interface-load-result
           scheme-interface-load-result?
           scheme-interface-load-result-path
+          scheme-interface-load-result-origin-view-id
+          scheme-interface-load-result-origin-buffer-id
+          scheme-interface-load-result-environment-id
           scheme-interface-load-result-status
           scheme-interface-load-result-data
           scheme-interface-load-result-detail)
   (import (rnrs)
+          (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
           (soda editor file)
+          (soda editor scheme-environment)
           (soda editor scheme-interface-index)
           (soda editor scheme-workspace)
           (soda editor state))
@@ -21,32 +29,65 @@
     (scheme-interface-load-request
       %make-scheme-interface-load-request
       scheme-interface-load-request?)
-    (fields path))
+    (fields path origin-view-id origin-buffer-id environment-id))
 
   (define-record-type
     (scheme-interface-load-result
       %make-scheme-interface-load-result
       scheme-interface-load-result?)
-    (fields path status data detail))
+    (fields path origin-view-id origin-buffer-id environment-id status data detail))
 
   (define (non-empty-string? value)
     (and
       (string? value)
       (positive? (string-length value))))
 
-  (define (make-scheme-interface-load-request path)
-    (unless (non-empty-string? path)
-      (assertion-violation
-        'make-scheme-interface-load-request
-        "path must be a non-empty string"
-        path))
-    (%make-scheme-interface-load-request path))
+  (define (editor-find-view editor id)
+    (and
+      id
+      (find
+        (lambda (view) (= (view-id view) id))
+        (editor-views editor))))
 
-  (define (make-scheme-interface-load-result
-            path
-            status
-            data
-            detail)
+  (define make-scheme-interface-load-request
+    (case-lambda
+      [(path)
+       (make-scheme-interface-load-request path #f #f #f)]
+      [(path origin-view-id environment-id)
+       (make-scheme-interface-load-request
+         path origin-view-id #f environment-id)]
+      [(path origin-view-id origin-buffer-id environment-id)
+       (unless
+         (and
+           (non-empty-string? path)
+           (or (not origin-view-id)
+               (and (integer? origin-view-id)
+                    (exact? origin-view-id)
+                    (not (negative? origin-view-id))))
+           (or (not environment-id)
+               (and (integer? environment-id)
+                    (exact? environment-id)
+                    (positive? environment-id)))
+           (or (not origin-buffer-id)
+               (and (integer? origin-buffer-id)
+                    (exact? origin-buffer-id)
+                    (positive? origin-buffer-id))))
+         (assertion-violation
+           'make-scheme-interface-load-request
+           "invalid Scheme interface load request"
+           path origin-view-id origin-buffer-id environment-id))
+       (%make-scheme-interface-load-request
+         path origin-view-id origin-buffer-id environment-id)]))
+
+  (define make-scheme-interface-load-result
+    (case-lambda
+      [(path status data detail)
+       (make-scheme-interface-load-result
+         path #f #f #f status data detail)]
+      [(path origin-view-id environment-id status data detail)
+       (make-scheme-interface-load-result
+         path origin-view-id #f environment-id status data detail)]
+      [(path origin-view-id origin-buffer-id environment-id status data detail)
     (unless
       (and
         (non-empty-string? path)
@@ -58,12 +99,12 @@
         'make-scheme-interface-load-result
         "invalid Scheme interface load result"
         path status data detail))
-    (%make-scheme-interface-load-result
-      path status data detail))
+       (%make-scheme-interface-load-result
+         path origin-view-id origin-buffer-id environment-id status data detail)]))
 
   (define-command
     (load-interface-index-command context path)
-    "Load a compiled Scheme interface index into the language workspace."
+    "Load a compiled Scheme interface index into a SchemeEnvironment."
     (interactive
       (interactive-file-name
         "Load Scheme interface index: "))
@@ -77,7 +118,11 @@
         (make-command-effect
           'scheme.interface-index-read
           (make-scheme-interface-load-request
-            path)))))
+            path
+            (view-id (command-context-view context))
+            (buffer-id
+              (view-buffer (command-context-view context)))
+            #f)))))
 
   (define (load-interface-index-path-command context)
     (let ([path (command-context-argument context)])
@@ -95,10 +140,14 @@
         (make-command-effect
           'scheme.interface-index-read
           (make-scheme-interface-load-request
-            path)))))
+            path
+            (view-id (command-context-view context))
+            (buffer-id
+              (view-buffer (command-context-view context)))
+            #f)))))
 
   (define (apply-interface-index-command
-            workspace
+            environments
             context)
     (let* ([editor (command-context-editor context)]
            [result (command-context-argument context)])
@@ -135,11 +184,49 @@
                    (scheme-interface-index-decode
                      (scheme-interface-load-result-data
                        result))])
+             (let* ([environment
+                      (if
+                        (scheme-interface-load-result-environment-id result)
+                        (scheme-environment-registry-ref
+                          environments
+                          (scheme-interface-load-result-environment-id result))
+                        (scheme-environment-registry-ensure!
+                          environments
+                          (scheme-interface-index-owner index)
+                          'r6rs))]
+                    [origin-view-id
+                      (or
+                        (scheme-interface-load-result-origin-view-id result)
+                        (view-id (command-context-view context)))])
+               (unless
+                 (scheme-interface-load-result-environment-id result)
+                 (let* ([origin-buffer-id
+                          (or
+                            (scheme-interface-load-result-origin-buffer-id result)
+                            (buffer-id
+                              (view-buffer
+                                (command-context-view context))))]
+                        [attachment
+                          (scheme-environment-attach-buffer!
+                            environments
+                            editor
+                            origin-buffer-id
+                            environment
+                            origin-view-id)]
+                        [origin-view
+                          (editor-find-view editor origin-view-id)])
+                   (when
+                     (and
+                       origin-view
+                       (= origin-buffer-id
+                          (buffer-id (view-buffer origin-view))))
+                     (editor-set-view-language-attachment!
+                       editor origin-view-id attachment))))
              (scheme-workspace-install-interface-index!
-               workspace
+               (scheme-environment-index environment)
                index)
              (scheme-workspace-sync-editor!
-               workspace
+               (scheme-environment-index environment)
                editor)
              (editor-set-status-message!
                editor
@@ -148,23 +235,23 @@
                  (scheme-interface-index-owner index)
                  "@"
                  (scheme-interface-index-revision
-                   index)))))]))
+                   index))))))]))
     '())
 
   (define (install-scheme-interface-commands!
             editor
-            workspace)
-    (unless (scheme-workspace-index? workspace)
+            environments)
+    (unless (scheme-environment-registry? environments)
       (assertion-violation
         'install-scheme-interface-commands!
-        "expected a Scheme workspace index"
-        workspace))
+        "expected a SchemeEnvironment registry"
+        environments))
     (editor-register-command!
       editor
       (make-interactive-context-command
         'scheme.load-interface-index
         load-interface-index-command
-        "Load a compiled Scheme interface index into the language workspace."))
+        "Load a compiled Scheme interface index into a SchemeEnvironment."))
     (editor-register-internal-command!
       editor
       (make-internal-context-command
@@ -177,7 +264,7 @@
         'scheme.apply-interface-index
         (lambda (context)
           (apply-interface-index-command
-            workspace
+            environments
             context))
         "Apply a Scheme interface index read result."))
     editor))

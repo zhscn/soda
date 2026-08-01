@@ -7,12 +7,13 @@
           (soda editor command-runtime)
           (soda editor evaluator)
           (soda editor keymap)
+          (soda editor scheme-environment)
           (soda editor scheme-query)
           (soda editor scheme-semantics)
           (soda editor scheme-workspace)
           (soda editor state))
 
-  (define editor-workspaces
+  (define editor-environments
     (make-weak-eq-hashtable))
 
   (define (require-scheme-buffer who context)
@@ -35,22 +36,18 @@
           (car values)
           (cdr values))))
 
-  (define (semantic-snapshot editor buffer)
-    (let ([workspace
+  (define (semantic-snapshot context buffer)
+    (let* ([editor (command-context-editor context)]
+           [environments
             (hashtable-ref
-              editor-workspaces editor #f)])
-      (if
-        (and
-          workspace
-          (scheme-workspace-session-active?
-            workspace))
-        (begin
-          (scheme-workspace-sync-editor!
-            workspace editor)
-          (scheme-workspace-snapshot-for-buffer
-            workspace buffer))
-        (buffer-scheme-semantic-snapshot
-          buffer))))
+              editor-environments editor #f)]
+           [index
+             (scheme-semantic-index-for-view
+               environments
+               editor
+               (view-id (command-context-view context)))])
+      (scheme-workspace-snapshot-for-buffer
+        index buffer)))
 
   (define (definition-description definition)
     (let* ([signatures
@@ -137,7 +134,7 @@
                'help.describe-symbol
                context)]
            [snapshot
-             (semantic-snapshot editor buffer)]
+             (semantic-snapshot context buffer)]
            [definitions
              (scheme-definitions-at-point
                snapshot
@@ -169,7 +166,7 @@
                'scheme.signature-help
                context)]
            [snapshot
-             (semantic-snapshot editor buffer)]
+             (semantic-snapshot context buffer)]
            [call
              (scheme-semantic-call-context-at
                snapshot
@@ -221,20 +218,20 @@
 
   (define (install-scheme-help-commands/internal!
             editor
-            workspace)
+            environments)
     (unless
       (or
-        (not workspace)
-        (scheme-workspace-index? workspace))
+        (not environments)
+        (scheme-environment-registry? environments))
       (assertion-violation
         'install-scheme-help-commands!
-        "expected a Scheme workspace index"
-        workspace))
-    (if workspace
+        "expected a SchemeEnvironment registry"
+        environments))
+    (if environments
         (hashtable-set!
-          editor-workspaces editor workspace)
+          editor-environments editor environments)
         (hashtable-delete!
-          editor-workspaces editor))
+          editor-environments editor))
     (for-each
       (lambda (entry)
         (editor-register-command!
@@ -267,6 +264,6 @@
       [(editor)
        (install-scheme-help-commands/internal!
          editor #f)]
-      [(editor workspace)
+      [(editor environments)
        (install-scheme-help-commands/internal!
-         editor workspace)])))
+         editor environments)])))

@@ -94,6 +94,7 @@
           editor-language-session-registry
           editor-ensure-language-session!
           editor-attach-language-session!
+          editor-remove-language-session!
           editor-buffer-language-attachments
           editor-set-view-language-attachment!
           editor-view-language-attachment
@@ -1548,6 +1549,30 @@
     (language-session-registry-buffer-attachments
       (editor-language-session-registry value)
       buffer-id))
+
+  (define (editor-remove-language-session! value session-id)
+    (require-open-editor 'editor-remove-language-session! value)
+    (let* ([removed
+             (language-session-registry-remove-session!
+               (editor-language-session-registry value)
+               session-id)]
+           [removed-ids
+             (map language-attachment-id removed)])
+      (for-each
+        (lambda (view)
+          (let ([language-context
+                  (resource-context-language-context
+                    (view-resource-context view))])
+            (when
+              (and
+                (view-language-context? language-context)
+                (memv
+                  (view-language-context-attachment-id language-context)
+                  removed-ids))
+              (editor-set-view-language-attachment!
+                value (view-id view) #f))))
+        (editor-views value))
+      removed))
 
   (define (editor-view-language-attachment value view-id)
     (require-open-editor 'editor-view-language-attachment value)

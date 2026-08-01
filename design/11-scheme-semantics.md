@@ -8,7 +8,7 @@
 | completion、signature/help、definition、references 与 rename | 已实现 |
 | 构建期 Soda API index 与 runtime catalog | 已实现 |
 | Scheme interface artifact、异步 build 与显式安装 | 已实现 |
-| 显式 SchemeEnvironment、Document attachment 与隔离的跨文档索引 | 部分实现 |
+| 显式 SchemeEnvironment、Document attachment 与隔离的跨文档索引 | 已实现 |
 | 任意用户宏的可执行展开与完整 phase 分析 | 未实现 |
 | 跨语言 server/session 接口 | 未实现 |
 

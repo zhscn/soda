@@ -33,6 +33,12 @@
                (make-scheme-interface-load-result
                  (scheme-interface-load-request-path
                    request)
+                 (scheme-interface-load-request-origin-view-id
+                   request)
+                 (scheme-interface-load-request-origin-buffer-id
+                   request)
+                 (scheme-interface-load-request-environment-id
+                   request)
                  -1
                  (make-bytevector 0)
                  (condition->string condition)))))])
@@ -55,9 +61,13 @@
            #t
            (list
              (make-internal-command-message
-               'scheme.apply-project
+               'scheme.apply-environment
                (make-scheme-project-load-result
                  (scheme-project-load-request-path
+                   request)
+                 (scheme-project-load-request-origin-view-id
+                   request)
+                 (scheme-project-load-request-origin-buffer-id
                    request)
                  -1
                  (make-bytevector 0)
@@ -103,13 +113,13 @@
           (start-load! adapter request)))
       (register-effect-handler!
         executor
-        'scheme.project-read
+        'scheme.environment-read
         (lambda (request)
           (unless
             (scheme-project-load-request? request)
             (assertion-violation
-              'scheme.project-read
-              "expected a Scheme project load request"
+              'scheme.environment-read
+              "expected a Scheme environment load request"
               request))
           (start-project-load! adapter request)))
       adapter))
@@ -155,14 +165,24 @@
                      (make-scheme-interface-load-result
                        (scheme-interface-load-request-path
                          request)
+                       (scheme-interface-load-request-origin-view-id
+                         request)
+                       (scheme-interface-load-request-origin-buffer-id
+                         request)
+                       (scheme-interface-load-request-environment-id
+                         request)
                        (event-status event)
                        (event-data event)
                        detail))]
                   [(scheme-project-load-request? request)
                    (make-internal-command-message
-                     'scheme.apply-project
+                     'scheme.apply-environment
                      (make-scheme-project-load-result
                        (scheme-project-load-request-path
+                         request)
+                       (scheme-project-load-request-origin-view-id
+                         request)
+                       (scheme-project-load-request-origin-buffer-id
                          request)
                        (event-status event)
                        (event-data event)

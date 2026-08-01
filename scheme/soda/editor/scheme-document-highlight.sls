@@ -6,6 +6,7 @@
           (soda editor annotation)
           (soda editor buffer)
           (soda editor command)
+          (soda editor scheme-environment)
           (soda editor scheme-query)
           (soda editor scheme-semantics)
           (soda editor scheme-workspace)
@@ -14,7 +15,7 @@
   (define document-highlight-namespace
     'scheme-document-highlight)
 
-  (define editor-workspaces
+  (define editor-environments
     (make-weak-eq-hashtable))
 
   (define editor-highlight-states
@@ -36,31 +37,35 @@
 
   (define (semantic-snapshot
             editor
-            workspace
+            environments
+            view
             buffer)
-    (if
-      (and
-        workspace
-        (scheme-workspace-session-active?
-          workspace))
-      (scheme-workspace-refresh-buffer!
-        workspace buffer)
-      (buffer-scheme-semantic-snapshot
-        buffer)))
+    (let ([environment
+            (scheme-environment-for-view
+              environments editor (view-id view))])
+      (if environment
+          (scheme-workspace-refresh-buffer!
+            (scheme-environment-index environment)
+            buffer)
+          (buffer-scheme-semantic-snapshot buffer))))
 
   (define (highlight-state
-            workspace
+            environments
+            editor
+            view
             buffer
             caret)
-    (list
-      (buffer-id buffer)
-      (buffer-revision buffer)
-      caret
-      (and
-        workspace
-        (scheme-workspace-session-active?
-          workspace)
-        (scheme-workspace-generation workspace))))
+    (let* ([environment
+             (scheme-environment-for-view
+               environments editor (view-id view))]
+           [index
+             (and environment
+                  (scheme-environment-index environment))])
+      (list
+        (buffer-id buffer)
+        (buffer-revision buffer)
+        caret
+        (and index (scheme-workspace-generation index)))))
 
   (define (publish-highlights!
             editor
@@ -91,9 +96,9 @@
 
   (define (editor-refresh-scheme-document-highlights!
             editor)
-    (let* ([workspace
+    (let* ([environments
              (hashtable-ref
-               editor-workspaces editor #f)]
+               editor-environments editor #f)]
            [view (editor-base-view editor)]
            [buffer (view-buffer view)]
            [caret (view-caret view)]
@@ -101,12 +106,12 @@
              (and
                (scheme-buffer? buffer)
                (semantic-snapshot
-                 editor workspace buffer))]
+                 editor environments view buffer))]
            [state
              (if
                (scheme-buffer? buffer)
                (highlight-state
-                 workspace buffer caret)
+                 environments editor view buffer caret)
                (list 'inactive
                      (buffer-id buffer)
                      (buffer-revision buffer)))]
@@ -149,20 +154,20 @@
 
   (define (install-scheme-document-highlights/internal!
             editor
-            workspace)
+            environments)
     (unless
       (or
-        (not workspace)
-        (scheme-workspace-index? workspace))
+        (not environments)
+        (scheme-environment-registry? environments))
       (assertion-violation
         'install-scheme-document-highlights!
-        "expected a Scheme workspace index"
-        workspace))
-    (if workspace
+        "expected a SchemeEnvironment registry"
+        environments))
+    (if environments
         (hashtable-set!
-          editor-workspaces editor workspace)
+          editor-environments editor environments)
         (hashtable-delete!
-          editor-workspaces editor))
+          editor-environments editor))
     (for-each
       (lambda (phase)
         (editor-add-hook!
@@ -187,6 +192,6 @@
       [(editor)
        (install-scheme-document-highlights/internal!
          editor #f)]
-      [(editor workspace)
+      [(editor environments)
        (install-scheme-document-highlights/internal!
-         editor workspace)])))
+         editor environments)])))

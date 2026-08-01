@@ -5,6 +5,7 @@
           (soda editor buffer)
           (soda editor completion)
           (soda editor completion-provider)
+          (soda editor scheme-environment)
           (soda editor scheme-query)
           (soda editor scheme-semantics)
           (soda editor scheme-workspace)
@@ -125,7 +126,7 @@
 
   (define (start-scheme-completion
             editor
-            workspace
+            environments
             request)
     (let ([buffer
             (buffer-for-document
@@ -149,17 +150,26 @@
                       request
                       '()
                       #t))
-                  (let* ([snapshot
-                           (if
-                             (and
-                               workspace
-                               (scheme-workspace-session-active?
-                                 workspace))
+                  (let* ([environment
+                           (and
+                             environments
+                             (completion-request-target-view-id request)
+                             (scheme-environment-for-view
+                               environments
+                               editor
+                               (completion-request-target-view-id request)))]
+                         [index
+                           (and environment
+                                (scheme-environment-index environment))]
+                         [snapshot
+                           (if index
                                (begin
+                                 (scheme-workspace-attach-buffer!
+                                   index buffer)
                                  (scheme-workspace-sync-editor!
-                                   workspace editor)
+                                   index editor)
                                  (scheme-workspace-snapshot-for-buffer
-                                   workspace buffer))
+                                   index buffer))
                                (make-scheme-semantic-snapshot
                                  document-id
                                  revision
@@ -188,7 +198,7 @@
       [(editor)
        (make-scheme-static-completion-provider
          editor #f)]
-      [(editor workspace)
+      [(editor environments)
        (unless (editor? editor)
          (assertion-violation
            'make-scheme-static-completion-provider
@@ -196,15 +206,15 @@
            editor))
        (unless
          (or
-           (not workspace)
-           (scheme-workspace-index? workspace))
+           (not environments)
+           (scheme-environment-registry? environments))
          (assertion-violation
            'make-scheme-static-completion-provider
-           "expected a Scheme workspace index"
-           workspace))
+           "expected a SchemeEnvironment registry"
+           environments))
        (make-completion-provider
          'scheme-static
          (lambda (request)
            (start-scheme-completion
-             editor workspace request))
+             editor environments request))
          (lambda (request) #f))])))

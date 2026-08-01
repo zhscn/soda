@@ -9,6 +9,7 @@
           (soda editor file)
           (soda editor keymap)
           (soda editor prompt)
+          (soda editor scheme-environment)
           (soda editor scheme-query)
           (soda editor scheme-semantics)
           (soda editor scheme-workspace)
@@ -44,7 +45,7 @@
                 (scheme-lexical-token-value token)
                 value)))))))
 
-  (define (definition-at-point workspace context)
+  (define (definition-at-point environments context)
     (let* ([editor (command-context-editor context)]
            [view (command-context-view context)]
            [buffer (view-buffer view)])
@@ -53,10 +54,12 @@
           'scheme.rename
           "active buffer is not in Scheme mode"
           (buffer-major-mode-name buffer)))
-      (scheme-workspace-sync-editor! workspace editor)
-      (let* ([snapshot
+      (let* ([index
+               (scheme-semantic-index-for-view
+                 environments editor (view-id view))]
+             [snapshot
                (scheme-workspace-snapshot-for-buffer
-                 workspace buffer)]
+                 index buffer)]
              [definitions
                (scheme-definitions-at-point
                  snapshot
@@ -72,12 +75,12 @@
              "definition at point is ambiguous")]
           [else (car definitions)]))))
 
-  (define (rename-reader workspace)
+  (define (rename-reader environments)
     (make-interactive-reader
       'scheme-rename-name
       (lambda (context)
         (let* ([definition
-                 (definition-at-point workspace context)]
+                 (definition-at-point environments context)]
                [old-name
                  (scheme-definition-id-name
                    (scheme-definition-id definition))])
@@ -292,11 +295,16 @@
         editor workspace edits new-name)))
 
   (define (start-rename!
-            workspace
+            environments
             context
             definition
             new-name)
     (let* ([editor (command-context-editor context)]
+           [workspace
+             (scheme-semantic-index-for-view
+               environments
+               editor
+               (view-id (command-context-view context)))]
            [old-name
              (scheme-definition-id-name
                (scheme-definition-id definition))])
@@ -385,6 +393,12 @@
              editor
              (pending-rename-resources pending))
            (hashtable-delete! pending-renames editor)
+           (for-each
+             (lambda (resource)
+               (scheme-workspace-attach-buffer!
+                 (pending-rename-workspace pending)
+                 (editor-buffer-for-resource editor resource)))
+             (pending-rename-resources pending))
            (finish-rename!
              editor
              (pending-rename-workspace pending)
@@ -397,11 +411,16 @@
       (char->integer character)
       modifiers))
 
-  (define (install-scheme-rename-command! editor workspace)
+  (define (install-scheme-rename-command! editor environments)
+    (unless (scheme-environment-registry? environments)
+      (assertion-violation
+        'install-scheme-rename-command!
+        "expected a SchemeEnvironment registry"
+        environments))
     (let ([implementation
             (lambda (context definition new-name)
               (start-rename!
-                workspace context definition new-name))])
+                environments context definition new-name))])
       (editor-register-command!
         editor
         (make-command-definition
@@ -412,7 +431,7 @@
           "Rename the Scheme binding at point across the workspace."
           #f
           (make-interactive-plan
-            (list (rename-reader workspace)))
+            (list (rename-reader environments)))
           '())))
     (command-add-advice!
       (editor-command-registry editor)

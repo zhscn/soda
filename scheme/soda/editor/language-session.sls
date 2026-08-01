@@ -31,6 +31,7 @@
           language-session-registry-attach!
           language-session-registry-attachment-ref
           language-session-registry-buffer-attachments
+          language-session-registry-remove-session!
           language-session-registry-detach-buffer!)
   (import (rnrs))
 
@@ -285,6 +286,28 @@
       (lambda (attachment)
         (= (language-attachment-buffer-id attachment) buffer-id))
       (language-session-registry-attachments registry)))
+
+  (define (language-session-registry-remove-session! registry session-id)
+    (require-registry 'language-session-registry-remove-session! registry)
+    (let* ([session
+             (language-session-registry-session-ref registry session-id)]
+           [removed
+             (filter
+               (lambda (attachment)
+                 (= (language-attachment-session-id attachment) session-id))
+               (language-session-registry-attachments registry))])
+      (language-session-registry-sessions-set!
+        registry
+        (filter
+          (lambda (candidate) (not (eq? candidate session)))
+          (language-session-registry-sessions registry)))
+      (language-session-registry-attachments-set!
+        registry
+        (filter
+          (lambda (attachment)
+            (not (= (language-attachment-session-id attachment) session-id)))
+          (language-session-registry-attachments registry)))
+      removed))
 
   (define (language-session-registry-detach-buffer! registry buffer-id)
     (require-registry 'language-session-registry-detach-buffer! registry)

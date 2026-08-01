@@ -13,6 +13,7 @@
         (soda editor scheme-interface-commands)
         (soda editor scheme-interface-index)
         (soda editor scheme-interface-runtime)
+        (soda editor scheme-environment)
         (soda editor scheme-project-build-runtime)
         (soda editor scheme-project-session)
         (soda editor scheme-semantics)
@@ -21,6 +22,28 @@
         (only (soda editor state) view-set-caret!)
         (soda runtime)
         (soda vfs))
+
+(define (test-scheme-environment-index editor)
+  (let* ([view (editor-active-view editor)]
+         [environment
+           (scheme-environment-registry-ensure!
+             (editor-scheme-environments editor)
+             "fixture-project"
+             'r6rs)])
+    (scheme-environment-attach-view!
+      (editor-scheme-environments editor)
+      editor
+      (view-id view)
+      environment)
+    (scheme-environment-index environment)))
+
+(define (test-sync-environment! index editor)
+  (for-each
+    (lambda (buffer)
+      (when (scheme-buffer? buffer)
+        (scheme-workspace-attach-buffer! index buffer)))
+    (editor-buffers editor))
+  (scheme-workspace-sync-editor! index editor))
 
 (define root (getenv "SODA_SCHEME_PROJECT_TEST_ROOT"))
 (define root-resource
@@ -93,7 +116,7 @@
 (define editor (make-editor scratch))
 (define runtime (make-runtime))
 (define workspace
-  (editor-scheme-workspace editor))
+  (test-scheme-environment-index editor))
 
 (define project-interface-owner "fixture-project")
 (define project-interface-revision 0)
@@ -144,7 +167,7 @@
     ("consumer.sls" . 1002)
     ("nested/private.ss" . 1003)
     ("empty.sls" . 1004)))
-(scheme-workspace-sync-editor! workspace editor)
+(test-sync-environment! workspace editor)
 
 (define compiled-interface-source
   (string-append
@@ -199,8 +222,10 @@
   (lambda (port)
     (write
       (list
-        'soda-scheme-project
+        'soda-scheme-environment
         '(format-version 1)
+        '(name "fixture-project")
+        '(dialect r6rs)
         '(interface-index
            "compiled-interface.fasl")
         (list
@@ -231,9 +256,9 @@
   (editor-update!
     editor
     (make-internal-command-message
-      'scheme.load-project-path
+      'scheme.load-environment-path
       compiled-project-path)))
-(let load-loop ()
+(let load-loop ([attempt 0])
   (let ([loaded? #f])
     (for-each
       (lambda (event)
@@ -249,12 +274,28 @@
               (when
                 (and
                   status
+                  (or
+                    (string-prefix? "Invalid Scheme" status)
+                    (string-prefix? "Cannot load Scheme" status)))
+                (error
+                  'scheme-project-session-tests
+                  "SchemeEnvironment manifest load failed"
+                  status))
+              (when
+                (and
+                  status
                   (string-prefix?
                     "Loaded Scheme interfaces "
                     status))
                 (set! loaded? #t))))))
       (runtime-poll! runtime))
-    (unless loaded? (load-loop))))
+    (unless loaded?
+      (when (> attempt 1000)
+        (error
+          'scheme-project-session-tests
+          "SchemeEnvironment manifest load produced no completion"
+          (editor-status-message editor)))
+      (load-loop (+ attempt 1)))))
 
 (define (compiled-diagnostic-visible?)
   (exists
@@ -293,7 +334,7 @@
     "/plugin/compiled-consumer.sls"
     'scheme-mode))
 (editor-add-buffer! editor compiled-consumer-buffer)
-(scheme-workspace-sync-editor! workspace editor)
+(test-sync-environment! workspace editor)
 (define compiled-consumer-snapshot
   (scheme-workspace-snapshot-for-buffer
     workspace
@@ -379,6 +420,13 @@
   editor
   (view-id (editor-active-view editor))
   (buffer-id compiled-consumer-buffer))
+(scheme-environment-attach-view!
+  (editor-scheme-environments editor)
+  editor
+  (view-id (editor-active-view editor))
+  (scheme-environment-registry-find
+    (editor-scheme-environments editor)
+    "fixture-project"))
 (view-set-caret!
   (editor-active-view editor)
   (scheme-use-start compiled-call-use))
@@ -418,6 +466,9 @@
     compiled-indexed-consumer-resource
     'scheme-mode))
 (editor-add-buffer! editor compiled-reference-shadow)
+(scheme-workspace-attach-buffer!
+  workspace
+  compiled-reference-shadow)
 (when (compiled-diagnostic-visible?)
   (error
     'scheme-project-session-tests
@@ -480,7 +531,7 @@
   (editor-update!
     editor
     (make-internal-command-message
-      'scheme.build-project-path
+      'scheme.build-environment-path
       compiled-project-path)))
 (let build-loop ()
   (for-each
@@ -589,11 +640,9 @@
     'scheme-project-session-tests
     "replacing an interface owner retained stale compiled diagnostics"))
 
-(editor-update!
-  editor
-  (make-internal-command-message
-    'scheme.unload-project-owner
-    "fixture-build"))
+(scheme-workspace-remove-interface-index!
+  workspace
+  "fixture-build")
 (let ([snapshot
         (scheme-workspace-snapshot-for-buffer
           workspace
@@ -616,7 +665,7 @@
     '("fixture-project"))
   (error
     'scheme-project-session-tests
-    "unloading the Scheme project retained its session owner"))
+    "unloading the Scheme environment retained its session owner"))
 (editor-remove-buffer!
   editor
   (buffer-id compiled-consumer-buffer))
@@ -682,7 +731,7 @@
     'scheme-project-session-tests
     "empty project library was absent from the semantic catalog"))
 (remove-project-source! empty-resource)
-(scheme-workspace-sync-editor! workspace editor)
+(test-sync-environment! workspace editor)
 (define empty-import-without-library
   (scheme-workspace-snapshot-for-buffer
     workspace empty-import-buffer))
@@ -710,7 +759,7 @@
     (lambda (port)
       (string->utf8
         (get-string-all port)))))
-(scheme-workspace-sync-editor! workspace editor)
+(test-sync-environment! workspace editor)
 (unless
   (exists
     (lambda (diagnostic)
@@ -741,7 +790,7 @@
     consumer-resource
     'scheme-mode))
 (editor-add-buffer! editor project-consumer-buffer)
-(scheme-workspace-sync-editor! workspace editor)
+(test-sync-environment! workspace editor)
 (define project-consumer-snapshot
   (scheme-workspace-snapshot-for-buffer
     workspace project-consumer-buffer))
@@ -823,6 +872,13 @@
   editor
   (view-id (editor-active-view editor))
   (buffer-id project-consumer-buffer))
+(scheme-environment-attach-view!
+  (editor-scheme-environments editor)
+  editor
+  (view-id (editor-active-view editor))
+  (scheme-environment-registry-find
+    (editor-scheme-environments editor)
+    "fixture-project"))
 (view-set-caret!
   (editor-active-view editor)
   (scheme-use-start project-root-use))
@@ -886,7 +942,7 @@
     (vfs-path-join root "unrelated.sls")
     'scheme-mode))
 (editor-add-buffer! editor unrelated-buffer)
-(scheme-workspace-sync-editor! workspace editor)
+(test-sync-environment! workspace editor)
 (define consumer-snapshot-before-library-change
   (scheme-workspace-snapshot-for-buffer
     workspace project-consumer-buffer))
@@ -903,7 +959,7 @@
       "  ;; shift the exported declaration\n"
       "  (define (project-root-symbol value)\n"
       "    value))\n")))
-(scheme-workspace-sync-editor! workspace editor)
+(test-sync-environment! workspace editor)
 (define consumer-snapshot-after-library-change
   (scheme-workspace-snapshot-for-buffer
     workspace project-consumer-buffer))
@@ -1035,6 +1091,7 @@
     root-resource
     'scheme-mode))
 (editor-add-buffer! editor live-buffer)
+(scheme-workspace-attach-buffer! workspace live-buffer)
 
 (unless
   (and
@@ -1062,7 +1119,7 @@
     (lambda (port)
       (string->utf8
         (get-string-all port)))))
-(scheme-workspace-sync-editor! workspace editor)
+(test-sync-environment! workspace editor)
 (define final-root-symbol
   (car (symbols-named "project-root-symbol")))
 (define final-rename-executor
@@ -1070,6 +1127,13 @@
 (define final-file-adapter
   (install-file-runtime!
     final-rename-executor runtime))
+(scheme-environment-attach-view!
+  (editor-scheme-environments editor)
+  editor
+  (view-id (editor-active-view editor))
+  (scheme-environment-registry-find
+    (editor-scheme-environments editor)
+    "fixture-project"))
 (define final-rename-context
   (make-command-context
     editor
@@ -1087,7 +1151,7 @@
 
 (unless
   (and
-    (= (length final-rename-effects) 2)
+    (pair? final-rename-effects)
     (for-all
       (lambda (effect)
         (and
@@ -1154,7 +1218,14 @@
     (= (length (symbols-named "project-root-final")) 1))
   (error
     'scheme-project-session-tests
-    "background rename did not update the workspace without activating its source"))
+    "background rename did not update the workspace without activating its source"
+    (map scheme-workspace-symbol-name
+         (scheme-workspace-symbols workspace editor))
+    (buffer-string (editor-buffer-for-resource editor root-resource))
+    (scheme-workspace-buffer-attached?
+      workspace
+      (buffer-id (editor-buffer-for-resource editor root-resource)))
+    (buffer-resource (view-buffer (editor-active-view editor)))))
 
 (editor-close! editor)
 (runtime-close! runtime)

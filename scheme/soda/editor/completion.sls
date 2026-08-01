@@ -99,6 +99,7 @@
           completion-request-provider-instance
           completion-request-provider-instance-set!
           completion-request-target-kind
+          completion-request-target-view-id
           completion-request-target-id
           completion-request-target-revision
           completion-request-start
@@ -227,6 +228,7 @@
             provider
             (mutable provider-instance)
             target-kind
+            target-view-id
             target-id
             target-revision
             start
@@ -1341,6 +1343,7 @@
            provider
            #f
            'document
+           (document-completion-target-view-id target)
            (document-completion-target-document-id target)
            (document-completion-target-revision target)
            (document-completion-target-start target)
@@ -1354,6 +1357,7 @@
            provider
            #f
            'prompt
+           #f
            (prompt-completion-target-prompt-id target)
            #f
            (prompt-completion-target-start target)

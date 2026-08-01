@@ -3,6 +3,10 @@
           scheme-workspace-index?
           scheme-workspace-session-active?
           scheme-workspace-generation
+          scheme-workspace-attach-buffer!
+          scheme-workspace-detach-buffer!
+          scheme-workspace-clear!
+          scheme-workspace-buffer-attached?
           scheme-workspace-sync-editor!
           scheme-workspace-refresh-buffer!
           scheme-workspace-interface-index-owners
@@ -68,6 +72,7 @@
       %make-scheme-workspace-index
       scheme-workspace-index?)
     (fields
+      attachments
       documents
       references
       (mutable interface-indexes)
@@ -103,6 +108,7 @@
   (define (make-scheme-workspace-index)
     (%make-scheme-workspace-index
       (make-eqv-hashtable)
+      (make-eqv-hashtable)
       (make-hashtable
         scheme-definition-id-hash
         scheme-definition-id=?)
@@ -127,8 +133,6 @@
 
   (define (deactivate-session-cache! index)
     (hashtable-clear!
-      (scheme-workspace-index-documents index))
-    (hashtable-clear!
       (scheme-workspace-index-references index))
     (scheme-workspace-index-library-index-set!
       index
@@ -141,10 +145,15 @@
       (+ 1
          (scheme-workspace-index-generation
            index)))
+    (for-each
+      (lambda (document)
+        (scheme-workspace-document-needs-analysis?-set!
+          document #t))
+      (all-workspace-documents index))
     (scheme-workspace-index-catalog-dirty?-set!
-      index #f)
+      index #t)
     (scheme-workspace-index-dirty?-set!
-      index #f))
+      index #t))
 
   (define (scheme-workspace-interface-index-owners index)
     (require-index
@@ -191,7 +200,75 @@
           (scheme-workspace-index-documents index))])
       (vector->list documents)))
 
-  (define workspace-documents all-workspace-documents)
+  (define (workspace-documents index)
+    (filter
+      (lambda (document)
+        (hashtable-contains?
+          (scheme-workspace-index-attachments index)
+          (scheme-workspace-document-buffer-id document)))
+      (all-workspace-documents index)))
+
+  (define (scheme-workspace-buffer-attached? index buffer-id)
+    (require-index 'scheme-workspace-buffer-attached? index)
+    (unless (and (integer? buffer-id) (exact? buffer-id) (positive? buffer-id))
+      (assertion-violation
+        'scheme-workspace-buffer-attached?
+        "buffer id must be positive"
+        buffer-id))
+    (hashtable-contains?
+      (scheme-workspace-index-attachments index)
+      buffer-id))
+
+  (define (scheme-workspace-attach-buffer! index buffer)
+    (require-index 'scheme-workspace-attach-buffer! index)
+    (unless (buffer? buffer)
+      (assertion-violation
+        'scheme-workspace-attach-buffer!
+        "expected a buffer"
+        buffer))
+    (unless (scheme-buffer? buffer)
+      (assertion-violation
+        'scheme-workspace-attach-buffer!
+        "buffer is not in Scheme mode"
+        (buffer-major-mode-name buffer)))
+    (hashtable-set!
+      (scheme-workspace-index-attachments index)
+      (buffer-id buffer)
+      #t)
+    (sync-buffer! index buffer)
+    index)
+
+  (define (scheme-workspace-detach-buffer! index buffer-id)
+    (require-index 'scheme-workspace-detach-buffer! index)
+    (let ([attached?
+            (scheme-workspace-buffer-attached? index buffer-id)])
+      (when attached?
+        (hashtable-delete!
+          (scheme-workspace-index-attachments index)
+          buffer-id)
+        (hashtable-delete!
+          (scheme-workspace-index-documents index)
+          buffer-id)
+        (scheme-workspace-index-catalog-dirty?-set! index #t)
+        (scheme-workspace-index-dirty?-set! index #t))
+      attached?))
+
+  (define (scheme-workspace-clear! index)
+    (require-index 'scheme-workspace-clear! index)
+    (hashtable-clear! (scheme-workspace-index-attachments index))
+    (hashtable-clear! (scheme-workspace-index-documents index))
+    (hashtable-clear! (scheme-workspace-index-references index))
+    (scheme-workspace-index-interface-indexes-set! index '())
+    (scheme-workspace-index-library-index-set!
+      index soda-built-in-api-index)
+    (scheme-workspace-index-library-catalog-set!
+      index soda-built-in-library-index)
+    (scheme-workspace-index-generation-set!
+      index
+      (+ 1 (scheme-workspace-index-generation index)))
+    (scheme-workspace-index-catalog-dirty?-set! index #t)
+    (scheme-workspace-index-dirty?-set! index #t)
+    index)
 
   (define (sync-buffer! index buffer)
     (let* ([table
@@ -332,25 +409,25 @@
 
   (define (merge-library-index
             baseline
-            project
-            project-catalog)
+            environment
+            environment-catalog)
     (append
       (filter
         (lambda (entry)
           (not
             (member
               (list-ref entry 2)
-              project-catalog)))
+              environment-catalog)))
         baseline)
-      project))
+      environment))
 
-  (define (merge-library-catalog baseline project)
+  (define (merge-library-catalog baseline environment)
     (append
       baseline
       (filter
         (lambda (library)
           (not (member library baseline)))
-        project)))
+        environment)))
 
   (define (merge-interface-indexes indexes)
     (fold-left
@@ -390,21 +467,21 @@
                (merge-interface-indexes
                  (scheme-workspace-index-interface-indexes
                    index))]
-             [project-library-index
+             [environment-library-index
                (scheme-sources-api-index
                  sources)]
-             [project-library-catalog
+             [environment-library-catalog
                (scheme-sources-library-index
                  sources)]
              [library-index
                (merge-library-index
                  (car interface-catalog)
-                 project-library-index
-                 project-library-catalog)]
+                 environment-library-index
+                 environment-library-catalog)]
              [library-catalog
                (merge-library-catalog
                  (cdr interface-catalog)
-                 project-library-catalog)])
+                 environment-library-catalog)])
         (let ([changed-libraries
                 (changed-library-names
                   (scheme-workspace-index-library-index index)
@@ -549,24 +626,29 @@
     (let ([live (make-eqv-hashtable)])
       (for-each
         (lambda (buffer)
-          (hashtable-set! live (buffer-id buffer) #t)
-          (sync-buffer! index buffer))
+          (hashtable-set! live (buffer-id buffer) buffer))
         (editor-buffers editor))
       (let-values
-        ([(ids documents)
+        ([(ids attached)
           (hashtable-entries
-            (scheme-workspace-index-documents index))])
+            (scheme-workspace-index-attachments index))])
         (let loop ([position 0])
           (when (< position (vector-length ids))
-            (let ([id (vector-ref ids position)])
-              (unless (hashtable-contains? live id)
-                (hashtable-delete!
-                  (scheme-workspace-index-documents index)
-                  id)
-                (scheme-workspace-index-catalog-dirty?-set!
-                  index #t)
-                (scheme-workspace-index-dirty?-set!
-                  index #t)))
+            (let* ([id (vector-ref ids position)]
+                   [buffer (hashtable-ref live id #f)])
+              (if buffer
+                  (sync-buffer! index buffer)
+                  (begin
+                    (hashtable-delete!
+                      (scheme-workspace-index-attachments index)
+                      id)
+                    (hashtable-delete!
+                      (scheme-workspace-index-documents index)
+                      id)
+                    (scheme-workspace-index-catalog-dirty?-set!
+                      index #t)
+                    (scheme-workspace-index-dirty?-set!
+                      index #t))))
             (loop (+ position 1))))))
     (ensure-library-index! index)
     (when (scheme-workspace-index-dirty? index)

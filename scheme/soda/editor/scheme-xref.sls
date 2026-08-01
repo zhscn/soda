@@ -1,6 +1,6 @@
 (library (soda editor scheme-xref)
   (export install-scheme-xref-commands!
-          editor-scheme-workspace)
+          editor-scheme-environments)
   (import (rnrs)
           (only (chezscheme) make-weak-eq-hashtable)
           (soda document)
@@ -15,16 +15,33 @@
           (soda editor navigation)
           (soda editor prompt)
           (soda editor resource-context)
+          (soda editor scheme-environment)
           (soda editor scheme-query)
           (soda editor scheme-semantics)
           (soda editor scheme-workspace)
           (soda editor state))
 
-  (define editor-workspaces
+  (define editor-environments
     (make-weak-eq-hashtable))
 
-  (define (editor-scheme-workspace editor)
-    (hashtable-ref editor-workspaces editor #f))
+  (define (editor-scheme-environments editor)
+    (hashtable-ref editor-environments editor #f))
+
+  (define (scheme-index-for-context environments context)
+    (let* ([editor (command-context-editor context)]
+           [view (command-context-view context)]
+           [buffer (view-buffer view)]
+           [environment
+             (scheme-environment-for-view
+               environments editor (view-id view))]
+           [index
+             (if environment
+                 (scheme-environment-index environment)
+                 (let ([index (make-scheme-workspace-index)])
+                   (scheme-workspace-attach-buffer! index buffer)
+                   index))])
+      (scheme-workspace-sync-editor! index editor)
+      index))
 
   (define (exact-non-negative-integer? value)
     (and
@@ -204,7 +221,7 @@
                   'definition
                   'xref))))))
 
-  (define (semantic-query workspace context)
+  (define (semantic-query environments context)
     (let* ([editor (command-context-editor context)]
            [view (command-context-view context)]
            [buffer (view-buffer view)])
@@ -213,22 +230,23 @@
           'scheme-xref
           "active buffer is not in Scheme mode"
           (buffer-major-mode-name buffer)))
-      (scheme-workspace-sync-editor! workspace editor)
-      (let* ([snapshot
+      (let* ([index
+               (scheme-index-for-context environments context)]
+             [snapshot
                (scheme-workspace-snapshot-for-buffer
-                 workspace
+                 index
                  buffer)]
              [definitions
                (scheme-definitions-at-point
                  snapshot
                  (view-caret view))])
-        (values buffer snapshot definitions))))
+        (values index buffer snapshot definitions))))
 
-  (define (find-definition-command workspace context)
+  (define (find-definition-command environments context)
     (let ([editor (command-context-editor context)])
       (call-with-values
-        (lambda () (semantic-query workspace context))
-        (lambda (buffer snapshot definitions)
+        (lambda () (semantic-query environments context))
+        (lambda (index buffer snapshot definitions)
           (let ([items
                   (filter
                     (lambda (item) item)
@@ -267,11 +285,11 @@
                      "No definition at point"))
                '()]))))))
 
-  (define (find-references-command workspace context)
+  (define (find-references-command environments context)
     (let ([editor (command-context-editor context)])
       (call-with-values
-        (lambda () (semantic-query workspace context))
-        (lambda (buffer snapshot definitions)
+        (lambda () (semantic-query environments context))
+        (lambda (index buffer snapshot definitions)
           (if (null? definitions)
               (begin
                 (editor-set-current-location-list! editor #f)
@@ -283,7 +301,7 @@
                        (definition-location editor definition)]
                      [references
                        (scheme-workspace-references
-                         workspace
+                         index
                          editor
                          definition)]
                      [items
@@ -381,22 +399,26 @@
           ""))))
 
   (define (workspace-symbol-choice-source
-            workspace
-            editor)
-    (symbol-choice-source
-      'scheme-workspace-symbol
-      (scheme-workspace-symbols workspace editor)))
+            environments
+            context)
+    (let ([editor (command-context-editor context)]
+          [index (scheme-index-for-context environments context)])
+      (symbol-choice-source
+        'scheme-workspace-symbol
+        (scheme-workspace-symbols index editor))))
 
   (define (document-symbol-choice-source
-            workspace
+            environments
             context)
-    (symbol-choice-source
-      'scheme-document-symbol
-      (scheme-workspace-document-symbols
-        workspace
-        (command-context-editor context)
-        (view-buffer
-          (command-context-view context)))))
+    (let ([index
+            (scheme-index-for-context environments context)])
+      (symbol-choice-source
+        'scheme-document-symbol
+        (scheme-workspace-document-symbols
+          index
+          (command-context-editor context)
+          (view-buffer
+            (command-context-view context))))))
 
   (define (symbol-choice-source source-id symbols)
     (let ([items
@@ -432,13 +454,13 @@
             items))
         (lambda (generation) #f))))
 
-  (define (workspace-symbol-reader workspace)
+  (define (workspace-symbol-reader environments)
     (interactive-completing-read
       "Workspace symbol: "
       (lambda (context)
         (workspace-symbol-choice-source
-          workspace
-          (command-context-editor context)))
+          environments
+          context))
       'must-match
       'scheme-workspace-symbol
       ""
@@ -451,12 +473,12 @@
             (list (completion-item-payload candidate))
             (list #f))))))
 
-  (define (document-symbol-reader workspace)
+  (define (document-symbol-reader environments)
     (interactive-completing-read
       "Document symbol: "
       (lambda (context)
         (document-symbol-choice-source
-          workspace context))
+          environments context))
       'must-match
       'scheme-document-symbol
       ""
@@ -478,13 +500,15 @@
       symbols))
 
   (define (find-symbol-command
-            workspace
+            environments
             context
             key)
     (let* ([editor (command-context-editor context)]
+           [index
+             (scheme-index-for-context environments context)]
            [symbol
              (find-workspace-symbol
-               (scheme-workspace-symbols workspace editor)
+               (scheme-workspace-symbols index editor)
                key)])
       (cond
         [(not symbol)
@@ -533,11 +557,11 @@
            "Workspace symbol has no source location")
          '()])))
 
-  (define (make-find-symbol-definition workspace)
+  (define (make-find-symbol-definition environments)
     (let ([implementation
             (lambda (context key)
               (find-symbol-command
-                workspace context key))])
+                environments context key))])
       (make-command-definition
         'xref.find-symbol
         implementation
@@ -547,21 +571,23 @@
         #f
         (make-interactive-plan
           (list
-            (workspace-symbol-reader workspace)))
+            (workspace-symbol-reader environments)))
         '())))
 
   (define (find-document-symbol-command
-            workspace
+            environments
             context
             key)
     (let* ([editor (command-context-editor context)]
            [buffer
              (view-buffer
                (command-context-view context))]
+           [index
+             (scheme-index-for-context environments context)]
            [symbol
              (find-workspace-symbol
                (scheme-workspace-document-symbols
-                 workspace editor buffer)
+                 index editor buffer)
                key)])
       (if
         (not symbol)
@@ -582,11 +608,11 @@
           '()))))
 
   (define (make-find-document-symbol-definition
-            workspace)
+            environments)
     (let ([implementation
             (lambda (context key)
               (find-document-symbol-command
-                workspace context key))])
+                environments context key))])
       (make-command-definition
         'xref.find-document-symbol
         implementation
@@ -596,7 +622,7 @@
         #f
         (make-interactive-plan
           (list
-            (document-symbol-reader workspace)))
+            (document-symbol-reader environments)))
         '())))
 
   (define (stroke character modifiers)
@@ -606,8 +632,8 @@
       modifiers))
 
   (define (install-scheme-xref-commands! editor)
-    (let ([workspace (make-scheme-workspace-index)])
-      (hashtable-set! editor-workspaces editor workspace)
+    (let ([environments (make-scheme-environment-registry)])
+      (hashtable-set! editor-environments editor environments)
       (for-each
         (lambda (entry)
           (editor-register-command!
@@ -620,12 +646,12 @@
           (list
             'xref.find-definition
             (lambda (context)
-              (find-definition-command workspace context))
+              (find-definition-command environments context))
             "Jump to the definition at point.")
           (list
             'xref.find-references
             (lambda (context)
-              (find-references-command workspace context))
+              (find-references-command environments context))
             "Publish and visit references for the definition at point.")
           (list
             'xref.next-location
@@ -637,11 +663,11 @@
             "Visit the previous item in the current location list.")))
       (editor-register-command!
         editor
-        (make-find-symbol-definition workspace))
+        (make-find-symbol-definition environments))
       (editor-register-command!
         editor
         (make-find-document-symbol-definition
-          workspace))
+          environments))
       (for-each
         (lambda (entry)
           (editor-bind-key! editor (car entry) (cdr entry)))
@@ -670,4 +696,4 @@
           (cons
             (list (stroke #\g 2) (stroke #\I 0))
             'xref.find-symbol)))
-      workspace)))
+      environments)))

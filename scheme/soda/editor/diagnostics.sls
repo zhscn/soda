@@ -11,6 +11,7 @@
           (soda editor keymap)
           (soda editor location)
           (soda editor navigation)
+          (soda editor scheme-environment)
           (soda editor scheme-query)
           (soda editor scheme-semantics)
           (soda editor scheme-workspace)
@@ -19,7 +20,7 @@
   (define scheme-diagnostic-namespace
     'scheme-semantic-diagnostics)
 
-  (define editor-workspaces
+  (define editor-environments
     (make-weak-eq-hashtable))
 
   (define published-workspace-generations
@@ -136,21 +137,16 @@
             editor
             buffer
             current
-            workspace
+            index
             synchronize-workspace?)
     (let* ([snapshot
-             (if
-               (and
-                 workspace
-                 (scheme-workspace-session-active?
-                   workspace))
-               (if
-                 synchronize-workspace?
-                 (scheme-workspace-snapshot-for-buffer
-                   workspace buffer)
-                 (scheme-workspace-refresh-buffer!
-                   workspace buffer))
-               (buffer-scheme-semantic-snapshot buffer))]
+             (if index
+                 (if synchronize-workspace?
+                     (scheme-workspace-snapshot-for-buffer
+                       index buffer)
+                     (scheme-workspace-refresh-buffer!
+                       index buffer))
+                 (buffer-scheme-semantic-snapshot buffer))]
            [revision
              (scheme-semantic-snapshot-revision snapshot)]
            [diagnostics
@@ -175,11 +171,11 @@
         (when
           (editor-publish-annotation-set!
             editor set)
-          (when workspace
+          (when index
             (hashtable-set!
               published-workspace-generations
               set
-              (scheme-workspace-generation workspace)))
+              (scheme-workspace-generation index)))
           (hashtable-set!
             published-presentation-policies
             set
@@ -203,25 +199,30 @@
   (define (refresh-scheme-diagnostics!
             editor
             synchronize-workspace?)
-    (let ([workspace
+    (let ([environments
             (hashtable-ref
-              editor-workspaces editor #f)])
-      (when
-        (and
-          workspace
-          (scheme-workspace-session-active?
-            workspace)
-          synchronize-workspace?)
-        (scheme-workspace-sync-editor!
-          workspace editor))
+              editor-environments editor #f)])
       (for-each
         (lambda (buffer)
           (let ([current
                   (scheme-annotation-set editor buffer)])
             (cond
               [(scheme-buffer? buffer)
-               (unless
-                 (and
+               (let ([index
+                       (let ([environment
+                               (scheme-environment-for-buffer
+                                 environments
+                                 editor
+                                 (buffer-id buffer))])
+                         (and
+                           environment
+                           (if synchronize-workspace?
+                               (scheme-semantic-index-for-buffer
+                                 environments editor buffer)
+                               (scheme-environment-index
+                                 environment))))])
+                 (unless
+                   (and
                    current
                    (=
                      (annotation-set-source-revision current)
@@ -232,25 +233,20 @@
                        current
                        #f)
                      (expected-presentation-key editor buffer))
-                   (or
-                     (not
-                       (and
-                         workspace
-                         (scheme-workspace-session-active?
-                           workspace)))
-                     (equal?
-                       (hashtable-ref
-                         published-workspace-generations
-                         current
-                         #f)
-                       (scheme-workspace-generation
-                         workspace))))
-                 (publish-scheme-diagnostics!
-                   editor
-                   buffer
-                   current
-                   workspace
-                   synchronize-workspace?))]
+                     (or
+                       (not index)
+                       (equal?
+                         (hashtable-ref
+                           published-workspace-generations
+                           current
+                           #f)
+                         (scheme-workspace-generation index))))
+                   (publish-scheme-diagnostics!
+                     editor
+                     buffer
+                     current
+                     index
+                     synchronize-workspace?)))]
               [current
                (clear-scheme-diagnostics!
                  editor buffer current)])))
@@ -409,14 +405,19 @@
                     (view-id view))))))))))
 
   (define (list-workspace-diagnostics-command
-            workspace
+            environments
             context)
     (let* ([editor (command-context-editor context)]
+           [index
+             (scheme-semantic-index-for-view
+               environments
+               editor
+               (view-id (command-context-view context)))]
            [items
              (map
                workspace-diagnostic-item
                (scheme-workspace-diagnostics
-                 workspace editor))])
+                 index editor))])
       (if
         (null? items)
         (begin
@@ -450,40 +451,40 @@
 
   (define (install-diagnostic-commands/internal!
             editor
-            workspace)
+            environments)
     (unless
       (or
-        (not workspace)
-        (scheme-workspace-index? workspace))
+        (not environments)
+        (scheme-environment-registry? environments))
       (assertion-violation
         'install-diagnostic-commands!
-        "expected a Scheme workspace index"
-        workspace))
-    (if workspace
+        "expected a SchemeEnvironment registry"
+        environments))
+    (if environments
         (hashtable-set!
-          editor-workspaces editor workspace)
+          editor-environments editor environments)
         (hashtable-delete!
-          editor-workspaces editor))
+          editor-environments editor))
     (editor-register-command!
       editor
       (make-interactive-context-command
         'diagnostics.list
         list-diagnostics-command
         "Publish current-buffer diagnostics as a location list."))
-    (when workspace
+    (when environments
       (editor-register-command!
         editor
         (make-interactive-context-command
           'diagnostics.list-workspace
           (lambda (context)
             (list-workspace-diagnostics-command
-              workspace context))
+              environments context))
           "Publish Scheme workspace diagnostics as a location list.")))
     (editor-bind-key!
       editor
       (list (stroke #\g 2) (stroke #\d 0))
       'diagnostics.list)
-    (when workspace
+    (when environments
       (editor-bind-key!
         editor
         (list (stroke #\g 2) (stroke #\d 2))
@@ -511,6 +512,6 @@
       [(editor)
        (install-diagnostic-commands/internal!
          editor #f)]
-      [(editor workspace)
+      [(editor environments)
        (install-diagnostic-commands/internal!
-         editor workspace)])))
+         editor environments)])))
