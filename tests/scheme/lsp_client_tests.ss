@@ -417,6 +417,89 @@
   "accepting an LSP completion did not apply its primary and additional edits"
   (utf8->string (buffer-bytes source)))
 
+(define rename-target
+  (editor-create-buffer!
+    editor "/workspace/src/other.cpp" 'cpp-mode "int Widget;\n"))
+(buffer-set-file-path! rename-target "/workspace/src/other.cpp")
+(view-set-caret! (editor-active-view editor) 3)
+(define rename-effects
+  ((command-procedure (editor-command-registry editor) 'lsp.rename)
+   (make-command-context editor (editor-active-view editor) #f #f)
+   "Gadget"))
+(check
+  (and (= (length rename-effects) 1)
+       (eq? (command-effect-kind (car rename-effects)) 'managed-process.write))
+  "LSP rename did not send a language-server request"
+  rename-effects)
+(define rename-message
+  (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload (car rename-effects))))))
+(check
+  (and
+    (string=? (json-object-ref rename-message "method" #f) "textDocument/rename")
+    (string=?
+      (json-object-ref
+        (json-object-ref rename-message "params" #f)
+        "newName"
+        #f)
+      "Gadget"))
+  "LSP rename request did not preserve the requested name")
+(define rename-source-range
+  (make-json-object
+    (list
+      (cons "start"
+            (make-json-object
+              (list (cons "line" 0) (cons "character" 3))))
+      (cons "end"
+            (make-json-object
+              (list (cons "line" 0) (cons "character" 9)))))))
+(define rename-target-range
+  (make-json-object
+    (list
+      (cons "start"
+            (make-json-object
+              (list (cons "line" 0) (cons "character" 4))))
+      (cons "end"
+            (make-json-object
+              (list (cons "line" 0) (cons "character" 10)))))))
+(define rename-source-edit
+  (make-json-object
+    (list (cons "range" rename-source-range)
+          (cons "newText" "Gadget"))))
+(define rename-target-edit
+  (make-json-object
+    (list (cons "range" rename-target-range)
+          (cons "newText" "Gadget"))))
+(define rename-workspace-edit
+  (make-json-object
+    (list
+      (cons "changes"
+            (make-json-object
+              (list
+                (cons "file:///workspace/src/main.cpp"
+                      (make-json-array (list rename-source-edit)))
+                (cons "file:///workspace/src/other.cpp"
+                      (make-json-array (list rename-target-edit)))))))))
+(lsp-client-handle-json-message!
+  editor session
+  (make-json-object
+    (list
+      (cons "jsonrpc" "2.0")
+      (cons "id" (json-object-ref rename-message "id" #f))
+      (cons "result" rename-workspace-edit))))
+(check
+  (and
+    (bytevector=?
+      (buffer-bytes source)
+      (string->utf8 "// Gadget\n// Generated\nint main() {}\n"))
+    (bytevector=?
+      (buffer-bytes rename-target)
+      (string->utf8 "int Gadget;\n")))
+  "LSP WorkspaceEdit did not commit all rename targets atomically")
+
 (define lsp-reference-effects
   (editor-execute-command! editor 'lsp.find-references))
 (check
