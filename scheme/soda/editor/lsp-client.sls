@@ -2105,6 +2105,104 @@
       'type-definition
       "No type definition found"))
 
+  (define (document-symbols-supported? session)
+    (let ([capability
+            (json-object-ref
+              (lsp-client-session-capabilities session)
+              "documentSymbolProvider"
+              #f)])
+      (or (eq? capability #t) (json-object? capability))))
+
+  (define (document-symbol-location document value)
+    (and
+      (json-object? value)
+      (let ([range
+              (or (json-object-ref value "selectionRange" #f)
+                  (json-object-ref value "range" #f))])
+        (and
+          (json-object? range)
+          (make-json-object
+            (list
+              (cons "uri" (lsp-client-document-uri document))
+              (cons "range" range)))))))
+
+  (define (lsp-document-symbol-items editor document result)
+    (define (walk value items)
+      (if (not (json-object? value))
+          items
+          (let* ([location
+                   (or
+                     (json-object-ref value "location" #f)
+                     (document-symbol-location document value))]
+                 [item (lsp-location-item editor location)]
+                 [with-item (if item (cons item items) items)]
+                 [children (json-object-ref value "children" #f)])
+            (if (json-array? children)
+                (fold-left
+                  (lambda (collected child) (walk child collected))
+                  with-item
+                  (json-array-values children))
+                with-item))))
+    (if (json-array? result)
+        (reverse
+          (fold-left
+            (lambda (items value) (walk value items))
+            '()
+            (json-array-values result)))
+        '()))
+
+  (define (lsp-document-symbols! editor)
+    (let* ([view (editor-active-view editor)]
+           [buffer (view-buffer view)]
+           [revision (buffer-revision buffer)]
+           [session (active-view-lsp-session editor)]
+           [document (and session (find-document session (buffer-id buffer)))])
+      (if (and session
+               document
+               (document-symbols-supported? session)
+               (eq? (lsp-client-session-state session) 'ready))
+          (list
+            (session-request!
+              session
+              "textDocument/documentSymbol"
+              (make-json-object
+                (list
+                  (cons "textDocument"
+                        (make-json-object
+                          (list (cons "uri" (lsp-client-document-uri document)))))))
+              (lambda (response-editor response-session result)
+                (if (and (eq? response-session session)
+                         (= (buffer-revision buffer) revision))
+                    (let ([items
+                            (lsp-document-symbol-items
+                              response-editor document result)])
+                      (if (null? items)
+                          (begin
+                            (editor-set-current-location-list! response-editor #f)
+                            (editor-set-status-message!
+                              response-editor "No document symbols found")
+                            '())
+                          (let ([locations
+                                  (make-location-list
+                                    'lsp-document-symbol items)])
+                            (editor-set-current-location-list!
+                              response-editor locations)
+                            (editor-set-status-message!
+                              response-editor
+                              (string-append
+                                "Document symbols: "
+                                (number->string (length items))))
+                            (lsp-jump-to-location-item!
+                              response-editor
+                              view
+                              (location-list-current locations)
+                              'xref))))
+                    '()))))
+          (begin
+            (editor-set-status-message!
+              editor "The language server does not provide document symbols")
+            '()))))
+
   (define (lsp-workspace-symbol-items editor value)
     (if (json-array? value)
         (let loop ([symbols (json-array-values value)] [items '()])
@@ -2884,6 +2982,13 @@
         'lsp.find-references
         (lambda (context) (lsp-find-references! (command-context-editor context)))
         "Find language-server references at point."))
+    (editor-register-command!
+      editor
+      (make-interactive-context-command
+        'lsp.document-symbols
+        (lambda (context)
+          (lsp-document-symbols! (command-context-editor context)))
+        "List language-server symbols in the active document."))
     (let ([implementation
             (lambda (context query)
               (lsp-workspace-symbol! (command-context-editor context) query))])

@@ -127,6 +127,7 @@
       (cons "documentHighlightProvider" #t)
       (cons "documentFormattingProvider" #t)
       (cons "documentRangeFormattingProvider" #t)
+      (cons "documentSymbolProvider" #t)
       (cons "signatureHelpProvider" #t)
       (cons
         "semanticTokensProvider"
@@ -621,6 +622,68 @@
     (editor-status-message editor)
     "main(int argc, char** argv)")
   "signature-help did not present the active signature")
+
+(define document-symbol-effects
+  (editor-execute-command! editor 'lsp.document-symbols))
+(check
+  (and (= (length document-symbol-effects) 1)
+       (eq? (command-effect-kind (car document-symbol-effects))
+            'managed-process.write))
+  "document-symbols did not issue an LSP request"
+  document-symbol-effects)
+(define document-symbol-message
+  (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload (car document-symbol-effects))))))
+(check
+  (string=?
+    (json-object-ref document-symbol-message "method" #f)
+    "textDocument/documentSymbol")
+  "document-symbols used the wrong LSP method")
+(define document-symbol-range
+  (make-json-object
+    (list
+      (cons "start"
+            (make-json-object
+              (list (cons "line" 0) (cons "character" 3))))
+      (cons "end"
+            (make-json-object
+              (list (cons "line" 0) (cons "character" 7)))))))
+(lsp-client-handle-json-message!
+  editor session
+  (make-json-object
+    (list
+      (cons "jsonrpc" "2.0")
+      (cons "id" (json-object-ref document-symbol-message "id" #f))
+      (cons
+        "result"
+        (make-json-array
+          (list
+            (make-json-object
+              (list
+                (cons "name" "main")
+                (cons "kind" 12)
+                (cons "range" document-symbol-range)
+                (cons "selectionRange" document-symbol-range)
+                (cons
+                  "children"
+                  (make-json-array
+                    (list
+                      (make-json-object
+                        (list
+                          (cons "name" "body")
+                          (cons "kind" 6)
+                          (cons "range" document-symbol-range)
+                          (cons "selectionRange" document-symbol-range))))))))))))))
+(let ([locations (editor-current-location-list editor)])
+  (check
+    (and locations
+         (eq? (location-list-source locations) 'lsp-document-symbol)
+         (= (length (location-list-items locations)) 2)
+         (= (view-caret (editor-active-view editor)) 3))
+    "document-symbols did not publish nested symbols as a location list"))
 
 (define definition-effects
   (editor-execute-command! editor 'lsp.find-definition))
