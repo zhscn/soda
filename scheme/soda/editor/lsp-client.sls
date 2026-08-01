@@ -29,6 +29,7 @@
           install-lsp-commands!)
   (import (rnrs)
           (soda document)
+          (soda editor annotation)
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
@@ -38,6 +39,7 @@
           (soda editor language)
           (soda editor language-session)
           (soda editor lsp-json-rpc)
+          (soda editor lsp-position)
           (soda editor lsp-protocol)
           (soda editor managed-process)
           (soda editor project)
@@ -80,7 +82,10 @@
             (mutable documents lsp-client-session-documents lsp-client-session-documents-set!)
             (mutable capabilities
                      lsp-client-session-capabilities
-                     lsp-client-session-capabilities-set!)))
+                     lsp-client-session-capabilities-set!)
+            (mutable diagnostic-generation
+                     lsp-client-session-diagnostic-generation
+                     lsp-client-session-diagnostic-generation-set!)))
 
   (define-record-type
     (lsp-client-registry %make-lsp-client-registry lsp-client-registry?)
@@ -516,6 +521,84 @@
           (if (string? message) message "LSP request failed"))
         "LSP request failed"))
 
+  (define (session-diagnostic-namespace session)
+    (string->symbol
+      (string-append
+        "lsp.diagnostics."
+        (number->string
+          (language-session-id (lsp-client-session-language-session session))))))
+
+  (define (diagnostic-severity value)
+    (case value
+      [(1) 'error]
+      [(2) 'warning]
+      [(3) 'info]
+      [else 'hint]))
+
+  (define (diagnostic-message value)
+    (let ([message (json-object-ref value "message" #f)])
+      (if (string? message) message "Language server diagnostic")))
+
+  (define (diagnostic-annotation buffer index value)
+    (guard (condition [else #f])
+      (let* ([range
+               (lsp-range-from-json (json-object-ref value "range" #f))]
+             [start (lsp-buffer-offset-at buffer (lsp-range-start range))]
+             [end (lsp-buffer-offset-at buffer (lsp-range-end range))])
+        (and start end
+             (make-diagnostic
+               (list
+                 index
+                 start
+                 end
+                 (json-object-ref value "code" json-null)
+                 (diagnostic-message value))
+               start
+               end
+               (diagnostic-severity
+                 (json-object-ref value "severity" 4))
+               (diagnostic-message value)
+               value)))))
+
+  (define (lsp-client-publish-diagnostics! editor session params)
+    (when (json-object? params)
+      (let* ([uri (json-object-ref params "uri" #f)]
+             [document
+               (and (string? uri)
+                    (find
+                      (lambda (candidate)
+                        (string=? (lsp-client-document-uri candidate) uri))
+                      (lsp-client-session-documents session)))] )
+        (when document
+          (let ([buffer (editor-buffer-ref editor (lsp-client-document-buffer-id document))]
+                [diagnostics (json-object-ref params "diagnostics" #f)])
+            (when
+              (and (json-array? diagnostics)
+                   (= (buffer-revision buffer)
+                      (lsp-client-document-revision document)))
+              (let ([generation
+                      (+ 1 (lsp-client-session-diagnostic-generation session))])
+                (lsp-client-session-diagnostic-generation-set!
+                  session generation)
+                (editor-publish-annotation-set!
+                  editor
+                  (make-buffer-annotation-set
+                    buffer
+                    (session-diagnostic-namespace session)
+                    (buffer-revision buffer)
+                    generation
+                    (let loop ([values (json-array-values diagnostics)] [index 0])
+                      (if
+                        (null? values)
+                        '()
+                        (let ([annotation
+                                (and
+                                  (json-object? (car values))
+                                  (diagnostic-annotation buffer index (car values)))])
+                          (if annotation
+                              (cons annotation (loop (cdr values) (+ index 1)))
+                              (loop (cdr values) (+ index 1)))))))))))))))
+
   (define (server-request-error id message)
     (make-json-object
       (list
@@ -565,7 +648,16 @@
                   (lsp-json-rpc-frame
                     (server-request-error id "Soda does not implement this server request")))))]
            [else '()]))]
-      [else '()]))
+      [else
+       (let ([method (json-object-ref message "method" #f)])
+         (if
+           (and (string? method)
+                (string=? method "textDocument/publishDiagnostics"))
+           (begin
+             (lsp-client-publish-diagnostics!
+               editor session (json-object-ref message "params" #f))
+             '())
+           '()))]))
 
   (define (lsp-client-handle-process-output! editor event)
     (unless (managed-process-event? event)
@@ -793,7 +885,8 @@
                   1
                   '()
                   '()
-                  (make-json-object '()))]
+                  (make-json-object '())
+                  0)]
                [process (make-lsp-process workspace profile session)])
           (lsp-client-session-process-set! session process)
           (hashtable-set!

@@ -1,6 +1,7 @@
 #!r6rs
 (import (rnrs)
         (soda document)
+        (soda editor annotation)
         (soda editor buffer)
         (soda editor command)
         (soda editor language-session)
@@ -134,6 +135,45 @@
         #f)
       "textDocument/didChange"))
   "buffer edits did not enqueue an LSP didChange notification")
+
+(define diagnostic-range
+  (make-json-object
+    (list
+      (cons "start"
+            (make-json-object
+              (list (cons "line" 0) (cons "character" 0))))
+      (cons "end"
+            (make-json-object
+              (list (cons "line" 0) (cons "character" 3)))))))
+(define diagnostic-value
+  (make-json-object
+    (list
+      (cons "range" diagnostic-range)
+      (cons "severity" 1)
+      (cons "message" "invalid prefix"))))
+(define diagnostic-params
+  (make-json-object
+    (list
+      (cons "uri" "file:///workspace/src/main.cpp")
+      (cons "diagnostics" (make-json-array (list diagnostic-value))))))
+(lsp-client-handle-json-message!
+  editor session
+  (make-json-object
+    (list
+      (cons "jsonrpc" "2.0")
+      (cons "method" "textDocument/publishDiagnostics")
+      (cons "params" diagnostic-params))))
+(define lsp-annotations
+  (apply append
+    (map
+      annotation-set-annotations
+      (editor-annotation-sets-for-buffer editor (buffer-id source)))))
+(check
+  (and
+    (= (length lsp-annotations) 1)
+    (eq? (annotation-severity (car lsp-annotations)) 'error)
+    (string=? (annotation-message (car lsp-annotations)) "invalid prefix"))
+  "publishDiagnostics did not publish an LSP diagnostic annotation")
 
 (define updated-project
   (make-project
