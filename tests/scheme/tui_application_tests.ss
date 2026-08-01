@@ -811,6 +811,39 @@
     sole-host-quit-effects)
   "the sole-host C-g escape path must terminate the shared command loop")
 
+(define quit-requested? #f)
+(define confirm-exit-definition
+  (make-tui-application-definition
+    'confirm-exit
+    (lambda (context arguments) (values #f '()))
+    (lambda (model message context)
+      (when (tui-quit-request-event? (tui-message-payload message))
+        (set! quit-requested? #t))
+      (tui-result model '() '()))
+    (lambda (model context)
+      (tui-text 'confirm-exit.root "Quit?"))
+    #f #f 'fundamental-mode 'edit '(confirm-on-exit)))
+(editor-register-tui-application! editor confirm-exit-definition)
+(define confirm-exit-buffer
+  (tui-open! editor 'confirm-exit #f 'edit))
+(define confirm-exit-session (tui-active-session editor))
+(define confirm-exit-effects
+  (editor-update!
+    editor
+    (make-key-message
+      (make-key-event
+        'character (char->integer #\g) #f #f 4
+        'press (make-bytevector 0)))))
+(check
+  (and
+    quit-requested?
+    (not
+      (exists
+        (lambda (effect) (eq? (command-effect-kind effect) 'quit))
+        confirm-exit-effects)))
+  "a sole-host application may take over C-g with a typed quit request")
+(tui-close! editor (tui-session-id confirm-exit-session))
+
 (define debugger-close-buffer
   (tui-open! editor 'failing-close 'debugger-close 'edit))
 (define debugger-close-session (tui-active-session editor))

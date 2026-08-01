@@ -143,6 +143,8 @@
           tui-timer-event?
           tui-timer-event-timer-id
           tui-timer-event-instant
+          make-tui-quit-request-event
+          tui-quit-request-event?
           make-tui-close-event
           tui-close-event?
           make-tui-pointer
@@ -823,6 +825,11 @@
         "instant must be a non-negative exact integer"
         instant))
     (%make-tui-timer-event timer-id instant))
+
+  (define-record-type
+    (tui-quit-request-event
+      make-tui-quit-request-event
+      tui-quit-request-event?))
 
   (define-record-type (tui-close-event make-tui-close-event tui-close-event?))
 
