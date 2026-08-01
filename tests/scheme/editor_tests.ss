@@ -325,7 +325,22 @@
       'project.remember-current)
     (command-registered?
       (editor-command-registry editor)
-      'project.forget))
+      'project.forget)
+    (command-registered?
+      (editor-command-registry editor)
+      'project.find-file)
+    (command-registered?
+      (editor-command-registry editor)
+      'project.find-file-all)
+    (command-registered?
+      (editor-command-registry editor)
+      'project.find-directory)
+    (command-registered?
+      (editor-command-registry editor)
+      'project.switch-buffer)
+    (command-registered?
+      (editor-command-registry editor)
+      'project.find-other-file))
   (error 'editor-tests "project commands were not installed"))
 (define editor-test-project
   (editor-discover-project
@@ -347,6 +362,47 @@
 (unless
   (eq? (car (editor-known-projects editor)) editor-test-project)
   (error 'editor-tests "editor known project registry differs"))
+(editor-apply-project-resource-snapshot!
+  editor
+  (make-project-resource-snapshot
+    (project-id editor-test-project)
+    0
+    '("/virtual/repository/src/main.cpp"
+      "/virtual/repository/src/main.hpp"
+      "/virtual/repository/tests/main_test.cpp")
+    '("/virtual/repository/src"
+      "/virtual/repository/tests")))
+(let* ([context
+         (make-command-context
+           editor (editor-active-view editor) #f #f #f)]
+       [effects
+         (execute-command!
+           (editor-command-registry editor)
+           'project.find-file
+           context
+           (list
+             (vector
+               editor-test-project
+               "/virtual/repository/src/main.cpp")))]
+       [request
+         (and
+           (= (length effects) 1)
+           (eq? (command-effect-kind (car effects)) 'file.read)
+           (command-effect-payload (car effects)))])
+  (unless
+    (and
+      (open-request? request)
+      (string=?
+        (open-request-path request)
+        "/virtual/repository/src/main.cpp")
+      (eq?
+        (resource-context-project-hint
+          (open-request-resource-context request))
+        editor-test-project))
+    (error
+      'editor-tests
+      "project file command did not preserve Project context"
+      effects)))
 (guard
   (condition [else #f])
   (call-with-editor-configuration-transaction
