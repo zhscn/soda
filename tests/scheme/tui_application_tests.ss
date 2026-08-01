@@ -35,6 +35,7 @@
     'fundamental-mode))
 (define editor (make-editor initial-buffer))
 (define close-count 0)
+(define close-message-count 0)
 (define fail-next? #t)
 (define view-count 0)
 (define input-kinds '())
@@ -57,6 +58,9 @@
     (lambda (model message context)
       (let ([payload (tui-message-payload message)])
         (cond
+          [(tui-close-event? payload)
+           (set! close-message-count (+ close-message-count 1))
+           (tui-result model '() '())]
           [(or (tui-focus-event? payload)
                (tui-blur-event? payload)
                (tui-resize-event? payload))
@@ -594,6 +598,7 @@
 (check
   (and
     (= close-count 1)
+    (= close-message-count 1)
     (eq? (tui-session-state session) 'closed)
     (not
       (editor-tui-session-for-buffer
@@ -602,6 +607,33 @@
     (buffer-closed? application-buffer)
     (eq? (view-buffer (editor-active-view editor)) initial-buffer))
   "closing an application must close its session and internal Buffer")
+
+(define failing-close-definition
+  (make-tui-application-definition
+    'failing-close
+    (lambda (context arguments) (values arguments '()))
+    (lambda (model message context) (tui-result model '() '()))
+    (lambda (model context) (tui-text 'failing-close.root "close"))
+    (lambda (model context) (error 'failing-close "close failed"))
+    #f
+    'fundamental-mode
+    'edit
+    '()))
+(editor-register-tui-application! editor failing-close-definition)
+(define failing-close-buffer (tui-open! editor 'failing-close 'model))
+(define failing-close-session (tui-active-session editor))
+(tui-close! editor (tui-session-id failing-close-session))
+(check
+  (and
+    (eq? (tui-session-state failing-close-session) 'closed)
+    (null? (tui-session-view-states failing-close-session))
+    (null? (tui-session-pending-commands failing-close-session))
+    (not
+      (editor-tui-session-for-buffer
+        editor
+        (buffer-id failing-close-buffer)))
+    (buffer-closed? failing-close-buffer))
+  "a failing close hook must not interrupt idempotent session cleanup")
 
 (editor-close! editor)
 (display "tui application tests passed\n")

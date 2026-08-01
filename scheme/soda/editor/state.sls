@@ -1578,6 +1578,11 @@
                   (editor-buffer-table value)
                   (tui-session-buffer-id session)
                   #f)])
+          (for-each
+            (lambda (view)
+              (when (and buffer (eq? (view-buffer view) buffer))
+                (view-clear-input-handler-pending! view)))
+            (editor-views value))
           (guard
             (condition
               [else

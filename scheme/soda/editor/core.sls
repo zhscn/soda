@@ -235,6 +235,8 @@
           tui-resize-event-view-id
           tui-resize-event-width
           tui-resize-event-height
+          make-tui-close-event
+          tui-close-event?
           make-tui-pointer
           tui-pointer?
           tui-pointer-view-id

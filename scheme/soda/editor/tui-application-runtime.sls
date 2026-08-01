@@ -696,16 +696,7 @@
       (for-each
         (lambda (view)
           (when (eq? (view-buffer view) buffer)
-            (let ([state
-                    (tui-session-view-state session (view-id view))])
-              (when (and state (tui-view-state-focused? state))
-                (tui-view-state-set-focused! state #f)
-                (view-clear-input-handler-pending! view)
-                (tui-send!
-                  editor
-                  session-id
-                  (make-tui-blur-event (view-id view))
-                  (view-id view))))))
+            (view-clear-input-handler-pending! view)))
         (editor-views editor))
       (for-each
         (lambda (view)

@@ -119,6 +119,8 @@
           tui-resize-event-view-id
           tui-resize-event-width
           tui-resize-event-height
+          make-tui-close-event
+          tui-close-event?
           make-tui-pointer
           tui-pointer?
           tui-pointer-view-id
@@ -659,6 +661,8 @@
         view-id width height))
     (%make-tui-resize-event view-id width height))
 
+  (define-record-type (tui-close-event make-tui-close-event tui-close-event?))
+
   (define-record-type
     (tui-pointer %make-tui-pointer tui-pointer?)
     (fields view-id node-key component-path local-row local-column
@@ -702,7 +706,7 @@
 
   (define (tui-session-set-state! session state)
     (require-session 'tui-session-set-state! session)
-    (unless (memq state '(initializing ready failed closed))
+    (unless (memq state '(initializing ready failed closing closed))
       (assertion-violation
         'tui-session-set-state!
         "invalid session state"
@@ -780,16 +784,65 @@
 
   (define (tui-session-close! session context)
     (require-session 'tui-session-close! session)
-    (unless (eq? (tui-session-state session) 'closed)
-      (tui-session-invalidate-commands! session)
-      (hashtable-clear! (tui-session-view-state-table session))
-      (tui-session-view-state-ids-set! session '())
-      (let ([close
-              (tui-application-definition-close
-                (tui-session-definition session))])
-        (when close
-          (close (tui-session-model session) context)))
-      (tui-session-state-set! session 'closed))
+    (unless (memq (tui-session-state session) '(closing closed))
+      (let ([failure #f]
+            [definition (tui-session-definition session)])
+        (letrec
+          ([deliver!
+             (lambda (payload view-id view-state)
+               (guard
+                 (condition
+                   [else (unless failure (set! failure condition))])
+                 (let* ([message
+                          (make-tui-message
+                            (tui-session-id session)
+                            (tui-session-generation session)
+                            view-id
+                            payload)]
+                        [result
+                          ((tui-application-definition-update definition)
+                           (tui-session-model session)
+                           message
+                           (make-tui-application-context
+                             (tui-application-context-editor context)
+                             (tui-session-id session)
+                             (tui-session-buffer-id session)
+                             view-id
+                             #f
+                             view-state))])
+                   (unless (tui-update-result? result)
+                     (assertion-violation
+                       'tui-session-close!
+                       "application close update must return a TuiUpdateResult"
+                       (tui-application-definition-name definition)
+                       result))
+                   (tui-session-set-last-message! session message)
+                   (tui-session-set-model!
+                     session
+                     (tui-update-result-model result))
+                   (tui-session-advance-generation! session))))])
+          (tui-session-set-state! session 'closing)
+          (for-each
+            (lambda (state)
+              (when (tui-view-state-focused? state)
+                (deliver!
+                  (make-tui-blur-event (tui-view-state-view-id state))
+                  (tui-view-state-view-id state)
+                  state)
+                (tui-view-state-set-focused! state #f)))
+            (tui-session-view-states session))
+          (deliver! (make-tui-close-event) #f #f)
+          (tui-session-invalidate-commands! session)
+          (hashtable-clear! (tui-session-view-state-table session))
+          (tui-session-view-state-ids-set! session '())
+          (let ([close (tui-application-definition-close definition)])
+            (when close
+              (guard
+                (condition
+                  [else (unless failure (set! failure condition))])
+                (close (tui-session-model session) context))))
+          (tui-session-set-state! session 'closed)
+          (when failure (raise failure)))))
     session)
 
   (define-record-type
