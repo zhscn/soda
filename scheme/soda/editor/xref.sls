@@ -25,6 +25,7 @@
           (soda editor state)
           (soda editor tui-application)
           (soda editor tui-application-runtime)
+          (soda editor window-runtime)
           (soda tui application))
 
   (define editor-xref-backends
@@ -279,13 +280,11 @@
                   'jump
                   (editor-view-resource-context editor (view-id view)))))))))
 
-  (define (visit-xref-result-command context)
+  (define (selected-xref-result context who)
     (let* ([editor (command-context-editor context)]
            [session (active-xref-results-session editor)])
       (if (not session)
-          (begin
-            (editor-set-status-message! editor "No active xref results")
-            '())
+          (editor-user-error who "No active location results")
           (let* ([model (tui-session-model session)]
                  [state
                    (tui-session-view-state
@@ -298,12 +297,49 @@
                    (editor-view-ref
                      editor (xref-results-model-origin-view-id model))])
             (if selection
-                (visit-location-item!
-                  editor
-                  origin-view
-                  (list-ref items selection)
-                  (xref-results-model-jump-kind model))
-                '())))))
+                (list session model origin-view (list-ref items selection))
+                (editor-user-error who "The location result list is empty"))))))
+
+  (define (require-xref-results-session context who)
+    (or (active-xref-results-session (command-context-editor context))
+        (editor-user-error who "No active location results")))
+
+  (define (visit-xref-result context select-origin? close-results?)
+    (let* ([editor (command-context-editor context)]
+           [selected (selected-xref-result context 'xref.visit)]
+           [session (car selected)]
+           [model (cadr selected)]
+           [origin-view (caddr selected)]
+           [item (cadddr selected)]
+           [effects
+             (visit-location-item!
+               editor origin-view item (xref-results-model-jump-kind model))])
+      (when select-origin?
+        (editor-select-view-window! editor (view-id origin-view)))
+      (when close-results?
+        (tui-close! editor (tui-session-id session)))
+      effects))
+
+  (define (preview-xref-result-command context)
+    (visit-xref-result context #f #f))
+
+  (define (visit-xref-result-command context)
+    (visit-xref-result context #t #f))
+
+  (define (visit-and-close-xref-result-command context)
+    (visit-xref-result context #t #t))
+
+  (define (quit-xref-results-command context)
+    (let* ([editor (command-context-editor context)]
+           [session
+             (require-xref-results-session context 'xref.results-quit)]
+           [model (tui-session-model session)]
+           [origin-view
+             (editor-view-ref
+               editor (xref-results-model-origin-view-id model))])
+      (editor-select-view-window! editor (view-id origin-view))
+      (tui-close! editor (tui-session-id session))
+      '()))
 
   (define (editor-show-location-results!
             editor title locations origin-view-id jump-kind)
@@ -372,8 +408,14 @@
       (bind-xref-key! keymap 'down #f 'xref.results-next)
       (bind-xref-key! keymap 'up #f 'xref.results-previous)
       (bind-xref-key! keymap 'enter 13 'xref.visit)
+      (bind-xref-key! keymap 'tab 9 'xref.visit-and-close)
       (bind-xref-key! keymap 'character (char->integer #\n) 'xref.results-next)
       (bind-xref-key! keymap 'character (char->integer #\p) 'xref.results-previous)
+      (bind-xref-key! keymap 'character (char->integer #\q) 'xref.results-quit)
+      (keymap-bind!
+        keymap
+        (list (make-key-stroke 'character (char->integer #\o) 4))
+        'xref.preview)
       (keymap-catalog-register!
         (editor-keymap-catalog editor) 'xref-results-mode-map keymap))
     (for-each
@@ -390,5 +432,11 @@
               (lambda (context) (send-xref-results! context 'previous))
               "Select the previous xref result.")
         (list 'xref.visit visit-xref-result-command
-              "Visit the selected xref result.")))
+              "Visit the selected location and select its source view.")
+        (list 'xref.preview preview-xref-result-command
+              "Preview the selected location while retaining results focus.")
+        (list 'xref.visit-and-close visit-and-close-xref-result-command
+              "Visit the selected location and close the results view.")
+        (list 'xref.results-quit quit-xref-results-command
+              "Close location results and return to their origin view.")))
     editor))

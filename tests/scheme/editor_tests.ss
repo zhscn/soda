@@ -4295,17 +4295,36 @@
   (make-command-message 'xref.results-next #f))
 (editor-update!
   xref-editor
-  (make-command-message 'xref.visit #f))
+  (make-command-message 'xref.preview #f))
 (unless (= (view-caret xref-view) 21)
-  (error 'editor-tests "xref results did not visit the first use"))
+  (error 'editor-tests "xref results did not preview the first use"))
 (editor-update!
   xref-editor
   (make-command-message 'xref.results-next #f))
 (editor-update!
   xref-editor
-  (make-command-message 'xref.visit #f))
+  (make-command-message 'xref.preview #f))
 (unless (= (view-caret xref-view) 28)
-  (error 'editor-tests "xref results did not visit the next use"))
+  (error 'editor-tests "xref results did not preview the next use"))
+(editor-update!
+  xref-editor
+  (make-command-message 'xref.visit #f))
+(unless (= (view-id (editor-active-view xref-editor)) (view-id xref-view))
+  (error 'editor-tests "xref visit did not select the source view"))
+(let ([results-view
+        (find
+          (lambda (view)
+            (let ([session
+                    (editor-tui-session-for-buffer
+                      xref-editor (buffer-id (view-buffer view)))])
+              (and session
+                   (eq? (tui-application-definition-name
+                          (tui-session-definition session))
+                        'xref-results))))
+          (editor-views xref-editor))])
+  (unless results-view
+    (error 'editor-tests "xref results view disappeared after visiting"))
+  (editor-select-view-window! xref-editor (view-id results-view)))
 (buffer-replace-range!
   xref-buffer
   (bytevector-length (buffer-bytes xref-buffer))
@@ -4313,7 +4332,7 @@
   (string->utf8 "; changed"))
 (editor-update!
   xref-editor
-  (make-command-message 'xref.visit #f))
+  (make-command-message 'xref.preview #f))
 (unless
   (and
     (= (view-caret xref-view) 28)
@@ -4324,6 +4343,20 @@
          (location-list-index
            (editor-current-location-list xref-editor))
          (editor-status-message xref-editor)))
+(editor-update!
+  xref-editor
+  (make-command-message 'xref.results-quit #f))
+(unless
+  (and
+    (= (view-id (editor-active-view xref-editor)) (view-id xref-view))
+    (not
+      (exists
+        (lambda (session)
+          (eq? (tui-application-definition-name
+                 (tui-session-definition session))
+               'xref-results))
+        (editor-tui-sessions xref-editor))))
+  (error 'editor-tests "xref results quit did not restore the source view"))
 (editor-close! xref-editor)
 
 (define provisional-diagnostic-source
