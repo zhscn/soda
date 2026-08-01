@@ -687,14 +687,21 @@
            [else '()]))]
       [else
        (let ([method (json-object-ref message "method" #f)])
-         (if
-           (and (string? method)
-                (string=? method "textDocument/publishDiagnostics"))
-           (begin
-             (lsp-client-publish-diagnostics!
-               editor session (json-object-ref message "params" #f))
-             '())
-           '()))]))
+         (cond
+           [(and (string? method)
+                 (string=? method "textDocument/publishDiagnostics"))
+            (lsp-client-publish-diagnostics!
+              editor session (json-object-ref message "params" #f))
+            '()]
+           [(and (string? method)
+                 (or (string=? method "window/showMessage")
+                     (string=? method "window/logMessage")))
+            (let* ([params (json-object-ref message "params" #f)]
+                   [text (and (json-object? params)
+                              (json-object-ref params "message" #f))])
+              (when (string? text) (editor-set-status-message! editor text))
+              '())]
+           [else '()]))]))
 
   (define (lsp-client-handle-process-output! editor event)
     (unless (managed-process-event? event)
