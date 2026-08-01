@@ -23,7 +23,8 @@
             directories
             resources
             (mutable scan-source)
-            watch-sources))
+            watch-sources
+            (mutable continuation)))
 
   (define-record-type
     (project-resource-runtime
@@ -69,21 +70,25 @@
       (project-resource-session-watch-sources session)))
 
   (define (snapshot-message session)
-    (make-internal-command-message
-      'project.apply-resource-snapshot
-      (make-project-resource-snapshot
-        (project-id (project-resource-session-project session))
-        (project-resource-session-generation session)
-        (list-sort
-          string<?
-          (vector->list
-            (hashtable-keys
-              (project-resource-session-resources session))))
-        (list-sort
-          string<?
-          (vector->list
-            (hashtable-keys
-              (project-resource-session-directories session)))))))
+    (let ([continuation (project-resource-session-continuation session)])
+      (project-resource-session-continuation-set! session #f)
+      (make-internal-command-message
+        'project.apply-resource-snapshot
+        (make-project-resource-result
+          (make-project-resource-snapshot
+            (project-id (project-resource-session-project session))
+            (project-resource-session-generation session)
+            (list-sort
+              string<?
+              (vector->list
+                (hashtable-keys
+                  (project-resource-session-resources session))))
+            (list-sort
+              string<?
+              (vector->list
+                (hashtable-keys
+                  (project-resource-session-directories session)))))
+          continuation))))
 
   (define (start-watch! adapter session directory)
     (guard
@@ -209,7 +214,8 @@
                 (make-hashtable string-hash string=?)
                 (make-hashtable string-hash string=?)
                 #f
-                (make-eqv-hashtable))])
+                (make-eqv-hashtable)
+                (project-resource-request-continuation request))])
         (hashtable-set!
           (project-resource-runtime-by-project adapter)
           id

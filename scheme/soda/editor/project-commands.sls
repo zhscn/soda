@@ -678,7 +678,15 @@
 
   (define (apply-project-resource-snapshot-command context)
     (let* ([editor (command-context-editor context)]
-           [snapshot (command-context-argument context)])
+           [argument (command-context-argument context)]
+           [snapshot
+             (if (project-resource-result? argument)
+                 (project-resource-result-snapshot argument)
+                 argument)]
+           [continuation
+             (and
+               (project-resource-result? argument)
+               (project-resource-result-continuation argument))])
       (when
         (editor-apply-project-resource-snapshot! editor snapshot)
         (editor-set-status-message!
@@ -688,7 +696,9 @@
             (number->string
               (length
                 (project-resource-snapshot-resources snapshot))))))
-      '()))
+      (if continuation
+          (list (make-command-effect 'command.invoke continuation))
+          '())))
 
   (define (install-project-commands! editor)
     (let ([state (make-project-command-state #f #f)])

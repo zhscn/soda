@@ -10,12 +10,17 @@
           project-resource-request-project
           project-resource-request-generation
           project-resource-request-policy
+          project-resource-request-continuation
           make-project-resource-snapshot
           project-resource-snapshot?
           project-resource-snapshot-project-id
           project-resource-snapshot-generation
           project-resource-snapshot-resources
-          project-resource-snapshot-directories)
+          project-resource-snapshot-directories
+          make-project-resource-result
+          project-resource-result?
+          project-resource-result-snapshot
+          project-resource-result-continuation)
   (import (rnrs)
           (soda editor project)
           (soda vfs))
@@ -30,13 +35,16 @@
     (project-resource-request
       %make-project-resource-request
       project-resource-request?)
-    (fields project generation policy))
+    (fields project generation policy continuation))
 
   (define-record-type
     (project-resource-snapshot
       %make-project-resource-snapshot
       project-resource-snapshot?)
     (fields project-id generation resources directories))
+
+  (define-record-type project-resource-result
+    (fields snapshot continuation))
 
   (define (valid-name-list? value)
     (and (list? value)
@@ -76,25 +84,30 @@
         "build" "node_modules" "target" "vendor")
       (lambda (path entry) #t)))
 
-  (define (make-project-resource-request project generation policy)
-    (unless (project? project)
-      (assertion-violation
-        'make-project-resource-request
-        "expected a project"
-        project))
-    (unless
-      (and (integer? generation) (exact? generation)
-           (not (negative? generation)))
-      (assertion-violation
-        'make-project-resource-request
-        "generation must be a non-negative exact integer"
-        generation))
-    (unless (project-resource-policy? policy)
-      (assertion-violation
-        'make-project-resource-request
-        "expected a project resource policy"
-        policy))
-    (%make-project-resource-request project generation policy))
+  (define make-project-resource-request
+    (case-lambda
+      [(project generation policy)
+       (make-project-resource-request project generation policy #f)]
+      [(project generation policy continuation)
+       (unless (project? project)
+         (assertion-violation
+           'make-project-resource-request
+           "expected a project"
+           project))
+       (unless
+         (and (integer? generation) (exact? generation)
+              (not (negative? generation)))
+         (assertion-violation
+           'make-project-resource-request
+           "generation must be a non-negative exact integer"
+           generation))
+       (unless (project-resource-policy? policy)
+         (assertion-violation
+           'make-project-resource-request
+           "expected a project resource policy"
+           policy))
+       (%make-project-resource-request
+         project generation policy continuation)]))
 
   (define (make-project-resource-snapshot
             project-id generation resources directories)

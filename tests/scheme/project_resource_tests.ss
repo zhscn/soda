@@ -36,6 +36,8 @@
 (define executor (make-effect-executor))
 (define adapter
   (install-project-resource-runtime! executor runtime))
+(define continuation
+  (make-command-message 'test.resume-project-command #f))
 
 (define start-result
   (execute-effects!
@@ -46,7 +48,8 @@
         (make-project-resource-request
           project
           7
-          default-project-resource-policy)))))
+          default-project-resource-policy
+          continuation)))))
 (check
   (effect-result-continue? start-result)
   "resource enumeration must keep the editor loop running")
@@ -73,8 +76,17 @@
       'project.apply-resource-snapshot))
   "enumeration must publish a snapshot command")
 
-(define snapshot
+(define completed-result
   (internal-command-message-argument completed-message))
+(check
+  (and
+    (project-resource-result? completed-result)
+    (eq?
+      (project-resource-result-continuation completed-result)
+      continuation))
+  "resource enumeration must preserve its continuation")
+(define snapshot
+  (project-resource-result-snapshot completed-result))
 (define resources
   (project-resource-snapshot-resources snapshot))
 (define directories

@@ -56,6 +56,18 @@
   (define (project-snapshot editor project)
     (editor-project-resource-snapshot editor (project-id project)))
 
+  (define (project-refresh-effect editor project continuation)
+    (let ([snapshot (project-snapshot editor project)])
+      (make-command-effect
+        'project.refresh-resources
+        (make-project-resource-request
+          project
+          (if snapshot
+              (+ 1 (project-resource-snapshot-generation snapshot))
+              0)
+          default-project-resource-policy
+          continuation))))
+
   (define (project-resources editor project)
     (let ([snapshot (project-snapshot editor project)])
       (if snapshot
@@ -251,6 +263,31 @@
     (interactive project-file-reader)
     (open-resource! context selection))
 
+  (define (find-project-file-dispatch-command context)
+    (let* ([editor (command-context-editor context)]
+           [project (context-project context)])
+      (cond
+        [(not project)
+         (editor-set-status-message! editor "No Project found")
+         '()]
+        [(project-snapshot editor project)
+         (list
+           (make-command-effect
+             'command.invoke
+             (make-command-message 'project.select-file #f)))]
+        [else
+         (editor-remember-project! editor project)
+         (editor-set-status-message!
+           editor
+           (string-append
+             "Scanning Project: "
+             (project-primary-root project)))
+         (list
+           (project-refresh-effect
+             editor
+             project
+             (make-command-message 'project.select-file #f)))])))
+
   (define-command (find-file-in-known-projects-command context selection)
     "Find a file in any known Project resource snapshot."
     (interactive all-project-file-reader)
@@ -416,11 +453,14 @@
 
   (define (install-project-navigation-commands! editor)
     (register-command!
-      editor 'project.find-file find-project-file-command
+      editor 'project.find-file find-project-file-dispatch-command
       "Find a file in the current Project.")
     (register-command!
-      editor 'project.find-file-dwim find-project-file-command
+      editor 'project.find-file-dwim find-project-file-dispatch-command
       "Find a file in the current Project.")
+    (register-command!
+      editor 'project.select-file find-project-file-command
+      "Select a file from an available Project resource snapshot.")
     (register-command!
       editor 'project.find-file-all find-file-in-known-projects-command
       "Find a file in any known Project.")

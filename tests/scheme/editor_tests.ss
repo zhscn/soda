@@ -29,6 +29,9 @@
               editor-complete-async-jump!
               editor-cancel-async-jump!)
         (soda editor prompt)
+        (only (soda editor project-resource)
+              project-resource-request?
+              project-resource-request-continuation)
         (soda editor repl)
         (soda editor save-place-store)
         (soda editor scheme-interface-index)
@@ -417,7 +420,7 @@
        [effects
          (execute-command!
            (editor-command-registry editor)
-           'project.find-file
+           'project.select-file
            context
            (list
              (vector
@@ -471,6 +474,44 @@
   editor
   (view-id (editor-active-view editor))
   editor-test-resource-context)
+(editor-clear-project-resource-snapshot!
+  editor
+  (project-id editor-test-project))
+(let* ([context
+         (make-command-context
+           editor (editor-active-view editor) #f #f #f)]
+       [effects
+         (execute-command!
+           (editor-command-registry editor)
+           'project.find-file
+           context
+           '())]
+       [request
+         (and
+           (= (length effects) 1)
+           (eq?
+             (command-effect-kind (car effects))
+             'project.refresh-resources)
+           (command-effect-payload (car effects)))]
+       [continuation
+         (and
+           (project-resource-request? request)
+           (project-resource-request-continuation request))])
+  (unless
+    (and
+      (command-message? continuation)
+      (eq? (command-message-name continuation) 'project.select-file))
+    (error
+      'editor-tests
+      "Project file command did not defer until resource scanning"
+      effects)))
+(editor-apply-project-resource-snapshot!
+  editor
+  (make-project-resource-snapshot
+    (project-id editor-test-project)
+    0
+    '("/virtual/repository/src/main.cpp")
+    '("/virtual/repository/src")))
 (let* ([context
          (make-command-context
            editor (editor-active-view editor) #f #f #f)]
