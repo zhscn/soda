@@ -14,7 +14,7 @@
 | ProjectWorkspace bootstrap snapshot 与 file-backed Buffer 归属解析 | 已实现 |
 | LSP process transport、ProjectWorkspace bootstrap 与 full-text document synchronization | 已实现 |
 | LSP diagnostics、completion text edits/resolve、hover、definition、references、rename、code actions 与 workspace/applyEdit | 已实现 |
-| LSP semantic tokens | 未实现 |
+| LSP semantic tokens full refresh | 已实现 |
 
 ## 分层
 

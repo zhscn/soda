@@ -124,6 +124,7 @@
   (define editor-lsp-registries (make-eq-hashtable))
   (define pending-lsp-workspace-edits (make-weak-eq-hashtable))
   (define pending-lsp-completion-resolutions (make-weak-eq-hashtable))
+  (define lsp-semantic-generations (make-weak-eq-hashtable))
 
   (define (exact-non-negative-integer? value)
     (and (integer? value) (exact? value) (not (negative? value))))
@@ -1535,6 +1536,165 @@
             (editor-set-status-message! editor "No ready language server at point")
             '()))))
 
+  (define (session-semantic-namespace session)
+    (string->symbol
+      (string-append
+        "lsp.semantic."
+        (number->string
+          (language-session-id (lsp-client-session-language-session session))))))
+
+  (define (semantic-token-types session)
+    (let* ([provider
+             (json-object-ref
+               (lsp-client-session-capabilities session)
+               "semanticTokensProvider"
+               #f)]
+           [legend
+             (and (json-object? provider)
+                  (json-object-ref provider "legend" #f))]
+           [types
+             (and (json-object? legend)
+                  (json-object-ref legend "tokenTypes" #f))])
+      (and
+        (json-array? types)
+        (let ([values (json-array-values types)])
+          (and (for-all string? values) values)))))
+
+  (define (semantic-token-face type)
+    (cond
+      [(member type '("namespace" "type" "class" "enum" "interface" "struct"))
+       'type]
+      [(string=? type "typeParameter") 'type.parameter]
+      [(string=? type "parameter") 'variable.parameter]
+      [(member type '("variable" "enumMember")) 'variable]
+      [(member type '("property" "event")) 'property]
+      [(member type '("function" "method" "macro")) 'function]
+      [(member type '("keyword" "modifier")) 'keyword]
+      [(string=? type "comment") 'comment]
+      [(member type '("string" "regexp")) 'string]
+      [(member type '("number" "boolean")) 'number]
+      [(string=? type "operator") 'operator]
+      [(string=? type "decorator") 'attribute]
+      [else 'default]))
+
+  (define (semantic-token-annotations buffer types data)
+    (and
+      (list? types)
+      (json-array? data)
+      (let loop ([values (json-array-values data)]
+                 [line 0]
+                 [character 0]
+                 [index 0]
+                 [annotations '()])
+        (cond
+          [(null? values) (reverse annotations)]
+          [(or (not (pair? values))
+               (not (pair? (cdr values)))
+               (not (pair? (cddr values)))
+               (not (pair? (cdddr values)))
+               (not (pair? (cddddr values))))
+           #f]
+          [else
+           (let* ([delta-line (car values)]
+                  [delta-start (cadr values)]
+                  [token-length (caddr values)]
+                  [type-index (cadddr values)]
+                  [modifiers (car (cddddr values))]
+                  [remaining (cdr (cddddr values))])
+             (if
+               (not
+                 (and (exact-non-negative-integer? delta-line)
+                      (exact-non-negative-integer? delta-start)
+                      (exact-non-negative-integer? token-length)
+                      (exact-non-negative-integer? type-index)
+                      (exact-non-negative-integer? modifiers)
+                      (< type-index (length types))))
+               #f
+               (let* ([next-line (+ line delta-line)]
+                      [next-character
+                        (if (zero? delta-line)
+                            (+ character delta-start)
+                            delta-start)]
+                      [start
+                        (lsp-buffer-offset-at
+                          buffer
+                          (make-lsp-position next-line next-character))]
+                      [end
+                        (lsp-buffer-offset-at
+                          buffer
+                          (make-lsp-position
+                            next-line (+ next-character token-length)))])
+                 (if (or (not start) (not end))
+                     #f
+                     (let ([type (list-ref types type-index)])
+                       (loop
+                         remaining
+                         next-line
+                         next-character
+                         (+ index 1)
+                         (if (zero? token-length)
+                             annotations
+                             (cons
+                               (make-annotation
+                                 (list index start end type modifiers)
+                                 start end
+                                 'semantic-token
+                                 (semantic-token-face type)
+                                 #f #f
+                                 (list type modifiers))
+                               annotations))))))))]))))
+
+  (define (publish-semantic-tokens! editor session buffer revision result)
+    (guard (condition [else #f])
+      (when
+        (and (= (buffer-revision buffer) revision)
+             (eq? (lsp-client-session-state session) 'ready))
+        (let ([annotations
+                (and (json-object? result)
+                     (semantic-token-annotations
+                       buffer
+                       (semantic-token-types session)
+                       (json-object-ref result "data" #f)))])
+          (when annotations
+            (let ([generation
+                    (+ 1 (hashtable-ref lsp-semantic-generations session 0))])
+              (hashtable-set! lsp-semantic-generations session generation)
+              (editor-publish-annotation-set!
+                editor
+                (make-buffer-annotation-set
+                  buffer
+                  (session-semantic-namespace session)
+                  revision
+                  generation
+                  annotations))))))))
+
+  (define (lsp-request-semantic-tokens! editor)
+    (let* ([view (editor-active-view editor)]
+           [buffer (view-buffer view)]
+           [session (active-view-lsp-session editor)]
+           [document (and session (find-document session (buffer-id buffer)))]
+           [types (and session (semantic-token-types session))]
+           [revision (buffer-revision buffer)])
+      (if (and session document types
+               (eq? (lsp-client-session-state session) 'ready))
+          (list
+            (session-request!
+              session
+              "textDocument/semanticTokens/full"
+              (make-json-object
+                (list
+                  (cons "textDocument"
+                        (make-json-object
+                          (list (cons "uri" (lsp-client-document-uri document)))))))
+              (lambda (response-editor response-session result)
+                (publish-semantic-tokens!
+                  response-editor response-session buffer revision result)
+                '())))
+          (begin
+            (editor-set-status-message!
+              editor "The language server does not provide semantic tokens")
+            '()))))
+
   (define (hover-text value)
     (cond
       [(string? value) value]
@@ -2270,6 +2430,13 @@
         'lsp.find-definition
         (lambda (context) (lsp-find-definition! (command-context-editor context)))
         "Jump to the language-server definition at point."))
+    (editor-register-command!
+      editor
+      (make-interactive-context-command
+        'lsp.semantic-tokens
+        (lambda (context)
+          (lsp-request-semantic-tokens! (command-context-editor context)))
+        "Refresh language-server semantic tokens for the active document."))
     (editor-register-command!
       editor
       (make-interactive-context-command

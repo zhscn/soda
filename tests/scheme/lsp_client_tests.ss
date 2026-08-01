@@ -108,6 +108,26 @@
       "file:///workspace"))
   "initialize did not use the ProjectWorkspace root")
 
+(define lsp-capabilities
+  (make-json-object
+    (list
+      (cons
+        "completionProvider"
+        (make-json-object (list (cons "resolveProvider" #t))))
+      (cons
+        "semanticTokensProvider"
+        (make-json-object
+          (list
+            (cons
+              "legend"
+              (make-json-object
+                (list
+                  (cons
+                    "tokenTypes"
+                    (make-json-array (list "type" "function")))
+                  (cons "tokenModifiers" (make-json-array '())))))
+            (cons "full" #t)))))))
+
 (define ready-effects
   (lsp-client-handle-json-message!
     editor
@@ -118,15 +138,7 @@
         (cons "id" 1)
         (cons "result"
               (make-json-object
-                (list
-                  (cons
-                    "capabilities"
-                    (make-json-object
-                      (list
-                        (cons
-                          "completionProvider"
-                          (make-json-object
-                            (list (cons "resolveProvider" #t))))))))))))))
+                (list (cons "capabilities" lsp-capabilities))))))))
 (check
   (and
     (eq? (lsp-client-session-state session) 'ready)
@@ -164,6 +176,62 @@
   (buffer-id source))
 (editor-set-view-language-attachment!
   editor (view-id (editor-active-view editor)) attachment)
+
+(define semantic-effects
+  (editor-execute-command! editor 'lsp.semantic-tokens))
+(check
+  (and (= (length semantic-effects) 1)
+       (eq? (command-effect-kind (car semantic-effects)) 'managed-process.write))
+  "semantic tokens did not issue an LSP request")
+(define semantic-message
+  (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload (car semantic-effects))))))
+(check
+  (string=?
+    (json-object-ref semantic-message "method" #f)
+    "textDocument/semanticTokens/full")
+  "semantic tokens used the wrong LSP method")
+(lsp-client-handle-json-message!
+  editor
+  session
+  (make-json-object
+    (list
+      (cons "jsonrpc" "2.0")
+      (cons "id" (json-object-ref semantic-message "id" #f))
+      (cons
+        "result"
+        (make-json-object
+          (list
+            (cons
+              "data"
+              (make-json-array
+                (list 0 0 3 0 0
+                      0 4 4 1 0)))))))))
+(define semantic-annotations
+  (apply append
+    (map
+      annotation-set-annotations
+      (editor-annotation-sets-for-buffer editor (buffer-id source)))))
+(check
+  (and
+    (exists
+      (lambda (annotation)
+        (and (eq? (annotation-kind annotation) 'semantic-token)
+             (eq? (annotation-face annotation) 'type)
+             (= (annotation-start annotation) 0)
+             (= (annotation-end annotation) 3)))
+      semantic-annotations)
+    (exists
+      (lambda (annotation)
+        (and (eq? (annotation-kind annotation) 'semantic-token)
+             (eq? (annotation-face annotation) 'function)
+             (= (annotation-start annotation) 4)
+             (= (annotation-end annotation) 8)))
+      semantic-annotations))
+  "semantic token delta positions did not publish faces for the current revision")
 
 (define workspace-folder-response
   (lsp-client-handle-json-message!
@@ -254,10 +322,13 @@
       (cons "method" "textDocument/publishDiagnostics")
       (cons "params" diagnostic-params))))
 (define lsp-annotations
-  (apply append
-    (map
-      annotation-set-annotations
-      (editor-annotation-sets-for-buffer editor (buffer-id source)))))
+  (filter
+    (lambda (annotation)
+      (eq? (annotation-kind annotation) 'diagnostic))
+    (apply append
+      (map
+        annotation-set-annotations
+        (editor-annotation-sets-for-buffer editor (buffer-id source))))))
 (check
   (and
     (= (length lsp-annotations) 1)
