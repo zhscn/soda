@@ -23,6 +23,8 @@
           lsp-client-handle-json-message!
           lsp-client-handle-process-output!
           lsp-client-handle-process-exit!
+          lsp-client-sync-buffer!
+          lsp-client-close-buffer!
           lsp-client-stop!
           install-lsp-commands!)
   (import (rnrs)
@@ -50,7 +52,10 @@
     (fields buffer-id uri
             (mutable version lsp-client-document-version lsp-client-document-version-set!)
             (mutable revision lsp-client-document-revision lsp-client-document-revision-set!)
-            (mutable opened? lsp-client-document-opened? lsp-client-document-opened?-set!)))
+            (mutable opened? lsp-client-document-opened? lsp-client-document-opened?-set!)
+            (mutable observer-name
+                     lsp-client-document-observer-name
+                     lsp-client-document-observer-name-set!)))
 
   (define-record-type lsp-client-pending-request
     (fields id method continuation))
@@ -300,19 +305,77 @@
                 (lsp-file-uri (require-file-buffer 'lsp-document buffer))
                 1
                 (buffer-revision buffer)
+                #f
                 #f)])
         (lsp-client-session-documents-set!
           session
           (append (lsp-client-session-documents session) (list document)))
         document)))
 
-  (define (did-open-effect session buffer document)
+  (define (document-observer-name session)
+    (string->symbol
+      (string-append
+        "lsp.client."
+        (number->string
+          (language-session-id (lsp-client-session-language-session session))))))
+
+  (define (lsp-client-sync-buffer! editor session buffer)
+    (let ([document (find-document session (buffer-id buffer))])
+      (if
+        (or (not document)
+            (not (lsp-client-document-opened? document))
+            (not (eq? (lsp-client-session-state session) 'ready)))
+        '()
+        (begin
+          (lsp-client-document-version-set!
+            document (+ 1 (lsp-client-document-version document)))
+          (lsp-client-document-revision-set! document (buffer-revision buffer))
+          (list
+            (session-notification-effect
+              session
+              "textDocument/didChange"
+              (make-json-object
+                (list
+                  (cons "textDocument"
+                        (make-json-object
+                          (list
+                            (cons "uri" (lsp-client-document-uri document))
+                            (cons "version" (lsp-client-document-version document)))))
+                  (cons "contentChanges"
+                        (make-json-array
+                          (list
+                            (make-json-object
+                              (list (cons "text" (buffer-text buffer)))))))))))))))
+
+  (define (install-document-observer! editor session buffer document)
+    (unless (lsp-client-document-observer-name document)
+      (let ([name (document-observer-name session)])
+        (buffer-add-change-observer!
+          buffer
+          name
+          (lambda (changed-buffer change)
+            (let ([effects (lsp-client-sync-buffer! editor session changed-buffer)])
+              (when (pair? effects)
+                (editor-queue-tui-effects! editor effects)))))
+        (editor-add-buffer-hook!
+          editor
+          buffer
+          'before-buffer-removed
+          name
+          (lambda (hook-editor closing-buffer)
+            (let ([effects (lsp-client-close-buffer! hook-editor closing-buffer)])
+              (when (pair? effects)
+                (editor-queue-tui-effects! hook-editor effects)))))
+        (lsp-client-document-observer-name-set! document name))))
+
+  (define (did-open-effect editor session buffer document)
     (let ([language (buffer-language buffer)])
       (unless language
         (assertion-violation
           'did-open-effect "Buffer has no language profile" buffer))
       (lsp-client-document-opened?-set! document #t)
       (lsp-client-document-revision-set! document (buffer-revision buffer))
+      (install-document-observer! editor session buffer document)
       (session-notification-effect
         session
         "textDocument/didOpen"
@@ -343,8 +406,53 @@
           (let ([document (ensure-document! session buffer)])
             (if (lsp-client-document-opened? document)
                 '()
-                (list (did-open-effect session buffer document)))))
+                (list (did-open-effect editor session buffer document)))))
         (session-attached-buffers editor session))))
+
+  (define (lsp-client-close-buffer! editor buffer)
+    (unless (buffer? buffer)
+      (assertion-violation
+        'lsp-client-close-buffer! "expected a Buffer" buffer))
+    (let-values
+      ([(ids sessions)
+        (hashtable-entries
+          (lsp-client-registry-sessions (editor-lsp-registry editor)))])
+      (let loop ([index 0] [effects '()])
+        (if
+          (= index (vector-length sessions))
+          (reverse effects)
+          (let* ([session (vector-ref sessions index)]
+                 [document (find-document session (buffer-id buffer))])
+            (if
+              (not document)
+              (loop (+ index 1) effects)
+              (begin
+                (when (lsp-client-document-observer-name document)
+                  (buffer-remove-change-observer!
+                    buffer (lsp-client-document-observer-name document)))
+                (lsp-client-session-documents-set!
+                  session
+                  (filter
+                    (lambda (candidate) (not (eq? candidate document)))
+                    (lsp-client-session-documents session)))
+                (loop
+                  (+ index 1)
+                  (if
+                    (and (lsp-client-document-opened? document)
+                         (eq? (lsp-client-session-state session) 'ready))
+                    (cons
+                      (session-notification-effect
+                        session
+                        "textDocument/didClose"
+                        (make-json-object
+                          (list
+                            (cons "textDocument"
+                                  (make-json-object
+                                    (list
+                                      (cons "uri"
+                                            (lsp-client-document-uri document))))))))
+                      effects)
+                    effects)))))))))
 
   (define (initialize-response! editor session result)
     (unless (json-object? result)

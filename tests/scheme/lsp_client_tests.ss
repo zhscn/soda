@@ -115,6 +115,26 @@
     (string=? (json-object-ref text-document "text" #f) "int main() {}\n"))
   "ready LSP session did not open its attached document")
 
+(call-with-buffer-transaction
+  source
+  (lambda (transaction)
+    (transaction-insert! transaction 0 "// Soda\n")))
+(define change-effects (editor-take-tui-effects! editor))
+(check
+  (and
+    (= (length change-effects) 1)
+    (string=?
+      (json-object-ref
+        (car
+          (lsp-json-rpc-decode!
+            (make-lsp-json-rpc-decoder)
+            (managed-process-write-request-data
+              (command-effect-payload (car change-effects)))))
+        "method"
+        #f)
+      "textDocument/didChange"))
+  "buffer edits did not enqueue an LSP didChange notification")
+
 (define stop-effects (lsp-client-stop! editor session))
 (check
   (and
