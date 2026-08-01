@@ -138,7 +138,7 @@
             (current-items)))
         (lambda (generation) #f))))
 
-  (define (candidate-payload result)
+  (define (candidate-payload context result)
     (let ([candidate (prompt-result-candidate result)])
       (list (and candidate (completion-item-payload candidate)))))
 
