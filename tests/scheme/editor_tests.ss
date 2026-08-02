@@ -5012,7 +5012,14 @@
 (define scoped-result-primary-buffer
   (editor-show-xref-results!
     scoped-result-editor
-    (make-location-list 'primary-xref '())
+    (make-location-list
+      'primary-xref
+      (list
+        (make-location-item
+          (buffer-id scoped-result-source)
+          (buffer-resource scoped-result-source)
+          (buffer-revision scoped-result-source)
+          0 0 "primary" '())))
     (view-id scoped-result-primary-view)))
 (editor-select-view-window!
   scoped-result-editor (view-id scoped-result-primary-view))
@@ -5025,14 +5032,28 @@
 (define scoped-result-secondary-buffer
   (editor-show-xref-results!
     scoped-result-editor
-    (make-location-list 'secondary-xref '())
+    (make-location-list
+      'secondary-xref
+      (list
+        (make-location-item
+          (buffer-id scoped-result-source)
+          (buffer-resource scoped-result-source)
+          (buffer-revision scoped-result-source)
+          3 3 "secondary" '())))
     (view-id scoped-result-secondary-view)))
 (editor-switch-workbench!
   scoped-result-editor (workbench-id scoped-result-primary))
 (define scoped-result-primary-buffer-again
   (editor-show-xref-results!
     scoped-result-editor
-    (make-location-list 'primary-xref '())
+    (make-location-list
+      'primary-xref
+      (list
+        (make-location-item
+          (buffer-id scoped-result-source)
+          (buffer-resource scoped-result-source)
+          (buffer-revision scoped-result-source)
+          0 0 "primary" '())))
     (view-id scoped-result-primary-view)))
 (unless
   (and
@@ -5053,6 +5074,28 @@
       (workbench-id scoped-result-secondary)))
   (error 'editor-tests
          "Result Buffer identity crossed Workbench scopes"))
+(buffer-set-local!
+  scoped-result-primary-buffer 'result-current-index #f)
+(buffer-set-local!
+  scoped-result-secondary-buffer 'result-current-index #f)
+(editor-note-result-buffer!
+  scoped-result-editor scoped-result-secondary-buffer)
+(editor-select-view-window!
+  scoped-result-editor (view-id scoped-result-primary-view))
+(editor-update!
+  scoped-result-editor
+  (make-command-message 'xref.next-location #f))
+(unless
+  (and
+    (equal?
+      (buffer-local-ref
+        scoped-result-primary-buffer 'result-current-index #f)
+      0)
+    (not
+      (buffer-local-ref
+        scoped-result-secondary-buffer 'result-current-index #f)))
+  (error 'editor-tests
+         "global result navigation crossed Workbench scopes"))
 (editor-close! scoped-result-editor)
 
 (define result-restore-source

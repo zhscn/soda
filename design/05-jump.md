@@ -182,11 +182,11 @@ Buffer 的 producer，而不判断它来自搜索、版本控制或语义服务�
 session、取消仍在运行的旧任务并重新建立属性；Project search 和 Git status 使用该
 协议。
 
-Result Buffer 在不可见时仍保存当前 item。全局 next/previous locus 使用最近实际导航的
-Result Buffer，并跳过已经关闭的 Buffer；它不依赖 Result Buffer 当前是否显示在某个
-Window。多个结果 Buffer 按最近使用次序参与选择。源位置访问由公共 location visitor
-完成，统一处理 live Buffer revision、异步文件打开、UTF-16 fallback 和
-LanguageAttachment 传播。
+Result Buffer 在不可见时仍保存当前 item。全局 next/previous locus 使用当前 Workbench
+中最近实际导航的 Result Buffer，并跳过已经关闭的 Buffer；它不依赖 Result Buffer
+当前是否显示在某个 Window。多个结果 Buffer 按最近使用次序参与选择。源位置访问由公共
+location visitor 完成，统一处理 live Buffer revision、异步文件打开、UTF-16 fallback
+和 LanguageAttachment 传播。
 
 Result Buffer 的会话身份由基础 resource 名称和 source View 所属 Workbench 共同确定。
 同一 Workbench 内重新执行 producer 会刷新原有 Buffer；不同 Workbench 可以同时保留

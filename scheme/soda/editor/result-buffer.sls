@@ -453,24 +453,30 @@
     buffer)
 
   (define (available-navigation-buffer editor)
-    (let loop ([ids (hashtable-ref editor-result-buffers editor '())]
-               [retained '()])
-      (if (null? ids)
-          (begin
-            (hashtable-set!
-              editor-result-buffers editor (reverse retained))
-            #f)
-          (let ([buffer
-                  (guard (condition [else #f])
-                    (editor-buffer-ref editor (car ids)))])
-            (if (and buffer (buffer-result-interface-ref buffer))
-                (begin
-                  (hashtable-set!
-                    editor-result-buffers
-                    editor
-                    (append (reverse retained) ids))
-                  buffer)
-                (loop (cdr ids) retained))))))
+    (let ([workbench-id
+            (workbench-id (editor-active-workbench editor))])
+      (let loop ([ids (hashtable-ref editor-result-buffers editor '())]
+                 [retained '()])
+        (if (null? ids)
+            (begin
+              (hashtable-set!
+                editor-result-buffers editor (reverse retained))
+              #f)
+            (let ([buffer
+                    (guard (condition [else #f])
+                      (editor-buffer-ref editor (car ids)))])
+              (if (and buffer
+                       (buffer-result-interface-ref buffer)
+                       (equal?
+                         (buffer-result-workbench-id buffer)
+                         workbench-id))
+                  (begin
+                    (hashtable-set!
+                      editor-result-buffers
+                      editor
+                      (append (reverse retained) ids))
+                    buffer)
+                  (loop (cdr ids) retained)))))))
 
   (define (require-interface context who)
     (let* ([buffer (view-buffer (command-context-view context))]
@@ -1294,9 +1300,13 @@
                    (and buffer
                         (find
                           (lambda (candidate)
-                            (=
-                              (buffer-id (view-buffer candidate))
-                              (buffer-id buffer)))
+                            (and
+                              (=
+                                (view-workbench-id candidate)
+                                (buffer-result-workbench-id buffer))
+                              (=
+                                (buffer-id (view-buffer candidate))
+                                (buffer-id buffer))))
                           (editor-views editor)))])
       (unless (and buffer
                    (buffer-result-interface-ref buffer))
