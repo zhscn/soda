@@ -804,10 +804,13 @@
     (let ([session-id (language-session-id (lsp-client-session-language-session session))])
       (filter
         (lambda (buffer)
-          (exists
-            (lambda (attachment)
-              (= (language-attachment-session-id attachment) session-id))
-            (editor-buffer-language-attachments editor (buffer-id buffer))))
+          (and
+            (non-empty-string? (buffer-file-path buffer))
+            (buffer-language buffer)
+            (exists
+              (lambda (attachment)
+                (= (language-attachment-session-id attachment) session-id))
+              (editor-buffer-language-attachments editor (buffer-id buffer)))))
         (editor-buffers editor))))
 
   (define (session-open-attached-documents! editor session)
@@ -2407,26 +2410,33 @@
         additional-parameters))
     (let* ([buffer (view-buffer view)]
            [session (view-lsp-session editor view)]
+           [open-effects
+             (if (and session
+                      (eq? (lsp-client-session-state session) 'ready))
+                 (session-open-attached-documents! editor session)
+                 '())]
            [document (and session (find-document session (buffer-id buffer)))]
            [position (and (buffer? buffer)
                           (lsp-buffer-position-at buffer (view-caret view)))])
       (if (and session document position
                (eq? (lsp-client-session-state session) 'ready))
-          (list
-            (session-request!
-              session method
-              (make-json-object
-                (append
-                  (list
-                    (cons "textDocument"
-                          (make-json-object
-                            (list (cons "uri" (lsp-client-document-uri document)))))
-                    (cons "position" (lsp-position->json position)))
-                  additional-parameters))
-              continuation
-              default-request-error
-              default-request-cancel
-              request-context))
+          (append
+            open-effects
+            (list
+              (session-request!
+                session method
+                (make-json-object
+                  (append
+                    (list
+                      (cons "textDocument"
+                            (make-json-object
+                              (list (cons "uri" (lsp-client-document-uri document)))))
+                      (cons "position" (lsp-position->json position)))
+                    additional-parameters))
+                continuation
+                default-request-error
+                default-request-cancel
+                request-context)))
           (begin
             (editor-set-status-message! editor "No ready language server at point")
             '()))))
@@ -3969,11 +3979,15 @@
         100
         (lambda (context)
           (let* ([context-editor (command-context-editor context)]
-                 [buffer (view-buffer (command-context-view context))]
-                 [session (active-view-lsp-session context-editor)])
+                 [session
+                   (view-lsp-session
+                     context-editor
+                     (command-context-view context))])
             (and session
                  (eq? (lsp-client-session-state session) 'ready)
-                 (find-document session (buffer-id buffer)))))
+                 (editor-view-language-attachment
+                   context-editor
+                   (view-id (command-context-view context))))))
         (lambda (context)
           (lsp-find-definition! (command-context-editor context)))
         (lambda (context)

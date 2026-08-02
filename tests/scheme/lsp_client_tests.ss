@@ -1936,6 +1936,46 @@
         -1)
       0))
   "xref p did not return from an asynchronously opened preview")
+(define inherited-header
+  (editor-create-buffer!
+    editor "/usr/include/c++/vector.hpp" 'cpp-mode
+    "struct vector_header {};\n"))
+(buffer-set-file-path! inherited-header "/usr/include/c++/vector.hpp")
+(define inherited-context
+  (editor-view-resource-context editor (view-id reference-origin-view)))
+(editor-set-view-buffer!
+  editor (view-id reference-origin-view) (buffer-id inherited-header))
+(editor-set-view-resource-context!
+  editor (view-id reference-origin-view) inherited-context)
+(editor-select-view-window! editor (view-id reference-origin-view))
+(check
+  (editor-view-language-attachment
+    editor (view-id reference-origin-view))
+  "xref target outside the Project did not inherit its LanguageAttachment")
+(define inherited-reference-effects
+  (editor-execute-command! editor 'lsp.find-references))
+(define inherited-reference-methods
+  (filter
+    values
+    (map
+      (lambda (effect)
+        (and
+          (eq? (command-effect-kind effect) 'managed-process.write)
+          (json-object-ref
+            (car
+              (lsp-json-rpc-decode!
+                (make-lsp-json-rpc-decoder)
+                (managed-process-write-request-data
+                  (command-effect-payload effect))))
+            "method"
+            #f)))
+      inherited-reference-effects)))
+(check
+  (and
+    (member "textDocument/didOpen" inherited-reference-methods)
+    (member "textDocument/references" inherited-reference-methods))
+  "xref in an inherited system header did not open it in the existing LSP session"
+  inherited-reference-methods)
 
 (define updated-project
   (make-project
