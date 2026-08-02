@@ -1740,9 +1740,19 @@
 (editor-update!
   editor
   (make-command-message 'workspace-edit.accept #f))
-(editor-update!
-  editor
-  (make-command-message 'buffer-item.quit #f))
+(define workspace-preview-quit-effects
+  (editor-update!
+    editor
+    (make-command-message 'buffer-item.quit #f)))
+(for-each
+  (lambda (effect)
+    (when (eq? (command-effect-kind effect) 'command.invoke)
+      (editor-update! editor (command-effect-payload effect))))
+  workspace-preview-quit-effects)
+(check
+  (string=? (editor-status-message editor) "Renamed in 1 place")
+  "WorkspaceEdit preview reported the total projection count instead of the applied selection"
+  (editor-status-message editor))
 (check
   (and
     (bytevector=?

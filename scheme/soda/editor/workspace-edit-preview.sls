@@ -23,7 +23,7 @@
     (fields (mutable projections)
             description
             after-apply
-            (mutable accepted?)))
+            (mutable applied-count)))
 
   (define (buffer-size buffer)
     (let ([snapshot (document-snapshot (buffer-document buffer))])
@@ -176,7 +176,7 @@
                     (buffer-local-ref
                       candidate 'workspace-edit-preview #f)])
               (and (workspace-edit-preview? value)
-                   (not (workspace-edit-preview-accepted? value))
+                   (not (workspace-edit-preview-applied-count value))
                    (pair? (buffer-result-marked-indices candidate)))))
           (lambda (context candidate)
             (accept-workspace-edit-preview context))))
@@ -189,7 +189,7 @@
                     (buffer-local-ref
                       candidate 'workspace-edit-preview #f)])
               (and (workspace-edit-preview? value)
-                   (not (workspace-edit-preview-accepted? value))
+                   (not (workspace-edit-preview-applied-count value))
                    (pair? (buffer-result-marked-indices candidate)))))
           (lambda (context candidate)
             (edit-workspace-edit-preview context))))
@@ -254,7 +254,7 @@
               validation-error
               ")"))))
       (workspace-text-edits-apply! editor edits)
-      (workspace-edit-preview-accepted?-set! preview #t)
+      (workspace-edit-preview-applied-count-set! preview (length edits))
       (editor-set-status-message!
         editor
         (string-append
@@ -311,10 +311,9 @@
       (when (workspace-edit-preview? preview)
         (editor-set-status-message!
           (command-context-editor context)
-          (if (workspace-edit-preview-accepted? preview)
+          (if (workspace-edit-preview-applied-count preview)
               (let ([count
-                      (length
-                        (workspace-edit-preview-projections preview))])
+                      (workspace-edit-preview-applied-count preview)])
                 (string-append
                   (workspace-edit-preview-description preview)
                   " in " (number->string count)
