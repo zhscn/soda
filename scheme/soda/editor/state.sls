@@ -25,7 +25,6 @@
           editor-clear-view-display-map!
           editor-base-view
           editor-window-root
-          editor-root-viewport-columns
           editor-active-window-id
           editor-set-window-root!
           editor-set-workbench-layout!
