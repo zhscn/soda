@@ -427,24 +427,121 @@
       (buffer-text-property-ranges buffer 'result-index))
     buffer)
 
+  (define diagnostic-severities '(error warning info hint))
+
+  (define (diagnostic-items-for-severities items severities)
+    (filter
+      (lambda (item)
+        (memq (diagnostic-severity item) severities))
+      items))
+
+  (define (severity-label severity)
+    (case severity
+      [(error) "errors"]
+      [(warning) "warnings"]
+      [(info) "information"]
+      [else "hints"]))
+
+  (define (toggle-severity severities severity)
+    (if (memq severity severities)
+        (filter (lambda (candidate) (not (eq? candidate severity)))
+                severities)
+        (filter
+          (lambda (candidate)
+            (or (eq? candidate severity) (memq candidate severities)))
+          diagnostic-severities)))
+
+  (define (register-diagnostic-filter-actions!
+            editor buffer resource title source origin-view-id refresh)
+    (let ([all-items
+            (buffer-local-ref buffer 'diagnostic-source-items '())])
+      (for-each
+        (lambda (severity)
+          (when
+            (exists
+              (lambda (item)
+                (eq? (diagnostic-severity item) severity))
+              all-items)
+            (let ([name
+                    (string->symbol
+                      (string-append
+                        "toggle-" (symbol->string severity)))])
+              (buffer-register-result-panel-action!
+                buffer
+                (make-result-panel-action
+                  name
+                  (string-append
+                    (if
+                      (memq
+                        severity
+                        (buffer-local-ref
+                          buffer
+                          'diagnostic-visible-severities
+                          diagnostic-severities))
+                      "Hide "
+                      "Show ")
+                    (severity-label severity))
+                  (lambda (candidate) #t)
+                  (lambda (context candidate)
+                    (let* ([current
+                             (buffer-local-ref
+                               candidate
+                               'diagnostic-visible-severities
+                               diagnostic-severities)]
+                           [next (toggle-severity current severity)])
+                      (buffer-set-local!
+                        candidate 'diagnostic-visible-severities next)
+                      (show-diagnostics!
+                        editor resource title source all-items
+                        origin-view-id refresh)
+                      (let ([shown
+                              (length
+                                (diagnostic-items-for-severities
+                                  all-items next))])
+                        (editor-set-status-message!
+                          editor
+                          (string-append
+                            "Diagnostics: " (number->string shown)
+                            " of " (number->string (length all-items)))))
+                      '())))))))
+        diagnostic-severities))
+    buffer)
+
   (define (show-diagnostics!
             editor resource title source items origin-view-id refresh)
-    (let* ([presented-items (map diagnostic-display-item items)]
-           [locations (make-location-list source '())]
+    (let* ([locations (make-location-list source '())]
            [buffer
             (editor-open-result-buffer!
               editor resource 'diagnostics-mode title locations
-              origin-view-id 'diagnostic #f #f)])
+              origin-view-id 'diagnostic #f #f)]
+           [severities
+             (buffer-local-ref
+               buffer
+               'diagnostic-visible-severities
+               diagnostic-severities)]
+           [visible-items
+             (diagnostic-items-for-severities items severities)]
+           [presented-items (map diagnostic-display-item visible-items)])
+      (buffer-set-local! buffer 'diagnostic-source-items items)
+      (buffer-set-local!
+        buffer 'diagnostic-visible-severities severities)
       (editor-set-current-location-list!
         editor (if (null? presented-items) #f locations))
       (editor-append-location-results! editor buffer presented-items)
       (when (null? presented-items)
         (editor-append-result-message!
-          editor buffer "No diagnostics." 'info))
+          editor
+          buffer
+          (if (null? items)
+              "No diagnostics."
+              "No diagnostics match the active filter.")
+          'info))
       (when refresh
         (buffer-set-result-refresh! buffer refresh))
       (editor-finish-result-producer! editor buffer 'ready)
-      (decorate-diagnostic-results! buffer)))
+      (decorate-diagnostic-results! buffer)
+      (register-diagnostic-filter-actions!
+        editor buffer resource title source origin-view-id refresh)))
 
   (define (diagnostic-status! editor label items)
     (editor-set-status-message!

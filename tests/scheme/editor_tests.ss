@@ -6092,6 +6092,44 @@
            (utf8->string
              (buffer-bytes
                (view-buffer (editor-active-view highlight-editor)))))))
+(let* ([view (editor-active-view highlight-editor)]
+       [buffer (view-buffer view)]
+       [context
+         (make-command-context highlight-editor view #f #f #f)])
+  (unless
+    (for-all
+      (lambda (name)
+        (memq
+          name
+          (map result-panel-action-name
+               (buffer-result-panel-actions buffer))))
+      '(toggle-error toggle-warning))
+    (error 'editor-tests
+           "Diagnostics did not expose severity filter actions"))
+  (invoke-result-panel-action context 'toggle-warning)
+  (unless
+    (and
+      (= (length
+           (location-list-items
+             (editor-current-location-list highlight-editor)))
+         1)
+      (not
+        (string-contains?
+          (utf8->string (buffer-bytes buffer))
+          "string needs review")))
+    (error 'editor-tests
+           "Diagnostics severity filter did not update its projection"))
+  (invoke-result-panel-action
+    (make-command-context
+      highlight-editor (editor-active-view highlight-editor) #f #f #f)
+    'toggle-warning)
+  (unless
+    (= (length
+         (location-list-items
+           (editor-current-location-list highlight-editor)))
+       2)
+    (error 'editor-tests
+           "Diagnostics severity filter did not restore hidden entries")))
 (editor-update!
   highlight-editor
   (make-command-message 'buffer-item.next #f))

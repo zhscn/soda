@@ -168,7 +168,10 @@ diagnostic producer 将协议坐标解析到发布 snapshot，再创建 Annotati
 location list 是呈现/导航投影，不复制诊断所有权。`diagnostics.list` 把活动 Buffer
 的当前 diagnostics 按 byte range 排序并发布为通用 LocationList；后续导航复用
 `xref.next-location` 与 `xref.previous-location`。替换或清除集合会同时废弃引用
-旧 annotation identity 的 current diagnostics list。
+旧 annotation identity 的 current diagnostics list。列表行使用 LocationItem 的
+presentation 显示 severity、producer source、code 和 message；source excerpt 仍保存
+真实 range 文本供 stale location 校验。Diagnostics Buffer 保存可见 severity 集合，
+筛选只重新投影其完整 item 集合，并在 producer refresh 后沿用，不改变 AnnotationSet。
 
 ## 设计依据
 
