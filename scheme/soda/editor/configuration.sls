@@ -5,14 +5,12 @@
           load-default-editor-init!
           reload-editor-init!)
   (import (rnrs)
+          (soda editor contract)
           (only (chezscheme) getenv)
           (soda editor evaluator)
           (soda editor state))
 
   (define user-init-owner 'user-init)
-
-  (define (non-empty-string? value)
-    (and (string? value) (positive? (string-length value))))
 
   (define (default-editor-init-path)
     (let ([override (getenv "SODA_INIT_FILE")])

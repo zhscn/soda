@@ -31,6 +31,7 @@
           workbench-unpin-window!
           workbench-window-pinned?)
   (import (rnrs)
+          (soda editor contract)
           (soda editor jump-graph)
           (soda editor location)
           (soda editor window))
@@ -51,9 +52,6 @@
       (mutable location-lists
                workbench-location-lists
                workbench-location-lists-set!)))
-
-  (define (exact-positive-integer? value)
-    (and (integer? value) (exact? value) (positive? value)))
 
   (define (valid-project-id? value)
     (or

@@ -47,6 +47,7 @@
           navigation-walk-detach-buffer!
           navigation-walk-close!)
   (import (rnrs)
+          (soda editor contract)
           (soda document)
           (soda editor buffer))
 
@@ -87,11 +88,6 @@
   (define-record-type
     (location-list %make-location-list location-list?)
     (fields source (mutable items) (mutable index)))
-
-  (define (exact-non-negative-integer? value)
-    (and (integer? value)
-         (exact? value)
-         (not (negative? value))))
 
   (define (make-buffer-location buffer offset)
     (unless (buffer? buffer)

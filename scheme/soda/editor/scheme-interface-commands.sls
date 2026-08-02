@@ -19,6 +19,7 @@
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
+          (soda editor contract)
           (soda editor file)
           (soda editor scheme-environment)
           (soda editor scheme-interface-index)
@@ -36,11 +37,6 @@
       %make-scheme-interface-load-result
       scheme-interface-load-result?)
     (fields path origin-view-id origin-buffer-id environment-id status data detail))
-
-  (define (non-empty-string? value)
-    (and
-      (string? value)
-      (positive? (string-length value))))
 
   (define (editor-find-view editor id)
     (and

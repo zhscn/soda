@@ -5,6 +5,7 @@
           load-save-place-file
           ensure-save-place-directory!)
   (import (rnrs)
+          (soda editor contract)
           (only (chezscheme)
                 file-directory?
                 getenv
@@ -14,9 +15,6 @@
 
   (define schema-name 'soda-save-place)
   (define schema-version 1)
-
-  (define (non-empty-string? value)
-    (and (string? value) (positive? (string-length value))))
 
   (define (default-save-place-path)
     (let ([override (getenv "SODA_SAVE_PLACE_FILE")])

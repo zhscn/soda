@@ -47,6 +47,7 @@
           scheme-workspace-symbol-end
           scheme-workspace-symbol-definition)
   (import (rnrs)
+          (soda editor contract)
           (soda document)
           (soda editor buffer)
           (soda editor builtin-api-index)
@@ -169,12 +170,6 @@
         who
         "expected a Scheme workspace index"
         value)))
-
-  (define (exact-non-negative-integer? value)
-    (and
-      (integer? value)
-      (exact? value)
-      (not (negative? value))))
 
   (define (current-document? document buffer)
     (and

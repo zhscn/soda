@@ -26,6 +26,7 @@
           annotation-set-location-items
           annotation-set-close!)
   (import (rnrs)
+          (soda editor contract)
           (soda document)
           (soda editor buffer)
           (soda editor decoration)
@@ -55,12 +56,6 @@
             (mutable closed?
                      annotation-set-closed?
                      annotation-set-closed?-set!)))
-
-  (define (exact-non-negative-integer? value)
-    (and
-      (integer? value)
-      (exact? value)
-      (not (negative? value))))
 
   (define (make-annotation
             id

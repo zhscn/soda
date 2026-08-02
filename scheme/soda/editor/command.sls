@@ -73,6 +73,7 @@
           command-effect-kind
           command-effect-payload)
   (import (rnrs)
+          (soda editor contract)
           (soda editor prefix))
 
   (define-record-type (command-registry %make-command-registry command-registry?)
@@ -210,12 +211,6 @@
     registry)
 
   (define procedure-definitions (make-eq-hashtable))
-
-  (define (exact-non-negative-integer? value)
-    (and
-      (integer? value)
-      (exact? value)
-      (not (negative? value))))
 
   (define (make-interactive-reader name resolver)
     (unless (symbol? name)

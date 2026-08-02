@@ -7,6 +7,7 @@
           load-workbench-session-file
           ensure-workbench-session-directory!)
   (import (rnrs)
+          (soda editor contract)
           (only (chezscheme)
                 file-directory?
                 getenv
@@ -33,16 +34,10 @@
       workbench-session-snapshot?)
     (fields active-index workbenches applications))
 
-  (define (non-empty-string? value)
-    (and (string? value) (positive? (string-length value))))
-
   (define (stable-resource? value)
     (and
       (non-empty-string? value)
       (not (char=? (string-ref value 0) #\*))))
-
-  (define (exact-non-negative-integer? value)
-    (and (integer? value) (exact? value) (not (negative? value))))
 
   (define (default-workbench-session-path)
     (let ([override (getenv "SODA_WORKBENCH_SESSION_FILE")])

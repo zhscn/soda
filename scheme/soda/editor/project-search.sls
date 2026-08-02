@@ -3,6 +3,7 @@
           start-project-search!
           project-search-json-line->locations)
   (import (rnrs)
+          (soda editor contract)
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
@@ -33,9 +34,6 @@
 
   (define active-project-searches
     (make-result-producer-registry))
-
-  (define (non-empty-string? value)
-    (and (string? value) (positive? (string-length value))))
 
   (define (json-text object key)
     (let ([value (and (json-object? object)

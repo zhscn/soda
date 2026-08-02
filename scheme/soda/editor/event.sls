@@ -51,6 +51,7 @@
           completion-response-message-items
           completion-response-message-complete?)
   (import (rnrs)
+          (soda editor contract)
           (soda editor prefix))
 
   (define-record-type key-event
@@ -115,9 +116,6 @@
             target-revision
             items
             complete?))
-
-  (define (exact-non-negative-integer? value)
-    (and (integer? value) (exact? value) (not (negative? value))))
 
   (define (make-completion-response-message
             session-id

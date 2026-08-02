@@ -13,6 +13,7 @@
           scheme-interface-index-write-file!
           scheme-sources->interface-index-file!)
   (import (chezscheme)
+          (soda editor contract)
           (soda editor scheme-api-indexer)
           (soda editor scheme-semantics))
 
@@ -37,12 +38,6 @@
               (exact? part)
               (not (negative? part)))))
         value)))
-
-  (define (exact-non-negative-integer? value)
-    (and
-      (integer? value)
-      (exact? value)
-      (not (negative? value))))
 
   (define (interface-entry? entry)
     (and
@@ -553,11 +548,6 @@
               'scheme-interface-index-decode
               "Scheme interface index contains trailing objects"))
           datum))))
-
-  (define (non-empty-string? value)
-    (and
-      (string? value)
-      (positive? (string-length value))))
 
   (define (scheme-interface-index-write-file!
             index

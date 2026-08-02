@@ -33,7 +33,8 @@
           language-session-registry-buffer-attachments
           language-session-registry-remove-session!
           language-session-registry-detach-buffer!)
-  (import (rnrs))
+  (import (rnrs)
+          (soda editor contract))
 
   (define-record-type
     (language-session-key %make-language-session-key language-session-key?)
@@ -87,12 +88,6 @@
       (mutable next-attachment-id
                language-session-registry-next-attachment-id
                language-session-registry-next-attachment-id-set!)))
-
-  (define (exact-non-negative-integer? value)
-    (and (integer? value) (exact? value) (not (negative? value))))
-
-  (define (exact-positive-integer? value)
-    (and (integer? value) (exact? value) (positive? value)))
 
   (define (snapshot-value value)
     (cond

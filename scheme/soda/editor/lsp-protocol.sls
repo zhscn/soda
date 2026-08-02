@@ -19,6 +19,7 @@
           lsp-json-response-result
           lsp-json-response-error)
   (import (rnrs)
+          (soda editor contract)
           (soda json)
           (soda vfs))
 
@@ -29,9 +30,6 @@
   (define-record-type
     (lsp-range %make-lsp-range lsp-range?)
     (fields start end))
-
-  (define (exact-non-negative-integer? value)
-    (and (integer? value) (exact? value) (not (negative? value))))
 
   (define (make-lsp-position line character)
     (unless (and (exact-non-negative-integer? line)

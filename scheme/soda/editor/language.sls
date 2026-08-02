@@ -56,6 +56,7 @@
           major-mode-feature-ref
           major-mode-syntax-capabilities)
   (import (rnrs)
+          (soda editor contract)
           (soda document)
           (soda editor decoration)
           (soda editor indentation-protocol)
@@ -79,9 +80,6 @@
   (define-record-type
     (syntax-capture %make-syntax-capture syntax-capture?)
     (fields name start end node-kind properties depth))
-
-  (define (exact-non-negative-integer? value)
-    (and (integer? value) (exact? value) (not (negative? value))))
 
   (define (make-syntax-capture
             name start end node-kind properties depth)

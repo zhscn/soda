@@ -32,6 +32,7 @@
           lsp-client-stop!
           install-lsp-commands!)
   (import (rnrs)
+          (soda editor contract)
           (only (chezscheme) make-weak-eq-hashtable)
           (soda document)
           (soda editor annotation)
@@ -171,12 +172,6 @@
   (define pending-lsp-completion-resolutions (make-weak-eq-hashtable))
   (define lsp-semantic-generations (make-weak-eq-hashtable))
   (define lsp-document-highlight-generations (make-weak-eq-hashtable))
-
-  (define (exact-non-negative-integer? value)
-    (and (integer? value) (exact? value) (not (negative? value))))
-
-  (define (non-empty-string? value)
-    (and (string? value) (positive? (string-length value))))
 
   (define (make-lsp-server-profile
             name languages command initialization-options settings)

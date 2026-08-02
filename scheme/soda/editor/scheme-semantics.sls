@@ -90,6 +90,7 @@
           scheme-semantic-import-rename-plan
           scheme-semantic-export-rename-replacements)
   (import (rnrs)
+          (soda editor contract)
           (soda editor builtin-api-index))
 
   (define-record-type
@@ -217,9 +218,6 @@
       [(memq (token-kind value) '(string character))
        (parse-token-datum (token-value value))]
       [else invalid-token-datum]))
-
-  (define (exact-non-negative-integer? value)
-    (and (integer? value) (exact? value) (not (negative? value))))
 
   (define (whitespace-byte? byte)
     (memv byte '(9 10 11 12 13 32)))

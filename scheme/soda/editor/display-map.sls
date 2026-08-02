@@ -44,6 +44,7 @@
           display-chunk-owner
           display-chunk-detail)
   (import (rnrs)
+          (soda editor contract)
           (soda document)
           (soda editor display))
 
@@ -74,9 +75,6 @@
             end
             continuation?
             final?))
-
-  (define (exact-non-negative-integer? value)
-    (and (integer? value) (exact? value) (not (negative? value))))
 
   (define (require-run-attributes who text affinity faces owner)
     (unless (and (string? text) (positive? (string-length text)))

@@ -27,6 +27,7 @@
           jump-graph-detach-buffer!
           jump-graph-close!)
   (import (rnrs)
+          (soda editor contract)
           (soda document)
           (soda editor buffer)
           (soda editor location))
@@ -56,12 +57,6 @@
       (immutable limit jump-graph-limit)
       (mutable next-node-id jump-graph-next-node-id jump-graph-next-node-id-set!)
       (mutable clock jump-graph-clock jump-graph-clock-set!)))
-
-  (define (exact-non-negative-integer? value)
-    (and (integer? value) (exact? value) (not (negative? value))))
-
-  (define (exact-positive-integer? value)
-    (and (integer? value) (exact? value) (positive? value)))
 
   (define (make-jump-node
             id resource buffer-id revision start end excerpt language-context

@@ -18,6 +18,7 @@
           scheme-semantic-index-for-view
           scheme-semantic-index-for-buffer)
   (import (rnrs)
+          (soda editor contract)
           (soda editor buffer)
           (soda editor language-session)
           (soda editor scheme-query)
@@ -50,9 +51,6 @@
         who
         "expected a SchemeEnvironment registry"
         registry)))
-
-  (define (non-empty-string? value)
-    (and (string? value) (positive? (string-length value))))
 
   (define (scheme-environment-registry-environments registry)
     (require-registry

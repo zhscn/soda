@@ -98,6 +98,7 @@
           save-result-adopt-path?
           save-result-observed-state)
   (import (rnrs)
+          (soda editor contract)
           (only (chezscheme)
                 current-directory)
           (soda document)
@@ -232,12 +233,6 @@
             detail
             adopt-path?
             observed-state))
-
-  (define (exact-non-negative-integer? value)
-    (and (integer? value) (exact? value) (not (negative? value))))
-
-  (define (non-empty-string? value)
-    (and (string? value) (positive? (string-length value))))
 
   (define (valid-open-position? value)
     (or

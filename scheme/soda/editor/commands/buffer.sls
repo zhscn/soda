@@ -1,6 +1,7 @@
 (library (soda editor commands buffer)
   (export install-buffer-commands!)
   (import (rnrs)
+          (soda editor contract)
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
@@ -14,9 +15,6 @@
           (soda editor result-buffer)
           (soda editor state)
           (soda editor window-runtime))
-
-  (define (exact-non-negative-integer? value)
-    (and (integer? value) (exact? value) (not (negative? value))))
 
   (define (buffer-base-label buffer)
     (or

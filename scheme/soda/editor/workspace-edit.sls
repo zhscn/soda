@@ -12,6 +12,7 @@
           editor-undo-workspace-edit!
           editor-redo-workspace-edit!)
   (import (rnrs)
+          (soda editor contract)
           (only (chezscheme) make-weak-eq-hashtable)
           (soda document)
           (soda editor buffer)
@@ -35,9 +36,6 @@
   (define-record-type
     (workspace-text-edit %make-workspace-text-edit workspace-text-edit?)
     (fields resource revision start end text))
-
-  (define (exact-non-negative-integer? value)
-    (and (integer? value) (exact? value) (not (negative? value))))
 
   (define (make-workspace-text-edit resource revision start end text)
     (unless (and (string? resource)

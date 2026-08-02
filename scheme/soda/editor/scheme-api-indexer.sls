@@ -6,13 +6,11 @@
           scheme-api-source-summary?
           scheme-api-summaries-api+library-index)
   (import (rnrs)
+          (soda editor contract)
           (soda editor scheme-semantics))
 
   (define summary-tag 'soda-scheme-api-source)
   (define summary-version 1)
-
-  (define (exact-non-negative-integer? value)
-    (and (integer? value) (exact? value) (not (negative? value))))
 
   (define (export-summary? value)
     (and

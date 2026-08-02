@@ -75,6 +75,7 @@
           interaction-transcript?
           interaction-transcript-closed?)
   (import (rnrs)
+          (soda editor contract)
           (soda editor interaction-history)
           (soda editor interaction-transcript))
 
@@ -182,9 +183,6 @@
   (define (interaction-session-history-draft session)
     (interaction-history-draft
       (interaction-session-history-state session)))
-
-  (define (exact-non-negative-integer? value)
-    (and (integer? value) (exact? value) (not (negative? value))))
 
   (define (make-evaluation-origin buffer-id resource revision start end)
     (unless (exact-non-negative-integer? buffer-id)

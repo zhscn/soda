@@ -10,6 +10,7 @@
           resource-context-with-language-context
           resource-context-resolve)
   (import (rnrs)
+          (soda editor contract)
           (soda editor project)
           (soda vfs))
 
@@ -19,9 +20,6 @@
             origin-view-id
             project-hint
             language-context))
-
-  (define (non-empty-string? value)
-    (and (string? value) (positive? (string-length value))))
 
   (define make-resource-context
     (case-lambda

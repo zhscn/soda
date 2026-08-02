@@ -197,10 +197,8 @@
           tui-runtime-result-status
           tui-runtime-result-flags
           tui-runtime-result-data)
-  (import (rnrs))
-
-  (define (exact-positive-integer? value)
-    (and (integer? value) (exact? value) (positive? value)))
+  (import (rnrs)
+          (soda editor contract))
 
   (define (unique-symbol-list? values)
     (and

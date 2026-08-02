@@ -27,6 +27,7 @@
           interaction-transcript-close!
           interaction-transcript-closed?)
   (import (rnrs)
+          (soda editor contract)
           (soda document)
           (soda editor buffer))
 
@@ -74,12 +75,6 @@
 
   (define-record-type tracked-interaction-field
     (fields kind start-anchor end-anchor))
-
-  (define (exact-non-negative-integer? value)
-    (and
-      (integer? value)
-      (exact? value)
-      (not (negative? value))))
 
   (define (buffer-size buffer)
     (let ([snapshot (document-snapshot (buffer-document buffer))])

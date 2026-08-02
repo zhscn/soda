@@ -50,6 +50,7 @@
           default-project-marker-probe
           built-in-project-finders)
   (import (rnrs)
+          (soda editor contract)
           (soda vfs))
 
   (define-record-type
@@ -103,9 +104,6 @@
 
   (define project-discovery-unavailable
     (list 'project-discovery-unavailable))
-
-  (define (non-empty-string? value)
-    (and (string? value) (positive? (string-length value))))
 
   (define (valid-id? value)
     (or (symbol? value) (non-empty-string? value)))

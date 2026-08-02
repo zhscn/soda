@@ -1,6 +1,7 @@
 (library (soda editor commands basic)
   (export install-basic-commands!)
   (import (rnrs)
+          (soda editor contract)
           (soda document)
           (soda editor buffer)
           (soda editor command)
@@ -65,12 +66,6 @@
 
   (define (context-document context)
     (buffer-document (context-buffer context)))
-
-  (define (exact-non-negative-integer? value)
-    (and
-      (integer? value)
-      (exact? value)
-      (not (negative? value))))
 
   (define (require-non-negative-count who context)
     (let ([count (command-context-count context)])

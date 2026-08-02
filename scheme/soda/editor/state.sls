@@ -295,6 +295,7 @@
           editor-layout-ready?
           editor-reconcile-viewports!)
   (import (rnrs)
+          (soda editor contract)
           (only (chezscheme) current-directory)
           (soda document)
           (soda editor annotation)
@@ -636,9 +637,6 @@
       (assertion-violation who "expected an editor" value))
     (when (editor-closed? value)
       (assertion-violation who "editor is closed" value)))
-
-  (define (exact-non-negative-integer? value)
-    (and (integer? value) (exact? value) (not (negative? value))))
 
   (define (editor-set-pending-prefix! editor prefix)
     (require-open-editor 'editor-set-pending-prefix! editor)

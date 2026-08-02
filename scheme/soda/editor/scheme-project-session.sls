@@ -37,6 +37,7 @@
           scheme-project-build-result-flags
           scheme-project-build-result-data)
   (import (rnrs)
+          (soda editor contract)
           (soda document)
           (soda editor buffer)
           (soda editor command)
@@ -95,11 +96,6 @@
 
   (define-record-type scheme-project-session-state
     (fields environments manifests builds))
-
-  (define (non-empty-string? value)
-    (and
-      (string? value)
-      (positive? (string-length value))))
 
   (define (editor-find-view editor id)
     (and

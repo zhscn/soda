@@ -15,6 +15,7 @@
           editor-plan-display
           editor-display-buffer!)
   (import (rnrs)
+          (soda editor contract)
           (soda editor buffer)
           (soda editor resource-context)
           (soda editor state)
@@ -34,9 +35,6 @@
   (define-record-type
     (display-plan %make-display-plan display-plan?)
     (fields workbench-id window-id action role))
-
-  (define (exact-positive-integer? value)
-    (and (integer? value) (exact? value) (positive? value)))
 
   (define (make-display-request
             buffer-id intent origin-view-id target-window-id context)

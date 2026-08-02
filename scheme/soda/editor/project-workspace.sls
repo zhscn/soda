@@ -21,6 +21,7 @@
           editor-project-workspace-for-buffer
           project-workspace-language-session-key)
   (import (rnrs)
+          (soda editor contract)
           (soda editor buffer)
           (soda editor language-session)
           (soda editor project)
@@ -37,9 +38,6 @@
 
   (define-record-type project-workspace
     (fields project project-id generation folders configuration-data))
-
-  (define (non-empty-string? value)
-    (and (string? value) (positive? (string-length value))))
 
   (define (make-project-workspace-folder name resource)
     (unless (non-empty-string? name)

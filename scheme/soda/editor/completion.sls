@@ -125,6 +125,7 @@
           completion-session-select-next!
           completion-session-select-previous!)
   (import (rnrs)
+          (soda editor contract)
           (soda document)
           (soda editor fuzzy))
 
@@ -299,9 +300,6 @@
             end
             query
             context))
-
-  (define (exact-non-negative-integer? value)
-    (and (integer? value) (exact? value) (not (negative? value))))
 
   (define (valid-range? start end)
     (and (exact-non-negative-integer? start)

@@ -2,6 +2,7 @@
   (export install-scheme-xref-commands!
           editor-scheme-environments)
   (import (rnrs)
+          (soda editor contract)
           (only (chezscheme) make-weak-eq-hashtable)
           (soda document)
           (soda editor buffer)
@@ -43,12 +44,6 @@
                    index))])
       (scheme-workspace-sync-editor! index editor)
       index))
-
-  (define (exact-non-negative-integer? value)
-    (and
-      (integer? value)
-      (exact? value)
-      (not (negative? value))))
 
   (define (buffer-for-document editor target-document-id)
     (find

@@ -15,7 +15,8 @@
           window-node-leaves
           window-node-replace
           window-node-remove-leaf)
-  (import (rnrs))
+  (import (rnrs)
+          (soda editor contract))
 
   (define-record-type
     (window-leaf %make-window-leaf window-leaf?)
@@ -24,9 +25,6 @@
   (define-record-type
     (window-split %make-window-split window-split?)
     (fields id orientation children))
-
-  (define (exact-positive-integer? value)
-    (and (integer? value) (exact? value) (positive? value)))
 
   (define (make-window-leaf id view-id)
     (unless (and (exact-positive-integer? id)

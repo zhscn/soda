@@ -23,6 +23,7 @@
           modeline-span-text
           modeline-span-faces)
   (import (rnrs)
+          (soda editor contract)
           (soda editor display))
 
   (define-record-type
@@ -37,12 +38,6 @@
       %make-modeline-segment-source
       modeline-segment-source?)
     (fields id supply faces priority minimum-width truncation))
-
-  (define (exact-non-negative-integer? value)
-    (and
-      (integer? value)
-      (exact? value)
-      (not (negative? value))))
 
   (define (make-modeline-segment
             id

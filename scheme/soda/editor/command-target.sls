@@ -28,6 +28,7 @@
           command-context-line-target
           command-context-buffer-target)
   (import (rnrs)
+          (soda editor contract)
           (soda document)
           (soda editor buffer)
           (soda editor command)
@@ -53,12 +54,6 @@
       %make-command-target-selector
       command-target-selector?)
     (fields region-policy allow-empty-region? fallback))
-
-  (define (exact-non-negative-integer? value)
-    (and
-      (integer? value)
-      (exact? value)
-      (not (negative? value))))
 
   (define (symbol-alist? value)
     (and

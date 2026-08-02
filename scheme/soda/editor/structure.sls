@@ -28,6 +28,7 @@
           structure-provider?
           structure-provider-build)
   (import (rnrs)
+          (soda editor contract)
           (soda document))
 
   (define-record-type
@@ -49,12 +50,6 @@
   (define-record-type
     (structure-provider %make-structure-provider structure-provider?)
     (fields (immutable build structure-provider-builder)))
-
-  (define (exact-non-negative-integer? value)
-    (and
-      (integer? value)
-      (exact? value)
-      (not (negative? value))))
 
   (define (symbol-alist? value)
     (and

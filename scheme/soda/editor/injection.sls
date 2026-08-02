@@ -14,6 +14,7 @@
           injection-index-regions-in-range
           syntax-captures->injection-index)
   (import (rnrs)
+          (soda editor contract)
           (soda document)
           (soda editor language))
 
@@ -24,12 +25,6 @@
   (define-record-type
     (injection-index %make-injection-index injection-index?)
     (fields document-id revision regions))
-
-  (define (exact-non-negative-integer? value)
-    (and
-      (integer? value)
-      (exact? value)
-      (not (negative? value))))
 
   (define (symbol-alist? value)
     (and
