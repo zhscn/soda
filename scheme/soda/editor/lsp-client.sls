@@ -61,6 +61,7 @@
           (soda editor project-target)
           (soda editor project-workspace)
           (soda editor result-buffer)
+          (soda editor result-producer-session)
           (soda editor state)
           (soda editor workbench)
           (soda editor workspace-edit)
@@ -94,8 +95,12 @@
   (define-record-type lsp-xref-query
     (fields buffer-id revision offset attachment-id))
 
-  (define-record-type lsp-xref-request-context
-    (fields query origin-view-id language-context result-buffer-id generation))
+  (define-record-type
+    (lsp-xref-request-context
+      %make-lsp-xref-request-context
+      lsp-xref-request-context?)
+    (parent result-producer-session)
+    (fields query language-context generation))
 
   (define-record-type
     (lsp-client-session %make-lsp-client-session lsp-client-session?)
@@ -2968,7 +2973,7 @@
           (lsp-client-pending-request-method request)
           "textDocument/references")
         (lsp-xref-request-context? context)
-        (= (lsp-xref-request-context-result-buffer-id context)
+        (= (buffer-id (result-producer-session-buffer context))
            result-buffer-id))))
 
   (define (cancel-lsp-xref-requests!
@@ -3012,16 +3017,18 @@
   (define (xref-result-buffer-for-context editor context)
     (and
       (lsp-xref-request-context? context)
-      (lsp-xref-request-context-result-buffer-id context)
-      (find
-        (lambda (buffer)
-          (and
-            (= (buffer-id buffer)
-               (lsp-xref-request-context-result-buffer-id context))
-            (=
-              (buffer-local-ref buffer 'lsp-xref-generation -1)
-              (lsp-xref-request-context-generation context))))
-        (editor-buffers editor))))
+      (not (result-producer-session-closed? context))
+      (let ([buffer (result-producer-session-buffer context)])
+        (and
+          buffer
+          (memq buffer (editor-buffers editor))
+          (equal?
+            (result-producer-session-scope context)
+            (buffer-result-workbench-id buffer))
+          (=
+            (buffer-local-ref buffer 'lsp-xref-generation -1)
+            (lsp-xref-request-context-generation context))
+          buffer))))
 
   (define (begin-lsp-xref-request!
             editor query origin-view-id language-context result-buffer)
@@ -3036,11 +3043,14 @@
           result-buffer 'lsp-xref-generation generation)
         (buffer-set-result-producer-state! result-buffer 'running)
         (editor-invalidate! editor 'chrome))
-      (make-lsp-xref-request-context
-        query
+      (%make-lsp-xref-request-context
         origin-view-id
+        (buffer-result-workbench-id result-buffer)
+        #f
+        result-buffer
+        #f
+        query
         language-context
-        (buffer-id result-buffer)
         generation)))
 
   (define (lsp-xref-refresh-procedure)
@@ -3064,7 +3074,9 @@
               (xref-result-buffer-for-context editor request-context)])
         (if (not current-result-buffer)
             '()
-            (let* ([items
+            (begin
+              (result-producer-session-closed?-set! request-context #t)
+              (let* ([items
                      (lsp-reference-items
                        editor
                        result
@@ -3072,7 +3084,7 @@
                          request-context))]
                    [locations (make-location-list 'lsp-references items)]
                    [origin-view-id
-                     (lsp-xref-request-context-origin-view-id
+                     (result-producer-session-origin-view-id
                        request-context)]
                    [buffer
                      (editor-show-xref-results!
@@ -3096,7 +3108,7 @@
                 'lsp-xref-generation
                 (lsp-xref-request-context-generation request-context))
               (editor-finish-result-producer! editor buffer 'ready)
-              '())))))
+              '()))))))
 
   (define (fail-lsp-xref-request editor session error context)
     (let ([buffer (xref-result-buffer-for-context editor context)]
@@ -3104,22 +3116,25 @@
             (string-append
               "LSP references failed: " (error-message error))])
       (when buffer
+        (result-producer-session-closed?-set! context #t)
         (editor-finish-result-producer!
           editor buffer 'failed message 'error))
       (editor-set-status-message! editor message 'error)
       '()))
 
   (define (cancel-lsp-xref-request editor session reason context)
-    (unless (eq? reason 'superseded)
-      (let ([buffer (xref-result-buffer-for-context editor context)])
+    (let ([buffer (xref-result-buffer-for-context editor context)])
+      (when buffer
+        (result-producer-session-closed?-set! context #t))
+      (unless (eq? reason 'superseded)
         (when buffer
           (editor-finish-result-producer!
             editor
             buffer
             'cancelled
             "LSP reference request cancelled."
-            'warning))))
-    '())
+            'warning)))
+      '()))
 
   (define (xref-query-attachment editor query buffer)
     (let* ([registry (editor-language-session-registry editor)]

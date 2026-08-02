@@ -25,7 +25,7 @@
 
   (define-record-type
     (git-status-session %make-git-status-session git-status-session?)
-    (parent result-producer-session)
+    (parent process-result-producer-session)
     (fields project root
             (mutable operation-process)
             (mutable rename-record)))
@@ -208,8 +208,8 @@
            [locations (make-location-list 'git-status '())]
            [session
              (%make-git-status-session
-               origin-view-id scope locations #f #f
-               (make-bytevector 0) (make-bytevector 0) #f
+               origin-view-id scope locations #f #f #f
+               (make-bytevector 0) (make-bytevector 0)
                project root #f #f)]
            [process
              (make-managed-process

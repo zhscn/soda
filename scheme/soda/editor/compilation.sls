@@ -20,7 +20,7 @@
 
   (define-record-type
     (compilation-session %make-compilation-session compilation-session?)
-    (parent result-producer-session)
+    (parent process-result-producer-session)
     (fields label working-directory))
 
   (define active-compilations (make-result-producer-registry))
@@ -207,8 +207,8 @@
            [locations (make-location-list 'compilation '())]
            [session
              (%make-compilation-session
-               origin-view-id scope locations #f #f
-               (make-bytevector 0) (make-bytevector 0) #f
+               origin-view-id scope locations #f #f #f
+               (make-bytevector 0) (make-bytevector 0)
                label working-directory)]
            [process
              (make-managed-process

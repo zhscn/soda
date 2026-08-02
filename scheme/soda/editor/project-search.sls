@@ -28,7 +28,7 @@
 
   (define-record-type
     (project-search-session %make-project-search-session project-search-session?)
-    (parent result-producer-session)
+    (parent process-result-producer-session)
     (fields project root query))
 
   (define active-project-searches
@@ -300,8 +300,8 @@
            [locations (make-location-list 'project-search '())]
            [session
              (%make-project-search-session
-               origin-view-id scope locations #f #f
-               (make-bytevector 0) (make-bytevector 0) #f
+               origin-view-id scope locations #f #f #f
+               (make-bytevector 0) (make-bytevector 0)
                project root query)]
            [process
              (make-managed-process

@@ -225,11 +225,12 @@ Result Buffer 的会话身份由基础 resource 名称和 source View 所属 Wor
 producer 的 active session 也按 Workbench 隔离，因此一个 Workbench 中的刷新只取消
 该 Workbench 的旧任务。
 
-进程驱动的 producer 继承公共 `ResultProducerSession`。公共 session 持有来源 View、
-Workbench scope、LocationList、Result Buffer、managed process、增量输出缓冲和关闭状态；
-`ResultProducerRegistry` 负责按 Editor 与 scope 激活、替换、释放和取消 session。Project
-search、Git status 与 compilation 只在子类型中保存查询、Project 和输出解释策略，不各自
-实现 current-session、跨 Workbench 隔离或取消后的迟到事件判定。
+`ResultProducerSession` 持有来源 View、Workbench scope、LocationList、Result Buffer
+和关闭状态。请求型 producer 直接继承这一最小会话；进程型 producer 通过
+`ProcessResultProducerSession` 增加 managed process、增量标准输出和错误输出缓冲。
+`ResultProducerRegistry` 负责按 Editor 与 scope 激活、替换、释放和取消 session。
+Project search、Git status、compilation 与 LSP xref 只在子类型中保存领域查询和结果解释
+策略，共用 View 归属、跨 Workbench 隔离、Result Buffer 身份和迟到事件判定。
 
 `diagnostics.list` 物化当前 Buffer 的诊断；`diagnostics.list-workspace` 聚合当前
 Workbench MRU 中所有 Buffer 的 diagnostic annotation provider。Scheme environment

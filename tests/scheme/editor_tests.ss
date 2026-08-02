@@ -5628,10 +5628,10 @@
 (define scoped-session-owner (list 'editor-owner))
 (define scoped-primary-session
   (make-result-producer-session
-    1 1 #f #f #f (make-bytevector 0) (make-bytevector 0) #f))
+    1 1 #f #f #f))
 (define scoped-secondary-session
   (make-result-producer-session
-    2 2 #f #f #f (make-bytevector 0) (make-bytevector 0) #f))
+    2 2 #f #f #f))
 (result-producer-registry-activate!
   scoped-session-table-test scoped-session-owner scoped-primary-session)
 (result-producer-registry-activate!

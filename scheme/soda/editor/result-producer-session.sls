@@ -7,14 +7,17 @@
           result-producer-session-locations
           result-producer-session-buffer
           result-producer-session-buffer-set!
+          result-producer-session-closed?
+          result-producer-session-closed?-set!
+          process-result-producer-session
+          make-process-result-producer-session
+          process-result-producer-session?
           result-producer-session-process
           result-producer-session-process-set!
           result-producer-session-pending-output
           result-producer-session-pending-output-set!
           result-producer-session-error-output
           result-producer-session-error-output-set!
-          result-producer-session-closed?
-          result-producer-session-closed?-set!
           make-result-producer-registry
           result-producer-registry?
           result-producer-registry-ref
@@ -40,10 +43,20 @@
             scope
             locations
             (mutable buffer)
-            (mutable process)
-            (mutable pending-output)
-            (mutable error-output)
             (mutable closed?)))
+
+  (define-record-type process-result-producer-session
+    (parent result-producer-session)
+    (fields
+      (mutable process
+               result-producer-session-process
+               result-producer-session-process-set!)
+      (mutable pending-output
+               result-producer-session-pending-output
+               result-producer-session-pending-output-set!)
+      (mutable error-output
+               result-producer-session-error-output
+               result-producer-session-error-output-set!)))
 
   (define-record-type
     (result-producer-registry
