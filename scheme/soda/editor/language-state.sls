@@ -25,9 +25,6 @@
           (soda editor workbench)
           (soda vfs))
 
-  (define (editor-views* value)
-    (entity-registry-values (editor-view-registry value)))
-
   (define (editor-view-ref* value id)
     (unless (exact-non-negative-integer? id)
       (assertion-violation
@@ -136,7 +133,7 @@
                                  value (view-id view))))
                     (editor-set-view-language-attachment!
                       value (view-id view) attachment)))
-                (editor-views* value)))))
+                (entity-registry-values (editor-view-registry value))))))
         attachment)))
 
   (define (editor-buffer-language-attachments value buffer-id)
@@ -172,7 +169,7 @@
                   removed-ids))
               (editor-set-view-language-attachment!
                 value (view-id view) #f))))
-        (editor-views* value))
+        (entity-registry-values (editor-view-registry value)))
       removed))
 
   (define (editor-view-language-attachment value view-id)

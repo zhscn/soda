@@ -24,9 +24,6 @@
           (soda editor tui-application)
           (soda editor view))
 
-  (define (editor-views* editor)
-    (entity-registry-values (editor-view-registry editor)))
-
   (define (editor-tui-application-catalog value)
     (require-open-editor 'editor-tui-application-catalog value)
     (tui-application-registry-catalog
@@ -109,7 +106,7 @@
             (lambda (view)
               (when (and buffer (eq? (view-buffer view) buffer))
                 (view-clear-input-handler-pending! view)))
-            (editor-views* value))
+            (entity-registry-values (editor-view-registry value)))
           (guard
             (condition
               [else
