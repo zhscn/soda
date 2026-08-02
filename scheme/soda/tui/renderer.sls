@@ -71,10 +71,6 @@
         (integer->char #xfffd)
         character))
 
-  (define (character-byte-length character)
-    (bytevector-length
-      (string->utf8 (string character))))
-
   (define (document-source buffer-id position detail)
     (make-cell-source 'text buffer-id (cons position detail)))
 

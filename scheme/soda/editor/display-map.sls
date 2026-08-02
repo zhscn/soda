@@ -391,9 +391,6 @@
                     (max position run-start))
                 (cons (run-chunk run) result)))))))
 
-  (define (character-byte-length character)
-    (bytevector-length (string->utf8 (string character))))
-
   (define (chunk-atoms chunk)
     (let ([value (display-chunk-text chunk)]
           [transformed?

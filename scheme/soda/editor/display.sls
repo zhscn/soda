@@ -1,5 +1,6 @@
 (library (soda editor display)
   (export character-cell-width
+          character-byte-length
           next-tab-stop
           string-cell-width
           text-cell-column
