@@ -290,9 +290,8 @@
         buffer text ranges))
     (let* ([state (location-results-state-for-buffer buffer)]
            [locations (location-results-state-locations state)]
-           [base (buffer-size buffer)]
            [text-size (bytevector-length (string->utf8 text))]
-           [start-index (length (location-list-items locations))])
+           [items (map caddr ranges)])
       (for-each
         (lambda (range)
           (unless (<= (cadr range) text-size)
@@ -301,19 +300,8 @@
               "result range exceeds appended text"
               range text-size)))
         ranges)
-      (buffer-replace-range-internal!
-        buffer base base (string->utf8 text))
-      (let loop ([ranges ranges] [index start-index] [items '()])
-        (if (null? ranges)
-            (location-list-append-items! locations (reverse items))
-            (let* ([range (car ranges)] [item (caddr range)])
-              (buffer-add-text-properties!
-                buffer
-                (+ base (car range))
-                (+ base (cadr range))
-                `((result-item . ,item) (result-index . ,index)))
-              (loop (cdr ranges) (+ index 1) (cons item items)))))
-      (editor-invalidate! editor 'document)
+      (editor-append-result-items! editor buffer text ranges)
+      (location-list-append-items! locations items)
       buffer))
 
   (define (active-location-results context who)

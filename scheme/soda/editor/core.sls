@@ -930,6 +930,21 @@
           location-list-index
           location-list-set-index!
           location-list-current
+          make-result-buffer-interface
+          result-buffer-interface?
+          result-buffer-interface-cyclic?
+          buffer-set-result-interface!
+          buffer-result-interface-ref
+          editor-note-result-buffer!
+          editor-append-result-items!
+          location-item-open-position
+          editor-visit-location-item!
+          make-editable-projection!
+          editable-projection?
+          editable-projection-source
+          editable-projection-range
+          editable-projection-text
+          buffer-install-projection-edit-guard!
           editor-current-location-list
           editor-set-current-location-list!
           make-decoration-run
@@ -1589,6 +1604,7 @@
           (soda editor decoration)
           (soda editor display-map)
           (soda editor diagnostics)
+          (soda editor editable-projection)
           (soda editor edit)
           (soda editor event)
           (soda editor evaluator)
@@ -1606,6 +1622,7 @@
           (soda editor language-session)
           (soda editor lsp-client)
           (soda editor location)
+          (soda editor location-visit)
           (soda editor managed-process)
           (soda editor minor-mode)
           (soda editor minor-mode-runtime)
@@ -1626,6 +1643,7 @@
           (soda editor project-target)
           (soda editor project-workspace)
           (soda editor repl)
+          (soda editor result-buffer)
           (soda editor resource-context)
           (soda editor scheme-completion)
           (soda editor scheme-commands)

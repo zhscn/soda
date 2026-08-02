@@ -5,13 +5,16 @@
           buffer-set-result-interface!
           buffer-result-interface-ref
           editor-note-result-buffer!
+          editor-append-result-items!
           install-result-buffer-commands!)
   (import (rnrs)
           (only (chezscheme) make-weak-eq-hashtable)
+          (soda document)
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
           (soda editor condition)
+          (soda editor edit)
           (soda editor state)
           (soda editor window-runtime))
 
@@ -102,6 +105,65 @@
     (map
       (lambda (range) (cons (car range) (caddr range)))
       (buffer-text-property-ranges buffer 'result-index)))
+
+  (define (buffer-size buffer)
+    (let ([snapshot (document-snapshot (buffer-document buffer))])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (let ([text (snapshot-text snapshot)])
+            (dynamic-wind
+              (lambda () #f)
+              (lambda () (text-size text))
+              (lambda () (text-close! text)))))
+        (lambda () (snapshot-close! snapshot)))))
+
+  (define (editor-append-result-items! editor buffer value ranges)
+    (unless
+      (and (editor? editor)
+           (buffer? buffer)
+           (result-buffer-interface? (buffer-result-interface-ref buffer))
+           (string? value)
+           (list? ranges)
+           (for-all
+             (lambda (range)
+               (and (list? range)
+                    (= (length range) 3)
+                    (integer? (car range)) (exact? (car range))
+                    (integer? (cadr range)) (exact? (cadr range))
+                    (<= 0 (car range) (cadr range))
+                    (caddr range)))
+             ranges))
+      (assertion-violation
+        'editor-append-result-items!
+        "invalid attributed result text"
+        editor buffer value ranges))
+    (let* ([base (buffer-size buffer)]
+           [bytes (string->utf8 value)]
+           [size (bytevector-length bytes)]
+           [start-index
+             (length (buffer-text-property-ranges buffer 'result-index))])
+      (for-each
+        (lambda (range)
+          (unless (<= (cadr range) size)
+            (assertion-violation
+              'editor-append-result-items!
+              "result range exceeds appended text"
+              range size)))
+        ranges)
+      (buffer-replace-range-internal! buffer base base bytes)
+      (let loop ([pending ranges] [index start-index])
+        (unless (null? pending)
+          (let ([range (car pending)])
+            (buffer-add-text-properties!
+              buffer
+              (+ base (car range))
+              (+ base (cadr range))
+              `((result-item . ,(caddr range))
+                (result-index . ,index))))
+          (loop (cdr pending) (+ index 1))))
+      (editor-invalidate! editor 'document)
+      buffer))
 
   (define (property-starts buffer property)
     (map car (buffer-text-property-ranges buffer property)))
