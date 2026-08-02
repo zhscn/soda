@@ -911,36 +911,13 @@
                 '()))
             ids)))))
 
-  (define (line-start-in-bytes bytes offset)
-    (let loop ([position (min offset (bytevector-length bytes))])
-      (if
-        (or
-          (zero? position)
-          (memv
-            (bytevector-u8-ref bytes (- position 1))
-            '(10 13)))
-        position
-        (loop (- position 1)))))
-
-  (define (line-end-in-bytes bytes offset)
-    (let ([size (bytevector-length bytes)])
-      (let loop ([position (min offset size)])
-        (if
-          (or
-            (= position size)
-            (memv
-              (bytevector-u8-ref bytes position)
-              '(10 13)))
-          position
-          (loop (+ position 1))))))
-
   (define (diagnostic-excerpt bytes diagnostic)
     (let* ([start
-             (line-start-in-bytes
+             (scheme-bytevector-line-start
                bytes
                (scheme-diagnostic-start diagnostic))]
            [end
-             (line-end-in-bytes
+             (scheme-bytevector-line-end
                bytes
                (scheme-diagnostic-end diagnostic))]
            [result

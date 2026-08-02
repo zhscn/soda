@@ -11,7 +11,9 @@
           scheme-interface-index-encode
           scheme-interface-index-decode
           scheme-interface-index-write-file!
-          scheme-sources->interface-index-file!)
+          scheme-sources->interface-index-file!
+          scheme-bytevector-line-start
+          scheme-bytevector-line-end)
   (import (chezscheme)
           (soda editor contract)
           (soda editor scheme-api-indexer)
@@ -296,32 +298,34 @@
         '()
         values)))
 
-  (define (line-start bytes offset)
+  (define (scheme-bytevector-line-start bytes offset)
     (let loop ([offset (min offset (bytevector-length bytes))])
       (if
         (or
           (zero? offset)
-          (= (bytevector-u8-ref bytes (- offset 1)) 10))
+          (memv
+            (bytevector-u8-ref bytes (- offset 1))
+            '(10 13)))
         offset
         (loop (- offset 1)))))
 
-  (define (line-end bytes offset)
+  (define (scheme-bytevector-line-end bytes offset)
     (let ([size (bytevector-length bytes)])
       (let loop ([offset (min offset size)])
         (if
           (or
             (= offset size)
-            (= (bytevector-u8-ref bytes offset) 10))
+            (memv (bytevector-u8-ref bytes offset) '(10 13)))
           offset
           (loop (+ offset 1))))))
 
   (define (diagnostic-excerpt bytes diagnostic)
     (let* ([start
-             (line-start
+             (scheme-bytevector-line-start
                bytes
                (scheme-diagnostic-start diagnostic))]
            [end
-             (line-end
+             (scheme-bytevector-line-end
                bytes
                (scheme-diagnostic-end diagnostic))]
            [result (make-bytevector (- end start))])
