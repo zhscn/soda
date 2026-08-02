@@ -27,10 +27,9 @@
       %make-prompt-completion-store
       prompt-completion-store?)
     (fields
-      (immutable prompts %prompt-completion-store-prompts)
-      (mutable prompt-ids
-               %prompt-completion-store-prompt-ids
-               %prompt-completion-store-prompt-ids-set!)
+      (mutable prompts
+               prompt-completion-store-prompts
+               prompt-completion-store-prompts-set!)
       (mutable next-prompt-id
                %prompt-completion-store-next-prompt-id
                %prompt-completion-store-next-prompt-id-set!)
@@ -45,7 +44,6 @@
 
   (define (make-prompt-completion-store)
     (%make-prompt-completion-store
-      (make-eqv-hashtable)
       '()
       1
       (make-eqv-hashtable)
@@ -53,24 +51,14 @@
       (make-eq-hashtable)
       '()))
 
-  (define (table-values table ids)
-    (map (lambda (id) (hashtable-ref table id #f)) ids))
-
-  (define (prompt-completion-store-prompts store)
-    (table-values
-      (%prompt-completion-store-prompts store)
-      (%prompt-completion-store-prompt-ids store)))
-
   (define (prompt-completion-store-active-prompt store)
-    (and
-      (pair? (%prompt-completion-store-prompt-ids store))
-      (hashtable-ref
-        (%prompt-completion-store-prompts store)
-        (car (%prompt-completion-store-prompt-ids store))
-        #f)))
+    (and (pair? (prompt-completion-store-prompts store))
+         (car (prompt-completion-store-prompts store))))
 
   (define (prompt-completion-store-prompt-ref store id)
-    (hashtable-ref (%prompt-completion-store-prompts store) id #f))
+    (find
+      (lambda (session) (= (prompt-session-id session) id))
+      (prompt-completion-store-prompts store)))
 
   (define (prompt-completion-store-allocate-prompt-id! store)
     (let ([id (%prompt-completion-store-next-prompt-id store)])
@@ -79,15 +67,14 @@
 
   (define (prompt-completion-store-push-prompt! store session)
     (let ([id (prompt-session-id session)])
-      (when (hashtable-ref (%prompt-completion-store-prompts store) id #f)
+      (when (prompt-completion-store-prompt-ref store id)
         (assertion-violation
           'prompt-completion-store-push-prompt!
           "prompt session id is already registered"
           id))
-      (hashtable-set! (%prompt-completion-store-prompts store) id session)
-      (%prompt-completion-store-prompt-ids-set!
+      (prompt-completion-store-prompts-set!
         store
-        (cons id (%prompt-completion-store-prompt-ids store))))
+        (cons session (prompt-completion-store-prompts store))))
     session)
 
   (define (prompt-completion-store-pop-prompt! store session)
@@ -97,11 +84,9 @@
         'prompt-completion-store-pop-prompt!
         "prompt session is not active"
         session))
-    (let ([id (prompt-session-id session)])
-      (%prompt-completion-store-prompt-ids-set!
-        store
-        (cdr (%prompt-completion-store-prompt-ids store)))
-      (hashtable-delete! (%prompt-completion-store-prompts store) id))
+    (prompt-completion-store-prompts-set!
+      store
+      (cdr (prompt-completion-store-prompts store)))
     session)
 
   (define (prompt-completion-store-allocate-completion-id! store)
@@ -171,8 +156,7 @@
     (%prompt-completion-store-effects-set! store '()))
 
   (define (prompt-completion-store-clear! store)
-    (%prompt-completion-store-prompt-ids-set! store '())
-    (hashtable-clear! (%prompt-completion-store-prompts store))
+    (prompt-completion-store-prompts-set! store '())
     (hashtable-clear! (%prompt-completion-store-completions store))
     (hashtable-clear! (%prompt-completion-store-histories store))
     (prompt-completion-store-clear-effects! store)))
