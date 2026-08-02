@@ -32,6 +32,7 @@
           (soda editor display)
           (soda editor indentation-protocol)
           (soda editor language)
+          (soda editor line-range)
           (soda editor state)
           (soda editor structure)
           (soda tree-sitter))
@@ -375,16 +376,6 @@
           (< start (syntax-capture-end capture))))
       captures))
 
-  (define (line-leading-end text line)
-    (let ([end (text-line-content-end text line)])
-      (let loop ([offset (text-line-start text line)])
-        (if
-          (and
-            (< offset end)
-            (memv (text-byte-at text offset) '(9 32)))
-          (loop (+ offset 1))
-          offset))))
-
   (define (capture-span capture)
     (- (syntax-capture-end capture)
        (syntax-capture-start capture)))
@@ -486,7 +477,7 @@
                   #f
                   (let* ([start (text-line-start text line)]
                          [end (text-line-content-end text line)]
-                         [content (line-leading-end text line)]
+                         [content (text-line-leading-end text line)]
                          [captures
                            (tree-sitter-indent-context-captures
                              context)])

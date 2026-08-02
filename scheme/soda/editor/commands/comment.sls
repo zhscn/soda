@@ -8,6 +8,7 @@
           (soda editor command-target)
           (soda editor condition)
           (soda editor keymap)
+          (soda editor line-range)
           (soda editor setting)
           (soda editor editor-settings)
           (soda editor state))
@@ -23,15 +24,6 @@
               (= (text-byte-at text (+ offset index))
                  (bytevector-u8-ref bytes index))
               (loop (+ index 1))))))))
-
-  (define (line-leading-end text line)
-    (let ([end (text-line-content-end text line)])
-      (let loop ([offset (text-line-start text line)])
-        (if
-          (and (< offset end)
-               (memv (text-byte-at text offset) '(9 32)))
-          (loop (+ offset 1))
-          offset))))
 
   (define (target-line-range text target)
     (let* ([start (command-target-start target)]
@@ -79,7 +71,7 @@
                    (reverse result)
                    (loop
                      (+ line 1)
-                     (cons (line-leading-end text line) result))))]
+                     (cons (text-line-leading-end text line) result))))]
            [nonempty
              (filter
                (lambda (position)

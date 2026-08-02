@@ -18,6 +18,7 @@
           (soda editor kill)
           (soda editor keymap)
           (soda editor language)
+          (soda editor line-range)
           (soda editor motion-runtime)
           (soda editor minor-mode)
           (soda editor minor-mode-runtime)
@@ -78,7 +79,7 @@
             (let* ([line (car (text-position text offset))]
                    [line-start (text-line-start text line)]
                    [whitespace-end
-                     (line-whitespace-end text line)]
+                     (text-line-leading-end text line)]
                    [prefix-end (min offset whitespace-end)])
               (bytevector-append
                 newlines
@@ -562,7 +563,7 @@
           (reverse result)
           (let ([start (text-line-start text line)])
             (if unindent?
-                (let* ([end (line-whitespace-end text line)]
+                (let* ([end (text-line-leading-end text line)]
                        [remove-end
                          (let consume ([offset start] [remaining width])
                            (if

@@ -1,13 +1,13 @@
 (library (soda editor indentation-runtime)
   (export buffer-indentation-provider
           buffer-reindent-range!
-          buffer-reindent-line!
-          line-whitespace-end)
+          buffer-reindent-line!)
   (import (rnrs)
           (soda document)
           (soda editor buffer)
           (soda editor indentation-protocol)
-          (soda editor language))
+          (soda editor language)
+          (soda editor line-range))
 
   (define (buffer-indentation-provider buffer)
     (unless (buffer? buffer)
@@ -17,16 +17,6 @@
         buffer))
     (let ([profile (buffer-language-profile buffer)])
       (and profile (language-profile-indent profile))))
-
-  (define (line-whitespace-end text line)
-    (let ([end (text-line-content-end text line)])
-      (let loop ([offset (text-line-start text line)])
-        (if
-          (and
-            (< offset end)
-            (memv (text-byte-at text offset) '(9 32)))
-          (loop (+ offset 1))
-          offset))))
 
   (define (bytevector-equal? left right)
     (and
@@ -62,7 +52,7 @@
                  [content-end
                    (text-line-content-end text line)]
                  [whitespace-end
-                   (line-whitespace-end text line)])
+                   (text-line-leading-end text line)])
             (if (= whitespace-end content-end)
                 (loop (+ line 1) replacements)
                 (let ([indentation

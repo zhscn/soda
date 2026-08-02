@@ -10,8 +10,8 @@
           (soda editor cpp-language)
           (soda editor edit)
           (soda editor editor-storage)
-          (soda editor indentation-runtime)
           (soda editor keymap)
+          (soda editor line-range)
           (soda editor view)
           (soda indentation))
 
@@ -163,7 +163,7 @@
               caret
               (let* ([line-start (text-line-start text line)]
                      [whitespace-end
-                       (line-whitespace-end text line)])
+                       (text-line-leading-end text line)])
                 (set! result
                   (cpp-language-compute-indent
                     session snapshot line style))

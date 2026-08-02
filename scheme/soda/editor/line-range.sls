@@ -6,6 +6,7 @@
           text-line-fragment-content
           text-line-fragment-reaches-content-end?
           text-line-fragment-terminator-selected?
+          text-line-leading-end
           text-range-line-fragments
           text-range-lines
           text-range-trailing-newline?
@@ -37,6 +38,16 @@
     (if (< line (- (text-line-count text) 1))
         (text-line-start text (+ line 1))
         (text-size text)))
+
+  (define (text-line-leading-end text line)
+    (let ([end (text-line-content-end text line)])
+      (let loop ([offset (text-line-start text line)])
+        (if
+          (and
+            (< offset end)
+            (memv (text-byte-at text offset) '(9 32)))
+          (loop (+ offset 1))
+          offset))))
 
   (define (text-range-line-fragments text start end)
     (validate-range 'text-range-line-fragments text start end)
