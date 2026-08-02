@@ -18,6 +18,7 @@
           (soda editor command-runtime)
           (soda editor completion)
           (soda editor display)
+          (soda editor edit)
           (soda editor file)
           (soda editor resource-context)
           (soda editor scheme-environment)
@@ -476,31 +477,6 @@
           (when change
             (change-close! change))))))
 
-  (define (append-buffer! buffer bytes)
-    (let ([change #f]
-          [start (buffer-byte-size buffer)]
-          [data
-            (if
-              (bytevector? bytes)
-              bytes
-              (string->utf8 bytes))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (call-with-values
-            (lambda ()
-              (call-with-buffer-transaction
-                buffer
-                (lambda (transaction)
-                  (transaction-insert!
-                    transaction start data))))
-            (lambda (result committed-change)
-              (set! change committed-change)
-              (+ start (bytevector-length data)))))
-        (lambda ()
-          (when change
-            (change-close! change))))))
-
   (define (move-build-views-to-end! editor buffer end)
     (for-each
       (lambda (view)
@@ -681,7 +657,7 @@
                       (scheme-project-build-result-data
                         result))]
                   [end
-                    (append-buffer! buffer data)])
+                    (buffer-append-internal! buffer data)])
              (move-build-views-to-end!
                editor buffer end))
            '()]
@@ -701,7 +677,7 @@
                     (and
                       (positive?
                         (bytevector-length detail))
-                      (append-buffer! buffer detail))]
+                      (buffer-append-internal! buffer detail))]
                   [status
                     (scheme-project-build-result-status
                       result)]
@@ -733,7 +709,7 @@
                             (number->string output-status))
                           "")
                         ")\n"))]
-                  [end (append-buffer! buffer summary)])
+                  [end (buffer-append-internal! buffer summary)])
              (when detail-end
                (move-build-views-to-end!
                  editor buffer detail-end))

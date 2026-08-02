@@ -29,7 +29,8 @@
   (import (rnrs)
           (soda editor contract)
           (soda document)
-          (soda editor buffer))
+          (soda editor buffer)
+          (soda editor edit))
 
   (define-record-type
     (interaction-transcript
@@ -75,29 +76,6 @@
 
   (define-record-type tracked-interaction-field
     (fields kind start-anchor end-anchor))
-
-  (define (append-buffer! buffer value)
-    (let* ([bytes
-             (if (bytevector? value)
-                 value
-                 (string->utf8 value))]
-           [offset (buffer-byte-size buffer)]
-           [change #f])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (call-with-values
-            (lambda ()
-              (call-with-buffer-transaction
-                buffer
-                (lambda (transaction)
-                  (transaction-insert! transaction offset bytes))))
-            (lambda (result committed-change)
-              (set! change committed-change)
-              (+ offset (bytevector-length bytes)))))
-        (lambda ()
-          (when change
-            (change-close! change))))))
 
   (define (replace-buffer-range! buffer start end value)
     (let ([bytes
@@ -512,7 +490,7 @@
       buffer)
     (let* ([start (interaction-transcript-input-start transcript)]
            [input-end (buffer-byte-size buffer)]
-           [end (append-buffer! buffer "\n")])
+           [end (buffer-append-internal! buffer "\n")])
       (append-tracked-field!
         transcript
         'input
@@ -543,10 +521,10 @@
         "output must be a string or bytevector"
         output))
     (let* ([output-start (buffer-byte-size buffer)]
-           [output-end (append-buffer! buffer output)]
+           [output-end (buffer-append-internal! buffer output)]
            [prompt-start output-end]
            [input-start
-             (append-buffer!
+             (buffer-append-internal!
                buffer
                (interaction-transcript-prompt transcript))]
            [stashed-input
@@ -556,7 +534,7 @@
                (and
                  stashed-input
                  (positive? (string-length stashed-input)))
-               (append-buffer! buffer stashed-input)
+               (buffer-append-internal! buffer stashed-input)
                input-start)])
       (append-tracked-field!
         transcript
