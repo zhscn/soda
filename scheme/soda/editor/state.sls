@@ -1875,13 +1875,31 @@
             'editor-attach-language-session!
             "LanguageSession belongs to another editor"
             session)))
-      (language-session-registry-attach!
-        (editor-language-session-registry value)
-        buffer-id
-        (language-session-id session)
-        provenance
-        origin-view-id
-        (buffer-revision buffer))))
+      (let ([attachment
+              (language-session-registry-attach!
+                (editor-language-session-registry value)
+                buffer-id
+                (language-session-id session)
+                provenance
+                origin-view-id
+                (buffer-revision buffer))])
+        (when (eq? provenance 'home)
+          (let ([homes
+                  (filter
+                    (lambda (candidate)
+                      (eq? (language-attachment-provenance candidate) 'home))
+                    (editor-buffer-language-attachments value buffer-id))])
+            (when (= (length homes) 1)
+              (for-each
+                (lambda (view)
+                  (when (and (eq? (view-buffer view) buffer)
+                             (not
+                               (editor-view-language-attachment
+                                 value (view-id view))))
+                    (editor-set-view-language-attachment!
+                      value (view-id view) attachment)))
+                (editor-views value)))))
+        attachment)))
 
   (define (editor-buffer-language-attachments value buffer-id)
     (require-open-editor 'editor-buffer-language-attachments value)
@@ -1965,6 +1983,14 @@
       (lambda (attachment)
         (eq? (language-attachment-provenance attachment) 'home))
       (editor-buffer-language-attachments value (buffer-id buffer))))
+
+  (define (editor-select-unique-home-language-attachment! value view)
+    (let ([home
+            (buffer-home-language-attachments value (view-buffer view))])
+      (and
+        (= (length home) 1)
+        (editor-set-view-language-attachment!
+          value (view-id view) (car home)))))
 
   (define (bootstrap-buffer-home-language-attachment!
             value buffer context origin-view-id)
@@ -2658,6 +2684,7 @@
       (view-pending-keys-set! view '())
       (attach-tui-view-state! value view)
       (editor-restore-view-place! value view)
+      (editor-select-unique-home-language-attachment! value view)
       (when
         (eq? (editor-workbench-for-view value view-id)
              (editor-active-workbench value))

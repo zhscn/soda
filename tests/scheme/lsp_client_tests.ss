@@ -22,6 +22,18 @@
   (unless condition
     (apply assertion-violation 'lsp-client-tests message irritants)))
 
+(define (effect-method effect)
+  (and
+    (eq? (command-effect-kind effect) 'managed-process.write)
+    (json-object-ref
+      (car
+        (lsp-json-rpc-decode!
+          (make-lsp-json-rpc-decoder)
+          (managed-process-write-request-data
+            (command-effect-payload effect))))
+      "method"
+      #f)))
+
 (define (buffer-bytes buffer)
   (let ([snapshot (document-snapshot (buffer-document buffer))])
     (dynamic-wind
@@ -318,6 +330,38 @@
   editor
   (workbench-id (editor-active-workbench editor))
   project)
+(define sibling
+  (editor-create-buffer!
+    editor "/workspace/src/sibling.cpp" 'cpp-mode "int sibling();\n"))
+(buffer-set-file-path! sibling "/workspace/src/sibling.cpp")
+(editor-set-view-buffer!
+  editor
+  (view-id (editor-active-view editor))
+  (buffer-id source))
+(define project-start-effects
+  (editor-start-lsp-for-active-view! editor))
+(define sibling-attachments
+  (editor-buffer-language-attachments editor (buffer-id sibling)))
+(check
+  (and
+    (= (length sibling-attachments) 1)
+    (= (language-attachment-session-id (car sibling-attachments))
+       (language-session-id language-session))
+    (exists
+      (lambda (effect)
+        (equal? (effect-method effect) "textDocument/didOpen"))
+      project-start-effects))
+  "lsp.start did not attach and open compatible Buffers in the Project")
+(editor-set-view-buffer!
+  editor
+  (view-id (editor-active-view editor))
+  (buffer-id sibling))
+(check
+  (eq?
+    (editor-view-language-attachment
+      editor (view-id (editor-active-view editor)))
+    (car sibling-attachments))
+  "switching to an attached Project Buffer did not select its LSP route")
 (define external
   (editor-create-buffer!
     editor "/toolchain/include/widget.hpp" 'cpp-mode "struct Widget {};\n"))
@@ -2046,17 +2090,6 @@
     '()))
 (editor-update-project! editor updated-project)
 (define reconcile-effects (editor-take-tui-effects! editor))
-(define (effect-method effect)
-  (and
-    (eq? (command-effect-kind effect) 'managed-process.write)
-    (json-object-ref
-      (car
-        (lsp-json-rpc-decode!
-          (make-lsp-json-rpc-decoder)
-          (managed-process-write-request-data
-            (command-effect-payload effect))))
-      "method"
-      #f)))
 (check
   (and
     (eq? (lsp-client-session-state session) 'stopping)

@@ -1769,10 +1769,13 @@
         (editor-user-error 'lsp.start "No Project workspace for the active buffer"))
       (unless server
         (editor-user-error 'lsp.start "No language server is configured for this language"))
-      (editor-start-lsp-session!
-        editor buffer workspace server
-        (lsp-start-provenance buffer workspace)
-        (view-id view))))
+      (append
+        (editor-start-project-lsp!
+          editor workspace language server)
+        (editor-start-lsp-session!
+          editor buffer workspace server
+          (lsp-start-provenance buffer workspace)
+          (view-id view)))))
 
   ;; Retained as the document-oriented spelling of project activation.
   (define (editor-start-lsp-for-active-view! editor)
