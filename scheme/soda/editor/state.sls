@@ -859,14 +859,6 @@
         arguments)
       #t))
 
-  (define (editor-register-completion-provider! value provider)
-    (require-open-editor
-      'editor-register-completion-provider!
-      value)
-    (completion-provider-catalog-register!
-      (editor-completion-provider-catalog value)
-      provider))
-
   (define (enqueue-completion-effect! value kind request)
     (completion-provider-catalog-bind-request!
       (editor-completion-provider-catalog value)

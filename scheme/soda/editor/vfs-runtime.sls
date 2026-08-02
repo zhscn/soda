@@ -5,7 +5,7 @@
   (import (rnrs)
           (soda editor completion)
           (soda editor completion-provider)
-          (soda editor state)
+          (soda editor editor-storage)
           (soda runtime)
           (soda vfs))
 

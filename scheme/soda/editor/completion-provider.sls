@@ -15,9 +15,11 @@
           completion-provider-for-request
           completion-provider-catalog-bind-request!
           completion-provider-catalog-names
+          editor-register-completion-provider!
           make-completion-response-for-request)
   (import (rnrs)
           (soda editor completion)
+          (soda editor editor-storage)
           (soda editor event)
           (soda editor ordered-registry))
 
@@ -215,6 +217,14 @@
         'completion-provider-catalog-ref
         "unknown completion provider"
         name)))
+
+  (define (editor-register-completion-provider! editor provider)
+    (require-open-editor
+      'editor-register-completion-provider!
+      editor)
+    (completion-provider-catalog-register!
+      (editor-completion-provider-catalog editor)
+      provider))
 
   (define (completion-provider-for-request catalog request)
     (unless (completion-request? request)
