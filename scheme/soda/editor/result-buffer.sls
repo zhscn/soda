@@ -26,9 +26,11 @@
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
+          (soda editor completion)
           (soda editor condition)
           (soda editor display-placement)
           (soda editor edit)
+          (soda editor prompt)
           (soda editor resource-context)
           (soda editor state)
           (soda editor window-runtime))
@@ -368,6 +370,68 @@
             name))
         ((result-action-invoke action) context buffer item index))))
 
+  (define (result-action-choice-source actions)
+    (let ([items
+            (map
+              (lambda (action)
+                (let* ([name (result-action-name action)]
+                       [label (result-action-label action)])
+                  (make-completion-item
+                    name
+                    'result-action
+                    label
+                    label
+                    label
+                    (symbol->string name)
+                    #f
+                    name)))
+              actions)])
+      (make-choice-source
+        'result-action
+        '((category . result-action)
+          (styles . (fzf))
+          (preselect . #t))
+        (lambda (input point) (cons 0 (string-length input)))
+        (lambda (query) items)
+        (lambda (value)
+          (exists
+            (lambda (item)
+              (string=? value (completion-item-insert-text item)))
+            items))
+        (lambda (generation) #f))))
+
+  (define result-action-reader
+    (interactive-completing-read
+      "Action: "
+      (lambda (context)
+        (let-values ([(buffer interface item index)
+                      (selected-item context 'buffer-item.actions)])
+          (let ([actions
+                  (buffer-result-actions-at
+                    buffer
+                    (view-caret (command-context-view context)))])
+            (when (null? actions)
+              (editor-user-error
+                'buffer-item.actions
+                "No actions are available for the item at point"))
+            (result-action-choice-source actions))))
+      'must-match
+      'result-action
+      ""
+      #f
+      (lambda (context result)
+        (let ([candidate (prompt-result-candidate result)])
+          (unless (and candidate
+                       (symbol? (completion-item-payload candidate)))
+            (editor-user-error
+              'buffer-item.actions "No result action was selected"))
+          (list (completion-item-payload candidate))))))
+
+  (define-command (choose-buffer-item-action context name)
+    "Choose and invoke an action available for the result item at point."
+    (interactive result-action-reader)
+    (invoke-buffer-item-action context name))
+
   (define (refresh-buffer-items context)
     (let* ([buffer (view-buffer (command-context-view context))]
            [refresh (buffer-local-ref buffer 'result-refresh #f)])
@@ -588,6 +652,9 @@
         (list 'buffer-item.refresh
               refresh-buffer-items
               "Regenerate the current result Buffer from its producer.")
+        (list 'buffer-item.actions
+              choose-buffer-item-action
+              "Choose an action available for the result item at point.")
         (list 'buffer-item.next-global
               (lambda (context) (move-global-item context 1))
               "Advance the most recent visible navigable Buffer.")

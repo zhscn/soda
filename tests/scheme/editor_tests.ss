@@ -4501,6 +4501,48 @@
        (location-item? (cadr result-action-invocation))
        (= (caddr result-action-invocation) 0))
   (error 'editor-tests "result action did not receive the selected item"))
+(buffer-register-result-action!
+  xref-results-buffer
+  (make-result-action
+    'secondary
+    "Secondary action"
+    (lambda (buffer item) (location-item? item))
+    (lambda (context buffer item index) '())))
+(set! result-action-invocation #f)
+(editor-update!
+  xref-editor
+  (make-command-message 'buffer-item.actions #f))
+(let ([completion (editor-active-prompt-completion xref-editor)])
+  (unless
+    (and
+      completion
+      (= (length (completion-session-items completion)) 2)
+      (for-all
+        (lambda (name)
+          (exists
+            (lambda (item)
+              (eq? (completion-item-payload item) name))
+            (completion-session-items completion)))
+        '(inspect secondary)))
+    (error 'editor-tests
+           "result action picker did not expose applicable actions"
+           (and completion
+                (map completion-item-payload
+                     (completion-session-items completion))))))
+(send! xref-editor (make-input-decoder) (string->utf8 "Inspect reference"))
+(let ([reply (editor-accept-prompt! xref-editor)])
+  (editor-update!
+    xref-editor
+    (make-internal-command-message
+      (prompt-reply-command reply)
+      (prompt-reply-result reply))))
+(unless
+  (and result-action-invocation
+       (eq? (car result-action-invocation) xref-results-buffer)
+       (= (caddr result-action-invocation) 0)
+       (not (editor-active-command-invocation xref-editor)))
+  (error 'editor-tests
+         "result action picker did not invoke the selected action"))
 (define appended-xref-item
   (make-location-item
     (buffer-id xref-buffer)
