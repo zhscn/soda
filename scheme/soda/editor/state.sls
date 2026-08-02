@@ -2840,16 +2840,6 @@
       (editor-active-prompt-completion value)
       (view-completion (editor-active-view value))))
 
-  (define (register-completion! value completion)
-    (prompt-completion-store-register-completion!
-      (editor-prompt-completion-store value)
-      completion))
-
-  (define (unregister-completion! value completion)
-    (prompt-completion-store-unregister-completion!
-      (editor-prompt-completion-store value)
-      completion))
-
   (define (editor-completion-ref value id)
     (prompt-completion-store-completion-ref
       (editor-prompt-completion-store value)
@@ -2921,7 +2911,9 @@
         (pop-completion-input-state! view)))
 
   (define (retire-completion! value completion)
-    (unregister-completion! value completion)
+    (prompt-completion-store-unregister-completion!
+      (editor-prompt-completion-store value)
+      completion)
     (queue-completion-cancellation! value completion)
     (choice-source-cancel!
       (completion-session-source completion)
@@ -3153,7 +3145,9 @@
                     target
                     source
                     provider-names)])
-           (register-completion! value completion)
+           (prompt-completion-store-register-completion!
+             (editor-prompt-completion-store value)
+             completion)
            (view-completion-set! view completion)
            (editor-refresh-document-completion! value #f)
            completion))]))
@@ -3798,23 +3792,14 @@
       (ensure-view-visible! view)
       (prompt-completion-store-push-prompt! store session)
       (when completion
-        (register-completion! value completion))
+        (prompt-completion-store-register-completion!
+          store
+          completion))
       (editor-active-view-id-set! value (view-id view))
       (editor-set-status-message! value #f)
       (editor-refresh-prompt-completion! value)
       (editor-reconcile-viewports! value)
       session)))
-
-  (define (history-for value id create?)
-    (and
-      id
-      (if create?
-          (prompt-completion-store-ensure-history!
-            (editor-prompt-completion-store value)
-            id)
-          (prompt-completion-store-history-ref
-            (editor-prompt-completion-store value)
-            id))))
 
   (define (editor-history-entries value id)
     (require-open-editor 'editor-history-entries value)
@@ -3823,14 +3808,20 @@
         'editor-history-entries
         "history id must be a symbol"
         id))
-    (let ([history (history-for value id #f)])
+    (let ([history
+            (prompt-completion-store-history-ref
+              (editor-prompt-completion-store value)
+              id)])
       (if history (prompt-history-entries history) '())))
 
   (define (record-history! value session input)
     (let* ([history-id
              (prompt-request-history-id
                (prompt-session-request session))]
-           [history (history-for value history-id #t)])
+           [history
+             (prompt-completion-store-ensure-history!
+               (editor-prompt-completion-store value)
+               history-id)])
       (when (and history
                  (positive? (string-length input))
                  (or (null? (prompt-history-entries history))
@@ -4079,7 +4070,10 @@
            [history-id
              (prompt-request-history-id
                (prompt-session-request session))]
-           [history (history-for value history-id #f)]
+           [history
+             (prompt-completion-store-history-ref
+               (editor-prompt-completion-store value)
+               history-id)]
            [entries
              (if history (prompt-history-entries history) '())]
            [current (prompt-session-history-index session)]
@@ -4119,7 +4113,10 @@
          (let* ([history-id
                   (prompt-request-history-id
                     (prompt-session-request session))]
-                [history (history-for value history-id #f)]
+                [history
+                  (prompt-completion-store-history-ref
+                    (editor-prompt-completion-store value)
+                    history-id)]
                 [next-index (- current 1)])
            (prompt-session-history-index-set! session next-index)
            (set-active-prompt-input!
