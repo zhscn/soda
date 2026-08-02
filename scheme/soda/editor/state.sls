@@ -315,7 +315,7 @@
           (soda editor hook)
           (soda editor input-state)
           (soda editor interaction)
-          (soda editor prompt-completion-store)
+          (soda editor prompt-store)
           (soda editor jump-graph)
           (soda editor keymap)
           (soda editor language)
@@ -453,7 +453,7 @@
       (mutable active-workbench-id
                editor-active-workbench-id
                editor-active-workbench-id-set!)
-      (immutable prompt-completions editor-prompt-completion-store)
+      (immutable prompt-store editor-prompt-store)
       (immutable interactions editor-interaction-registry)
       (immutable tui-applications editor-tui-application-registry)
       (mutable effects editor-effects editor-effects-set!)
@@ -2152,8 +2152,8 @@
   (define (prompt-for-view value id)
     (find
       (lambda (session) (= (prompt-session-view-id session) id))
-      (prompt-completion-store-prompts
-        (editor-prompt-completion-store value))))
+      (prompt-store-prompts
+        (editor-prompt-store value))))
 
   (define (close-view-unchecked! value id)
     (let ([view (editor-view-ref value id)])
@@ -2671,13 +2671,13 @@
 
   (define (editor-prompts value)
     (require-open-editor 'editor-prompts value)
-    (prompt-completion-store-prompts
-      (editor-prompt-completion-store value)))
+    (prompt-store-prompts
+      (editor-prompt-store value)))
 
   (define (editor-active-prompt value)
     (require-open-editor 'editor-active-prompt value)
-    (prompt-completion-store-active-prompt
-      (editor-prompt-completion-store value)))
+    (prompt-store-active-prompt
+      (editor-prompt-store value)))
 
   (define (last-prompt sessions)
     (if (null? (cdr sessions))
@@ -2744,8 +2744,8 @@
       (view-completion (editor-active-view value))))
 
   (define (editor-completion-ref value id)
-    (prompt-completion-store-completion-ref
-      (editor-prompt-completion-store value)
+    (prompt-store-completion-ref
+      (editor-prompt-store value)
       id))
 
   (define (editor-root-viewport-columns value)
@@ -2814,8 +2814,8 @@
         (pop-completion-input-state! view)))
 
   (define (release-completion! value completion release-requests!)
-    (prompt-completion-store-unregister-completion!
-      (editor-prompt-completion-store value)
+    (prompt-store-unregister-completion!
+      (editor-prompt-store value)
       completion)
     (completion-session-close!
       completion
@@ -3026,8 +3026,8 @@
              caret))
          (cancel-view-completion! value view)
          (let* ([id
-                  (prompt-completion-store-allocate-completion-id!
-                    (editor-prompt-completion-store value))]
+                  (prompt-store-allocate-completion-id!
+                    (editor-prompt-store value))]
                 [target
                   (make-document-completion-target
                     (view-id view)
@@ -3043,8 +3043,8 @@
                     target
                     source
                     provider-names)])
-           (prompt-completion-store-register-completion!
-             (editor-prompt-completion-store value)
+           (prompt-store-register-completion!
+             (editor-prompt-store value)
              completion)
            (view-completion-set! view completion)
            (editor-refresh-document-completion! value #f)
@@ -3357,8 +3357,8 @@
                 (document-completion-target-revision target))))]
         [(prompt-completion-target? target)
          (let ([prompt
-                 (prompt-completion-store-prompt-ref
-                   (editor-prompt-completion-store value)
+                 (prompt-store-prompt-ref
+                   (editor-prompt-store value)
                    (prompt-completion-target-prompt-id target))])
            (and
              prompt
@@ -3425,8 +3425,8 @@
           (prompt-completion-target?
             (completion-session-target completion)))
         (let ([prompt
-                (prompt-completion-store-prompt-ref
-                  (editor-prompt-completion-store value)
+                (prompt-store-prompt-ref
+                  (editor-prompt-store value)
                   (prompt-completion-target-prompt-id
                     (completion-session-target completion)))])
           (when prompt
@@ -3606,12 +3606,12 @@
           source
           initial
           (string-length initial)))
-      (let* ([store (editor-prompt-completion-store value)]
-           [id (prompt-completion-store-allocate-prompt-id! store)]
+      (let* ([store (editor-prompt-store value)]
+           [id (prompt-store-allocate-prompt-id! store)]
            [completion-id
              (and
                source
-               (prompt-completion-store-allocate-completion-id! store))]
+               (prompt-store-allocate-completion-id! store))]
            [origin-view-id (editor-active-view-id value)]
            [origin-view (editor-active-view value)]
            [buffer
@@ -3661,9 +3661,9 @@
           '(prompt.input)
           'accept))
       (ensure-view-visible! view)
-      (prompt-completion-store-push-prompt! store session)
+      (prompt-store-push-prompt! store session)
       (when completion
-        (prompt-completion-store-register-completion!
+        (prompt-store-register-completion!
           store
           completion))
       (editor-active-view-id-set! value (view-id view))
@@ -3679,8 +3679,8 @@
         'editor-history-entries
         "history id must be a symbol"
         id))
-    (prompt-completion-store-history-entries
-      (editor-prompt-completion-store value)
+    (prompt-store-history-entries
+      (editor-prompt-store value)
       id))
 
   (define (finish-prompt! value status input candidate command)
@@ -3704,8 +3704,8 @@
           value
           (prompt-session-completion session)))
       (prompt-session-state-set! session status)
-      (prompt-completion-store-pop-prompt!
-        (editor-prompt-completion-store value)
+      (prompt-store-pop-prompt!
+        (editor-prompt-store value)
         session)
       (editor-active-view-id-set! value origin-view-id)
       (close-view-unchecked! value view-id)
@@ -3800,8 +3800,8 @@
               "Input does not match an available choice")
             #f)
           (begin
-            (prompt-completion-store-record-history!
-              (editor-prompt-completion-store value)
+            (prompt-store-record-history!
+              (editor-prompt-store value)
               session
               resolved)
             (finish-prompt!
@@ -3905,8 +3905,8 @@
              (active-prompt-session
                'editor-prompt-history-previous! value)]
            [input
-             (prompt-completion-store-history-previous!
-               (editor-prompt-completion-store value)
+             (prompt-store-history-previous!
+               (editor-prompt-store value)
                session
                (editor-active-prompt-input value))])
       (when input
@@ -3919,8 +3919,8 @@
              (active-prompt-session
                'editor-prompt-history-next! value)]
            [input
-             (prompt-completion-store-history-next!
-               (editor-prompt-completion-store value)
+             (prompt-store-history-next!
+               (editor-prompt-store value)
                session)])
       (when input
          (set-active-prompt-input!
@@ -6155,7 +6155,7 @@
            [views (make-entity-registry 2)]
            [interactions (make-entity-registry 1)]
            [workbenches (make-entity-registry 2)]
-           [prompt-completions (make-prompt-completion-store)]
+           [prompt-store (make-prompt-store)]
            [keymaps (make-keymap-catalog)]
            [view
              (%make-view
@@ -6207,7 +6207,7 @@
                2
                workbenches
                1
-               prompt-completions
+               prompt-store
                interactions
                (make-tui-application-registry)
                '()
@@ -6338,8 +6338,8 @@
               (prompt-session-completion session)))
           (prompt-session-state-set! session 'aborted))
         (editor-prompts value))
-      (prompt-completion-store-clear!
-        (editor-prompt-completion-store value))
+      (prompt-store-clear!
+        (editor-prompt-store value))
       (when (editor-active-command-invocation value)
         (command-invocation-set-state!
           (editor-active-command-invocation value)
