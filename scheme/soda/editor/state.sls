@@ -503,9 +503,6 @@
       (mutable bookmarks editor-bookmarks editor-bookmarks-set!)
       (mutable save-places editor-save-places editor-save-places-set!)
       (mutable last-yank editor-last-yank editor-last-yank-set!)
-      (mutable current-location-list
-               editor-current-location-list
-               editor-current-location-list-set!)
       (mutable annotation-sets
                editor-annotation-sets
                editor-annotation-sets-set!)
@@ -566,6 +563,9 @@
 
   (define (editor-active-window-id value)
     (workbench-active-window-id (editor-active-workbench value)))
+
+  (define (editor-current-location-list value)
+    (workbench-current-location-list (editor-active-workbench value)))
 
   (define-record-type global-mark-entry
     (fields buffer-id anchor))
@@ -724,8 +724,7 @@
         locations))
     (workbench-set-current-location-list!
       (editor-active-workbench editor)
-      locations)
-    (editor-current-location-list-set! editor locations))
+      locations))
 
   (define (same-annotation-owner? set namespace buffer-id)
     (and
@@ -754,8 +753,7 @@
             (location-list-items locations)))
         (workbench-set-current-location-list!
           (editor-active-workbench editor)
-          #f)
-        (editor-current-location-list-set! editor #f))))
+          #f))))
 
   (define (editor-annotation-sets-for-buffer editor buffer-id)
     (require-open-editor 'editor-annotation-sets-for-buffer editor)
@@ -1503,8 +1501,7 @@
               (location-list-items locations))))
         (workbench-set-current-location-list!
           (editor-active-workbench value)
-          #f)
-        (editor-current-location-list-set! value #f))
+          #f))
       (for-each
         annotation-set-close!
         (filter
@@ -2418,9 +2415,6 @@
     (let ([target (editor-workbench-ref value id)])
       (unless (= id (editor-active-workbench-id value))
         (editor-active-workbench-id-set! value id)
-        (editor-current-location-list-set!
-          value
-          (workbench-current-location-list target))
         (let ([leaf
                 (window-node-find
                   (workbench-layout target)
@@ -6559,7 +6553,6 @@
                -1
                '()
                '()
-               #f
                #f
                '()
                #f
