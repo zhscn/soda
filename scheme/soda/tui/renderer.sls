@@ -1099,6 +1099,30 @@
                            '()))
                      '()))
                '())]
+           [result-marks
+             (buffer-local-ref buffer 'result-marked-indices '())]
+           [result-mark-decorations
+             (fold-right
+               (lambda (range runs)
+                 (let ([start (car range)]
+                       [end (cadr range)]
+                       [index (caddr range)])
+                   (if (and (memv index result-marks)
+                            (< start visible-end)
+                            (< visible-start end))
+                       (cons
+                         (make-decoration-run
+                           (max start visible-start)
+                           (min end visible-end)
+                           'result.marked
+                           'transient
+                           10
+                           'buffer
+                           (buffer-id buffer))
+                         runs)
+                       runs)))
+               '()
+               (buffer-text-property-ranges buffer 'result-index))]
            [styled-chunks
              (make-styled-chunk-cursor
                (decoration-runs->styled-chunks
@@ -1107,6 +1131,7 @@
                    text-property-decorations
                    external-decorations
                    selection-decorations
+                   result-mark-decorations
                    navigation-target-decorations)
                  visible-start
                  visible-end)

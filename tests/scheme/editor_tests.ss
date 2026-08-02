@@ -4543,6 +4543,58 @@
        (not (editor-active-command-invocation xref-editor)))
   (error 'editor-tests
          "result action picker did not invoke the selected action"))
+(editor-update!
+  xref-editor
+  (make-command-message 'buffer-item.toggle-mark #f))
+(unless (equal? (buffer-result-marked-indices xref-results-buffer) '(0))
+  (error 'editor-tests "result mark command did not mark the current item"))
+(editor-update!
+  xref-editor
+  (make-command-message 'buffer-item.toggle-mark #f))
+(unless (null? (buffer-result-marked-indices xref-results-buffer))
+  (error 'editor-tests "result mark command did not toggle the mark off"))
+(define result-batch-invocation #f)
+(buffer-register-result-action!
+  xref-results-buffer
+  (make-result-action
+    'batch-inspect
+    "Inspect marked references"
+    (lambda (buffer item) (location-item? item))
+    (lambda (context buffer item index) '())
+    (lambda (context buffer entries)
+      (set! result-batch-invocation entries)
+      '())))
+(buffer-set-result-item-marked! xref-results-buffer 0 #t)
+(buffer-set-result-item-marked! xref-results-buffer 1 #t)
+(view-set-caret! (editor-active-view xref-editor) 0)
+(invoke-buffer-item-action
+  (make-command-context
+    xref-editor (editor-active-view xref-editor) #f #f #f)
+  'batch-inspect)
+(unless
+  (and
+    (equal? (map car result-batch-invocation) '(0 1))
+    (for-all location-item? (map cdr result-batch-invocation)))
+  (error 'editor-tests
+         "result action did not receive the marked item set"))
+(editor-update! xref-editor (make-resize-message 12 80))
+(let ([frame (render-editor-frame xref-editor 12 80)])
+  (unless
+    (let row-loop ([row 0])
+      (and
+        (< row (frame-rows frame))
+        (or
+          (let column-loop ([column 0])
+            (and
+              (< column (frame-columns frame))
+              (or
+                (memq
+                  'result.marked
+                  (cell-faces (frame-cell-ref frame row column)))
+                (column-loop (+ column 1)))))
+          (row-loop (+ row 1)))))
+    (error 'editor-tests "marked result items were not rendered")))
+(buffer-clear-result-marks! xref-results-buffer)
 (define appended-xref-item
   (make-location-item
     (buffer-id xref-buffer)

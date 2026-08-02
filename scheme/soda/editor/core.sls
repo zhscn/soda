@@ -946,8 +946,14 @@
           result-action?
           result-action-name
           result-action-label
+          result-action-batch-invoke
           buffer-register-result-action!
           buffer-result-actions-at
+          buffer-result-marked-indices
+          buffer-result-marked-items
+          buffer-result-item-marked?
+          buffer-set-result-item-marked!
+          buffer-clear-result-marks!
           invoke-buffer-item-action
           buffer-set-result-refresh!
           buffer-result-refreshable?

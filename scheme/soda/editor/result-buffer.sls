@@ -6,8 +6,14 @@
           result-action?
           result-action-name
           result-action-label
+          result-action-batch-invoke
           buffer-register-result-action!
           buffer-result-actions-at
+          buffer-result-marked-indices
+          buffer-result-marked-items
+          buffer-result-item-marked?
+          buffer-set-result-item-marked!
+          buffer-clear-result-marks!
           invoke-buffer-item-action
           buffer-set-result-refresh!
           buffer-result-refreshable?
@@ -57,18 +63,24 @@
 
   (define-record-type
     (result-action %make-result-action result-action?)
-    (fields name label applicable? invoke))
+    (fields name label applicable? invoke batch-invoke))
 
-  (define (make-result-action name label applicable? invoke)
-    (unless (and (symbol? name)
-                 (string? label)
-                 (procedure? applicable?)
-                 (procedure? invoke))
-      (assertion-violation
-        'make-result-action
-        "invalid result action"
-        name label applicable? invoke))
-    (%make-result-action name label applicable? invoke))
+  (define make-result-action
+    (case-lambda
+      [(name label applicable? invoke)
+       (make-result-action name label applicable? invoke #f)]
+      [(name label applicable? invoke batch-invoke)
+       (unless (and (symbol? name)
+                    (string? label)
+                    (procedure? applicable?)
+                    (procedure? invoke)
+                    (or (not batch-invoke) (procedure? batch-invoke)))
+         (assertion-violation
+           'make-result-action
+           "invalid result action"
+           name label applicable? invoke batch-invoke))
+       (%make-result-action
+         name label applicable? invoke batch-invoke)]))
 
   (define (buffer-set-result-interface! buffer interface)
     (unless (and (buffer? buffer)
@@ -80,9 +92,75 @@
     (buffer-set-local! buffer 'result-buffer-interface interface)
     (buffer-set-local! buffer 'result-current-index #f)
     (buffer-set-local! buffer 'result-actions '())
+    (buffer-set-local! buffer 'result-marked-indices '())
     (buffer-set-local! buffer 'result-refresh #f)
     (buffer-set-local! buffer 'result-producer-state 'idle)
     buffer)
+
+  (define (buffer-result-marked-indices buffer)
+    (unless (buffer? buffer)
+      (assertion-violation
+        'buffer-result-marked-indices "expected a Buffer" buffer))
+    (buffer-local-ref buffer 'result-marked-indices '()))
+
+  (define (buffer-result-item-marked? buffer index)
+    (unless (and (buffer? buffer)
+                 (integer? index) (exact? index)
+                 (not (negative? index)))
+      (assertion-violation
+        'buffer-result-item-marked?
+        "expected a Buffer and result index"
+        buffer index))
+    (and (memv index (buffer-result-marked-indices buffer)) #t))
+
+  (define (buffer-set-result-item-marked! buffer index marked?)
+    (unless (and (buffer? buffer)
+                 (integer? index) (exact? index)
+                 (not (negative? index))
+                 (boolean? marked?))
+      (assertion-violation
+        'buffer-set-result-item-marked!
+        "invalid result mark mutation"
+        buffer index marked?))
+    (unless (exists
+              (lambda (range) (= (caddr range) index))
+              (buffer-text-property-ranges buffer 'result-index))
+      (editor-user-error
+        'buffer-item.mark "Result item no longer exists" index))
+    (let ([marks
+            (filter
+              (lambda (candidate) (not (= candidate index)))
+              (buffer-result-marked-indices buffer))])
+      (buffer-set-local!
+        buffer
+        'result-marked-indices
+        (if marked?
+            (list-sort < (cons index marks))
+            marks)))
+    marked?)
+
+  (define (buffer-clear-result-marks! buffer)
+    (unless (buffer? buffer)
+      (assertion-violation
+        'buffer-clear-result-marks! "expected a Buffer" buffer))
+    (buffer-set-local! buffer 'result-marked-indices '())
+    buffer)
+
+  (define (buffer-result-marked-items buffer)
+    (unless (buffer? buffer)
+      (assertion-violation
+        'buffer-result-marked-items "expected a Buffer" buffer))
+    (fold-right
+      (lambda (range items)
+        (let ([index (caddr range)])
+          (if (buffer-result-item-marked? buffer index)
+              (let ([item
+                      (buffer-text-property-ref
+                        buffer (car range) 'result-item #f)])
+                (if item (cons (cons index item) items) items))
+              items)))
+      '()
+      (buffer-text-property-ranges buffer 'result-index)))
 
   (define result-producer-states
     '(idle running ready failed cancelled))
@@ -350,25 +428,85 @@
         (buffer-set-local! buffer 'result-current-index index)
         (values buffer interface item index))))
 
+  (define (current-result-entry buffer view)
+    (let ([item
+            (buffer-text-property-ref
+              buffer (view-caret view) 'result-item #f)]
+          [index
+            (buffer-text-property-ref
+              buffer (view-caret view) 'result-index #f)])
+      (and item
+           (integer? index) (exact? index)
+           (cons index item))))
+
+  (define (action-applicable-to-entry? action buffer entry)
+    ((result-action-applicable? action) buffer (cdr entry)))
+
+  (define (available-actions context who)
+    (let-values ([(buffer interface) (require-interface context who)])
+      (let* ([view (command-context-view context)]
+             [current (current-result-entry buffer view)]
+             [marked (buffer-result-marked-items buffer)]
+             [actions
+               (filter
+                 (lambda (action)
+                   (let ([batch (result-action-batch-invoke action)])
+                     (if (and batch (pair? marked))
+                         (for-all
+                           (lambda (entry)
+                             (action-applicable-to-entry?
+                               action buffer entry))
+                           marked)
+                         (and current
+                              (action-applicable-to-entry?
+                                action buffer current)))))
+                 (reverse
+                   (buffer-local-ref buffer 'result-actions '())))])
+        (values buffer current marked actions))))
+
   (define (invoke-buffer-item-action context name)
     (unless (symbol? name)
       (assertion-violation
         'invoke-buffer-item-action "action name must be a symbol" name))
-    (let-values ([(buffer interface item index)
-                  (selected-item context 'buffer-item.action)])
+    (let-values ([(buffer current marked actions)
+                  (available-actions context 'buffer-item.action)])
       (let ([action
               (find
                 (lambda (candidate)
                   (eq? (result-action-name candidate) name))
-                (buffer-result-actions-at
-                  buffer
-                  (view-caret (command-context-view context))))])
+                actions)])
         (unless action
           (editor-user-error
             'buffer-item.action
             "Action is not available for the item at point"
             name))
-        ((result-action-invoke action) context buffer item index))))
+        (let ([batch (result-action-batch-invoke action)])
+          (if (and batch (pair? marked))
+              (batch context buffer marked)
+              ((result-action-invoke action)
+               context buffer (cdr current) (car current)))))))
+
+  (define (set-selected-item-mark! context marked?)
+    (let-values ([(buffer interface item index)
+                  (selected-item context 'buffer-item.mark)])
+      (buffer-set-result-item-marked! buffer index marked?)
+      (editor-invalidate! (command-context-editor context) 'overlay)
+      '()))
+
+  (define (toggle-selected-item-mark! context)
+    (let-values ([(buffer interface item index)
+                  (selected-item context 'buffer-item.toggle-mark)])
+      (buffer-set-result-item-marked!
+        buffer index (not (buffer-result-item-marked? buffer index)))
+      (editor-invalidate! (command-context-editor context) 'overlay)
+      '()))
+
+  (define (clear-item-marks! context)
+    (let-values ([(buffer interface)
+                  (require-interface context 'buffer-item.unmark-all)])
+      (buffer-clear-result-marks! buffer)
+      (editor-invalidate! (command-context-editor context) 'overlay)
+      '()))
 
   (define (result-action-choice-source actions)
     (let ([items
@@ -404,17 +542,13 @@
     (interactive-completing-read
       "Action: "
       (lambda (context)
-        (let-values ([(buffer interface item index)
-                      (selected-item context 'buffer-item.actions)])
-          (let ([actions
-                  (buffer-result-actions-at
-                    buffer
-                    (view-caret (command-context-view context)))])
+        (let-values ([(buffer current marked actions)
+                      (available-actions context 'buffer-item.actions)])
             (when (null? actions)
               (editor-user-error
                 'buffer-item.actions
                 "No actions are available for the item at point"))
-            (result-action-choice-source actions))))
+            (result-action-choice-source actions)))
       'must-match
       'result-action
       ""
@@ -655,6 +789,18 @@
         (list 'buffer-item.actions
               choose-buffer-item-action
               "Choose an action available for the result item at point.")
+        (list 'buffer-item.mark
+              (lambda (context) (set-selected-item-mark! context #t))
+              "Mark the result item at point.")
+        (list 'buffer-item.unmark
+              (lambda (context) (set-selected-item-mark! context #f))
+              "Unmark the result item at point.")
+        (list 'buffer-item.toggle-mark
+              toggle-selected-item-mark!
+              "Toggle the mark on the result item at point.")
+        (list 'buffer-item.unmark-all
+              clear-item-marks!
+              "Clear all marks in the current result Buffer.")
         (list 'buffer-item.next-global
               (lambda (context) (move-global-item context 1))
               "Advance the most recent visible navigable Buffer.")

@@ -295,6 +295,11 @@
   (define (git-status-item? buffer item)
     (and (location-item? item) (item-status item)))
 
+  (define (marked-git-paths entries)
+    (map
+      (lambda (entry) (location-item-excerpt (cdr entry)))
+      entries))
+
   (define (register-git-status-actions! buffer session)
     (for-each
       (lambda (action)
@@ -306,14 +311,26 @@
           (lambda (context buffer item index)
             (start-git-operation
               session "Git stage"
-              (list "git" "add" "--" (location-item-excerpt item)))))
+              (list "git" "add" "--" (location-item-excerpt item))))
+          (lambda (context buffer entries)
+            (start-git-operation
+              session "Git stage"
+              (append
+                (list "git" "add" "--")
+                (marked-git-paths entries)))))
         (make-result-action
           'unstage "Unstage"
           git-status-item?
           (lambda (context buffer item index)
             (start-git-operation
               session "Git unstage"
-              (list "git" "reset" "--" (location-item-excerpt item)))))
+              (list "git" "reset" "--" (location-item-excerpt item))))
+          (lambda (context buffer entries)
+            (start-git-operation
+              session "Git unstage"
+              (append
+                (list "git" "reset" "--")
+                (marked-git-paths entries)))))
         (make-result-action
           'diff "Show diff"
           git-status-item?

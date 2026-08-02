@@ -549,6 +549,8 @@
       (bind-result-key! keymap 'character (char->integer #\P) 'buffer-item.previous-group)
       (bind-result-key! keymap 'character (char->integer #\g) 'buffer-item.refresh)
       (bind-result-key! keymap 'character (char->integer #\a) 'buffer-item.actions)
+      (bind-result-key! keymap 'character (char->integer #\m) 'buffer-item.toggle-mark)
+      (bind-result-key! keymap 'character (char->integer #\M) 'buffer-item.unmark-all)
       (bind-result-key! keymap 'character (char->integer #\q) 'buffer-item.quit)
       (keymap-bind!
         keymap
