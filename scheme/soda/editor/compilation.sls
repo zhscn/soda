@@ -115,29 +115,19 @@
       lines))
 
   (define (consume-output! editor session stdout? data)
-    (let ([combined
-            (bytevector-append
-              (if stdout?
-                  (result-producer-session-pending-output session)
-                  (result-producer-session-error-output session))
-              data)])
-      (let-values ([(lines remainder) (split-complete-lines combined)])
-        (if stdout?
-            (result-producer-session-pending-output-set! session remainder)
-            (result-producer-session-error-output-set! session remainder))
-        (append-lines! editor session lines))))
+    (append-lines!
+      editor
+      session
+      (result-producer-split-output!
+        session data split-complete-lines (not stdout?))))
 
   (define (apply-compilation-output context)
     (let* ([editor (command-context-editor context)]
            [event (command-context-argument context)]
-           [process (and (managed-process-event? event)
-                         (managed-process-event-process event))]
-           [session (and process (managed-process-owner process))])
-      (when (and (compilation-session? session)
-                 (result-producer-registry-current?
-                   active-compilations editor session)
-                 (= (managed-process-event-generation event)
-                    (managed-process-generation process)))
+           [session
+             (result-producer-event-session
+               active-compilations editor event compilation-session?)])
+      (when session
         (cond
           [(= (managed-process-event-flags event) process-stdout)
            (consume-output! editor session #t (managed-process-event-data event))]
@@ -161,12 +151,10 @@
   (define (apply-compilation-exit context)
     (let* ([editor (command-context-editor context)]
            [event (command-context-argument context)]
-           [process (and (managed-process-event? event)
-                         (managed-process-event-process event))]
-           [session (and process (managed-process-owner process))])
-      (when (and (compilation-session? session)
-                 (result-producer-registry-current?
-                   active-compilations editor session))
+           [session
+             (result-producer-event-session
+               active-compilations editor event compilation-session?)])
+      (when session
         (flush-pending! editor session)
         (result-producer-registry-release!
           active-compilations editor session)

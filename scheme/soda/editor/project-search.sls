@@ -150,32 +150,24 @@
   (define (apply-project-search-output context)
     (let* ([editor (command-context-editor context)]
            [event (command-context-argument context)]
-           [process (and (managed-process-event? event)
-                         (managed-process-event-process event))]
-           [session (and process (managed-process-owner process))])
-      (if (not (and (project-search-session? session)
-                    (result-producer-registry-current?
-                      active-project-searches editor session)
-                    (= (managed-process-event-generation event)
-                       (managed-process-generation process))))
+           [session
+             (result-producer-event-session
+               active-project-searches editor event project-search-session?)])
+      (if (not session)
           '()
           (cond
             [(= (managed-process-event-flags event) process-stdout)
-             (let ([combined
-                     (bytevector-append
-                       (result-producer-session-pending-output session)
-                       (managed-process-event-data event))])
-               (let-values ([(lines remainder)
-                             (split-complete-lines combined)])
-                 (result-producer-session-pending-output-set! session remainder)
-                 (append-output-lines! editor session lines)))
+             (append-output-lines!
+               editor
+               session
+               (result-producer-split-output!
+                 session
+                 (managed-process-event-data event)
+                 split-complete-lines))
              '()]
             [(= (managed-process-event-flags event) process-stderr)
-             (result-producer-session-error-output-set!
-               session
-               (bytevector-append
-                 (result-producer-session-error-output session)
-                 (managed-process-event-data event)))
+             (result-producer-append-error-output!
+               session (managed-process-event-data event))
              '()]
             [else '()]))))
 
@@ -197,12 +189,10 @@
   (define (apply-project-search-exit context)
     (let* ([editor (command-context-editor context)]
            [event (command-context-argument context)]
-           [process (and (managed-process-event? event)
-                         (managed-process-event-process event))]
-           [session (and process (managed-process-owner process))])
-      (when (and (project-search-session? session)
-                 (result-producer-registry-current?
-                   active-project-searches editor session))
+           [session
+             (result-producer-event-session
+               active-project-searches editor event project-search-session?)])
+      (when session
         (let ([remainder (result-producer-session-pending-output session)])
           (unless (zero? (bytevector-length remainder))
             (append-output-lines! editor session (list remainder))))

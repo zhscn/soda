@@ -23,10 +23,15 @@
           result-producer-registry-release!
           result-producer-registry-close!
           result-producer-retire!
-          result-producer-cancel!)
+          result-producer-cancel!
+          result-producer-event-session
+          result-producer-append-error-output!
+          result-producer-split-output!)
   (import (rnrs)
           (only (chezscheme) make-weak-eq-hashtable)
           (soda editor command)
+          (soda editor event)
+          (only (soda editor line-stream) bytevector-append)
           (soda editor managed-process)
           (soda editor result-buffer))
 
@@ -109,4 +114,42 @@
         (editor-finish-result-producer!
           editor buffer 'cancelled message 'warning)))
     (signal-effects process))
+
+  (define (result-producer-event-session
+            registry editor event predicate)
+    (let* ([process
+             (and (managed-process-event? event)
+                  (managed-process-event-process event))]
+           [session (and process (managed-process-owner process))])
+      (and
+        session
+        (predicate session)
+        (result-producer-registry-current? registry editor session)
+        (= (managed-process-event-generation event)
+           (managed-process-generation process))
+        session)))
+
+  (define (result-producer-append-error-output! session data)
+    (result-producer-session-error-output-set!
+      session
+      (bytevector-append
+        (result-producer-session-error-output session)
+        data)))
+
+  (define result-producer-split-output!
+    (case-lambda
+      [(session data splitter)
+       (result-producer-split-output! session data splitter #f)]
+      [(session data splitter error?)
+       (let ([combined
+               (bytevector-append
+                 (if error?
+                     (result-producer-session-error-output session)
+                     (result-producer-session-pending-output session))
+                 data)])
+         (let-values ([(units remainder) (splitter combined)])
+           (if error?
+               (result-producer-session-error-output-set! session remainder)
+               (result-producer-session-pending-output-set! session remainder))
+           units))]))
 )

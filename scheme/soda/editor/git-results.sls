@@ -114,41 +114,31 @@
   (define (apply-git-status-output context)
     (let* ([editor (command-context-editor context)]
            [event (command-context-argument context)]
-           [process (and (managed-process-event? event)
-                         (managed-process-event-process event))]
-           [session (and process (managed-process-owner process))])
-      (when (and (git-status-session? session)
-                 (result-producer-registry-current?
-                   active-git-statuses editor session)
-                 (= (managed-process-event-generation event)
-                    (managed-process-generation process)))
+           [session
+             (result-producer-event-session
+               active-git-statuses editor event git-status-session?)])
+      (when session
         (cond
           [(= (managed-process-event-flags event) process-stdout)
-           (let ([combined
-                   (bytevector-append
-                     (result-producer-session-pending-output session)
-                     (managed-process-event-data event))])
-             (let-values ([(records remainder)
-                           (split-complete-records combined 0)])
-               (result-producer-session-pending-output-set! session remainder)
-               (consume-records! editor session records)))]
-          [(= (managed-process-event-flags event) process-stderr)
-           (result-producer-session-error-output-set!
+           (consume-records!
+             editor
              session
-             (bytevector-append
-               (result-producer-session-error-output session)
-               (managed-process-event-data event)))]))
+             (result-producer-split-output!
+               session
+               (managed-process-event-data event)
+               (lambda (bytes) (split-complete-records bytes 0))))]
+          [(= (managed-process-event-flags event) process-stderr)
+           (result-producer-append-error-output!
+             session (managed-process-event-data event))]))
       '()))
 
   (define (apply-git-status-exit context)
     (let* ([editor (command-context-editor context)]
            [event (command-context-argument context)]
-           [process (and (managed-process-event? event)
-                         (managed-process-event-process event))]
-           [session (and process (managed-process-owner process))])
-      (when (and (git-status-session? session)
-                 (result-producer-registry-current?
-                   active-git-statuses editor session))
+           [session
+             (result-producer-event-session
+               active-git-statuses editor event git-status-session?)])
+      (when session
         (let ([remainder (result-producer-session-pending-output session)])
           (unless (zero? (bytevector-length remainder))
             (consume-records! editor session (list remainder))))
