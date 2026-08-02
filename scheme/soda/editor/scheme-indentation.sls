@@ -1,7 +1,11 @@
 (library (soda editor scheme-indentation)
   (export scheme-continuation-indent
           scheme-line-indent
-          scheme-reindent-entry)
+          scheme-reindent-entry
+          scheme-string-line-position
+          scheme-string-line-start
+          scheme-string-line-end
+          scheme-string-leading-whitespace-end)
   (import (rnrs))
 
   (define-record-type
@@ -375,7 +379,27 @@
           (eq? state 'normal)
           (context-indent stack standard-indent)))))
 
-  (define (line-end source start)
+  (define (scheme-string-line-position source offset)
+    (let loop ([index 0] [line 0] [line-start 0])
+      (if
+        (= index offset)
+        (values line line-start (- offset line-start))
+        (if
+          (char=? (string-ref source index) #\newline)
+          (loop (+ index 1) (+ line 1) (+ index 1))
+          (loop (+ index 1) line line-start)))))
+
+  (define (scheme-string-line-start source target-line)
+    (let ([length (string-length source)])
+      (let loop ([index 0] [line 0])
+        (cond
+          [(= line target-line) index]
+          [(= index length) length]
+          [(char=? (string-ref source index) #\newline)
+           (loop (+ index 1) (+ line 1))]
+          [else (loop (+ index 1) line)]))))
+
+  (define (scheme-string-line-end source start)
     (let ([length (string-length source)])
       (let loop ([index start])
         (if
@@ -385,7 +409,7 @@
           index
           (loop (+ index 1))))))
 
-  (define (leading-whitespace-end source start end)
+  (define (scheme-string-leading-whitespace-end source start end)
     (let loop ([index start])
       (if
         (and
@@ -409,9 +433,9 @@
         (if
           (= start length)
           (apply string-append (reverse parts))
-          (let* ([end (line-end source start)]
+          (let* ([end (scheme-string-line-end source start)]
                  [whitespace-end
-                   (leading-whitespace-end source start end)]
+                   (scheme-string-leading-whitespace-end source start end)]
                  [prefix
                    (apply string-append (reverse parts))]
                  [indentation

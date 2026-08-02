@@ -97,45 +97,6 @@
                             (+ caret delta))))))))))
     '())
 
-  (define (string-line-position source offset)
-    (let loop ([index 0] [line 0] [line-start 0])
-      (if
-        (= index offset)
-        (values line line-start (- offset line-start))
-        (if
-          (char=? (string-ref source index) #\newline)
-          (loop (+ index 1) (+ line 1) (+ index 1))
-          (loop (+ index 1) line line-start)))))
-
-  (define (string-line-start source target-line)
-    (let ([length (string-length source)])
-      (let loop ([index 0] [line 0])
-        (cond
-          [(= line target-line) index]
-          [(= index length) length]
-          [(char=? (string-ref source index) #\newline)
-           (loop (+ index 1) (+ line 1))]
-          [else (loop (+ index 1) line)]))))
-
-  (define (string-line-end source start)
-    (let ([length (string-length source)])
-      (let loop ([index start])
-        (if
-          (or
-            (= index length)
-            (char=? (string-ref source index) #\newline))
-          index
-          (loop (+ index 1))))))
-
-  (define (string-leading-whitespace-end source start end)
-    (let loop ([index start])
-      (if
-        (and
-          (< index end)
-          (memv (string-ref source index) '(#\space #\tab)))
-        (loop (+ index 1))
-        index)))
-
   (define (reindented-caret source replacement caret-offset)
     (let* ([source-bytes (string->utf8 source)]
            [prefix (make-bytevector caret-offset)])
@@ -149,24 +110,24 @@
               (string-length (utf8->string prefix))])
         (call-with-values
           (lambda ()
-            (string-line-position source character-offset))
+            (scheme-string-line-position source character-offset))
           (lambda (line old-start old-column)
             (let* ([old-end
-                     (string-line-end source old-start)]
+                     (scheme-string-line-end source old-start)]
                    [old-leading
                      (-
-                       (string-leading-whitespace-end
+                       (scheme-string-leading-whitespace-end
                          source
                          old-start
                          old-end)
                        old-start)]
                    [new-start
-                     (string-line-start replacement line)]
+                     (scheme-string-line-start replacement line)]
                    [new-end
-                     (string-line-end replacement new-start)]
+                     (scheme-string-line-end replacement new-start)]
                    [new-leading
                      (-
-                       (string-leading-whitespace-end
+                       (scheme-string-leading-whitespace-end
                          replacement
                          new-start
                          new-end)
