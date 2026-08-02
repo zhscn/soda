@@ -17,6 +17,7 @@
           (soda editor result-buffer)
           (soda editor result-edit)
           (soda editor state)
+          (soda editor string)
           (soda editor workspace-edit))
 
   (define-record-type workspace-edit-preview
@@ -37,17 +38,6 @@
               (lambda () (text-close! text)))))
         (lambda () (snapshot-close! snapshot)))))
 
-  (define (single-line value)
-    (list->string
-      (map
-        (lambda (character)
-          (if (or (char=? character #\newline)
-                  (char=? character #\return)
-                  (char=? character #\tab))
-              #\space
-              character))
-        (string->list value))))
-
   (define (edit-location-item editor edit)
     (let ([buffer
             (editor-buffer-for-resource
@@ -63,7 +53,7 @@
         (workspace-text-edit-revision edit)
         (workspace-text-edit-start edit)
         (workspace-text-edit-end edit)
-        (single-line
+        (string-single-line
           (buffer-substring
             buffer
             (workspace-text-edit-start edit)
@@ -74,7 +64,7 @@
     (let ([prefix
             (string-append
               "  "
-              (single-line (or (location-item-excerpt item) ""))
+              (string-single-line (or (location-item-excerpt item) ""))
               "  =>  ")]
           [replacement (workspace-text-edit-text edit)])
       (values prefix replacement (string-append prefix replacement "\n"))))

@@ -22,6 +22,7 @@
           (soda editor result-buffer)
           (soda editor result-edit)
           (soda editor result-producer-session)
+          (soda editor string)
           (soda editor state)
           (soda json)
           (soda runtime)
@@ -56,17 +57,6 @@
       (utf16-length
         (utf8->string (bytevector-slice bytes 0 column)))))
 
-  (define (single-line value)
-    (list->string
-      (map
-        (lambda (character)
-          (if (or (char=? character #\newline)
-                  (char=? character #\return)
-                  (char=? character #\tab))
-              #\space
-              character))
-        (string->list value))))
-
   (define (match-message->locations root message)
     (if (not (and (json-object? message)
                   (equal? (json-object-ref message "type" #f) "match")))
@@ -91,7 +81,7 @@
               (let ([resource
                       (vfs-resolve-path
                         root path)]
-                    [excerpt (single-line line-text)])
+                    [excerpt (string-single-line line-text)])
                 (filter
                   (lambda (item) item)
                   (map
@@ -180,7 +170,7 @@
           (string-append
             "Project search failed with status "
             (number->string status))
-          (single-line
+          (string-single-line
             (guard (condition [else "Project search failed"])
               (utf8->string stderr))))))
 

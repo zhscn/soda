@@ -23,6 +23,7 @@
           (soda editor location-visit)
           (soda editor result-buffer)
           (soda editor state)
+          (soda editor string)
           (soda editor window)
           (soda editor window-runtime))
 
@@ -88,17 +89,6 @@
   (define (location-open-position item)
     (location-item-open-position item))
 
-  (define (single-line value)
-    (list->string
-      (map
-        (lambda (character)
-          (if (or (char=? character #\newline)
-                  (char=? character #\return)
-                  (char=? character #\tab))
-              #\space
-              character))
-        (string->list value))))
-
   (define (item-metadata-ref item key)
     (let ([metadata (location-item-metadata item)])
       (let ([entry (and (list? metadata) (assq key metadata))])
@@ -124,7 +114,7 @@
                   (list
                     line
                     column
-                    (single-line excerpt)
+                    (string-single-line excerpt)
                     (and (<= start (location-item-start item) end)
                          (- (location-item-start item) start))
                     (and (<= start (location-item-end item) end)

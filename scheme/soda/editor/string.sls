@@ -1,7 +1,8 @@
 (library (soda editor string)
   (export string-prefix?
           string-suffix?
-          string-contains?)
+          string-contains?
+          string-single-line)
   (import (rnrs))
 
   (define (string-prefix? prefix value)
@@ -32,4 +33,17 @@
             (string=?
               needle
               (substring value index (+ index needle-length)))
-            (loop (+ index 1))))))))
+            (loop (+ index 1)))))))
+
+  (define (string-single-line value)
+    (unless (string? value)
+      (assertion-violation
+        'string-single-line "expected a string" value))
+    (list->string
+      (map
+        (lambda (character)
+          (if (memv character '(#\newline #\return #\tab))
+              #\space
+              character))
+        (string->list value))))
+)
