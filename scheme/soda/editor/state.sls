@@ -455,7 +455,7 @@
       (immutable prompt-completions editor-prompt-completion-store)
       (immutable interactions editor-interaction-registry)
       (immutable tui-applications editor-tui-application-registry)
-      (mutable tui-effects editor-tui-effects editor-tui-effects-set!)
+      (mutable effects editor-effects editor-effects-set!)
       (mutable evaluator editor-evaluator editor-evaluator-set!)
       (mutable debugger editor-debugger editor-debugger-set!)
       (immutable commands editor-command-registry)
@@ -1093,16 +1093,26 @@
     (completion-provider-catalog-bind-request!
       (editor-completion-provider-catalog value)
       request)
-    (prompt-completion-store-enqueue-effect!
-      (editor-prompt-completion-store value)
-      (make-command-effect kind request)))
+    (editor-effects-set!
+      value
+      (append
+        (editor-effects value)
+        (list (make-command-effect kind request)))))
+
+  (define (completion-effect? effect)
+    (memq
+      (command-effect-kind effect)
+      '(completion.request completion.cancel)))
 
   (define (editor-take-completion-effects! value)
     (require-open-editor
       'editor-take-completion-effects!
       value)
-    (prompt-completion-store-take-effects!
-      (editor-prompt-completion-store value)))
+    (let-values
+      ([(completion remaining)
+        (partition completion-effect? (editor-effects value))])
+      (editor-effects-set! value remaining)
+      completion))
 
   (define (queue-completion-generation! value completion)
     (call-with-values
@@ -1156,11 +1166,7 @@
                   (editor-completion-provider-catalog value)
                   request)
                 request)))))
-      (reverse
-        (prompt-completion-store-effects
-          (editor-prompt-completion-store value))))
-    (prompt-completion-store-clear-effects!
-      (editor-prompt-completion-store value)))
+      (editor-take-completion-effects! value)))
 
   (define (editor-buffers value)
     (require-open-editor 'editor-buffers value)
@@ -1689,9 +1695,9 @@
         'editor-queue-tui-effects!
         "expected command effects"
         effects))
-    (editor-tui-effects-set!
+    (editor-effects-set!
       value
-      (append (editor-tui-effects value) effects))
+      (append (editor-effects value) effects))
     effects)
 
   (define (editor-take-tui-effects! value)
@@ -1719,8 +1725,8 @@
                                (tui-command-id command)))
                           (tui-session-pending-commands session))))
                     #t))
-              (editor-tui-effects value))])
-      (editor-tui-effects-set! value '())
+              (editor-effects value))])
+      (editor-effects-set! value '())
       effects))
 
   (define (editor-views value)
@@ -6572,7 +6578,7 @@
             (condition [else #f])
             (editor-close-tui-session! value (tui-session-id session))))
         (editor-tui-sessions value))
-      (editor-tui-effects-set! value '())
+      (editor-effects-set! value '())
       (for-each
         (lambda (session)
           (when (prompt-session-completion session)

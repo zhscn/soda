@@ -13,10 +13,6 @@
           prompt-completion-store-completion-ref
           prompt-completion-store-history-ref
           prompt-completion-store-ensure-history!
-          prompt-completion-store-enqueue-effect!
-          prompt-completion-store-effects
-          prompt-completion-store-take-effects!
-          prompt-completion-store-clear-effects!
           prompt-completion-store-clear!)
   (import (rnrs)
           (soda editor completion)
@@ -37,10 +33,7 @@
       (mutable next-completion-id
                %prompt-completion-store-next-completion-id
                %prompt-completion-store-next-completion-id-set!)
-      (immutable histories %prompt-completion-store-histories)
-      (mutable effects
-               %prompt-completion-store-effects
-               %prompt-completion-store-effects-set!)))
+      (immutable histories %prompt-completion-store-histories)))
 
   (define (make-prompt-completion-store)
     (%make-prompt-completion-store
@@ -48,8 +41,7 @@
       1
       (make-eqv-hashtable)
       1
-      (make-eq-hashtable)
-      '()))
+      (make-eq-hashtable)))
 
   (define (prompt-completion-store-active-prompt store)
     (and (pair? (prompt-completion-store-prompts store))
@@ -138,25 +130,7 @@
             history)
           history))))
 
-  (define (prompt-completion-store-enqueue-effect! store effect)
-    (%prompt-completion-store-effects-set!
-      store
-      (cons effect (%prompt-completion-store-effects store)))
-    effect)
-
-  (define (prompt-completion-store-effects store)
-    (%prompt-completion-store-effects store))
-
-  (define (prompt-completion-store-take-effects! store)
-    (let ([effects (reverse (%prompt-completion-store-effects store))])
-      (%prompt-completion-store-effects-set! store '())
-      effects))
-
-  (define (prompt-completion-store-clear-effects! store)
-    (%prompt-completion-store-effects-set! store '()))
-
   (define (prompt-completion-store-clear! store)
     (prompt-completion-store-prompts-set! store '())
     (hashtable-clear! (%prompt-completion-store-completions store))
-    (hashtable-clear! (%prompt-completion-store-histories store))
-    (prompt-completion-store-clear-effects! store)))
+    (hashtable-clear! (%prompt-completion-store-histories store))))
