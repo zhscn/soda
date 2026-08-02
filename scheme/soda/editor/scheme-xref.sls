@@ -342,62 +342,6 @@
                       (number->string (length items))))
                   (if effect (list effect) '()))))))))
 
-  (define (move-location-list! context delta)
-    (let ([editor (command-context-editor context)])
-      (let ([locations (editor-current-location-list editor)])
-        (if (or (not locations)
-                (null? (location-list-items locations)))
-            #f
-            (let* ([items (location-list-items locations)]
-                   [index
-                     (mod
-                       (+ (location-list-index locations) delta)
-                       (length items))]
-                   [effect
-                     (jump-to-item!
-                       context
-                       (list-ref items index)
-                       (if (eq? (location-list-source locations)
-                                'scheme-definition)
-                           'definition
-                           'xref))])
-              (location-list-set-index! locations index)
-              (editor-set-status-message!
-                editor
-                (string-append
-                  (number->string (+ index 1))
-                  "/"
-                  (number->string (length items))))
-              (or effect #t))))))
-
-  (define (next-location-command context)
-    (let ([result
-            (move-location-list!
-              context
-              (command-context-count context))])
-      (cond
-        [(not result)
-         (editor-set-status-message!
-           (command-context-editor context)
-           "No current location list")
-         '()]
-        [(command-effect? result) (list result)]
-        [else '()])))
-
-  (define (previous-location-command context)
-    (let ([result
-            (move-location-list!
-              context
-              (- (command-context-count context)))])
-      (cond
-        [(not result)
-         (editor-set-status-message!
-           (command-context-editor context)
-           "No current location list")
-         '()]
-        [(command-effect? result) (list result)]
-        [else '()])))
-
   (define (workspace-symbol-detail symbol)
     (let ([resource
             (scheme-workspace-symbol-resource symbol)])
@@ -673,15 +617,7 @@
           (list
             'xref.find-references
             (lambda (context) (dispatch-xref context 'xref.find-references))
-            "Publish and visit references for the definition at point.")
-          (list
-            'xref.next-location
-            next-location-command
-            "Visit the next item in the current location list.")
-          (list
-            'xref.previous-location
-            previous-location-command
-            "Visit the previous item in the current location list.")))
+            "Publish and visit references for the definition at point.")))
       (editor-register-command!
         editor
         (make-find-symbol-definition environments))

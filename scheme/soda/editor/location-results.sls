@@ -248,6 +248,7 @@
           'location-item 'location-index #t
           activate-location-result
           quit-location-results))
+      (editor-note-navigation-buffer! editor buffer)
       (let ([view
               (editor-display-buffer!
                 editor
@@ -467,6 +468,7 @@
             'location-item 'location-index #t
             activate-location-result
             quit-location-results))
+        (editor-note-navigation-buffer! editor buffer)
         (location-results-state-last-resource-set! state last-resource)
         (let ([view
                 (editor-display-buffer!

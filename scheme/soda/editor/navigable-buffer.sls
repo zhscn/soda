@@ -6,14 +6,18 @@
           buffer-navigation-interface-cyclic?
           buffer-set-navigation-interface!
           buffer-navigation-interface-ref
+          editor-note-navigation-buffer!
           install-navigable-buffer-commands!)
   (import (rnrs)
+          (only (chezscheme) make-weak-eq-hashtable)
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
           (soda editor condition)
           (soda editor state)
           (soda editor window-runtime))
+
+  (define editor-navigation-buffers (make-weak-eq-hashtable))
 
   (define-record-type
     (buffer-navigation-interface
@@ -54,6 +58,17 @@
       (assertion-violation
         'buffer-navigation-interface-ref "expected a Buffer" buffer))
     (buffer-local-ref buffer 'navigation-interface #f))
+
+  (define (editor-note-navigation-buffer! editor buffer)
+    (unless (and (editor? editor) (buffer? buffer)
+                 (buffer-navigation-interface?
+                   (buffer-navigation-interface-ref buffer)))
+      (assertion-violation
+        'editor-note-navigation-buffer!
+        "expected an Editor and navigable Buffer"
+        editor buffer))
+    (hashtable-set! editor-navigation-buffers editor (buffer-id buffer))
+    buffer)
 
   (define (require-interface context who)
     (let* ([buffer (view-buffer (command-context-view context))]
@@ -141,6 +156,37 @@
                   (require-interface context 'buffer-item.quit)])
       ((buffer-navigation-interface-quit interface) context)))
 
+  (define (global-navigation-context context)
+    (let* ([editor (command-context-editor context)]
+           [active-view (command-context-view context)])
+      (if (buffer-navigation-interface-ref (view-buffer active-view))
+          context
+          (let* ([latest-buffer-id
+                   (hashtable-ref editor-navigation-buffers editor #f)]
+                 [view
+                   (and latest-buffer-id
+                        (find
+                          (lambda (candidate)
+                            (=
+                              (buffer-id (view-buffer candidate))
+                              latest-buffer-id))
+                          (editor-views editor)))])
+            (unless view
+              (editor-user-error
+                'buffer-item.next-global
+                "No visible navigable result Buffer"))
+            (make-command-context
+              editor
+              view
+              (command-context-event context)
+              (command-context-argument context)
+              (command-context-prefix context))))))
+
+  (define (move-global-item context direction)
+    (move-item
+      (global-navigation-context context)
+      (* direction (command-context-count context))))
+
   (define (install-navigable-buffer-commands! editor)
     (for-each
       (lambda (spec)
@@ -168,6 +214,18 @@
               "Activate the item at point and close its presenting Buffer.")
         (list 'buffer-item.quit
               quit-buffer-items
-              "Close the current navigable Buffer.")))
+              "Close the current navigable Buffer.")
+        (list 'buffer-item.next-global
+              (lambda (context) (move-global-item context 1))
+              "Advance the most recent visible navigable Buffer.")
+        (list 'buffer-item.previous-global
+              (lambda (context) (move-global-item context -1))
+              "Move backward in the most recent visible navigable Buffer.")
+        (list 'xref.next-location
+              (lambda (context) (move-global-item context 1))
+              "Advance the most recent visible navigable Buffer.")
+        (list 'xref.previous-location
+              (lambda (context) (move-global-item context -1))
+              "Move backward in the most recent visible navigable Buffer.")))
     editor)
 )

@@ -5247,7 +5247,22 @@
   highlight-editor
   (make-command-message 'xref.next-location #f))
 (unless
-  (= (view-caret (editor-active-view highlight-editor)) 15)
+  (and
+    (= (view-caret (editor-active-view highlight-editor)) 15)
+    (let* ([result-view
+             (find
+               (lambda (view)
+                 (eq?
+                   (buffer-major-mode-name (view-buffer view))
+                   'location-results-mode))
+               (editor-views highlight-editor))]
+           [ranges
+             (and result-view
+                  (buffer-text-property-ranges
+                    (view-buffer result-view) 'location-index))])
+      (and result-view
+           (= (length ranges) 2)
+           (= (view-caret result-view) (car (cadr ranges))))))
   (error 'editor-tests
          "generic next-location did not navigate diagnostics"))
 
