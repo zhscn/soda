@@ -101,9 +101,6 @@
           (soda tui component)
           (soda tui frame))
 
-  (define (exact-non-negative-integer? value)
-    (and (integer? value) (exact? value) (not (negative? value))))
-
   (define-record-type
     (tui-dimension %make-tui-dimension tui-dimension?)
     (fields kind amount minimum maximum))

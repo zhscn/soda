@@ -42,7 +42,8 @@
           frame-append-cell-text!
           frame-fill-rect!
           frame-set-layout!
-          frame-set-cursor!)
+          frame-set-cursor!
+          exact-non-negative-integer?)
   (import (rnrs))
 
   (define-record-type (rect %make-rect rect?)
