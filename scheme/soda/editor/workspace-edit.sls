@@ -7,6 +7,7 @@
           workspace-text-edit-end
           workspace-text-edit-text
           workspace-text-edits-missing-resources
+          workspace-text-edits-validation-error
           workspace-text-edits-apply!)
   (import (rnrs)
           (soda document)
@@ -54,41 +55,39 @@
   (define (edit-before? left right)
     (> (workspace-text-edit-start left) (workspace-text-edit-start right)))
 
-  (define (validate-edits! buffer edits)
+  (define (buffer-edits-validation-error buffer edits)
     (let ([revision (workspace-text-edit-revision (car edits))])
-      (unless (= (buffer-revision buffer) revision)
+      (cond
+        [(not (= (buffer-revision buffer) revision))
+         "workspace edit target changed"]
+        [(not
+           (for-all
+             (lambda (edit)
+               (= (workspace-text-edit-revision edit)
+                  (buffer-revision buffer)))
+             edits))
+         "workspace edit group has inconsistent revisions"]
+        [(buffer-setting-ref buffer 'read-only? #f)
+         "workspace edit target is read-only"]
+        [else
+         (let loop ([ordered (list-sort edit-before? edits)])
+           (if (pair? (cdr ordered))
+               (let ([later (car ordered)] [earlier (cadr ordered)])
+                 (if (or (> (workspace-text-edit-end earlier)
+                            (workspace-text-edit-start later))
+                         (= (workspace-text-edit-start earlier)
+                            (workspace-text-edit-start later)))
+                     "workspace edits overlap"
+                     (loop (cdr ordered))))
+               #f))])))
+
+  (define (validate-edits! buffer edits)
+    (let ([message (buffer-edits-validation-error buffer edits)])
+      (when message
         (assertion-violation
           'workspace-text-edits-apply!
-          "workspace edit target changed"
-          (buffer-resource buffer)
-          revision
-          (buffer-revision buffer))))
-    (unless (for-all
-              (lambda (edit)
-                (= (workspace-text-edit-revision edit)
-                   (buffer-revision buffer)))
-              edits)
-      (assertion-violation
-        'workspace-text-edits-apply!
-        "workspace edit group has inconsistent revisions"
-        (buffer-resource buffer)))
-    (when (buffer-setting-ref buffer 'read-only? #f)
-      (assertion-violation
-        'workspace-text-edits-apply!
-        "workspace edit target is read-only"
-        (buffer-resource buffer)))
-    (let loop ([ordered (list-sort edit-before? edits)])
-      (when (pair? (cdr ordered))
-        (let ([later (car ordered)] [earlier (cadr ordered)])
-          (when (or (> (workspace-text-edit-end earlier)
-                       (workspace-text-edit-start later))
-                    (= (workspace-text-edit-start earlier)
-                       (workspace-text-edit-start later)))
-            (assertion-violation
-              'workspace-text-edits-apply!
-              "workspace edits overlap"
-              earlier later)))
-        (loop (cdr ordered)))))
+          message
+          (buffer-resource buffer)))))
 
   (define (group-edits editor edits)
     (let ([groups (make-eqv-hashtable)])
@@ -108,6 +107,35 @@
               (cons edit (hashtable-ref groups (buffer-id buffer) '())))))
         edits)
       groups))
+
+  (define (workspace-text-edits-validation-error editor edits)
+    (unless (and (editor? editor)
+                 (list? edits) (pair? edits)
+                 (for-all workspace-text-edit? edits))
+      (assertion-violation
+        'workspace-text-edits-validation-error
+        "expected an Editor and non-empty workspace text edits"
+        editor edits))
+    (let ([missing (workspace-text-edits-missing-resources editor edits)])
+      (if (pair? missing)
+          (string-append
+            "workspace edit target is not open: " (car missing))
+          (let ([groups (group-edits editor edits)])
+            (let-values ([(buffer-ids edit-vectors)
+                          (hashtable-entries groups)])
+              (let loop ([index 0])
+                (if (= index (vector-length buffer-ids))
+                    #f
+                    (let* ([buffer
+                             (editor-buffer-ref
+                               editor (vector-ref buffer-ids index))]
+                           [message
+                             (buffer-edits-validation-error
+                               buffer (vector-ref edit-vectors index))])
+                      (if message
+                          (string-append
+                            message ": " (buffer-resource buffer))
+                          (loop (+ index 1)))))))))))
 
   (define (apply-buffer-edits! buffer edits)
     (let ([change #f])

@@ -232,7 +232,9 @@ Editable projection 使用 DocumentAnchor 标记 Result Buffer 中允许修改�
 Workspace edit preview 将每项协议 edit 映射为一个可编辑 projection，并默认标记
 全部条目。用户可以在预览中取消任意条目；Apply 和 Edit 只消费仍被标记的 projection，
 因此 rename、code action 等 producer 无需各自实现变更筛选。清空全部标记时应用与
-编辑动作不可用，重新标记条目即可恢复。
+编辑动作不可用，重新标记条目即可恢复。应用前对所有选中目标执行统一 preflight；
+目标 revision 或只读状态变化时保留预览并报告可恢复的 stale-preview user error，
+不会进入 debugger 或提交部分修改。
 
 ## Excerpt 组合视图
 

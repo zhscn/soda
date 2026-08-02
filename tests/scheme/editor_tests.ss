@@ -47,6 +47,8 @@
         (soda editor scheme-environment)
         (soda editor scheme-workspace)
         (soda editor scheme-xref)
+        (soda editor workspace-edit)
+        (soda editor workspace-edit-preview)
         (only (soda editor xref)
               editor-begin-xref-results!
               editor-show-xref-results!)
@@ -5266,6 +5268,51 @@
   (error 'editor-tests
          "quitting an orphaned Result Buffer did not restore its source"))
 (editor-close! orphan-result-editor)
+
+(define stale-workspace-target
+  (make-buffer
+    19831
+    (make-document "alpha" 19831)
+    "/virtual/stale-workspace-target.sls"
+    'scheme-mode))
+(define stale-workspace-editor (make-editor stale-workspace-target))
+(define stale-workspace-origin
+  (editor-active-view stale-workspace-editor))
+(editor-show-workspace-edit-preview!
+  stale-workspace-editor
+  (view-id stale-workspace-origin)
+  (list
+    (make-workspace-text-edit
+      (buffer-resource stale-workspace-target)
+      (buffer-revision stale-workspace-target)
+      0 5 "beta"))
+  "Rename symbol"
+  (lambda (editor) '()))
+(buffer-replace-range!
+  stale-workspace-target 5 5 (string->utf8 "!"))
+(editor-update!
+  stale-workspace-editor
+  (make-command-message 'workspace-edit.accept #f))
+(let ([message (editor-status-message stale-workspace-editor)])
+  (unless
+    (and
+      (not (editor-debugger stale-workspace-editor))
+      (eq?
+        (buffer-major-mode-name
+          (view-buffer (editor-active-view stale-workspace-editor)))
+        'workspace-edit-preview-mode)
+      (bytevector=?
+        (buffer-bytes stale-workspace-target)
+        (string->utf8 "alpha!"))
+      (string? message)
+      (<= 31 (string-length message))
+      (string=?
+        (substring message 0 31)
+        "Workspace edit preview is stale"))
+    (error 'editor-tests
+           "stale WorkspaceEdit preview entered the debugger or applied edits"
+           message)))
+(editor-close! stale-workspace-editor)
 
 (define scoped-session-table-test (make-scoped-session-table))
 (define scoped-session-owner (list 'editor-owner))

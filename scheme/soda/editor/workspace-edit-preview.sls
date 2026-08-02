@@ -244,6 +244,15 @@
                      (workspace-text-edit-end edit)
                      (editable-projection-text buffer projection))))
                projections)])
+      (let ([validation-error
+              (workspace-text-edits-validation-error editor edits)])
+        (when validation-error
+          (editor-user-error
+            'workspace-edit.accept
+            (string-append
+              "Workspace edit preview is stale; rerun the refactoring ("
+              validation-error
+              ")"))))
       (workspace-text-edits-apply! editor edits)
       (workspace-edit-preview-accepted?-set! preview #t)
       (editor-set-status-message!
