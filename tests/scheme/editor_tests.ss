@@ -12,6 +12,7 @@
               completion-session-schedule-requests!)
         (soda editor core)
         (soda editor cpp-language)
+        (soda editor project-state)
         (soda editor diagnostics)
         (soda editor effect)
         (soda editor evaluator)

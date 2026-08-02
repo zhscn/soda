@@ -7,6 +7,7 @@
         (soda editor project-workspace)
         (soda editor resource-context)
         (soda editor state)
+        (soda editor project-state)
         (soda json))
 
 (define (check condition message . irritants)

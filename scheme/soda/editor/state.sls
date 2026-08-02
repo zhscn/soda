@@ -113,16 +113,6 @@
           editor-view-resource-context
           editor-set-view-resource-context!
           editor-project-catalog
-          editor-register-project-finder!
-          editor-remove-project-finder!
-          editor-discover-project
-          editor-known-projects
-          editor-remember-project!
-          editor-update-project!
-          editor-forget-project!
-          editor-project-resource-snapshot
-          editor-apply-project-resource-snapshot!
-          editor-clear-project-resource-snapshot!
           editor-setting-store
           editor-setting-names
           editor-setting-definition

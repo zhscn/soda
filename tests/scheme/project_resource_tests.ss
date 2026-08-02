@@ -10,6 +10,7 @@
         (soda editor project-resource)
         (soda editor project-resource-runtime)
         (soda editor state)
+        (soda editor project-state)
         (soda runtime)
         (soda vfs))
 
