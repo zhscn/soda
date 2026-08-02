@@ -121,10 +121,35 @@
         'key-event->key-stroke
         "expected a key event"
         event))
-    (make-key-stroke
-      (key-event-key event)
-      (key-event-codepoint event)
-      (key-event-modifiers event)))
+    (let* ([key (key-event-key event)]
+           [codepoint (key-event-codepoint event)]
+           [shifted (key-event-shifted-codepoint event)]
+           [modifiers (key-event-modifiers event)]
+           [logical-codepoint
+             (if (and (eq? key 'character)
+                      (not (zero? (bitwise-and modifiers 1)))
+                      (or shifted codepoint)
+                      (let ([character
+                              (integer->char (or shifted codepoint))])
+                        (and (not (char-alphabetic? character))
+                             (not (char-whitespace? character)))))
+                 (or shifted codepoint)
+                 codepoint)]
+           [logical-modifiers
+             (if (and (eq? key 'character)
+                      logical-codepoint
+                      (not (equal? logical-codepoint codepoint)))
+                 (bitwise-and modifiers (bitwise-not 1))
+                 (if (and (eq? key 'character)
+                          codepoint
+                          (not (zero? (bitwise-and modifiers 1)))
+                          (let ([character (integer->char codepoint)])
+                            (and (not (char-alphabetic? character))
+                                 (not (char-numeric? character))
+                                 (not (char-whitespace? character)))))
+                     (bitwise-and modifiers (bitwise-not 1))
+                     modifiers))])
+      (make-key-stroke key logical-codepoint logical-modifiers)))
 
   (define make-keymap
     (case-lambda

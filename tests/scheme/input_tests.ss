@@ -1,6 +1,7 @@
 #!r6rs
 (import (rnrs)
         (soda editor event)
+        (soda editor keymap)
         (soda tui input))
 
 (define (ascii value)
@@ -38,6 +39,34 @@
                (eq? (key-event-type event) 'repeat)
                (bytevector=? (key-event-text event) (ascii "A")))
     (error 'input-tests "enhanced Kitty event differs" event)))
+
+(define kitty-meta-less
+  (input-decoder-feed! decoder (ascii "\x1b;[44:60:44;4u")))
+(let ([stroke (key-event->key-stroke (car kitty-meta-less))])
+  (unless
+    (and
+      (eq? (key-stroke-key stroke) 'character)
+      (= (key-stroke-codepoint stroke) (char->integer #\<))
+      (= (key-stroke-modifiers stroke) 2))
+    (error 'input-tests "Kitty M-< did not normalize to a logical character")))
+
+(define kitty-meta-less-primary
+  (input-decoder-feed! decoder (ascii "\x1b;[60;4u")))
+(let ([stroke (key-event->key-stroke (car kitty-meta-less-primary))])
+  (unless
+    (and
+      (= (key-stroke-codepoint stroke) (char->integer #\<))
+      (= (key-stroke-modifiers stroke) 2))
+    (error 'input-tests "Kitty shifted punctuation retained a redundant Shift")))
+
+(define kitty-control-shift-z
+  (input-decoder-feed! decoder (ascii "\x1b;[122:90:122;6u")))
+(let ([stroke (key-event->key-stroke (car kitty-control-shift-z))])
+  (unless
+    (and
+      (= (key-stroke-codepoint stroke) (char->integer #\z))
+      (= (key-stroke-modifiers stroke) 5))
+    (error 'input-tests "Kitty C-S-z lost its explicit Shift modifier")))
 
 (define left
   (input-decoder-feed! decoder (ascii "\x1b;[1;5D")))

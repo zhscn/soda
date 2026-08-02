@@ -533,7 +533,7 @@
           (queue-control-output!
             (string-append
               (ansi "[?1049h")
-              (ansi "[>1u")
+              (ansi "[>5u")
               (ansi "[?2004h")))
           (set! input-source
             (runtime-watch-fd! runtime 0 fd-readable))
