@@ -19,6 +19,7 @@
           (soda editor location)
           (soda editor resource-context)
           (soda editor state)
+          (soda editor language-state)
           (soda editor window)
           (soda editor workbench))
 

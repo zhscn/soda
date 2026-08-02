@@ -50,6 +50,7 @@
           (soda editor scheme-interface-commands)
           (soda editor scheme-workspace)
           (soda editor state)
+          (soda editor language-state)
           (soda vfs))
 
   (define project-manifest-format-version 1)

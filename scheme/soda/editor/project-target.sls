@@ -14,6 +14,7 @@
           (soda editor project)
           (soda editor resource-context)
           (soda editor state)
+          (soda editor language-state)
           (soda editor project-state)
           (soda editor workbench))
 

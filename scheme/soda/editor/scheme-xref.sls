@@ -21,6 +21,7 @@
           (soda editor scheme-semantics)
           (soda editor scheme-workspace)
           (soda editor state)
+          (soda editor language-state)
           (soda editor xref))
 
   (define editor-environments

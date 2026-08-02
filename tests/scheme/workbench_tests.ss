@@ -8,6 +8,7 @@
         (soda editor project-target)
         (soda editor resource-context)
         (soda editor state)
+        (soda editor language-state)
         (soda editor window)
         (soda editor window-runtime)
         (soda editor workbench))

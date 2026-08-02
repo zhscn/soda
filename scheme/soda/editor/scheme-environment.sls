@@ -23,7 +23,8 @@
           (soda editor language-session)
           (soda editor scheme-query)
           (soda editor scheme-workspace)
-          (soda editor state))
+          (soda editor state)
+          (soda editor language-state))
 
   (define-record-type scheme-environment
     (fields id name dialect index))

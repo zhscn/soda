@@ -20,6 +20,7 @@
           (soda editor project)
           (soda editor resource-context)
           (soda editor state)
+          (soda editor language-state)
           (soda editor project-state)
           (soda editor tui-application)
           (soda editor tui-state)

@@ -16,6 +16,7 @@
         (soda editor project-workspace)
         (soda editor result-buffer)
         (soda editor state)
+        (soda editor language-state)
         (soda editor project-state)
         (soda editor tui-state)
         (soda editor workbench)

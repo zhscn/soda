@@ -14,6 +14,7 @@
           (soda editor prompt)
           (soda editor result-buffer)
           (soda editor state)
+          (soda editor language-state)
           (soda editor window-runtime))
 
   (define (buffer-base-label buffer)

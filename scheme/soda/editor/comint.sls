@@ -28,7 +28,8 @@
           (soda editor display-placement)
           (soda editor interaction)
           (soda editor interaction-transcript)
-          (soda editor state))
+          (soda editor state)
+          (soda editor language-state))
 
   (define (activate-interaction-view! editor session keymap-layers)
     (let* ([buffer-id (interaction-session-buffer-id session)]

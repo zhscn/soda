@@ -35,6 +35,7 @@
           (soda editor presentation)
           (soda editor resource-context)
           (soda editor state)
+          (soda editor language-state)
           (soda editor tui-application)
           (soda editor tui-state)
           (soda editor tui-projection)

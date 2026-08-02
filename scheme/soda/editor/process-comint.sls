@@ -27,6 +27,7 @@
           (soda editor managed-process)
           (soda editor resource-context)
           (soda editor state)
+          (soda editor language-state)
           (soda runtime))
 
   (define-record-type

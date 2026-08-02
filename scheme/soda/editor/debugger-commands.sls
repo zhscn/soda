@@ -23,6 +23,7 @@
           (soda editor prompt)
           (soda editor source-debug)
           (soda editor state)
+          (soda editor language-state)
           (soda editor window)
           (soda editor window-runtime))
 

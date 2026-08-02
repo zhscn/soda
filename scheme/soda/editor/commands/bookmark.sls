@@ -10,7 +10,8 @@
           (soda editor effect)
           (soda editor file)
           (soda editor navigation)
-          (soda editor state))
+          (soda editor state)
+          (soda editor language-state))
 
   (define (bookmark-choice-source editor)
     (let ([items

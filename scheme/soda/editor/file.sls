@@ -116,6 +116,7 @@
           (soda editor prompt)
           (soda editor resource-context)
           (soda editor state)
+          (soda editor language-state)
           (soda editor tui-projection)
           (soda editor window)
           (soda editor workbench)

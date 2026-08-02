@@ -10,6 +10,7 @@
         (soda editor navigation)
         (soda editor resource-context)
         (soda editor state)
+        (soda editor language-state)
         (soda editor workbench))
 
 (define (check condition message . irritants)

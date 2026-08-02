@@ -10,7 +10,8 @@
           (soda editor evaluator)
           (soda editor keymap)
           (soda editor source-debug)
-          (soda editor state))
+          (soda editor state)
+          (soda editor language-state))
 
   (define breakpoint-buffer-resource
     "*scheme-breakpoints*")

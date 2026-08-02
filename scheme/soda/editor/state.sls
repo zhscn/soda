@@ -99,19 +99,10 @@
           editor-keymap-catalog
           editor-language-catalog
           editor-language-session-registry
-          editor-ensure-language-session!
-          editor-attach-language-session!
-          editor-remove-language-session!
-          editor-buffer-language-attachments
-          editor-set-view-language-attachment!
-          editor-view-language-attachment
-          editor-bootstrap-view-language-session!
           editor-auto-mode-catalog
           editor-register-auto-mode-rule!
           editor-major-mode-for-path
           editor-select-buffer-major-mode!
-          editor-view-resource-context
-          editor-set-view-resource-context!
           editor-project-catalog
           editor-setting-store
           editor-setting-names

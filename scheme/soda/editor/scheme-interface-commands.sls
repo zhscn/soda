@@ -24,7 +24,8 @@
           (soda editor scheme-environment)
           (soda editor scheme-interface-index)
           (soda editor scheme-workspace)
-          (soda editor state))
+          (soda editor state)
+          (soda editor language-state))
 
   (define-record-type
     (scheme-interface-load-request

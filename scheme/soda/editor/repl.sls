@@ -23,7 +23,8 @@
           (soda editor keymap)
           (soda editor scheme-indentation)
           (soda editor scheme-repl-indentation)
-          (soda editor state))
+          (soda editor state)
+          (soda editor language-state))
 
   (define repl-resource "*scheme-repl*")
   (define repl-prompt "> ")

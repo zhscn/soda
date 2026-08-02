@@ -17,6 +17,7 @@
           (soda editor prompt)
           (soda editor resource-context)
           (soda editor state)
+          (soda editor language-state)
           (soda editor project-state)
           (soda editor workbench)
           (soda vfs))

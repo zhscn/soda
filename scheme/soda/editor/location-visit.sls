@@ -9,7 +9,8 @@
           (soda editor location)
           (soda editor navigation)
           (soda editor resource-context)
-          (soda editor state))
+          (soda editor state)
+          (soda editor language-state))
 
   (define (location-item-open-position item)
     (let ([metadata (location-item-metadata item)])
