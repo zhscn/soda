@@ -333,104 +333,10 @@
           (soda editor theme)
           (soda editor themes catppuccin)
           (soda editor tui-application)
+          (soda editor view)
           (soda editor window)
           (soda editor workbench)
           (soda vfs))
-
-  (define-record-type (view %make-view view?)
-    (fields
-      (immutable id view-id)
-      (mutable workbench-id
-               view-workbench-id
-               view-workbench-id-set!)
-      (mutable buffer view-buffer view-buffer-set!)
-      (mutable caret-anchor view-caret-anchor view-caret-anchor-set!)
-      (mutable mark-anchor view-mark-anchor view-mark-anchor-set!)
-      (mutable mark-active? view-mark-active? view-mark-active?-set!)
-      (immutable mark-ring view-mark-ring-state)
-      (mutable preferred-column
-               view-preferred-column
-               view-preferred-column-set!)
-      (mutable caret-display-affinity
-               view-caret-display-affinity
-               view-caret-display-affinity-set!)
-      (mutable first-line view-first-line view-first-line-set!)
-      (mutable first-visual-row
-               view-first-visual-row
-               view-first-visual-row-set!)
-      (mutable first-column view-first-column view-first-column-set!)
-      (mutable viewport-rows
-               view-viewport-rows
-               view-viewport-rows-set!)
-      (mutable viewport-columns
-               view-viewport-columns
-               view-viewport-columns-set!)
-      (mutable viewport-ready?
-               view-viewport-ready?
-               view-viewport-ready?-set!)
-      (mutable keymap-layers view-keymap-layers view-keymap-layers-set!)
-      (mutable input-states view-input-states view-input-states-set!)
-      (mutable input-handler-pending
-               view-input-handler-pending
-               view-input-handler-pending-set!)
-      (mutable completion view-completion view-completion-set!)
-      (mutable pending-keys view-pending-keys view-pending-keys-set!)
-      (mutable display-map view-display-map view-display-map-set!)
-      (mutable folds view-folds view-folds-set!)
-      (mutable projection-cache
-               view-projection-cache
-               view-projection-cache-set!)
-      (mutable resource-context
-               view-resource-context
-               view-resource-context-set!)
-      (mutable navigation-target
-               view-navigation-target
-               view-navigation-target-set!)
-      (immutable navigation-walk view-navigation-walk)))
-
-  (define-record-type
-    (view-navigation-target-record
-      make-view-navigation-target
-      view-navigation-target?)
-    (fields
-      (immutable buffer-id view-navigation-target-buffer-id)
-      (immutable revision view-navigation-target-revision)
-      (immutable start view-navigation-target-start)
-      (immutable end view-navigation-target-end)
-      (immutable kind view-navigation-target-kind)))
-
-  (define (view-clear-navigation-target! view)
-    (unless (view? view)
-      (assertion-violation
-        'view-clear-navigation-target! "expected a View" view))
-    (view-navigation-target-set! view #f))
-
-  (define (view-set-navigation-target! view start end kind)
-    (unless (and (view? view)
-                 (exact-non-negative-integer? start)
-                 (exact-non-negative-integer? end)
-                 (<= start end)
-                 (symbol? kind))
-      (assertion-violation
-        'view-set-navigation-target!
-        "invalid View navigation target"
-        view start end kind))
-    (let ([buffer (view-buffer view)])
-      (view-navigation-target-set!
-        view
-        (make-view-navigation-target
-          (buffer-id buffer)
-          (buffer-revision buffer)
-          start
-          end
-          kind))))
-
-  (define-record-type
-    (projection-cache %make-projection-cache projection-cache?)
-    (fields map-key
-            display-map
-            (mutable visual-key)
-            (mutable visual-lines)))
 
   (define-record-type (editor %make-editor editor?)
     (fields
@@ -2109,7 +2015,7 @@
                     value source-context buffer)
                   id)]
            [view
-             (%make-view
+             (make-view-state
                id
                #f
                buffer
@@ -2194,7 +2100,7 @@
           (view-mark-anchor view)))
       (anchored-location-ring-clear!
         (view-mark-ring-state view)
-        (view-buffer-ref-or-false view))
+        (view-buffer-resolver view))
       (document-remove-anchor!
         (buffer-document (view-buffer view))
         (view-caret-anchor view))
@@ -2575,7 +2481,7 @@
             (view-mark-anchor view)))
         (anchored-location-ring-clear!
           (view-mark-ring-state view)
-          (view-buffer-ref-or-false view))
+          (view-buffer-resolver view))
         (view-buffer-set! view buffer)
         (view-caret-anchor-set! view anchor)
         (view-mark-anchor-set! view #f)
@@ -5004,109 +4910,6 @@
         (register!)
         (call-with-editor-configuration-transaction value register!))))
 
-  (define (view-caret value)
-    (unless (view? value)
-      (assertion-violation 'view-caret "expected a view" value))
-    (document-anchor-offset
-      (buffer-document (view-buffer value))
-      (view-caret-anchor value)))
-
-  (define (view-mark value)
-    (unless (view? value)
-      (assertion-violation 'view-mark "expected a view" value))
-    (and
-      (view-mark-anchor value)
-      (document-anchor-offset
-        (buffer-document (view-buffer value))
-        (view-mark-anchor value))))
-
-  (define (view-set-mark! value offset)
-    (unless (view? value)
-      (assertion-violation 'view-set-mark! "expected a view" value))
-    (unless (exact-non-negative-integer? offset)
-      (assertion-violation
-        'view-set-mark!
-        "offset must be a non-negative exact integer"
-        offset))
-    (let ([document (buffer-document (view-buffer value))])
-      (when (view-mark-anchor value)
-        (document-remove-anchor!
-          document
-          (view-mark-anchor value)))
-      (view-mark-anchor-set!
-        value
-        (document-create-anchor!
-          document
-          offset
-          anchor-before-insertion))
-      (view-mark-active?-set! value #t))
-    offset)
-
-  (define (view-mark-ring value)
-    (unless (view? value)
-      (assertion-violation 'view-mark-ring "expected a view" value))
-    (map
-      cadr
-      (anchored-location-ring-locations
-        (view-mark-ring-state value)
-        (view-buffer-ref-or-false value))))
-
-  (define (view-buffer-ref-or-false view)
-    (lambda (id)
-      (let ([buffer (view-buffer view)])
-        (and (= id (buffer-id buffer)) buffer))))
-
-  (define (view-push-mark! value offset)
-    (unless (view? value)
-      (assertion-violation 'view-push-mark! "expected a view" value))
-    (unless (exact-non-negative-integer? offset)
-      (assertion-violation
-        'view-push-mark!
-        "offset must be a non-negative exact integer"
-        offset))
-    (anchored-location-ring-push!
-      (view-mark-ring-state value)
-      (view-buffer value)
-      offset
-      #f
-      (view-buffer-ref-or-false value))
-    offset)
-
-  (define (view-pop-mark! value)
-    (unless (view? value)
-      (assertion-violation 'view-pop-mark! "expected a view" value))
-    (let ([location
-            (anchored-location-ring-pop!
-              (view-mark-ring-state value)
-              (view-buffer-ref-or-false value))])
-      (and location (cadr location))))
-
-  (define (view-deactivate-mark! value)
-    (unless (view? value)
-      (assertion-violation
-        'view-deactivate-mark!
-        "expected a view"
-        value))
-    (view-mark-active?-set! value #f))
-
-  (define (view-clear-mark! value)
-    (unless (view? value)
-      (assertion-violation 'view-clear-mark! "expected a view" value))
-    (when (view-mark-anchor value)
-      (document-remove-anchor!
-        (buffer-document (view-buffer value))
-        (view-mark-anchor value))
-      (view-mark-anchor-set! value #f))
-    (view-mark-active?-set! value #f))
-
-  (define (view-region value)
-    (unless (view? value)
-      (assertion-violation 'view-region "expected a view" value))
-    (let ([mark (and (view-mark-active? value) (view-mark value))])
-      (and mark
-           (let ([caret (view-caret value)])
-             (cons (min mark caret) (max mark caret))))))
-
   (define (editor-set-last-command-class! value class)
     (require-open-editor 'editor-set-last-command-class! value)
     (unless (or (not class) (symbol? class))
@@ -5846,7 +5649,7 @@
                                  (make-display-map
                                    document-id revision runs))))))])
             (view-projection-cache-set!
-              view (%make-projection-cache key effective #f '()))
+              view (make-projection-cache key effective #f '()))
             effective))))
 
   (define (view-visible-visual-lines
@@ -6161,7 +5964,7 @@
            [completions (make-entity-registry 1)]
            [keymaps (make-keymap-catalog)]
            [view
-             (%make-view
+             (make-view-state
                1
                1
                buffer
@@ -6392,7 +6195,7 @@
             (view-mark-anchor-set! view #f))
           (anchored-location-ring-clear!
             (view-mark-ring-state view)
-            (view-buffer-ref-or-false view))
+            (view-buffer-resolver view))
           (document-remove-anchor!
             (buffer-document (view-buffer view))
             (view-caret-anchor view))
