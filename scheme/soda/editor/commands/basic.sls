@@ -1266,9 +1266,6 @@
           text-size)))
     '())
 
-  (define (horizontal-space-byte? byte)
-    (or (= byte 9) (= byte 32)))
-
   (define (horizontal-space-target context)
     (let ([caret
             (view-caret

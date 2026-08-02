@@ -206,9 +206,6 @@
                       (+ start (bytevector-length replacement))))))))))
       '()))
 
-  (define (horizontal-space-byte? byte)
-    (or (= byte 9) (= byte 32)))
-
   (define (trimmed-line-end text line)
     (let loop ([offset (text-line-content-end text line)])
       (if (and (> offset (text-line-start text line))

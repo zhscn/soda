@@ -10,7 +10,8 @@
           text-range-line-fragments
           text-range-lines
           text-range-trailing-newline?
-          text-complete-line-range)
+          text-complete-line-range
+          horizontal-space-byte?)
   (import (rnrs)
           (soda document))
 
@@ -48,6 +49,9 @@
             (memv (text-byte-at text offset) '(9 32)))
           (loop (+ offset 1))
           offset))))
+
+  (define (horizontal-space-byte? byte)
+    (or (= byte 9) (= byte 32)))
 
   (define (text-range-line-fragments text start end)
     (validate-range 'text-range-line-fragments text start end)
