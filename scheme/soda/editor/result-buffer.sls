@@ -347,6 +347,9 @@
         'buffer-set-result-producer-state!
         "Buffer has no result interface"
         buffer))
+    (when (eq? state 'running)
+      (buffer-set-local!
+        buffer 'result-producer-stop-invoked? #f))
     (buffer-set-local! buffer 'result-producer-state state)
     state)
 

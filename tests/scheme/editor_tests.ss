@@ -48,6 +48,7 @@
         (soda editor scheme-workspace)
         (soda editor scheme-xref)
         (only (soda editor xref)
+              editor-begin-xref-results!
               editor-show-xref-results!)
         (only (soda editor state)
               editor-refresh-completion-after-command!
@@ -5152,6 +5153,42 @@
     "No navigable items")
   (error 'editor-tests
          "empty result message became a navigable result item"))
+(define restarted-xref-buffer
+  (editor-begin-xref-results!
+    empty-xref-editor
+    (view-id (editor-active-view empty-xref-editor))
+    (lambda (context buffer) '())
+    'test.cancel-result-producer
+    'producer-token))
+(let* ([context
+         (make-command-context
+           empty-xref-editor
+           (editor-active-view empty-xref-editor)
+           #f #f #f)]
+       [stop-effects
+         (invoke-result-panel-action context 'stop)])
+  (unless
+    (and
+      (= (length stop-effects) 1)
+      (eq? (command-effect-kind (car stop-effects)) 'command.invoke)
+      (not
+        (memq
+          'stop
+          (map
+            result-panel-action-name
+            (buffer-result-panel-actions restarted-xref-buffer)))))
+    (error 'editor-tests
+           "stopped Result producer retained an applicable stop action")))
+(buffer-set-result-producer-state! restarted-xref-buffer 'cancelled)
+(buffer-set-result-producer-state! restarted-xref-buffer 'running)
+(unless
+  (memq
+    'stop
+    (map
+      result-panel-action-name
+      (buffer-result-panel-actions restarted-xref-buffer)))
+  (error 'editor-tests
+         "restarted Result producer did not restore its stop action"))
 (editor-close! empty-xref-editor)
 
 (define scoped-session-table-test (make-scoped-session-table))

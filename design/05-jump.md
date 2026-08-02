@@ -190,7 +190,9 @@ session、取消仍在运行的旧任务并重新建立属性；Project search �
 任务但保留已经生成的文本和 LocationItem。`close` 仍可取消并关闭面板，已经显式停止
 的任务在关闭时不会重复提交 cancellation。`C-c C-k` 是所有 Result Buffer 的停止入口。
 refresh action 根据 producer state 显示为 Refresh、Restart、Retry 或 Run again；命令
-身份保持为 `buffer-item.refresh`，领域 mode 不需要复制状态分支。
+身份保持为 `buffer-item.refresh`，领域 mode 不需要复制状态分支。每次进入 `running`
+状态建立新的 producer generation，并重置该 Buffer 的停止握手，使停止后的重试仍可
+再次取消。
 LSP xref producer 按 source View 跟踪 pending request。刷新先发送
 `$/cancelRequest` 终止同一来源的旧请求，再建立新 generation；迟到响应不改变当前
 Result Buffer。停止命令只结束当前请求，保留已经呈现的 reference 条目。
