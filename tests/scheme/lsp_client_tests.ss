@@ -1972,6 +1972,10 @@
          'xref-results-mode)
     (eq? (buffer-result-producer-state pending-reference-results-buffer)
          'running)
+    (memq
+      'stop
+      (map result-panel-action-name
+        (buffer-result-panel-actions pending-reference-results-buffer)))
     (exists
       (lambda (range) (eq? (caddr range) 'info))
       (buffer-text-property-ranges
@@ -2210,12 +2214,44 @@
         (command-effect-payload (car successful-reference-refresh-effects))))))
 (define latest-reference-refresh-effects
   (editor-execute-command! editor 'buffer-item.refresh))
+(define successful-reference-cancel-effect
+  (find
+    (lambda (effect)
+      (equal? (effect-method effect) "$/cancelRequest"))
+    latest-reference-refresh-effects))
+(define latest-reference-refresh-effect
+  (find
+    (lambda (effect)
+      (equal? (effect-method effect) "textDocument/references"))
+    latest-reference-refresh-effects))
 (define latest-reference-refresh-message
-  (car
-    (lsp-json-rpc-decode!
-      (make-lsp-json-rpc-decoder)
-      (managed-process-write-request-data
-        (command-effect-payload (car latest-reference-refresh-effects))))))
+  (and
+    latest-reference-refresh-effect
+    (car
+      (lsp-json-rpc-decode!
+        (make-lsp-json-rpc-decoder)
+        (managed-process-write-request-data
+          (command-effect-payload latest-reference-refresh-effect))))))
+(define successful-reference-cancel-message
+  (and
+    successful-reference-cancel-effect
+    (car
+      (lsp-json-rpc-decode!
+        (make-lsp-json-rpc-decoder)
+        (managed-process-write-request-data
+          (command-effect-payload successful-reference-cancel-effect))))))
+(check
+  (and
+    latest-reference-refresh-message
+    successful-reference-cancel-message
+    (equal?
+      (json-object-ref
+        (json-object-ref successful-reference-cancel-message "params" #f)
+        "id"
+        #f)
+      (json-object-ref successful-reference-refresh-message "id" #f)))
+  "a superseding xref refresh did not cancel the pending LSP request"
+  latest-reference-refresh-effects)
 (lsp-client-handle-json-message!
   editor session
   (make-json-object

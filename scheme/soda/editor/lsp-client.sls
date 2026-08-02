@@ -2924,6 +2924,54 @@
                   (if item (cons item items) items)))))
         '()))
 
+  (define (lsp-xref-request-for-origin? request origin-view-id)
+    (let ([context (lsp-client-pending-request-context request)])
+      (and
+        (string=?
+          (lsp-client-pending-request-method request)
+          "textDocument/references")
+        (lsp-xref-request-context? context)
+        (= (lsp-xref-request-context-origin-view-id context)
+           origin-view-id))))
+
+  (define (cancel-lsp-xref-requests!
+            editor origin-view-id reason)
+    (let-values
+      ([(ids sessions)
+        (hashtable-entries
+          (lsp-client-registry-sessions (editor-lsp-registry editor)))])
+      (let loop ([index 0] [effects '()])
+        (if (= index (vector-length sessions))
+            (reverse effects)
+            (let* ([session (vector-ref sessions index)]
+                   [cancelled
+                     (terminate-pending-requests!
+                       editor
+                       session
+                       reason
+                       (eq? (lsp-client-session-state session) 'ready)
+                       (lambda (request)
+                         (lsp-xref-request-for-origin?
+                           request origin-view-id)))])
+              (loop
+                (+ index 1)
+                (append (reverse cancelled) effects)))))))
+
+  (define (cancel-lsp-xref-command context)
+    (let ([origin-view-id (command-context-argument context)])
+      (unless
+        (and (integer? origin-view-id)
+             (exact? origin-view-id)
+             (positive? origin-view-id))
+        (assertion-violation
+          'lsp.cancel-xref
+          "expected an origin View id"
+          origin-view-id))
+      (cancel-lsp-xref-requests!
+        (command-context-editor context)
+        origin-view-id
+        'user-cancelled)))
+
   (define (xref-result-buffer-for-context editor context)
     (and
       (lsp-xref-request-context? context)
@@ -2984,7 +3032,9 @@
                        editor
                        locations
                        origin-view-id
-                       (lsp-xref-refresh-procedure origin-view-id))])
+                       (lsp-xref-refresh-procedure origin-view-id)
+                       'lsp.cancel-xref
+                       origin-view-id)])
               (editor-set-current-location-list!
                 editor (if (null? items) #f locations))
               (editor-set-status-message!
@@ -3013,15 +3063,16 @@
       '()))
 
   (define (cancel-lsp-xref-request editor session reason context)
-    (let ([buffer (xref-result-buffer-for-context editor context)])
-      (when buffer
-        (editor-finish-result-producer!
-          editor
-          buffer
-          'cancelled
-          "LSP reference request cancelled."
-          'warning))
-      '()))
+    (unless (eq? reason 'superseded)
+      (let ([buffer (xref-result-buffer-for-context editor context)])
+        (when buffer
+          (editor-finish-result-producer!
+            editor
+            buffer
+            'cancelled
+            "LSP reference request cancelled."
+            'warning))))
+    '())
 
   (define lsp-find-references-at-view!
     (case-lambda
@@ -3029,12 +3080,16 @@
        (lsp-find-references-at-view! editor view #f)]
       [(editor view result-buffer)
        (let* ([origin-view-id (view-id view)]
+              [cancel-effects
+                (cancel-lsp-xref-requests!
+                  editor origin-view-id 'superseded)]
               [refresh
                 (lsp-xref-refresh-procedure origin-view-id)]
               [request-buffer
                 (or result-buffer
                     (editor-begin-xref-results!
-                      editor origin-view-id refresh))]
+                      editor origin-view-id refresh
+                      'lsp.cancel-xref origin-view-id))]
               [request-context
                 (begin-lsp-xref-request! editor view request-buffer)]
               [effects
@@ -3058,7 +3113,7 @@
              'failed
              "No ready language server at point."
              'error))
-         effects)]))
+         (append cancel-effects effects))]))
 
   (define (lsp-find-references! editor)
     (lsp-find-references-at-view! editor (editor-active-view editor)))
@@ -4356,6 +4411,12 @@
                     (command-context-editor context) "No language server is active")
                   '()))))
         "Stop the language server selected by the active view."))
+    (editor-register-internal-command!
+      editor
+      (make-internal-context-command
+        'lsp.cancel-xref
+        cancel-lsp-xref-command
+        "Cancel pending reference requests for an Xref source View."))
     (editor-register-internal-command!
       editor
       (make-internal-context-command

@@ -100,7 +100,7 @@
     editor)
 
   (define (%editor-show-xref-results!
-            editor locations origin-view-id refresh)
+            editor locations origin-view-id refresh close-command close-argument)
     (unless (and (location-list? locations)
                  (or (not refresh) (procedure? refresh)))
       (assertion-violation
@@ -113,7 +113,7 @@
              (editor-open-result-buffer!
                editor "*Xref*" 'xref-results-mode
                "References" presentation origin-view-id
-               'xref #f #f)])
+               'xref close-command close-argument)])
       (editor-set-current-location-list! editor presentation)
       (editor-append-location-results!
         editor buffer (location-list-items locations))
@@ -127,36 +127,45 @@
           buffer "Edit reference targets"))
       buffer))
 
-  (define (editor-begin-xref-results! editor origin-view-id refresh)
-    (unless (and (editor? editor)
-                 (integer? origin-view-id) (exact? origin-view-id)
-                 (positive? origin-view-id)
-                 (procedure? refresh))
-      (assertion-violation
-        'editor-begin-xref-results!
-        "expected an Editor, origin View id, and refresh procedure"
-        editor origin-view-id refresh))
-    (let* ([locations (make-location-list 'lsp-references '())]
-           [buffer
-             (editor-open-result-buffer!
-               editor "*Xref*" 'xref-results-mode
-               "References" locations origin-view-id
-               'xref #f #f)])
-      (editor-set-current-location-list! editor locations)
-      (buffer-set-result-refresh! buffer refresh)
-      (buffer-enable-result-edit-action!
-        buffer "Edit reference targets")
-      (buffer-set-result-producer-state! buffer 'running)
-      (editor-append-result-message!
-        editor buffer "Searching references..." 'info)
-      buffer))
+  (define editor-begin-xref-results!
+    (case-lambda
+      [(editor origin-view-id refresh)
+       (editor-begin-xref-results!
+         editor origin-view-id refresh #f #f)]
+      [(editor origin-view-id refresh close-command close-argument)
+       (unless (and (editor? editor)
+                    (integer? origin-view-id) (exact? origin-view-id)
+                    (positive? origin-view-id)
+                    (procedure? refresh)
+                    (or (not close-command) (symbol? close-command)))
+         (assertion-violation
+           'editor-begin-xref-results!
+           "invalid Xref producer request"
+           editor origin-view-id refresh close-command))
+       (let* ([locations (make-location-list 'lsp-references '())]
+              [buffer
+                (editor-open-result-buffer!
+                  editor "*Xref*" 'xref-results-mode
+                  "References" locations origin-view-id
+                  'xref close-command close-argument)])
+         (editor-set-current-location-list! editor locations)
+         (buffer-set-result-refresh! buffer refresh)
+         (buffer-enable-result-edit-action!
+           buffer "Edit reference targets")
+         (buffer-set-result-producer-state! buffer 'running)
+         (editor-append-result-message!
+           editor buffer "Searching references..." 'info)
+         buffer)]))
 
   (define editor-show-xref-results!
     (case-lambda
       [(editor locations origin-view-id)
        (%editor-show-xref-results!
-         editor locations origin-view-id #f)]
+         editor locations origin-view-id #f #f #f)]
       [(editor locations origin-view-id refresh)
        (%editor-show-xref-results!
-         editor locations origin-view-id refresh)]))
+         editor locations origin-view-id refresh #f #f)]
+      [(editor locations origin-view-id refresh close-command close-argument)
+       (%editor-show-xref-results!
+         editor locations origin-view-id refresh close-command close-argument)]))
 )
