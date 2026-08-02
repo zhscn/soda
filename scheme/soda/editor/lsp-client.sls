@@ -2903,43 +2903,12 @@
               #f)])
       (or (eq? capability #t) (json-object? capability))))
 
-  (define (document-symbol-location document value)
-    (and
-      (json-object? value)
-      (let ([range
-              (or (json-object-ref value "selectionRange" #f)
-                  (json-object-ref value "range" #f))])
-        (and
-          (json-object? range)
-          (make-json-object
-            (list
-              (cons "uri" (lsp-client-document-uri document))
-              (cons "range" range)))))))
-
   (define (lsp-document-symbol-items editor document result)
-    (define (walk value items)
-      (if (not (json-object? value))
-          items
-          (let* ([location
-                   (or
-                     (json-object-ref value "location" #f)
-                     (document-symbol-location document value))]
-                 [item (lsp-location-item editor location)]
-                 [with-item (if item (cons item items) items)]
-                 [children (json-object-ref value "children" #f)])
-            (if (json-array? children)
-                (fold-left
-                  (lambda (collected child) (walk child collected))
-                  with-item
-                  (json-array-values children))
-                with-item))))
-    (if (json-array? result)
-        (reverse
-          (fold-left
-            (lambda (items value) (walk value items))
-            '()
-            (json-array-values result)))
-        '()))
+    (decode-lsp-document-symbol-items
+      (lambda (resource)
+        (editor-buffer-for-resource editor resource))
+      (lsp-client-document-uri document)
+      result))
 
   (define (lsp-document-symbols! editor)
     (let* ([view (editor-active-view editor)]
@@ -2994,20 +2963,10 @@
             '()))))
 
   (define (lsp-workspace-symbol-items editor value)
-    (if (json-array? value)
-        (let loop ([symbols (json-array-values value)] [items '()])
-          (if (null? symbols)
-              (reverse items)
-              (let* ([symbol (car symbols)]
-                     [location
-                       (and
-                         (json-object? symbol)
-                         (json-object-ref symbol "location" #f))]
-                     [item (lsp-location-item editor location)])
-                (loop
-                  (cdr symbols)
-                  (if item (cons item items) items)))))
-        '()))
+    (decode-lsp-workspace-symbol-items
+      (lambda (resource)
+        (editor-buffer-for-resource editor resource))
+      value))
 
   (define (lsp-workspace-symbol! editor query)
     (let ([session (active-view-lsp-session editor)]

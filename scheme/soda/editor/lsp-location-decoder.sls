@@ -1,7 +1,9 @@
 (library (soda editor lsp-location-decoder)
   (export lsp-first-location
           decode-lsp-location-item
-          decode-lsp-location-items)
+          decode-lsp-location-items
+          decode-lsp-document-symbol-items
+          decode-lsp-workspace-symbol-items)
   (import (rnrs)
           (soda editor buffer)
           (soda editor file)
@@ -99,4 +101,56 @@
                    (loop
                      (cdr locations)
                      (if item (cons item items) items)))))
-           '())])))
+           '())]))
+
+  (define (document-symbol-location document-uri value)
+    (and
+      (json-object? value)
+      (let ([range
+              (or (json-object-ref value "selectionRange" #f)
+                  (json-object-ref value "range" #f))])
+        (and
+          (json-object? range)
+          (make-json-object
+            (list
+              (cons "uri" document-uri)
+              (cons "range" range)))))))
+
+  (define (decode-lsp-document-symbol-items
+            buffer-for-resource document-uri value)
+    (define (walk items value)
+      (if (not (json-object? value))
+          items
+          (let* ([location
+                   (or
+                     (json-object-ref value "location" #f)
+                     (document-symbol-location document-uri value))]
+                 [item
+                   (decode-lsp-location-item buffer-for-resource location)]
+                 [with-item (if item (cons item items) items)]
+                 [children (json-object-ref value "children" #f)])
+            (if (json-array? children)
+                (fold-left walk with-item (json-array-values children))
+                with-item))))
+    (if (json-array? value)
+        (reverse
+          (fold-left walk '() (json-array-values value)))
+        '()))
+
+  (define (decode-lsp-workspace-symbol-items buffer-for-resource value)
+    (if (json-array? value)
+        (let loop ([symbols (json-array-values value)] [items '()])
+          (if (null? symbols)
+              (reverse items)
+              (let* ([symbol (car symbols)]
+                     [location
+                       (and
+                         (json-object? symbol)
+                         (json-object-ref symbol "location" #f))]
+                     [item
+                       (decode-lsp-location-item
+                         buffer-for-resource location)])
+                (loop
+                  (cdr symbols)
+                  (if item (cons item items) items)))))
+        '())))
