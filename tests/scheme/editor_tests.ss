@@ -8011,6 +8011,48 @@
       (error 'editor-tests
              "fzf score escaped its completion style tier"))))
 
+(define (case-choice-source options)
+  (make-choice-source
+    'fzf-case-test
+    options
+    (lambda (input point) (cons 0 point))
+    (lambda (query)
+      (list
+        (make-completion-item
+          'camel-case
+          'fzf-case-test
+          "CamelCase"
+          "CamelCase"
+          "CamelCase"
+          #f
+          #f
+          'camel-case)))
+    (lambda (value) #f)
+    (lambda (generation) #f)))
+(let ([session
+        (make-completion-session
+          940
+          (make-prompt-completion-target 940 0 0)
+          (case-choice-source
+            '((category . fzf-case-test)
+              (styles . (fzf)))))])
+  (completion-session-refresh! session "cc")
+  (unless (= (length (completion-session-items session)) 1)
+    (error 'editor-tests
+           "fzf completion was not case-insensitive by default")))
+(let ([session
+        (make-completion-session
+          941
+          (make-prompt-completion-target 941 0 0)
+          (case-choice-source
+            '((category . fzf-case-test)
+              (styles . (fzf))
+              (ignore-case . #f))))])
+  (completion-session-refresh! session "cc")
+  (unless (null? (completion-session-items session))
+    (error 'editor-tests
+           "explicit case-sensitive fzf completion was ignored")))
+
 (let* ([source
          (make-choice-source
            'malformed-provider-test

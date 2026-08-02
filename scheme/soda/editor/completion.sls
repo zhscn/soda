@@ -902,15 +902,23 @@
          style)]))
 
   (define (match-item source query item)
-    (let* ([ignore-case?
-             (choice-source-option source 'ignore-case #f)]
-           [styles
-             (choice-source-option source 'styles '(prefix))])
+    (let* ([styles
+             (choice-source-option source 'styles '(prefix))]
+           [ignore-case?
+             (choice-source-option
+               source
+               'ignore-case
+               (and (memq 'fzf styles) #t))])
       (unless (and (list? styles) (for-all symbol? styles))
         (assertion-violation
           'completion-session-refresh!
           "completion styles must be a list of symbols"
           styles))
+      (unless (boolean? ignore-case?)
+        (assertion-violation
+          'completion-session-refresh!
+          "ignore-case metadata must be a boolean"
+          ignore-case?))
       (let loop ([remaining styles])
         (and
           (pair? remaining)
