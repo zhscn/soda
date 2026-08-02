@@ -58,6 +58,9 @@ function(soda_embed_chez_application target)
   set(api_index_cache "${generated_dir}/scheme-api-index.cache")
   set(chez_boot_c "${generated_dir}/soda_chez_boot.c")
   set(editor_boot_c "${generated_dir}/soda_editor_boot.c")
+  set(editor_boot_program_so "${editor_boot}.program.so")
+  set(editor_boot_program_wpo "${editor_boot}.program.wpo")
+  set(editor_boot_whole_so "${editor_boot}.whole.so")
 
   add_custom_command(
     OUTPUT
@@ -125,6 +128,9 @@ function(soda_embed_chez_application target)
       "${PROJECT_SOURCE_DIR}/cmake/generate-scheme-api-index.ss"
       ${SODA_CHEZ_SOURCES}
     BYPRODUCTS
+      "${editor_boot_program_so}"
+      "${editor_boot_program_wpo}"
+      "${editor_boot_whole_so}"
       "${api_index_cache}"
     COMMENT "Compiling and embedding the Soda editor boot image"
     VERBATIM
