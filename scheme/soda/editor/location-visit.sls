@@ -62,6 +62,13 @@
                 (buffer-revision buffer)))
             (editor-jump-view-to-buffer!
               editor view buffer (location-item-start item) kind)
+            (when (location-item-language-context item)
+              (editor-set-view-resource-context!
+                editor
+                (view-id view)
+                (resource-context-with-language-context
+                  (editor-view-resource-context editor (view-id view))
+                  (location-item-language-context item))))
             (view-set-navigation-target!
               view
               (location-item-start item)

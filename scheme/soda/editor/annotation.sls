@@ -18,6 +18,7 @@
           annotation-set-document-id
           annotation-set-source-revision
           annotation-set-generation
+          annotation-set-language-context
           annotation-set-annotations
           annotation-set-closed?
           annotation-set-stale?
@@ -46,6 +47,7 @@
             source-revision
             source-size
             generation
+            language-context
             document
             entries
             decoration-index
@@ -234,7 +236,8 @@
             source-revision
             generation
             annotations
-            display-stale?)
+            display-stale?
+            language-context)
     (unless (buffer? buffer)
       (assertion-violation
         'make-buffer-annotation-set
@@ -312,6 +315,7 @@
             source-revision
             size
             generation
+            language-context
             document
             (reverse entries)
             (make-decoration-index
@@ -332,10 +336,16 @@
     (case-lambda
       [(buffer namespace source-revision generation annotations)
        (make-buffer-annotation-set/internal
-         buffer namespace source-revision generation annotations #f)]
+         buffer namespace source-revision generation annotations #f #f)]
       [(buffer namespace source-revision generation annotations display-stale?)
        (make-buffer-annotation-set/internal
-         buffer namespace source-revision generation annotations display-stale?)]))
+         buffer namespace source-revision generation annotations
+         display-stale? #f)]
+      [(buffer namespace source-revision generation annotations display-stale?
+               language-context)
+       (make-buffer-annotation-set/internal
+         buffer namespace source-revision generation annotations
+         display-stale? language-context)]))
 
   (define (require-open-set who value)
     (unless (annotation-set? value)
@@ -439,7 +449,7 @@
                   (cdr range))
                 (annotation-message annotation)
                 annotation
-                #f)))
+                (annotation-set-language-context value))))
           (annotation-set-entries value))))
 
   (define (annotation-set-close! value)

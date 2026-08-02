@@ -225,8 +225,11 @@ producer 的 active session 也按 Workbench 隔离，因此一个 Workbench 中
 Workbench MRU 中所有 Buffer 的 diagnostic annotation provider。Scheme environment
 存在时，同一列表还合并尚未打开的静态索引诊断。聚合按 resource、range、severity、
 origin、code 和 message 去重并稳定排序，因此 Scheme 的 live annotation 与后台索引
-不会产生重复行，LSP 与其他 provider 仍保留各自 payload 供 code action 使用。severity
-filter、refresh、location preview 和 ResultAction 对两种作用域使用同一实现。
+不会产生重复行。annotation set 把 provider 的 LanguageAttachment provenance 传给每个
+LocationItem；跨 Buffer preview 会在目标 View 应用该上下文，LSP code action 因而根据
+诊断所属的目标 Buffer 和 session 发起，而不依赖打开结果面板时的源 View。LSP 与其他
+provider 仍保留各自 payload。severity filter、refresh、location preview 和
+ResultAction 对两种作用域使用同一实现。
 
 LocationList 的 index 与 Result Buffer 当前 item 同步，用于语义 API 和 session 数据。
 从任意 Result Buffer 激活或预览位置时，该列表同时成为所在 Workbench 的 current

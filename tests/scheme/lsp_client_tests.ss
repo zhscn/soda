@@ -916,6 +916,94 @@
   (eq? (view-buffer (editor-active-view editor)) source)
   "closing diagnostics did not restore its source view")
 
+(define sibling-diagnostic-value
+  (make-json-object
+    (list
+      (cons "range" diagnostic-range)
+      (cons "severity" 2)
+      (cons "message" "invalid sibling declaration"))))
+(lsp-client-handle-json-message!
+  editor session
+  (make-json-object
+    (list
+      (cons "jsonrpc" "2.0")
+      (cons "method" "textDocument/publishDiagnostics")
+      (cons
+        "params"
+        (make-json-object
+          (list
+            (cons "uri" "file:///workspace/src/sibling.cpp")
+            (cons
+              "diagnostics"
+              (make-json-array (list sibling-diagnostic-value)))))))))
+(editor-execute-command! editor 'diagnostics.list-workspace)
+(define workspace-diagnostic-view (editor-active-view editor))
+(define workspace-diagnostic-buffer (view-buffer workspace-diagnostic-view))
+(define sibling-diagnostic-range
+  (find
+    (lambda (range)
+      (let ([item
+              (buffer-text-property-ref
+                workspace-diagnostic-buffer
+                (car range)
+                'result-item
+                #f)])
+        (and
+          item
+          (string=?
+            (location-item-resource item)
+            "/workspace/src/sibling.cpp"))))
+    (buffer-text-property-ranges
+      workspace-diagnostic-buffer 'result-index)))
+(check
+  sibling-diagnostic-range
+  "Workbench diagnostics omitted a sibling LSP diagnostic")
+(view-set-caret! workspace-diagnostic-view (car sibling-diagnostic-range))
+(check
+  (memq
+    'code-actions
+    (map
+      result-action-name
+      (buffer-result-actions-at
+        workspace-diagnostic-buffer
+        (view-caret workspace-diagnostic-view))))
+  "a sibling diagnostic lost its LSP code-action provenance")
+(define sibling-diagnostic-action-effects
+  (invoke-buffer-item-action
+    (make-command-context
+      editor workspace-diagnostic-view #f #f #f)
+    'code-actions))
+(define sibling-diagnostic-action-message
+  (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload
+          (car sibling-diagnostic-action-effects))))))
+(check
+  (and
+    (= (length sibling-diagnostic-action-effects) 1)
+    (string=?
+      (json-object-ref sibling-diagnostic-action-message "method" #f)
+      "textDocument/codeAction")
+    (string=?
+      (json-object-ref
+        (json-object-ref
+          (json-object-ref sibling-diagnostic-action-message "params" #f)
+          "textDocument"
+          #f)
+        "uri"
+        #f)
+      "file:///workspace/src/sibling.cpp"))
+  "Workbench diagnostic code actions used the origin Buffer language route")
+(editor-execute-command! editor 'buffer-item.quit)
+(editor-set-view-buffer!
+  editor
+  (view-id (editor-active-view editor))
+  (buffer-id source))
+(editor-set-view-language-attachment!
+  editor (view-id (editor-active-view editor)) attachment)
+
 (view-set-caret! (editor-active-view editor) 12)
 (define hover-effects
   (editor-execute-command! editor 'lsp.hover))

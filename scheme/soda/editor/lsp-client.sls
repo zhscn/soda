@@ -1002,7 +1002,14 @@
                           (if annotation
                               (cons annotation (loop (cdr values) (+ index 1)))
                               (loop (cdr values) (+ index 1))))))
-                    #t)))))))))
+                    #t
+                    (let ([attachment
+                            (session-buffer-attachment
+                              editor session buffer)])
+                      (and
+                        attachment
+                        (make-view-language-context
+                          (language-attachment-id attachment)))))))))))))
 
   (define (lsp-request-diagnostics-for-buffer!
             editor session buffer document revision)
@@ -4088,51 +4095,66 @@
       (lsp-request-code-actions-at-view!
         editor view (lsp-code-action-range view))))
 
-  (define (diagnostic-result-origin-view editor result-buffer item)
-    (let ([origin-view-id
-            (buffer-local-ref
-              result-buffer 'diagnostic-origin-view-id #f)]
-          [target-buffer-id (location-item-buffer-id item)])
+  (define (diagnostic-item-lsp-session editor item)
+    (let ([target-buffer-id (location-item-buffer-id item)]
+          [language-context (location-item-language-context item)])
       (and
-        origin-view-id
         target-buffer-id
+        (view-language-context? language-context)
         (guard (condition [else #f])
-          (let* ([view (editor-view-ref editor origin-view-id)]
-                 [buffer (view-buffer view)]
-                 [session (view-lsp-session editor view)])
+          (let* ([buffer (editor-buffer-ref editor target-buffer-id)]
+                 [attachment
+                   (language-session-registry-attachment-ref
+                     (editor-language-session-registry editor)
+                     (view-language-context-attachment-id language-context))]
+                 [language-session
+                   (language-session-registry-session-ref
+                     (editor-language-session-registry editor)
+                     (language-attachment-session-id attachment))]
+                 [session
+                   (editor-lsp-session-for-language-session
+                     editor language-session)])
             (and
-              (= (buffer-id buffer) target-buffer-id)
+              (= (language-attachment-buffer-id attachment)
+                 target-buffer-id)
               (= (buffer-revision buffer)
                  (location-item-revision item))
               session
               (eq? (lsp-client-session-state session) 'ready)
               (find-document session target-buffer-id)
-              view))))))
+              session))))))
 
   (define (lsp-diagnostic-result-item? editor result-buffer item)
     (let ([metadata (location-item-metadata item)])
       (and
         (annotation? metadata)
         (json-object? (annotation-payload metadata))
-        (diagnostic-result-origin-view
-          editor result-buffer item))))
+        (diagnostic-item-lsp-session editor item))))
 
   (define (invoke-lsp-diagnostic-code-actions
             editor context result-buffer item index)
-    (let ([view
-            (diagnostic-result-origin-view
-              editor result-buffer item)])
-      (unless view
+    (let* ([session (diagnostic-item-lsp-session editor item)]
+           [view
+             (guard (condition [else #f])
+               (editor-view-ref
+                 editor
+                 (editor-result-origin-view-id
+                   editor (command-context-view context))))])
+      (unless (and session view)
         (editor-user-error
           'lsp.code-actions
           "The diagnostic source no longer has a ready language server"))
-      (view-set-caret! view (location-item-start item))
-      (view-set-navigation-target!
-        view
-        (location-item-start item)
-        (location-item-end item)
-        'diagnostic)
-      (ensure-view-visible! view)
+      (let ([visit-effects
+              (editor-visit-location-item!
+                editor view item 'diagnostic 'jump)])
+        (when (pair? visit-effects)
+          (editor-user-error
+            'lsp.code-actions
+            "The diagnostic source Buffer is not available")))
+      (unless (eq? (view-lsp-session editor view) session)
+        (editor-user-error
+          'lsp.code-actions
+          "The diagnostic language session is no longer attached"))
       (lsp-request-code-actions-at-view!
         editor
         view
