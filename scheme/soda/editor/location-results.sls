@@ -387,6 +387,7 @@
            [origin-view
              (editor-view-ref
                editor (location-results-state-origin-view-id state))])
+      (editor-set-current-location-list! editor locations)
       (location-list-set-index! locations index)
       (editor-visit-location-item!
         editor

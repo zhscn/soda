@@ -4643,6 +4643,8 @@
     (error 'editor-tests "Scheme xref did not publish references")))
 (define xref-results-buffer
   (view-buffer (editor-active-view xref-editor)))
+(define xref-results-locations
+  (editor-current-location-list xref-editor))
 (let* ([view (editor-active-view xref-editor)]
        [group
          (car
@@ -4892,6 +4894,9 @@
                       xref-results-buffer position size)])
               (loop (if (> next position) next (+ position 1)))))))))
   (error 'editor-tests "location results did not append attributed text"))
+(editor-set-current-location-list!
+  xref-editor
+  (make-location-list 'newer-result-panel '()))
 (view-set-caret! (editor-active-view xref-editor) 0)
 (editor-update!
   xref-editor
@@ -4901,6 +4906,7 @@
        [target (view-navigation-target xref-view)])
   (unless
     (and
+      (eq? locations xref-results-locations)
       (= (location-list-index locations) 0)
       (= (view-caret xref-view) 8)
       target

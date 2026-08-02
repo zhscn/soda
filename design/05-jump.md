@@ -210,8 +210,10 @@ Result Buffer 的会话身份由基础 resource 名称和 source View 所属 Wor
 producer 的 active session 也按 Workbench 隔离，因此一个 Workbench 中的刷新只取消
 该 Workbench 的旧任务。
 
-LocationList 的 index 与 Result Buffer 当前 item 同步，用于语义 API 和 session 数据，
-但不承担 point、Window 或 preview 生命周期。
+LocationList 的 index 与 Result Buffer 当前 item 同步，用于语义 API 和 session 数据。
+从任意 Result Buffer 激活或预览位置时，该列表同时成为所在 Workbench 的 current
+LocationList；在多个 xref、搜索或诊断面板之间往返不会留下另一个 producer 的列表。
+LocationList 不承担 point、Window 或 preview 生命周期。
 
 Editable projection 使用 DocumentAnchor 标记 Result Buffer 中允许修改的区间，并把每个
 区间关联到领域 source。编辑 guard 只允许修改完整落在 projection 内的文本。接受操作
