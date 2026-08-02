@@ -25,6 +25,7 @@
           pointer-event-modifier?
           input-event?)
   (import (rnrs)
+          (soda editor bytevector)
           (soda editor event))
 
   (define-record-type (input-decoder %make-input-decoder input-decoder?)
@@ -55,11 +56,6 @@
            [output (make-bytevector (+ left-size right-size))])
       (bytevector-copy! left 0 output 0 left-size)
       (bytevector-copy! right 0 output left-size right-size)
-      output))
-
-  (define (bytevector-slice bytes start end)
-    (let ([output (make-bytevector (- end start))])
-      (bytevector-copy! bytes start output 0 (- end start))
       output))
 
   (define (single-byte value)
