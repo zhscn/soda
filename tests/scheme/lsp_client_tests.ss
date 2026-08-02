@@ -856,6 +856,66 @@
     (string=? (annotation-message (car lsp-annotations)) "invalid prefix"))
   "publishDiagnostics did not publish an LSP diagnostic annotation")
 
+(editor-execute-command! editor 'diagnostics.list)
+(define lsp-diagnostic-results-view (editor-active-view editor))
+(define lsp-diagnostic-results-buffer
+  (view-buffer lsp-diagnostic-results-view))
+(check
+  (and
+    (eq? (buffer-major-mode-name lsp-diagnostic-results-buffer)
+         'diagnostics-mode)
+    (memq
+      'code-actions
+      (map
+        result-action-name
+        (buffer-result-actions-at
+          lsp-diagnostic-results-buffer
+          (view-caret lsp-diagnostic-results-view)))))
+  "LSP diagnostics did not expose code actions in the result Buffer")
+(define diagnostic-code-action-effects
+  (invoke-buffer-item-action
+    (make-command-context
+      editor lsp-diagnostic-results-view #f #f #f)
+    'code-actions))
+(define diagnostic-code-action-message
+  (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload
+          (car diagnostic-code-action-effects))))))
+(define diagnostic-code-action-params
+  (json-object-ref diagnostic-code-action-message "params" #f))
+(define diagnostic-code-action-range
+  (json-object-ref diagnostic-code-action-params "range" #f))
+(define diagnostic-code-action-start
+  (json-object-ref diagnostic-code-action-range "start" #f))
+(define diagnostic-code-action-end
+  (json-object-ref diagnostic-code-action-range "end" #f))
+(check
+  (and
+    (= (length diagnostic-code-action-effects) 1)
+    (string=?
+      (json-object-ref diagnostic-code-action-message "method" #f)
+      "textDocument/codeAction")
+    (= (json-object-ref diagnostic-code-action-start "line" #f) 0)
+    (= (json-object-ref diagnostic-code-action-start "character" #f) 0)
+    (= (json-object-ref diagnostic-code-action-end "line" #f) 0)
+    (= (json-object-ref diagnostic-code-action-end "character" #f) 3)
+    (=
+      (length
+        (json-array-values
+          (json-object-ref
+            (json-object-ref diagnostic-code-action-params "context" #f)
+            "diagnostics"
+            #f)))
+      1))
+  "diagnostic code action did not preserve the selected diagnostic range")
+(editor-execute-command! editor 'buffer-item.quit)
+(check
+  (eq? (view-buffer (editor-active-view editor)) source)
+  "closing diagnostics did not restore its source view")
+
 (view-set-caret! (editor-active-view editor) 12)
 (define hover-effects
   (editor-execute-command! editor 'lsp.hover))

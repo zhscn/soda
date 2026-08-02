@@ -1,5 +1,6 @@
 (library (soda editor diagnostics)
   (export install-diagnostic-commands!
+          editor-register-diagnostic-result-action!
           editor-refresh-scheme-diagnostics!)
   (import (rnrs)
           (only (chezscheme) make-weak-eq-hashtable)
@@ -31,6 +32,31 @@
 
   (define published-presentation-policies
     (make-weak-eq-hashtable))
+
+  (define editor-diagnostic-result-actions
+    (make-weak-eq-hashtable))
+
+  (define (editor-register-diagnostic-result-action! editor action)
+    (unless (and (editor? editor) (result-action? action))
+      (assertion-violation
+        'editor-register-diagnostic-result-action!
+        "expected an Editor and ResultAction"
+        editor action))
+    (let ([current
+            (hashtable-ref
+              editor-diagnostic-result-actions editor '())])
+      (hashtable-set!
+        editor-diagnostic-result-actions
+        editor
+        (cons
+          action
+          (filter
+            (lambda (candidate)
+              (not
+                (eq? (result-action-name candidate)
+                     (result-action-name action))))
+            current))))
+    action)
 
   (define (scheme-annotation-id diagnostic)
     (list
@@ -523,6 +549,7 @@
              (diagnostic-items-for-severities items severities)]
            [presented-items (map diagnostic-display-item visible-items)])
       (buffer-set-local! buffer 'diagnostic-source-items items)
+      (buffer-set-local! buffer 'diagnostic-origin-view-id origin-view-id)
       (buffer-set-local!
         buffer 'diagnostic-visible-severities severities)
       (editor-set-current-location-list!
@@ -540,6 +567,12 @@
         (buffer-set-result-refresh! buffer refresh))
       (editor-finish-result-producer! editor buffer 'ready)
       (decorate-diagnostic-results! buffer)
+      (for-each
+        (lambda (action)
+          (buffer-register-result-action! buffer action))
+        (reverse
+          (hashtable-ref
+            editor-diagnostic-result-actions editor '())))
       (register-diagnostic-filter-actions!
         editor buffer resource title source origin-view-id refresh)))
 

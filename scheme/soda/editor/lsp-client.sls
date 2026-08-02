@@ -42,6 +42,7 @@
           (soda editor completion)
           (soda editor completion-provider)
           (soda editor condition)
+          (soda editor diagnostics)
           (soda editor effect)
           (soda editor event)
           (soda editor file)
@@ -3955,12 +3956,10 @@
                    (lsp-code-action-title action))
                  '())))])))
 
-  (define (lsp-request-code-actions! editor)
-    (let* ([view (editor-active-view editor)]
-           [buffer (view-buffer view)]
-           [session (active-view-lsp-session editor)]
+  (define (lsp-request-code-actions-at-view! editor view range)
+    (let* ([buffer (view-buffer view)]
+           [session (view-lsp-session editor view)]
            [document (and session (find-document session (buffer-id buffer)))]
-           [range (lsp-code-action-range view)]
            [start (lsp-buffer-position-at buffer (car range))]
            [end (lsp-buffer-position-at buffer (cdr range))])
       (if (and session
@@ -4028,6 +4027,62 @@
             (editor-set-status-message! editor "No ready language server at point")
             '()))))
 
+  (define (lsp-request-code-actions! editor)
+    (let ([view (editor-active-view editor)])
+      (lsp-request-code-actions-at-view!
+        editor view (lsp-code-action-range view))))
+
+  (define (diagnostic-result-origin-view editor result-buffer item)
+    (let ([origin-view-id
+            (buffer-local-ref
+              result-buffer 'diagnostic-origin-view-id #f)]
+          [target-buffer-id (location-item-buffer-id item)])
+      (and
+        origin-view-id
+        target-buffer-id
+        (guard (condition [else #f])
+          (let* ([view (editor-view-ref editor origin-view-id)]
+                 [buffer (view-buffer view)]
+                 [session (view-lsp-session editor view)])
+            (and
+              (= (buffer-id buffer) target-buffer-id)
+              (= (buffer-revision buffer)
+                 (location-item-revision item))
+              session
+              (eq? (lsp-client-session-state session) 'ready)
+              (find-document session target-buffer-id)
+              view))))))
+
+  (define (lsp-diagnostic-result-item? editor result-buffer item)
+    (let ([metadata (location-item-metadata item)])
+      (and
+        (annotation? metadata)
+        (json-object? (annotation-payload metadata))
+        (diagnostic-result-origin-view
+          editor result-buffer item))))
+
+  (define (invoke-lsp-diagnostic-code-actions
+            editor context result-buffer item index)
+    (let ([view
+            (diagnostic-result-origin-view
+              editor result-buffer item)])
+      (unless view
+        (editor-user-error
+          'lsp.code-actions
+          "The diagnostic source no longer has a ready language server"))
+      (view-set-caret! view (location-item-start item))
+      (view-set-navigation-target!
+        view
+        (location-item-start item)
+        (location-item-end item)
+        'diagnostic)
+      (ensure-view-visible! view)
+      (lsp-request-code-actions-at-view!
+        editor
+        view
+        (cons (location-item-start item)
+              (location-item-end item)))))
+
   (define (lsp-apply-code-action-command context)
     (let* ([editor (command-context-editor context)]
            [result (command-context-argument context)]
@@ -4089,6 +4144,17 @@
 
 
   (define (install-lsp-commands! editor)
+    (editor-register-diagnostic-result-action!
+      editor
+      (make-result-action
+        'code-actions
+        "Code actions"
+        (lambda (result-buffer item)
+          (lsp-diagnostic-result-item?
+            editor result-buffer item))
+        (lambda (context result-buffer item index)
+          (invoke-lsp-diagnostic-code-actions
+            editor context result-buffer item index))))
     (editor-register-xref-backend!
       editor
       (make-xref-backend

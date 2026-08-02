@@ -173,6 +173,12 @@ presentation 显示 severity、producer source、code 和 message；source excer
 真实 range 文本供 stale location 校验。Diagnostics Buffer 保存可见 severity 集合，
 筛选只重新投影其完整 item 集合，并在 producer refresh 后沿用，不改变 AnnotationSet。
 
+诊断域通过 `editor-register-diagnostic-result-action!` 向投影注册条目操作。操作的
+适用性由 producer 在调用时判定，列表只显示仍拥有有效 source revision、协议
+session 和目标资源的动作。LSP diagnostics 提供 `code-actions`：命令以所选
+LocationItem 的精确 range 构造 `textDocument/codeAction`，并从对应 Annotation
+payload 生成 diagnostic context。普通 Scheme diagnostics 不暴露该协议动作。
+
 ## 设计依据
 
 Emacs overlay 把元数据、显示替换、keymap 和生命周期放入同一对象，组合时容易形成
