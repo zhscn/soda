@@ -48,6 +48,23 @@
             (face-spec-background spec))
         (face-spec-attributes-add spec))))
 
+  (define (draw-inactive-cursor! frame row column theme view)
+    (let* ([cell (frame-cell-ref frame row column)]
+           [faces (append (cell-faces cell) '(cursor.inactive))])
+      (frame-put-cell!
+        frame
+        row
+        column
+        (make-cell
+          (cell-text cell)
+          (cell-width cell)
+          faces
+          (resolve-faces theme faces)
+          (cell-document-position cell)
+          (cons
+            (make-cell-source 'view (view-id view) 'inactive-cursor)
+            (cell-sources cell))))))
+
   (define (decode-text bytes)
     (utf8->string bytes))
 
@@ -1171,8 +1188,7 @@
                              display-column)])
                   (+ (rect-column text-rectangle)
                      display-column)))])
-        (if (and (editor-render-context-focused? context)
-                 cursor-row
+        (if (and cursor-row
                  cursor-column
                  (rect-contains?
                    text-rectangle
@@ -1180,18 +1196,21 @@
                    cursor-column)
                  (< cursor-row (frame-rows frame))
                  (< cursor-column (frame-columns frame)))
-            (let ([cursor
-                    (input-state-cursor
-                      (view-current-input-state view))])
-              (frame-set-cursor!
-                frame
-                cursor-row
-                cursor-column
-                (not (eq? cursor 'hidden))
-                (case cursor
-                  [(beam) 'bar]
-                  [(underline) 'underline]
-                  [else 'block])))
+            (if (editor-render-context-focused? context)
+                (let ([cursor
+                        (input-state-cursor
+                          (view-current-input-state view))])
+                  (frame-set-cursor!
+                    frame
+                    cursor-row
+                    cursor-column
+                    (not (eq? cursor 'hidden))
+                    (case cursor
+                      [(beam) 'bar]
+                      [(underline) 'underline]
+                      [else 'block])))
+                (draw-inactive-cursor!
+                  frame cursor-row cursor-column theme view))
             (when (editor-render-context-focused? context)
               (frame-set-cursor! frame 0 0 #f))))))
 

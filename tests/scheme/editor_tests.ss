@@ -4263,6 +4263,9 @@
     (and
       (string=? (cell-text (frame-cell-ref multi-window-frame 0 0))
                 "o")
+      (memq
+        'cursor.inactive
+        (cell-faces (frame-cell-ref multi-window-frame 0 0)))
       (memq 'modeline.inactive (cell-faces top-modeline))
       (memq 'modeline.active (cell-faces bottom-modeline))
       (= (length

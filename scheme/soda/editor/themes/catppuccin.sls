@@ -50,6 +50,7 @@
         (cons 'editor.background (pface 'text 'base '()))
         (cons 'editor.foreground (pface 'text 'inherit '()))
         (cons 'cursor (pface 'base 'rosewater '()))
+        (cons 'cursor.inactive (pface 'inherit 'inherit '(reverse)))
         (cons 'modeline (pface 'subtext1 'mantle '()))
         (cons 'modeline.active (pface 'inherit 'inherit '()))
         (cons 'modeline.inactive (pface 'overlay0 'mantle '()))
