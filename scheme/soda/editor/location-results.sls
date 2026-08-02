@@ -5,6 +5,7 @@
           editor-show-location-results!
           editor-append-location-results!
           editor-result-origin-view-id
+          buffer-set-location-result-close-argument!
           location-results-buffer?)
   (import (rnrs)
           (soda document)
@@ -22,16 +23,67 @@
           (soda editor location-visit)
           (soda editor result-buffer)
           (soda editor state)
+          (soda editor window)
           (soda editor window-runtime))
 
   (define-record-type location-results-state
     (fields title
             locations
-            origin-view-id
+            (mutable origin-view-id
+                     location-results-state-origin-view-id
+                     location-results-state-origin-view-id-set!)
             jump-kind
             close-command
-            close-argument
+            (mutable close-argument
+                     location-results-state-close-argument
+                     location-results-state-close-argument-set!)
             (mutable last-resource)))
+
+  (define (live-view-ref editor id)
+    (and id
+         (find
+           (lambda (view) (= (view-id view) id))
+           (editor-views editor))))
+
+  (define (location-results-origin-view
+            editor buffer state create?)
+    (or
+      (live-view-ref
+        editor (location-results-state-origin-view-id state))
+      (let* ([workbench-id (buffer-result-workbench-id buffer)]
+             [candidate
+               (find
+                 (lambda (view)
+                   (and
+                     (equal? (view-workbench-id view) workbench-id)
+                     (not (eq? (view-buffer view) buffer))
+                     (not
+                       (buffer-result-interface-ref
+                         (view-buffer view)))))
+                 (editor-views editor))])
+        (cond
+          [candidate
+           (location-results-state-origin-view-id-set!
+             state (view-id candidate))
+           candidate]
+          [create?
+           (let ([result-view
+                   (find
+                     (lambda (view) (eq? (view-buffer view) buffer))
+                     (editor-views editor))])
+             (unless result-view
+               (editor-user-error
+                 'buffer-item.activate
+                 "Result Buffer has no live source or presentation View"))
+             (editor-select-view-window! editor (view-id result-view))
+             (let* ([leaf (editor-split-window! editor 'vertical)]
+                    [view
+                      (editor-view-ref
+                        editor (window-leaf-view-id leaf))])
+               (location-results-state-origin-view-id-set!
+                 state (view-id view))
+               view))]
+          [else #f]))))
 
   (define (location-open-position item)
     (location-item-open-position item))
@@ -236,6 +288,16 @@
          (location-results-state?
            (location-results-state-for-buffer buffer))))
 
+  (define (buffer-set-location-result-close-argument! buffer argument)
+    (let ([state (location-results-state-for-buffer buffer)])
+      (unless (location-results-state? state)
+        (assertion-violation
+          'buffer-set-location-result-close-argument!
+          "expected a location Result Buffer"
+          buffer))
+      (location-results-state-close-argument-set! state argument)
+      buffer))
+
   (define (location-result-item-key buffer item index)
     (list
       (or (location-item-resource item)
@@ -248,9 +310,11 @@
     (unless (and (editor? editor) (view? view))
       (assertion-violation
         'editor-result-origin-view-id "expected an Editor and View" editor view))
-    (let ([state (location-results-state-for-buffer (view-buffer view))])
+    (let* ([buffer (view-buffer view)]
+           [state (location-results-state-for-buffer buffer)])
       (if (location-results-state? state)
-          (location-results-state-origin-view-id state)
+          (view-id
+            (location-results-origin-view editor buffer state #t))
           (view-id view))))
 
   (define (validate-result-request
@@ -381,12 +445,11 @@
       (buffer-text-property-ranges buffer 'result-index)))
 
   (define (preview-location-result!
-            context item index state display-intent)
+            context buffer item index state display-intent)
     (let* ([editor (command-context-editor context)]
            [locations (location-results-state-locations state)]
            [origin-view
-             (editor-view-ref
-               editor (location-results-state-origin-view-id state))])
+             (location-results-origin-view editor buffer state #t)])
       (editor-set-current-location-list! editor locations)
       (location-list-set-index! locations index)
       (editor-visit-location-item!
@@ -403,11 +466,11 @@
           'buffer-item.activate "Result Buffer has no location model"))
       (let* ([editor (command-context-editor context)]
              [origin-view
-               (editor-view-ref
-                 editor (location-results-state-origin-view-id state))]
+               (location-results-origin-view editor buffer state #t)]
              [effects
                (preview-location-result!
                  context
+                 buffer
                  item
                  index
                  state
@@ -428,15 +491,15 @@
           'buffer-item.quit "Result Buffer has no location model"))
       (let* ([editor (command-context-editor context)]
              [origin-view
-               (editor-view-ref
-                 editor (location-results-state-origin-view-id state))]
+               (location-results-origin-view editor buffer state #f)]
              [close-command (location-results-state-close-command state)]
              [close-argument (location-results-state-close-argument state)]
              [stop-invoked?
                (buffer-local-ref
                  buffer 'result-producer-stop-invoked? #f)])
-        (view-clear-navigation-target! origin-view)
-        (editor-select-view-window! editor (view-id origin-view))
+        (when origin-view
+          (view-clear-navigation-target! origin-view)
+          (editor-select-view-window! editor (view-id origin-view)))
         (editor-dismiss-result-buffer! editor buffer origin-view)
         (if (and close-command (not stop-invoked?))
             (list

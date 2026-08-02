@@ -5197,6 +5197,76 @@
          "restarted Result producer did not restore its stop action"))
 (editor-close! empty-xref-editor)
 
+(define orphan-result-source
+  (make-buffer
+    19830
+    (make-document "alpha beta\n" 19830)
+    "*orphan-result-source*"
+    'fundamental-mode))
+(define orphan-result-editor (make-editor orphan-result-source))
+(define orphan-result-origin
+  (editor-active-view orphan-result-editor))
+(define orphan-result-buffer
+  (editor-show-xref-results!
+    orphan-result-editor
+    (make-location-list
+      'orphan-result
+      (list
+        (make-location-item
+          (buffer-id orphan-result-source)
+          (buffer-resource orphan-result-source)
+          (buffer-revision orphan-result-source)
+          6 10 "beta" '())))
+    (view-id orphan-result-origin)))
+(editor-select-view-window!
+  orphan-result-editor (view-id orphan-result-origin))
+(editor-delete-window! orphan-result-editor)
+(unless
+  (and
+    (= (length (editor-window-leaves orphan-result-editor)) 1)
+    (eq?
+      (view-buffer (editor-active-view orphan-result-editor))
+      orphan-result-buffer))
+  (error 'editor-tests
+         "closing a Result Buffer origin did not retain its panel"))
+(editor-update!
+  orphan-result-editor
+  (make-command-message 'buffer-item.next #f))
+(define rebound-result-origin
+  (find
+    (lambda (view)
+      (eq? (view-buffer view) orphan-result-source))
+    (editor-views orphan-result-editor)))
+(unless
+  (and
+    rebound-result-origin
+    (= (length (editor-window-leaves orphan-result-editor)) 2)
+    (eq?
+      (view-buffer (editor-active-view orphan-result-editor))
+      orphan-result-buffer)
+    (= (view-caret rebound-result-origin) 6))
+  (error 'editor-tests
+         "Result navigation did not recreate its missing source View"))
+(editor-select-view-window!
+  orphan-result-editor (view-id rebound-result-origin))
+(editor-delete-window! orphan-result-editor)
+(editor-update!
+  orphan-result-editor
+  (make-command-message 'buffer-item.quit #f))
+(unless
+  (and
+    (= (length (editor-window-leaves orphan-result-editor)) 1)
+    (eq?
+      (view-buffer (editor-active-view orphan-result-editor))
+      orphan-result-source)
+    (not
+      (exists
+        (lambda (buffer) (eq? buffer orphan-result-buffer))
+        (editor-buffers orphan-result-editor))))
+  (error 'editor-tests
+         "quitting an orphaned Result Buffer did not restore its source"))
+(editor-close! orphan-result-editor)
+
 (define scoped-session-table-test (make-scoped-session-table))
 (define scoped-session-owner (list 'editor-owner))
 (scoped-session-table-set!

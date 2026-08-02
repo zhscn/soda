@@ -49,6 +49,7 @@
           (soda editor language)
           (soda editor language-session)
           (soda editor location)
+          (soda editor location-results)
           (soda editor location-visit)
           (soda editor lsp-json-rpc)
           (soda editor lsp-position)
@@ -3006,13 +3007,13 @@
   (define (lsp-xref-refresh-procedure origin-view-id)
     (lambda (refresh-context refresh-buffer)
       (let* ([editor (command-context-editor refresh-context)]
+             [resolved-origin-view-id
+               (editor-result-origin-view-id
+                 editor (command-context-view refresh-context))]
              [origin-view
-               (guard (condition [else #f])
-                 (editor-view-ref editor origin-view-id))])
-        (unless origin-view
-          (editor-user-error
-            'buffer-item.refresh
-            "The xref source View no longer exists"))
+               (editor-view-ref editor resolved-origin-view-id)])
+        (buffer-set-location-result-close-argument!
+          refresh-buffer resolved-origin-view-id)
         (lsp-find-references-at-view!
           editor origin-view refresh-buffer))))
 

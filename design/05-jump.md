@@ -175,6 +175,9 @@ Buffer 的真实 point，再激活 point 下的 item；`N`/`P` 按 `result-group
 refresh callback。`g` 从该 View 的语言上下文重新执行查询。preview 更新专用 source
 View，但保持 Result Buffer 的 Window 为 active；该规则同样适用于需要异步打开文件的
 LocationItem。select 才携带 display intent 并把焦点交给 source View。
+source Window 被关闭后，Result Buffer 优先重绑定同一 Workbench 的普通 View；没有
+可用 View 时，下一次 preview 或 refresh 创建新的 source split。关闭孤立的 Result
+Buffer 使用其 display restoration 恢复原 Buffer，不依赖已删除的 View identity。
 
 领域 mode 可以向 Buffer 注册命名 `result-action`。action 包含显示名称、针对 point
 下 `result-item` 的适用性判断和执行过程。键位仍由 mode keymap 决定；which-key、菜单

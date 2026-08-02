@@ -841,10 +841,11 @@
            (editor-buffers editor))))
 
   (define (editor-dismiss-result-buffer! editor buffer origin-view)
-    (unless (and (editor? editor) (buffer? buffer) (view? origin-view))
+    (unless (and (editor? editor) (buffer? buffer)
+                 (or (not origin-view) (view? origin-view)))
       (assertion-violation
         'editor-dismiss-result-buffer!
-        "expected an Editor, result Buffer, and origin View"
+        "expected an Editor, result Buffer, and optional origin View"
         editor buffer origin-view))
     (let* ([result-view
              (find
@@ -880,17 +881,35 @@
               (> (length (editor-window-leaves editor)) 1))
          (editor-select-view-window! editor (view-id result-view))
          (editor-delete-window! editor)]
+        [(and restorable?
+              (eq? (result-display-restoration-action restoration) 'split)
+              (editor-buffer-if-present
+                editor
+                (result-display-restoration-previous-buffer-id restoration)))
+         =>
+         (lambda (previous-buffer)
+           (editor-set-view-buffer!
+             editor
+             (view-id result-view)
+             (buffer-id previous-buffer))
+           (editor-set-view-resource-context!
+             editor
+             (view-id result-view)
+             (result-display-restoration-previous-resource-context
+               restoration)))]
         [result-view
          (if (> (length (editor-window-leaves editor)) 1)
              (begin
                (editor-select-view-window! editor (view-id result-view))
                (editor-delete-window! editor))
-             (editor-set-view-buffer!
-               editor
-               (view-id result-view)
-               (buffer-id (view-buffer origin-view))))])
-      (when (exists (lambda (view) (eq? view origin-view))
-                    (editor-views editor))
+             (when origin-view
+               (editor-set-view-buffer!
+                 editor
+                 (view-id result-view)
+                 (buffer-id (view-buffer origin-view)))))])
+      (when (and origin-view
+                 (exists (lambda (view) (eq? view origin-view))
+                         (editor-views editor)))
         (editor-select-view-window! editor (view-id origin-view)))
       (unless
         (exists

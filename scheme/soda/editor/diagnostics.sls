@@ -600,7 +600,11 @@
                      (editor-user-error
                        'buffer-item.refresh
                        "Diagnostic source Buffer is no longer open"))
-                   (let ([current
+                   (let ([current-origin-view-id
+                           (editor-result-origin-view-id
+                             editor
+                             (command-context-view refresh-context))]
+                         [current
                            (current-diagnostic-items editor buffer)])
                      (show-diagnostics!
                        editor
@@ -608,7 +612,7 @@
                        "Diagnostics"
                        'diagnostics
                        current
-                       origin-view-id
+                       current-origin-view-id
                        refresh)
                      (diagnostic-status! editor "Diagnostics" current)
                      '()))])
@@ -650,9 +654,13 @@
                  index editor))])
       (letrec ([refresh
                  (lambda (refresh-context refresh-buffer)
-                   (let* ([current-index
+                   (let* ([current-origin-view-id
+                            (editor-result-origin-view-id
+                              editor
+                              (command-context-view refresh-context))]
+                          [current-index
                             (scheme-semantic-index-for-view
-                              environments editor origin-view-id)]
+                              environments editor current-origin-view-id)]
                           [current
                             (map
                               workspace-diagnostic-item
@@ -664,7 +672,7 @@
                        "Workspace diagnostics"
                        'workspace-diagnostics
                        current
-                       origin-view-id
+                       current-origin-view-id
                        refresh)
                      (diagnostic-status!
                        editor "Workspace diagnostics" current)
