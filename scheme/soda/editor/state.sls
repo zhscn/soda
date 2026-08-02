@@ -310,6 +310,7 @@
           (soda editor display)
           (soda editor display-map)
           (soda editor editor-storage)
+          (soda editor editor-history)
           (soda editor entity-registry)
           (soda editor event)
           (soda editor fold)
@@ -339,6 +340,16 @@
           (soda editor window)
           (soda editor workbench)
           (soda vfs))
+
+  (define (attach-editor-change-observer! editor buffer)
+    (buffer-add-change-observer!
+      buffer
+      'editor.change-ring
+      (lambda (changed-buffer change)
+        (editor-record-buffer-change!
+          editor changed-buffer change)
+        (editor-touch-buffer-registry!
+          editor changed-buffer 'modified))))
 
   (define (editor-window-root value)
     (workbench-layout (editor-active-workbench value)))
@@ -4684,136 +4695,6 @@
         entries))
     (editor-kill-ring-set! value entries))
 
-  (define (editor-buffer-ref-or-false editor)
-    (lambda (id)
-      (entity-registry-ref
-        (editor-buffer-registry editor)
-        id)))
-
-  (define (ring-location->pair location)
-    (and location (cons (car location) (cadr location))))
-
-  (define (editor-global-mark-ring value)
-    (require-open-editor 'editor-global-mark-ring value)
-    (map
-      ring-location->pair
-      (anchored-location-ring-locations
-        (editor-global-marks value)
-        (editor-buffer-ref-or-false value))))
-
-  (define (editor-push-global-mark! value buffer offset)
-    (require-open-editor 'editor-push-global-mark! value)
-    (unless (and (buffer? buffer)
-                 (eq? buffer
-                      (entity-registry-ref
-                        (editor-buffer-registry value)
-                        (buffer-id buffer))))
-      (assertion-violation
-        'editor-push-global-mark!
-        "buffer does not belong to the editor"
-        buffer))
-    (unless (exact-non-negative-integer? offset)
-      (assertion-violation
-        'editor-push-global-mark!
-        "offset must be a non-negative exact integer"
-        offset))
-    (anchored-location-ring-push!
-      (editor-global-marks value)
-      buffer
-      offset
-      #f
-      (editor-buffer-ref-or-false value))
-    offset)
-
-  (define (editor-pop-global-mark! value)
-    (require-open-editor 'editor-pop-global-mark! value)
-    (ring-location->pair
-      (anchored-location-ring-pop!
-        (editor-global-marks value)
-        (editor-buffer-ref-or-false value))))
-
-  (define (editor-clear-buffer-global-marks! value buffer)
-    (anchored-location-ring-remove-buffer!
-      (editor-global-marks value)
-      (buffer-id buffer)
-      (editor-buffer-ref-or-false value)))
-
-  (define (editor-change-ring value)
-    (require-open-editor 'editor-change-ring value)
-    (map
-      (lambda (location)
-        (list (car location) (cadr location) (caddr location)))
-      (anchored-location-ring-locations
-        (editor-changes value)
-        (editor-buffer-ref-or-false value))))
-
-  (define (coalescing-change-class? class)
-    (memq class '(self-insert kill yank)))
-
-  (define (editor-current-command-class editor)
-    (let ([name (editor-current-command editor)])
-      (and
-        name
-        (guard (condition [else #f])
-          (command-class (editor-command-registry editor) name)))))
-
-  (define (editor-record-buffer-change! editor buffer change)
-    (let* ([command (editor-current-command editor)]
-           [class (and command (editor-current-command-class editor))])
-      (when command
-        (let* ([entries
-                 (anchored-location-ring-entries
-                   (editor-changes editor))]
-               [top (and (pair? entries) (car entries))]
-               [coalesce?
-                 (and
-                   (coalescing-change-class? class)
-                   top
-                   (= (anchored-location-entry-buffer-id top)
-                      (buffer-id buffer))
-                   (eq? (anchored-location-entry-payload top) class)
-                   (eq? (editor-last-command-class editor) class))])
-          (unless coalesce?
-            (let ([range (change-affected-new-range change)])
-              (anchored-location-ring-push!
-                (editor-changes editor)
-                buffer
-                (car range)
-                class
-                (editor-buffer-ref-or-false editor))))))
-        (anchored-location-ring-reset!
-          (editor-changes editor))))
-
-  (define (attach-editor-change-observer! editor buffer)
-    (buffer-add-change-observer!
-      buffer
-      'editor.change-ring
-      (lambda (changed-buffer change)
-        (editor-record-buffer-change!
-          editor changed-buffer change)
-        (editor-touch-buffer-registry!
-          editor changed-buffer 'modified))))
-
-  (define (editor-previous-change! editor)
-    (require-open-editor 'editor-previous-change! editor)
-    (ring-location->pair
-      (anchored-location-ring-previous!
-        (editor-changes editor)
-        (editor-buffer-ref-or-false editor))))
-
-  (define (editor-next-change! editor)
-    (require-open-editor 'editor-next-change! editor)
-    (ring-location->pair
-      (anchored-location-ring-next!
-        (editor-changes editor)
-        (editor-buffer-ref-or-false editor))))
-
-  (define (editor-clear-buffer-changes! editor buffer)
-    (anchored-location-ring-remove-buffer!
-      (editor-changes editor)
-      (buffer-id buffer)
-      (editor-buffer-ref-or-false editor)))
-
   (define (editor-find-bookmark editor name)
     (require-open-editor 'editor-find-bookmark editor)
     (unless (string? name)
@@ -5658,10 +5539,10 @@
       (editor-annotation-sets-set! value '())
       (anchored-location-ring-clear!
         (editor-global-marks value)
-        (editor-buffer-ref-or-false value))
+        (editor-buffer-resolver value))
       (anchored-location-ring-clear!
         (editor-changes value)
-        (editor-buffer-ref-or-false value))
+        (editor-buffer-resolver value))
       (for-each close-bookmark! (editor-bookmarks value))
       (editor-bookmarks-set! value '())
       (for-each
