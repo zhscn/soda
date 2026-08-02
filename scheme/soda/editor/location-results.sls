@@ -365,27 +365,6 @@
         (location-results-state-jump-kind state)
         display-intent)))
 
-  (define (close-location-results-buffer! editor buffer origin-view)
-    (let ([result-view
-            (find
-              (lambda (view) (eq? (view-buffer view) buffer))
-              (editor-views editor))])
-      (when result-view
-        (if (> (length (editor-window-leaves editor)) 1)
-            (begin
-              (editor-select-view-window! editor (view-id result-view))
-              (editor-delete-window! editor))
-            (editor-set-view-buffer!
-              editor
-              (view-id result-view)
-              (buffer-id (view-buffer origin-view)))))
-      (editor-select-view-window! editor (view-id origin-view))
-      (unless
-        (exists
-          (lambda (view) (eq? (view-buffer view) buffer))
-          (editor-views editor))
-        (editor-remove-buffer! editor (buffer-id buffer)))))
-
   (define (activate-location-result context buffer item index disposition)
     (let ([state (location-results-state-for-buffer buffer)])
       (unless (location-results-state? state)
@@ -407,7 +386,7 @@
           (view-clear-navigation-target! origin-view)
           (editor-select-view-window! editor (view-id origin-view)))
         (when (eq? disposition 'select-and-close)
-          (close-location-results-buffer!
+          (editor-dismiss-result-buffer!
             editor buffer origin-view))
         effects)))
 
@@ -424,7 +403,7 @@
              [close-argument (location-results-state-close-argument state)])
         (view-clear-navigation-target! origin-view)
         (editor-select-view-window! editor (view-id origin-view))
-        (close-location-results-buffer! editor buffer origin-view)
+        (editor-dismiss-result-buffer! editor buffer origin-view)
         (if close-command
             (list
               (make-command-effect

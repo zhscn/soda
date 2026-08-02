@@ -4306,9 +4306,10 @@
     (and
       (string=? (cell-text (frame-cell-ref multi-window-frame 0 0))
                 "o")
-      (memq
-        'cursor.inactive
-        (cell-faces (frame-cell-ref multi-window-frame 0 0)))
+      (not
+        (memq
+          'cursor.inactive
+          (cell-faces (frame-cell-ref multi-window-frame 0 0))))
       (memq 'modeline.inactive (cell-faces top-modeline))
       (memq 'modeline.active (cell-faces bottom-modeline))
       (= (length
@@ -4849,6 +4850,85 @@
              (list (buffer-id buffer) (buffer-major-mode-name buffer)))
            (editor-buffers xref-editor))))
 (editor-close! xref-editor)
+
+(define result-restore-source
+  (make-buffer
+    19830
+    (make-document "target\n" 19830)
+    "/tmp/result-restore-source.scm"
+    'scheme-mode))
+(define result-restore-editor (make-editor result-restore-source))
+(define result-restore-origin
+  (editor-active-view result-restore-editor))
+(define result-restore-tools
+  (editor-create-buffer!
+    result-restore-editor "*Existing Tools*" 'fundamental-mode "tools\n"))
+(define result-restore-context
+  (make-resource-context "/tmp/result-tools/"))
+(define result-restore-tools-view
+  (editor-display-buffer!
+    result-restore-editor
+    (make-display-request
+      (buffer-id result-restore-tools)
+      'tools
+      (view-id result-restore-origin)
+      #f
+      result-restore-context)))
+(editor-show-location-results!
+  result-restore-editor
+  "Temporary Results"
+  (make-location-list
+    'test
+    (list
+      (make-location-item
+        (buffer-id result-restore-source)
+        (buffer-resource result-restore-source)
+        (buffer-revision result-restore-source)
+        0 6 "target" '())))
+  (view-id result-restore-origin)
+  'test)
+(unless
+  (and
+    (= (length (editor-window-leaves result-restore-editor)) 2)
+    (eq?
+      (buffer-major-mode-name
+        (view-buffer result-restore-tools-view))
+      'location-results-mode))
+  (error 'editor-tests
+         "temporary results did not reuse the existing tools window"))
+(editor-update!
+  result-restore-editor
+  (make-command-message 'buffer-item.quit #f))
+(unless
+  (and
+    (= (length (editor-window-leaves result-restore-editor)) 2)
+    (eq? (view-buffer result-restore-tools-view) result-restore-tools)
+    (let ([context
+            (editor-view-resource-context
+              result-restore-editor (view-id result-restore-tools-view))])
+      (and
+        (string=?
+          (resource-context-base-resource context)
+          (resource-context-base-resource result-restore-context))
+        (= (resource-context-origin-view-id context)
+           (view-id result-restore-tools-view))))
+    (= (view-id (editor-active-view result-restore-editor))
+       (view-id result-restore-origin))
+    (not
+      (exists
+        (lambda (buffer)
+          (eq? (buffer-major-mode-name buffer)
+               'location-results-mode))
+        (editor-buffers result-restore-editor))))
+  (error 'editor-tests
+         "quitting temporary results did not restore the tools window"
+         (length (editor-window-leaves result-restore-editor))
+         (buffer-resource (view-buffer result-restore-tools-view))
+         (resource-context-base-resource
+           (editor-view-resource-context
+             result-restore-editor (view-id result-restore-tools-view)))
+         (view-id (editor-active-view result-restore-editor))))
+(editor-close! result-restore-editor)
 
 (define provisional-diagnostic-source
   "(define (hello name)\n  (display nam")

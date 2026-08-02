@@ -28,6 +28,7 @@
           buffer-result-interface-ref
           editor-note-result-buffer!
           editor-present-result-buffer!
+          editor-dismiss-result-buffer!
           editor-append-result-items!
           install-result-buffer-commands!)
   (import (rnrs)
@@ -44,7 +45,9 @@
           (soda editor prompt)
           (soda editor resource-context)
           (soda editor state)
-          (soda editor window-runtime))
+          (soda editor window)
+          (soda editor window-runtime)
+          (soda editor workbench))
 
   (define editor-result-buffers (make-weak-eq-hashtable))
 
@@ -56,6 +59,12 @@
             item-key
             activate
             quit))
+
+  (define-record-type result-display-restoration
+    (fields action
+            view-id
+            previous-buffer-id
+            previous-resource-context))
 
   (define make-result-buffer-interface
     (case-lambda
@@ -550,16 +559,110 @@
         (buffer-set-local!
           buffer 'result-restore-mark-keys (caddr preserved)))
       (editor-note-result-buffer! editor buffer)
-      (let ([view
-              (editor-display-buffer!
-                editor
-                (make-display-request
-                  (buffer-id buffer) 'tools origin-view-id #f
-                  (editor-view-resource-context editor origin-view-id)))])
+      (let* ([request
+               (make-display-request
+                 (buffer-id buffer) 'tools origin-view-id #f
+                 (editor-view-resource-context editor origin-view-id))]
+             [plan (editor-plan-display editor request)]
+             [visible-before?
+               (exists
+                 (lambda (candidate)
+                   (eq? (view-buffer candidate) buffer))
+                 (editor-views editor))]
+             [target-workbench
+               (editor-workbench-ref
+                 editor (display-plan-workbench-id plan))]
+             [target-leaf
+               (window-node-find
+                 (workbench-layout target-workbench)
+                 (display-plan-window-id plan))]
+             [target-view
+               (and
+                 (window-leaf? target-leaf)
+                 (editor-view-ref
+                   editor (window-leaf-view-id target-leaf)))]
+             [previous-buffer-id
+               (and target-view (buffer-id (view-buffer target-view)))]
+             [previous-context
+               (and target-view (view-resource-context target-view))]
+             [view (editor-display-buffer! editor request)])
+        (unless visible-before?
+          (buffer-set-local!
+            buffer
+            'result-display-restoration
+            (make-result-display-restoration
+              (display-plan-action plan)
+              (view-id view)
+              previous-buffer-id
+              previous-context)))
         (view-set-caret! view 0)
         (ensure-view-visible! view))
       (editor-invalidate! editor 'document)
       buffer))
+
+  (define (editor-buffer-if-present editor id)
+    (and id
+         (find
+           (lambda (buffer) (= (buffer-id buffer) id))
+           (editor-buffers editor))))
+
+  (define (editor-dismiss-result-buffer! editor buffer origin-view)
+    (unless (and (editor? editor) (buffer? buffer) (view? origin-view))
+      (assertion-violation
+        'editor-dismiss-result-buffer!
+        "expected an Editor, result Buffer, and origin View"
+        editor buffer origin-view))
+    (let* ([result-view
+             (find
+               (lambda (view) (eq? (view-buffer view) buffer))
+               (editor-views editor))]
+           [restoration
+             (buffer-local-ref buffer 'result-display-restoration #f)]
+           [restorable?
+             (and
+               result-view
+               (result-display-restoration? restoration)
+               (= (view-id result-view)
+                  (result-display-restoration-view-id restoration)))])
+      (cond
+        [(and restorable?
+              (eq? (result-display-restoration-action restoration) 'replace)
+              (editor-buffer-if-present
+                editor
+                (result-display-restoration-previous-buffer-id restoration)))
+         =>
+         (lambda (previous-buffer)
+           (editor-set-view-buffer!
+             editor
+             (view-id result-view)
+             (buffer-id previous-buffer))
+           (editor-set-view-resource-context!
+             editor
+             (view-id result-view)
+             (result-display-restoration-previous-resource-context
+               restoration)))]
+        [(and restorable?
+              (eq? (result-display-restoration-action restoration) 'split)
+              (> (length (editor-window-leaves editor)) 1))
+         (editor-select-view-window! editor (view-id result-view))
+         (editor-delete-window! editor)]
+        [result-view
+         (if (> (length (editor-window-leaves editor)) 1)
+             (begin
+               (editor-select-view-window! editor (view-id result-view))
+               (editor-delete-window! editor))
+             (editor-set-view-buffer!
+               editor
+               (view-id result-view)
+               (buffer-id (view-buffer origin-view))))])
+      (when (exists (lambda (view) (eq? view origin-view))
+                    (editor-views editor))
+        (editor-select-view-window! editor (view-id origin-view)))
+      (unless
+        (exists
+          (lambda (view) (eq? (view-buffer view) buffer))
+          (editor-views editor))
+        (editor-remove-buffer! editor (buffer-id buffer)))))
 
   (define (property-starts buffer property)
     (map car (buffer-text-property-ranges buffer property)))
