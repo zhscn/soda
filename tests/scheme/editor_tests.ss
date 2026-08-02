@@ -5720,12 +5720,10 @@
     (string=?
       (buffer-resource scoped-result-secondary-buffer) "*Xref*<2>")
     (=
-      (buffer-local-ref
-        scoped-result-primary-buffer 'result-workbench-id #f)
+      (buffer-result-workbench-id scoped-result-primary-buffer)
       (workbench-id scoped-result-primary))
     (=
-      (buffer-local-ref
-        scoped-result-secondary-buffer 'result-workbench-id #f)
+      (buffer-result-workbench-id scoped-result-secondary-buffer)
       (workbench-id scoped-result-secondary)))
   (error 'editor-tests
          "Result Buffer identity crossed Workbench scopes"))

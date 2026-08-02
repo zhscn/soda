@@ -78,14 +78,21 @@
 
   (define-record-type
     (result-buffer-state %make-result-buffer-state result-buffer-state?)
-    (fields interface
+    (fields (mutable interface)
             (mutable current-index)
             (mutable actions)
             (mutable panel-actions)
             (mutable marked-indices)
             (mutable refresh)
             (mutable producer-state)
-            (mutable producer-stop-invoked?)))
+            (mutable producer-stop-invoked?)
+            (mutable base-resource)
+            (mutable workbench-id)
+            (mutable display-restoration)
+            (mutable restore-current-key)
+            (mutable restore-current-index)
+            (mutable restore-mark-keys)
+            (mutable pending-collapsed-groups)))
 
   (define (buffer-result-state-ref buffer)
     (buffer-local-ref buffer 'result-buffer-state #f))
@@ -164,11 +171,23 @@
         'buffer-set-result-interface!
         "expected a Buffer and navigation interface"
         buffer interface))
-    (buffer-set-local!
-      buffer
-      'result-buffer-state
-      (%make-result-buffer-state
-        interface #f '() '() '() #f 'idle #f))
+    (let ([state (buffer-result-state-ref buffer)])
+      (if state
+          (begin
+            (result-buffer-state-interface-set! state interface)
+            (result-buffer-state-current-index-set! state #f)
+            (result-buffer-state-actions-set! state '())
+            (result-buffer-state-panel-actions-set! state '())
+            (result-buffer-state-marked-indices-set! state '())
+            (result-buffer-state-refresh-set! state #f)
+            (result-buffer-state-producer-state-set! state 'idle)
+            (result-buffer-state-producer-stop-invoked?-set! state #f))
+          (buffer-set-local!
+            buffer
+            'result-buffer-state
+            (%make-result-buffer-state
+              interface #f '() '() '() #f 'idle #f
+              (buffer-resource buffer) #f #f #f #f '() '()))))
     buffer)
 
   (define (buffer-clear-result-interface! buffer)
@@ -298,15 +317,15 @@
           'buffer-reconcile-result-selection!
           "Buffer has no result interface"))
       (let* ([entries (result-entries buffer interface)]
+             [state
+               (require-result-state
+                 buffer 'buffer-reconcile-result-selection!)]
              [current-key
-               (buffer-local-ref
-                 buffer 'result-restore-current-key #f)]
+               (result-buffer-state-restore-current-key state)]
              [old-index
-               (buffer-local-ref
-                 buffer 'result-restore-current-index #f)]
+               (result-buffer-state-restore-current-index state)]
              [mark-keys
-               (buffer-local-ref
-                 buffer 'result-restore-mark-keys '())]
+               (result-buffer-state-restore-mark-keys state)]
              [matched-current
                (and current-key
                     (find
@@ -339,12 +358,12 @@
               buffer 'buffer-reconcile-result-selection!)
             marked-indices))
         (when finalize?
-          (buffer-set-local! buffer 'result-restore-mark-keys '()))
+          (result-buffer-state-restore-mark-keys-set! state '()))
         (when current
           (let ([index (car current)] [position (cadr current)])
             (buffer-set-result-current-index! buffer index)
-            (buffer-set-local! buffer 'result-restore-current-key #f)
-            (buffer-set-local! buffer 'result-restore-current-index #f)
+            (result-buffer-state-restore-current-key-set! state #f)
+            (result-buffer-state-restore-current-index-set! state #f)
             (for-each
               (lambda (view)
                 (when (eq? (view-buffer view) buffer)
@@ -778,14 +797,17 @@
     (unless (buffer? buffer)
       (assertion-violation
         'buffer-result-base-resource "expected a Buffer" buffer))
-    (buffer-local-ref
-      buffer 'result-base-resource (buffer-resource buffer)))
+    (let ([state (buffer-result-state-ref buffer)])
+      (if state
+          (result-buffer-state-base-resource state)
+          (buffer-resource buffer))))
 
   (define (buffer-result-workbench-id buffer)
     (unless (buffer? buffer)
       (assertion-violation
         'buffer-result-workbench-id "expected a Buffer" buffer))
-    (buffer-local-ref buffer 'result-workbench-id #f))
+    (let ([state (buffer-result-state-ref buffer)])
+      (and state (result-buffer-state-workbench-id state))))
 
   (define (result-buffer-for-scope editor resource workbench-id)
     (find
@@ -836,10 +858,6 @@
                           ""
                           (editor-view-resource-context
                             editor origin-view-id))])
-                  (buffer-set-local!
-                    created 'result-base-resource resource)
-                  (buffer-set-local!
-                    created 'result-workbench-id workbench-id)
                   created)]
                [(buffer-result-interface-ref existing) existing]
                [else
@@ -860,13 +878,21 @@
       (buffer-replace-range-internal!
         buffer 0 (buffer-byte-size buffer) (string->utf8 text))
       (buffer-set-result-interface! buffer interface)
+      (let ([state
+              (require-result-state
+                buffer 'editor-present-result-buffer!)])
+        (result-buffer-state-base-resource-set! state resource)
+        (result-buffer-state-workbench-id-set! state workbench-id))
       (when preserved
-        (buffer-set-local!
-          buffer 'result-restore-current-key (car preserved))
-        (buffer-set-local!
-          buffer 'result-restore-current-index (cadr preserved))
-        (buffer-set-local!
-          buffer 'result-restore-mark-keys (caddr preserved)))
+        (let ([state
+                (require-result-state
+                  buffer 'editor-present-result-buffer!)])
+          (result-buffer-state-restore-current-key-set!
+            state (car preserved))
+          (result-buffer-state-restore-current-index-set!
+            state (cadr preserved))
+          (result-buffer-state-restore-mark-keys-set!
+            state (caddr preserved))))
       (editor-note-result-buffer! editor buffer)
       (let* ([request
                (make-display-request
@@ -896,9 +922,9 @@
                (and target-view (view-resource-context target-view))]
              [view (editor-display-buffer! editor request)])
         (unless visible-before?
-          (buffer-set-local!
-            buffer
-            'result-display-restoration
+          (result-buffer-state-display-restoration-set!
+            (require-result-state
+              buffer 'editor-present-result-buffer!)
             (make-result-display-restoration
               (display-plan-action plan)
               (view-id view)
@@ -927,7 +953,9 @@
                (lambda (view) (eq? (view-buffer view) buffer))
                (editor-views editor))]
            [restoration
-             (buffer-local-ref buffer 'result-display-restoration #f)]
+             (result-buffer-state-display-restoration
+               (require-result-state
+                 buffer 'editor-dismiss-result-buffer!))]
            [restorable?
              (and
                result-view
@@ -1060,9 +1088,9 @@
       (result-group-ranges buffer)))
 
   (define (buffer-capture-result-group-folds! editor buffer)
-    (buffer-set-local!
-      buffer
-      'result-pending-collapsed-groups
+    (result-buffer-state-pending-collapsed-groups-set!
+      (require-result-state
+        buffer 'buffer-capture-result-group-folds!)
       (fold-right
         (lambda (view entries)
           (if (eq? (view-buffer view) buffer)
@@ -1101,8 +1129,9 @@
 
   (define (editor-reconcile-result-group-folds! editor buffer)
     (let ([pending
-            (buffer-local-ref
-              buffer 'result-pending-collapsed-groups '())])
+            (result-buffer-state-pending-collapsed-groups
+              (require-result-state
+                buffer 'editor-reconcile-result-group-folds!))])
       (for-each
         (lambda (entry)
           (let ([view
@@ -1114,8 +1143,10 @@
               (replace-result-group-folds!
                 editor buffer view (cdr entry)))))
         pending)
-      (buffer-set-local!
-        buffer 'result-pending-collapsed-groups '())))
+      (result-buffer-state-pending-collapsed-groups-set!
+        (require-result-state
+          buffer 'editor-reconcile-result-group-folds!)
+        '())))
 
   (define (selected-item context who)
     (let-values ([(buffer interface) (require-interface context who)])
