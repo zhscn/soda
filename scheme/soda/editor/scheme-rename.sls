@@ -1,14 +1,13 @@
 (library (soda editor scheme-rename)
   (export install-scheme-rename-command!)
   (import (rnrs)
-          (only (chezscheme) make-weak-eq-hashtable)
           (soda document)
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
-          (soda editor file)
           (soda editor keymap)
           (soda editor prompt)
+          (soda editor resource-resolver)
           (soda editor scheme-environment)
           (soda editor scheme-query)
           (soda editor scheme-semantics)
@@ -16,12 +15,6 @@
           (soda editor state)
           (soda editor workspace-edit)
           (soda editor workspace-edit-preview))
-
-  (define-record-type pending-rename
-    (fields workspace definition new-name resources origin-view-id))
-
-  (define pending-renames
-    (make-weak-eq-hashtable))
 
   (define (scheme-identifier? value)
     (and
@@ -203,11 +196,6 @@
           'scheme.rename
           "new name must be a Scheme identifier"
           new-name))
-      (when
-        (hashtable-contains? pending-renames editor)
-        (assertion-violation
-          'scheme.rename
-          "another Scheme rename is waiting for source files"))
       (if
         (string=? old-name new-name)
         (begin
@@ -227,13 +215,8 @@
               editor
               (view-id (command-context-view context))
               workspace edits new-name)
-            (begin
-              (hashtable-set!
-                pending-renames
-                editor
-                (make-pending-rename
-                  workspace definition new-name resources
-                  (view-id (command-context-view context))))
+            (let ([origin-view-id
+                    (view-id (command-context-view context))])
               (editor-set-status-message!
                 editor
                 (string-append
@@ -241,63 +224,22 @@
                   (number->string (length resources))
                   " rename target"
                   (if (= (length resources) 1) "" "s")))
-              (map
-                (lambda (resource)
-                  (make-command-effect
-                    'file.read
-                    (make-open-request
-                      #f resource 0)))
-                resources)))))))
-
-  (define (all-resources-open? editor resources)
-    (for-all
-      (lambda (resource)
-        (editor-buffer-for-resource editor resource))
-      resources))
-
-  (define (after-open-result context arguments effects)
-    (let* ([editor (command-context-editor context)]
-           [pending
-             (hashtable-ref pending-renames editor #f)]
-           [result
-             (let ([argument
-                     (command-context-argument context)])
-               (and
-                 (open-result? argument)
-                 argument))])
-      (when
-        (and
-          pending
-          result
-          (member
-            (open-result-path result)
-            (pending-rename-resources pending)))
-        (cond
-          [(or
-             (not (zero? (open-result-status result)))
-             (eq? (open-result-kind result) 'directory))
-           (hashtable-delete! pending-renames editor)
-           (editor-set-status-message!
-             editor
-             (string-append
-               "Rename cancelled: cannot read "
-               (open-result-path result)))]
-          [(all-resources-open?
-             editor
-             (pending-rename-resources pending))
-           (hashtable-delete! pending-renames editor)
-           (for-each
-             (lambda (resource)
-               (scheme-workspace-attach-buffer!
-                 (pending-rename-workspace pending)
-                 (editor-buffer-for-resource editor resource)))
-             (pending-rename-resources pending))
-           (finish-rename!
-             editor
-             (pending-rename-workspace pending)
-             (pending-rename-definition pending)
-             (pending-rename-new-name pending)
-             (pending-rename-origin-view-id pending))]))))
+              (editor-resolve-resources!
+                editor
+                resources
+                (lambda (current-editor buffers)
+                  (for-each
+                    (lambda (buffer)
+                      (scheme-workspace-attach-buffer! workspace buffer))
+                    buffers)
+                  (finish-rename!
+                    current-editor workspace definition new-name
+                    origin-view-id))
+                (lambda (current-editor resource status)
+                  (editor-set-status-message!
+                    current-editor
+                    (string-append
+                      "Rename cancelled: cannot read " resource))))))))))
 
   (define (stroke character modifiers)
     (make-key-stroke
@@ -327,13 +269,6 @@
           (make-interactive-plan
             (list (rename-reader environments)))
           '())))
-    (command-add-advice!
-      (editor-command-registry editor)
-      'file.apply-open-result
-      'scheme-rename-resume
-      'after
-      after-open-result
-      0)
     (editor-bind-key!
       editor
       (list (stroke #\c 4) (stroke #\r 4))
