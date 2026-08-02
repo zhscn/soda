@@ -163,28 +163,34 @@
                         buffer edit replacement-start replacement-end)))))))
           items edits))
       (buffer-set-local! buffer 'workspace-edit-preview preview)
+      (for-each
+        (lambda (range)
+          (buffer-set-result-item-marked! buffer (caddr range) #t))
+        (buffer-text-property-ranges buffer 'result-index))
       (buffer-register-result-panel-action!
         buffer
         (make-result-panel-action
-          'apply "Apply all changes"
+          'apply "Apply selected changes"
           (lambda (candidate)
             (let ([value
                     (buffer-local-ref
                       candidate 'workspace-edit-preview #f)])
               (and (workspace-edit-preview? value)
-                   (not (workspace-edit-preview-accepted? value)))))
+                   (not (workspace-edit-preview-accepted? value))
+                   (pair? (buffer-result-marked-indices candidate)))))
           (lambda (context candidate)
             (accept-workspace-edit-preview context))))
       (buffer-register-result-panel-action!
         buffer
         (make-result-panel-action
-          'edit "Edit replacement text"
+          'edit "Edit selected replacement text"
           (lambda (candidate)
             (let ([value
                     (buffer-local-ref
                       candidate 'workspace-edit-preview #f)])
               (and (workspace-edit-preview? value)
-                   (not (workspace-edit-preview-accepted? value)))))
+                   (not (workspace-edit-preview-accepted? value))
+                   (pair? (buffer-result-marked-indices candidate)))))
           (lambda (context candidate)
             (edit-workspace-edit-preview context))))
       (install-edit-guard! buffer preview)
@@ -206,6 +212,23 @@
       (unless (workspace-edit-preview? preview)
         (editor-user-error who "Current Buffer is not a workspace edit preview"))
       preview))
+
+  (define (selected-preview-projections buffer preview who)
+    (let ([marked (buffer-result-marked-indices buffer)])
+      (unless (pair? marked)
+        (editor-user-error who "Select at least one workspace change"))
+      (let loop
+        ([remaining (workspace-edit-preview-projections preview)]
+         [index 0]
+         [selected '()])
+        (if (null? remaining)
+            (reverse selected)
+            (loop
+              (cdr remaining)
+              (+ index 1)
+              (if (memv index marked)
+                  (cons (car remaining) selected)
+                  selected))))))
 
   (define (apply-workspace-edit-preview
             context buffer preview projections)
@@ -245,15 +268,17 @@
               context
               buffer
               preview
-              (workspace-edit-preview-projections preview))))))
+              (selected-preview-projections
+                buffer preview 'workspace-edit.accept))))))
 
   (define (edit-workspace-edit-preview context)
     (let* ([editor (command-context-editor context)]
            [buffer (view-buffer (command-context-view context))])
       (active-preview context 'workspace-edit.edit)
-      (let ([projections
-              (workspace-edit-preview-projections
-                (active-preview context 'workspace-edit.edit))])
+      (let* ([preview (active-preview context 'workspace-edit.edit)]
+             [projections
+               (selected-preview-projections
+                 buffer preview 'workspace-edit.edit)])
         (editor-begin-projection-edit!
           editor
           buffer

@@ -168,7 +168,8 @@ face          普通文本装饰
 `result-list-mode` 提供只读策略和基础 keymap。领域 mode 继承该 mode，并通过
 `result-buffer-interface` 提供 item activation 和 quit 行为。`n`/`p` 移动 Result
 Buffer 的真实 point，再激活 point 下的 item；`N`/`P` 按 `result-group` 移动到相邻组
-的首项。RET 选择源位置，TAB 选择并关闭结果窗口，`C-o` 只预览。
+的首项。RET 选择源位置，TAB 选择并关闭结果窗口，`C-o` 只预览。`m` 切换条目标记，
+`u` 取消当前标记，`U` 清除全部标记；支持批处理的领域 action 消费已标记条目。
 
 `xref-results-mode` 继承 location result 行为，并保存产生列表的 source View 与
 refresh callback。`g` 从该 View 的语言上下文重新执行查询。preview 更新专用 source
@@ -213,6 +214,11 @@ Editable projection 使用 DocumentAnchor 标记 Result Buffer 中允许修改�
 呈现为 `result-target`，进入编辑模式前异步打开全部目标文件，并校验该属性覆盖的文本仍
 与源 Buffer 一致。接受后源 Buffer 保持 modified 状态，结果 Buffer 关闭以避免继续使用
 旧位置。领域编辑逻辑只消费标准 target property，不依赖结果行的前缀或布局。
+
+Workspace edit preview 将每项协议 edit 映射为一个可编辑 projection，并默认标记
+全部条目。用户可以在预览中取消任意条目；Apply 和 Edit 只消费仍被标记的 projection，
+因此 rename、code action 等 producer 无需各自实现变更筛选。清空全部标记时应用与
+编辑动作不可用，重新标记条目即可恢复。
 
 ## Excerpt 组合视图
 

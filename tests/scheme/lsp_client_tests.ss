@@ -1601,6 +1601,24 @@
          (memq 'close names))
     "WorkspaceEdit preview did not expose panel-level actions"
     names))
+(check
+  (equal?
+    (buffer-result-marked-indices
+      (view-buffer (editor-active-view editor)))
+    '(0 1))
+  "WorkspaceEdit preview did not select every change by default")
+(editor-update!
+  editor
+  (make-command-message 'buffer-item.next #f))
+(editor-update!
+  editor
+  (make-command-message 'buffer-item.unmark #f))
+(check
+  (equal?
+    (buffer-result-marked-indices
+      (view-buffer (editor-active-view editor)))
+    '(0))
+  "WorkspaceEdit preview did not exclude the unmarked change")
 (editor-update!
   editor
   (make-command-message 'workspace-edit.edit #f))
@@ -1631,8 +1649,13 @@
       (string->utf8 "// XGadget\n// Generated\nint main() {}\n"))
     (bytevector=?
       (buffer-bytes rename-target)
-      (string->utf8 "int Gadget;\n")))
-  "LSP WorkspaceEdit did not commit all rename targets atomically")
+      (string->utf8 "int Widget;\n")))
+  "LSP WorkspaceEdit did not restrict application to selected changes")
+(editor-set-view-buffer!
+  editor
+  (view-id (editor-active-view editor))
+  (buffer-id source))
+(editor-take-tui-effects! editor)
 
 (define server-apply-edit
   (make-json-object
@@ -1932,10 +1955,13 @@
 
 (define lsp-reference-effects
   (editor-execute-command! editor 'lsp.find-references))
+(define lsp-reference-effect
+  (find
+    (lambda (effect)
+      (equal? (effect-method effect) "textDocument/references"))
+    lsp-reference-effects))
 (check
-  (and (= (length lsp-reference-effects) 1)
-       (eq? (command-effect-kind (car lsp-reference-effects))
-            'managed-process.write))
+  lsp-reference-effect
   "find-references did not issue an LSP request"
   lsp-reference-effects)
 (define pending-reference-results-buffer
@@ -1959,7 +1985,7 @@
     (lsp-json-rpc-decode!
       (make-lsp-json-rpc-decoder)
       (managed-process-write-request-data
-        (command-effect-payload (car lsp-reference-effects))))))
+        (command-effect-payload lsp-reference-effect)))))
 (check
   (and
     (string=? (json-object-ref lsp-reference-message "method" #f)
