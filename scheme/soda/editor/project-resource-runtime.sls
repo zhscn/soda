@@ -26,7 +26,8 @@
             (mutable scan-source)
             watch-sources
             (mutable continuation)
-            (mutable completed-directory-count)))
+            (mutable completed-directory-count)
+            (mutable rescan-pending?)))
 
   (define-record-type
     (project-resource-runtime
@@ -149,7 +150,15 @@
         (cond
           [(not directory)
            (project-resource-session-scan-source-set! session #f)
-           (snapshot-message session #t)]
+           (let ([message (snapshot-message session #t)])
+             (when (project-resource-session-rescan-pending? session)
+               (project-resource-session-rescan-pending?-set! session #f)
+               (reset-session!
+                 adapter
+                 session
+                 (+ 1
+                    (project-resource-session-generation session))))
+             message)]
           [else
            (if
              (hashtable-ref
@@ -237,6 +246,7 @@
       (project-roots (project-resource-session-project session)))
     (project-resource-session-queue-back-set! session '())
     (project-resource-session-completed-directory-count-set! session 0)
+    (project-resource-session-rescan-pending?-set! session #f)
     (hashtable-clear!
       (project-resource-session-directories session))
     (hashtable-clear!
@@ -262,7 +272,8 @@
       #f
       (make-eqv-hashtable)
       continuation
-      0))
+      0
+      #f))
 
   (define (start-request! adapter request)
     (let* ([project (project-resource-request-project request)]
@@ -383,11 +394,19 @@
             [(watch)
              (and
                (eq? (event-kind event) 'path-change)
-               (reset-session!
-                 adapter
-                 session
-                 (+ 1
-                    (project-resource-session-generation session))))]
+               (if
+                 (or
+                   (project-resource-session-scan-source session)
+                   (not (queue-empty? session)))
+                 (begin
+                   (project-resource-session-rescan-pending?-set!
+                     session #t)
+                   #f)
+                 (reset-session!
+                   adapter
+                   session
+                   (+ 1
+                      (project-resource-session-generation session)))))]
             [else #f])))))
 
   (define (project-resource-runtime-close! adapter)

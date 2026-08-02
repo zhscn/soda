@@ -133,6 +133,7 @@
   (and
     (member (vfs-path-join root "main.ss") resources)
     (member (vfs-path-join root "src/library.ss") resources)
+    (member (vfs-path-join root "src/editor.sls") resources)
     (member (vfs-path-join root "visible/.metadata") resources))
   "snapshot must include recursively discovered files")
 (check
