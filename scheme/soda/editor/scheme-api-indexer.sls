@@ -191,32 +191,54 @@
         sources)
       table))
 
-  (define (find-definition sources preferred name)
-    (let search ([source preferred] [visited '()])
-      (and
-        source
-        (not (member (summary-name source) visited))
-        (let ([local
-                (find
-                  (lambda (definition)
-                    (string=?
-                      name
-                      (definition-name definition)))
-                  (summary-definitions source))])
-          (if local
-              (cons source local)
-              (let loop
-                ([imports
-                   (summary-imports source)])
-                (and
-                  (pair? imports)
-                  (or
-                    (search
-                      (hashtable-ref sources (car imports) #f)
-                      (cons
-                        (summary-name source)
-                        visited))
-                    (loop (cdr imports))))))))))
+  (define (library-definition-table metadata)
+    (let ([libraries (make-hashtable equal-hash equal?)])
+      (for-each
+        (lambda (source)
+          (let ([definitions (make-hashtable string-hash string=?)])
+            (for-each
+              (lambda (definition)
+                (unless
+                  (hashtable-contains? definitions (definition-name definition))
+                  (hashtable-set!
+                    definitions
+                    (definition-name definition)
+                    definition)))
+              (summary-definitions source))
+            (hashtable-set! libraries (summary-name source) definitions)))
+        metadata)
+      libraries))
+
+  (define (make-definition-resolver sources metadata)
+    (let ([definitions (library-definition-table metadata)]
+          [cache (make-hashtable equal-hash equal?)])
+      (lambda (preferred name)
+        (let search ([source preferred] [visited '()])
+          (and
+            source
+            (not (member (summary-name source) visited))
+            (let ([key (cons (summary-name source) name)])
+              (if (hashtable-contains? cache key)
+                  (hashtable-ref cache key #f)
+                  (let* ([local-table
+                           (hashtable-ref
+                             definitions (summary-name source) #f)]
+                         [local
+                           (and local-table
+                                (hashtable-ref local-table name #f))]
+                         [result
+                           (if local
+                               (cons source local)
+                               (let loop ([imports (summary-imports source)])
+                                 (and
+                                   (pair? imports)
+                                   (or
+                                     (search
+                                       (hashtable-ref sources (car imports) #f)
+                                       (cons (summary-name source) visited))
+                                     (loop (cdr imports))))))])
+                    (hashtable-set! cache key result)
+                    result))))))))
 
   (define (entry-signatures owner+definition)
     (if (not owner+definition)
@@ -307,7 +329,8 @@
       (map source-metadata sources)))
 
   (define (metadata-api-index metadata)
-    (let ([sources (library-source-table metadata)])
+    (let* ([sources (library-source-table metadata)]
+           [find-definition (make-definition-resolver sources metadata)])
       (list-sort
         entry<?
         (deduplicate
@@ -321,7 +344,6 @@
                       source
                       export
                       (find-definition
-                        sources
                         source
                         (symbol->string (car export)))))
                   (summary-exports source)))
