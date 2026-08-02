@@ -58,6 +58,7 @@
           (soda editor project)
           (soda editor project-target)
           (soda editor project-workspace)
+          (soda editor result-buffer)
           (soda editor state)
           (soda editor workspace-edit)
           (soda editor workspace-edit-preview)
@@ -86,6 +87,9 @@
 
   (define-record-type lsp-client-pending-request
     (fields id method result error cancel context))
+
+  (define-record-type lsp-xref-request-context
+    (fields origin-view-id result-buffer-id generation))
 
   (define-record-type
     (lsp-client-session %make-lsp-client-session lsp-client-session?)
@@ -2398,8 +2402,9 @@
                 (+ index 1)
                 (append (reverse cancelled) effects)))))))
 
-  (define (lsp-request-at-view-point!
-            editor view method additional-parameters continuation request-context)
+  (define (%lsp-request-at-view-point!
+            editor view method additional-parameters continuation
+            error cancel request-context)
     (unless (and (list? additional-parameters)
                  (for-all
                    (lambda (entry)
@@ -2437,12 +2442,24 @@
                       (cons "position" (lsp-position->json position)))
                     additional-parameters))
                 continuation
-                default-request-error
-                default-request-cancel
+                error
+                cancel
                 request-context)))
           (begin
             (editor-set-status-message! editor "No ready language server at point")
             '()))))
+
+  (define lsp-request-at-view-point!
+    (case-lambda
+      [(editor view method additional-parameters continuation request-context)
+       (%lsp-request-at-view-point!
+         editor view method additional-parameters continuation
+         default-request-error default-request-cancel request-context)]
+      [(editor view method additional-parameters continuation
+               error cancel request-context)
+       (%lsp-request-at-view-point!
+         editor view method additional-parameters continuation
+         error cancel request-context)]))
 
   (define lsp-request-at-active-point!
     (case-lambda
@@ -2906,8 +2923,58 @@
                   (if item (cons item items) items)))))
         '()))
 
-  (define (lsp-find-references-at-view! editor view)
-    (lsp-request-at-view-point!
+  (define (xref-result-buffer-for-context editor context)
+    (and
+      (lsp-xref-request-context? context)
+      (lsp-xref-request-context-result-buffer-id context)
+      (find
+        (lambda (buffer)
+          (and
+            (= (buffer-id buffer)
+               (lsp-xref-request-context-result-buffer-id context))
+            (=
+              (buffer-local-ref buffer 'lsp-xref-generation -1)
+              (lsp-xref-request-context-generation context))))
+        (editor-buffers editor))))
+
+  (define (begin-lsp-xref-request! editor view result-buffer)
+    (let ([generation
+            (if result-buffer
+                (+ 1
+                   (buffer-local-ref
+                     result-buffer 'lsp-xref-generation 0))
+                0)])
+      (when result-buffer
+        (buffer-set-local!
+          result-buffer 'lsp-xref-generation generation)
+        (buffer-set-result-producer-state! result-buffer 'running)
+        (editor-invalidate! editor 'chrome))
+      (make-lsp-xref-request-context
+        (view-id view)
+        (and result-buffer (buffer-id result-buffer))
+        generation)))
+
+  (define (lsp-xref-refresh-procedure origin-view-id)
+    (lambda (refresh-context refresh-buffer)
+      (let* ([editor (command-context-editor refresh-context)]
+             [origin-view
+               (guard (condition [else #f])
+                 (editor-view-ref editor origin-view-id))])
+        (unless origin-view
+          (editor-user-error
+            'buffer-item.refresh
+            "The xref source View no longer exists"))
+        (lsp-find-references-at-view!
+          editor origin-view refresh-buffer))))
+
+  (define lsp-find-references-at-view!
+    (case-lambda
+      [(editor view)
+       (lsp-find-references-at-view! editor view #f)]
+      [(editor view result-buffer)
+       (let ([request-context
+               (begin-lsp-xref-request! editor view result-buffer)])
+         (lsp-request-at-view-point!
         editor
         view
         "textDocument/references"
@@ -2916,39 +2983,72 @@
                 (make-json-object
                   (list (cons "includeDeclaration" #t)))))
         (lambda (response-editor response-session result)
-          (let ([items (lsp-reference-items response-editor result)])
-            (if (null? items)
-                (begin
-                  (editor-set-current-location-list! response-editor #f)
-                  (editor-set-status-message! response-editor "No references found")
-                  '())
-                (let ([locations (make-location-list 'lsp-references items)])
-                  (editor-set-current-location-list! response-editor locations)
+          (let ([current-result-buffer
+                  (xref-result-buffer-for-context
+                    response-editor request-context)])
+            (if (and result-buffer (not current-result-buffer))
+                '()
+                (let* ([items (lsp-reference-items response-editor result)]
+                       [locations
+                         (make-location-list 'lsp-references items)])
+                  (editor-set-current-location-list!
+                    response-editor
+                    (if (null? items) #f locations))
                   (editor-set-status-message!
                     response-editor
-                    (string-append
-                      "References: "
-                      (number->string (length items))))
-                  (if (> (length items) 1)
-                      (begin
-                        (editor-show-xref-results!
-                          response-editor
-                          locations
-                          (view-id view)
-                          (let ([origin-view-id (view-id view)])
-                            (lambda (refresh-context refresh-buffer)
-                              (lsp-find-references-at-view!
-                                (command-context-editor refresh-context)
-                                (editor-view-ref
-                                  (command-context-editor refresh-context)
-                                  origin-view-id)))))
-                        '())
-                      (lsp-jump-to-location-item!
-                        response-editor
-                        view
-                        (location-list-current locations)
-                        'xref))))))
-        #f))
+                    (if (null? items)
+                        "No references found"
+                        (string-append
+                          "References: "
+                          (number->string (length items)))))
+                  (cond
+                    [(or current-result-buffer (> (length items) 1))
+                     (let ([buffer
+                             (editor-show-xref-results!
+                               response-editor
+                               locations
+                               (lsp-xref-request-context-origin-view-id
+                                 request-context)
+                               (lsp-xref-refresh-procedure
+                                 (lsp-xref-request-context-origin-view-id
+                                   request-context)))])
+                       (buffer-set-local!
+                         buffer
+                         'lsp-xref-generation
+                         (lsp-xref-request-context-generation request-context))
+                       (editor-finish-result-producer!
+                         response-editor buffer 'ready)
+                       '())]
+                    [(pair? items)
+                     (lsp-jump-to-location-item!
+                       response-editor
+                       view
+                       (location-list-current locations)
+                       'xref)]
+                    [else '()])))))
+        (lambda (response-editor response-session error context)
+          (let ([buffer
+                  (xref-result-buffer-for-context response-editor context)]
+                [message
+                  (string-append
+                    "LSP references failed: " (error-message error))])
+            (when buffer
+              (editor-finish-result-producer!
+                response-editor buffer 'failed message 'error))
+            (editor-set-status-message! response-editor message 'error)
+            '()))
+        (lambda (response-editor response-session reason context)
+          (let ([buffer
+                  (xref-result-buffer-for-context response-editor context)])
+            (when buffer
+              (editor-finish-result-producer!
+                response-editor
+                buffer
+                'cancelled
+                "LSP reference request cancelled."
+                'warning))
+            '()))
+        request-context))]))
 
   (define (lsp-find-references! editor)
     (lsp-find-references-at-view! editor (editor-active-view editor)))

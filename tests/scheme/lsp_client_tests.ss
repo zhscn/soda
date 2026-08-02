@@ -1938,6 +1938,8 @@
                (buffer-text-property-ref
                  results-buffer point 'result-item #f)))))
     "LSP references did not publish a navigable location list"))
+(define lsp-reference-results-buffer
+  (view-buffer (editor-active-view editor)))
 (let* ([effects (editor-execute-command! editor 'buffer-item.next)]
        [request
          (and
@@ -1975,6 +1977,9 @@
           (command-effect-payload (car lsp-reference-refresh-effects)))))))
 (check
   (and lsp-reference-refresh-message
+       (eq?
+         (buffer-result-producer-state lsp-reference-results-buffer)
+         'running)
        (string=?
          (json-object-ref lsp-reference-refresh-message "method" #f)
          "textDocument/references"))
@@ -1986,6 +1991,98 @@
     (list
       (cons "jsonrpc" "2.0")
       (cons "id" (json-object-ref lsp-reference-refresh-message "id" #f))
+      (cons
+        "error"
+        (make-json-object
+          (list
+            (cons "code" -32603)
+            (cons "message" "reference refresh failed")))))))
+(check
+  (and
+    (eq?
+      (buffer-result-producer-state lsp-reference-results-buffer)
+      'failed)
+    (exists
+      (lambda (range) (eq? (caddr range) 'error))
+      (buffer-text-property-ranges
+        lsp-reference-results-buffer 'result-message))
+    (=
+      (length
+        (buffer-text-property-ranges
+          lsp-reference-results-buffer 'result-index))
+      2))
+  "failed xref refresh did not retain and mark the previous results")
+
+(define empty-reference-refresh-effects
+  (editor-execute-command! editor 'buffer-item.refresh))
+(define empty-reference-refresh-message
+  (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload (car empty-reference-refresh-effects))))))
+(lsp-client-handle-json-message!
+  editor session
+  (make-json-object
+    (list
+      (cons "jsonrpc" "2.0")
+      (cons "id" (json-object-ref empty-reference-refresh-message "id" #f))
+      (cons "result" (make-json-array '())))))
+(check
+  (and
+    (eq?
+      (view-buffer (editor-active-view editor))
+      lsp-reference-results-buffer)
+    (eq?
+      (buffer-result-producer-state lsp-reference-results-buffer)
+      'ready)
+    (null?
+      (buffer-text-property-ranges
+        lsp-reference-results-buffer 'result-index))
+    (exists
+      (lambda (range) (eq? (caddr range) 'info))
+      (buffer-text-property-ranges
+        lsp-reference-results-buffer 'result-message)))
+  "empty xref refresh did not atomically replace stale results")
+
+(define successful-reference-refresh-effects
+  (editor-execute-command! editor 'buffer-item.refresh))
+(define successful-reference-refresh-message
+  (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload (car successful-reference-refresh-effects))))))
+(define latest-reference-refresh-effects
+  (editor-execute-command! editor 'buffer-item.refresh))
+(define latest-reference-refresh-message
+  (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload (car latest-reference-refresh-effects))))))
+(lsp-client-handle-json-message!
+  editor session
+  (make-json-object
+    (list
+      (cons "jsonrpc" "2.0")
+      (cons "id" (json-object-ref successful-reference-refresh-message "id" #f))
+      (cons "result" reference-result))))
+(check
+  (and
+    (eq?
+      (buffer-result-producer-state lsp-reference-results-buffer)
+      'running)
+    (null?
+      (buffer-text-property-ranges
+        lsp-reference-results-buffer 'result-index)))
+  "a superseded xref response replaced the latest refresh")
+(lsp-client-handle-json-message!
+  editor session
+  (make-json-object
+    (list
+      (cons "jsonrpc" "2.0")
+      (cons "id" (json-object-ref latest-reference-refresh-message "id" #f))
       (cons "result" reference-result))))
 (define reference-next-effects
   (editor-execute-command! editor 'buffer-item.next))
