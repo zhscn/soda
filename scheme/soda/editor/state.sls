@@ -318,6 +318,7 @@
           (soda editor hook)
           (soda editor input-state)
           (soda editor interaction)
+          (soda editor invalidation)
           (soda editor prompt-store)
           (soda editor jump-graph)
           (soda editor keymap)
@@ -4601,28 +4602,6 @@
   (define (editor-set-pending-keys! value sequence)
     (require-open-editor 'editor-set-pending-keys! value)
     (view-pending-keys-set! (editor-active-view value) sequence))
-
-  (define (editor-invalidate! value reason)
-    (require-open-editor 'editor-invalidate! value)
-    (unless (symbol? reason)
-      (assertion-violation
-        'editor-invalidate!
-        "dirty reason must be a symbol"
-        reason))
-    (editor-render-generation-set!
-      value
-      (+ (editor-render-generation value) 1))
-    (unless (memq reason (editor-dirty-reasons value))
-      (editor-dirty-reasons-set!
-        value
-        (append (editor-dirty-reasons value) (list reason))))
-    (editor-render-generation value))
-
-  (define (editor-take-dirty-reasons! value)
-    (require-open-editor 'editor-take-dirty-reasons! value)
-    (let ([reasons (editor-dirty-reasons value)])
-      (editor-dirty-reasons-set! value '())
-      reasons))
 
   (define (editor-set-theme! value theme)
     (require-open-editor 'editor-set-theme! value)
