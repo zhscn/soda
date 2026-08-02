@@ -68,6 +68,15 @@
           view-set-first-column!
           view-set-viewport!
           view-invalidate-viewport!
+          view-set-keymap-layers!
+          view-current-input-state
+          view-set-input-handler-pending!
+          view-clear-input-handler-pending!
+          view-replace-input-states!
+          view-push-input-state!
+          view-pop-input-state!
+          view-replace-durable-input-state!
+          view-reset-input-states!
           make-view-navigation-target
           view-navigation-target?
           view-navigation-target-buffer-id
@@ -89,7 +98,10 @@
           (soda document)
           (soda editor anchored-location-ring)
           (soda editor buffer)
-          (soda editor contract))
+          (soda editor contract)
+          (soda editor event)
+          (soda editor input-state)
+          (soda editor keymap))
 
   (define-record-type (view make-view-state view?)
     (fields
@@ -384,6 +396,142 @@
       (assertion-violation
         'view-invalidate-viewport! "expected a view" view))
     (view-viewport-ready?-set! view #f))
+
+  (define (view-set-keymap-layers! view layers)
+    (unless (view? view)
+      (assertion-violation
+        'view-set-keymap-layers! "expected a view" view))
+    (unless (and (list? layers)
+                 (for-all
+                   (lambda (layer)
+                     (or (symbol? layer) (keymap? layer)))
+                   layers))
+      (assertion-violation
+        'view-set-keymap-layers!
+        "layers must be a list of keymaps or keymap names"
+        layers))
+    (view-keymap-layers-set! view layers))
+
+  (define (view-current-input-state view)
+    (unless (view? view)
+      (assertion-violation
+        'view-current-input-state "expected a view" view))
+    (car (view-input-states view)))
+
+  (define (run-input-state-enter! view state)
+    (let ([hook (input-state-on-enter state)])
+      (when hook (hook view state))))
+
+  (define (run-input-state-exit! view state)
+    (let ([hook (input-state-on-exit state)])
+      (when hook (hook view state))))
+
+  (define (view-set-input-handler-pending! view state disposition)
+    (unless (view? view)
+      (assertion-violation
+        'view-set-input-handler-pending! "expected a view" view))
+    (unless (and (input-state? state)
+                 (input-disposition? disposition)
+                 (eq? (input-disposition-kind disposition) 'pending))
+      (assertion-violation
+        'view-set-input-handler-pending!
+        "expected an input state and pending disposition"
+        state
+        disposition))
+    (view-input-handler-pending-set! view (cons state disposition)))
+
+  (define (view-clear-input-handler-pending! view)
+    (unless (view? view)
+      (assertion-violation
+        'view-clear-input-handler-pending! "expected a view" view))
+    (view-input-handler-pending-set! view #f))
+
+  (define (view-replace-input-states! view states)
+    (let ([removed (view-input-states view)])
+      (view-input-states-set! view states)
+      (view-pending-keys-set! view '())
+      (view-clear-input-handler-pending! view)
+      (for-each
+        (lambda (state) (run-input-state-exit! view state))
+        removed)
+      (for-each
+        (lambda (state) (run-input-state-enter! view state))
+        (reverse states))))
+
+  (define (view-push-input-state! view state)
+    (unless (view? view)
+      (assertion-violation
+        'view-push-input-state! "expected a view" view))
+    (unless (input-state? state)
+      (assertion-violation
+        'view-push-input-state! "expected an input state" state))
+    (view-input-states-set!
+      view
+      (cons state (view-input-states view)))
+    (view-pending-keys-set! view '())
+    (view-clear-input-handler-pending! view)
+    (run-input-state-enter! view state)
+    state)
+
+  (define (view-pop-input-state! view)
+    (unless (view? view)
+      (assertion-violation
+        'view-pop-input-state! "expected a view" view))
+    (let ([states (view-input-states view)])
+      (if (null? (cdr states))
+          #f
+          (begin
+            (view-input-states-set! view (cdr states))
+            (view-pending-keys-set! view '())
+            (view-clear-input-handler-pending! view)
+            (run-input-state-exit! view (car states))
+            (car states)))))
+
+  (define (last-input-state states)
+    (if (null? (cdr states))
+        (car states)
+        (last-input-state (cdr states))))
+
+  (define (replace-last-input-state states replacement)
+    (if (null? (cdr states))
+        (list replacement)
+        (cons
+          (car states)
+          (replace-last-input-state (cdr states) replacement))))
+
+  (define (view-replace-durable-input-state! view state)
+    (unless (view? view)
+      (assertion-violation
+        'view-replace-durable-input-state! "expected a view" view))
+    (unless (input-state? state)
+      (assertion-violation
+        'view-replace-durable-input-state!
+        "expected an input state"
+        state))
+    (let* ([states (view-input-states view)]
+           [removed (last-input-state states)])
+      (view-input-states-set!
+        view
+        (replace-last-input-state states state))
+      (view-pending-keys-set! view '())
+      (view-clear-input-handler-pending! view)
+      (run-input-state-exit! view removed)
+      (run-input-state-enter! view state)
+      state))
+
+  (define (view-reset-input-states! view)
+    (unless (view? view)
+      (assertion-violation
+        'view-reset-input-states! "expected a view" view))
+    (let* ([states (view-input-states view)]
+           [durable (last-input-state states)]
+           [removed (reverse (cdr (reverse states)))])
+      (view-input-states-set! view (list durable))
+      (view-pending-keys-set! view '())
+      (view-clear-input-handler-pending! view)
+      (for-each
+        (lambda (state) (run-input-state-exit! view state))
+        removed)))
 
   (define-record-type
     (projection-cache make-projection-cache projection-cache?)

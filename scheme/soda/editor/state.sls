@@ -1636,7 +1636,7 @@
     (let ([session (view-tui-session value view)])
       (if session
           (begin
-            (replace-view-input-states!
+            (view-replace-input-states!
               view
               (list
                 (make-input-state
@@ -1649,7 +1649,7 @@
             (eq?
               (input-state-name (view-current-input-state view))
               'application)
-            (replace-view-input-states!
+            (view-replace-input-states!
               view
               (list (make-input-state 'editing '() 'accept)))))))
 
@@ -2085,11 +2085,7 @@
           'editor-close-view!
           "an open editor requires at least one view"
           id))
-      (let ([states (view-input-states view)])
-        (view-input-states-set! view '())
-        (for-each
-          (lambda (state) (run-input-state-exit! view state))
-          states))
+      (view-replace-input-states! view '())
       (cancel-view-completion! value view)
       (view-clear-navigation-target! view)
       (for-each fold-close! (view-folds view))
@@ -5276,156 +5272,6 @@
                 (view-set-mark! view (min size mark))
                 (view-deactivate-mark! view))
               entry))))))
-
-  (define (view-set-keymap-layers! value layers)
-    (unless (view? value)
-      (assertion-violation
-        'view-set-keymap-layers!
-        "expected a view"
-        value))
-    (unless (and (list? layers)
-                 (for-all
-                   (lambda (layer)
-                     (or (symbol? layer) (keymap? layer)))
-                   layers))
-      (assertion-violation
-        'view-set-keymap-layers!
-        "layers must be a list of keymaps or keymap names"
-        layers))
-    (view-keymap-layers-set! value layers))
-
-  (define (view-current-input-state value)
-    (unless (view? value)
-      (assertion-violation
-        'view-current-input-state
-        "expected a view"
-        value))
-    (car (view-input-states value)))
-
-  (define (run-input-state-enter! value state)
-    (let ([hook (input-state-on-enter state)])
-      (when hook (hook value state))))
-
-  (define (run-input-state-exit! value state)
-    (let ([hook (input-state-on-exit state)])
-      (when hook (hook value state))))
-
-  (define (view-set-input-handler-pending! value state disposition)
-    (unless (view? value)
-      (assertion-violation
-        'view-set-input-handler-pending! "expected a view" value))
-    (unless (and (input-state? state)
-                 (input-disposition? disposition)
-                 (eq? (input-disposition-kind disposition) 'pending))
-      (assertion-violation
-        'view-set-input-handler-pending!
-        "expected an input state and pending disposition"
-        state
-        disposition))
-    (view-input-handler-pending-set! value (cons state disposition)))
-
-  (define (view-clear-input-handler-pending! value)
-    (unless (view? value)
-      (assertion-violation
-        'view-clear-input-handler-pending! "expected a view" value))
-    (view-input-handler-pending-set! value #f))
-
-  (define (replace-view-input-states! value states)
-    (let ([removed (view-input-states value)])
-      (view-input-states-set! value states)
-      (view-pending-keys-set! value '())
-      (view-clear-input-handler-pending! value)
-      (for-each
-        (lambda (state) (run-input-state-exit! value state))
-        removed)
-      (for-each
-        (lambda (state) (run-input-state-enter! value state))
-        (reverse states))))
-
-  (define (view-push-input-state! value state)
-    (unless (view? value)
-      (assertion-violation
-        'view-push-input-state!
-        "expected a view"
-        value))
-    (unless (input-state? state)
-      (assertion-violation
-        'view-push-input-state!
-        "expected an input state"
-        state))
-    (view-input-states-set!
-      value
-      (cons state (view-input-states value)))
-    (view-pending-keys-set! value '())
-    (view-clear-input-handler-pending! value)
-    (run-input-state-enter! value state)
-    state)
-
-  (define (view-pop-input-state! value)
-    (unless (view? value)
-      (assertion-violation
-        'view-pop-input-state!
-        "expected a view"
-        value))
-    (let ([states (view-input-states value)])
-      (if (null? (cdr states))
-          #f
-          (begin
-            (view-input-states-set! value (cdr states))
-            (view-pending-keys-set! value '())
-            (view-clear-input-handler-pending! value)
-            (run-input-state-exit! value (car states))
-            (car states)))))
-
-  (define (last-input-state states)
-    (if (null? (cdr states))
-        (car states)
-        (last-input-state (cdr states))))
-
-  (define (replace-last-input-state states replacement)
-    (if (null? (cdr states))
-        (list replacement)
-        (cons
-          (car states)
-          (replace-last-input-state (cdr states) replacement))))
-
-  (define (view-replace-durable-input-state! value state)
-    (unless (view? value)
-      (assertion-violation
-        'view-replace-durable-input-state!
-        "expected a view"
-        value))
-    (unless (input-state? state)
-      (assertion-violation
-        'view-replace-durable-input-state!
-        "expected an input state"
-        state))
-    (let* ([states (view-input-states value)]
-           [removed (last-input-state states)])
-      (view-input-states-set!
-        value
-        (replace-last-input-state states state))
-      (view-pending-keys-set! value '())
-      (view-clear-input-handler-pending! value)
-      (run-input-state-exit! value removed)
-      (run-input-state-enter! value state)
-      state))
-
-  (define (view-reset-input-states! value)
-    (unless (view? value)
-      (assertion-violation
-        'view-reset-input-states!
-        "expected a view"
-        value))
-    (let* ([states (view-input-states value)]
-           [durable (last-input-state states)]
-           [removed (reverse (cdr (reverse states)))])
-      (view-input-states-set! value (list durable))
-      (view-pending-keys-set! value '())
-      (view-clear-input-handler-pending! value)
-      (for-each
-        (lambda (state) (run-input-state-exit! value state))
-        removed)))
 
   (define (display-line-leading-end text line)
     (let ([end (text-line-content-end text line)])
