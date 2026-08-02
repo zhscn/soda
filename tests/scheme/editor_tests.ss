@@ -4280,34 +4280,27 @@
       (location-list? locations)
       (eq? (location-list-source locations) 'scheme-references)
       (= (length (location-list-items locations)) 3)
-      (let ([results
-              (editor-tui-session-for-buffer
-                xref-editor
-                (buffer-id
-                  (view-buffer (editor-active-view xref-editor))))])
-        (and results
-             (eq? (tui-application-definition-name
-                    (tui-session-definition results))
-                  'xref-results))))
+      (let* ([results-buffer
+               (view-buffer (editor-active-view xref-editor))]
+             [point (view-caret (editor-active-view xref-editor))])
+        (and
+          (eq? (buffer-major-mode-name results-buffer) 'xref-results-mode)
+          (location-item?
+            (buffer-text-property-ref
+              results-buffer point 'location-item #f)))))
     (error 'editor-tests "Scheme xref did not publish references")))
 (editor-update!
   xref-editor
   (make-command-message 'xref.results-next #f))
 (unless (= (location-list-index (editor-current-location-list xref-editor)) 1)
   (error 'editor-tests "xref results did not synchronize location selection"))
-(editor-update!
-  xref-editor
-  (make-command-message 'xref.preview #f))
 (unless (= (view-caret xref-view) 21)
-  (error 'editor-tests "xref results did not preview the first use"))
+  (error 'editor-tests "xref next did not preview the first use"))
 (editor-update!
   xref-editor
   (make-command-message 'xref.results-next #f))
-(editor-update!
-  xref-editor
-  (make-command-message 'xref.preview #f))
 (unless (= (view-caret xref-view) 28)
-  (error 'editor-tests "xref results did not preview the next use"))
+  (error 'editor-tests "xref next did not preview the next use"))
 (editor-update!
   xref-editor
   (make-command-message 'xref.visit #f))
@@ -4316,13 +4309,8 @@
 (let ([results-view
         (find
           (lambda (view)
-            (let ([session
-                    (editor-tui-session-for-buffer
-                      xref-editor (buffer-id (view-buffer view)))])
-              (and session
-                   (eq? (tui-application-definition-name
-                          (tui-session-definition session))
-                        'xref-results))))
+            (eq? (buffer-major-mode-name (view-buffer view))
+                 'xref-results-mode))
           (editor-views xref-editor))])
   (unless results-view
     (error 'editor-tests "xref results view disappeared after visiting"))
@@ -4353,12 +4341,17 @@
     (= (view-id (editor-active-view xref-editor)) (view-id xref-view))
     (not
       (exists
-        (lambda (session)
-          (eq? (tui-application-definition-name
-                 (tui-session-definition session))
-               'xref-results))
-        (editor-tui-sessions xref-editor))))
-  (error 'editor-tests "xref results quit did not restore the source view"))
+        (lambda (buffer)
+          (eq? (buffer-major-mode-name buffer) 'xref-results-mode))
+        (editor-buffers xref-editor))))
+  (error 'editor-tests
+         "xref results quit did not restore the source view"
+         (view-id (editor-active-view xref-editor))
+         (view-id xref-view)
+         (map
+           (lambda (buffer)
+             (list (buffer-id buffer) (buffer-major-mode-name buffer)))
+           (editor-buffers xref-editor))))
 (editor-close! xref-editor)
 
 (define provisional-diagnostic-source
@@ -4729,16 +4722,10 @@
               (location-item-metadata item))))
         (location-list-items locations))
       (null? workspace-diagnostic-effects)
-      (let ([results
-              (editor-tui-session-for-buffer
-                project-diagnostic-editor
-                (buffer-id
-                  (view-buffer
-                    (editor-active-view project-diagnostic-editor))))])
-        (and results
-             (eq? (tui-application-definition-name
-                    (tui-session-definition results))
-                  'xref-results))))
+      (eq?
+        (buffer-major-mode-name
+          (view-buffer (editor-active-view project-diagnostic-editor)))
+        'xref-results-mode))
     (error
       'editor-tests
       "workspace diagnostics did not include navigable background sources"
@@ -5127,15 +5114,10 @@
       (location-list? locations)
       (eq? (location-list-source locations) 'diagnostics)
       (= (length (location-list-items locations)) 2)
-      (let ([results
-              (editor-tui-session-for-buffer
-                highlight-editor
-                (buffer-id
-                  (view-buffer (editor-active-view highlight-editor))))])
-        (and results
-             (eq? (tui-application-definition-name
-                    (tui-session-definition results))
-                  'xref-results))))
+      (eq?
+        (buffer-major-mode-name
+          (view-buffer (editor-active-view highlight-editor)))
+        'xref-results-mode))
     (error 'editor-tests
            "diagnostics did not publish a sorted location list")))
 (editor-set-active-view!

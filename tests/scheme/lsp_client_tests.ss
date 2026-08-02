@@ -1822,18 +1822,17 @@
     (and locations
          (eq? (location-list-source locations) 'lsp-references)
          (= (length (location-list-items locations)) 2)
-         (let ([results
-                 (editor-tui-session-for-buffer
-                   editor
-                   (buffer-id (view-buffer (editor-active-view editor))))])
-           (and results
-                (eq? (tui-application-definition-name
-                       (tui-session-definition results))
-                     'xref-results))))
+         (let* ([results-buffer
+                  (view-buffer (editor-active-view editor))]
+                [point (view-caret (editor-active-view editor))])
+           (and
+             (eq? (buffer-major-mode-name results-buffer) 'xref-results-mode)
+             (location-item?
+               (buffer-text-property-ref
+                 results-buffer point 'location-item #f)))))
     "LSP references did not publish a navigable location list"))
-(editor-execute-command! editor 'xref.results-next)
 (define reference-next-effects
-  (editor-execute-command! editor 'xref.visit))
+  (editor-execute-command! editor 'xref.results-next))
 (check
   (and
     (= (length reference-next-effects) 1)

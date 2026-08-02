@@ -15,6 +15,7 @@
           (soda editor command-runtime)
           (soda editor condition)
           (soda editor display-placement)
+          (soda editor edit)
           (soda editor effect)
           (soda editor file)
           (soda editor keymap)
@@ -23,10 +24,7 @@
           (soda editor navigation)
           (soda editor resource-context)
           (soda editor state)
-          (soda editor tui-application)
-          (soda editor tui-application-runtime)
-          (soda editor window-runtime)
-          (soda tui application))
+          (soda editor window-runtime))
 
   (define editor-xref-backends
     (make-weak-eq-hashtable))
@@ -88,7 +86,7 @@
           (assertion-violation 'dispatch-xref "unknown xref operation" operation)])
        context)))
 
-  (define-record-type xref-results-model
+  (define-record-type location-results-state
     (fields title locations origin-view-id jump-kind))
 
   (define (location-open-position item)
@@ -145,121 +143,91 @@
         [else
          (list 0 0 (or (location-item-excerpt item) ""))])))
 
+  (define (location-resource-label item)
+    (or (location-item-resource item)
+        (and (location-item-buffer-id item)
+             (string-append
+               "<buffer "
+               (number->string (location-item-buffer-id item))
+               ">"))
+        "<buffer>"))
+
   (define (location-row editor item)
     (let ([presentation (location-presentation editor item)])
       (string-append
-        (or (location-item-resource item) "<buffer>")
-        ":" (number->string (+ (car presentation) 1))
+        "  " (number->string (+ (car presentation) 1))
         ":" (number->string (+ (cadr presentation) 1))
         "  " (caddr presentation))))
 
-  (define (xref-results-selection model state)
-    (let* ([items (location-list-items (xref-results-model-locations model))]
-           [stored (and state (tui-view-state-transient-state state))]
-           [location-index
-             (location-list-index (xref-results-model-locations model))])
-      (and (pair? items)
-           (cond
-             [(and (integer? stored) (exact? stored)
-                   (<= 0 stored) (< stored (length items)))
-              stored]
-             [(and (integer? location-index) (exact? location-index)
-                   (<= 0 location-index) (< location-index (length items)))
-              location-index]
-             [else 0]))))
+  (define (buffer-size buffer)
+    (let ([snapshot (document-snapshot (buffer-document buffer))])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (let ([text (snapshot-text snapshot)])
+            (dynamic-wind
+              (lambda () #f)
+              (lambda () (text-size text))
+              (lambda () (text-close! text)))))
+        (lambda () (snapshot-close! snapshot)))))
 
-  (define (xref-results-move model delta context)
-    (let* ([items (location-list-items (xref-results-model-locations model))]
-           [count (length items)])
-      (if (zero? count)
-          (tui-result model '() '())
-          (let* ([state (tui-application-context-view-state context)]
-                 [current (or (xref-results-selection model state) 0)]
-                 [selection (mod (+ current delta) count)]
-                 [rows (max 1 (- (if state (tui-view-state-height state) 10) 1))]
-                 [old-viewport
-                   (if state (car (tui-view-state-viewport state)) 0)]
-                 [viewport
-                   (cond
-                     [(< selection old-viewport) selection]
-                     [(>= selection (+ old-viewport rows))
-                     (+ 1 (- selection rows))]
-                     [else old-viewport])])
-            (location-list-set-index!
-              (xref-results-model-locations model) selection)
-            (tui-result
-              model
-              '()
-              (list
-                (make-tui-view-action 'origin 'transient selection)
-                (make-tui-view-action 'origin 'scroll (cons viewport 0))))))))
+  (define (render-location-results editor title locations)
+    (let ([chunks '()] [properties '()] [position 0] [last-resource #f])
+      (define (emit! text values)
+        (let* ([bytes (string->utf8 text)]
+               [end (+ position (bytevector-length bytes))])
+          (set! chunks (cons text chunks))
+          (when (and values (< position end))
+            (set! properties (cons (list position end values) properties)))
+          (set! position end)))
+      (emit!
+        (string-append
+          title " ("
+          (number->string (length (location-list-items locations)))
+          ")\n")
+        '((face . application.heading) (result-heading . #t)))
+      (let loop ([items (location-list-items locations)] [index 0])
+        (unless (null? items)
+          (let* ([item (car items)]
+                 [resource (location-resource-label item)])
+            (unless (equal? resource last-resource)
+              (emit!
+                (string-append resource "\n")
+                `((face . application.heading) (result-group . ,resource)))
+              (set! last-resource resource))
+            (emit!
+              (string-append (location-row editor item) "\n")
+              `((location-item . ,item) (location-index . ,index)))
+            (loop (cdr items) (+ index 1)))))
+      (values
+        (apply string-append (reverse chunks))
+        (reverse properties))))
 
-  (define xref-results-definition
-    (make-tui-application-definition
-      'xref-results
-      (lambda (context arguments) (values arguments '()))
-      (lambda (model message context)
-        (case (tui-message-payload message)
-          [(next) (xref-results-move model 1 context)]
-          [(previous) (xref-results-move model -1 context)]
-          [else (tui-result model '() '())]))
-      (lambda (model context)
-        (let* ([editor (tui-application-context-editor context)]
-               [locations (xref-results-model-locations model)]
-               [items (location-list-items locations)]
-               [state (tui-application-context-view-state context)]
-               [selection (xref-results-selection model state)]
-               [viewport
-                 (if state (tui-view-state-viewport state) (cons 0 0))])
-          (tui-column
-            'xref.root
-            (list
-              (tui-node-with-layout
-                (tui-text
-                  'xref.title
-                  (string-append
-                    (xref-results-model-title model)
-                    " (" (number->string (length items)) ")")
-                  '(application.heading))
-                (make-tui-layout (tui-flex 1) (tui-fixed 1)))
-              (tui-node-with-layout
-                (tui-scroll
-                  'xref.viewport
-                  (tui-list
-                    'xref.locations
-                    (map (lambda (item) (location-row editor item)) items)
-                    selection)
-                  viewport)
-                (make-tui-layout (tui-flex 1) (tui-flex 1)))))))
-      #f
-      (lambda (model context)
-        (let ([editor (tui-application-context-editor context)])
-          (apply string-append
-            (map
-              (lambda (item)
-                (string-append (location-row editor item) "\n"))
-              (location-list-items
-                (xref-results-model-locations model))))))
-      'xref-results-mode
-      'tools
-      '()))
+  (define (location-results-state-for-buffer buffer)
+    (buffer-local-ref buffer 'location-results-state #f))
 
-  (define (active-xref-results-session editor)
-    (let ([session (tui-active-session editor)])
-      (and session
-           (eq? (tui-application-definition-name
-                  (tui-session-definition session))
-                'xref-results)
-           session)))
+  (define (active-location-results context who)
+    (let* ([view (command-context-view context)]
+           [buffer (view-buffer view)]
+           [state (location-results-state-for-buffer buffer)])
+      (unless (location-results-state? state)
+        (editor-user-error who "Current Buffer does not contain location results"))
+      (values buffer state)))
 
-  (define (send-xref-results! context payload)
-    (let* ([editor (command-context-editor context)]
-           [session (active-xref-results-session editor)])
-      (when session
-        (tui-send!
-          editor (tui-session-id session) payload
-          (view-id (command-context-view context))))
-      '()))
+  (define (location-property-positions buffer)
+    (let ([size (buffer-size buffer)])
+      (let loop ([position 0] [result '()])
+        (if (>= position size)
+            (reverse result)
+            (let* ([index
+                     (buffer-text-property-ref
+                       buffer position 'location-index #f)]
+                   [next
+                     (buffer-next-text-property-change
+                       buffer position size)])
+              (loop
+                (if (> next position) next (+ position 1))
+                (if index (cons (cons position index) result) result)))))))
 
   (define (visit-location-item! editor view item kind)
     (let ([buffer-id (location-item-buffer-id item)])
@@ -288,51 +256,93 @@
                   'jump
                   (editor-view-resource-context editor (view-id view)))))))))
 
-  (define (selected-xref-result context who)
-    (let* ([editor (command-context-editor context)]
-           [session (active-xref-results-session editor)])
-      (if (not session)
-          (editor-user-error who "No active location results")
-          (let* ([model (tui-session-model session)]
-                 [state
-                   (tui-session-view-state
-                     session (view-id (command-context-view context)))]
-                 [selection (xref-results-selection model state)]
-                 [items
-                   (location-list-items
-                     (xref-results-model-locations model))]
-                 [origin-view
-                   (editor-view-ref
-                     editor (xref-results-model-origin-view-id model))])
-            (if selection
-                (list session model origin-view (list-ref items selection))
-                (editor-user-error who "The location result list is empty"))))))
+  (define (selected-location-result context who)
+    (let-values ([(buffer state) (active-location-results context who)])
+      (let* ([view (command-context-view context)]
+             [position (view-caret view)]
+             [item
+               (buffer-text-property-ref
+                 buffer position 'location-item #f)]
+             [index
+               (buffer-text-property-ref
+                 buffer position 'location-index #f)])
+        (unless (and (location-item? item) (integer? index) (exact? index))
+          (editor-user-error who "Point is not on a location result"))
+        (values buffer state item index))))
 
-  (define (require-xref-results-session context who)
-    (or (active-xref-results-session (command-context-editor context))
-        (editor-user-error who "No active location results")))
+  (define (preview-location-result! context item index state)
+    (let* ([editor (command-context-editor context)]
+           [locations (location-results-state-locations state)]
+           [origin-view
+             (editor-view-ref
+               editor (location-results-state-origin-view-id state))])
+      (location-list-set-index! locations index)
+      (visit-location-item!
+        editor origin-view item (location-results-state-jump-kind state))))
+
+  (define (close-location-results-buffer! editor buffer origin-view)
+    (let ([result-view
+            (find
+              (lambda (view) (eq? (view-buffer view) buffer))
+              (editor-views editor))])
+      (when result-view
+        (if (> (length (editor-window-leaves editor)) 1)
+            (begin
+              (editor-select-view-window! editor (view-id result-view))
+              (editor-delete-window! editor))
+            (editor-set-view-buffer!
+              editor
+              (view-id result-view)
+              (buffer-id (view-buffer origin-view)))))
+      (editor-select-view-window! editor (view-id origin-view))
+      (unless
+        (exists
+          (lambda (view) (eq? (view-buffer view) buffer))
+          (editor-views editor))
+        (editor-remove-buffer! editor (buffer-id buffer)))))
+
+  (define (move-location-result-command context delta)
+    (let-values ([(buffer state)
+                  (active-location-results context 'xref.results-next)])
+      (let ([positions (location-property-positions buffer)])
+        (if (null? positions)
+            (begin
+              (editor-set-status-message!
+                (command-context-editor context) "No location results")
+              '())
+            (let* ([view (command-context-view context)]
+                   [current
+                     (buffer-text-property-ref
+                       buffer (view-caret view) 'location-index
+                       (location-list-index
+                         (location-results-state-locations state)))]
+                   [target-index
+                     (mod (+ (or current 0) delta) (length positions))]
+                   [entry (list-ref positions target-index)]
+                   [position (car entry)]
+                   [index (cdr entry)]
+                   [item
+                     (buffer-text-property-ref
+                       buffer position 'location-item #f)])
+              (view-set-caret! view position)
+              (ensure-view-visible! view)
+              (preview-location-result! context item index state))))))
 
   (define (visit-xref-result context select-origin? close-results?)
-    (let* ([editor (command-context-editor context)]
-           [selected (selected-xref-result context 'xref.visit)]
-           [session (car selected)]
-           [model (cadr selected)]
-           [origin-view (caddr selected)]
-           [item (cadddr selected)]
-           [effects
-             (visit-location-item!
-               editor origin-view item (xref-results-model-jump-kind model))])
-      (location-list-set-index!
-        (xref-results-model-locations model)
-        (xref-results-selection
-          model
-          (tui-session-view-state
-            session (view-id (command-context-view context)))))
-      (when select-origin?
-        (editor-select-view-window! editor (view-id origin-view)))
-      (when close-results?
-        (tui-close! editor (tui-session-id session)))
-      effects))
+    (let-values ([(buffer state item index)
+                  (selected-location-result context 'xref.visit)])
+      (let* ([editor (command-context-editor context)]
+             [origin-view
+               (editor-view-ref
+                 editor (location-results-state-origin-view-id state))]
+             [effects
+               (preview-location-result! context item index state)])
+        (when select-origin?
+          (editor-select-view-window! editor (view-id origin-view)))
+        (when close-results?
+          (close-location-results-buffer!
+            editor buffer origin-view))
+        effects)))
 
   (define (preview-xref-result-command context)
     (visit-xref-result context #f #f))
@@ -344,16 +354,15 @@
     (visit-xref-result context #t #t))
 
   (define (quit-xref-results-command context)
-    (let* ([editor (command-context-editor context)]
-           [session
-             (require-xref-results-session context 'xref.results-quit)]
-           [model (tui-session-model session)]
-           [origin-view
-             (editor-view-ref
-               editor (xref-results-model-origin-view-id model))])
-      (editor-select-view-window! editor (view-id origin-view))
-      (tui-close! editor (tui-session-id session))
-      '()))
+    (let-values ([(buffer state)
+                  (active-location-results context 'xref.results-quit)])
+      (let* ([editor (command-context-editor context)]
+             [origin-view
+               (editor-view-ref
+                 editor (location-results-state-origin-view-id state))])
+        (editor-select-view-window! editor (view-id origin-view))
+        (close-location-results-buffer! editor buffer origin-view)
+        '())))
 
   (define (editor-show-location-results!
             editor title locations origin-view-id jump-kind)
@@ -366,39 +375,42 @@
       (assertion-violation
         'editor-show-location-results! "invalid location result model"
         title locations origin-view-id jump-kind))
-    (let* ([model
-             (make-xref-results-model
+    (let* ([state
+             (make-location-results-state
                title locations origin-view-id jump-kind)]
            [existing
              (find
-               (lambda (session)
-                 (eq? (tui-application-definition-name
-                        (tui-session-definition session))
-                      'xref-results))
-               (editor-tui-sessions editor))])
-      (if existing
-          (let ([buffer
-                  (editor-buffer-ref
-                    editor (tui-session-buffer-id existing))])
-            (tui-session-set-model! existing model)
-            (for-each
-              (lambda (state)
-                (tui-view-state-set-transient-state! state #f)
-                (tui-view-state-set-viewport! state (cons 0 0)))
-              (tui-session-view-states existing))
-            (editor-display-buffer!
-              editor
-              (make-display-request
-                (buffer-id buffer) 'tools origin-view-id #f
-                (editor-view-resource-context editor origin-view-id)))
-            (editor-invalidate! editor 'application)
-            buffer)
-          (tui-open!
-            editor
-            'xref-results
-            model
-            'tools
-            origin-view-id))))
+               (lambda (buffer)
+                 (location-results-state?
+                   (location-results-state-for-buffer buffer)))
+               (editor-buffers editor))]
+           [buffer
+             (or existing
+                 (editor-create-buffer!
+                   editor "*Location Results*" 'xref-results-mode ""))])
+      (let-values ([(text properties)
+                    (render-location-results editor title locations)])
+        (buffer-clear-text-properties! buffer)
+        (buffer-replace-range-internal!
+          buffer 0 (buffer-size buffer) (string->utf8 text))
+        (for-each
+          (lambda (entry)
+            (buffer-add-text-properties!
+              buffer (car entry) (cadr entry) (caddr entry)))
+          properties)
+        (buffer-set-local! buffer 'location-results-state state)
+        (let ([view
+                (editor-display-buffer!
+                  editor
+                  (make-display-request
+                    (buffer-id buffer) 'tools origin-view-id #f
+                    (editor-view-resource-context editor origin-view-id)))])
+          (let ([positions (location-property-positions buffer)])
+            (when (pair? positions)
+              (view-set-caret! view (caar positions))
+              (ensure-view-visible! view)))
+          (editor-invalidate! editor 'document)
+          buffer))))
 
   (define (editor-show-xref-results! editor locations origin-view-id)
     (editor-show-location-results!
@@ -411,7 +423,6 @@
       command))
 
   (define (install-xref-results! editor)
-    (editor-register-tui-application! editor xref-results-definition)
     (register-major-mode!
       (editor-language-catalog editor)
       (make-major-mode
@@ -440,11 +451,15 @@
             (car spec) (cadr spec) (caddr spec))))
       (list
         (list 'xref.results-next
-              (lambda (context) (send-xref-results! context 'next))
-              "Select the next xref result.")
+              (lambda (context)
+                (move-location-result-command
+                  context (command-context-count context)))
+              "Move to and preview the next location result.")
         (list 'xref.results-previous
-              (lambda (context) (send-xref-results! context 'previous))
-              "Select the previous xref result.")
+              (lambda (context)
+                (move-location-result-command
+                  context (- (command-context-count context))))
+              "Move to and preview the previous location result.")
         (list 'xref.visit visit-xref-result-command
               "Visit the selected location and select its source view.")
         (list 'xref.preview preview-xref-result-command
