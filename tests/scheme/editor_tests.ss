@@ -5408,9 +5408,25 @@
       (eq?
         (buffer-major-mode-name
           (view-buffer (editor-active-view highlight-editor)))
-        'diagnostics-mode))
+        'diagnostics-mode)
+      (buffer-result-refreshable?
+        (view-buffer (editor-active-view highlight-editor))))
     (error 'editor-tests
            "diagnostics did not publish a sorted location list")))
+(editor-update!
+  highlight-editor
+  (make-command-message 'buffer-item.refresh #f))
+(unless
+  (and
+    (= (length
+         (location-list-items
+           (editor-current-location-list highlight-editor)))
+       2)
+    (eq?
+      (buffer-major-mode-name
+        (view-buffer (editor-active-view highlight-editor)))
+      'diagnostics-mode))
+  (error 'editor-tests "diagnostics Result producer did not refresh"))
 (editor-set-active-view!
   highlight-editor (view-id highlight-source-view))
 (view-set-caret! highlight-source-view 8)

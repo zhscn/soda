@@ -7,6 +7,7 @@
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
+          (soda editor condition)
           (soda editor keymap)
           (soda editor language)
           (soda editor location)
@@ -15,7 +16,8 @@
           (soda editor scheme-semantics)
           (soda editor scheme-workspace)
           (soda editor state)
-          (soda editor location-results))
+          (soda editor location-results)
+          (soda editor result-buffer))
 
   (define scheme-diagnostic-namespace
     'scheme-semantic-diagnostics)
@@ -355,7 +357,7 @@
     buffer)
 
   (define (show-diagnostics!
-            editor resource title source items origin-view-id)
+            editor resource title source items origin-view-id refresh)
     (let* ([locations (make-location-list source '())]
            [buffer
             (editor-open-result-buffer!
@@ -363,13 +365,26 @@
               origin-view-id 'diagnostic #f #f)])
       (editor-set-current-location-list! editor locations)
       (editor-append-location-results! editor buffer items)
+      (when refresh
+        (buffer-set-result-refresh! buffer refresh))
       (decorate-diagnostic-results! buffer)))
+
+  (define (diagnostic-status! editor label items)
+    (editor-set-status-message!
+      editor
+      (string-append
+        label ": " (number->string (length items)))))
+
+  (define (buffer-present-in-editor? editor buffer)
+    (exists (lambda (candidate) (eq? candidate buffer))
+            (editor-buffers editor)))
 
   (define (list-diagnostics-command context)
     (let* ([editor (command-context-editor context)]
            [buffer
              (view-buffer
                (command-context-view context))]
+           [origin-view-id (view-id (command-context-view context))]
            [items
              (current-diagnostic-items editor buffer)])
       (if (null? items)
@@ -379,18 +394,34 @@
               editor
               "No current diagnostics"))
           (begin
-            (show-diagnostics!
-              editor
-              "*Diagnostics*"
-              "Diagnostics"
-              'diagnostics
-              items
-              (view-id (command-context-view context)))
-            (editor-set-status-message!
-              editor
-              (string-append
-                "Diagnostics: "
-                (number->string (length items))))))
+            (letrec ([refresh
+                       (lambda (refresh-context refresh-buffer)
+                         (unless (buffer-present-in-editor? editor buffer)
+                           (editor-user-error
+                             'buffer-item.refresh
+                             "Diagnostic source Buffer is no longer open"))
+                         (let ([current
+                                 (current-diagnostic-items editor buffer)])
+                           (show-diagnostics!
+                             editor
+                             "*Diagnostics*"
+                             "Diagnostics"
+                             'diagnostics
+                             current
+                             origin-view-id
+                             refresh)
+                           (diagnostic-status!
+                             editor "Diagnostics" current)
+                           '()))])
+              (show-diagnostics!
+                editor
+                "*Diagnostics*"
+                "Diagnostics"
+                'diagnostics
+                items
+                origin-view-id
+                refresh)
+              (diagnostic-status! editor "Diagnostics" items))))
       '()))
 
   (define (workspace-diagnostic-item value)
@@ -409,11 +440,10 @@
             environments
             context)
     (let* ([editor (command-context-editor context)]
+           [origin-view-id (view-id (command-context-view context))]
            [index
              (scheme-semantic-index-for-view
-               environments
-               editor
-               (view-id (command-context-view context)))]
+               environments editor origin-view-id)]
            [items
              (map
                workspace-diagnostic-item
@@ -428,18 +458,37 @@
             "No workspace diagnostics")
           '())
         (begin
-          (show-diagnostics!
-            editor
-            "*Workspace Diagnostics*"
-            "Workspace diagnostics"
-            'workspace-diagnostics
-            items
-            (view-id (command-context-view context)))
-          (editor-set-status-message!
-            editor
-            (string-append
-              "Workspace diagnostics: "
-              (number->string (length items))))
+          (letrec ([refresh
+                     (lambda (refresh-context refresh-buffer)
+                       (let* ([current-index
+                                (scheme-semantic-index-for-view
+                                  environments editor origin-view-id)]
+                              [current
+                                (map
+                                  workspace-diagnostic-item
+                                  (scheme-workspace-diagnostics
+                                    current-index editor))])
+                         (show-diagnostics!
+                           editor
+                           "*Workspace Diagnostics*"
+                           "Workspace diagnostics"
+                           'workspace-diagnostics
+                           current
+                           origin-view-id
+                           refresh)
+                         (diagnostic-status!
+                           editor "Workspace diagnostics" current)
+                         '()))])
+            (show-diagnostics!
+              editor
+              "*Workspace Diagnostics*"
+              "Workspace diagnostics"
+              'workspace-diagnostics
+              items
+              origin-view-id
+              refresh)
+            (diagnostic-status!
+              editor "Workspace diagnostics" items))
           '()))))
 
   (define (stroke character modifiers)
