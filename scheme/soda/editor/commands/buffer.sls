@@ -326,8 +326,10 @@
             (editor-views editor))))
       (buffer-set-result-refresh!
         panel
-        (lambda (refresh-editor refresh-buffer)
-          (buffer-list-refresh! refresh-editor origin-view-id)
+        (lambda (context refresh-buffer)
+          (buffer-list-refresh!
+            (command-context-editor context)
+            origin-view-id)
           '()))
       (register-buffer-list-actions! editor panel)
       panel))
@@ -372,6 +374,49 @@
             (lambda (entry) (editor-save-buffer! editor (cdr entry)))
             entries)))))
 
+  (define (set-buffer-list-item-read-only! editor item read-only?)
+    (buffer-set-local-setting! item 'read-only? read-only?)
+    (editor-invalidate! editor 'document))
+
+  (define (toggle-buffer-list-item-read-only context panel item index)
+    (let ([editor (command-context-editor context)])
+      (set-buffer-list-item-read-only!
+        editor item
+        (not (buffer-setting-ref item 'read-only? #f)))
+      (refresh-buffer-list-after! editor panel '())))
+
+  (define (toggle-buffer-list-items-read-only context panel entries)
+    (let* ([editor (command-context-editor context)]
+           [items (map cdr entries)]
+           [read-only?
+             (not
+               (for-all
+                 (lambda (item)
+                   (buffer-setting-ref item 'read-only? #f))
+                 items))])
+      (for-each
+        (lambda (item)
+          (set-buffer-list-item-read-only! editor item read-only?))
+        items)
+      (refresh-buffer-list-after! editor panel '())))
+
+  (define (mark-buffer-list-item-unmodified! editor item)
+    (buffer-mark-saved! item)
+    (editor-invalidate! editor 'document))
+
+  (define (mark-buffer-list-item-unmodified context panel item index)
+    (let ([editor (command-context-editor context)])
+      (mark-buffer-list-item-unmodified! editor item)
+      (refresh-buffer-list-after! editor panel '())))
+
+  (define (mark-buffer-list-items-unmodified context panel entries)
+    (let ([editor (command-context-editor context)])
+      (for-each
+        (lambda (entry)
+          (mark-buffer-list-item-unmodified! editor (cdr entry)))
+        entries)
+      (refresh-buffer-list-after! editor panel '())))
+
   (define (register-buffer-list-actions! editor panel)
     (buffer-register-result-action!
       panel
@@ -390,7 +435,24 @@
                (buffer-modified? item)
                (not (buffer-save-pending? item))))
         save-buffer-list-item
-        save-buffer-list-items)))
+        save-buffer-list-items))
+    (buffer-register-result-action!
+      panel
+      (make-result-action
+        'toggle-read-only "Toggle read-only"
+        (lambda (buffer item) (buffer-list-item-live? editor item))
+        toggle-buffer-list-item-read-only
+        toggle-buffer-list-items-read-only))
+    (buffer-register-result-action!
+      panel
+      (make-result-action
+        'mark-unmodified "Mark unmodified"
+        (lambda (buffer item)
+          (and (buffer-list-item-live? editor item)
+               (buffer-modified? item)
+               (not (buffer-save-pending? item))))
+        mark-buffer-list-item-unmodified
+        mark-buffer-list-items-unmodified)))
 
   (define (list-buffers-command context)
     (let* ([editor (command-context-editor context)]
@@ -426,6 +488,18 @@
       (keymap-bind!
         keymap (list (make-key-stroke 'character (char->integer #\s) 0))
         'buffer-list.save)
+      (keymap-bind!
+        keymap (list (make-key-stroke 'character (char->integer #\%) 0))
+        'buffer-list.toggle-read-only)
+      (keymap-bind!
+        keymap (list (make-key-stroke 'character (char->integer #\~) 0))
+        'buffer-list.mark-unmodified)
+      (keymap-bind!
+        keymap (list (make-key-stroke 'character (char->integer #\u) 0))
+        'buffer-item.unmark)
+      (keymap-bind!
+        keymap (list (make-key-stroke 'character (char->integer #\U) 0))
+        'buffer-item.unmark-all)
       (keymap-catalog-register!
         (editor-keymap-catalog editor) 'buffer-list-mode-map keymap))
     (editor-register-command!
@@ -476,6 +550,18 @@
         'buffer-list.save
         (buffer-list-action-command 'save)
         "Save the buffer at point, or all marked buffers."))
+    (editor-register-command!
+      editor
+      (make-interactive-context-command
+        'buffer-list.toggle-read-only
+        (buffer-list-action-command 'toggle-read-only)
+        "Toggle read-only for the buffer at point, or all marked buffers."))
+    (editor-register-command!
+      editor
+      (make-interactive-context-command
+        'buffer-list.mark-unmodified
+        (buffer-list-action-command 'mark-unmodified)
+        "Treat the buffer at point, or all marked buffers, as unmodified."))
     (editor-bind-key!
       editor
       (list

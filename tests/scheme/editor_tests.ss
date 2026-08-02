@@ -10556,8 +10556,52 @@
          (buffer-result-actions-at
            buffer-list-panel
            (view-caret (editor-active-view buffer-list-editor))))
-    '(kill))
+    '(kill toggle-read-only))
   (error 'editor-tests "buffer list did not expose management actions"))
+(editor-update!
+  buffer-list-editor
+  (make-command-message 'buffer-list.toggle-read-only #f))
+(unless
+  (and
+    (buffer-setting-ref buffer-list-buffer 'read-only? #f)
+    (string-contains?
+      (utf8->string (buffer-bytes buffer-list-panel))
+      "%  *alpha*"))
+  (error 'editor-tests "buffer list did not toggle the target read-only state"))
+(editor-update!
+  buffer-list-editor
+  (make-command-message 'buffer-list.toggle-read-only #f))
+(let ([end (bytevector-length (buffer-bytes buffer-list-buffer))])
+  (buffer-replace-range!
+    buffer-list-buffer end end (string->utf8 "!")))
+(editor-update!
+  buffer-list-editor
+  (make-command-message 'buffer-item.refresh #f))
+(unless (buffer-modified? buffer-list-buffer)
+  (error 'editor-tests "buffer list test target did not become modified"))
+(let* ([view (editor-active-view buffer-list-editor)]
+       [panel (view-buffer view)]
+       [range
+         (find
+           (lambda (candidate)
+             (eq? (caddr candidate) buffer-list-buffer))
+           (buffer-text-property-ranges panel 'result-item))])
+  (unless range
+    (error 'editor-tests "buffer list lost its modified test target"))
+  (view-set-caret! view (car range)))
+(unless
+  (memq
+    'mark-unmodified
+    (map result-action-name
+         (buffer-result-actions-at
+           (view-buffer (editor-active-view buffer-list-editor))
+           (view-caret (editor-active-view buffer-list-editor)))))
+  (error 'editor-tests "buffer list did not offer modified-state management"))
+(editor-update!
+  buffer-list-editor
+  (make-command-message 'buffer-list.mark-unmodified #f))
+(when (buffer-modified? buffer-list-buffer)
+  (error 'editor-tests "buffer list did not clear the target modified state"))
 (editor-update!
   buffer-list-editor
   (make-command-message 'buffer-item.next #f))
