@@ -5,13 +5,11 @@
           editor-show-location-results!
           editor-append-location-results!
           editor-result-origin-view-id
-          buffer-set-location-result-close-argument!
-          location-results-buffer?)
+          buffer-set-location-result-close-argument!)
   (import (rnrs)
           (soda document)
           (soda editor buffer)
           (soda editor command)
-          (soda editor command-runtime)
           (soda editor condition)
           (soda editor edit)
           (soda editor effect)
@@ -399,14 +397,6 @@
       (editor-append-result-items! editor buffer text ranges)
       (location-list-append-items! locations items)
       buffer))
-
-  (define (active-location-results context who)
-    (let* ([view (command-context-view context)]
-           [buffer (view-buffer view)]
-           [state (location-results-state-for-buffer buffer)])
-      (unless (location-results-state? state)
-        (editor-user-error who "Current Buffer does not contain location results"))
-      (values buffer state)))
 
   (define (location-property-positions buffer)
     (map

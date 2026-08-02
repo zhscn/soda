@@ -1,14 +1,11 @@
 (library (soda editor prompt-store)
   (export make-prompt-store
-          prompt-store?
           prompt-store-prompts
           prompt-store-active-prompt
           prompt-store-prompt-ref
           prompt-store-allocate-prompt-id!
           prompt-store-push-prompt!
           prompt-store-pop-prompt!
-          prompt-store-history-ref
-          prompt-store-ensure-history!
           prompt-store-history-entries
           prompt-store-record-history!
           prompt-store-history-previous!

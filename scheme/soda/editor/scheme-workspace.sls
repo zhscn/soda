@@ -1,6 +1,5 @@
 (library (soda editor scheme-workspace)
   (export make-scheme-workspace-index
-          scheme-workspace-index?
           scheme-workspace-session-active?
           scheme-workspace-generation
           scheme-workspace-attach-buffer!
@@ -14,19 +13,16 @@
           scheme-workspace-remove-interface-index!
           scheme-workspace-snapshot-for-buffer
           scheme-workspace-references
-          scheme-workspace-reference?
           scheme-workspace-reference-buffer-id
           scheme-workspace-reference-resource
           scheme-workspace-reference-revision
           scheme-workspace-reference-use
           scheme-workspace-diagnostics
-          scheme-workspace-diagnostic?
           scheme-workspace-diagnostic-buffer-id
           scheme-workspace-diagnostic-resource
           scheme-workspace-diagnostic-revision
           scheme-workspace-diagnostic-excerpt
           scheme-workspace-diagnostic-diagnostic
-          scheme-workspace-text-edit?
           scheme-workspace-text-edit-buffer-id
           scheme-workspace-text-edit-resource
           scheme-workspace-text-edit-revision
@@ -36,15 +32,12 @@
           scheme-workspace-rename-edits
           scheme-workspace-document-symbols
           scheme-workspace-symbols
-          scheme-workspace-symbol?
           scheme-workspace-symbol-key
           scheme-workspace-symbol-name
           scheme-workspace-symbol-kind
           scheme-workspace-symbol-buffer-id
           scheme-workspace-symbol-resource
-          scheme-workspace-symbol-revision
           scheme-workspace-symbol-start
-          scheme-workspace-symbol-end
           scheme-workspace-symbol-definition)
   (import (rnrs)
           (soda editor contract)

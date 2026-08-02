@@ -1,41 +1,15 @@
 (library (soda editor scheme-project-session)
   (export install-scheme-project-session-commands!
-          scheme-project-manifest?
-          scheme-project-manifest-path
-          scheme-project-manifest-name
-          scheme-project-manifest-dialect
-          scheme-project-manifest-interface-path
-          scheme-project-manifest-build-arguments
-          scheme-project-manifest-working-directory
-          scheme-project-manifest-decode
-          make-scheme-project-load-request
           scheme-project-load-request?
           scheme-project-load-request-path
           scheme-project-load-request-origin-view-id
           scheme-project-load-request-origin-buffer-id
           make-scheme-project-load-result
-          scheme-project-load-result?
-          scheme-project-load-result-path
-          scheme-project-load-result-origin-view-id
-          scheme-project-load-result-origin-buffer-id
-          scheme-project-load-result-status
-          scheme-project-load-result-data
-          scheme-project-load-result-detail
-          make-scheme-project-build-request
           scheme-project-build-request?
           scheme-project-build-request-manifest-path
-          scheme-project-build-request-interface-path
           scheme-project-build-request-arguments
           scheme-project-build-request-working-directory
-          scheme-project-build-request-environment-id
-          scheme-project-build-request-origin-view-id
-          make-scheme-project-build-result
-          scheme-project-build-result?
-          scheme-project-build-result-request
-          scheme-project-build-result-kind
-          scheme-project-build-result-status
-          scheme-project-build-result-flags
-          scheme-project-build-result-data)
+          make-scheme-project-build-result)
   (import (rnrs)
           (soda editor contract)
           (soda document)

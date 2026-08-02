@@ -12,8 +12,6 @@
           scheme-interface-index-decode
           scheme-interface-index-write-file!
           scheme-sources->interface-index-file!
-          scheme-bytevector-line-start
-          scheme-bytevector-line-end
           scheme-diagnostic-excerpt)
   (import (chezscheme)
           (soda editor contract)
