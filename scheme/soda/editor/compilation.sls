@@ -181,13 +181,12 @@
                    "\nProcess "
                    (if (zero? status) "finished" "failed")
                    " with status " (number->string status) ".\n")])
-          (buffer-reconcile-result-selection!
-            editor (compilation-session-buffer session) #t)
-          (buffer-set-result-producer-state!
+          (editor-finish-result-producer!
+            editor
             (compilation-session-buffer session)
-            (if (zero? status) 'ready 'failed))
-          (editor-append-result-text!
-            editor (compilation-session-buffer session) message '())
+            (if (zero? status) 'ready 'failed)
+            message
+            (if (zero? status) 'info 'error))
           (editor-set-status-message! editor
             (string-append (compilation-session-label session) ": "
                            (if (zero? status) "finished" "failed")))))
@@ -201,8 +200,12 @@
           (let ([process (compilation-session-process session)])
             (compilation-session-closed?-set! session #t)
             (when (compilation-session-buffer session)
-              (buffer-set-result-producer-state!
-                (compilation-session-buffer session) 'cancelled))
+              (editor-finish-result-producer!
+                editor
+                (compilation-session-buffer session)
+                'cancelled
+                "Compilation cancelled."
+                'warning))
             (when (eq? (hashtable-ref active-compilations editor #f) session)
               (hashtable-delete! active-compilations editor))
             (if (and process (managed-process-running? process))

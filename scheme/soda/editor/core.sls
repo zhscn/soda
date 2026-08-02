@@ -961,12 +961,14 @@
           buffer-result-refreshable?
           buffer-set-result-producer-state!
           buffer-result-producer-state
+          editor-finish-result-producer!
           refresh-buffer-items
           buffer-set-result-interface!
           buffer-result-interface-ref
           editor-note-result-buffer!
           editor-present-result-buffer!
           editor-append-result-items!
+          editor-append-result-message!
           editor-resolve-resources!
           location-item-open-position
           editor-visit-location-item!

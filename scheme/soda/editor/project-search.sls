@@ -216,21 +216,14 @@
         (let* ([status (managed-process-event-status event)]
                [count (search-result-count session)]
                [success? (or (= status 0) (= status 1))])
-          (let ([message
-                  (if success?
-                      (and (zero? count) "No matches.")
-                      (project-search-error-message session status))])
-            (when message
-              (editor-append-result-message!
-                editor
-                (project-search-session-buffer session)
-                message
-                (if success? 'info 'error))))
-          (buffer-reconcile-result-selection!
-            editor (project-search-session-buffer session) #t)
-          (buffer-set-result-producer-state!
+          (editor-finish-result-producer!
+            editor
             (project-search-session-buffer session)
-            (if success? 'ready 'failed))
+            (if success? 'ready 'failed)
+            (if success?
+                (and (zero? count) "No matches.")
+                (project-search-error-message session status))
+            (if success? 'info 'error))
           (editor-set-status-message!
             editor
             (cond
@@ -249,8 +242,12 @@
           (let ([process (project-search-session-process session)])
             (project-search-session-closed?-set! session #t)
             (when (project-search-session-buffer session)
-              (buffer-set-result-producer-state!
-                (project-search-session-buffer session) 'cancelled))
+              (editor-finish-result-producer!
+                editor
+                (project-search-session-buffer session)
+                'cancelled
+                "Project search cancelled."
+                'warning))
             (when (eq? (hashtable-ref active-project-searches editor #f) session)
               (hashtable-delete! active-project-searches editor))
             (if (and process (managed-process-running? process))

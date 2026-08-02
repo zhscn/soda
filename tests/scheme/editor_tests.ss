@@ -4939,6 +4939,32 @@
         empty-xref-buffer 'result-message)))
   (error 'editor-tests
          "empty xref result did not retain its informational message"))
+(editor-finish-result-producer!
+  empty-xref-editor
+  empty-xref-buffer
+  'cancelled
+  "Request cancelled."
+  'warning)
+(unless
+  (and
+    (eq?
+      (buffer-result-producer-state empty-xref-buffer)
+      'cancelled)
+    (equal?
+      (map caddr
+        (buffer-text-property-ranges
+          empty-xref-buffer 'result-message))
+      '(info warning))
+    (exists
+      (lambda (range)
+        (eq?
+          (buffer-text-property-ref
+            empty-xref-buffer (car range) 'face #f)
+          'status.warning))
+      (buffer-text-property-ranges
+        empty-xref-buffer 'result-message)))
+  (error 'editor-tests
+         "Result producer outcome was not persisted atomically"))
 (editor-update!
   empty-xref-editor
   (make-command-message 'buffer-item.next #f))

@@ -21,6 +21,7 @@
           buffer-result-refreshable?
           buffer-set-result-producer-state!
           buffer-result-producer-state
+          editor-finish-result-producer!
           buffer-capture-result-group-folds!
           editor-reconcile-result-group-folds!
           refresh-buffer-items
@@ -329,6 +330,38 @@
       (assertion-violation
         'buffer-result-producer-state "expected a Buffer" buffer))
     (buffer-local-ref buffer 'result-producer-state 'idle))
+
+  (define terminal-result-producer-states
+    '(ready failed cancelled))
+
+  (define editor-finish-result-producer!
+    (case-lambda
+      [(editor buffer state)
+       (editor-finish-result-producer!
+         editor buffer state #f #f)]
+      [(editor buffer state message severity)
+       (unless
+         (and (editor? editor)
+              (buffer? buffer)
+              (memq state terminal-result-producer-states)
+              (or
+                (and (not message)
+                     (or (not severity)
+                         (memq severity '(info warning error))))
+                (and (string? message)
+                     (positive? (string-length message))
+                     (memq severity '(info warning error)))))
+         (assertion-violation
+           'editor-finish-result-producer!
+           "invalid Result producer outcome"
+           editor buffer state message severity))
+       (when message
+         (editor-append-result-message!
+           editor buffer message severity))
+       (buffer-reconcile-result-selection! editor buffer #t)
+       (buffer-set-result-producer-state! buffer state)
+       (editor-invalidate! editor 'chrome)
+       buffer]))
 
   (define (buffer-set-result-refresh! buffer refresh)
     (unless (and (buffer? buffer)

@@ -138,30 +138,23 @@
                  (length
                    (location-list-items
                      (git-status-session-locations session)))])
-          (cond
-            [(and (zero? status) (zero? count))
-             (editor-append-result-message!
-               editor
-               (git-status-session-buffer session)
-               "Working tree clean."
-               'info)]
-            [(not (zero? status))
-             (let ([stderr (git-status-session-stderr-output session)])
-               (editor-append-result-message!
-                 editor
-                 (git-status-session-buffer session)
+          (editor-finish-result-producer!
+            editor
+            (git-status-session-buffer session)
+            (if (zero? status) 'ready 'failed)
+            (cond
+              [(and (zero? status) (zero? count))
+               "Working tree clean."]
+              [(not (zero? status))
+               (let ([stderr (git-status-session-stderr-output session)])
                  (if (zero? (bytevector-length stderr))
                      (string-append
                        "Git status failed with status "
                        (number->string status))
                      (guard (condition [else "Git status produced invalid UTF-8"])
-                       (utf8->string stderr)))
-                 'error))])
-          (buffer-reconcile-result-selection!
-            editor (git-status-session-buffer session) #t)
-          (buffer-set-result-producer-state!
-            (git-status-session-buffer session)
-            (if (zero? status) 'ready 'failed))
+                       (utf8->string stderr))))]
+              [else #f])
+            (if (zero? status) 'info 'error))
           (editor-set-status-message!
             editor
             (if (zero? status)
@@ -181,8 +174,12 @@
           (let ([process (git-status-session-process session)])
             (git-status-session-closed?-set! session #t)
             (when (git-status-session-buffer session)
-              (buffer-set-result-producer-state!
-                (git-status-session-buffer session) 'cancelled))
+              (editor-finish-result-producer!
+                editor
+                (git-status-session-buffer session)
+                'cancelled
+                "Git status cancelled."
+                'warning))
             (when (eq? (hashtable-ref active-git-statuses editor #f) session)
               (hashtable-delete! active-git-statuses editor))
             (if (and process (managed-process-running? process))
@@ -284,21 +281,32 @@
                         (make-command-context editor view #f #f #f)
                         (git-status-session-project session))
                       (begin
-                        (buffer-set-result-producer-state!
-                          (git-status-session-buffer session) 'ready)
+                        (editor-finish-result-producer!
+                          editor
+                          (git-status-session-buffer session)
+                          'ready
+                          (string-append
+                            (git-operation-label operation) " succeeded.")
+                          'info)
                         '())))
                 (begin
-                  (buffer-set-result-producer-state!
-                    (git-status-session-buffer session) 'failed)
-                  (editor-set-status-message!
-                    editor
-                    (let ([stderr (git-operation-stderr-output operation)])
-                      (if (zero? (bytevector-length stderr))
-                          (string-append
-                            (git-operation-label operation) " failed with status "
-                            (number->string status))
-                          (guard (condition [else "Git operation failed"])
-                            (utf8->string stderr)))))
+                  (let ([message
+                          (let ([stderr
+                                  (git-operation-stderr-output operation)])
+                            (if (zero? (bytevector-length stderr))
+                                (string-append
+                                  (git-operation-label operation)
+                                  " failed with status "
+                                  (number->string status))
+                                (guard (condition [else "Git operation failed"])
+                                  (utf8->string stderr))))])
+                    (editor-finish-result-producer!
+                      editor
+                      (git-status-session-buffer session)
+                      'failed
+                      message
+                      'error)
+                    (editor-set-status-message! editor message))
                   '()))))))
 
   (define (start-git-operation session label arguments)
