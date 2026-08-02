@@ -580,7 +580,6 @@
           editor-start-project-lsp!
           editor-start-project-lsp-for-active-view!
           editor-start-lsp-session!
-          editor-start-lsp-for-active-view!
           lsp-client-stop!
           scheme-environment-registry?
           scheme-environment?

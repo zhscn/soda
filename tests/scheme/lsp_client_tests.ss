@@ -356,7 +356,7 @@
   (view-id (editor-active-view editor))
   (buffer-id source))
 (define project-start-effects
-  (editor-start-lsp-for-active-view! editor))
+  (editor-start-project-lsp-for-active-view! editor))
 (define sibling-attachments
   (editor-buffer-language-attachments editor (buffer-id sibling)))
 (check
@@ -389,7 +389,8 @@
   (buffer-id external))
 (editor-set-view-language-attachment!
   editor (view-id (editor-active-view editor)) #f)
-(define external-start-effects (editor-start-lsp-for-active-view! editor))
+(define external-start-effects
+  (editor-start-project-lsp-for-active-view! editor))
 (define external-attachment
   (car (editor-buffer-language-attachments editor (buffer-id external))))
 (check

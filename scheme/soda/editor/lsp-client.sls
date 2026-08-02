@@ -23,7 +23,6 @@
           editor-start-project-lsp!
           editor-start-project-lsp-for-active-view!
           editor-start-lsp-session!
-          editor-start-lsp-for-active-view!
           lsp-client-handle-json-message!
           lsp-client-handle-process-output!
           lsp-client-handle-process-exit!
@@ -1764,10 +1763,6 @@
           editor buffer workspace server
           (lsp-start-provenance buffer workspace)
           (view-id view)))))
-
-  ;; Retained as the document-oriented spelling of project activation.
-  (define (editor-start-lsp-for-active-view! editor)
-    (editor-start-project-lsp-for-active-view! editor))
 
   (define (lsp-client-stop! editor session)
     (unless (lsp-client-session? session)
@@ -4040,7 +4035,8 @@
       (make-interactive-context-command
         'lsp.start
         (lambda (context)
-          (editor-start-lsp-for-active-view! (command-context-editor context)))
+          (editor-start-project-lsp-for-active-view!
+            (command-context-editor context)))
         "Start the configured language server for the active buffer."))
     (editor-register-command!
       editor
