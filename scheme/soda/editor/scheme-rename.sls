@@ -14,10 +14,11 @@
           (soda editor scheme-semantics)
           (soda editor scheme-workspace)
           (soda editor state)
-          (soda editor workspace-edit))
+          (soda editor workspace-edit)
+          (soda editor workspace-edit-preview))
 
   (define-record-type pending-rename
-    (fields workspace definition new-name resources))
+    (fields workspace definition new-name resources origin-view-id))
 
   (define pending-renames
     (make-weak-eq-hashtable))
@@ -152,31 +153,36 @@
     (workspace-text-edits-missing-resources
       editor (scheme-edits->workspace-edits editor edits)))
 
-  (define (apply-rename-edits! editor workspace edits new-name)
-    (workspace-text-edits-apply!
-      editor (scheme-edits->workspace-edits editor edits))
-    (scheme-workspace-sync-editor! workspace editor)
-      (editor-set-status-message!
-        editor
-        (string-append
-          "Renamed to "
-          new-name
-          " in "
-          (number->string (length edits))
-          (if (= (length edits) 1) " place" " places")))
-      (editor-invalidate! editor 'document)
-      '())
+  (define (preview-rename-edits!
+            editor origin-view-id workspace edits new-name)
+    (let ([resolved (scheme-edits->workspace-edits editor edits)])
+      (if (null? resolved)
+          (begin
+            (editor-set-status-message! editor "No rename edits")
+            '())
+          (begin
+            (editor-show-workspace-edit-preview!
+              editor
+              origin-view-id
+              resolved
+              (string-append "Renamed to " new-name)
+              (lambda (current-editor)
+                (scheme-workspace-sync-editor! workspace current-editor)
+                (editor-invalidate! current-editor 'document)
+                '()))
+            '()))))
 
   (define (finish-rename!
             editor
             workspace
             definition
-            new-name)
+            new-name
+            origin-view-id)
     (let ([edits
             (scheme-workspace-rename-edits
               workspace editor definition new-name)])
-      (apply-rename-edits!
-        editor workspace edits new-name)))
+      (preview-rename-edits!
+        editor origin-view-id workspace edits new-name)))
 
   (define (start-rename!
             environments
@@ -217,14 +223,17 @@
                    editor edits)])
           (if
             (null? resources)
-            (apply-rename-edits!
-              editor workspace edits new-name)
+            (preview-rename-edits!
+              editor
+              (view-id (command-context-view context))
+              workspace edits new-name)
             (begin
               (hashtable-set!
                 pending-renames
                 editor
                 (make-pending-rename
-                  workspace definition new-name resources))
+                  workspace definition new-name resources
+                  (view-id (command-context-view context))))
               (editor-set-status-message!
                 editor
                 (string-append
@@ -287,7 +296,8 @@
              editor
              (pending-rename-workspace pending)
              (pending-rename-definition pending)
-             (pending-rename-new-name pending))]))))
+             (pending-rename-new-name pending)
+             (pending-rename-origin-view-id pending))]))))
 
   (define (stroke character modifiers)
     (make-key-stroke

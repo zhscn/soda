@@ -45,6 +45,24 @@
     (editor-buffers editor))
   (scheme-workspace-sync-editor! index editor))
 
+(define (accept-rename-preview! editor)
+  (unless
+    (eq?
+      (buffer-major-mode-name (view-buffer (editor-active-view editor)))
+      'workspace-edit-preview-mode)
+    (error
+      'scheme-project-session-tests
+      "rename did not open a workspace edit preview"))
+  (let drain ([effects
+                (editor-update!
+                  editor
+                  (make-command-message 'workspace-edit.accept #f))])
+    (for-each
+      (lambda (effect)
+        (when (eq? (command-effect-kind effect) 'command.invoke)
+          (drain (editor-update! editor (command-effect-payload effect)))))
+      effects)))
+
 (define root (getenv "SODA_SCHEME_PROJECT_TEST_ROOT"))
 (define root-resource
   (vfs-path-join root "root.sls"))
@@ -1218,6 +1236,7 @@
       (runtime-poll! runtime))
     (loop (+ turn 1))))
 (runtime-cancel! runtime final-rename-timeout)
+(accept-rename-preview! editor)
 
 (unless
   (and

@@ -421,7 +421,7 @@
             (list
               (make-command-effect
                 'command.invoke
-                (make-command-message close-command close-argument)))
+                (make-internal-command-message close-command close-argument)))
             '()))))
 
   (define (%editor-show-location-results!

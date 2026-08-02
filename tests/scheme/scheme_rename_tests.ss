@@ -50,6 +50,22 @@
     (editor-buffers editor))
   (scheme-workspace-sync-editor! index editor))
 
+(define (accept-rename-preview! editor)
+  (unless
+    (eq?
+      (buffer-major-mode-name (view-buffer (editor-active-view editor)))
+      'workspace-edit-preview-mode)
+    (error 'scheme-rename-tests "rename did not open a workspace edit preview"))
+  (let drain ([effects
+                (editor-update!
+                  editor
+                  (make-command-message 'workspace-edit.accept #f))])
+    (for-each
+      (lambda (effect)
+        (when (eq? (command-effect-kind effect) 'command.invoke)
+          (drain (editor-update! editor (command-effect-payload effect)))))
+      effects)))
+
 (define owner-source
   (string-append
     "(library (fixture rename-owner)\n"
@@ -178,6 +194,7 @@
    context
    owner-definition
    "alpha-execute"))
+(accept-rename-preview! editor)
 
 (define invalid-name-rejected? #f)
 (guard
@@ -399,6 +416,7 @@
    syntax-pattern-context
    syntax-pattern-definition
    "element"))
+(accept-rename-preview! syntax-pattern-editor)
 (define renamed-syntax-pattern
   (buffer-string syntax-pattern-buffer))
 (unless
@@ -474,6 +492,7 @@
    syntax-case-context
    syntax-case-definition
    "expression"))
+(accept-rename-preview! syntax-case-editor)
 (define renamed-syntax-case
   (buffer-string syntax-case-buffer))
 (unless
@@ -551,6 +570,7 @@
    local-syntax-context
    local-syntax-definition
    "repeat-form"))
+(accept-rename-preview! local-syntax-editor)
 (define renamed-local-syntax
   (buffer-string local-syntax-buffer))
 (unless
@@ -638,6 +658,7 @@
    identifier-syntax-context
    identifier-syntax-value
    "new-value"))
+(accept-rename-preview! identifier-syntax-editor)
 (define renamed-identifier-syntax
   (buffer-string identifier-syntax-buffer))
 (unless
@@ -715,6 +736,7 @@
    fluid-let-syntax-context
    fluid-let-syntax-keyword
    "dynamic-keyword"))
+(accept-rename-preview! fluid-let-syntax-editor)
 (define renamed-fluid-let-syntax
   (buffer-string fluid-let-syntax-buffer))
 (unless
@@ -788,6 +810,7 @@
    define-values-context
    define-values-primary
    "main-value"))
+(accept-rename-preview! define-values-editor)
 (define renamed-define-values
   (buffer-string define-values-buffer))
 (unless
@@ -854,6 +877,7 @@
    fluid-let-context
    fluid-let-setting
    "dynamic-setting"))
+(accept-rename-preview! fluid-let-editor)
 (define renamed-fluid-let
   (buffer-string fluid-let-buffer))
 (unless
@@ -927,6 +951,7 @@
    dynamic-top-level-context
    dynamic-top-level-definition
    "session-value"))
+(accept-rename-preview! dynamic-top-level-editor)
 (define renamed-dynamic-top-level
   (buffer-string dynamic-top-level-buffer))
 (unless
@@ -1127,6 +1152,7 @@
 (runtime-cancel!
   compiled-runtime
   compiled-timeout)
+(accept-rename-preview! compiled-editor)
 
 (define compiled-owner-buffer
   (editor-buffer-for-resource

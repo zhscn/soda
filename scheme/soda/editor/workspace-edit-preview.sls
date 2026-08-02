@@ -241,12 +241,19 @@
 
   (define (discard-workspace-edit-preview context)
     (let ([preview (command-context-argument context)])
-      (when (and (workspace-edit-preview? preview)
-                 (not (workspace-edit-preview-accepted? preview)))
+      (when (workspace-edit-preview? preview)
         (editor-set-status-message!
           (command-context-editor context)
-          (string-append
-            (workspace-edit-preview-description preview) " discarded")))
+          (if (workspace-edit-preview-accepted? preview)
+              (let ([count
+                      (length
+                        (workspace-edit-preview-projections preview))])
+                (string-append
+                  (workspace-edit-preview-description preview)
+                  " in " (number->string count)
+                  (if (= count 1) " place" " places")))
+              (string-append
+                (workspace-edit-preview-description preview) " discarded"))))
       '()))
 
   (define (install-workspace-edit-preview! editor)
