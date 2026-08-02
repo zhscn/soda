@@ -869,21 +869,6 @@
         (editor-effects value)
         (list (make-command-effect kind request)))))
 
-  (define (completion-effect? effect)
-    (memq
-      (command-effect-kind effect)
-      '(completion.request completion.cancel)))
-
-  (define (editor-take-completion-effects! value)
-    (require-open-editor
-      'editor-take-completion-effects!
-      value)
-    (let-values
-      ([(completion remaining)
-        (partition completion-effect? (editor-effects value))])
-      (editor-effects-set! value remaining)
-      completion))
-
   (define (queue-completion-generation! value completion)
     (call-with-values
       (lambda ()

@@ -16,8 +16,10 @@
           completion-provider-catalog-bind-request!
           completion-provider-catalog-names
           editor-register-completion-provider!
+          editor-take-completion-effects!
           make-completion-response-for-request)
   (import (rnrs)
+          (soda editor command)
           (soda editor completion)
           (soda editor editor-storage)
           (soda editor event)
@@ -225,6 +227,23 @@
     (completion-provider-catalog-register!
       (editor-completion-provider-catalog editor)
       provider))
+
+  (define (completion-effect? effect)
+    (memq
+      (command-effect-kind effect)
+      '(completion.request completion.cancel)))
+
+  (define (editor-take-completion-effects! editor)
+    (require-open-editor
+      'editor-take-completion-effects!
+      editor)
+    (let-values
+      ([(completion remaining)
+        (partition
+          completion-effect?
+          (editor-effects editor))])
+      (editor-effects-set! editor remaining)
+      completion))
 
   (define (completion-provider-for-request catalog request)
     (unless (completion-request? request)
