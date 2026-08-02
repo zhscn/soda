@@ -1916,9 +1916,6 @@
          (editor-set-status-message! editor #f)
          '()])))
 
-  (define (stroke key codepoint modifiers)
-    (make-key-stroke key codepoint modifiers))
-
   (define (install-basic-commands! editor)
     (for-each
       (lambda (entry)
@@ -2170,7 +2167,7 @@
           (keymap-bind!
             keymap
             (list
-              (stroke
+              (make-key-stroke
                 'character
                 (char->integer (car entry))
                 0))
@@ -2190,156 +2187,156 @@
       (lambda (entry)
         (editor-bind-key! editor (list (car entry)) (cdr entry)))
       (list
-        (cons (stroke 'backspace 127 0) 'edit.backward-delete)
-        (cons (stroke 'delete #f 0) 'edit.forward-delete)
+        (cons (make-key-stroke 'backspace 127 0) 'edit.backward-delete)
+        (cons (make-key-stroke 'delete #f 0) 'edit.forward-delete)
         (cons
-          (stroke 'character (char->integer #\d) 4)
+          (make-key-stroke 'character (char->integer #\d) 4)
           'edit.forward-delete)
-        (cons (stroke 'enter 13 0) 'edit.newline)
-        (cons (stroke 'tab 9 0) 'edit.indent-or-insert-tab)
-        (cons (stroke 'tab 9 1) 'edit.unindent)
+        (cons (make-key-stroke 'enter 13 0) 'edit.newline)
+        (cons (make-key-stroke 'tab 9 0) 'edit.indent-or-insert-tab)
+        (cons (make-key-stroke 'tab 9 1) 'edit.unindent)
         (cons
-          (stroke 'character (char->integer #\i) 2)
+          (make-key-stroke 'character (char->integer #\i) 2)
           'edit.toggle-auto-indent)
-        (cons (stroke 'character (char->integer #\o) 4) 'edit.open-line)
+        (cons (make-key-stroke 'character (char->integer #\o) 4) 'edit.open-line)
         (cons
-          (stroke 'character (char->integer #\}) 2)
+          (make-key-stroke 'character (char->integer #\}) 2)
           'edit.shift-region-right)
         (cons
-          (stroke 'character (char->integer #\{) 2)
+          (make-key-stroke 'character (char->integer #\{) 2)
           'edit.unindent-region)
         (cons
-          (stroke 'character (char->integer #\\) 6)
+          (make-key-stroke 'character (char->integer #\\) 6)
           'edit.indent-region)
-        (cons (stroke 'left #f 0) 'move.backward-character)
-        (cons (stroke 'right #f 0) 'move.forward-character)
+        (cons (make-key-stroke 'left #f 0) 'move.backward-character)
+        (cons (make-key-stroke 'right #f 0) 'move.forward-character)
         (cons
-          (stroke 'character (char->integer #\b) 4)
+          (make-key-stroke 'character (char->integer #\b) 4)
           'move.backward-character)
         (cons
-          (stroke 'character (char->integer #\f) 4)
+          (make-key-stroke 'character (char->integer #\f) 4)
           'move.forward-character)
-        (cons (stroke 'character (char->integer #\b) 2) 'move.backward-word)
-        (cons (stroke 'character (char->integer #\f) 2) 'move.forward-word)
+        (cons (make-key-stroke 'character (char->integer #\b) 2) 'move.backward-word)
+        (cons (make-key-stroke 'character (char->integer #\f) 2) 'move.forward-word)
         (cons
-          (stroke 'character (char->integer #\a) 2)
+          (make-key-stroke 'character (char->integer #\a) 2)
           'move.backward-sentence)
         (cons
-          (stroke 'character (char->integer #\e) 2)
+          (make-key-stroke 'character (char->integer #\e) 2)
           'move.forward-sentence)
-        (cons (stroke 'up #f 0) 'move.previous-line)
-        (cons (stroke 'down #f 0) 'move.next-line)
+        (cons (make-key-stroke 'up #f 0) 'move.previous-line)
+        (cons (make-key-stroke 'down #f 0) 'move.next-line)
         (cons
-          (stroke 'character (char->integer #\p) 4)
+          (make-key-stroke 'character (char->integer #\p) 4)
           'move.previous-line)
         (cons
-          (stroke 'character (char->integer #\n) 4)
+          (make-key-stroke 'character (char->integer #\n) 4)
           'move.next-line)
-        (cons (stroke 'page-up #f 0) 'move.previous-page)
-        (cons (stroke 'page-down #f 0) 'move.next-page)
-        (cons (stroke 'character (char->integer #\v) 2) 'move.previous-page)
-        (cons (stroke 'character (char->integer #\v) 4) 'move.next-page)
+        (cons (make-key-stroke 'page-up #f 0) 'move.previous-page)
+        (cons (make-key-stroke 'page-down #f 0) 'move.next-page)
+        (cons (make-key-stroke 'character (char->integer #\v) 2) 'move.previous-page)
+        (cons (make-key-stroke 'character (char->integer #\v) 4) 'move.next-page)
         (cons
-          (stroke 'character (char->integer #\l) 4)
+          (make-key-stroke 'character (char->integer #\l) 4)
           'display.recenter)
         (cons
-          (stroke 'character (char->integer #\n) 2)
+          (make-key-stroke 'character (char->integer #\n) 2)
           'display.toggle-line-numbers)
-        (cons (stroke 'home #f 0) 'move.line-start)
-        (cons (stroke 'end #f 0) 'move.line-end)
+        (cons (make-key-stroke 'home #f 0) 'move.line-start)
+        (cons (make-key-stroke 'end #f 0) 'move.line-end)
         (cons
-          (stroke 'character (char->integer #\a) 4)
+          (make-key-stroke 'character (char->integer #\a) 4)
           'move.line-start)
         (cons
-          (stroke 'character (char->integer #\e) 4)
+          (make-key-stroke 'character (char->integer #\e) 4)
           'move.line-end)
-        (cons (stroke 'character (char->integer #\<) 2) 'move.buffer-start)
-        (cons (stroke 'character (char->integer #\>) 2) 'move.buffer-end)
+        (cons (make-key-stroke 'character (char->integer #\<) 2) 'move.buffer-start)
+        (cons (make-key-stroke 'character (char->integer #\>) 2) 'move.buffer-end)
         (cons
-          (stroke 'character (char->integer #\]) 2)
+          (make-key-stroke 'character (char->integer #\]) 2)
           'move.matching-delimiter)
-        (cons (stroke 'character (char->integer #\z) 4) 'edit.undo)
-        (cons (stroke 'character (char->integer #\/) 4) 'edit.undo)
-        (cons (stroke 'character (char->integer #\_) 4) 'edit.undo)
-        (cons (stroke 'character (char->integer #\z) 5) 'edit.redo)
-        (cons (stroke 'character (char->integer #\space) 4) 'mark.set)
-        (cons (stroke 'character (char->integer #\w) 2) 'edit.copy-region)
-        (cons (stroke 'character (char->integer #\w) 4) 'edit.kill-region)
-        (cons (stroke 'character (char->integer #\d) 2) 'edit.kill-word)
-        (cons (stroke 'character (char->integer #\k) 4) 'edit.kill-line)
+        (cons (make-key-stroke 'character (char->integer #\z) 4) 'edit.undo)
+        (cons (make-key-stroke 'character (char->integer #\/) 4) 'edit.undo)
+        (cons (make-key-stroke 'character (char->integer #\_) 4) 'edit.undo)
+        (cons (make-key-stroke 'character (char->integer #\z) 5) 'edit.redo)
+        (cons (make-key-stroke 'character (char->integer #\space) 4) 'mark.set)
+        (cons (make-key-stroke 'character (char->integer #\w) 2) 'edit.copy-region)
+        (cons (make-key-stroke 'character (char->integer #\w) 4) 'edit.kill-region)
+        (cons (make-key-stroke 'character (char->integer #\d) 2) 'edit.kill-word)
+        (cons (make-key-stroke 'character (char->integer #\k) 4) 'edit.kill-line)
         (cons
-          (stroke 'character (char->integer #\k) 2)
+          (make-key-stroke 'character (char->integer #\k) 2)
           'edit.kill-sentence)
         (cons
-          (stroke 'character (char->integer #\\) 2)
+          (make-key-stroke 'character (char->integer #\\) 2)
           'edit.delete-horizontal-space)
-        (cons (stroke 'backspace 127 2) 'edit.backward-kill-word)
-        (cons (stroke 'backspace 127 4) 'edit.backward-kill-word)
-        (cons (stroke 'delete #f 4) 'edit.kill-word)
-        (cons (stroke 'character (char->integer #\y) 4) 'edit.yank)
-        (cons (stroke 'character (char->integer #\y) 2) 'edit.yank-pop)))
+        (cons (make-key-stroke 'backspace 127 2) 'edit.backward-kill-word)
+        (cons (make-key-stroke 'backspace 127 4) 'edit.backward-kill-word)
+        (cons (make-key-stroke 'delete #f 4) 'edit.kill-word)
+        (cons (make-key-stroke 'character (char->integer #\y) 4) 'edit.yank)
+        (cons (make-key-stroke 'character (char->integer #\y) 2) 'edit.yank-pop)))
     (editor-bind-key!
       editor
       (list
-        (stroke 'character (char->integer #\x) 4)
-        (stroke 'character (char->integer #\c) 4))
+        (make-key-stroke 'character (char->integer #\x) 4)
+        (make-key-stroke 'character (char->integer #\c) 4))
       'editor.quit)
     (editor-bind-key!
       editor
       (list
-        (stroke 'character (char->integer #\g) 2)
-        (stroke 'character (char->integer #\g) 0))
+        (make-key-stroke 'character (char->integer #\g) 2)
+        (make-key-stroke 'character (char->integer #\g) 0))
       'move.goto-line-column)
     (editor-bind-key!
       editor
       (list
-        (stroke 'character (char->integer #\g) 2)
-        (stroke 'character (char->integer #\g) 2))
+        (make-key-stroke 'character (char->integer #\g) 2)
+        (make-key-stroke 'character (char->integer #\g) 2))
       'move.goto-line-column)
     (editor-bind-key!
       editor
       (list
-        (stroke 'character (char->integer #\x) 4)
-        (stroke 'character (char->integer #\u) 0))
+        (make-key-stroke 'character (char->integer #\x) 4)
+        (make-key-stroke 'character (char->integer #\u) 0))
       'edit.undo)
     (editor-bind-key!
       editor
       (list
-        (stroke 'character (char->integer #\x) 4)
-        (stroke 'character (char->integer #\x) 4))
+        (make-key-stroke 'character (char->integer #\x) 4)
+        (make-key-stroke 'character (char->integer #\x) 4))
       'mark.exchange-point-and-mark)
     (editor-bind-key!
       editor
       (list
-        (stroke 'character (char->integer #\x) 4)
-        (stroke 'character (char->integer #\h) 0))
+        (make-key-stroke 'character (char->integer #\x) 4)
+        (make-key-stroke 'character (char->integer #\h) 0))
       'mark.whole-buffer)
     (editor-bind-key!
       editor
       (list
-        (stroke 'character (char->integer #\x) 4)
-        (stroke 'character (char->integer #\space) 4))
+        (make-key-stroke 'character (char->integer #\x) 4)
+        (make-key-stroke 'character (char->integer #\space) 4))
       'mark.pop-global)
     (let ([keymap (make-keymap)])
       (for-each
         (lambda (entry)
           (keymap-bind! keymap (list (car entry)) (cdr entry)))
         (list
-          (cons (stroke 'up #f 0) 'move.previous-visual-line)
-          (cons (stroke 'down #f 0) 'move.next-visual-line)
+          (cons (make-key-stroke 'up #f 0) 'move.previous-visual-line)
+          (cons (make-key-stroke 'down #f 0) 'move.next-visual-line)
           (cons
-            (stroke 'character (char->integer #\p) 4)
+            (make-key-stroke 'character (char->integer #\p) 4)
             'move.previous-visual-line)
           (cons
-            (stroke 'character (char->integer #\n) 4)
+            (make-key-stroke 'character (char->integer #\n) 4)
             'move.next-visual-line)
-          (cons (stroke 'home #f 0) 'move.visual-line-start)
-          (cons (stroke 'end #f 0) 'move.visual-line-end)
+          (cons (make-key-stroke 'home #f 0) 'move.visual-line-start)
+          (cons (make-key-stroke 'end #f 0) 'move.visual-line-end)
           (cons
-            (stroke 'character (char->integer #\a) 4)
+            (make-key-stroke 'character (char->integer #\a) 4)
             'move.visual-line-start)
           (cons
-            (stroke 'character (char->integer #\e) 4)
+            (make-key-stroke 'character (char->integer #\e) 4)
             'move.visual-line-end)))
       (keymap-catalog-register!
         (editor-keymap-catalog editor)
@@ -2350,5 +2347,5 @@
       (keymap-catalog-ref
         (editor-keymap-catalog editor)
         'editor.override)
-      (list (stroke 'character 103 4))
+      (list (make-key-stroke 'character 103 4))
       'keyboard.quit)))

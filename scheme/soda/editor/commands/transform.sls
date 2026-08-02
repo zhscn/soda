@@ -729,12 +729,6 @@
     (interactive word-transform-target-reader)
     (transform-words! context target string-titlecase))
 
-  (define (stroke character modifiers)
-    (make-key-stroke
-      'character
-      (char->integer character)
-      modifiers))
-
   (define (install-transform-commands! editor)
     (for-each
       (lambda (definition)
@@ -826,18 +820,18 @@
       (lambda (entry)
         (editor-bind-key! editor (list (car entry)) (cdr entry)))
       (list
-        (cons (stroke #\t 4) 'edit.transpose-characters)
-        (cons (stroke #\t 2) 'edit.transpose-words)
-        (cons (stroke #\^ 2) 'edit.join-line)
-        (cons (stroke #\u 2) 'edit.upcase-word)
-        (cons (stroke #\l 2) 'edit.downcase-word)
-        (cons (stroke #\c 2) 'edit.capitalize-word)))
+        (cons (make-character-key-stroke #\t 4) 'edit.transpose-characters)
+        (cons (make-character-key-stroke #\t 2) 'edit.transpose-words)
+        (cons (make-character-key-stroke #\^ 2) 'edit.join-line)
+        (cons (make-character-key-stroke #\u 2) 'edit.upcase-word)
+        (cons (make-character-key-stroke #\l 2) 'edit.downcase-word)
+        (cons (make-character-key-stroke #\c 2) 'edit.capitalize-word)))
     (editor-bind-key!
       editor
-      (list (stroke #\x 4) (stroke #\t 4))
+      (list (make-character-key-stroke #\x 4) (make-character-key-stroke #\t 4))
       'edit.transpose-lines)
     (editor-bind-key!
       editor
-      (list (stroke #\x 4) (stroke #\o 4))
+      (list (make-character-key-stroke #\x 4) (make-character-key-stroke #\o 4))
       'edit.delete-blank-lines)
     editor))

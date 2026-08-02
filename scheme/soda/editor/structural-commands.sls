@@ -445,12 +445,6 @@
       (editor-set-status-message! editor "Function marked")
       '()))
 
-  (define (stroke character)
-    (make-key-stroke
-      'character
-      (char->integer character)
-      6))
-
   (define (install-structural-commands! editor)
     (for-each
       (lambda (entry)
@@ -523,7 +517,7 @@
       (lambda (entry)
         (editor-bind-key!
           editor
-          (list (stroke (car entry)))
+          (list (make-character-key-stroke (car entry) 6))
           (cdr entry)))
       (list
         (cons #\f 'move.forward-sexp)

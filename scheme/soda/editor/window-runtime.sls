@@ -232,12 +232,6 @@
       (command-context-editor context))
     '())
 
-  (define (stroke character modifiers)
-    (make-key-stroke
-      'character
-      (char->integer character)
-      modifiers))
-
   (define (install-window-commands! editor)
     (for-each
       (lambda (entry)
@@ -273,18 +267,18 @@
         (editor-bind-key! editor (car entry) (cdr entry)))
       (list
         (cons
-          (list (stroke #\x 4) (stroke #\2 0))
+          (list (make-character-key-stroke #\x 4) (make-character-key-stroke #\2 0))
           'window.split-below)
         (cons
-          (list (stroke #\x 4) (stroke #\3 0))
+          (list (make-character-key-stroke #\x 4) (make-character-key-stroke #\3 0))
           'window.split-right)
         (cons
-          (list (stroke #\x 4) (stroke #\o 0))
+          (list (make-character-key-stroke #\x 4) (make-character-key-stroke #\o 0))
           'window.other)
         (cons
-          (list (stroke #\x 4) (stroke #\0 0))
+          (list (make-character-key-stroke #\x 4) (make-character-key-stroke #\0 0))
           'window.delete)
         (cons
-          (list (stroke #\x 4) (stroke #\1 0))
+          (list (make-character-key-stroke #\x 4) (make-character-key-stroke #\1 0))
           'window.delete-others)))
     editor))

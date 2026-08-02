@@ -229,12 +229,6 @@
       (view-id (command-context-view context)))
     '())
 
-  (define (stroke character modifiers)
-    (make-key-stroke
-      'character
-      (char->integer character)
-      modifiers))
-
   (define (install-fold-commands! editor)
     (for-each
       (lambda (entry)
@@ -266,20 +260,20 @@
       (list
         (cons
           (list
-            (stroke #\c 2)
-            (stroke #\@ 0)
-            (stroke #\c 2))
+            (make-character-key-stroke #\c 2)
+            (make-character-key-stroke #\@ 0)
+            (make-character-key-stroke #\c 2))
           'display.toggle-fold)
         (cons
           (list
-            (stroke #\c 2)
-            (stroke #\@ 0)
-            (stroke #\a 2))
+            (make-character-key-stroke #\c 2)
+            (make-character-key-stroke #\@ 0)
+            (make-character-key-stroke #\a 2))
           'display.fold-all)
         (cons
           (list
-            (stroke #\c 2)
-            (stroke #\@ 0)
-            (stroke #\s 2))
+            (make-character-key-stroke #\c 2)
+            (make-character-key-stroke #\@ 0)
+            (make-character-key-stroke #\s 2))
           'display.unfold-all)))
     editor))

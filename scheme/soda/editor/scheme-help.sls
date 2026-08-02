@@ -210,12 +210,6 @@
              (join-strings " | " signatures))]))
       '()))
 
-  (define (stroke character modifiers)
-    (make-key-stroke
-      'character
-      (char->integer character)
-      modifiers))
-
   (define (install-scheme-help-commands/internal!
             editor
             environments)
@@ -251,11 +245,11 @@
           "Show signatures and the active argument for the Scheme call at point.")))
     (editor-bind-key!
       editor
-      (list (stroke #\h 4) (stroke #\o 0))
+      (list (make-character-key-stroke #\h 4) (make-character-key-stroke #\o 0))
       'help.describe-symbol)
     (editor-bind-key!
       editor
-      (list (stroke #\c 4) (stroke #\s 4))
+      (list (make-character-key-stroke #\c 4) (make-character-key-stroke #\s 4))
       'scheme.signature-help)
     editor)
 

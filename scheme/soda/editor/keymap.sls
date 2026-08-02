@@ -1,5 +1,6 @@
 (library (soda editor keymap)
   (export make-key-stroke
+          make-character-key-stroke
           key-stroke?
           key-stroke-key
           key-stroke-codepoint
@@ -38,6 +39,18 @@
 
   (define-record-type key-stroke
     (fields key codepoint modifiers))
+
+  (define (make-character-key-stroke character modifiers)
+    (unless (and (char? character)
+                 (integer? modifiers)
+                 (exact? modifiers)
+                 (not (negative? modifiers)))
+      (assertion-violation
+        'make-character-key-stroke
+        "expected a character and modifier mask"
+        character modifiers))
+    (make-key-stroke
+      'character (char->integer character) modifiers))
 
   (define-record-type (keymap %make-keymap keymap?)
     (fields

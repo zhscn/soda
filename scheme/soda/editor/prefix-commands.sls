@@ -48,12 +48,6 @@
         (prefix-argument-negative
           (editor-pending-prefix editor)))))
 
-  (define (stroke character modifiers)
-    (make-key-stroke
-      'character
-      (char->integer character)
-      modifiers))
-
   (define (install-prefix-commands! editor)
     (for-each
       (lambda (entry)
@@ -82,8 +76,8 @@
               (editor-keymap-catalog editor)
               'editor.default)]
           [prefix (make-keymap)])
-      (keymap-bind! default (list (stroke #\u 4)) 'argument.universal)
-      (keymap-bind! default (list (stroke #\- 2)) 'argument.negative)
+      (keymap-bind! default (list (make-character-key-stroke #\u 4)) 'argument.universal)
+      (keymap-bind! default (list (make-character-key-stroke #\- 2)) 'argument.negative)
       (do ([digit 0 (+ digit 1)])
           [(= digit 10)]
         (let ([character
@@ -91,19 +85,19 @@
                   (+ (char->integer #\0) digit))])
           (keymap-bind!
             default
-            (list (stroke character 2))
+            (list (make-character-key-stroke character 2))
             'argument.digit)
           (keymap-bind!
             prefix
-            (list (stroke character 0))
+            (list (make-character-key-stroke character 0))
             'argument.digit)
           (keymap-bind!
             prefix
-            (list (stroke character 2))
+            (list (make-character-key-stroke character 2))
             'argument.digit)))
-      (keymap-bind! prefix (list (stroke #\- 0)) 'argument.negative)
-      (keymap-bind! prefix (list (stroke #\- 2)) 'argument.negative)
-      (keymap-bind! prefix (list (stroke #\u 4)) 'argument.universal)
+      (keymap-bind! prefix (list (make-character-key-stroke #\- 0)) 'argument.negative)
+      (keymap-bind! prefix (list (make-character-key-stroke #\- 2)) 'argument.negative)
+      (keymap-bind! prefix (list (make-character-key-stroke #\u 4)) 'argument.universal)
       (keymap-catalog-register!
         (editor-keymap-catalog editor)
         'editor.prefix

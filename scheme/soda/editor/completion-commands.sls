@@ -305,9 +305,6 @@
       (command-context-editor context))
     '())
 
-  (define (stroke key codepoint modifiers)
-    (make-key-stroke key codepoint modifiers))
-
   (define (install-completion-commands! editor)
     (for-each
       (lambda (entry)
@@ -351,22 +348,22 @@
         (lambda (entry)
           (keymap-bind! keymap (list (car entry)) (cdr entry)))
         (list
-          (cons (stroke 'enter 13 0) 'completion.accept)
-          (cons (stroke 'character 106 4) 'completion.accept)
-          (cons (stroke 'enter 13 2) 'completion.accept-replace)
-          (cons (stroke 'escape 27 0) 'completion.cancel)
-          (cons (stroke 'tab 9 0) 'completion.next)
-          (cons (stroke 'tab 9 1) 'completion.previous)
-          (cons (stroke 'down #f 0) 'completion.next)
-          (cons (stroke 'up #f 0) 'completion.previous)
-          (cons (stroke 'character 110 4) 'completion.next)
-          (cons (stroke 'character 112 4) 'completion.previous)))
+          (cons (make-key-stroke 'enter 13 0) 'completion.accept)
+          (cons (make-key-stroke 'character 106 4) 'completion.accept)
+          (cons (make-key-stroke 'enter 13 2) 'completion.accept-replace)
+          (cons (make-key-stroke 'escape 27 0) 'completion.cancel)
+          (cons (make-key-stroke 'tab 9 0) 'completion.next)
+          (cons (make-key-stroke 'tab 9 1) 'completion.previous)
+          (cons (make-key-stroke 'down #f 0) 'completion.next)
+          (cons (make-key-stroke 'up #f 0) 'completion.previous)
+          (cons (make-key-stroke 'character 110 4) 'completion.next)
+          (cons (make-key-stroke 'character 112 4) 'completion.previous)))
       (keymap-catalog-register!
         (editor-keymap-catalog editor)
         'completion.menu
         keymap))
     (editor-bind-key!
       editor
-      (list (stroke 'character 47 2))
+      (list (make-key-stroke 'character 47 2))
       'completion.at-point)
     editor))

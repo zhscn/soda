@@ -241,12 +241,6 @@
                     (string-append
                       "Rename cancelled: cannot read " resource))))))))))
 
-  (define (stroke character modifiers)
-    (make-key-stroke
-      'character
-      (char->integer character)
-      modifiers))
-
   (define (install-scheme-rename-command! editor environments)
     (unless (scheme-environment-registry? environments)
       (assertion-violation
@@ -271,6 +265,6 @@
           '())))
     (editor-bind-key!
       editor
-      (list (stroke #\c 4) (stroke #\r 4))
+      (list (make-character-key-stroke #\c 4) (make-character-key-stroke #\r 4))
       'scheme.rename)
     editor))

@@ -347,9 +347,6 @@
            (string-append description " is undefined"))]))
     '())
 
-  (define (stroke key codepoint modifiers)
-    (make-key-stroke key codepoint modifiers))
-
   (define (install-prompt-commands! editor)
     (for-each
       (lambda (entry)
@@ -446,28 +443,28 @@
         (lambda (entry)
           (keymap-bind! keymap (list (car entry)) (cdr entry)))
         (list
-          (cons (stroke 'enter 13 0) 'prompt.accept)
-          (cons (stroke 'character 106 4) 'prompt.accept)
-          (cons (stroke 'enter 13 2) 'prompt.accept-input)
-          (cons (stroke 'character 106 2) 'prompt.accept-input)
-          (cons (stroke 'escape 27 0) 'prompt.abort)
-          (cons (stroke 'up #f 0) 'prompt.completion-previous)
-          (cons (stroke 'down #f 0) 'prompt.completion-next)
-          (cons (stroke 'character 112 4) 'prompt.completion-previous)
-          (cons (stroke 'character 110 4) 'prompt.completion-next)
-          (cons (stroke 'character 112 2) 'prompt.history-previous)
-          (cons (stroke 'character 110 2) 'prompt.history-next)
-          (cons (stroke 'up #f 2) 'prompt.history-previous)
-          (cons (stroke 'down #f 2) 'prompt.history-next)
-          (cons (stroke 'tab 9 0) 'prompt.insert-completion)
-          (cons (stroke 'tab 9 1) 'prompt.completion-previous)))
+          (cons (make-key-stroke 'enter 13 0) 'prompt.accept)
+          (cons (make-key-stroke 'character 106 4) 'prompt.accept)
+          (cons (make-key-stroke 'enter 13 2) 'prompt.accept-input)
+          (cons (make-key-stroke 'character 106 2) 'prompt.accept-input)
+          (cons (make-key-stroke 'escape 27 0) 'prompt.abort)
+          (cons (make-key-stroke 'up #f 0) 'prompt.completion-previous)
+          (cons (make-key-stroke 'down #f 0) 'prompt.completion-next)
+          (cons (make-key-stroke 'character 112 4) 'prompt.completion-previous)
+          (cons (make-key-stroke 'character 110 4) 'prompt.completion-next)
+          (cons (make-key-stroke 'character 112 2) 'prompt.history-previous)
+          (cons (make-key-stroke 'character 110 2) 'prompt.history-next)
+          (cons (make-key-stroke 'up #f 2) 'prompt.history-previous)
+          (cons (make-key-stroke 'down #f 2) 'prompt.history-next)
+          (cons (make-key-stroke 'tab 9 0) 'prompt.insert-completion)
+          (cons (make-key-stroke 'tab 9 1) 'prompt.completion-previous)))
       (keymap-catalog-register!
         (editor-keymap-catalog editor)
         'prompt.input
         keymap))
     (editor-bind-key!
       editor
-      (list (stroke 'character 120 2))
+      (list (make-key-stroke 'character 120 2))
       'execute-extended-command)
     (for-each
       (lambda (entry)
@@ -475,32 +472,32 @@
       (list
         (cons
           (list
-            (stroke 'character 104 4)
-            (stroke 'character 120 0))
+            (make-key-stroke 'character 104 4)
+            (make-key-stroke 'character 120 0))
           'help.describe-command)
         (cons
           (list
-            (stroke 'character 104 4)
-            (stroke 'character 97 0))
+            (make-key-stroke 'character 104 4)
+            (make-key-stroke 'character 97 0))
           'help.command-apropos)
         (cons
           (list
-            (stroke 'character 104 4)
-            (stroke 'character 99 0))
+            (make-key-stroke 'character 104 4)
+            (make-key-stroke 'character 99 0))
           'help.describe-key-briefly)
         (cons
           (list
-            (stroke 'character 104 4)
-            (stroke 'character 107 0))
+            (make-key-stroke 'character 104 4)
+            (make-key-stroke 'character 107 0))
           'help.describe-key)
         (cons
           (list
-            (stroke 'character 104 4)
-            (stroke 'character 109 0))
+            (make-key-stroke 'character 104 4)
+            (make-key-stroke 'character 109 0))
           'help.describe-mode)
         (cons
           (list
-            (stroke 'character 104 4)
-            (stroke 'character 63 0))
+            (make-key-stroke 'character 104 4)
+            (make-key-stroke 'character 63 0))
           'help.summary)))
     editor))

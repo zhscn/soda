@@ -588,12 +588,6 @@
             (document-symbol-reader environments)))
         '())))
 
-  (define (stroke character modifiers)
-    (make-key-stroke
-      'character
-      (char->integer character)
-      modifiers))
-
   (define (install-scheme-xref-commands! editor)
     (let ([environments (make-scheme-environment-registry)])
       (install-xref-results! editor)
@@ -638,27 +632,27 @@
           (editor-bind-key! editor (car entry) (cdr entry)))
         (list
           (cons
-            (list (stroke #\. 2))
+            (list (make-character-key-stroke #\. 2))
             'xref.find-definition)
           (cons
-            (list (stroke #\? 2))
+            (list (make-character-key-stroke #\? 2))
             'xref.find-references)
           (cons
-            (list (stroke #\g 2) (stroke #\n 0))
+            (list (make-character-key-stroke #\g 2) (make-character-key-stroke #\n 0))
             'xref.next-location)
           (cons
-            (list (stroke #\g 2) (stroke #\p 0))
+            (list (make-character-key-stroke #\g 2) (make-character-key-stroke #\p 0))
             'xref.previous-location)
           (cons
-            (list (stroke #\g 2) (stroke #\n 2))
+            (list (make-character-key-stroke #\g 2) (make-character-key-stroke #\n 2))
             'xref.next-location)
           (cons
-            (list (stroke #\g 2) (stroke #\p 2))
+            (list (make-character-key-stroke #\g 2) (make-character-key-stroke #\p 2))
             'xref.previous-location)
           (cons
-            (list (stroke #\g 2) (stroke #\i 0))
+            (list (make-character-key-stroke #\g 2) (make-character-key-stroke #\i 0))
             'xref.find-document-symbol)
           (cons
-            (list (stroke #\g 2) (stroke #\I 0))
+            (list (make-character-key-stroke #\g 2) (make-character-key-stroke #\I 0))
             'xref.find-symbol)))
       environments)))

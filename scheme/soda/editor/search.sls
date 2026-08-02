@@ -829,12 +829,6 @@
   (define (query-replace-abort-command context)
     (query-replace-finish! context #t))
 
-  (define (stroke character modifiers)
-    (make-key-stroke
-      'character
-      (char->integer character)
-      modifiers))
-
   (define (install-search-commands! editor)
     (for-each
       (lambda (entry)
@@ -939,41 +933,41 @@
           "Abort the current query replace stage.")))
     (editor-bind-key!
       editor
-      (list (stroke #\s 4))
+      (list (make-character-key-stroke #\s 4))
       'search.forward)
     (editor-bind-key!
       editor
-      (list (stroke #\r 4))
+      (list (make-character-key-stroke #\r 4))
       'search.backward)
     (editor-bind-key!
       editor
-      (list (stroke #\s 6))
+      (list (make-character-key-stroke #\s 6))
       'search.forward-regexp)
     (editor-bind-key!
       editor
-      (list (stroke #\r 6))
+      (list (make-character-key-stroke #\r 6))
       'search.backward-regexp)
     (editor-bind-key!
       editor
-      (list (stroke #\% 2))
+      (list (make-character-key-stroke #\% 2))
       'query-replace)
     (editor-bind-key!
       editor
-      (list (stroke #\% 6))
+      (list (make-character-key-stroke #\% 6))
       'query-replace-regexp)
     (let ([keymap (make-keymap)])
       (for-each
         (lambda (entry)
           (keymap-bind! keymap (list (car entry)) (cdr entry)))
         (list
-          (cons (stroke #\y 0) 'query-replace.yes)
-          (cons (stroke #\space 0) 'query-replace.yes)
-          (cons (stroke #\n 0) 'query-replace.no)
+          (cons (make-character-key-stroke #\y 0) 'query-replace.yes)
+          (cons (make-character-key-stroke #\space 0) 'query-replace.yes)
+          (cons (make-character-key-stroke #\n 0) 'query-replace.no)
           (cons
             (make-key-stroke 'delete #f 0)
             'query-replace.no)
-          (cons (stroke #\! 0) 'query-replace.all)
-          (cons (stroke #\q 0) 'query-replace.quit)))
+          (cons (make-character-key-stroke #\! 0) 'query-replace.all)
+          (cons (make-character-key-stroke #\q 0) 'query-replace.quit)))
       (keymap-catalog-register!
         (editor-keymap-catalog editor)
         'query-replace

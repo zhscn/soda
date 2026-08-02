@@ -784,12 +784,6 @@
           editor "Workbench diagnostics" items)
         '())))
 
-  (define (stroke character modifiers)
-    (make-key-stroke
-      'character
-      (char->integer character)
-      modifiers))
-
   (define (install-diagnostic-commands/internal!
             editor
             environments)
@@ -828,11 +822,11 @@
         "Publish Workbench diagnostics as a location list."))
     (editor-bind-key!
       editor
-      (list (stroke #\g 2) (stroke #\d 0))
+      (list (make-character-key-stroke #\g 2) (make-character-key-stroke #\d 0))
       'diagnostics.list)
     (editor-bind-key!
       editor
-      (list (stroke #\g 2) (stroke #\d 2))
+      (list (make-character-key-stroke #\g 2) (make-character-key-stroke #\d 2))
       'diagnostics.list-workspace)
     (for-each
       (lambda (phase)
