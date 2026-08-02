@@ -1622,6 +1622,7 @@
           display-chunk-owner
           display-chunk-detail)
   (import (rnrs)
+          (soda editor contract)
           (soda editor annotation)
           (soda editor auto-mode)
           (soda editor buffer)
@@ -1746,9 +1747,6 @@
     (and
       (list? value)
       (for-all scheme-library-name? value)))
-
-  (define (symbol-list? value)
-    (and (list? value) (for-all symbol? value)))
 
   (define (install-core-settings! editor)
     (for-each

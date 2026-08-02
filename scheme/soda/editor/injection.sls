@@ -26,14 +26,6 @@
     (injection-index %make-injection-index injection-index?)
     (fields document-id revision regions))
 
-  (define (symbol-alist? value)
-    (and
-      (list? value)
-      (for-all
-        (lambda (entry)
-          (and (pair? entry) (symbol? (car entry))))
-        value)))
-
   (define (make-injection-region
             language start end depth properties)
     (unless

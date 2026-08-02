@@ -51,14 +51,6 @@
     (structure-provider %make-structure-provider structure-provider?)
     (fields (immutable build structure-provider-builder)))
 
-  (define (symbol-alist? value)
-    (and
-      (list? value)
-      (for-all
-        (lambda (entry)
-          (and (pair? entry) (symbol? (car entry))))
-        value)))
-
   (define (make-structural-thing
             roles
             start

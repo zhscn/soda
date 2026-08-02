@@ -55,14 +55,6 @@
       command-target-selector?)
     (fields region-policy allow-empty-region? fallback))
 
-  (define (symbol-alist? value)
-    (and
-      (list? value)
-      (for-all
-        (lambda (entry)
-          (and (pair? entry) (symbol? (car entry))))
-        value)))
-
   (define (make-command-target
             source
             buffer-id

@@ -23,6 +23,7 @@
           editor-register-tree-sitter-file-association!
           tree-sitter-language-available?)
   (import (rnrs)
+          (soda editor contract)
           (soda document)
           (soda editor auto-mode)
           (soda editor buffer)
@@ -68,17 +69,6 @@
       (mutable highlights
                tree-sitter-language-session-highlights
                tree-sitter-language-session-highlights-set!)))
-
-  (define (symbol-list? value)
-    (and (list? value) (for-all symbol? value)))
-
-  (define (symbol-alist? value)
-    (and
-      (list? value)
-      (for-all
-        (lambda (entry)
-          (and (pair? entry) (symbol? (car entry))))
-        value)))
 
   (define (require-language who language)
     (unless (symbol? language)

@@ -12,6 +12,7 @@
           text-property-store-decoration-runs)
   (import (rnrs)
           (soda document)
+          (soda editor contract)
           (soda editor decoration))
 
   (define-record-type text-property-span
@@ -26,13 +27,6 @@
             (mutable closed?
                      text-property-store-closed?
                      text-property-store-closed?-set!)))
-
-  (define (symbol-alist? value)
-    (and (list? value)
-         (for-all
-           (lambda (entry)
-             (and (pair? entry) (symbol? (car entry))))
-           value)))
 
   (define (make-text-property-store document)
     (unless (document? document)
