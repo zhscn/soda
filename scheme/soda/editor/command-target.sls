@@ -34,7 +34,7 @@
           (soda editor buffer)
           (soda editor command)
           (soda editor condition)
-          (soda editor state))
+          (soda editor view))
 
   (define-record-type
     (command-target %make-command-target command-target?)
