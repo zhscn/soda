@@ -3,7 +3,6 @@
           scheme-workspace-session-active?
           scheme-workspace-generation
           scheme-workspace-attach-buffer!
-          scheme-workspace-detach-buffer!
           scheme-workspace-clear!
           scheme-workspace-buffer-attached?
           scheme-workspace-sync-editor!
@@ -225,21 +224,6 @@
       #t)
     (sync-buffer! index buffer)
     index)
-
-  (define (scheme-workspace-detach-buffer! index buffer-id)
-    (require-index 'scheme-workspace-detach-buffer! index)
-    (let ([attached?
-            (scheme-workspace-buffer-attached? index buffer-id)])
-      (when attached?
-        (hashtable-delete!
-          (scheme-workspace-index-attachments index)
-          buffer-id)
-        (hashtable-delete!
-          (scheme-workspace-index-documents index)
-          buffer-id)
-        (scheme-workspace-index-catalog-dirty?-set! index #t)
-        (scheme-workspace-index-dirty?-set! index #t))
-      attached?))
 
   (define (scheme-workspace-clear! index)
     (require-index 'scheme-workspace-clear! index)

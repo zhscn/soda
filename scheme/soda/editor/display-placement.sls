@@ -6,7 +6,6 @@
           display-request-origin-view-id
           display-request-target-window-id
           display-request-resource-context
-          make-display-plan
           display-plan?
           display-plan-workbench-id
           display-plan-window-id

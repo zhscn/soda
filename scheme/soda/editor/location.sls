@@ -8,7 +8,6 @@
           editor-location->item
           editor-location-valid-for-buffer?
           editor-location-close!
-          editor-location-detach-buffer!
           make-location-item
           location-item?
           location-item-buffer-id
