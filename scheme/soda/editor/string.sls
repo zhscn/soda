@@ -2,7 +2,8 @@
   (export string-prefix?
           string-suffix?
           string-contains?
-          string-single-line)
+          string-single-line
+          stable-resource?)
   (import (rnrs))
 
   (define (string-prefix? prefix value)
@@ -46,4 +47,10 @@
               #\space
               character))
         (string->list value))))
+
+  (define (stable-resource? value)
+    (and
+      (string? value)
+      (positive? (string-length value))
+      (not (char=? (string-ref value 0) #\*))))
 )

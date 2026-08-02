@@ -19,6 +19,7 @@
           (soda editor location)
           (soda editor project)
           (soda editor resource-context)
+          (soda editor string)
           (soda editor state)
           (soda editor language-state)
           (soda editor project-state)
@@ -36,11 +37,6 @@
       %make-workbench-session-snapshot
       workbench-session-snapshot?)
     (fields active-index workbenches applications))
-
-  (define (stable-resource? value)
-    (and
-      (non-empty-string? value)
-      (not (char=? (string-ref value 0) #\*))))
 
   (define (default-workbench-session-path)
     (let ([override (getenv "SODA_WORKBENCH_SESSION_FILE")])

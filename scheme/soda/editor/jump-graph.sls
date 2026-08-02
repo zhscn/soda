@@ -30,7 +30,8 @@
           (soda editor contract)
           (soda document)
           (soda editor buffer)
-          (soda editor location))
+          (soda editor location)
+          (soda editor string))
 
   (define-record-type
     (jump-node %make-jump-node jump-node?)
@@ -102,12 +103,6 @@
   (define (require-graph who graph)
     (unless (jump-graph? graph)
       (assertion-violation who "expected a JumpGraph" graph)))
-
-  (define (stable-resource? value)
-    (and
-      (string? value)
-      (positive? (string-length value))
-      (not (char=? (string-ref value 0) #\*))))
 
   (define (same-node-location? node item)
     (and
