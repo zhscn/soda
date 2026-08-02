@@ -363,14 +363,15 @@
             (editor-open-result-buffer!
               editor resource 'diagnostics-mode title locations
               origin-view-id 'diagnostic #f #f)])
-      (editor-set-current-location-list! editor locations)
+      (editor-set-current-location-list!
+        editor (if (null? items) #f locations))
       (editor-append-location-results! editor buffer items)
       (when (null? items)
         (editor-append-result-message!
           editor buffer "No diagnostics." 'info))
-      (buffer-reconcile-result-selection! editor buffer #t)
       (when refresh
         (buffer-set-result-refresh! buffer refresh))
+      (editor-finish-result-producer! editor buffer 'ready)
       (decorate-diagnostic-results! buffer)))
 
   (define (diagnostic-status! editor label items)
@@ -391,41 +392,33 @@
            [origin-view-id (view-id (command-context-view context))]
            [items
              (current-diagnostic-items editor buffer)])
-      (if (null? items)
-          (begin
-            (editor-set-current-location-list! editor #f)
-            (editor-set-status-message!
-              editor
-              "No current diagnostics"))
-          (begin
-            (letrec ([refresh
-                       (lambda (refresh-context refresh-buffer)
-                         (unless (buffer-present-in-editor? editor buffer)
-                           (editor-user-error
-                             'buffer-item.refresh
-                             "Diagnostic source Buffer is no longer open"))
-                         (let ([current
-                                 (current-diagnostic-items editor buffer)])
-                           (show-diagnostics!
-                             editor
-                             "*Diagnostics*"
-                             "Diagnostics"
-                             'diagnostics
-                             current
-                             origin-view-id
-                             refresh)
-                           (diagnostic-status!
-                             editor "Diagnostics" current)
-                           '()))])
-              (show-diagnostics!
-                editor
-                "*Diagnostics*"
-                "Diagnostics"
-                'diagnostics
-                items
-                origin-view-id
-                refresh)
-              (diagnostic-status! editor "Diagnostics" items))))
+      (letrec ([refresh
+                 (lambda (refresh-context refresh-buffer)
+                   (unless (buffer-present-in-editor? editor buffer)
+                     (editor-user-error
+                       'buffer-item.refresh
+                       "Diagnostic source Buffer is no longer open"))
+                   (let ([current
+                           (current-diagnostic-items editor buffer)])
+                     (show-diagnostics!
+                       editor
+                       "*Diagnostics*"
+                       "Diagnostics"
+                       'diagnostics
+                       current
+                       origin-view-id
+                       refresh)
+                     (diagnostic-status! editor "Diagnostics" current)
+                     '()))])
+        (show-diagnostics!
+          editor
+          "*Diagnostics*"
+          "Diagnostics"
+          'diagnostics
+          items
+          origin-view-id
+          refresh)
+        (diagnostic-status! editor "Diagnostics" items))
       '()))
 
   (define (workspace-diagnostic-item value)
@@ -453,47 +446,38 @@
                workspace-diagnostic-item
                (scheme-workspace-diagnostics
                  index editor))])
-      (if
-        (null? items)
-        (begin
-          (editor-set-current-location-list! editor #f)
-          (editor-set-status-message!
-            editor
-            "No workspace diagnostics")
-          '())
-        (begin
-          (letrec ([refresh
-                     (lambda (refresh-context refresh-buffer)
-                       (let* ([current-index
-                                (scheme-semantic-index-for-view
-                                  environments editor origin-view-id)]
-                              [current
-                                (map
-                                  workspace-diagnostic-item
-                                  (scheme-workspace-diagnostics
-                                    current-index editor))])
-                         (show-diagnostics!
-                           editor
-                           "*Workspace Diagnostics*"
-                           "Workspace diagnostics"
-                           'workspace-diagnostics
-                           current
-                           origin-view-id
-                           refresh)
-                         (diagnostic-status!
-                           editor "Workspace diagnostics" current)
-                         '()))])
-            (show-diagnostics!
-              editor
-              "*Workspace Diagnostics*"
-              "Workspace diagnostics"
-              'workspace-diagnostics
-              items
-              origin-view-id
-              refresh)
-            (diagnostic-status!
-              editor "Workspace diagnostics" items))
-          '()))))
+      (letrec ([refresh
+                 (lambda (refresh-context refresh-buffer)
+                   (let* ([current-index
+                            (scheme-semantic-index-for-view
+                              environments editor origin-view-id)]
+                          [current
+                            (map
+                              workspace-diagnostic-item
+                              (scheme-workspace-diagnostics
+                                current-index editor))])
+                     (show-diagnostics!
+                       editor
+                       "*Workspace Diagnostics*"
+                       "Workspace diagnostics"
+                       'workspace-diagnostics
+                       current
+                       origin-view-id
+                       refresh)
+                     (diagnostic-status!
+                       editor "Workspace diagnostics" current)
+                     '()))])
+        (show-diagnostics!
+          editor
+          "*Workspace Diagnostics*"
+          "Workspace diagnostics"
+          'workspace-diagnostics
+          items
+          origin-view-id
+          refresh)
+        (diagnostic-status!
+          editor "Workspace diagnostics" items)
+        '())))
 
   (define (stroke character modifiers)
     (make-key-stroke

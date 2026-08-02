@@ -5861,7 +5861,7 @@
           (location-item-excerpt diagnostics-selected-before-refresh)))
       (equal? (buffer-result-marked-indices buffer) '(1))))
   (error 'editor-tests "diagnostics Result producer did not refresh"))
-(editor-set-active-view!
+(editor-select-view-window!
   highlight-editor (view-id highlight-source-view))
 (view-set-caret! highlight-source-view 8)
 (let ([description
@@ -5935,12 +5935,24 @@
 (editor-update!
   highlight-editor
   (make-command-message 'diagnostics.list #f))
-(editor-set-active-view!
+(editor-select-view-window!
   highlight-editor (view-id highlight-source-view))
 (unless
   (not (editor-current-location-list highlight-editor))
   (error 'editor-tests
          "stale diagnostics remained navigable"))
+(let ([buffer
+        (editor-buffer-for-resource highlight-editor "*Diagnostics*")])
+  (unless
+    (and
+      buffer
+      (eq? (buffer-result-producer-state buffer) 'ready)
+      (null? (buffer-text-property-ranges buffer 'result-index))
+      (exists
+        (lambda (range) (eq? (caddr range) 'info))
+        (buffer-text-property-ranges buffer 'result-message)))
+    (error 'editor-tests
+           "empty diagnostics did not replace stale Result Buffer items")))
 
 (define refreshed-diagnostic-set
   (make-buffer-annotation-set
@@ -5970,7 +5982,7 @@
 (editor-update!
   highlight-editor
   (make-command-message 'diagnostics.list #f))
-(editor-set-active-view!
+(editor-select-view-window!
   highlight-editor (view-id highlight-source-view))
 (unless
   (and
@@ -6014,19 +6026,30 @@
     (annotation-set-stale?
       stale-display-diagnostic-set
       (buffer-revision highlight-buffer))
-    (memq
-      'diagnostic-error
-      (cell-faces
-        (frame-cell-ref
-          (render-editor-frame highlight-editor 4 50)
-          0
-          8))))
+    (let ([frame (render-editor-frame highlight-editor 8 50)])
+      (let row-loop ([row 0])
+        (and
+          (< row (frame-rows frame))
+          (or
+            (let column-loop ([column 0])
+              (and
+                (< column (frame-columns frame))
+                (let ([cell (frame-cell-ref frame row column)])
+                  (or
+                    (and
+                      (equal? (cell-document-position cell) 8)
+                      (memq 'definition (cell-faces cell))
+                      (memq 'diagnostic-error (cell-faces cell)))
+                    (column-loop (+ column 1))))))
+            (row-loop (+ row 1)))))))
   (error
     'editor-tests
     "anchor-backed stale diagnostics did not remain visible during refresh"))
 (editor-update!
   highlight-editor
   (make-command-message 'diagnostics.list #f))
+(editor-select-view-window!
+  highlight-editor (view-id highlight-source-view))
 (unless
   (not (editor-current-location-list highlight-editor))
   (error

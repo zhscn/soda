@@ -83,7 +83,7 @@
            (= (car detail) position))))
 
   (define (cell-matches-position? cell position)
-    (or (and (cell-document-position cell)
+    (or (and (integer? (cell-document-position cell))
              (= (cell-document-position cell) position))
         (exists
           (lambda (source)
@@ -114,6 +114,7 @@
     (find
       (lambda (source)
         (and (eq? (cell-source-layer source) 'application)
+             (integer? (cell-source-owner source))
              (= (cell-source-owner source) session-id)
              (or (null? node-key)
                  (equal? (cell-source-detail source) (car node-key)))))
