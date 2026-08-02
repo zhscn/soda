@@ -4418,6 +4418,34 @@
     (error 'editor-tests "Scheme xref did not publish references")))
 (define xref-results-buffer
   (view-buffer (editor-active-view xref-editor)))
+(define result-action-invocation #f)
+(buffer-register-result-action!
+  xref-results-buffer
+  (make-result-action
+    'inspect
+    "Inspect reference"
+    (lambda (buffer item) (location-item? item))
+    (lambda (context buffer item index)
+      (set! result-action-invocation (list buffer item index))
+      '())))
+(unless
+  (equal?
+    (map result-action-name
+         (buffer-result-actions-at
+           xref-results-buffer
+           (view-caret (editor-active-view xref-editor))))
+    '(inspect))
+  (error 'editor-tests "result actions were not exposed at point"))
+(invoke-buffer-item-action
+  (make-command-context
+    xref-editor (editor-active-view xref-editor) #f #f #f)
+  'inspect)
+(unless
+  (and result-action-invocation
+       (eq? (car result-action-invocation) xref-results-buffer)
+       (location-item? (cadr result-action-invocation))
+       (= (caddr result-action-invocation) 0))
+  (error 'editor-tests "result action did not receive the selected item"))
 (define appended-xref-item
   (make-location-item
     (buffer-id xref-buffer)

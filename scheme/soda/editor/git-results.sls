@@ -17,6 +17,7 @@
           (soda editor location-results)
           (soda editor managed-process)
           (soda editor project)
+          (soda editor result-buffer)
           (soda editor state)
           (soda runtime)
           (soda vfs))
@@ -197,6 +198,7 @@
       (git-status-session-buffer-set! session buffer)
       (git-status-session-process-set! session process)
       (buffer-set-local! buffer 'git-status-session session)
+      (register-git-status-actions! buffer session)
       (hashtable-set! active-git-statuses editor session)
       (editor-set-current-location-list! editor locations)
       (append
@@ -211,19 +213,6 @@
                     (git-status-session-process old) 15))))
             '())
         (list (make-command-effect 'managed-process.start process)))))
-
-  (define (active-status-selection context who)
-    (let* ([view (command-context-view context)]
-           [buffer (view-buffer view)]
-           [session (buffer-local-ref buffer 'git-status-session #f)]
-           [item
-             (buffer-text-property-ref
-               buffer (view-caret view) 'result-item #f)])
-      (unless (git-status-session? session)
-        (editor-user-error who "Current Buffer is not a Git status Buffer"))
-      (unless (location-item? item)
-        (editor-user-error who "Point is not on a Git status entry"))
-      (values session item)))
 
   (define (item-status item)
     (let ([entry
@@ -292,38 +281,58 @@
                'git.operation-output 'git.operation-exit)])
       (list (make-command-effect 'managed-process.start process))))
 
+  (define (git-status-item? buffer item)
+    (and (location-item? item) (item-status item)))
+
+  (define (register-git-status-actions! buffer session)
+    (for-each
+      (lambda (action)
+        (buffer-register-result-action! buffer action))
+      (list
+        (make-result-action
+          'stage "Stage"
+          git-status-item?
+          (lambda (context buffer item index)
+            (start-git-operation
+              session "Git stage"
+              (list "git" "add" "--" (location-item-excerpt item)))))
+        (make-result-action
+          'unstage "Unstage"
+          git-status-item?
+          (lambda (context buffer item index)
+            (start-git-operation
+              session "Git unstage"
+              (list "git" "reset" "--" (location-item-excerpt item)))))
+        (make-result-action
+          'diff "Show diff"
+          git-status-item?
+          (lambda (context buffer item index)
+            (let* ([status (item-status item)]
+                   [cached?
+                     (and status
+                          (not (char=? (string-ref status 0) #\space))
+                          (char=? (string-ref status 1) #\space))]
+                   [arguments
+                     (append
+                       (list "git" "diff" "--no-ext-diff")
+                       (if cached? (list "--cached") '())
+                       (list "--" (location-item-excerpt item)))])
+              (start-compilation!
+                context
+                (string-append
+                  "Git diff: " (location-item-excerpt item))
+                arguments
+                (git-status-session-root session)))))))
+    buffer)
+
   (define (stage-git-entry context)
-    (let-values ([(session item)
-                  (active-status-selection context 'git.stage)])
-      (start-git-operation
-        session "Git stage"
-        (list "git" "add" "--" (location-item-excerpt item)))))
+    (invoke-buffer-item-action context 'stage))
 
   (define (unstage-git-entry context)
-    (let-values ([(session item)
-                  (active-status-selection context 'git.unstage)])
-      (start-git-operation
-        session "Git unstage"
-        (list "git" "reset" "--" (location-item-excerpt item)))))
+    (invoke-buffer-item-action context 'unstage))
 
   (define (diff-git-entry context)
-    (let-values ([(session item)
-                  (active-status-selection context 'git.diff)])
-      (let* ([status (item-status item)]
-             [cached?
-               (and status
-                    (not (char=? (string-ref status 0) #\space))
-                    (char=? (string-ref status 1) #\space))]
-             [arguments
-               (append
-                 (list "git" "diff" "--no-ext-diff")
-                 (if cached? (list "--cached") '())
-                 (list "--" (location-item-excerpt item)))])
-        (start-compilation!
-          context
-          (string-append "Git diff: " (location-item-excerpt item))
-          arguments
-          (git-status-session-root session)))))
+    (invoke-buffer-item-action context 'diff))
 
   (define (refresh-git-status context)
     (let* ([buffer (view-buffer (command-context-view context))]

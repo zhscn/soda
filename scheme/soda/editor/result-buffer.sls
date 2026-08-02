@@ -2,6 +2,13 @@
   (export make-result-buffer-interface
           result-buffer-interface?
           result-buffer-interface-cyclic?
+          make-result-action
+          result-action?
+          result-action-name
+          result-action-label
+          buffer-register-result-action!
+          buffer-result-actions-at
+          invoke-buffer-item-action
           buffer-set-result-interface!
           buffer-result-interface-ref
           editor-note-result-buffer!
@@ -41,6 +48,21 @@
         cyclic? activate quit))
     (%make-result-buffer-interface cyclic? activate quit))
 
+  (define-record-type
+    (result-action %make-result-action result-action?)
+    (fields name label applicable? invoke))
+
+  (define (make-result-action name label applicable? invoke)
+    (unless (and (symbol? name)
+                 (string? label)
+                 (procedure? applicable?)
+                 (procedure? invoke))
+      (assertion-violation
+        'make-result-action
+        "invalid result action"
+        name label applicable? invoke))
+    (%make-result-action name label applicable? invoke))
+
   (define (buffer-set-result-interface! buffer interface)
     (unless (and (buffer? buffer)
                  (result-buffer-interface? interface))
@@ -50,7 +72,49 @@
         buffer interface))
     (buffer-set-local! buffer 'result-buffer-interface interface)
     (buffer-set-local! buffer 'result-current-index #f)
+    (buffer-set-local! buffer 'result-actions '())
     buffer)
+
+  (define (buffer-register-result-action! buffer action)
+    (unless (and (buffer? buffer) (result-action? action))
+      (assertion-violation
+        'buffer-register-result-action!
+        "expected a result Buffer and ResultAction"
+        buffer action))
+    (unless (buffer-result-interface-ref buffer)
+      (assertion-violation
+        'buffer-register-result-action!
+        "Buffer has no result interface"
+        buffer))
+    (buffer-set-local!
+      buffer
+      'result-actions
+      (cons
+        action
+        (filter
+          (lambda (candidate)
+            (not (eq? (result-action-name candidate)
+                      (result-action-name action))))
+          (buffer-local-ref buffer 'result-actions '()))))
+    action)
+
+  (define (buffer-result-actions-at buffer position)
+    (unless (and (buffer? buffer)
+                 (integer? position) (exact? position)
+                 (not (negative? position)))
+      (assertion-violation
+        'buffer-result-actions-at
+        "expected a Buffer and non-negative position"
+        buffer position))
+    (let ([item
+            (buffer-text-property-ref
+              buffer position 'result-item #f)])
+      (if item
+          (filter
+            (lambda (action)
+              ((result-action-applicable? action) buffer item))
+            (reverse (buffer-local-ref buffer 'result-actions '())))
+          '())))
 
   (define (buffer-result-interface-ref buffer)
     (unless (buffer? buffer)
@@ -233,6 +297,26 @@
         (buffer-set-local! buffer 'result-current-index index)
         (values buffer interface item index))))
 
+  (define (invoke-buffer-item-action context name)
+    (unless (symbol? name)
+      (assertion-violation
+        'invoke-buffer-item-action "action name must be a symbol" name))
+    (let-values ([(buffer interface item index)
+                  (selected-item context 'buffer-item.action)])
+      (let ([action
+              (find
+                (lambda (candidate)
+                  (eq? (result-action-name candidate) name))
+                (buffer-result-actions-at
+                  buffer
+                  (view-caret (command-context-view context))))])
+        (unless action
+          (editor-user-error
+            'buffer-item.action
+            "Action is not available for the item at point"
+            name))
+        ((result-action-invoke action) context buffer item index))))
+
   (define (activate-selected context disposition)
     (let-values ([(buffer interface item index)
                   (selected-item context 'buffer-item.activate)])
@@ -256,11 +340,11 @@
                 (command-context-editor context) "No navigable items")
               '())
             (let* ([current
-                     (or
-                       (and view
-                            (buffer-text-property-ref
-                              buffer (view-caret view) 'result-index #f))
-                       (buffer-local-ref buffer 'result-current-index #f))]
+                     (if view
+                         (buffer-text-property-ref
+                           buffer (view-caret view) 'result-index #f)
+                         (buffer-local-ref
+                           buffer 'result-current-index #f))]
                    [base
                      (if current
                          current

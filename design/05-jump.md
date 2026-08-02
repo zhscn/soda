@@ -11,6 +11,7 @@
 | `LocationItem`、`LocationList` producer model | 已实现 |
 | 基于文本属性的 Result Buffer 与 next/previous/group navigation | 已实现 |
 | 隐藏 Result Buffer 的 Buffer-local navigation point | 已实现 |
+| Result Buffer 的可发现 item action | 已实现 |
 | Scheme definition/reference/diagnostic producer | 已实现 |
 | navigation origin 与 LanguageAttachment provenance | 已实现 |
 | Workbench 级语义 `JumpGraph` 与持久化 | 已实现 |
@@ -163,6 +164,11 @@ face          普通文本装饰
 `result-buffer-interface` 提供 item activation 和 quit 行为。`n`/`p` 移动 Result
 Buffer 的真实 point，再激活 point 下的 item；`N`/`P` 按 `result-group` 移动到相邻组
 的首项。RET 选择源位置，TAB 选择并关闭结果窗口，`C-o` 只预览。
+
+领域 mode 可以向 Buffer 注册命名 `result-action`。action 包含显示名称、针对 point
+下 `result-item` 的适用性判断和执行过程。键位仍由 mode keymap 决定；which-key、菜单
+或其他 TUI 组件可以枚举 point 下的可用 action，而无需识别领域 payload。Git status
+的 stage、unstage 和 diff 使用该协议。
 
 Result Buffer 在不可见时仍保存当前 item。全局 next/previous locus 使用最近实际导航的
 Result Buffer，并跳过已经关闭的 Buffer；它不依赖 Result Buffer 当前是否显示在某个

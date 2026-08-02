@@ -933,6 +933,13 @@
           make-result-buffer-interface
           result-buffer-interface?
           result-buffer-interface-cyclic?
+          make-result-action
+          result-action?
+          result-action-name
+          result-action-label
+          buffer-register-result-action!
+          buffer-result-actions-at
+          invoke-buffer-item-action
           buffer-set-result-interface!
           buffer-result-interface-ref
           editor-note-result-buffer!
