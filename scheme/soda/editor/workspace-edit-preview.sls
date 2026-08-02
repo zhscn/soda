@@ -8,6 +8,7 @@
           (soda editor command-runtime)
           (soda editor condition)
           (soda editor effect)
+          (soda editor editable-projection)
           (soda editor event)
           (soda editor keymap)
           (soda editor language)
@@ -21,9 +22,6 @@
             description
             after-apply
             (mutable accepted?)))
-
-  (define-record-type workspace-edit-projection
-    (fields edit start-anchor end-anchor))
 
   (define (buffer-size buffer)
     (let ([snapshot (document-snapshot (buffer-document buffer))])
@@ -92,35 +90,12 @@
           [replacement (workspace-text-edit-text edit)])
       (values prefix replacement (string-append prefix replacement "\n"))))
 
-  (define (projection-range buffer projection)
-    (let ([document (buffer-document buffer)])
-      (cons
-        (document-anchor-offset
-          document (workspace-edit-projection-start-anchor projection))
-        (document-anchor-offset
-          document (workspace-edit-projection-end-anchor projection)))))
-
   (define (install-edit-guard! buffer preview)
-    (buffer-set-local!
+    (buffer-install-projection-edit-guard!
       buffer
-      'edit-guard
-      (lambda (guarded-buffer start end bytes)
-        (unless
-          (exists
-            (lambda (projection)
-              (let ([range (projection-range guarded-buffer projection)])
-                (and (<= (car range) start)
-                     (<= end (cdr range)))))
-            (workspace-edit-preview-projections preview))
-          (editor-user-error
-            'workspace-edit "Only replacement text is editable" start end)))))
-
-  (define (make-projection! buffer edit start end)
-    (let ([document (buffer-document buffer)])
-      (make-workspace-edit-projection
-        edit
-        (document-create-anchor! document start anchor-before-insertion)
-        (document-create-anchor! document end anchor-after-insertion))))
+      (workspace-edit-preview-projections preview)
+      'workspace-edit
+      "Only replacement text is editable"))
 
   (define (editor-show-workspace-edit-preview!
             editor origin-view-id edits description after-apply)
@@ -166,7 +141,7 @@
                 (append
                   (workspace-edit-preview-projections preview)
                   (list
-                    (make-projection!
+                    (make-editable-projection!
                       buffer edit replacement-start replacement-end)))))))
         items edits)
       (buffer-set-local! buffer 'workspace-edit-preview preview)
@@ -197,14 +172,13 @@
            [edits
              (map
                (lambda (projection)
-                 (let* ([edit (workspace-edit-projection-edit projection)]
-                        [range (projection-range buffer projection)])
+                 (let ([edit (editable-projection-source projection)])
                    (make-workspace-text-edit
                      (workspace-text-edit-resource edit)
                      (workspace-text-edit-revision edit)
                      (workspace-text-edit-start edit)
                      (workspace-text-edit-end edit)
-                     (buffer-substring buffer (car range) (cdr range)))))
+                     (editable-projection-text buffer projection))))
                (workspace-edit-preview-projections preview))])
       (workspace-text-edits-apply! editor edits)
       (workspace-edit-preview-accepted?-set! preview #t)
@@ -233,7 +207,7 @@
         (when (pair? projections)
           (view-set-caret!
             (command-context-view context)
-            (car (projection-range buffer (car projections))))))
+            (car (editable-projection-range buffer (car projections))))))
       (editor-set-status-message!
         editor "Edit replacement text; C-c C-c applies, C-c C-k discards")
       (editor-invalidate! editor 'chrome)
