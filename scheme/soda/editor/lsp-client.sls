@@ -53,6 +53,7 @@
           (soda editor location-results)
           (soda editor location-visit)
           (soda editor lsp-json-rpc)
+          (soda editor lsp-completion-decoder)
           (soda editor lsp-position)
           (soda editor lsp-protocol)
           (soda editor managed-process)
@@ -1984,134 +1985,6 @@
                  (completion-request-target-id request))
               buffer))))))
 
-  (define (lsp-range-offsets buffer value)
-    (guard (condition [else #f])
-      (let* ([range (lsp-range-from-json value)]
-             [start
-               (lsp-buffer-offset-at buffer (lsp-range-start range))]
-             [end
-               (lsp-buffer-offset-at buffer (lsp-range-end range))])
-        (and start end (<= start end) (cons start end)))))
-
-  (define (lsp-text-edit-from-json buffer value)
-    (and
-      (json-object? value)
-      (let ([new-text (json-object-ref value "newText" #f)]
-            [offsets
-              (lsp-range-offsets buffer (json-object-ref value "range" #f))])
-        (and offsets
-             (string? new-text)
-             (make-completion-text-edit (car offsets) (cdr offsets) new-text)))))
-
-  (define (lsp-insert-replace-edit-from-json buffer value)
-    (and
-      (json-object? value)
-      (let ([new-text (json-object-ref value "newText" #f)]
-            [insert-range
-              (lsp-range-offsets buffer (json-object-ref value "insert" #f))]
-            [replace-range
-              (lsp-range-offsets buffer (json-object-ref value "replace" #f))])
-        (and
-          (string? new-text)
-          insert-range
-          replace-range
-          (make-completion-edit
-            (make-completion-text-edit
-              (car insert-range) (cdr insert-range) new-text)
-            (make-completion-text-edit
-              (car replace-range) (cdr replace-range) new-text)
-            '())))))
-
-  (define (lsp-additional-text-edits buffer value)
-    (if (json-array? value)
-        (let loop ([values (json-array-values value)] [edits '()])
-          (if (null? values)
-              (reverse edits)
-              (let ([edit (lsp-text-edit-from-json buffer (car values))])
-                (and edit (loop (cdr values) (cons edit edits))))))
-        '()))
-
-  (define (text-edits-disjoint? edits)
-    (let ([ordered
-            (list-sort
-              (lambda (left right)
-                (< (completion-text-edit-start left)
-                   (completion-text-edit-start right)))
-              edits)])
-      (let loop ([remaining ordered])
-        (or
-          (null? remaining)
-          (null? (cdr remaining))
-          (and
-            (<= (completion-text-edit-end (car remaining))
-                (completion-text-edit-start (cadr remaining)))
-            (loop (cdr remaining)))))))
-
-  (define (text-edits-disjoint-from? edit others)
-    (for-all
-      (lambda (other)
-        (cond
-          [(< (completion-text-edit-start edit)
-              (completion-text-edit-start other))
-           (<= (completion-text-edit-end edit)
-               (completion-text-edit-start other))]
-          [(< (completion-text-edit-start other)
-              (completion-text-edit-start edit))
-           (<= (completion-text-edit-end other)
-               (completion-text-edit-start edit))]
-          [else #f]))
-      others))
-
-  (define (lsp-completion-edit buffer value)
-    (let* ([text-edit (json-object-ref value "textEdit" #f)]
-           [primary
-             (or
-               (let ([edit (lsp-text-edit-from-json buffer text-edit)])
-                 (and edit (make-completion-edit edit edit '())))
-               (lsp-insert-replace-edit-from-json buffer text-edit))]
-           [additional
-             (lsp-additional-text-edits
-               buffer
-               (json-object-ref value "additionalTextEdits" #f))])
-      (and
-        primary
-        (let ([edit
-                (make-completion-edit
-                  (completion-edit-insert primary)
-                  (completion-edit-replace primary)
-                  additional)])
-          (and
-            (text-edits-disjoint? additional)
-            (for-all
-              (lambda (additional-edit)
-                (text-edits-disjoint-from?
-                  additional-edit
-                  (list (completion-edit-insert edit)
-                        (completion-edit-replace edit))))
-              additional)
-            edit)))))
-
-  (define (lsp-completion-insert-text value edit label)
-    (let ([insert (json-object-ref value "insertText" #f)])
-      (cond
-        [(string? insert) insert]
-        [edit (completion-text-edit-new-text (completion-edit-insert edit))]
-        [else label])))
-
-  (define (lsp-completion-documentation value)
-    (let ([documentation (json-object-ref value "documentation" #f)])
-      (cond
-        [(string? documentation)
-         (make-completion-documentation 'plaintext documentation)]
-        [(json-object? documentation)
-         (let ([contents (json-object-ref documentation "value" #f)]
-               [kind (json-object-ref documentation "kind" "plaintext")])
-           (and (string? contents)
-                (make-completion-documentation
-                  (if (string=? kind "markdown") 'markdown 'plaintext)
-                  contents)))]
-        [else #f])))
-
   (define (lsp-completion-resolve-supported? session)
     (let ([provider
             (json-object-ref
@@ -2130,134 +2003,30 @@
             (not (json-object-has-key? primary (car entry))))
           (json-object-entries fallback)))))
 
-  (define (completion-item-default value defaults key)
-    (if (json-object-has-key? value key)
-        '()
-        (if (and
-              (json-object? defaults)
-              (json-object-has-key? defaults key))
-            (list (cons key (json-object-ref defaults key #f)))
-            '())))
-
-  (define (completion-default-text-edit value defaults)
-    (and
-      (not (json-object-has-key? value "textEdit"))
-      (json-object? defaults)
-      (let* ([range (json-object-ref defaults "editRange" #f)]
-             [label (json-object-ref value "label" #f)]
-             [text
-               (or
-                 (json-object-ref value "textEditText" #f)
-                 (json-object-ref value "insertText" #f)
-                 label)])
-        (and
-          (json-object? range)
-          (string? text)
-          (cond
-            [(and
-               (json-object-has-key? range "start")
-               (json-object-has-key? range "end"))
-             (make-json-object
-               (list (cons "range" range) (cons "newText" text)))]
-            [(and
-               (json-object-has-key? range "insert")
-               (json-object-has-key? range "replace"))
-             (make-json-object
-               (list
-                 (cons "insert" (json-object-ref range "insert" #f))
-                 (cons "replace" (json-object-ref range "replace" #f))
-                 (cons "newText" text)))]
-            [else #f])))))
-
-  (define (completion-item-with-defaults value defaults)
-    (let ([text-edit (completion-default-text-edit value defaults)])
-      (make-json-object
-        (append
-          (json-object-entries value)
-          (completion-item-default value defaults "insertTextFormat")
-          (completion-item-default value defaults "data")
-          (if text-edit (list (cons "textEdit" text-edit)) '())))))
-
-  (define (plain-completion-item? value)
-    (let ([format (json-object-ref value "insertTextFormat" 1)])
-      (and (integer? format) (exact? format) (= format 1))))
-
-  (define (lsp-completion-item
-            buffer id value resolved? provider-data)
-    (let* ([label (json-object-ref value "label" #f)]
-           [edit (and buffer (lsp-completion-edit buffer value))]
-           [insert (lsp-completion-insert-text value edit label)]
-           [filter (json-object-ref value "filterText" label)]
-           [detail (json-object-ref value "detail" #f)]
-           [sort (json-object-ref value "sortText" label)]
-           [documentation (lsp-completion-documentation value)])
-      (and (plain-completion-item? value)
-           (string? label)
-           (string? insert)
-           (string? filter)
-           (string? sort)
-           (make-completion-item
-             id
-             'lsp
-             filter label insert
-             'choice detail edit sort #f resolved?
-             documentation provider-data detail "LSP" 0))))
-
   (define (lsp-completion-items editor request result)
-    (let ([values
-            (cond
-              [(json-array? result) (json-array-values result)]
-              [(json-object? result)
-               (let ([items (json-object-ref result "items" #f)])
-                 (if (json-array? items) (json-array-values items) '()))]
-              [else '()])]
-          [defaults
-            (if (json-object? result)
-                (json-object-ref result "itemDefaults" #f)
-                #f)]
-          [buffer (completion-request-buffer editor request)]
+    (let ([buffer (completion-request-buffer editor request)]
           [session (completion-request-session editor request)])
-      (let loop ([remaining values] [index 0] [items '()])
-        (if (null? remaining)
-            (reverse items)
-            (let ([value (car remaining)])
-              (if (not (json-object? value))
-                  (loop (cdr remaining) (+ index 1) items)
-                  (let* ([effective
-                           (completion-item-with-defaults value defaults)]
-                         [label (json-object-ref effective "label" #f)]
-                         [insert (json-object-ref effective "insertText" label)]
-                         [data
-                           (and session
-                                buffer
-                                (make-lsp-completion-data
-                                  session
-                                  (completion-request-session-id request)
-                                  (completion-request-generation request)
-                                  (buffer-id buffer)
-                                  (buffer-revision buffer)
-                                  effective))]
-                         [item
-                           (and
-                             (string? label)
-                             (string? insert)
-                             (lsp-completion-item
-                               buffer
-                               (list index label insert)
-                               effective
-                               (not (and data
-                                         (lsp-completion-resolve-supported? session)))
-                               (or data effective)))])
-                    (loop
-                      (cdr remaining)
-                      (+ index 1)
-                      (if item (cons item items) items)))))))))
-
-  (define (lsp-completion-result-complete? result)
-    (not
-      (and
-        (json-object? result)
-        (eq? (json-object-ref result "isIncomplete" #f) #t))))
+      (decode-lsp-completion-items
+        buffer
+        result
+        (lambda (index effective)
+          (let ([data
+                  (and
+                    session
+                    buffer
+                    (make-lsp-completion-data
+                      session
+                      (completion-request-session-id request)
+                      (completion-request-generation request)
+                      (buffer-id buffer)
+                      (buffer-revision buffer)
+                      effective))])
+            (values
+              (not
+                (and
+                  data
+                  (lsp-completion-resolve-supported? session)))
+              (or data effective)))))))
 
   (define (lsp-completion-resolution-current?
             editor data original)
@@ -2292,7 +2061,7 @@
                (json-object-merge
                  result (lsp-completion-data-raw data))]
              [replacement
-               (lsp-completion-item
+               (decode-lsp-completion-item
                  buffer
                  (completion-item-id original)
                  value
