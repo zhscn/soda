@@ -2872,7 +2872,12 @@
                     'file-open-position
                     (make-file-utf16-position
                       (lsp-position-line (lsp-range-start range))
-                      (lsp-position-character (lsp-range-start range)))))))))))
+                      (lsp-position-character (lsp-range-start range))))
+                  (cons
+                    'file-open-end-position
+                    (make-file-utf16-position
+                      (lsp-position-line (lsp-range-end range))
+                      (lsp-position-character (lsp-range-end range)))))))))))
 
   (define (lsp-jump-to-location-item! editor view item kind)
     (editor-visit-location-item! editor view item kind))

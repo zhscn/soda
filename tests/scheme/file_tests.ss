@@ -1359,6 +1359,41 @@
   (error 'file-tests
          "source-positioned open did not resolve its line and character"))
 
+(let ([result
+        (execute-effects!
+          executor
+          (list
+            (make-command-effect
+              'file.read
+              (make-open-request
+                origin-view-id
+                offset-path
+                (make-file-utf16-position 1 0)
+                #f
+                #f
+                (make-file-navigation-target
+                  (make-file-utf16-position 1 0)
+                  (make-file-utf16-position 1 3)
+                  'reference)))))])
+  (unless
+    (and
+      (effect-result-continue? result)
+      (null? (effect-result-messages result)))
+    (error 'file-tests
+           "navigation-target open did not start asynchronously")))
+(finish-file-read!)
+(let* ([view (editor-active-view editor)]
+       [target (view-navigation-target view)])
+  (unless
+    (and
+      (= (view-caret view) 5)
+      target
+      (= (view-navigation-target-start target) 5)
+      (= (view-navigation-target-end target) 8)
+      (eq? (view-navigation-target-kind target) 'reference))
+    (error 'file-tests
+           "asynchronous open did not restore its navigation target")))
+
 (write-file-bytes
   background-path
   (string->utf8 "(define background-value 1)\n"))

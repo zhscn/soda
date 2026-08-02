@@ -1859,6 +1859,19 @@
     (and locations
          (eq? (location-list-source locations) 'lsp-references)
          (= (length (location-list-items locations)) 2)
+         (let* ([external (cadr (location-list-items locations))]
+                [metadata (location-item-metadata external)]
+                [start (assq 'file-open-position metadata)]
+                [end (assq 'file-open-end-position metadata)])
+           (and
+             start
+             end
+             (file-utf16-position? (cdr start))
+             (file-utf16-position? (cdr end))
+             (= (file-utf16-position-line (cdr start)) 2)
+             (= (file-utf16-position-character (cdr start)) 1)
+             (= (file-utf16-position-line (cdr end)) 2)
+             (= (file-utf16-position-character (cdr end)) 7)))
          (let* ([results-buffer
                   (view-buffer (editor-active-view editor))]
                 [point (view-caret (editor-active-view editor))])
@@ -1869,6 +1882,29 @@
                (buffer-text-property-ref
                  results-buffer point 'result-item #f)))))
     "LSP references did not publish a navigable location list"))
+(let* ([effects (editor-execute-command! editor 'buffer-item.next)]
+       [request
+         (and
+           (= (length effects) 1)
+           (eq? (command-effect-kind (car effects)) 'file.read)
+           (command-effect-payload (car effects)))]
+       [target
+         (and request (open-request-navigation-target request))])
+  (check
+    (and
+      (open-request? request)
+      (file-navigation-target? target)
+      (file-utf16-position? (file-navigation-target-start target))
+      (file-utf16-position? (file-navigation-target-end target))
+      (= (file-utf16-position-character
+           (file-navigation-target-start target))
+         1)
+      (= (file-utf16-position-character
+           (file-navigation-target-end target))
+         7))
+    "external reference preview did not preserve its target range"
+    effects)
+  (editor-execute-command! editor 'buffer-item.previous))
 (define lsp-reference-refresh-effects
   (editor-execute-command! editor 'buffer-item.refresh))
 (define lsp-reference-refresh-message

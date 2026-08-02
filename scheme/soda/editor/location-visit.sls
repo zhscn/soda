@@ -20,6 +20,15 @@
              (file-utf16-position? (cdr entry))
              (cdr entry)))))
 
+  (define (location-item-open-end-position item)
+    (let ([metadata (location-item-metadata item)])
+      (let ([entry
+              (and (list? metadata)
+                   (assq 'file-open-end-position metadata))])
+        (and entry
+             (file-utf16-position? (cdr entry))
+             (cdr entry)))))
+
   (define (item-resource-context editor view item)
     (let ([base
             (editor-view-resource-context editor (view-id view))]
@@ -62,7 +71,14 @@
           (let ([resource (location-item-resource item)]
                 [position
                   (or (location-item-open-position item)
-                      (location-item-start item))])
+                      (location-item-start item))]
+                [end-position
+                  (or
+                    (location-item-open-end-position item)
+                    (and
+                      (> (location-item-end item)
+                         (location-item-start item))
+                      (location-item-end item)))])
             (unless (string? resource)
               (editor-user-error
                 'location.visit "Location has no resource"))
@@ -75,7 +91,12 @@
                   resource
                   position
                   display-intent
-                  context)))))))
+                  context
+                  (and
+                    (not display-intent)
+                    end-position
+                    (make-file-navigation-target
+                      position end-position kind)))))))))
 
   (define editor-visit-location-item!
     (case-lambda

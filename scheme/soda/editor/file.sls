@@ -10,6 +10,12 @@
           open-request-offset
           open-request-display-intent
           open-request-resource-context
+          open-request-navigation-target
+          make-file-navigation-target
+          file-navigation-target?
+          file-navigation-target-start
+          file-navigation-target-end
+          file-navigation-target-kind
           make-file-source-position
           file-source-position?
           file-source-position-line
@@ -114,7 +120,13 @@
 
   (define-record-type
     (open-request %make-open-request open-request?)
-    (fields view-id path offset display-intent resource-context))
+    (fields view-id path offset display-intent resource-context navigation-target))
+
+  (define-record-type
+    (file-navigation-target
+      %make-file-navigation-target
+      file-navigation-target?)
+    (fields start end kind))
 
   (define-record-type
     (file-source-position
@@ -254,6 +266,18 @@
         line character))
     (%make-file-utf16-position line character))
 
+  (define (make-file-navigation-target start end kind)
+    (unless (and (valid-open-position? start)
+                 start
+                 (valid-open-position? end)
+                 end
+                 (symbol? kind))
+      (assertion-violation
+        'make-file-navigation-target
+        "invalid file navigation target"
+        start end kind))
+    (%make-file-navigation-target start end kind))
+
   (define make-open-request
     (case-lambda
       [(view-id path)
@@ -261,6 +285,9 @@
       [(view-id path offset)
        (make-open-request view-id path offset #f #f)]
       [(view-id path offset display-intent resource-context)
+       (make-open-request
+         view-id path offset display-intent resource-context #f)]
+      [(view-id path offset display-intent resource-context navigation-target)
        (unless
          (or
            (not view-id)
@@ -301,8 +328,15 @@
            'make-open-request
            "resource context must be a ResourceContext or #f"
            resource-context))
+       (unless
+         (or (not navigation-target)
+             (file-navigation-target? navigation-target))
+         (assertion-violation
+           'make-open-request
+           "navigation target must be a FileNavigationTarget or #f"
+           navigation-target))
        (%make-open-request
-         view-id path offset display-intent resource-context)]))
+         view-id path offset display-intent resource-context navigation-target)]))
 
   (define (make-reload-request
             view-id
@@ -1016,6 +1050,23 @@
       [(integer? target) target]
       [else #f]))
 
+  (define (apply-open-navigation-target! buffer view request)
+    (let ([target (open-request-navigation-target request)])
+      (when target
+        (let ([start
+                (open-target-offset
+                  buffer (file-navigation-target-start target))]
+              [end
+                (open-target-offset
+                  buffer (file-navigation-target-end target))])
+          (when (and start end)
+            (let ([size (buffer-byte-length buffer)])
+              (view-set-navigation-target!
+                view
+                (min start size)
+                (min (max start end) size)
+                (file-navigation-target-kind target))))))))
+
   (define (activate-buffer! editor view-id buffer)
     (if (find-view-by-id editor view-id)
         (begin
@@ -1084,49 +1135,62 @@
                     (editor-display-buffer!
                       editor
                       placement-request)
+                    (apply-open-navigation-target!
+                      buffer planned-view request)
                     #t)
                   (let ([target
                           (editor-display-buffer!
                             editor
                             placement-request)])
                     (if (= (view-id target) origin-view-id)
-                        (or
-                          (and
-                            target-offset
-                            (editor-complete-async-jump!
-                              editor
-                              target
-                              buffer
-                              target-offset
-                              (open-result-path result)))
-                          (begin
-                            (editor-cancel-async-jump!
-                              editor target #f)
-                            (when target-offset
-                              (view-set-caret!
-                                target target-offset))
-                            #t))
+                        (let ([activated?
+                                (or
+                                  (and
+                                    target-offset
+                                    (editor-complete-async-jump!
+                                      editor
+                                      target
+                                      buffer
+                                      target-offset
+                                      (open-result-path result)))
+                                  (begin
+                                    (editor-cancel-async-jump!
+                                      editor target #f)
+                                    (when target-offset
+                                      (view-set-caret!
+                                        target target-offset))
+                                    #t))])
+                          (when activated?
+                            (apply-open-navigation-target!
+                              buffer target request))
+                          activated?)
                         (begin
                           (editor-cancel-async-jump!
                             editor view (open-result-path result))
                           (when target-offset
                             (view-set-caret! target target-offset))
+                          (apply-open-navigation-target!
+                            buffer target request)
                           #t)))))
-              (or
-                (and target-offset
-                     (editor-complete-async-jump!
-                       editor
-                       view
-                       buffer
-                       target-offset
-                       (open-result-path result)))
-                (and
-                  (activate-buffer! editor origin-view-id buffer)
-                  (begin
-                    (editor-cancel-async-jump! editor view #f)
-                    (when target-offset
-                      (view-set-caret! view target-offset))
-                    #t))))))))
+              (let ([activated?
+                      (or
+                        (and target-offset
+                             (editor-complete-async-jump!
+                               editor
+                               view
+                               buffer
+                               target-offset
+                               (open-result-path result)))
+                        (and
+                          (activate-buffer! editor origin-view-id buffer)
+                          (begin
+                            (editor-cancel-async-jump! editor view #f)
+                            (when target-offset
+                              (view-set-caret! view target-offset))
+                            #t)))])
+                (when activated?
+                  (apply-open-navigation-target! buffer view request))
+                activated?))))))
 
   (define (cancel-open-jumps! editor result)
     (for-each
