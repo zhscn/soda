@@ -1,6 +1,7 @@
 (library (soda editor location-results)
   (export install-location-results!
           editor-show-location-results!
+          editor-append-location-results!
           location-results-buffer?)
   (import (rnrs)
           (soda document)
@@ -11,6 +12,7 @@
           (soda editor display-placement)
           (soda editor edit)
           (soda editor effect)
+          (soda editor event)
           (soda editor file)
           (soda editor keymap)
           (soda editor language)
@@ -21,7 +23,13 @@
           (soda editor window-runtime))
 
   (define-record-type location-results-state
-    (fields title locations origin-view-id jump-kind))
+    (fields title
+            locations
+            origin-view-id
+            jump-kind
+            close-command
+            close-argument
+            (mutable last-resource)))
 
   (define (location-open-position item)
     (let ([metadata (location-item-metadata item)])
@@ -115,10 +123,7 @@
             (set! properties (cons (list position end values) properties)))
           (set! position end)))
       (emit!
-        (string-append
-          title " ("
-          (number->string (length (location-list-items locations)))
-          ")\n")
+        (string-append title "\n")
         '((face . application.heading) (result-heading . #t)))
       (let loop ([items (location-list-items locations)] [index 0])
         (unless (null? items)
@@ -135,7 +140,37 @@
             (loop (cdr items) (+ index 1)))))
       (values
         (apply string-append (reverse chunks))
-        (reverse properties))))
+        (reverse properties)
+        last-resource)))
+
+  (define (render-appended-locations
+            editor items start-index start-position last-resource)
+    (let ([chunks '()] [properties '()] [position start-position]
+          [last-resource last-resource])
+      (define (emit! text values)
+        (let* ([bytes (string->utf8 text)]
+               [end (+ position (bytevector-length bytes))])
+          (set! chunks (cons text chunks))
+          (when (< position end)
+            (set! properties (cons (list position end values) properties)))
+          (set! position end)))
+      (let loop ([items items] [index start-index])
+        (unless (null? items)
+          (let* ([item (car items)]
+                 [resource (location-resource-label item)])
+            (unless (equal? resource last-resource)
+              (emit!
+                (string-append resource "\n")
+                `((face . application.heading) (result-group . ,resource)))
+              (set! last-resource resource))
+            (emit!
+              (string-append (location-row editor item) "\n")
+              `((location-item . ,item) (location-index . ,index)))
+            (loop (cdr items) (+ index 1)))))
+      (values
+        (apply string-append (reverse chunks))
+        (reverse properties)
+        last-resource)))
 
   (define (location-results-state-for-buffer buffer)
     (buffer-local-ref buffer 'location-results-state #f))
@@ -298,25 +333,35 @@
       (let* ([editor (command-context-editor context)]
              [origin-view
                (editor-view-ref
-                 editor (location-results-state-origin-view-id state))])
+                 editor (location-results-state-origin-view-id state))]
+             [close-command (location-results-state-close-command state)]
+             [close-argument (location-results-state-close-argument state)])
         (editor-select-view-window! editor (view-id origin-view))
         (close-location-results-buffer! editor buffer origin-view)
-        '())))
+        (if close-command
+            (list
+              (make-command-effect
+                'command.invoke
+                (make-command-message close-command close-argument)))
+            '()))))
 
-  (define (editor-show-location-results!
-            editor title locations origin-view-id jump-kind)
+  (define (%editor-show-location-results!
+            editor title locations origin-view-id jump-kind
+            close-command close-argument)
     (unless (and (string? title)
                  (positive? (string-length title))
                  (location-list? locations)
                  (integer? origin-view-id) (exact? origin-view-id)
                  (positive? origin-view-id)
-                 (symbol? jump-kind))
+                 (symbol? jump-kind)
+                 (or (not close-command) (symbol? close-command)))
       (assertion-violation
         'editor-show-location-results! "invalid location result model"
-        title locations origin-view-id jump-kind))
+        title locations origin-view-id jump-kind close-command))
     (let* ([state
              (make-location-results-state
-               title locations origin-view-id jump-kind)]
+               title locations origin-view-id jump-kind
+               close-command close-argument #f)]
            [existing
              (find
                (lambda (buffer)
@@ -327,7 +372,7 @@
              (or existing
                  (editor-create-buffer!
                    editor "*Location Results*" 'location-results-mode ""))])
-      (let-values ([(text properties)
+      (let-values ([(text properties last-resource)
                     (render-location-results editor title locations)])
         (buffer-clear-text-properties! buffer)
         (buffer-replace-range-internal!
@@ -338,6 +383,7 @@
               buffer (car entry) (cadr entry) (caddr entry)))
           properties)
         (buffer-set-local! buffer 'location-results-state state)
+        (location-results-state-last-resource-set! state last-resource)
         (let ([view
                 (editor-display-buffer!
                   editor
@@ -350,6 +396,49 @@
               (ensure-view-visible! view)))
           (editor-invalidate! editor 'document)
           buffer))))
+
+  (define editor-show-location-results!
+    (case-lambda
+      [(editor title locations origin-view-id jump-kind)
+       (%editor-show-location-results!
+         editor title locations origin-view-id jump-kind #f #f)]
+      [(editor title locations origin-view-id jump-kind
+               close-command close-argument)
+       (%editor-show-location-results!
+         editor title locations origin-view-id jump-kind
+         close-command close-argument)]))
+
+  (define (editor-append-location-results! editor buffer items)
+    (unless (and (location-results-buffer? buffer)
+                 (list? items)
+                 (for-all location-item? items))
+      (assertion-violation
+        'editor-append-location-results!
+        "expected a location results Buffer and LocationItems"
+        buffer items))
+    (unless (null? items)
+      (let* ([state (location-results-state-for-buffer buffer)]
+             [locations (location-results-state-locations state)]
+             [start-index (length (location-list-items locations))]
+             [start-position (buffer-size buffer)])
+        (let-values ([(text properties last-resource)
+                      (render-appended-locations
+                        editor
+                        items
+                        start-index
+                        start-position
+                        (location-results-state-last-resource state))])
+          (buffer-replace-range-internal!
+            buffer start-position start-position (string->utf8 text))
+          (for-each
+            (lambda (entry)
+              (buffer-add-text-properties!
+                buffer (car entry) (cadr entry) (caddr entry)))
+            properties)
+          (location-list-append-items! locations items)
+          (location-results-state-last-resource-set! state last-resource)
+          (editor-invalidate! editor 'document))))
+    buffer)
 
   (define (bind-result-key! keymap key codepoint command)
     (keymap-bind!

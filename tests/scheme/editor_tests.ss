@@ -21,6 +21,7 @@
               interaction-session-evaluator)
         (soda editor keymap)
         (soda editor language)
+        (soda editor location-results)
         (only (soda editor injection)
               syntax-captures->injection-index)
         (soda editor minor-mode)
@@ -4289,6 +4290,39 @@
             (buffer-text-property-ref
               results-buffer point 'location-item #f)))))
     (error 'editor-tests "Scheme xref did not publish references")))
+(define xref-results-buffer
+  (view-buffer (editor-active-view xref-editor)))
+(define appended-xref-item
+  (make-location-item
+    (buffer-id xref-buffer)
+    (buffer-resource xref-buffer)
+    (buffer-revision xref-buffer)
+    8
+    13
+    "hello"
+    '((test . appended))))
+(editor-append-location-results!
+  xref-editor xref-results-buffer (list appended-xref-item))
+(unless
+  (and
+    (= (length
+         (location-list-items
+           (editor-current-location-list xref-editor)))
+       4)
+    (let ([size (bytevector-length (buffer-bytes xref-results-buffer))])
+      (let loop ([position 0])
+        (and
+          (< position size)
+          (or
+            (equal?
+              (buffer-text-property-ref
+                xref-results-buffer position 'location-index #f)
+              3)
+            (let ([next
+                    (buffer-next-text-property-change
+                      xref-results-buffer position size)])
+              (loop (if (> next position) next (+ position 1)))))))))
+  (error 'editor-tests "location results did not append attributed text"))
 (editor-update!
   xref-editor
   (make-command-message 'result.next #f))

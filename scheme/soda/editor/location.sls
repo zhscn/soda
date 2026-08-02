@@ -31,6 +31,7 @@
           location-list-items
           location-list-index
           location-list-set-index!
+          location-list-append-items!
           location-list-current
           make-navigation-walk
           navigation-walk?
@@ -83,7 +84,7 @@
 
   (define-record-type
     (location-list %make-location-list location-list?)
-    (fields source items (mutable index)))
+    (fields source (mutable items) (mutable index)))
 
   (define (exact-non-negative-integer? value)
     (and (integer? value)
@@ -215,6 +216,21 @@
         "location list index is outside the list"
         index))
     (location-list-index-set! list index))
+
+  (define (location-list-append-items! list items)
+    (unless (location-list? list)
+      (assertion-violation
+        'location-list-append-items! "expected a location list" list))
+    (unless (and (list? items) (for-all location-item? items))
+      (assertion-violation
+        'location-list-append-items! "items must be location items" items))
+    (unless (null? items)
+      (let ([empty? (null? (location-list-items list))])
+        (location-list-items-set!
+          list (append (location-list-items list) items))
+        (when empty?
+          (location-list-index-set! list 0))))
+    list)
 
   (define (location-list-current list)
     (unless (location-list? list)
