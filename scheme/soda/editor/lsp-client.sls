@@ -456,16 +456,10 @@
       path))
 
   (define (buffer-text buffer)
-    (let ([snapshot (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda () (utf8->string (text->bytevector text)))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
+    (call-with-document-text
+      (buffer-document buffer)
+      (lambda (text)
+        (utf8->string (text->bytevector text)))))
 
   (define (make-lsp-process workspace profile owner)
     (make-managed-process

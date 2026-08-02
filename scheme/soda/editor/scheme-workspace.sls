@@ -310,18 +310,9 @@
              index #t))])))
 
   (define (buffer-scheme-source-bytes buffer)
-    (let ([snapshot
-            (document-snapshot
-              (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda () (text->bytevector text))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
+    (call-with-document-text
+      (buffer-document buffer)
+      text->bytevector))
 
   (define (catalog-sources index)
     (filter
