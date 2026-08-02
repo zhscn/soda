@@ -1832,7 +1832,7 @@
                  results-buffer point 'location-item #f)))))
     "LSP references did not publish a navigable location list"))
 (define reference-next-effects
-  (editor-execute-command! editor 'result.next))
+  (editor-execute-command! editor 'buffer-item.next))
 (check
   (and
     (= (length reference-next-effects) 1)

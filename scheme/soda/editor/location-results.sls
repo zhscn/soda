@@ -21,6 +21,7 @@
           (soda editor language)
           (soda editor location)
           (soda editor navigation)
+          (soda editor navigable-buffer)
           (soda editor resource-context)
           (soda editor state)
           (soda editor window-runtime))
@@ -240,6 +241,12 @@
         (bytevector-length (string->utf8 heading))
         '((face . application.heading) (result-heading . #t)))
       (buffer-set-local! buffer 'location-results-state state)
+      (buffer-set-navigation-interface!
+        buffer
+        (make-buffer-navigation-interface
+          'location-item 'location-index #t
+          activate-location-result
+          quit-location-results))
       (let ([view
               (editor-display-buffer!
                 editor
@@ -315,7 +322,7 @@
           (let ([buffer (editor-buffer-ref editor buffer-id)])
             (unless (= (buffer-revision buffer) (location-item-revision item))
               (editor-user-error
-                'result.visit "The selected location is stale"))
+                'buffer-item.activate "The selected location is stale"))
             (editor-jump-view-to-buffer!
               editor view buffer (location-item-start item) kind)
             '())
@@ -324,7 +331,8 @@
                   (or (location-open-position item)
                       (location-item-start item))])
             (unless (string? resource)
-              (editor-user-error 'result.visit "The selected location has no resource"))
+              (editor-user-error
+                'buffer-item.activate "The selected location has no resource"))
             (editor-begin-async-jump! editor view resource kind)
             (list
               (make-command-effect
@@ -335,20 +343,6 @@
                   position
                   'jump
                   (editor-view-resource-context editor (view-id view)))))))))
-
-  (define (selected-location-result context who)
-    (let-values ([(buffer state) (active-location-results context who)])
-      (let* ([view (command-context-view context)]
-             [position (view-caret view)]
-             [item
-               (buffer-text-property-ref
-                 buffer position 'location-item #f)]
-             [index
-               (buffer-text-property-ref
-                 buffer position 'location-index #f)])
-        (unless (and (location-item? item) (integer? index) (exact? index))
-          (editor-user-error who "Point is not on a location result"))
-        (values buffer state item index))))
 
   (define (preview-location-result! context item index state)
     (let* ([editor (command-context-editor context)]
@@ -381,63 +375,25 @@
           (editor-views editor))
         (editor-remove-buffer! editor (buffer-id buffer)))))
 
-  (define (move-location-result-command context delta)
+  (define (activate-location-result context item index disposition)
     (let-values ([(buffer state)
-                  (active-location-results context 'result.next)])
-      (let ([positions (location-property-positions buffer)])
-        (if (null? positions)
-            (begin
-              (editor-set-status-message!
-                (command-context-editor context) "No location results")
-              '())
-            (let* ([view (command-context-view context)]
-                   [current
-                     (buffer-text-property-ref
-                       buffer (view-caret view) 'location-index #f)]
-                   [target-index
-                     (mod
-                       (if current
-                           (+ current delta)
-                           (if (positive? delta) (- delta 1) delta))
-                       (length positions))]
-                   [entry (list-ref positions target-index)]
-                   [position (car entry)]
-                   [index (cdr entry)]
-                   [item
-                     (buffer-text-property-ref
-                       buffer position 'location-item #f)])
-              (view-set-caret! view position)
-              (ensure-view-visible! view)
-              (preview-location-result! context item index state))))))
-
-  (define (visit-xref-result context select-origin? close-results?)
-    (let-values ([(buffer state item index)
-                  (selected-location-result context 'result.visit)])
+                  (active-location-results context 'buffer-item.activate)])
       (let* ([editor (command-context-editor context)]
              [origin-view
                (editor-view-ref
                  editor (location-results-state-origin-view-id state))]
              [effects
                (preview-location-result! context item index state)])
-        (when select-origin?
+        (when (memq disposition '(select select-and-close))
           (editor-select-view-window! editor (view-id origin-view)))
-        (when close-results?
+        (when (eq? disposition 'select-and-close)
           (close-location-results-buffer!
             editor buffer origin-view))
         effects)))
 
-  (define (preview-xref-result-command context)
-    (visit-xref-result context #f #f))
-
-  (define (visit-xref-result-command context)
-    (visit-xref-result context #t #f))
-
-  (define (visit-and-close-xref-result-command context)
-    (visit-xref-result context #t #t))
-
-  (define (quit-xref-results-command context)
+  (define (quit-location-results context)
     (let-values ([(buffer state)
-                  (active-location-results context 'result.quit)])
+                  (active-location-results context 'buffer-item.quit)])
       (let* ([editor (command-context-editor context)]
              [origin-view
                (editor-view-ref
@@ -491,6 +447,12 @@
               buffer (car entry) (cadr entry) (caddr entry)))
           properties)
         (buffer-set-local! buffer 'location-results-state state)
+        (buffer-set-navigation-interface!
+          buffer
+          (make-buffer-navigation-interface
+            'location-item 'location-index #t
+            activate-location-result
+            quit-location-results))
         (location-results-state-last-resource-set! state last-resource)
         (let ([view
                 (editor-display-buffer!
@@ -562,42 +524,18 @@
         'location-results-mode-map
         '((track-modified? . #f) (read-only? . #t))))
     (let ([keymap (make-keymap)])
-      (bind-result-key! keymap 'down #f 'result.next)
-      (bind-result-key! keymap 'up #f 'result.previous)
-      (bind-result-key! keymap 'enter 13 'result.visit)
-      (bind-result-key! keymap 'tab 9 'result.visit-and-close)
-      (bind-result-key! keymap 'character (char->integer #\n) 'result.next)
-      (bind-result-key! keymap 'character (char->integer #\p) 'result.previous)
-      (bind-result-key! keymap 'character (char->integer #\q) 'result.quit)
+      (bind-result-key! keymap 'down #f 'buffer-item.next)
+      (bind-result-key! keymap 'up #f 'buffer-item.previous)
+      (bind-result-key! keymap 'enter 13 'buffer-item.activate)
+      (bind-result-key! keymap 'tab 9 'buffer-item.activate-and-close)
+      (bind-result-key! keymap 'character (char->integer #\n) 'buffer-item.next)
+      (bind-result-key! keymap 'character (char->integer #\p) 'buffer-item.previous)
+      (bind-result-key! keymap 'character (char->integer #\q) 'buffer-item.quit)
       (keymap-bind!
         keymap
         (list (make-key-stroke 'character (char->integer #\o) 4))
-        'result.preview)
+        'buffer-item.preview)
       (keymap-catalog-register!
         (editor-keymap-catalog editor) 'location-results-mode-map keymap))
-    (for-each
-      (lambda (spec)
-        (editor-register-command!
-          editor
-          (make-interactive-context-command
-            (car spec) (cadr spec) (caddr spec))))
-      (list
-        (list 'result.next
-              (lambda (context)
-                (move-location-result-command
-                  context (command-context-count context)))
-              "Move to and preview the next location result.")
-        (list 'result.previous
-              (lambda (context)
-                (move-location-result-command
-                  context (- (command-context-count context))))
-              "Move to and preview the previous location result.")
-        (list 'result.visit visit-xref-result-command
-              "Visit the selected location and select its source view.")
-        (list 'result.preview preview-xref-result-command
-              "Preview the selected location while retaining results focus.")
-        (list 'result.visit-and-close visit-and-close-xref-result-command
-              "Visit the selected location and close the results view.")
-        (list 'result.quit quit-xref-results-command
-              "Close location results and return to their origin view.")))
+    (install-navigable-buffer-commands! editor)
     editor))
