@@ -556,6 +556,8 @@
       (bind-result-key! keymap 'tab 9 'buffer-item.activate-and-close)
       (bind-result-key! keymap 'character (char->integer #\n) 'buffer-item.next)
       (bind-result-key! keymap 'character (char->integer #\p) 'buffer-item.previous)
+      (bind-result-key! keymap 'character (char->integer #\N) 'buffer-item.next-group)
+      (bind-result-key! keymap 'character (char->integer #\P) 'buffer-item.previous-group)
       (bind-result-key! keymap 'character (char->integer #\q) 'buffer-item.quit)
       (keymap-bind!
         keymap

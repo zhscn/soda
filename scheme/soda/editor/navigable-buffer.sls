@@ -75,6 +75,9 @@
       (lambda (range) (cons (car range) (caddr range)))
       (buffer-text-property-ranges buffer 'result-index)))
 
+  (define (property-starts buffer property)
+    (map car (buffer-text-property-ranges buffer property)))
+
   (define (selected-item context who)
     (let-values ([(buffer interface) (require-interface context who)])
       (let* ([position (view-caret (command-context-view context))]
@@ -143,6 +146,77 @@
       (move-buffer-item
         context buffer interface (command-context-view context) delta)))
 
+  (define (index-of-position positions position)
+    (let loop ([items positions] [index 0] [found #f])
+      (cond
+        [(null? items) found]
+        [(<= (car items) position)
+         (loop (cdr items) (+ index 1) index)]
+        [else found])))
+
+  (define (first-item-after positions position limit)
+    (find
+      (lambda (entry)
+        (and (> (car entry) position)
+             (or (not limit) (< (car entry) limit))))
+      positions))
+
+  (define (move-buffer-group context buffer interface view direction)
+    (let* ([groups (property-starts buffer 'result-group)]
+           [items (property-positions buffer interface)])
+      (if (or (null? groups) (null? items))
+          (begin
+            (editor-set-status-message!
+              (command-context-editor context) "No result groups")
+            '())
+          (let* ([position
+                   (if view
+                       (view-caret view)
+                       (let ([index
+                               (buffer-local-ref
+                                 buffer 'result-current-index #f)])
+                         (if (and index (< index (length items)))
+                             (car (list-ref items index))
+                             0)))]
+                 [current (index-of-position groups position)]
+                 [base
+                   (if current
+                       current
+                       (if (positive? direction) -1 (length groups)))]
+                 [target
+                   (bounded-index
+                     base direction (length groups)
+                     (buffer-navigation-interface-cyclic? interface))]
+                 [group-start (list-ref groups target)]
+                 [group-limit
+                   (and (< (+ target 1) (length groups))
+                        (list-ref groups (+ target 1)))]
+                 [entry
+                   (first-item-after items group-start group-limit)])
+            (if (not entry)
+                (begin
+                  (editor-set-status-message!
+                    (command-context-editor context)
+                    "Result group contains no items")
+                  '())
+                (let* ([item-position (car entry)]
+                       [index (cdr entry)]
+                       [item
+                         (buffer-text-property-ref
+                           buffer item-position 'result-item #f)])
+                  (when view
+                    (view-set-caret! view item-position)
+                    (ensure-view-visible! view))
+                  (buffer-set-local! buffer 'result-current-index index)
+                  ((buffer-navigation-interface-activate interface)
+                   context buffer item index 'preview)))))))
+
+  (define (move-group context direction)
+    (let-values ([(buffer interface)
+                  (require-interface context 'buffer-item.next-group)])
+      (move-buffer-group
+        context buffer interface (command-context-view context) direction)))
+
   (define (quit-buffer-items context)
     (let-values ([(buffer interface)
                   (require-interface context 'buffer-item.quit)])
@@ -200,6 +274,14 @@
               (lambda (context)
                 (move-item context (- (command-context-count context))))
               "Move to and preview the previous navigable Buffer item.")
+        (list 'buffer-item.next-group
+              (lambda (context)
+                (move-group context (command-context-count context)))
+              "Move to and preview the next result group.")
+        (list 'buffer-item.previous-group
+              (lambda (context)
+                (move-group context (- (command-context-count context))))
+              "Move to and preview the previous result group.")
         (list 'buffer-item.activate
               (lambda (context) (activate-selected context 'select))
               "Activate the navigable Buffer item at point.")
