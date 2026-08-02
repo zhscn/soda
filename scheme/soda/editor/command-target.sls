@@ -19,9 +19,6 @@
           command-target-property-ref
           make-command-target-selector
           command-target-selector?
-          command-target-selector-region-policy
-          command-target-selector-allow-empty-region?
-          command-target-selector-fallback
           resolve-command-target
           make-command-target-reader
           command-context-range-target

@@ -6,15 +6,7 @@
           scheme-interface-load-request-origin-view-id
           scheme-interface-load-request-origin-buffer-id
           scheme-interface-load-request-environment-id
-          make-scheme-interface-load-result
-          scheme-interface-load-result?
-          scheme-interface-load-result-path
-          scheme-interface-load-result-origin-view-id
-          scheme-interface-load-result-origin-buffer-id
-          scheme-interface-load-result-environment-id
-          scheme-interface-load-result-status
-          scheme-interface-load-result-data
-          scheme-interface-load-result-detail)
+          make-scheme-interface-load-result)
   (import (rnrs)
           (soda editor buffer)
           (soda editor command)

@@ -3,7 +3,6 @@
           character-byte-length
           next-tab-stop
           string-cell-width
-          string-cell-end-column
           text-cell-column
           text-offset-at-cell-column
           line-number-gutter-width)

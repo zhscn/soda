@@ -3,7 +3,6 @@
           effect-executor?
           register-effect-handler!
           make-effect-result
-          effect-result?
           effect-result-continue?
           effect-result-messages
           execute-effects!)

@@ -66,7 +66,6 @@
           document-completion-target-end
           document-completion-target-replacement-end
           document-completion-target-refresh!
-          document-completion-target-close!
           completion-target?
           make-completion-selection-policy
           completion-selection-policy?
@@ -109,7 +108,6 @@
           completion-request-query
           completion-request-context
           completion-session-schedule-requests!
-          completion-session-cancel-requests!
           completion-session-closed?
           completion-session-close!
           completion-window-max-rows
