@@ -516,32 +516,6 @@
   (define (spaces count)
     (make-bytevector count 32))
 
-  (define (apply-replacements! buffer replacements)
-    (unless (null? replacements)
-      (let ([change #f])
-        (dynamic-wind
-          (lambda () #f)
-          (lambda ()
-            (call-with-values
-              (lambda ()
-                (call-with-buffer-transaction
-                  buffer
-                  (lambda (transaction)
-                    (for-each
-                      (lambda (replacement)
-                        (transaction-replace!
-                          transaction
-                          (car replacement)
-                          (cadr replacement)
-                          (caddr replacement)))
-                      replacements))))
-              (lambda (result committed-change)
-                (set! change committed-change)
-                result)))
-          (lambda ()
-            (when change
-              (change-close! change)))))))
-
   (define (target-line-range text target)
     (let* ([start (command-target-start target)]
            [end (command-target-end target)]
@@ -614,7 +588,7 @@
                            'edit.shift-region-right)
                        context))])
             (when (positive? width)
-              (apply-replacements!
+              (buffer-replace-ranges!
                 buffer
                 (region-indent-replacements
                   text
@@ -753,7 +727,7 @@
                   (unless (null? replacement)
                     (let* ([end (cadar replacement)]
                            [removed (- end start)])
-                      (apply-replacements! buffer replacement)
+                      (buffer-replace-ranges! buffer replacement)
                       (view-set-caret!
                         view
                         (if (<= caret end)

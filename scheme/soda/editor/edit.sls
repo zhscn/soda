@@ -1,7 +1,8 @@
 (library (soda editor edit)
   (export buffer-replace-range!
           buffer-replace-range-internal!
-          buffer-delete-range!)
+          buffer-delete-range!
+          buffer-replace-ranges!)
   (import (rnrs)
           (soda document)
           (soda editor buffer)
@@ -75,4 +76,38 @@
       buffer
       start
       end
-      (make-bytevector 0))))
+      (make-bytevector 0)))
+
+  (define (buffer-replace-ranges! buffer replacements)
+    (unless (list? replacements)
+      (assertion-violation
+        'buffer-replace-ranges!
+        "expected a list of replacements"
+        replacements))
+    (if
+      (null? replacements)
+      0
+      (let ([change #f])
+        (dynamic-wind
+          (lambda () #f)
+          (lambda ()
+            (call-with-values
+              (lambda ()
+                (call-with-buffer-transaction
+                  buffer
+                  (lambda (transaction)
+                    (for-each
+                      (lambda (replacement)
+                        (transaction-replace!
+                          transaction
+                          (car replacement)
+                          (cadr replacement)
+                          (caddr replacement)))
+                      replacements)
+                    (length replacements))))
+              (lambda (count committed-change)
+                (set! change committed-change)
+                count)))
+          (lambda ()
+            (when change
+              (change-close! change))))))))

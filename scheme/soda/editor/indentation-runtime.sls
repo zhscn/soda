@@ -5,6 +5,7 @@
   (import (rnrs)
           (soda document)
           (soda editor buffer)
+          (soda editor edit)
           (soda editor indentation-protocol)
           (soda editor language)
           (soda editor line-range))
@@ -79,33 +80,6 @@
                           indentation)
                         replacements)))))))))
 
-  (define (apply-replacements! buffer replacements)
-    (if (null? replacements)
-        0
-        (let ([change #f])
-          (dynamic-wind
-            (lambda () #f)
-            (lambda ()
-              (call-with-values
-                (lambda ()
-                  (call-with-buffer-transaction
-                    buffer
-                    (lambda (transaction)
-                      (for-each
-                        (lambda (replacement)
-                          (transaction-replace!
-                            transaction
-                            (car replacement)
-                            (cadr replacement)
-                            (caddr replacement)))
-                        replacements)
-                      (length replacements))))
-                (lambda (count committed-change)
-                  (set! change committed-change)
-                  count)))
-            (lambda ()
-              (when change (change-close! change)))))))
-
   (define (buffer-reindent-range! buffer start end)
     (unless (buffer? buffer)
       (assertion-violation
@@ -152,7 +126,7 @@
                       (lambda ()
                         (range-lines text start end))
                       (lambda (first last)
-                        (apply-replacements!
+                        (buffer-replace-ranges!
                           buffer
                           (collect-replacements
                             provider
