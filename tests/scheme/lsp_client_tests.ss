@@ -1466,6 +1466,16 @@
 (editor-update!
   editor
   (make-command-message 'workspace-edit.edit #f))
+(check
+  (and
+    (eq?
+      (buffer-major-mode-name (view-buffer (editor-active-view editor)))
+      'workspace-edit-preview-mode)
+    (editor-minor-mode-active?
+      editor
+      (view-buffer (editor-active-view editor))
+      'result-edit-mode))
+  "editing a WorkspaceEdit replaced its Result Buffer major mode")
 (let* ([preview-view (editor-active-view editor)]
        [point (view-caret preview-view)])
   (buffer-replace-range!

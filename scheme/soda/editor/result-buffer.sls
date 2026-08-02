@@ -345,7 +345,8 @@
   (define (refresh-buffer-items context)
     (let* ([buffer (view-buffer (command-context-view context))]
            [refresh (buffer-local-ref buffer 'result-refresh #f)])
-      (when (buffer-local-ref buffer 'result-edit-active? #f)
+      (when (or (buffer-local-ref buffer 'result-edit-active? #f)
+                (buffer-local-ref buffer 'result-edit-pending #f))
         (editor-user-error
           'buffer-item.refresh
           "Finish or discard Result Buffer edits before refreshing"))

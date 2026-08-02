@@ -14,6 +14,7 @@
           (soda editor language)
           (soda editor location)
           (soda editor location-results)
+          (soda editor result-edit)
           (soda editor state)
           (soda editor workspace-edit))
 
@@ -165,10 +166,9 @@
         (editor-user-error who "Current Buffer is not a workspace edit preview"))
       preview))
 
-  (define (accept-workspace-edit-preview context)
+  (define (apply-workspace-edit-preview
+            context buffer preview projections)
     (let* ([editor (command-context-editor context)]
-           [preview (active-preview context 'workspace-edit.accept)]
-           [buffer (view-buffer (command-context-view context))]
            [edits
              (map
                (lambda (projection)
@@ -179,7 +179,7 @@
                      (workspace-text-edit-start edit)
                      (workspace-text-edit-end edit)
                      (editable-projection-text buffer projection))))
-               (workspace-edit-preview-projections preview))])
+               projections)])
       (workspace-text-edits-apply! editor edits)
       (workspace-edit-preview-accepted?-set! preview #t)
       (editor-set-status-message!
@@ -195,22 +195,40 @@
             'command.invoke
             (make-command-message 'buffer-item.quit #f))))))
 
+  (define (accept-workspace-edit-preview context)
+    (let ([buffer (view-buffer (command-context-view context))])
+      (if (buffer-projection-edit-active? buffer)
+          (accept-projection-edit context)
+          (let ([preview (active-preview context 'workspace-edit.accept)])
+            (apply-workspace-edit-preview
+              context
+              buffer
+              preview
+              (workspace-edit-preview-projections preview))))))
+
   (define (edit-workspace-edit-preview context)
     (let* ([editor (command-context-editor context)]
            [buffer (view-buffer (command-context-view context))])
       (active-preview context 'workspace-edit.edit)
-      (buffer-set-major-mode! buffer 'workspace-edit-mode)
-      (buffer-set-local-setting! buffer 'read-only? #f)
       (let ([projections
               (workspace-edit-preview-projections
                 (active-preview context 'workspace-edit.edit))])
-        (when (pair? projections)
-          (view-set-caret!
-            (command-context-view context)
-            (car (editable-projection-range buffer (car projections))))))
-      (editor-set-status-message!
-        editor "Edit replacement text; C-c C-c applies, C-c C-k discards")
-      (editor-invalidate! editor 'chrome)
+        (editor-begin-projection-edit!
+          editor
+          buffer
+          projections
+          "Edit replacement text; C-c C-c applies, C-c C-k discards"
+          (lambda (accept-context edited-buffer edited-projections)
+            (apply-workspace-edit-preview
+              accept-context
+              edited-buffer
+              (active-preview accept-context 'workspace-edit.accept)
+              edited-projections))
+          (lambda (discard-context edited-buffer edited-projections)
+            (list
+              (make-command-effect
+                'command.invoke
+                (make-command-message 'buffer-item.quit #f))))))
       '()))
 
   (define (discard-workspace-edit-preview context)
@@ -240,15 +258,6 @@
         'interface
         'workspace-edit-preview-mode-map
         '((track-modified? . #f) (read-only? . #t))))
-    (register-major-mode!
-      (editor-language-catalog editor)
-      (make-major-mode
-        'workspace-edit-mode
-        'fundamental-mode
-        #f
-        'editing
-        'workspace-edit-mode-map
-        '((track-modified? . #f) (read-only? . #f))))
     (let ([keymap (make-keymap)])
       (keymap-bind!
         keymap
@@ -265,22 +274,6 @@
       (keymap-catalog-register!
         (editor-keymap-catalog editor)
         'workspace-edit-preview-mode-map
-        keymap))
-    (let ([keymap (make-keymap)]
-          [control-c
-            (make-key-stroke 'character (char->integer #\c) 4)])
-      (keymap-bind!
-        keymap
-        (list control-c control-c)
-        'workspace-edit.accept)
-      (keymap-bind!
-        keymap
-        (list control-c
-              (make-key-stroke 'character (char->integer #\k) 4))
-        'buffer-item.quit)
-      (keymap-catalog-register!
-        (editor-keymap-catalog editor)
-        'workspace-edit-mode-map
         keymap))
     (editor-register-command!
       editor

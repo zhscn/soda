@@ -1,5 +1,8 @@
 (library (soda editor result-edit)
-  (export install-result-edit!)
+  (export install-result-edit!
+          editor-begin-projection-edit!
+          buffer-projection-edit-active?
+          accept-projection-edit)
   (import (rnrs)
           (soda document)
           (soda editor buffer)
@@ -19,7 +22,13 @@
           (soda editor workspace-edit))
 
   (define-record-type result-edit-session
-    (fields original-read-only? (mutable projections)))
+    (fields original-read-only? projections accept discard))
+
+  (define (buffer-projection-edit-active? buffer)
+    (and
+      (buffer? buffer)
+      (result-edit-session?
+        (buffer-local-ref buffer 'result-edit-session #f))))
 
   (define (buffer-size buffer)
     (let ([snapshot (document-snapshot (buffer-document buffer))])
@@ -95,37 +104,88 @@
         (car range)
         (cadr range))))
 
-  (define (activate-result-edit! editor buffer session)
+  (define (editor-begin-projection-edit!
+            editor buffer projections status accept discard)
+    (unless
+      (and
+        (editor? editor)
+        (buffer? buffer)
+        (buffer-result-interface-ref buffer)
+        (list? projections)
+        (pair? projections)
+        (for-all editable-projection? projections)
+        (string? status)
+        (procedure? accept)
+        (procedure? discard))
+      (assertion-violation
+        'editor-begin-projection-edit!
+        "invalid projection edit session"
+        buffer projections status))
+    (when (buffer-local-ref buffer 'result-edit-session #f)
+      (editor-user-error
+        'editor-begin-projection-edit!
+        "Result Buffer is already being edited"))
+    (let ([session
+            (make-result-edit-session
+              (buffer-setting-ref buffer 'read-only? #f)
+              projections
+              accept
+              discard)])
+      (buffer-set-local! buffer 'result-edit-session session)
+      (buffer-set-local! buffer 'result-edit-active? #t)
+      (buffer-install-projection-edit-guard!
+        buffer projections 'result-edit
+        "Only projected source text is editable")
+      (editor-enable-minor-mode! editor buffer 'result-edit-mode)
+      (buffer-set-local-setting! buffer 'read-only? #f)
+      (let ([view
+              (find
+                (lambda (candidate) (eq? (view-buffer candidate) buffer))
+                (editor-views editor))])
+        (when view
+          (view-set-caret!
+            view
+            (car (editable-projection-range buffer (car projections))))))
+      (editor-set-status-message! editor status)
+      (editor-invalidate! editor 'chrome)
+      session))
+
+  (define (activate-result-edit! editor buffer pending-session)
     (when
       (and
         (exists (lambda (candidate) (eq? candidate buffer))
                 (editor-buffers editor))
-        (eq? (buffer-local-ref buffer 'result-edit-session #f) session))
+        (eq? (buffer-local-ref buffer 'result-edit-pending #f)
+             pending-session))
       (let ([projections
               (map
                 (lambda (range)
                   (make-target-projection! editor buffer range))
                 (target-ranges buffer))])
-        (result-edit-session-projections-set! session projections)
-        (buffer-set-local! buffer 'result-edit-active? #t)
-        (buffer-install-projection-edit-guard!
-          buffer projections 'result-edit
-          "Only result target text is editable")
-        (editor-enable-minor-mode! editor buffer 'result-edit-mode)
-        (buffer-set-local-setting! buffer 'read-only? #f)
-        (let ([view
-                (find
-                  (lambda (candidate) (eq? (view-buffer candidate) buffer))
-                  (editor-views editor))])
-          (when (and view (pair? projections))
-            (view-set-caret!
-              view
-              (car
-                (editable-projection-range
-                  buffer (car projections))))))
-        (editor-set-status-message!
-          editor "Edit targets; C-c C-c applies, C-c C-k discards")
-        (editor-invalidate! editor 'chrome))))
+        (buffer-clear-local! buffer 'result-edit-pending)
+        (editor-begin-projection-edit!
+          editor
+          buffer
+          projections
+          "Edit targets; C-c C-c applies, C-c C-k discards"
+          (lambda (context edited-buffer edited-projections)
+            (workspace-text-edits-apply!
+              (command-context-editor context)
+              (map
+                (lambda (projection)
+                  (projection-edit edited-buffer projection))
+                edited-projections))
+            (editor-set-status-message!
+              (command-context-editor context)
+              (string-append
+                "Updated " (number->string (length edited-projections))
+                " result targets"))
+            (list
+              (make-command-effect
+                'command.invoke
+                (make-command-message 'buffer-item.quit #f))))
+          (lambda (context edited-buffer edited-projections)
+            (refresh-buffer-items context))))))
 
   (define (begin-result-edit context)
     (let* ([editor (command-context-editor context)]
@@ -145,7 +205,8 @@
               (if (string? status)
                   status
                   "Result Buffer is not ready for editing")))))
-      (when (buffer-local-ref buffer 'result-edit-session #f)
+      (when (or (buffer-local-ref buffer 'result-edit-session #f)
+                (buffer-local-ref buffer 'result-edit-pending #f))
         (editor-user-error
           'result-edit.begin "Result Buffer is already being edited"))
       (when (null? ranges)
@@ -155,20 +216,19 @@
         (editor-user-error
           'result-edit.begin
           "Some result targets are unresolved; preview them and refresh first"))
-        (let ([session
-              (make-result-edit-session
-                (buffer-setting-ref buffer 'read-only? #f) '())])
-        (buffer-set-local! buffer 'result-edit-session session)
+      (let ([pending-session (list 'result-edit-pending)])
+        (buffer-set-local! buffer 'result-edit-pending pending-session)
         (editor-resolve-resources!
           editor
           (target-resources ranges)
           (lambda (resolved-editor buffers)
             (activate-result-edit!
-              resolved-editor buffer session))
+              resolved-editor buffer pending-session))
           (lambda (resolved-editor resource status)
             (when
-              (eq? (buffer-local-ref buffer 'result-edit-session #f) session)
-              (buffer-clear-local! buffer 'result-edit-session)
+              (eq? (buffer-local-ref buffer 'result-edit-pending #f)
+                   pending-session)
+              (buffer-clear-local! buffer 'result-edit-pending)
               (editor-set-status-message!
                 resolved-editor
                 (string-append
@@ -200,33 +260,24 @@
       'read-only?
       (result-edit-session-original-read-only? session)))
 
-  (define (accept-result-edit context)
+  (define (accept-projection-edit context)
     (let-values ([(buffer session)
                   (active-result-edit context 'result-edit.accept)])
       (let ([projections (result-edit-session-projections session)])
-        (workspace-text-edits-apply!
-          (command-context-editor context)
-          (map (lambda (projection)
-                 (projection-edit buffer projection))
-               projections))
+        (let ([effects
+                ((result-edit-session-accept session)
+                 context buffer projections)])
         (finish-result-edit!
           (command-context-editor context) buffer session)
-        (editor-set-status-message!
-          (command-context-editor context)
-          (string-append
-            "Updated " (number->string (length projections))
-            " result targets"))
-        (list
-          (make-command-effect
-            'command.invoke
-            (make-command-message 'buffer-item.quit #f))))))
+          effects))))
 
   (define (discard-result-edit context)
     (let-values ([(buffer session)
                   (active-result-edit context 'result-edit.discard)])
       (finish-result-edit!
         (command-context-editor context) buffer session)
-      (refresh-buffer-items context)))
+      ((result-edit-session-discard session)
+       context buffer (result-edit-session-projections session))))
 
   (define (install-result-edit! editor)
     (let ([keymap (make-keymap)]
@@ -260,7 +311,7 @@
       (list
         (list 'result-edit.begin begin-result-edit
               "Edit the source targets projected into this result Buffer.")
-        (list 'result-edit.accept accept-result-edit
+        (list 'result-edit.accept accept-projection-edit
               "Apply edits from the current result projection.")
         (list 'result-edit.discard discard-result-edit
               "Discard result projection edits and rerun its producer.")))
