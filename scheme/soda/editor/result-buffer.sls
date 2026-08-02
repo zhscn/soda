@@ -5,6 +5,7 @@
           buffer-set-result-interface!
           buffer-result-interface-ref
           editor-note-result-buffer!
+          editor-present-result-buffer!
           editor-append-result-items!
           install-result-buffer-commands!)
   (import (rnrs)
@@ -14,7 +15,9 @@
           (soda editor command)
           (soda editor command-runtime)
           (soda editor condition)
+          (soda editor display-placement)
           (soda editor edit)
+          (soda editor resource-context)
           (soda editor state)
           (soda editor window-runtime))
 
@@ -162,6 +165,54 @@
               `((result-item . ,(caddr range))
                 (result-index . ,index))))
           (loop (cdr pending) (+ index 1))))
+      (editor-invalidate! editor 'document)
+      buffer))
+
+  (define (editor-present-result-buffer!
+            editor resource mode text origin-view-id interface)
+    (unless (and (editor? editor)
+                 (string? resource) (positive? (string-length resource))
+                 (symbol? mode)
+                 (string? text)
+                 (integer? origin-view-id) (exact? origin-view-id)
+                 (positive? origin-view-id)
+                 (result-buffer-interface? interface))
+      (assertion-violation
+        'editor-present-result-buffer!
+        "invalid result Buffer presentation"
+        editor resource mode text origin-view-id interface))
+    (let* ([existing
+             (or
+               (editor-buffer-for-resource editor resource)
+               (find
+                 (lambda (candidate)
+                   (and (buffer-result-interface-ref candidate)
+                        (equal? (buffer-resource candidate) resource)))
+                 (editor-buffers editor)))]
+           [buffer
+             (cond
+               [(not existing)
+                (editor-create-buffer! editor resource mode "")]
+               [(buffer-result-interface-ref existing) existing]
+               [else
+                (editor-user-error
+                  'editor-present-result-buffer!
+                  "Result resource belongs to another Buffer"
+                  resource)])])
+      (buffer-set-major-mode! buffer mode)
+      (buffer-clear-text-properties! buffer)
+      (buffer-replace-range-internal!
+        buffer 0 (buffer-size buffer) (string->utf8 text))
+      (buffer-set-result-interface! buffer interface)
+      (editor-note-result-buffer! editor buffer)
+      (let ([view
+              (editor-display-buffer!
+                editor
+                (make-display-request
+                  (buffer-id buffer) 'tools origin-view-id #f
+                  (editor-view-resource-context editor origin-view-id)))])
+        (view-set-caret! view 0)
+        (ensure-view-visible! view))
       (editor-invalidate! editor 'document)
       buffer))
 

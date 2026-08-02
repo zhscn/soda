@@ -936,6 +936,7 @@
           buffer-set-result-interface!
           buffer-result-interface-ref
           editor-note-result-buffer!
+          editor-present-result-buffer!
           editor-append-result-items!
           location-item-open-position
           editor-visit-location-item!

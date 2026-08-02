@@ -12,7 +12,6 @@
           (soda editor command)
           (soda editor command-runtime)
           (soda editor condition)
-          (soda editor display-placement)
           (soda editor edit)
           (soda editor effect)
           (soda editor event)
@@ -22,7 +21,6 @@
           (soda editor location)
           (soda editor location-visit)
           (soda editor result-buffer)
-          (soda editor resource-context)
           (soda editor state)
           (soda editor window-runtime))
 
@@ -213,49 +211,22 @@
     (unless (and (string? resource) (positive? (string-length resource)))
       (assertion-violation
         'editor-open-result-buffer! "resource must be a non-empty string" resource))
-    (let* ([existing (editor-buffer-for-resource editor resource)]
-           [buffer
-             (cond
-               [(not existing)
-                (editor-create-buffer!
-                  editor resource mode "")]
-               [(location-results-buffer? existing) existing]
-               [else
-                (editor-user-error
-                  'editor-open-result-buffer!
-                  "Result resource belongs to another Buffer"
-                  resource)])]
-           [state
+    (let* ([state
              (make-location-results-state
                title locations origin-view-id jump-kind
                close-command close-argument #f)]
-           [heading (string-append title "\n")])
-      (buffer-set-major-mode! buffer mode)
-      (buffer-clear-text-properties! buffer)
-      (buffer-replace-range-internal!
-        buffer 0 (buffer-size buffer) (string->utf8 heading))
+           [heading (string-append title "\n")]
+           [buffer
+             (editor-present-result-buffer!
+               editor resource mode heading origin-view-id
+               (make-result-buffer-interface
+                 #t activate-location-result quit-location-results))])
       (buffer-add-text-properties!
         buffer
         0
         (bytevector-length (string->utf8 heading))
         '((face . application.heading) (result-heading . #t)))
       (buffer-set-local! buffer 'location-results-state state)
-      (buffer-set-result-interface!
-        buffer
-        (make-result-buffer-interface
-          #t
-          activate-location-result
-          quit-location-results))
-      (editor-note-result-buffer! editor buffer)
-      (let ([view
-              (editor-display-buffer!
-                editor
-                (make-display-request
-                  (buffer-id buffer) 'tools origin-view-id #f
-                  (editor-view-resource-context editor origin-view-id)))])
-        (view-set-caret! view 0)
-        (ensure-view-visible! view))
-      (editor-invalidate! editor 'document)
       buffer))
 
   (define editor-open-result-buffer!
@@ -403,47 +374,29 @@
              (make-location-results-state
                title locations origin-view-id jump-kind
                close-command close-argument #f)]
-           [existing
-             (find
-               (lambda (buffer)
-                 (location-results-state?
-                   (location-results-state-for-buffer buffer)))
-               (editor-buffers editor))]
-           [buffer
-             (or existing
-                 (editor-create-buffer!
-                   editor "*Location Results*" 'location-results-mode ""))])
+           [interface
+             (make-result-buffer-interface
+               #t activate-location-result quit-location-results)])
       (let-values ([(text properties last-resource)
                     (render-location-results editor title locations)])
-        (buffer-clear-text-properties! buffer)
-        (buffer-replace-range-internal!
-          buffer 0 (buffer-size buffer) (string->utf8 text))
-        (for-each
-          (lambda (entry)
-            (buffer-add-text-properties!
-              buffer (car entry) (cadr entry) (caddr entry)))
-          properties)
-        (buffer-set-local! buffer 'location-results-state state)
-        (buffer-set-result-interface!
-          buffer
-          (make-result-buffer-interface
-            #t
-            activate-location-result
-            quit-location-results))
-        (editor-note-result-buffer! editor buffer)
-        (location-results-state-last-resource-set! state last-resource)
-        (let ([view
-                (editor-display-buffer!
-                  editor
-                  (make-display-request
-                    (buffer-id buffer) 'tools origin-view-id #f
-                    (editor-view-resource-context editor origin-view-id)))])
+        (let ([buffer
+                (editor-present-result-buffer!
+                  editor "*Location Results*" 'location-results-mode
+                  text origin-view-id interface)])
+          (for-each
+            (lambda (entry)
+              (buffer-add-text-properties!
+                buffer (car entry) (cadr entry) (caddr entry)))
+            properties)
+          (buffer-set-local! buffer 'location-results-state state)
+          (location-results-state-last-resource-set! state last-resource)
+          (let ([view (editor-active-view editor)])
           (let ([positions (location-property-positions buffer)])
             (when (pair? positions)
               (view-set-caret! view (caar positions))
               (ensure-view-visible! view)))
           (editor-invalidate! editor 'document)
-          buffer))))
+            buffer)))))
 
   (define editor-show-location-results!
     (case-lambda

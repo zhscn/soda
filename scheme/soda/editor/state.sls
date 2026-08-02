@@ -1309,7 +1309,15 @@
         (assertion-violation
           'editor-add-buffer!
           "buffer id is already registered"
-          id))
+          id
+          (buffer-resource buffer)
+          (buffer-major-mode-name buffer)
+          (let ([existing
+                  (hashtable-ref (editor-buffer-table value) id #f)])
+            (and existing
+                 (list
+                   (buffer-resource existing)
+                   (buffer-major-mode-name existing))))))
       (register-buffer-resource! value buffer)
       (hashtable-set! (editor-buffer-table value) id buffer)
       (attach-editor-change-observer! value buffer)
