@@ -6,6 +6,7 @@
           editor-closed?
           editor-buffers
           editor-buffer-ref
+          editor-buffer-for-document
           editor-add-buffer!
           editor-create-buffer!
           editor-remove-buffer!
@@ -1193,6 +1194,18 @@
         "resource must be a string"
         resource))
     (hashtable-ref (editor-resource-table value) resource #f))
+
+  (define (editor-buffer-for-document value target-document-id)
+    (require-open-editor 'editor-buffer-for-document value)
+    (unless (exact-non-negative-integer? target-document-id)
+      (assertion-violation
+        'editor-buffer-for-document
+        "document id must be a non-negative exact integer"
+        target-document-id))
+    (find
+      (lambda (buffer)
+        (= (document-id (buffer-document buffer)) target-document-id))
+      (editor-buffers value)))
 
   (define (register-buffer-resource! value buffer)
     (let ([resource (buffer-resource buffer)])

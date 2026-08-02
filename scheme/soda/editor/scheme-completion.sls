@@ -11,33 +11,16 @@
           (soda editor scheme-workspace)
           (soda editor state))
 
-  (define (buffer-for-document editor target-document-id)
-    (find
-      (lambda (buffer)
-        (= (document-id (buffer-document buffer))
-           target-document-id))
-      (editor-buffers editor)))
-
   (define (buffer-source-bytes buffer)
     (let* ([document (buffer-document buffer)]
-           [start (or (document-editable-start document) 0)]
-           [snapshot (document-snapshot document)])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda ()
-                (values
-                  (snapshot-document-id snapshot)
-                  (snapshot-revision snapshot)
-                  (text-subbytevector
-                    text
-                    start
-                    (text-size text))))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
+           [start (or (document-editable-start document) 0)])
+      (call-with-document-snapshot-text
+        document
+        (lambda (snapshot text)
+          (values
+            (snapshot-document-id snapshot)
+            (snapshot-revision snapshot)
+            (text-subbytevector text start (text-size text)))))))
 
   (define (visible-definitions snapshot position)
     (let ([seen (make-hashtable string-hash string=?)]
@@ -129,7 +112,7 @@
             environments
             request)
     (let ([buffer
-            (buffer-for-document
+            (editor-buffer-for-document
               editor
               (completion-request-target-id request))])
       (if (not buffer)

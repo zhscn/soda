@@ -11,13 +11,6 @@
           (soda editor scheme-semantics)
           (soda editor state))
 
-  (define (buffer-for-document editor target-document-id)
-    (find
-      (lambda (buffer)
-        (= (document-id (buffer-document buffer))
-           target-document-id))
-      (editor-buffers editor)))
-
   (define (plain-identifier-character? character)
     (and
       (not (char-whitespace? character))
@@ -104,7 +97,7 @@
 
   (define (request-bindings editor request)
     (let ([buffer
-            (buffer-for-document
+            (editor-buffer-for-document
               editor
               (completion-request-target-id request))])
       (if (not buffer)

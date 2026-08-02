@@ -920,41 +920,30 @@
 
   (define (snapshot-save-request editor buffer path adopt-path?)
     (tui-ensure-buffer-text-projection! editor buffer)
-    (let* ([document (buffer-document buffer)]
-           [snapshot (document-snapshot document)])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda ()
-                (make-save-request
-                  (buffer-id buffer)
-                  (snapshot-document-id snapshot)
-                  (snapshot-revision snapshot)
-                  path
-                  (encode-file-data
-                    (text->bytevector text)
-                    (buffer-setting-ref
-                      buffer
-                      'file-line-ending
-                      'lf))
-                  adopt-path?
-                  (if
-                    (and
-                      adopt-path?
-                      (let ([current (buffer-file-path buffer)])
-                        (or
-                          (not current)
-                          (not (string=? current path)))))
-                    #f
-                    (buffer-setting-ref
-                      buffer
-                      'file-observed-state
-                      #f))))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
+    (call-with-document-snapshot-text
+      (buffer-document buffer)
+      (lambda (snapshot text)
+        (make-save-request
+          (buffer-id buffer)
+          (snapshot-document-id snapshot)
+          (snapshot-revision snapshot)
+          path
+          (encode-file-data
+            (text->bytevector text)
+            (buffer-setting-ref buffer 'file-line-ending 'lf))
+          adopt-path?
+          (if
+            (and
+              adopt-path?
+              (let ([current (buffer-file-path buffer)])
+                (or
+                  (not current)
+                  (not (string=? current path)))))
+            #f
+            (buffer-setting-ref
+              buffer
+              'file-observed-state
+              #f))))))
 
   (define (find-buffer-by-path editor path)
     (editor-buffer-for-resource

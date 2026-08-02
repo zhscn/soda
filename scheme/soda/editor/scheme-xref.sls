@@ -45,19 +45,12 @@
       (scheme-workspace-sync-editor! index editor)
       index))
 
-  (define (buffer-for-document editor target-document-id)
-    (find
-      (lambda (buffer)
-        (= (document-id (buffer-document buffer))
-           target-document-id))
-      (editor-buffers editor)))
-
   (define (definition-location editor definition)
     (let ([id (scheme-definition-id definition)])
       (case (scheme-definition-id-source id)
         [(document)
          (let ([buffer
-                 (buffer-for-document
+                 (editor-buffer-for-document
                    editor
                    (scheme-definition-id-document-id id))])
            (and

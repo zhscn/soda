@@ -5,6 +5,7 @@
           editor-closed?
           editor-buffers
           editor-buffer-ref
+          editor-buffer-for-document
           editor-add-buffer!
           editor-create-buffer!
           editor-remove-buffer!

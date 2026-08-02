@@ -36,23 +36,14 @@
         'buffer-scheme-semantic-snapshot
         "expected a buffer"
         buffer))
-    (let* ([document (buffer-document buffer)]
-           [snapshot (document-snapshot document)])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda ()
-                (make-scheme-semantic-snapshot
-                  (snapshot-document-id snapshot)
-                  (snapshot-revision snapshot)
-                  (text->bytevector text)
-                  (buffer-scheme-environment-libraries
-                    buffer)))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
+    (call-with-document-snapshot-text
+      (buffer-document buffer)
+      (lambda (snapshot text)
+        (make-scheme-semantic-snapshot
+          (snapshot-document-id snapshot)
+          (snapshot-revision snapshot)
+          (text->bytevector text)
+          (buffer-scheme-environment-libraries buffer)))))
 
   (define (scheme-definitions-at-point snapshot point)
     (unless (scheme-semantic-snapshot? snapshot)

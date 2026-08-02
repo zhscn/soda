@@ -24,6 +24,7 @@
           document-id
           document-revision
           document-snapshot
+          call-with-document-snapshot-text
           call-with-document-text
           document-byte-size
           document-begin-transaction
@@ -642,10 +643,12 @@
     (%make-text
       (check-pointer 'snapshot-text (%snapshot-text (snapshot-pointer value)))))
 
-  (define (call-with-document-text document procedure)
+  (define (call-with-document-snapshot-text document procedure)
     (unless (procedure? procedure)
       (assertion-violation
-        'call-with-document-text "expected a procedure" procedure))
+        'call-with-document-snapshot-text
+        "expected a procedure"
+        procedure))
     (let ([snapshot (document-snapshot document)])
       (dynamic-wind
         (lambda () #f)
@@ -653,9 +656,17 @@
           (let ([text (snapshot-text snapshot)])
             (dynamic-wind
               (lambda () #f)
-              (lambda () (procedure text))
+              (lambda () (procedure snapshot text))
               (lambda () (text-close! text)))))
         (lambda () (snapshot-close! snapshot)))))
+
+  (define (call-with-document-text document procedure)
+    (unless (procedure? procedure)
+      (assertion-violation
+        'call-with-document-text "expected a procedure" procedure))
+    (call-with-document-snapshot-text
+      document
+      (lambda (snapshot text) (procedure text))))
 
   (define (document-byte-size document)
     (call-with-document-text document text-size))
