@@ -131,23 +131,11 @@
             (min size (+ offset width))))))
 
   (define (buffer-regexp-source buffer)
-    (with-buffer-text
+    (call-with-buffer-text
       buffer
       (lambda (text)
         (make-regexp-source
           (utf8->string (text->bytevector text))))))
-
-  (define (with-buffer-text buffer procedure)
-    (let ([snapshot (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda () (procedure text))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
 
   (define (search-session-program! session query)
     (if (and
@@ -732,7 +720,7 @@
       (when (= start end)
         (query-replace-session-scan-position-set!
           session
-          (with-buffer-text
+          (call-with-buffer-text
             buffer
             (lambda (text)
               (next-character-offset text new-end)))))
@@ -764,7 +752,7 @@
         (query-replace-session-scan-position-set!
           session
           (if (= start end)
-              (with-buffer-text
+              (call-with-buffer-text
                 (query-replace-buffer editor session)
                 (lambda (text) (next-character-offset text end)))
               end)))

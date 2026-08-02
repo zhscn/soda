@@ -208,19 +208,6 @@
           "active buffer is not an interaction transcript"
           (buffer-id buffer)))))
 
-  (define (with-buffer-text buffer procedure)
-    (let ([snapshot
-            (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda () (procedure text))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
-
   (define (comint-history-previous-command context)
     (let* ([editor (command-context-editor context)]
            [session
@@ -312,7 +299,7 @@
       '()))
 
   (define (comint-line-beginning-position session buffer offset)
-    (with-buffer-text
+    (call-with-buffer-text
       buffer
       (lambda (text)
         (let* ([line
@@ -345,7 +332,7 @@
       (view-set-caret!
         view
         (if (command-context-prefix context)
-            (with-buffer-text
+            (call-with-buffer-text
               buffer
               (lambda (text)
                 (text-line-start
@@ -369,7 +356,7 @@
            [view (command-context-view context)]
            [buffer (view-buffer view)]
            [move?
-             (with-buffer-text
+             (call-with-buffer-text
                buffer
                (lambda (text)
                  (let ([line

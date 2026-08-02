@@ -37,19 +37,6 @@
       (result-edit-session?
         (buffer-local-ref buffer 'result-edit-session #f))))
 
-  (define (buffer-substring buffer start end)
-    (let ([snapshot (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda ()
-                (utf8->string (text-subbytevector text start end)))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
-
   (define (target-ranges buffer)
     (buffer-text-property-ranges buffer 'result-target))
 
@@ -109,7 +96,7 @@
            [source-start (location-item-start item)]
            [source-end (location-item-end item)]
            [shown
-             (buffer-substring result-buffer (car range) (cadr range))])
+             (buffer-string-range result-buffer (car range) (cadr range))])
       (unless (and source-buffer
                    (<= 0 source-start source-end
                        (buffer-byte-size source-buffer)))
@@ -118,7 +105,7 @@
       (unless
         (string=?
           shown
-          (buffer-substring source-buffer source-start source-end))
+          (buffer-string-range source-buffer source-start source-end))
         (editor-user-error
           'result-edit.begin
           "Source changed since the result was produced"

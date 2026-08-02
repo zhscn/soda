@@ -27,6 +27,8 @@
           buffer-adopt-setting-store!
           buffer-revision
           buffer-byte-size
+          call-with-buffer-text
+          buffer-string-range
           buffer-file-path
           buffer-set-file-path!
           buffer-saved-revision
@@ -791,15 +793,31 @@
         (lambda () (text-size text))
         (lambda () (text-close! text)))))
 
-  (define (buffer-byte-size buffer)
-    (unless (buffer? buffer)
+  (define (call-with-buffer-text buffer procedure)
+    (unless (and (buffer? buffer) (procedure? procedure))
       (assertion-violation
-        'buffer-byte-size "expected a Buffer" buffer))
+        'call-with-buffer-text
+        "expected a Buffer and procedure"
+        buffer procedure))
     (let ([snapshot (document-snapshot (buffer-document buffer))])
       (dynamic-wind
         (lambda () #f)
-        (lambda () (snapshot-size snapshot))
+        (lambda ()
+          (let ([text (snapshot-text snapshot)])
+            (dynamic-wind
+              (lambda () #f)
+              (lambda () (procedure text))
+              (lambda () (text-close! text)))))
         (lambda () (snapshot-close! snapshot)))))
+
+  (define (buffer-byte-size buffer)
+    (call-with-buffer-text buffer text-size))
+
+  (define (buffer-string-range buffer start end)
+    (call-with-buffer-text
+      buffer
+      (lambda (text)
+        (utf8->string (text-subbytevector text start end)))))
 
   (define (build-injection-index profile session snapshot)
     (let ([provider (language-profile-syntax profile)])

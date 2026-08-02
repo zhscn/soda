@@ -57,20 +57,6 @@
 (define (buffer-string buffer)
   (utf8->string (buffer-bytes buffer)))
 
-(define (buffer-string-range buffer start end)
-  (let ([snapshot (document-snapshot (buffer-document buffer))])
-    (dynamic-wind
-      (lambda () #f)
-      (lambda ()
-        (let ([text (snapshot-text snapshot)])
-          (dynamic-wind
-            (lambda () #f)
-            (lambda ()
-              (utf8->string
-                (text-subbytevector text start end)))
-            (lambda () (text-close! text)))))
-      (lambda () (snapshot-close! snapshot)))))
-
 (define (string-contains? value needle)
   (let ([limit (- (string-length value) (string-length needle))])
     (let loop ([index 0])

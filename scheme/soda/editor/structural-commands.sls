@@ -226,19 +226,6 @@
         (view-clear-mark! view))
       '()))
 
-  (define (with-buffer-text buffer procedure)
-    (let ([snapshot
-            (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda () (procedure text))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
-
   (define (transpose-pair index point)
     (let* ([at (structure-index-thing-at index 'sexp point)]
            [current
@@ -295,7 +282,7 @@
                 [middle-left (structural-thing-end left)]
                 [middle-right (structural-thing-start right)]
                 [end (structural-thing-end right)])
-            (with-buffer-text
+            (call-with-buffer-text
               buffer
               (lambda (text)
                 (buffer-replace-range!

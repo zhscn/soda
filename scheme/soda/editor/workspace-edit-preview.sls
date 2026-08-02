@@ -26,18 +26,6 @@
             after-apply
             (mutable applied-count)))
 
-  (define (buffer-substring buffer start end)
-    (let ([snapshot (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda () (utf8->string (text-subbytevector text start end)))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
-
   (define (edit-location-item editor edit)
     (let ([buffer
             (editor-buffer-for-resource
@@ -54,7 +42,7 @@
         (workspace-text-edit-start edit)
         (workspace-text-edit-end edit)
         (string-single-line
-          (buffer-substring
+          (buffer-string-range
             buffer
             (workspace-text-edit-start edit)
             (workspace-text-edit-end edit)))
