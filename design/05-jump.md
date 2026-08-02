@@ -204,9 +204,13 @@ refresh action 根据 producer state 显示为 Refresh、Restart、Retry 或 Run
 身份保持为 `buffer-item.refresh`，领域 mode 不需要复制状态分支。每次进入 `running`
 状态建立新的 producer generation，并重置该 Buffer 的停止握手，使停止后的重试仍可
 再次取消。
-LSP xref producer 按 source View 跟踪 pending request。刷新先发送
-`$/cancelRequest` 终止同一来源的旧请求，再建立新 generation；迟到响应不改变当前
-Result Buffer。停止命令只结束当前请求，保留已经呈现的 reference 条目。
+LSP xref producer 在首次查询时冻结 Buffer、revision、point 和 LanguageAttachment，形成
+类似 Emacs xref fetcher 的 query descriptor。Result Buffer 的刷新重放该 descriptor；
+source View 后续的 preview、Buffer 切换和 point 移动只影响展示位置，不改变查询语义。
+源 revision 已变化或 attachment 不再可用时刷新明确失败，避免在相邻符号上静默执行。
+pending request 以 Result Buffer identity 和 generation 跟踪。刷新先发送
+`$/cancelRequest` 终止同一结果会话的旧请求；迟到响应不改变当前 Result Buffer。停止
+命令只结束当前请求，保留已经呈现的 reference 条目。
 
 Result Buffer 在不可见时仍保存当前 item。全局 next/previous locus 使用当前 Workbench
 中最近实际导航的 Result Buffer，并跳过已经关闭的 Buffer；它不依赖 Result Buffer

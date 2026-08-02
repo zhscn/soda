@@ -8,6 +8,7 @@
         (soda editor edit)
         (soda editor file)
         (soda editor language-session)
+        (soda editor location-results)
         (soda editor lsp-client)
         (soda editor lsp-json-rpc)
         (soda editor prompt)
@@ -2133,9 +2134,15 @@
          (= (length (location-list-items locations)) 2)
          (let* ([external (cadr (location-list-items locations))]
                 [metadata (location-item-metadata external)]
+                [language-context
+                  (location-item-language-context external)]
                 [start (assq 'file-open-position metadata)]
                 [end (assq 'file-open-end-position metadata)])
            (and
+             (view-language-context? language-context)
+             (=
+               (view-language-context-attachment-id language-context)
+               (language-attachment-id attachment))
              start
              end
              (file-utf16-position? (cdr start))
@@ -2182,6 +2189,26 @@
     "external reference preview did not preserve its target range"
     effects)
   (editor-execute-command! editor 'buffer-item.previous))
+(define lsp-reference-origin-view
+  (editor-view-ref
+    editor
+    (editor-result-origin-view-id
+      editor (editor-active-view editor))))
+(editor-set-view-buffer!
+  editor
+  (view-id lsp-reference-origin-view)
+  (buffer-id sibling))
+(editor-set-view-language-attachment!
+  editor
+  (view-id lsp-reference-origin-view)
+  (car sibling-attachments))
+(view-set-caret! lsp-reference-origin-view 0)
+(editor-select-view-window! editor (view-id lsp-reference-origin-view))
+(editor-delete-window! editor)
+(check
+  (eq? (view-buffer (editor-active-view editor))
+       lsp-reference-results-buffer)
+  "closing the xref source View did not retain its Result Buffer")
 (define lsp-reference-refresh-effects
   (editor-execute-command! editor 'buffer-item.refresh))
 (define lsp-reference-refresh-message
@@ -2201,8 +2228,32 @@
          'running)
        (string=?
          (json-object-ref lsp-reference-refresh-message "method" #f)
-         "textDocument/references"))
-  "refreshing the xref Buffer did not rerun its source-view request"
+         "textDocument/references")
+       (string=?
+         (json-object-ref
+           (json-object-ref
+             (json-object-ref lsp-reference-refresh-message "params" #f)
+             "textDocument"
+             #f)
+           "uri"
+           #f)
+         "file:///workspace/src/main.cpp")
+       (let ([refresh-position
+               (json-object-ref
+                 (json-object-ref lsp-reference-refresh-message "params" #f)
+                 "position"
+                 #f)]
+             [original-position
+               (json-object-ref
+                 (json-object-ref lsp-reference-message "params" #f)
+                 "position"
+                 #f)])
+         (and
+           (= (json-object-ref refresh-position "line" #f)
+              (json-object-ref original-position "line" #f))
+           (= (json-object-ref refresh-position "character" #f)
+              (json-object-ref original-position "character" #f)))))
+  "refreshing the xref Buffer did not replay its saved query"
   lsp-reference-refresh-effects)
 (lsp-client-handle-json-message!
   editor session
