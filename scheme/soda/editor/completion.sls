@@ -166,6 +166,35 @@
         text))
     (%make-completion-documentation format text))
 
+  ;; A label is a single display row.  Providers decorate it freely — clangd,
+  ;; for one, pads every label with a leading space — so the session owns the
+  ;; presentation contract: no control characters, no surrounding whitespace,
+  ;; so that a menu column can line labels up without knowing their origin.
+  (define (normalize-completion-label value)
+    (define (blank? character)
+      (or (char-whitespace? character)
+          (eq? (char-general-category character) 'Cc)))
+    (let* ([size (string-length value)]
+           [start
+             (let loop ([index 0])
+               (if (and (< index size) (blank? (string-ref value index)))
+                   (loop (+ index 1))
+                   index))]
+           [end
+             (let loop ([index size])
+               (if (and (> index start) (blank? (string-ref value (- index 1))))
+                   (loop (- index 1))
+                   index))])
+      (let loop ([index start] [characters '()])
+        (if (= index end)
+            (list->string (reverse characters))
+            (let ([character (string-ref value index)])
+              (loop
+                (+ index 1)
+                (cons
+                  (if (blank? character) #\space character)
+                  characters)))))))
+
   (define (normalize-completion-documentation value)
     (cond
       [(not value) #f]
@@ -617,7 +646,7 @@
          id
          provider
          filter-text
-         label
+         (normalize-completion-label label)
          insert-text
          kind
          detail
@@ -1132,6 +1161,11 @@
   (define (rebuild-session-items! session selected-item)
     (let* ([query (or (completion-session-query session) "")]
            [target (completion-session-target session)]
+           ;; Only the replacement start takes part in the identity.  Every
+           ;; candidate of a session rewrites the same logical region, but a
+           ;; provider answers with the range of the revision it saw, so the
+           ;; end drifts while the user keeps typing and would split one
+           ;; candidate into two rows.
            [semantic-key
              (lambda (item)
                (let ([edit (completion-item-edit item)])
@@ -1141,21 +1175,20 @@
                          (completion-edit-insert edit))
                        (completion-item-insert-text item))
                    (if edit
-                       (cons
-                         (completion-text-edit-start
-                           (completion-edit-insert edit))
-                         (completion-text-edit-end
-                           (completion-edit-insert edit)))
-                       (cons
-                         (if
-                           (document-completion-target? target)
-                           (document-completion-target-start target)
-                           (prompt-completion-target-start target))
-                         (if
-                           (document-completion-target? target)
-                           (document-completion-target-end target)
-                           (prompt-completion-target-end target))))
+                       (completion-text-edit-start
+                         (completion-edit-insert edit))
+                       (if
+                         (document-completion-target? target)
+                         (document-completion-target-start target)
+                         (prompt-completion-target-start target)))
                    (completion-item-kind item))))]
+           ;; Between duplicates the candidate carrying a provider edit wins:
+           ;; it is the authoritative replacement, and it is the one that
+           ;; arrives with a signature, a type and documentation.
+           [preferred?
+             (lambda (candidate other)
+               (and (completion-item-edit candidate)
+                    (not (completion-item-edit other))))]
            [deduplicated
              (let loop
                ([remaining
@@ -1165,22 +1198,25 @@
                     (map
                       completion-provider-result-items
                       (completion-session-provider-results session)))]
-                [keys '()]
-                [result '()])
+                [entries '()])
                (if
                  (null? remaining)
-                 (reverse result)
-                 (let ([key (semantic-key (car remaining))])
-                   (if
-                     (exists
-                       (lambda (candidate)
-                         (equal? candidate key))
-                       keys)
-                     (loop (cdr remaining) keys result)
-                     (loop
-                       (cdr remaining)
-                       (cons key keys)
-                       (cons (car remaining) result))))))]
+                 (map cdr (reverse entries))
+                 (let* ([item (car remaining)]
+                        [key (semantic-key item)]
+                        [entry (assoc key entries)])
+                   (loop
+                     (cdr remaining)
+                     (cond
+                       [(not entry) (cons (cons key item) entries)]
+                       [(preferred? item (cdr entry))
+                        (map
+                          (lambda (candidate)
+                            (if (eq? candidate entry)
+                                (cons key item)
+                                candidate))
+                          entries)]
+                       [else entries])))))]
            [matched
              (match-items
                (completion-session-source session)

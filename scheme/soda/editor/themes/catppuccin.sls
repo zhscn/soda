@@ -71,6 +71,7 @@
         (cons 'popup.selected (pface 'text 'surface1 '(bold)))
         (cons 'popup.scrollbar (pface 'inherit 'overlay0 '()))
         (cons 'popup.annotation (pface 'overlay1 'inherit '()))
+        (cons 'popup.indicator (pface 'overlay0 'inherit '()))
         (cons 'popup.documentation
               (pface 'overlay1 'inherit '(italic)))
         (cons 'status.info (pface 'sapphire 'inherit '()))

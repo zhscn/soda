@@ -177,7 +177,9 @@ buffer local 设置仍可覆盖。
 
 `editor.background` 覆盖正文以外的文本区填充；`popup` 与 `popup.selected`
 覆盖 completion 等 caret-relative 临时层，实现另提供 `popup.scrollbar`、
-`minibuffer.input` 与 `completion-match` 扩展 role。`cursor` role 的背景色
+`popup.annotation`、`popup.documentation`、`popup.indicator`、
+`minibuffer.input` 与 `completion-match` 扩展 role。补全菜单的每一列使用
+自己的 role，并叠加所在行的基础 face，选中行的高亮因此覆盖整行。`cursor` role 的背景色
 定义终端光标颜色：TUI 会话在首帧与主题切换时发射 OSC 12，退出时以 OSC 112
 复位；theme 未给出具体颜色时不发射。
 

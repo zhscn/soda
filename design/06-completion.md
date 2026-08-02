@@ -123,6 +123,11 @@ CompletionEdit {
 及可视范围懒 resolve。`priority` 是 provider 提供的 exact integer，只表达同一
 文本匹配质量下的语义相关度；普通候选使用零。
 
+`label` 是一行显示文本，由 session 而不是 presenter 归一化：去掉首尾空白，把
+控制字符和换行折叠成空格。provider 各自装饰 label（clangd 给每个 label 加一个
+前导空格，静态索引附加签名），归一化让菜单的 label 列不需要知道候选来源就能
+对齐。`filter_text` 与 `insert_text` 不参与归一化。
+
 范围绑定请求 snapshot。provider 未指定 edit 时使用 session 的通用 insert/replace
 范围；LSP 的 insert/replace 双范围原样保留到 apply policy。additional edit 与主
 edit 不得重叠。
@@ -190,8 +195,12 @@ item semantic priority、候选长度、`sort_text` 和 label。文本匹配质�
 policy，不用短路方式隐藏较晚来源。异步合并和 refilter 通过
 `(provider, item-id)` 恢复选择，不把旧的列表索引解释成候选身份。
 
-语义重复可按最终 `new_text`、range 和 kind 去重；原 item identity 仍保留在
-provider side table 中供 resolve。
+语义重复按最终 `new_text`、替换起点和 kind 去重；原 item identity 仍保留在
+provider side table 中供 resolve。识别只用起点，不用终点：一个 session 的候选
+改写同一段逻辑区域，但 provider 按它看到的 revision 回答，用户继续输入时终点
+会漂移，把同一个候选拆成两行。重复项之间保留携带 CompletionEdit 的那个，它是
+provider 给出的权威替换，也是带签名、类型和文档的那个；buffer word 之类的
+派生候选让位。
 
 ## 触发
 
@@ -248,10 +257,26 @@ overlay。
 的文本输入继续走 buffer 插入，然后推进补全 query。UI 关闭只释放会话视图，不取消
 可复用的 provider cache。
 
-presenter 对可见候选统一计算 annotation 列，使用 match ranges 高亮 label，并显示
-候选总数和当前选择位置。空结果区分 provider 尚未完成与已完成但没有匹配。
-Document completion 默认预选首项；minibuffer completion 的选择策略由 choice
-source metadata 声明。
+菜单行是一张固定表格：
+
+```text
+pad | label | gap | annotation | gap | documentation | pad | count | scrollbar
+```
+
+列宽由整个候选列表而不是当前可视窗口测量，因此滚动不会移动任何一列；每个字段
+只在自己的盒子里绘制并按需截断，字段之间不可能互相覆盖。没有 documentation 列
+时 annotation 盒子贴住内容区右边界，annotation 成为右对齐的第二列。候选计数占
+用自己的保留盒子，宽度按计数能达到的最大形态预留，选择移动不会改变弹窗尺寸。
+
+Document 弹窗按候选内容定尺寸，在最小与最大宽度之间取需要的宽度；scrollbar 和
+计数是宽度请求的一部分，不在事后从内容里扣除。宽度被上限夹取时先截断 label，
+annotation 保持完整。minibuffer 的补全列表宽度由 minibuffer 决定，使用同一套
+列模型，多出的空间给 documentation 摘要列。
+
+match ranges 索引 `filter_text`，而菜单绘制的是 label；presenter 在 label 中
+定位 `filter_text` 得到偏移后再高亮，因此被 provider 装饰过的 label 同样显示
+命中片段。空结果区分 provider 尚未完成与已完成但没有匹配。Document completion
+默认预选首项；minibuffer completion 的选择策略由 choice source metadata 声明。
 
 合并时选中项按 `(provider, item-id)` 保持身份。某个 provider 的迟到响应只替换
 该 provider 的结果；其他 provider 的候选、完成状态和选中项保持不变。

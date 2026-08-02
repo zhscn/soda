@@ -1646,15 +1646,6 @@
                   (lambda () (text-close! text)))))
             (lambda () (snapshot-close! snapshot)))))))
 
-  (define (completion-row-text item)
-    (let ([annotation (completion-item-annotation item)])
-      (if annotation
-          (string-append
-            (completion-item-label item)
-            "  "
-            annotation)
-          (completion-item-label item))))
-
   (define (completion-documentation-summary item)
     (let ([documentation (completion-item-documentation item)])
       (and (completion-documentation? documentation)
@@ -1782,39 +1773,223 @@
   (define (completion-index-matched? match index)
     (and
       match
+      (not (negative? index))
       (exists
         (lambda (range)
           (and (<= (car range) index) (< index (cdr range))))
         (completion-match-ranges match))))
 
-  (define (draw-completion-item!
+  (define (string-search value pattern)
+    (let ([limit (- (string-length value) (string-length pattern))])
+      (let loop ([start 0])
+        (cond
+          [(> start limit) #f]
+          [(let compare ([index 0])
+             (or
+               (= index (string-length pattern))
+               (and
+                 (char=?
+                   (string-ref value (+ start index))
+                   (string-ref pattern index))
+                 (compare (+ index 1)))))
+           start]
+          [else (loop (+ start 1))]))))
+
+  ;; Match ranges index the filter text, while the menu paints the label.
+  ;; Providers routinely decorate the label, so the highlight is placed by
+  ;; locating the filter text inside the label instead of demanding equality.
+  (define (completion-label-match-offset item)
+    (let ([label (completion-item-label item)]
+          [filter-text (completion-item-filter-text item)])
+      (cond
+        [(string=? label filter-text) 0]
+        [(zero? (string-length filter-text)) #f]
+        [else (string-search label filter-text)])))
+
+  ;; Menu geometry.  A row is a fixed table:
+  ;;
+  ;;   pad | label | gap | annotation | gap | documentation | pad | count | bar
+  ;;
+  ;; Column boxes are derived once per frame from the whole item list, so they
+  ;; keep their place while the viewport scrolls, and every field is clipped to
+  ;; its own box, so fields can never overwrite each other.  Without a
+  ;; documentation column the annotation box is flush with the right edge of
+  ;; the content area, which lines annotations up as a second column.
+  (define completion-menu-gap 2)
+  (define completion-menu-padding 1)
+  (define completion-menu-minimum-label-columns 12)
+  (define completion-menu-minimum-annotation-columns 3)
+  (define completion-menu-minimum-documentation-columns 8)
+  (define completion-popup-minimum-columns 24)
+  (define completion-popup-maximum-columns 64)
+
+  (define-record-type
+    (completion-menu-columns
+      %make-completion-menu-columns
+      completion-menu-columns?)
+    (fields label-column
+            label-columns
+            annotation-column
+            annotation-columns
+            documentation-column
+            documentation-columns
+            indicator-column
+            indicator-columns))
+
+  (define (completion-label-natural-columns items)
+    (fold-left
+      (lambda (width item)
+        (max width (string-cell-width (completion-item-label item) 8)))
+      0
+      items))
+
+  (define (completion-annotation-natural-columns items)
+    (fold-left
+      (lambda (width item)
+        (let ([annotation (completion-item-annotation item)])
+          (if annotation
+              (max width (string-cell-width annotation 8))
+              width)))
+      0
+      items))
+
+  ;; The counter reserves the widest form it can reach, so moving the selection
+  ;; never resizes the popup underneath it.
+  (define (completion-indicator-natural-columns total)
+    (+ (* 2 (string-length (number->string (max total 1)))) 1))
+
+  (define (completion-indicator-text selected total)
+    (if selected
+        (string-append
+          (number->string (+ selected 1))
+          "/"
+          (number->string total))
+        (number->string total)))
+
+  (define (layout-completion-menu-columns
+            columns
+            padding
+            scrollbar?
+            indicator-natural
+            label-natural
+            annotation-natural
+            documentation?)
+    ;; Space goes to the label first, then to the annotation, and the counter
+    ;; only takes what is left over: a clamped popup spends its columns on the
+    ;; candidate, not on its own decoration.
+    (let* ([available
+             (max 0 (- columns (* 2 padding) (if scrollbar? 1 0)))]
+           [annotation-columns
+             (if (positive? annotation-natural)
+                 (max
+                   0
+                   (min
+                     annotation-natural
+                     (- available
+                        (min
+                          label-natural
+                          completion-menu-minimum-label-columns)
+                        completion-menu-gap)))
+                 0)]
+           [annotation-columns
+             (if (< annotation-columns
+                    completion-menu-minimum-annotation-columns)
+                 0
+                 annotation-columns)]
+           [annotation-reserved
+             (if (positive? annotation-columns)
+                 (+ annotation-columns completion-menu-gap)
+                 0)]
+           [label-columns
+             (max 0 (min label-natural (- available annotation-reserved)))]
+           [indicator-columns
+             (if (and
+                   (positive? indicator-natural)
+                   (>=
+                     (- available label-columns annotation-reserved)
+                     (+ completion-menu-gap indicator-natural)))
+                 indicator-natural
+                 0)]
+           [indicator-reserved
+             (if (positive? indicator-columns)
+                 (+ indicator-columns completion-menu-gap)
+                 0)]
+           [content-end (+ padding available)]
+           [annotation-column
+             (if documentation?
+                 (+ padding label-columns completion-menu-gap)
+                 (- content-end indicator-reserved annotation-columns))]
+           [documentation-column
+             (+ padding label-columns completion-menu-gap annotation-reserved)]
+           [documentation-columns
+             (if documentation?
+                 (max 0 (- content-end indicator-reserved documentation-column))
+                 0)]
+           [documentation-columns
+             (if (< documentation-columns
+                    completion-menu-minimum-documentation-columns)
+                 0
+                 documentation-columns)])
+      (%make-completion-menu-columns
+        padding
+        label-columns
+        annotation-column
+        annotation-columns
+        documentation-column
+        documentation-columns
+        (- content-end indicator-columns)
+        indicator-columns)))
+
+  (define (draw-completion-field!
+            frame
+            row
+            column
+            columns
+            value
+            align
+            base-faces
+            face
+            theme
+            sources)
+    (when (and value (positive? columns))
+      (let* ([visible (truncate-cells value columns)]
+             [width (string-cell-width visible 8)]
+             [faces (append base-faces (list face))]
+             [offset
+               (if (eq? align 'right)
+                   (max 0 (- columns width))
+                   0)])
+        (draw-string!
+          frame
+          row
+          (+ column offset)
+          (- columns offset)
+          visible
+          faces
+          (resolve-faces theme faces)
+          sources))))
+
+  (define (draw-completion-label!
             frame
             row
             column
             columns
             item
             match
-            selected?
             base-faces
             base-style
             theme
-            sources
-            annotation-column
-            documentation-column)
-    (let* ([label (completion-item-label item)]
-           [visible-label (truncate-cells label columns)]
-           [highlight?
-             (string=?
-               label
-               (completion-item-filter-text item))])
+            sources)
+    (let* ([visible (truncate-cells (completion-item-label item) columns)]
+           [offset (completion-label-match-offset item)])
       (let loop ([index 0] [cell-column 0])
-        (unless (= index (string-length visible-label))
-          (let* ([character (string-ref visible-label index)]
+        (unless (= index (string-length visible))
+          (let* ([character (string-ref visible index)]
                  [width (character-cell-width character)]
                  [matched?
                    (and
-                     highlight?
-                     (completion-index-matched? match index))]
+                     offset
+                     (completion-index-matched? match (- index offset)))]
                  [faces
                    (if matched?
                        (append base-faces '(completion-match))
@@ -1833,36 +2008,52 @@
                 faces
                 style
                 sources))
-            (loop (+ index 1) (+ cell-column width)))))
-      (let ([annotation (completion-item-annotation item)])
-        (when
-          (and annotation (< annotation-column columns))
-          (let ([annotation-faces
-                  (append base-faces '(popup.annotation))])
-            (draw-string!
-              frame
-              row
-              (+ column annotation-column)
-              (- columns annotation-column)
-              annotation
-              annotation-faces
-              (resolve-faces theme annotation-faces)
-              sources))))
-      (when documentation-column
-        (let ([documentation (completion-documentation-summary item)]
-              [width (- columns documentation-column)])
-          (when (and documentation (>= width 2))
-            (let ([documentation-faces
-                    (append base-faces '(popup.documentation))])
-              (draw-string!
-                frame
-                row
-                (+ column documentation-column)
-                width
-                (truncate-cells documentation width)
-                documentation-faces
-                (resolve-faces theme documentation-faces)
-                sources)))))))
+            (loop (+ index 1) (+ cell-column width)))))))
+
+  (define (draw-completion-item!
+            frame
+            row
+            column
+            layout
+            item
+            match
+            base-faces
+            base-style
+            theme
+            sources)
+    (draw-completion-label!
+      frame
+      row
+      (+ column (completion-menu-columns-label-column layout))
+      (completion-menu-columns-label-columns layout)
+      item
+      match
+      base-faces
+      base-style
+      theme
+      sources)
+    (draw-completion-field!
+      frame
+      row
+      (+ column (completion-menu-columns-annotation-column layout))
+      (completion-menu-columns-annotation-columns layout)
+      (completion-item-annotation item)
+      'right
+      base-faces
+      'popup.annotation
+      theme
+      sources)
+    (draw-completion-field!
+      frame
+      row
+      (+ column (completion-menu-columns-documentation-column layout))
+      (completion-menu-columns-documentation-columns layout)
+      (completion-documentation-summary item)
+      'left
+      base-faces
+      'popup.documentation
+      theme
+      sources))
 
   (define (completion-viewport-start completion rows)
     (let* ([count (length (completion-session-items completion))]
@@ -1932,67 +2123,23 @@
                            (loop
                              (cdr remaining)
                              (- count 1)
-                             (cons (car remaining) result))))]
-                   [annotation-column
-                     (+
-                       2
-                       (fold-left
-                         (lambda (width item)
-                           (max
-                             width
-                             (string-cell-width
-                               (completion-item-label item)
-                               8)))
-                         0
-                         visible))]
-                   [annotation-width
-                     (fold-left
-                       (lambda (width item)
-                         (let ([annotation
-                                 (completion-item-annotation item)])
-                           (if annotation
-                               (max
-                                 width
-                                 (string-cell-width annotation 8))
-                               width)))
-                       0
-                       visible)]
-                   [documentation-column
-                     (and
-                       (not document-target?)
-                       (+
-                         annotation-column
-                         (if (positive? annotation-width)
-                             (+ annotation-width 2)
-                             0)))]
-                   [indicator
-                     (and
-                       document-target?
-                       (if selected
-                           (string-append
-                             (number->string (+ selected 1))
-                             "/"
-                             (number->string (length items)))
-                           (number->string (length items))))]
-                   [indicator-column
-                     (and
-                       indicator
-                       (max
-                         0
-                         (-
-                           (rect-columns rectangle)
-                           (if (> (length items) (rect-rows rectangle))
-                               1
-                               0)
-                           (string-cell-width indicator 8))))])
+                             (cons (car remaining) result))))])
               (let* ([total (length items)]
                      [visible-rows (length visible)]
                      [scrollbar? (> total visible-rows)]
-                     [item-columns
-                       (max
-                         0
-                         (- (rect-columns rectangle)
-                            (if scrollbar? 1 0)))]
+                     [padding
+                       (if document-target? completion-menu-padding 0)]
+                     [layout
+                       (layout-completion-menu-columns
+                         (rect-columns rectangle)
+                         padding
+                         scrollbar?
+                         (if document-target?
+                             (completion-indicator-natural-columns total)
+                             0)
+                         (completion-label-natural-columns items)
+                         (completion-annotation-natural-columns items)
+                         (not document-target?))]
                      [thumb-rows
                        (and scrollbar?
                             (max
@@ -2056,16 +2203,26 @@
                       frame
                       (+ (rect-row rectangle) row)
                       (rect-column rectangle)
-                      item-columns
+                      layout
                       item
                       (completion-session-item-match completion item)
-                      selected?
                       faces
                       style
                       theme
-                      sources
-                      annotation-column
-                      documentation-column)
+                      sources)
+                    (when (zero? row)
+                      (draw-completion-field!
+                        frame
+                        (+ (rect-row rectangle) row)
+                        (+ (rect-column rectangle)
+                           (completion-menu-columns-indicator-column layout))
+                        (completion-menu-columns-indicator-columns layout)
+                        (completion-indicator-text selected total)
+                        'right
+                        faces
+                        'popup.indicator
+                        theme
+                        background-sources))
                     (when
                       (and
                         scrollbar?
@@ -2085,17 +2242,7 @@
                             theme
                             '(popup popup.scrollbar))
                           #f
-                          background-sources))))))
-              (when indicator
-                (draw-string!
-                  frame
-                  (rect-row rectangle)
-                  (+ (rect-column rectangle) indicator-column)
-                  (- (rect-columns rectangle) indicator-column)
-                  indicator
-                  '(popup)
-                  (resolve-faces theme '(popup))
-                  background-sources))))))))
+                          background-sources))))))))))))
 
   (define editor-text-component
     (make-component 'editor.text render-text-component!))
@@ -2226,8 +2373,26 @@
                     '()))
               '())))))
 
-  (define (completion-popup-width columns)
-    (min columns (max 24 (min 56 (div columns 3)))))
+  ;; The popup is sized from the candidates it shows, so labels and annotations
+  ;; keep their natural width whenever the screen can afford it.  The reserved
+  ;; counter and scrollbar are part of the request, never taken out of the
+  ;; content afterwards.
+  (define (completion-popup-width items columns rows)
+    (let* ([total (length items)]
+           [desired
+             (+ (* 2 completion-menu-padding)
+                (completion-label-natural-columns items)
+                (let ([annotation
+                        (completion-annotation-natural-columns items)])
+                  (if (positive? annotation)
+                      (+ completion-menu-gap annotation)
+                      0))
+                completion-menu-gap
+                (completion-indicator-natural-columns total)
+                (if (> total rows) 1 0))])
+      (max
+        (min columns completion-popup-minimum-columns)
+        (min columns completion-popup-maximum-columns desired))))
 
   (define (documentation-popup-width documentation columns)
     (min
@@ -2268,7 +2433,8 @@
                completion-window-max-rows
                (length items)
                available-rows)]
-           [popup-columns (completion-popup-width columns)])
+           [popup-columns
+             (completion-popup-width items columns candidate-rows)])
       (and (positive? candidate-rows)
            (let* ([text-rows (- rows 1)]
                   [popup-rows candidate-rows]

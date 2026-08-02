@@ -7755,8 +7755,9 @@
            (+
              (rect-row (component-node-rect node))
              (completion-session-selected-index completion)))]
+       ;; The document popup pads its content by one column on each side.
        [selected-column
-         (and node (rect-column (component-node-rect node)))])
+         (and node (+ (rect-column (component-node-rect node)) 1))])
   (unless
     (and node
          (= (rect-row (component-node-rect node)) 1)
@@ -8062,6 +8063,387 @@
   (error 'editor-tests
          "accepting document completion did not apply one replacement"))
 (editor-close! completion-editor)
+
+;; Completion menu geometry: the popup is sized from its candidates, columns
+;; are derived from the whole item list instead of the visible window, and the
+;; candidate counter lives in its own reserved box.
+(define menu-document
+  (make-document (string->utf8 "Ss") 946))
+(define menu-buffer
+  (make-buffer 946 menu-document #f 'fundamental-mode))
+(define menu-editor (make-editor menu-buffer))
+(buffer-set-local-setting! menu-buffer 'show-line-numbers? #f)
+(define menu-long-label "fn Ssdelta(const char *, double)")
+(define menu-descriptions
+  (list
+    (list 'alpha "Ssalpha" " Ssalpha(int, const char **)" "i32")
+    (list 'beta "Ssbeta" " Ssbeta()" "unit")
+    (list 'gamma "Ssgamma" "Ssgamma(void (*)(void))" "bufword")
+    (list 'delta "Ssdelta" menu-long-label "f64")
+    (list 'epsilon "Ssepsilon" " Ssepsilon(void)" "u8")
+    (list 'zeta "Sszeta" " Sszeta(int)" "ptr64")
+    (list 'eta "Sseta" " Sseta(char)" "widest-annotation")
+    (list 'theta "Sstheta" " Sstheta(short)" "i8")))
+(define menu-items
+  (map
+    (lambda (description)
+      (let ([id (car description)]
+            [filter-text (cadr description)]
+            [label (caddr description)]
+            [annotation (cadddr description)])
+        (make-completion-item
+          id
+          'menu-test
+          filter-text
+          label
+          filter-text
+          'choice
+          annotation
+          #f
+          filter-text
+          #f
+          #t
+          #f
+          #f
+          annotation
+          "menu"
+          0)))
+    menu-descriptions))
+(define menu-source
+  (make-choice-source
+    'menu-test
+    '((category . menu-test))
+    (lambda (input point) (cons 0 point))
+    (lambda (query) '())
+    (lambda (value) #f)
+    (lambda (generation) #f)))
+(editor-register-completion-provider!
+  menu-editor
+  (make-completion-provider
+    'menu-test
+    (lambda (request)
+      (list
+        (make-completion-response-for-request request menu-items #t)))
+    (lambda (request) #f)))
+(editor-update! menu-editor (make-resize-message 14 90))
+(view-set-caret! (editor-active-view menu-editor) 2)
+(editor-start-document-completion! menu-editor menu-source 0 2 2 '(menu-test))
+(define menu-executor (make-effect-executor))
+(install-completion-effect-handlers!
+  menu-executor
+  (editor-completion-provider-catalog menu-editor))
+(for-each
+  (lambda (message) (editor-update! menu-editor message))
+  (effect-result-messages
+    (execute-effects!
+      menu-executor
+      (editor-take-completion-effects! menu-editor))))
+(unless
+  (= (length
+       (completion-session-items (editor-active-completion menu-editor)))
+     (length menu-items))
+  (error 'editor-tests "completion menu fixture did not populate its session"))
+
+(define (menu-frame-at columns)
+  (editor-update! menu-editor (make-resize-message 14 columns))
+  (render-editor-frame menu-editor 14 columns))
+(define (menu-frame)
+  (menu-frame-at 90))
+(define (menu-rect frame)
+  (component-node-rect
+    (component-node-find (frame-layout frame) 'editor.completions)))
+(define (menu-row-text frame rectangle row)
+  (let ([text (frame-row-text frame (+ (rect-row rectangle) row))])
+    (substring
+      text
+      (rect-column rectangle)
+      (+ (rect-column rectangle) (rect-columns rectangle)))))
+(define (menu-annotation-end frame rectangle row annotation)
+  (let* ([text (menu-row-text frame rectangle row)]
+         [position
+           (let loop ([index (- (string-length text)
+                                (string-length annotation))])
+             (cond
+               [(negative? index) #f]
+               [(string=?
+                  (substring
+                    text
+                    index
+                    (+ index (string-length annotation)))
+                  annotation)
+                index]
+               [else (loop (- index 1))]))])
+    (and position (+ position (string-length annotation)))))
+(define (menu-visible-annotations frame rectangle)
+  (let ([completion (editor-active-completion menu-editor)])
+    (let loop ([row 0] [result '()])
+      (if (= row (rect-rows rectangle))
+          (reverse result)
+          (loop
+            (+ row 1)
+            (cons
+              (menu-annotation-end
+                frame
+                rectangle
+                row
+                (completion-item-annotation
+                  (list-ref
+                    (completion-session-items completion)
+                    (+ (completion-session-viewport-start completion) row))))
+              result))))))
+
+(let* ([frame (menu-frame)]
+       [rectangle (menu-rect frame)]
+       [ends (menu-visible-annotations frame rectangle)]
+       [first-row (menu-row-text frame rectangle 0)]
+       [counter-position (substring-position first-row "1/8")])
+  (unless (for-all (lambda (end) (equal? end (car ends))) ends)
+    (error 'editor-tests
+           "completion annotations did not share one column"
+           ends))
+  (unless
+    (and counter-position
+         (car ends)
+         (< (car ends) counter-position))
+    (error 'editor-tests
+           "candidate counter overlapped the annotation column"
+           first-row))
+  (unless
+    (exists
+      (lambda (row)
+        (string-contains?
+          (menu-row-text frame rectangle row)
+          "Ssalpha(int, const char **)"))
+      '(0 1 2 3 4 5))
+    (error 'editor-tests
+           "completion popup was not sized for its candidate labels"
+           (rect-columns rectangle)))
+  (unless
+    (exists
+      (lambda (row)
+        (string-contains?
+          (menu-row-text frame rectangle row)
+          menu-long-label))
+      '(0 1 2 3 4 5))
+    (error 'editor-tests
+           "completion popup did not fit its widest candidate label")))
+
+;; Where the popup cannot have the width it asks for, the candidates keep the
+;; columns: the label truncates, the annotation column survives, and the
+;; counter — decoration the scrollbar already carries — is what gives way.
+(let* ([frame (menu-frame-at 40)]
+       [rectangle (menu-rect frame)]
+       [ends (menu-visible-annotations frame rectangle)]
+       [rows
+         (map
+           (lambda (row) (menu-row-text frame rectangle row))
+           '(0 1 2 3 4 5))])
+  (unless (for-all (lambda (end) (equal? end (car ends))) ends)
+    (error 'editor-tests
+           "a clamped completion popup lost its annotation column"
+           ends))
+  (unless
+    (and
+      (exists
+        (lambda (text)
+          (string-contains? text (string (integer->char #x2026))))
+        rows)
+      (not
+        (exists
+          (lambda (text) (string-contains? text "1/8"))
+          rows)))
+    (error 'editor-tests
+           "a clamped completion popup kept its counter over its content"
+           rows)))
+(menu-frame)
+
+;; Labels routinely arrive decorated, so the matched prefix is located inside
+;; the label instead of requiring the label and the filter text to be equal.
+(let* ([frame (menu-frame)]
+       [rectangle (menu-rect frame)]
+       [row
+         (let loop ([row 0])
+           (cond
+             [(= row (rect-rows rectangle)) #f]
+             [(string-contains?
+                (menu-row-text frame rectangle row)
+                "fn Ssdelta")
+              row]
+             [else (loop (+ row 1))]))]
+       [label-column (+ (rect-column rectangle) 1 3)])
+  (unless
+    (and
+      row
+      (eq?
+        (cell-face
+          (frame-cell-ref frame (+ (rect-row rectangle) row) label-column))
+        'completion-match)
+      (eq?
+        (cell-face
+          (frame-cell-ref
+            frame
+            (+ (rect-row rectangle) row)
+            (+ label-column 1)))
+        'completion-match)
+      (not
+        (eq?
+          (cell-face
+            (frame-cell-ref
+              frame
+              (+ (rect-row rectangle) row)
+              (+ label-column 2)))
+          'completion-match)))
+    (error 'editor-tests
+           "decorated label did not highlight its matched prefix"
+           row)))
+
+;; Scrolling must not move the columns: they are measured over every candidate,
+;; so a row that survives the scroll is painted exactly the same way, even when
+;; the widest annotation of the list has left the viewport.
+(define (menu-candidate-row frame rectangle needle)
+  (let loop ([row 0])
+    (cond
+      [(= row (rect-rows rectangle)) #f]
+      [(string-contains? (menu-row-text frame rectangle row) needle)
+       (menu-row-text frame rectangle row)]
+      [else (loop (+ row 1))])))
+(let* ([before (menu-frame)]
+       [before-rect (menu-rect before)]
+       [before-ends (menu-visible-annotations before before-rect)]
+       [narrow-before (menu-frame-at 40)]
+       [narrow-before-row
+         (menu-candidate-row narrow-before (menu-rect narrow-before) "fn Ssdelta")])
+  (do ([count 0 (+ count 1)])
+      ((= count 7))
+    (editor-completion-next! menu-editor))
+  (let* ([narrow-after (menu-frame-at 40)]
+         [narrow-after-row
+           (menu-candidate-row
+             narrow-after
+             (menu-rect narrow-after)
+             "fn Ssdelta")]
+         [after (menu-frame)]
+         [after-rect (menu-rect after)]
+         [after-ends (menu-visible-annotations after after-rect)]
+         [counter-position
+           (substring-position (menu-row-text after after-rect 0) "8/8")])
+    (unless
+      (and
+        (= (rect-columns before-rect) (rect-columns after-rect))
+        (equal? before-ends after-ends)
+        narrow-before-row
+        (equal? narrow-before-row narrow-after-row)
+        counter-position
+        (car after-ends)
+        (< (car after-ends) counter-position))
+      (error 'editor-tests
+             "scrolling the completion menu moved its columns"
+             narrow-before-row
+             narrow-after-row))))
+(editor-close! menu-editor)
+
+;; The same candidate reached through two providers is one row, even when the
+;; provider answered with the range of an earlier revision, and the row that
+;; survives is the one carrying the provider edit.
+(define duplicate-document
+  (make-document (string->utf8 "Ss") 947))
+(define duplicate-buffer
+  (make-buffer 947 duplicate-document #f 'fundamental-mode))
+(define duplicate-editor (make-editor duplicate-buffer))
+(define duplicate-source
+  (make-choice-source
+    'duplicate-test
+    '((category . duplicate-test))
+    (lambda (input point) (cons 0 point))
+    (lambda (query)
+      (list
+        (make-completion-item
+          'word-alpha
+          'duplicate-word
+          "Ssalpha"
+          "Ssalpha"
+          "Ssalpha"
+          "buffer"
+          #f
+          'word-alpha)))
+    (lambda (value) #f)
+    (lambda (generation) #f)))
+(editor-register-completion-provider!
+  duplicate-editor
+  (make-completion-provider
+    'duplicate-test
+    (lambda (request)
+      (list
+        (make-completion-response-for-request
+          request
+          (list
+            (make-completion-item
+              'provider-alpha
+              'duplicate-test
+              "Ssalpha"
+              "Ssalpha(int)"
+              "Ssalpha"
+              'choice
+              "int"
+              (let ([edit (make-completion-text-edit 0 1 "Ssalpha")])
+                (make-completion-edit edit edit '()))
+              "Ssalpha"
+              #f
+              #t
+              #f
+              #f
+              "int"
+              "provider"
+              0))
+          #t)))
+    (lambda (request) #f)))
+(editor-update! duplicate-editor (make-resize-message 14 90))
+(view-set-caret! (editor-active-view duplicate-editor) 2)
+(editor-start-document-completion!
+  duplicate-editor
+  duplicate-source
+  0
+  2
+  2
+  '(duplicate-test))
+(define duplicate-executor (make-effect-executor))
+(install-completion-effect-handlers!
+  duplicate-executor
+  (editor-completion-provider-catalog duplicate-editor))
+(for-each
+  (lambda (message) (editor-update! duplicate-editor message))
+  (effect-result-messages
+    (execute-effects!
+      duplicate-executor
+      (editor-take-completion-effects! duplicate-editor))))
+(let ([items
+        (completion-session-items
+          (editor-active-completion duplicate-editor))])
+  (unless
+    (and
+      (= (length items) 1)
+      (string=? (completion-item-label (car items)) "Ssalpha(int)"))
+    (error 'editor-tests
+           "duplicate candidates did not collapse onto the provider entry"
+           (map completion-item-label items))))
+(editor-close! duplicate-editor)
+
+;; A label is a single display row: providers may decorate it, but surrounding
+;; whitespace never reaches the menu.
+(let ([item
+        (make-completion-item
+          'padded
+          'menu-test
+          "padded"
+          " padded(int)\tvalue "
+          "padded"
+          #f
+          #f
+          'padded)])
+  (unless (string=? (completion-item-label item) "padded(int) value")
+    (error 'editor-tests
+           "completion label was not normalized to one display row"
+           (completion-item-label item))))
 
 (define resolve-document
   (make-document (string->utf8 "12345678fo\n") 944))
