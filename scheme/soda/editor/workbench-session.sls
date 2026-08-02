@@ -21,6 +21,7 @@
           (soda editor resource-context)
           (soda editor state)
           (soda editor tui-application)
+          (soda editor tui-state)
           (soda editor tui-application-runtime)
           (soda editor window)
           (soda editor workbench))

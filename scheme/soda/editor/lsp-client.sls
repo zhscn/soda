@@ -68,6 +68,7 @@
           (soda editor result-buffer)
           (soda editor result-producer-session)
           (soda editor state)
+          (soda editor tui-state)
           (soda editor workbench)
           (soda editor workspace-edit)
           (soda editor workspace-edit-preview)

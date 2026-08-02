@@ -1711,6 +1711,7 @@
           (soda editor source-debug-commands)
           (soda editor state)
           (soda editor structure)
+          (soda editor tui-state)
           (soda editor structural-commands)
           (soda editor theme)
           (soda editor themes catppuccin)

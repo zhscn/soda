@@ -74,16 +74,6 @@
           editor-interaction-for-buffer
           editor-register-interaction!
           editor-tui-application-registry
-          editor-tui-application-catalog
-          editor-register-tui-application!
-          editor-remove-tui-application!
-          editor-tui-sessions
-          editor-tui-session-ref
-          editor-tui-session-for-buffer
-          editor-release-view-pointer-capture!
-          editor-close-tui-session!
-          editor-queue-tui-effects!
-          editor-take-tui-effects!
           editor-evaluator
           editor-set-evaluator!
           editor-debugger
@@ -1127,6 +1117,10 @@
         id))
     (or (entity-registry-ref (editor-view-registry value) id)
         (assertion-violation 'editor-view-ref "unknown view id" id)))
+
+  (define (editor-views value)
+    (require-open-editor 'editor-views value)
+    (entity-registry-values (editor-view-registry value)))
 
   (define editor-open-view!
     (case-lambda

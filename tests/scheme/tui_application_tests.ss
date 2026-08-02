@@ -4,6 +4,7 @@
         (soda editor buffer)
         (soda editor core)
         (soda editor effect)
+        (soda editor tui-state)
         (only (soda editor keymap) make-key-stroke)
         (only (soda editor event)
               make-key-event

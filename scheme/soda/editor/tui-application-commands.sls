@@ -7,6 +7,7 @@
           (soda editor keymap)
           (soda editor state)
           (soda editor tui-application)
+          (soda editor tui-state)
           (soda tui application))
 
   (define (active-application-state context)

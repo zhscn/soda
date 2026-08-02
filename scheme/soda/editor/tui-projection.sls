@@ -8,6 +8,7 @@
           (soda editor edit)
           (soda editor state)
           (soda editor tui-application)
+          (soda editor tui-state)
           (soda tui application))
 
   (define (projection-bytes definition model context)

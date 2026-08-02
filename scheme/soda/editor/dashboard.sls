@@ -20,6 +20,7 @@
           (soda editor project-target)
           (soda editor state)
           (soda editor tui-application)
+          (soda editor tui-state)
           (soda editor tui-application-runtime)
           (soda editor workbench)
           (soda tui application))

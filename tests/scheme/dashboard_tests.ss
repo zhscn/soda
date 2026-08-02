@@ -6,6 +6,7 @@
         (soda editor completion)
         (soda editor core)
         (soda editor dashboard)
+        (soda editor tui-state)
         (soda editor project-target)
         (only (soda editor event) make-key-event)
         (soda tui frame)

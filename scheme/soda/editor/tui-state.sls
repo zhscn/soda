@@ -9,7 +9,6 @@
           editor-close-tui-session!
           editor-queue-tui-effects!
           editor-take-tui-effects!
-          editor-views
           attach-tui-view-state!
           detach-tui-view-state!)
   (import (rnrs)
@@ -25,8 +24,7 @@
           (soda editor tui-application)
           (soda editor view))
 
-  (define (editor-views editor)
-    (require-open-editor 'editor-views editor)
+  (define (editor-views* editor)
     (entity-registry-values (editor-view-registry editor)))
 
   (define (editor-tui-application-catalog value)
@@ -111,7 +109,7 @@
             (lambda (view)
               (when (and buffer (eq? (view-buffer view) buffer))
                 (view-clear-input-handler-pending! view)))
-            (editor-views value))
+            (editor-views* value))
           (guard
             (condition
               [else

@@ -4,6 +4,7 @@
         (soda editor buffer)
         (soda editor core)
         (soda editor effect)
+        (soda editor tui-state)
         (soda editor event)
         (soda editor keymap)
         (soda editor tui-application)
