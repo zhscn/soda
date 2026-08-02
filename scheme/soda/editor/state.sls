@@ -3679,45 +3679,9 @@
         'editor-history-entries
         "history id must be a symbol"
         id))
-    (let ([history
-            (prompt-completion-store-history-ref
-              (editor-prompt-completion-store value)
-              id)])
-      (if history (prompt-history-entries history) '())))
-
-  (define (record-history! value session input)
-    (let* ([history-id
-             (prompt-request-history-id
-               (prompt-session-request session))]
-           [history
-             (prompt-completion-store-ensure-history!
-               (editor-prompt-completion-store value)
-               history-id)])
-      (when (and history
-                 (positive? (string-length input))
-                 (or (null? (prompt-history-entries history))
-                     (not
-                       (string=?
-                         input
-                         (car (prompt-history-entries history))))))
-        (for-each
-          (lambda (other)
-            (let ([index (prompt-session-history-index other)])
-              (when
-                (and
-                  (not (eq? other session))
-                  (eq?
-                    history-id
-                    (prompt-request-history-id
-                      (prompt-session-request other)))
-                  index)
-                (prompt-session-history-index-set!
-                  other
-                  (+ index 1)))))
-          (editor-prompts value))
-        (prompt-history-entries-set!
-          history
-          (cons input (prompt-history-entries history))))))
+    (prompt-completion-store-history-entries
+      (editor-prompt-completion-store value)
+      id))
 
   (define (finish-prompt! value status input candidate command)
     (let* ([session
@@ -3836,7 +3800,10 @@
               "Input does not match an available choice")
             #f)
           (begin
-            (record-history! value session resolved)
+            (prompt-completion-store-record-history!
+              (editor-prompt-completion-store value)
+              session
+              resolved)
             (finish-prompt!
               value
               'accepted
@@ -3936,66 +3903,28 @@
     (require-open-editor 'editor-prompt-history-previous! value)
     (let* ([session
              (active-prompt-session
-               'editor-prompt-history-previous!
-               value)]
-           [history-id
-             (prompt-request-history-id
-               (prompt-session-request session))]
-           [history
-             (prompt-completion-store-history-ref
+               'editor-prompt-history-previous! value)]
+           [input
+             (prompt-completion-store-history-previous!
                (editor-prompt-completion-store value)
-               history-id)]
-           [entries
-             (if history (prompt-history-entries history) '())]
-           [current (prompt-session-history-index session)]
-           [next-index
-             (cond
-               [(null? entries) #f]
-               [(not current) 0]
-               [(< (+ current 1) (length entries)) (+ current 1)]
-               [else current])])
-      (when (and next-index (not current))
-        (prompt-session-history-draft-set!
-          session
-          (editor-active-prompt-input value)))
-      (when next-index
-        (prompt-session-history-index-set! session next-index)
+               session
+               (editor-active-prompt-input value))])
+      (when input
         (set-active-prompt-input!
-          value
-          session
-          (list-ref entries next-index)))))
+          value session input))))
 
   (define (editor-prompt-history-next! value)
     (require-open-editor 'editor-prompt-history-next! value)
     (let* ([session
              (active-prompt-session
-               'editor-prompt-history-next!
-               value)]
-           [current (prompt-session-history-index session)])
-      (cond
-        [(not current) #f]
-        [(zero? current)
-         (prompt-session-history-index-set! session #f)
+               'editor-prompt-history-next! value)]
+           [input
+             (prompt-completion-store-history-next!
+               (editor-prompt-completion-store value)
+               session)])
+      (when input
          (set-active-prompt-input!
-           value
-           session
-           (prompt-session-history-draft session))]
-        [else
-         (let* ([history-id
-                  (prompt-request-history-id
-                    (prompt-session-request session))]
-                [history
-                  (prompt-completion-store-history-ref
-                    (editor-prompt-completion-store value)
-                    history-id)]
-                [next-index (- current 1)])
-           (prompt-session-history-index-set! session next-index)
-           (set-active-prompt-input!
-             value
-             session
-             (list-ref
-               (prompt-history-entries history)
-               next-index)))])))
+           value session input))))
 
   (define (editor-keymap value)
     (require-open-editor 'editor-keymap value)

@@ -13,6 +13,10 @@
           prompt-completion-store-completion-ref
           prompt-completion-store-history-ref
           prompt-completion-store-ensure-history!
+          prompt-completion-store-history-entries
+          prompt-completion-store-record-history!
+          prompt-completion-store-history-previous!
+          prompt-completion-store-history-next!
           prompt-completion-store-clear!)
   (import (rnrs)
           (soda editor completion)
@@ -129,6 +133,66 @@
             id
             history)
           history))))
+
+  (define (prompt-completion-store-history-entries store id)
+    (let ([history (prompt-completion-store-history-ref store id)])
+      (if history (prompt-history-entries history) '())))
+
+  (define (session-history-id session)
+    (prompt-request-history-id (prompt-session-request session)))
+
+  (define (prompt-completion-store-record-history! store session input)
+    (let* ([history-id (session-history-id session)]
+           [history
+             (prompt-completion-store-ensure-history! store history-id)])
+      (when (and history
+                 (positive? (string-length input))
+                 (or (null? (prompt-history-entries history))
+                     (not (string=? input (car (prompt-history-entries history))))))
+        (for-each
+          (lambda (other)
+            (let ([index (prompt-session-history-index other)])
+              (when (and (not (eq? other session))
+                         (eq? history-id (session-history-id other))
+                         index)
+                (prompt-session-history-index-set! other (+ index 1)))))
+          (prompt-completion-store-prompts store))
+        (prompt-history-entries-set!
+          history (cons input (prompt-history-entries history))))))
+
+  (define (prompt-completion-store-history-previous!
+            store session current-input)
+    (let* ([entries
+             (prompt-completion-store-history-entries
+               store (session-history-id session))]
+           [current (prompt-session-history-index session)]
+           [next
+             (cond
+               [(null? entries) #f]
+               [(not current) 0]
+               [(< (+ current 1) (length entries)) (+ current 1)]
+               [else current])])
+      (when (and next (not current))
+        (prompt-session-history-draft-set! session current-input))
+      (and next
+           (begin
+             (prompt-session-history-index-set! session next)
+             (list-ref entries next)))))
+
+  (define (prompt-completion-store-history-next! store session)
+    (let ([current (prompt-session-history-index session)])
+      (cond
+        [(not current) #f]
+        [(zero? current)
+         (prompt-session-history-index-set! session #f)
+         (prompt-session-history-draft session)]
+        [else
+         (let ([next (- current 1)])
+           (prompt-session-history-index-set! session next)
+           (list-ref
+             (prompt-completion-store-history-entries
+               store (session-history-id session))
+             next))])))
 
   (define (prompt-completion-store-clear! store)
     (prompt-completion-store-prompts-set! store '())
