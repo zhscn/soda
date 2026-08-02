@@ -4,6 +4,7 @@
           (soda editor contract)
           (soda document)
           (soda editor buffer)
+          (soda editor bytevector)
           (soda editor command)
           (soda editor command-runtime)
           (soda editor command-target)
@@ -91,22 +92,6 @@
   (define (newline-bytes count)
     (make-bytevector count 10))
 
-  (define (append-bytevectors first second)
-    (let* ([first-length (bytevector-length first)]
-           [second-length (bytevector-length second)]
-           [result
-             (make-bytevector
-               (+ first-length second-length))])
-      (bytevector-copy!
-        first 0 result 0 first-length)
-      (bytevector-copy!
-        second
-        0
-        result
-        first-length
-        second-length)
-      result))
-
   (define (line-whitespace-end text line)
     (let ([end (text-line-content-end text line)])
       (let loop ([offset (text-line-start text line)])
@@ -134,7 +119,7 @@
                    [whitespace-end
                      (line-whitespace-end text line)]
                    [prefix-end (min offset whitespace-end)])
-              (append-bytevectors
+              (bytevector-append
                 newlines
                 (text-subbytevector
                   text

@@ -5,6 +5,7 @@
           lsp-json-rpc-decode!
           lsp-json-rpc-frame)
   (import (rnrs)
+          (soda editor bytevector)
           (soda json))
 
   (define maximum-content-length (* 16 1024 1024))
@@ -32,14 +33,6 @@
   (define (copy-range value start end)
     (let ([result (make-bytevector (- end start))])
       (bytevector-copy! value start result 0 (- end start))
-      result))
-
-  (define (append-bytevectors left right)
-    (let* ([left-length (bytevector-length left)]
-           [right-length (bytevector-length right)]
-           [result (make-bytevector (+ left-length right-length))])
-      (bytevector-copy! left 0 result 0 left-length)
-      (bytevector-copy! right 0 result left-length right-length)
       result))
 
   (define (header-end bytes)
@@ -147,7 +140,7 @@
         'lsp-json-rpc-decode! "LSP input chunk must be a bytevector" chunk))
     (let loop
       ([bytes
-         (append-bytevectors
+         (bytevector-append
            (lsp-json-rpc-decoder-pending decoder)
            chunk)]
        [messages '()])
@@ -191,5 +184,5 @@
                  "Content-Length: "
                  (number->string (bytevector-length body))
                  "\r\n\r\n"))])
-      (append-bytevectors header body)))
+      (bytevector-append header body)))
 )

@@ -3,6 +3,7 @@
   (import (rnrs)
           (soda document)
           (soda editor buffer)
+          (soda editor bytevector)
           (soda editor command)
           (soda editor command-runtime)
           (soda editor command-target)
@@ -55,27 +56,6 @@
                 candidate
                 (loop (+ candidate 1)))))))
 
-  (define (append-bytevectors . values)
-    (let* ([size
-             (fold-left
-               (lambda (total value)
-                 (+ total (bytevector-length value)))
-               0
-               values)]
-           [result (make-bytevector size)])
-      (let loop ([values values] [offset 0])
-        (unless (null? values)
-          (let* ([value (car values)]
-                 [length (bytevector-length value)])
-            (bytevector-copy! value 0 result offset length)
-            (loop (cdr values) (+ offset length)))))
-      result))
-
-  (define (bytevector-slice value start end)
-    (let ([result (make-bytevector (- end start))])
-      (bytevector-copy! value start result 0 (- end start))
-      result))
-
   (define (transpose-character-once! view)
     (let ([buffer (view-buffer view)])
       (with-document-text
@@ -99,7 +79,7 @@
                    buffer
                    start
                    end
-                   (append-bytevectors right left))
+                   (bytevector-append right left))
                  (view-set-caret! view end)
                  #t)]))))))
 
@@ -166,7 +146,7 @@
                       buffer
                       first-start
                       second-end
-                      (append-bytevectors second between first))
+                      (bytevector-append second between first))
                     (view-set-caret! view second-end)
                     #t))))))))
 
@@ -189,7 +169,7 @@
         (cond
           [(null? remaining)
            (apply
-             append-bytevectors
+             bytevector-append
              (reverse
                (if trailing-newline?
                    (cons newline parts)
@@ -594,7 +574,7 @@
                 line
                 (let* ([position (car match)]
                        [padding (make-bytevector (- column current) 32)])
-                  (append-bytevectors
+                  (bytevector-append
                     (bytevector-slice line 0 position)
                     padding
                     (bytevector-slice
@@ -657,7 +637,7 @@
            [limit
              (and maximum-blank-lines (+ maximum-blank-lines 1))]
            [count (if limit (min requested limit) requested)])
-      (append-bytevectors
+      (bytevector-append
         (bytevector-slice value 0 base-size)
         (make-bytevector count 10))))
 

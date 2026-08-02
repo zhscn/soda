@@ -10,6 +10,7 @@
   (import (rnrs)
           (soda document)
           (soda editor buffer)
+          (soda editor bytevector)
           (soda editor command-target)
           (soda editor edit)
           (soda editor state)
@@ -26,14 +27,6 @@
         result
         0
         (bytevector-length value))
-      result))
-
-  (define (append-bytevectors first second)
-    (let* ([first-size (bytevector-length first)]
-           [second-size (bytevector-length second)]
-           [result (make-bytevector (+ first-size second-size))])
-      (bytevector-copy! first 0 result 0 first-size)
-      (bytevector-copy! second 0 result first-size second-size)
       result))
 
   (define (take-prefix values count)
@@ -79,8 +72,8 @@
                [current (car ring)]
                [combined
                  (if (eq? direction 'backward)
-                     (append-bytevectors bytes current)
-                     (append-bytevectors current bytes))])
+                     (bytevector-append bytes current)
+                     (bytevector-append current bytes))])
           (editor-set-kill-ring!
             editor
             (cons combined (cdr ring)))

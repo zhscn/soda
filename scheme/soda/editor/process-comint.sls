@@ -14,6 +14,7 @@
           install-process-comint-commands!
           process-comint-managed-process)
   (import (rnrs)
+          (soda editor bytevector)
           (soda document)
           (soda editor buffer)
           (soda editor command)
@@ -457,20 +458,6 @@
           (make-command-effect
             'managed-process.restart
             (process-comint-managed-process process))))))
-
-  (define (bytevector-append left right)
-    (let* ([left-size (bytevector-length left)]
-           [right-size (bytevector-length right)]
-           [result (make-bytevector (+ left-size right-size))])
-      (bytevector-copy! left 0 result 0 left-size)
-      (bytevector-copy!
-        right 0 result left-size right-size)
-      result))
-
-  (define (bytevector-slice value start end)
-    (let ([result (make-bytevector (- end start))])
-      (bytevector-copy! value start result 0 (- end start))
-      result))
 
   (define (bytevector-prefix-at? value prefix offset)
     (let ([size (bytevector-length prefix)])

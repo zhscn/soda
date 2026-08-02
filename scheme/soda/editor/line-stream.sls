@@ -3,29 +3,8 @@
           bytevector-slice
           split-complete-records
           split-complete-lines)
-  (import (rnrs))
-
-  (define (bytevector-append left right)
-    (unless (and (bytevector? left) (bytevector? right))
-      (assertion-violation
-        'bytevector-append "expected two bytevectors" left right))
-    (let* ([left-size (bytevector-length left)]
-           [right-size (bytevector-length right)]
-           [result (make-bytevector (+ left-size right-size))])
-      (bytevector-copy! left 0 result 0 left-size)
-      (bytevector-copy! right 0 result left-size right-size)
-      result))
-
-  (define (bytevector-slice bytes start end)
-    (unless (and (bytevector? bytes)
-                 (integer? start) (exact? start)
-                 (integer? end) (exact? end)
-                 (<= 0 start end (bytevector-length bytes)))
-      (assertion-violation
-        'bytevector-slice "invalid bytevector range" bytes start end))
-    (let ([result (make-bytevector (- end start))])
-      (bytevector-copy! bytes start result 0 (- end start))
-      result))
+  (import (rnrs)
+          (soda editor bytevector))
 
   (define (split-complete-records bytes delimiter)
     (unless (bytevector? bytes)

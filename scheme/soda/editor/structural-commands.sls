@@ -3,6 +3,7 @@
   (import (rnrs)
           (soda document)
           (soda editor buffer)
+          (soda editor bytevector)
           (soda editor command)
           (soda editor command-runtime)
           (soda editor command-target)
@@ -225,27 +226,6 @@
         (view-clear-mark! view))
       '()))
 
-  (define (append-bytevectors . values)
-    (let* ([size
-             (fold-left
-               (lambda (total bytes)
-                 (+ total (bytevector-length bytes)))
-               0
-               values)]
-           [result (make-bytevector size)])
-      (let loop ([remaining values] [offset 0])
-        (unless (null? remaining)
-          (let* ([bytes (car remaining)]
-                 [length (bytevector-length bytes)])
-            (bytevector-copy!
-              bytes
-              0
-              result
-              offset
-              length)
-            (loop (cdr remaining) (+ offset length)))))
-      result))
-
   (define (with-buffer-text buffer procedure)
     (let ([snapshot
             (document-snapshot (buffer-document buffer))])
@@ -322,7 +302,7 @@
                   buffer
                   start
                   end
-                  (append-bytevectors
+                  (bytevector-append
                     (text-subbytevector
                       text
                       middle-right
