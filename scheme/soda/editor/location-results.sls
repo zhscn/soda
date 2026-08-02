@@ -20,7 +20,7 @@
           (soda editor keymap)
           (soda editor language)
           (soda editor location)
-          (soda editor navigation)
+          (soda editor location-visit)
           (soda editor navigable-buffer)
           (soda editor resource-context)
           (soda editor state)
@@ -36,9 +36,7 @@
             (mutable last-resource)))
 
   (define (location-open-position item)
-    (let ([metadata (location-item-metadata item)])
-      (let ([entry (and (list? metadata) (assq 'file-open-position metadata))])
-        (and entry (file-utf16-position? (cdr entry)) (cdr entry)))))
+    (location-item-open-position item))
 
   (define (single-line value)
     (list->string
@@ -331,34 +329,6 @@
       (lambda (range) (cons (car range) (caddr range)))
       (buffer-text-property-ranges buffer 'result-index)))
 
-  (define (visit-location-item! editor view item kind)
-    (let ([buffer-id (location-item-buffer-id item)])
-      (if buffer-id
-          (let ([buffer (editor-buffer-ref editor buffer-id)])
-            (unless (= (buffer-revision buffer) (location-item-revision item))
-              (editor-user-error
-                'buffer-item.activate "The selected location is stale"))
-            (editor-jump-view-to-buffer!
-              editor view buffer (location-item-start item) kind)
-            '())
-          (let ([resource (location-item-resource item)]
-                [position
-                  (or (location-open-position item)
-                      (location-item-start item))])
-            (unless (string? resource)
-              (editor-user-error
-                'buffer-item.activate "The selected location has no resource"))
-            (editor-begin-async-jump! editor view resource kind)
-            (list
-              (make-command-effect
-                'file.read
-                (make-open-request
-                  (view-id view)
-                  resource
-                  position
-                  'jump
-                  (editor-view-resource-context editor (view-id view)))))))))
-
   (define (preview-location-result! context item index state)
     (let* ([editor (command-context-editor context)]
            [locations (location-results-state-locations state)]
@@ -366,7 +336,7 @@
              (editor-view-ref
                editor (location-results-state-origin-view-id state))])
       (location-list-set-index! locations index)
-      (visit-location-item!
+      (editor-visit-location-item!
         editor origin-view item (location-results-state-jump-kind state))))
 
   (define (close-location-results-buffer! editor buffer origin-view)

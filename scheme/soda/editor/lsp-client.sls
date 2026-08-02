@@ -48,6 +48,7 @@
           (soda editor language)
           (soda editor language-session)
           (soda editor location)
+          (soda editor location-visit)
           (soda editor lsp-json-rpc)
           (soda editor lsp-position)
           (soda editor lsp-protocol)
@@ -2855,36 +2856,7 @@
                       (lsp-position-character (lsp-range-start range)))))))))))
 
   (define (lsp-jump-to-location-item! editor view item kind)
-    (let ([context (editor-view-resource-context editor (view-id view))]
-          [buffer-id (location-item-buffer-id item)])
-      (if buffer-id
-          (let ([buffer (editor-buffer-ref editor buffer-id)])
-            (if (= (buffer-revision buffer) (location-item-revision item))
-                (begin
-                  (editor-jump-to-buffer!
-                    editor buffer (location-item-start item) kind context)
-                  '())
-                '()))
-          (let ([path (location-item-resource item)]
-                [metadata (location-item-metadata item)])
-            (let ([entry
-                    (and (list? metadata)
-                         (assq 'file-open-position metadata))])
-              (if (and (string? path)
-                       entry
-                       (file-utf16-position? (cdr entry)))
-                  (begin
-                    (editor-begin-async-jump! editor view path kind)
-                    (list
-                      (make-command-effect
-                        'file.read
-                        (make-open-request
-                          (view-id view)
-                          path
-                          (cdr entry)
-                          'jump
-                          context))))
-                  '()))))))
+    (editor-visit-location-item! editor view item kind))
 
   (define lsp-jump-to-location!
     (case-lambda
