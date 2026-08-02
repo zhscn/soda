@@ -42,19 +42,8 @@
           document (editable-projection-end-anchor projection)))))
 
   (define (editable-projection-text buffer projection)
-    (let* ([range (editable-projection-range buffer projection)]
-           [snapshot (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda ()
-                (utf8->string
-                  (text-subbytevector text (car range) (cdr range))))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
+    (let ([range (editable-projection-range buffer projection)])
+      (buffer-string-range buffer (car range) (cdr range))))
 
   (define (buffer-install-projection-edit-guard!
             buffer projections who message)

@@ -118,18 +118,10 @@
       payload))
 
   (define (snapshot-substring document start end)
-    (let ([snapshot (document-snapshot document)])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda ()
-                (utf8->string
-                  (text-subbytevector text start end)))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
+    (call-with-document-text
+      document
+      (lambda (text)
+        (utf8->string (text-subbytevector text start end)))))
 
   (define (close-entries! document entries)
     (for-each

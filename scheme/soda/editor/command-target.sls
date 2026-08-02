@@ -318,19 +318,9 @@
         context 'point point point)))
 
   (define (with-context-text context procedure)
-    (let* ([buffer
-             (view-buffer (command-context-view context))]
-           [snapshot
-             (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda () (procedure text))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
+    (call-with-buffer-text
+      (view-buffer (command-context-view context))
+      procedure))
 
   (define (command-context-line-target context)
     (with-context-text

@@ -2,7 +2,6 @@
   (export buffer-word-motion
           buffer-word-motion-target)
   (import (rnrs)
-          (soda document)
           (soda editor buffer)
           (soda editor language)
           (soda editor motion))
@@ -27,20 +26,11 @@
                default-word-motion))])))
 
   (define (buffer-word-motion-target buffer offset count)
-    (let* ([motion (buffer-word-motion buffer)]
-           [snapshot
-             (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda ()
-                (word-motion-target
-                  motion
-                  text
-                  offset
-                  count))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot))))))
+    (call-with-buffer-text
+      buffer
+      (lambda (text)
+        (word-motion-target
+          (buffer-word-motion buffer)
+          text
+          offset
+          count)))))

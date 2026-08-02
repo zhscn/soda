@@ -95,32 +95,25 @@
         (and entry (cdr entry)))))
 
   (define (buffer-location-presentation buffer item)
-    (let ([snapshot (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda ()
-                (let* ([offset (min (location-item-start item) (text-size text))]
-                       [position (text-position text offset)]
-                       [line (car position)]
-                       [column (cdr position)]
-                       [start (text-line-start text line)]
-                       [end (text-line-content-end text line)]
-                       [excerpt
-                         (utf8->string (text-subbytevector text start end))])
-                  (list
-                    line
-                    column
-                    (string-single-line excerpt)
-                    (and (<= start (location-item-start item) end)
-                         (- (location-item-start item) start))
-                    (and (<= start (location-item-end item) end)
-                         (- (location-item-end item) start)))))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
+    (call-with-buffer-text
+      buffer
+      (lambda (text)
+        (let* ([offset (min (location-item-start item) (text-size text))]
+               [position (text-position text offset)]
+               [line (car position)]
+               [column (cdr position)]
+               [start (text-line-start text line)]
+               [end (text-line-content-end text line)]
+               [excerpt
+                 (utf8->string (text-subbytevector text start end))])
+          (list
+            line
+            column
+            (string-single-line excerpt)
+            (and (<= start (location-item-start item) end)
+                 (- (location-item-start item) start))
+            (and (<= start (location-item-end item) end)
+                 (- (location-item-end item) start)))))))
 
   (define (location-presentation editor item)
     (let* ([buffer-id (location-item-buffer-id item)]

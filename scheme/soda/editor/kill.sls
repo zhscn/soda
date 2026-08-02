@@ -190,32 +190,25 @@
     (unless (buffer? buffer)
       (assertion-violation who "expected a buffer" buffer))
     (validate-offsets who first second)
-    (let ([snapshot (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda ()
-                (let ([size (text-size text)]
-                      [start (min first second)]
-                      [end (max first second)])
-                  (unless (and (<= first size) (<= second size))
-                    (assertion-violation
-                      who
-                      "range is outside the buffer"
-                      first
-                      second))
-                  (values
-                    start
-                    end
-                    (if (< second first) 'backward 'forward)
-                    (and
-                      (< start end)
-                      (text-subbytevector text start end)))))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
+    (call-with-buffer-text
+      buffer
+      (lambda (text)
+        (let ([size (text-size text)]
+              [start (min first second)]
+              [end (max first second)])
+          (unless (and (<= first size) (<= second size))
+            (assertion-violation
+              who
+              "range is outside the buffer"
+              first
+              second))
+          (values
+            start
+            end
+            (if (< second first) 'backward 'forward)
+            (and
+              (< start end)
+              (text-subbytevector text start end)))))))
 
   (define (read-target who buffer target)
     (unless (command-target? target)

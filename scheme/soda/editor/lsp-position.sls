@@ -8,7 +8,6 @@
           lsp-buffer-offset-at)
   (import (rnrs)
           (only (chezscheme) make-weak-eq-hashtable)
-          (soda document)
           (soda editor buffer)
           (soda editor lsp-protocol))
 
@@ -38,16 +37,7 @@
     (list->vector (reverse values)))
 
   (define (buffer-snapshot-string buffer)
-    (let ([snapshot (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda () (utf8->string (text->bytevector text)))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
+    (buffer-string-range buffer 0 (buffer-byte-size buffer)))
 
   (define (build-text-map buffer)
     (let* ([revision (buffer-revision buffer)]

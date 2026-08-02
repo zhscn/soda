@@ -70,30 +70,18 @@
     (let* ([document (buffer-document buffer)]
            [editable-start
              (or (document-editable-start document) 0)]
-           [snapshot (document-snapshot document)])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda ()
-                (if (< caret editable-start)
-                    (values #f #f editable-start)
-                    (values
-                      (utf8->string
-                        (text-subbytevector
-                          text
-                          editable-start
-                          (text-size text)))
-                      (utf8->string
-                        (text-subbytevector
-                          text
-                          editable-start
-                          caret))
-                      editable-start)))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
+           [size (buffer-byte-size buffer)])
+      (if (< caret editable-start)
+          (values #f #f editable-start)
+          (call-with-buffer-text
+            buffer
+            (lambda (text)
+              (values
+                (utf8->string
+                  (text-subbytevector text editable-start size))
+                (utf8->string
+                  (text-subbytevector text editable-start caret))
+                editable-start))))))
 
   (define (make-buffer-word-source
             words

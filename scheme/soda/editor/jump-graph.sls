@@ -257,18 +257,6 @@
     (trim-graph! graph)
     graph)
 
-  (define (buffer-end buffer)
-    (let ([snapshot (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda () (text-size text))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
-
   (define (jump-graph-attach-buffer! graph buffer)
     (require-graph 'jump-graph-attach-buffer! graph)
     (unless (buffer? buffer)
@@ -278,7 +266,7 @@
         buffer))
     (let ([resource (or (buffer-file-path buffer) (buffer-resource buffer))]
           [document (buffer-document buffer)]
-          [end (buffer-end buffer)])
+          [end (buffer-byte-size buffer)])
       (when resource
         (for-each
           (lambda (node)

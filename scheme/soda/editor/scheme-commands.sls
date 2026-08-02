@@ -1,7 +1,6 @@
 (library (soda editor scheme-commands)
   (export install-scheme-commands!)
   (import (rnrs)
-          (soda document)
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
@@ -14,19 +13,7 @@
           (soda editor state))
 
   (define (buffer-range-source buffer start end)
-    (let ([snapshot
-            (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda ()
-                (utf8->string
-                  (text-subbytevector text start end)))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
+    (buffer-string-range buffer start end))
 
   (define (indent-width buffer)
     (let ([value (buffer-setting-ref buffer 'indent-width 2)])
