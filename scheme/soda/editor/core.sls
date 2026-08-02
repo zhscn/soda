@@ -942,6 +942,8 @@
           invoke-buffer-item-action
           buffer-set-result-refresh!
           buffer-result-refreshable?
+          buffer-set-result-producer-state!
+          buffer-result-producer-state
           refresh-buffer-items
           buffer-set-result-interface!
           buffer-result-interface-ref

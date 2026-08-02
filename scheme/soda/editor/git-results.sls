@@ -134,6 +134,9 @@
             (git-status-session-rename-record-set! session #f)))
         (hashtable-delete! active-git-statuses editor)
         (let ([status (managed-process-event-status event)])
+          (buffer-set-result-producer-state!
+            (git-status-session-buffer session)
+            (if (zero? status) 'ready 'failed))
           (when (and (not (zero? status))
                      (positive?
                        (bytevector-length
@@ -164,6 +167,9 @@
           '()
           (let ([process (git-status-session-process session)])
             (git-status-session-closed?-set! session #t)
+            (when (git-status-session-buffer session)
+              (buffer-set-result-producer-state!
+                (git-status-session-buffer session) 'cancelled))
             (when (eq? (hashtable-ref active-git-statuses editor #f) session)
               (hashtable-delete! active-git-statuses editor))
             (if (and process (managed-process-running? process))
@@ -197,6 +203,7 @@
                'git-status 'git.status-cancel session)])
       (git-status-session-buffer-set! session buffer)
       (git-status-session-process-set! session process)
+      (buffer-set-result-producer-state! buffer 'running)
       (buffer-set-local! buffer 'git-status-session session)
       (register-git-status-actions! buffer session)
       (buffer-set-result-refresh!

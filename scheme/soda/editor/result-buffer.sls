@@ -11,6 +11,8 @@
           invoke-buffer-item-action
           buffer-set-result-refresh!
           buffer-result-refreshable?
+          buffer-set-result-producer-state!
+          buffer-result-producer-state
           refresh-buffer-items
           buffer-set-result-interface!
           buffer-result-interface-ref
@@ -77,7 +79,31 @@
     (buffer-set-local! buffer 'result-current-index #f)
     (buffer-set-local! buffer 'result-actions '())
     (buffer-set-local! buffer 'result-refresh #f)
+    (buffer-set-local! buffer 'result-producer-state 'idle)
     buffer)
+
+  (define result-producer-states
+    '(idle running ready failed cancelled))
+
+  (define (buffer-set-result-producer-state! buffer state)
+    (unless (and (buffer? buffer) (memq state result-producer-states))
+      (assertion-violation
+        'buffer-set-result-producer-state!
+        "expected a Result producer state"
+        buffer state))
+    (unless (buffer-result-interface-ref buffer)
+      (assertion-violation
+        'buffer-set-result-producer-state!
+        "Buffer has no result interface"
+        buffer))
+    (buffer-set-local! buffer 'result-producer-state state)
+    state)
+
+  (define (buffer-result-producer-state buffer)
+    (unless (buffer? buffer)
+      (assertion-violation
+        'buffer-result-producer-state "expected a Buffer" buffer))
+    (buffer-local-ref buffer 'result-producer-state 'idle))
 
   (define (buffer-set-result-refresh! buffer refresh)
     (unless (and (buffer? buffer)

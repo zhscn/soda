@@ -12,6 +12,7 @@
           (soda editor location)
           (soda editor location-results)
           (soda editor managed-process)
+          (soda editor result-buffer)
           (soda editor state)
           (soda runtime)
           (soda vfs))
@@ -180,6 +181,9 @@
                    "\nProcess "
                    (if (zero? status) "finished" "failed")
                    " with status " (number->string status) ".\n")])
+          (buffer-set-result-producer-state!
+            (compilation-session-buffer session)
+            (if (zero? status) 'ready 'failed))
           (editor-append-result-text!
             editor (compilation-session-buffer session) message '())
           (editor-set-status-message! editor
@@ -194,6 +198,9 @@
           '()
           (let ([process (compilation-session-process session)])
             (compilation-session-closed?-set! session #t)
+            (when (compilation-session-buffer session)
+              (buffer-set-result-producer-state!
+                (compilation-session-buffer session) 'cancelled))
             (when (eq? (hashtable-ref active-compilations editor #f) session)
               (hashtable-delete! active-compilations editor))
             (if (and process (managed-process-running? process))
@@ -229,6 +236,7 @@
                'compilation 'compilation.cancel session)])
       (compilation-session-buffer-set! session buffer)
       (compilation-session-process-set! session process)
+      (buffer-set-result-producer-state! buffer 'running)
       (hashtable-set! active-compilations editor session)
       (editor-set-current-location-list! editor locations)
       (append

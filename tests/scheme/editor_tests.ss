@@ -705,7 +705,11 @@
         (location-list-source (editor-current-location-list editor))
         'project-search)
       (buffer-result-refreshable?
-        (view-buffer (editor-active-view editor))))
+        (view-buffer (editor-active-view editor)))
+      (eq?
+        (buffer-result-producer-state
+          (view-buffer (editor-active-view editor)))
+        'running))
     (error 'editor-tests "Project search command differs" effects))
   (let ([items
           (project-search-json-line->locations
@@ -843,6 +847,10 @@
            'git-status-mode)
          (buffer-result-refreshable?
            (view-buffer (editor-active-view editor)))
+         (eq?
+           (buffer-result-producer-state
+             (view-buffer (editor-active-view editor)))
+           'running)
          (equal?
            (git-status-record-fields " M src/file with spaces.cpp")
            '(" M" "src/file with spaces.cpp")))
@@ -9832,6 +9840,16 @@
   (error 'editor-tests
          "full modeline did not use Helix-style segments"
          full-modeline-text))
+(buffer-set-local! modeline-buffer 'result-producer-state 'running)
+(let ([text
+        (frame-row-text
+          (render-editor-frame modeline-editor 3 80)
+          2)])
+  (unless (string-contains? text "[running]")
+    (error 'editor-tests
+           "modeline omitted the Result producer state"
+           text)))
+(buffer-clear-local! modeline-buffer 'result-producer-state)
 (define narrow-modeline-frame
   (render-editor-frame modeline-editor 3 12))
 (define narrow-modeline-text

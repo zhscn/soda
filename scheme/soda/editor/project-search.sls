@@ -205,6 +205,9 @@
         (hashtable-delete! active-project-searches editor)
         (let ([status (managed-process-event-status event)]
               [count (search-result-count session)])
+          (buffer-set-result-producer-state!
+            (project-search-session-buffer session)
+            (if (or (= status 0) (= status 1)) 'ready 'failed))
           (editor-set-status-message!
             editor
             (cond
@@ -229,6 +232,9 @@
           '()
           (let ([process (project-search-session-process session)])
             (project-search-session-closed?-set! session #t)
+            (when (project-search-session-buffer session)
+              (buffer-set-result-producer-state!
+                (project-search-session-buffer session) 'cancelled))
             (when (eq? (hashtable-ref active-project-searches editor #f) session)
               (hashtable-delete! active-project-searches editor))
             (if (and process (managed-process-running? process))
@@ -272,6 +278,7 @@
                session)])
       (project-search-session-buffer-set! session buffer)
       (project-search-session-process-set! session process)
+      (buffer-set-result-producer-state! buffer 'running)
       (buffer-set-local! buffer 'project-search-session session)
       (buffer-set-local!
         buffer

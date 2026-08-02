@@ -812,6 +812,8 @@
              (editor-interaction-for-buffer
                editor
                (buffer-id buffer))]
+           [result-producer-state
+             (buffer-local-ref buffer 'result-producer-state 'idle)]
            [message
              (and (editor-render-context-focused? context)
                   (editor-status-message editor))]
@@ -891,13 +893,20 @@
                    'end)
                  (modeline-segment
                    'process
-                   (if interaction
-                       (string-append
-                         " ["
-                         (symbol->string
-                           (interaction-session-state interaction))
-                         "]")
-                       "")
+                   (cond
+                     [interaction
+                      (string-append
+                        " ["
+                        (symbol->string
+                          (interaction-session-state interaction))
+                        "]")]
+                     [(memq result-producer-state
+                            '(running failed cancelled))
+                      (string-append
+                        " ["
+                        (symbol->string result-producer-state)
+                        "]")]
+                     [else ""])
                    'modeline.process
                    40
                    0
