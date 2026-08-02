@@ -88,10 +88,6 @@
         #t
         command-context-point-target)))
 
-  (define (require-current-target who buffer target)
-    (unless (command-target-current? target buffer)
-      (editor-user-error who "The command target is stale")))
-
   (define (native-enter-once! buffer view session style)
     (let ([result #f] [change #f])
       (dynamic-wind
@@ -124,7 +120,7 @@
                'cpp.newline-and-indent
                context)]
            [style #f])
-      (require-current-target
+      (require-command-target-current
         'cpp.newline-and-indent buffer target)
       (when (positive? count)
         (view-set-caret!
@@ -220,7 +216,7 @@
                target 'line)]
            [style #f]
            [caret (command-target-point target)])
-      (require-current-target
+      (require-command-target-current
         'cpp.indent-line buffer target)
       (dynamic-wind
         (lambda () #f)

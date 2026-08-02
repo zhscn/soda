@@ -54,16 +54,12 @@
         #t
         command-context-point-target)))
 
-  (define (require-current-target who buffer target)
-    (unless (command-target-current? target buffer)
-      (editor-user-error who "The command target is stale")))
-
   (define-command (scheme-indent-line-command context target)
     "Reindent the Scheme source line frozen by interactive dispatch."
     (interactive line-target-reader)
     (let* ([view (command-context-view context)]
            [buffer (view-buffer view)])
-      (require-current-target
+      (require-command-target-current
         'scheme.indent-line buffer target)
       (buffer-reindent-line!
         buffer
@@ -83,7 +79,7 @@
     (let* ([view (command-context-view context)]
            [buffer (view-buffer view)]
            [count (command-context-count context)])
-      (require-current-target
+      (require-command-target-current
         'scheme.newline-and-indent buffer target)
       (when (negative? count)
         (assertion-violation

@@ -367,12 +367,6 @@
       'forward-delete-target
       forward-delete-target-selector))
 
-  (define (require-current-target who context target)
-    (let ([buffer (context-buffer context)])
-      (unless (command-target-current? target buffer)
-        (editor-user-error who "The command target is stale"))
-      buffer))
-
   (define (finish-replacement! view target caret)
     (view-set-caret! view caret)
     (when (eq? (command-target-source target) 'region)
@@ -396,7 +390,7 @@
                  context))]
            [view (context-view context)]
            [buffer
-             (require-current-target
+             (require-command-target-current
                'edit.self-insert context target)]
            [start (command-target-start target)]
            [end (command-target-end target)])
@@ -413,7 +407,7 @@
     (interactive backward-delete-target-reader)
     (let* ([view (context-view context)]
            [buffer
-             (require-current-target
+             (require-command-target-current
                'edit.backward-delete context target)]
            [start (command-target-start target)]
            [end (command-target-end target)])
@@ -427,7 +421,7 @@
     (interactive forward-delete-target-reader)
     (let* ([view (context-view context)]
            [buffer
-             (require-current-target
+             (require-command-target-current
                'edit.forward-delete context target)]
            [start (command-target-start target)]
            [end (command-target-end target)])
@@ -441,7 +435,7 @@
     (interactive replace-target-reader)
     (let* ([view (context-view context)]
            [buffer
-             (require-current-target
+             (require-command-target-current
                'edit.newline context target)]
            [start (command-target-start target)]
            [end (command-target-end target)]
@@ -468,7 +462,7 @@
     (interactive replace-target-reader)
     (let* ([view (context-view context)]
            [buffer
-             (require-current-target
+             (require-command-target-current
                'edit.open-line context target)]
            [start (command-target-start target)]
            [end (command-target-end target)]
@@ -607,7 +601,7 @@
 
   (define (shift-region-command context target unindent?)
     (let ([buffer
-             (require-current-target
+             (require-command-target-current
                (if unindent?
                    'edit.unindent-region
                    'edit.shift-region-right)
@@ -697,7 +691,7 @@
     (interactive tab-target-reader)
     (let* ([view (context-view context)]
            [buffer
-             (require-current-target
+             (require-command-target-current
                'edit.indent-or-insert-tab
                context
                target)]
@@ -740,7 +734,7 @@
     (interactive tab-target-reader)
     (let* ([view (context-view context)]
            [buffer
-             (require-current-target
+             (require-command-target-current
                'edit.unindent context target)]
            [count
              (require-non-negative-count
@@ -1322,7 +1316,7 @@
     (interactive horizontal-space-target-reader)
     (let* ([view (context-view context)]
            [buffer
-             (require-current-target
+             (require-command-target-current
                'edit.delete-horizontal-space
                context
                target)]
@@ -1452,7 +1446,7 @@
     (let* ([editor (command-context-editor context)]
            [view (context-view context)]
            [buffer
-             (require-current-target
+             (require-command-target-current
                'edit.copy-region context target)])
       (if (command-target-empty? target)
           (if (editor-copy-focused-application! editor view)
@@ -1471,7 +1465,7 @@
     (let* ([editor (command-context-editor context)]
            [view (context-view context)]
            [buffer
-             (require-current-target
+             (require-command-target-current
                'edit.kill-target context target)]
            [start (command-target-start target)]
            [end (command-target-end target)])
@@ -1488,7 +1482,7 @@
     "Kill the active region."
     (interactive required-region-target-reader)
     (let ([editor (command-context-editor context)])
-      (require-current-target
+      (require-command-target-current
         'edit.kill-region context target)
       (if (command-target-empty? target)
           (editor-set-status-message! editor "Region is empty")
@@ -1627,7 +1621,7 @@
     (interactive replace-target-reader)
     (let* ([editor (command-context-editor context)]
            [view (context-view context)])
-      (require-current-target 'edit.yank context target)
+      (require-command-target-current 'edit.yank context target)
       (if (not
             (editor-yank!
               editor

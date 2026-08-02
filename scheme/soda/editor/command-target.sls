@@ -13,6 +13,7 @@
           command-target-properties
           command-target-empty?
           command-target-current?
+          require-command-target-current
           command-target-first
           command-target-second
           command-target-property-ref
@@ -132,6 +133,19 @@
       (= (command-target-document-id target)
          (document-id (buffer-document buffer)))
       (= (command-target-revision target) (buffer-revision buffer))))
+
+  (define (require-command-target-current who owner target)
+    (let ([buffer
+            (cond
+              [(buffer? owner) owner]
+              [(command-context? owner)
+               (view-buffer (command-context-view owner))]
+              [else
+               (assertion-violation
+                 who "expected a Buffer or command context" owner)])])
+      (unless (command-target-current? target buffer)
+        (editor-user-error who "The command target is stale"))
+      buffer))
 
   (define (command-target-first target)
     (unless (command-target? target)
