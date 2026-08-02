@@ -338,14 +338,6 @@
   (define (diff-git-entry context)
     (invoke-buffer-item-action context 'diff))
 
-  (define (refresh-git-status context)
-    (let* ([buffer (view-buffer (command-context-view context))]
-           [session (buffer-local-ref buffer 'git-status-session #f)])
-      (unless (git-status-session? session)
-        (editor-user-error 'git.status-refresh
-                           "Current Buffer is not a Git status Buffer"))
-      (start-git-status! context (git-status-session-project session))))
-
   (define (bind-status-key! keymap character command)
     (keymap-bind!
       keymap
@@ -360,7 +352,7 @@
         'git-status-mode-map
         '((track-modified? . #f) (read-only? . #t))))
     (let ([keymap (make-keymap)])
-      (bind-status-key! keymap #\g 'git.status-refresh)
+      (bind-status-key! keymap #\g 'buffer-item.refresh)
       (bind-status-key! keymap #\s 'git.stage)
       (bind-status-key! keymap #\u 'git.unstage)
       (bind-status-key! keymap #\d 'git.diff)
@@ -373,7 +365,6 @@
           (make-interactive-context-command
             (car entry) (cadr entry) (caddr entry))))
       (list
-        (list 'git.status-refresh refresh-git-status "Refresh Git status.")
         (list 'git.stage stage-git-entry "Stage the Git entry at point.")
         (list 'git.unstage unstage-git-entry "Unstage the Git entry at point.")
         (list 'git.diff diff-git-entry "Show the diff for the Git entry at point.")))

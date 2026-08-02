@@ -847,6 +847,22 @@
            (git-status-record-fields " M src/file with spaces.cpp")
            '(" M" "src/file with spaces.cpp")))
     (error 'editor-tests "Project Git status command differs" effects))
+  (let ([refresh-effects
+          (execute-command!
+            (editor-command-registry editor)
+            'buffer-item.refresh
+            (make-command-context
+              editor (editor-active-view editor) #f #f #f)
+            '())])
+    (unless
+      (exists
+        (lambda (effect)
+          (eq? (command-effect-kind effect) 'managed-process.start))
+        refresh-effects)
+      (error
+        'editor-tests
+        "Git status did not refresh through the Result producer"
+        refresh-effects)))
   (execute-command!
     (editor-command-registry editor)
     'buffer-item.quit
