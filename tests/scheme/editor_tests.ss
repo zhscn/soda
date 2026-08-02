@@ -17,6 +17,7 @@
         (soda editor evaluator)
         (soda editor event)
         (soda editor file)
+        (soda editor git-results)
         (only (soda editor interaction)
               interaction-session-evaluator)
         (soda editor keymap)
@@ -753,7 +754,13 @@
            '("git" "status" "--porcelain=v1" "-z" "--untracked-files=all"))
          (eq?
            (location-list-source (editor-current-location-list editor))
-           'git-status))
+           'git-status)
+         (eq?
+           (buffer-major-mode-name (view-buffer (editor-active-view editor)))
+           'git-status-mode)
+         (equal?
+           (git-status-record-fields " M src/file with spaces.cpp")
+           '(" M" "src/file with spaces.cpp")))
     (error 'editor-tests "Project Git status command differs" effects))
   (execute-command!
     (editor-command-registry editor)

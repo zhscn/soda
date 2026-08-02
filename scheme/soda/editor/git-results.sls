@@ -1,12 +1,17 @@
 (library (soda editor git-results)
-  (export install-git-results! start-git-status!)
+  (export install-git-results! start-git-status! git-status-record-fields)
   (import (rnrs)
           (only (chezscheme) make-weak-eq-hashtable)
+          (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
+          (soda editor compilation)
+          (soda editor condition)
           (soda editor effect)
           (soda editor event)
           (soda editor file)
+          (soda editor keymap)
+          (soda editor language)
           (soda editor line-stream)
           (soda editor location)
           (soda editor location-results)
@@ -18,27 +23,25 @@
 
   (define-record-type
     (git-status-session %make-git-status-session git-status-session?)
-    (fields root locations
+    (fields project root origin-view-id locations
             (mutable buffer) (mutable process)
             (mutable pending-output) (mutable stderr-output)
             (mutable rename-record) (mutable closed?)))
 
   (define active-git-statuses (make-weak-eq-hashtable))
 
+  (define-record-type git-operation
+    (fields status-session label (mutable stderr-output)))
+
   (define (rename-status? status)
     (and (= (string-length status) 2)
          (or (memv (string-ref status 0) '(#\R #\C))
              (memv (string-ref status 1) '(#\R #\C)))))
 
-  (define (deleted-status? status)
-    (and (= (string-length status) 2)
-         (or (char=? (string-ref status 0) #\D)
-             (char=? (string-ref status 1) #\D))))
-
   (define (decode-record bytes)
     (guard (condition [else #f]) (utf8->string bytes)))
 
-  (define (status-record-fields value)
+  (define (git-status-record-fields value)
     (and value
          (>= (string-length value) 3)
          (char=? (string-ref value 2) #\space)
@@ -46,12 +49,11 @@
                (substring value 3 (string-length value)))))
 
   (define (status-item root status path)
-    (and (not (deleted-status? status))
-         (make-location-item
-           #f (vfs-resolve-path root path) 0 0 0 path
-           (list
-             (cons 'file-open-position (make-file-utf16-position 0 0))
-             (cons 'git-status status)))))
+    (make-location-item
+      #f (vfs-resolve-path root path) 0 0 0 path
+      (list
+        (cons 'file-open-position (make-file-utf16-position 0 0))
+        (cons 'git-status status))))
 
   (define (append-status! editor session status path original)
     (let* ([line
@@ -75,7 +77,7 @@
             [pending
              (append-status! editor session (car pending) (cadr pending) value)
              (git-status-session-rename-record-set! session #f)]
-            [(status-record-fields value) =>
+            [(git-status-record-fields value) =>
              (lambda (fields)
                (if (rename-status? (car fields))
                    (git-status-session-rename-record-set! session fields)
@@ -178,7 +180,8 @@
            [locations (make-location-list 'git-status '())]
            [session
              (%make-git-status-session
-               root locations #f #f (make-bytevector 0) (make-bytevector 0) #f #f)]
+               project root origin-view-id locations #f #f
+               (make-bytevector 0) (make-bytevector 0) #f #f)]
            [process
              (make-managed-process
                "git-status"
@@ -188,10 +191,12 @@
            [old (hashtable-ref active-git-statuses editor #f)]
            [buffer
              (editor-open-result-buffer!
-               editor "*Git Status*" "Git status" locations origin-view-id
+               editor "*Git Status*" 'git-status-mode
+               "Git status" locations origin-view-id
                'git-status 'git.status-cancel session)])
       (git-status-session-buffer-set! session buffer)
       (git-status-session-process-set! session process)
+      (buffer-set-local! buffer 'git-status-session session)
       (hashtable-set! active-git-statuses editor session)
       (editor-set-current-location-list! editor locations)
       (append
@@ -207,7 +212,158 @@
             '())
         (list (make-command-effect 'managed-process.start process)))))
 
+  (define (active-status-selection context who)
+    (let* ([view (command-context-view context)]
+           [buffer (view-buffer view)]
+           [session (buffer-local-ref buffer 'git-status-session #f)]
+           [item
+             (buffer-text-property-ref
+               buffer (view-caret view) 'location-item #f)])
+      (unless (git-status-session? session)
+        (editor-user-error who "Current Buffer is not a Git status Buffer"))
+      (unless (location-item? item)
+        (editor-user-error who "Point is not on a Git status entry"))
+      (values session item)))
+
+  (define (item-status item)
+    (let ([entry
+            (and (list? (location-item-metadata item))
+                 (assq 'git-status (location-item-metadata item)))])
+      (and entry (cdr entry))))
+
+  (define (status-result-view editor session)
+    (find
+      (lambda (view)
+        (eq? (view-buffer view) (git-status-session-buffer session)))
+      (editor-views editor)))
+
+  (define (apply-git-operation-output context)
+    (let* ([event (command-context-argument context)]
+           [process (and (managed-process-event? event)
+                         (managed-process-event-process event))]
+           [operation (and process (managed-process-owner process))])
+      (when (and (git-operation? operation)
+                 (= (managed-process-event-flags event) process-stderr))
+        (git-operation-stderr-output-set!
+          operation
+          (bytevector-append
+            (git-operation-stderr-output operation)
+            (managed-process-event-data event))))
+      '()))
+
+  (define (apply-git-operation-exit context)
+    (let* ([editor (command-context-editor context)]
+           [event (command-context-argument context)]
+           [process (and (managed-process-event? event)
+                         (managed-process-event-process event))]
+           [operation (and process (managed-process-owner process))])
+      (if (not (git-operation? operation))
+          '()
+          (let* ([status (managed-process-event-status event)]
+                 [session (git-operation-status-session operation)]
+                 [view (status-result-view editor session)])
+            (if (zero? status)
+                (begin
+                  (editor-set-status-message!
+                    editor (string-append (git-operation-label operation) " succeeded"))
+                  (if view
+                      (start-git-status!
+                        (make-command-context editor view #f #f #f)
+                        (git-status-session-project session))
+                      '()))
+                (begin
+                  (editor-set-status-message!
+                    editor
+                    (let ([stderr (git-operation-stderr-output operation)])
+                      (if (zero? (bytevector-length stderr))
+                          (string-append
+                            (git-operation-label operation) " failed with status "
+                            (number->string status))
+                          (guard (condition [else "Git operation failed"])
+                            (utf8->string stderr)))))
+                  '()))))))
+
+  (define (start-git-operation session label arguments)
+    (let* ([operation
+             (make-git-operation session label (make-bytevector 0))]
+           [process
+             (make-managed-process
+               label arguments (git-status-session-root session) operation
+               'git.operation-output 'git.operation-exit)])
+      (list (make-command-effect 'managed-process.start process))))
+
+  (define (stage-git-entry context)
+    (let-values ([(session item)
+                  (active-status-selection context 'git.stage)])
+      (start-git-operation
+        session "Git stage"
+        (list "git" "add" "--" (location-item-excerpt item)))))
+
+  (define (unstage-git-entry context)
+    (let-values ([(session item)
+                  (active-status-selection context 'git.unstage)])
+      (start-git-operation
+        session "Git unstage"
+        (list "git" "reset" "--" (location-item-excerpt item)))))
+
+  (define (diff-git-entry context)
+    (let-values ([(session item)
+                  (active-status-selection context 'git.diff)])
+      (let* ([status (item-status item)]
+             [cached?
+               (and status
+                    (not (char=? (string-ref status 0) #\space))
+                    (char=? (string-ref status 1) #\space))]
+             [arguments
+               (append
+                 (list "git" "diff" "--no-ext-diff")
+                 (if cached? (list "--cached") '())
+                 (list "--" (location-item-excerpt item)))])
+        (start-compilation!
+          context
+          (string-append "Git diff: " (location-item-excerpt item))
+          arguments
+          (git-status-session-root session)))))
+
+  (define (refresh-git-status context)
+    (let* ([buffer (view-buffer (command-context-view context))]
+           [session (buffer-local-ref buffer 'git-status-session #f)])
+      (unless (git-status-session? session)
+        (editor-user-error 'git.status-refresh
+                           "Current Buffer is not a Git status Buffer"))
+      (start-git-status! context (git-status-session-project session))))
+
+  (define (bind-status-key! keymap character command)
+    (keymap-bind!
+      keymap
+      (list (make-key-stroke 'character (char->integer character) 0))
+      command))
+
   (define (install-git-results! editor)
+    (register-major-mode!
+      (editor-language-catalog editor)
+      (make-major-mode
+        'git-status-mode 'location-results-mode #f 'interface
+        'git-status-mode-map
+        '((track-modified? . #f) (read-only? . #t))))
+    (let ([keymap (make-keymap)])
+      (bind-status-key! keymap #\g 'git.status-refresh)
+      (bind-status-key! keymap #\s 'git.stage)
+      (bind-status-key! keymap #\u 'git.unstage)
+      (bind-status-key! keymap #\d 'git.diff)
+      (keymap-catalog-register!
+        (editor-keymap-catalog editor) 'git-status-mode-map keymap))
+    (for-each
+      (lambda (entry)
+        (editor-register-command!
+          editor
+          (make-interactive-context-command
+            (car entry) (cadr entry) (caddr entry))))
+      (list
+        (list 'git.status-refresh refresh-git-status "Refresh Git status.")
+        (list 'git.stage stage-git-entry "Stage the Git entry at point.")
+        (list 'git.unstage unstage-git-entry "Unstage the Git entry at point.")
+        (list 'git.diff diff-git-entry "Show the diff for the Git entry at point.")))
     (for-each
       (lambda (entry)
         (editor-register-internal-command!
@@ -220,6 +376,10 @@
         (list 'git.status-exit apply-git-status-exit
               "Finalize a Git status process.")
         (list 'git.status-cancel cancel-git-status
-              "Cancel a Git status process.")))
+              "Cancel a Git status process.")
+        (list 'git.operation-output apply-git-operation-output
+              "Collect output from a Git operation.")
+        (list 'git.operation-exit apply-git-operation-exit
+              "Finalize a Git operation and refresh status.")))
     editor)
 )
