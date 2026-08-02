@@ -404,49 +404,6 @@
                            (+ column width)
                            column)])))))))))
 
-  (define (display-chunks-column-at chunks position tab-width)
-    (let loop ([remaining chunks] [column 0])
-      (if (null? remaining)
-          column
-          (let* ([chunk (car remaining)]
-                 [kind (display-chunk-kind chunk)]
-                 [start (display-chunk-start chunk)]
-                 [end (display-chunk-end chunk)]
-                 [include?
-                   (cond
-                     [(eq? kind 'text) (> position start)]
-                     [(eq? kind 'virtual)
-                      (or
-                        (> position start)
-                        (and
-                          (= position start)
-                          (eq? (display-chunk-affinity chunk) 'before)))]
-                     [else
-                      (or
-                        (>= position end)
-                        (and
-                          (> position start)
-                          (< position end)
-                          (eq? (display-chunk-affinity chunk) 'after)))])])
-            (cond
-              [(not include?) column]
-              [(and (eq? kind 'text) (< position end))
-               (let* ([bytes (string->utf8 (display-chunk-text chunk))]
-                      [length (- position start)]
-                      [prefix (make-bytevector length)])
-                 (bytevector-copy! bytes 0 prefix 0 length)
-                 (string-cell-end-column
-                      (utf8->string prefix)
-                      column
-                      tab-width))]
-              [else
-               (loop
-                 (cdr remaining)
-                 (string-cell-end-column
-                      (display-chunk-text chunk)
-                      column
-                      tab-width))])))))
-
   (define (make-line-projection visual-line)
     (vector
       (visual-line-physical-line visual-line)
@@ -460,9 +417,6 @@
 
   (define (line-projection-line projection)
     (vector-ref projection 0))
-
-  (define (line-projection-next-line projection)
-    (vector-ref projection 1))
 
   (define (line-projection-chunks projection)
     (vector-ref projection 2))

@@ -104,11 +104,6 @@
         role))
     (%make-display-plan workbench-id window-id action role))
 
-  (define (workbench-window-for-view workbench view-id)
-    (find
-      (lambda (leaf) (= (window-leaf-view-id leaf) view-id))
-      (window-node-leaves (workbench-layout workbench))))
-
   (define (workbench-for-window editor window-id)
     (find
       (lambda (workbench)

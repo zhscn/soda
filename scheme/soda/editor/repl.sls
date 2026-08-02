@@ -183,9 +183,6 @@
             (activate-session-view! editor session)
             session))))
 
-  (define (session-buffer editor session)
-    (comint-session-buffer editor session))
-
   (define (buffer-origin buffer start end)
     (make-evaluation-origin
       (buffer-id buffer)

@@ -514,17 +514,6 @@
   (define (syntax-prefix? value)
     (eq? (token-kind value) 'syntax-prefix))
 
-  (define (remove-ignored-data tokens)
-    (let loop ([remaining tokens] [result '()])
-      (cond
-        [(null? remaining) (reverse result)]
-        [(eq? (token-kind (car remaining)) 'datum-comment)
-         (loop (skip-datum (cdr remaining)) result)]
-        [(ignored-prefix? (car remaining))
-         (loop (skip-datum (cdr remaining)) result)]
-        [else
-         (loop (cdr remaining) (cons (car remaining) result))])))
-
   (define (symbol-token? value)
     (symbol? (token-datum value)))
 
