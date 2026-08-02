@@ -97,9 +97,11 @@ Project {
 ```
 
 发现器从给定 resource 向上查询 VCS marker、build manifest 或显式 marker。发现策略
-是有序 registry，第一个有效结果建立 Project；成功和确定性的失败都按起始目录缓存。
-远程或暂时不可访问的 resource 不缓存失败。显式 known-project registry 独立保存用户
-选择过的 root，使 project switch 不依赖当前 Buffer 或启动目录。
+是有序 registry：每个 finder 按优先级依次查询完整祖先链，第一个有效结果建立
+Project。因而 `.soda-project` 这类高优先级显式 marker 可以定义 Workbench 根，不会被
+后代目录中的通用 build manifest 截断。成功和确定性的失败都按起始目录缓存。远程或
+暂时不可访问的 resource 不缓存失败。显式 known-project registry 独立保存用户选择过的
+root，使 project switch 不依赖当前 Buffer 或启动目录。
 
 catalog 为每个 Project id 维护独立、单调递增的 descriptor revision。`remember` 只把
 Project 纳入 known registry，并返回当前 canonical descriptor；`update` 显式替换同 id

@@ -499,26 +499,29 @@
   (define (directory-parent directory)
     (vfs-normalize-path (vfs-parent-directory directory)))
 
-  (define (discover-at-directory catalog directory probe)
-    (let loop ([finders (project-catalog-finders catalog)]
-               [unavailable? #f])
-      (if
-        (null? finders)
-        (values #f unavailable?)
-        (let ([result
-                ((project-finder-procedure (car finders))
-                 directory
-                 probe)])
-          (cond
-            [(project? result) (values result unavailable?)]
-            [(eq? result project-discovery-unavailable)
-             (loop (cdr finders) #t)]
-            [(not result) (loop (cdr finders) unavailable?)]
-            [else
-             (assertion-violation
-               (project-finder-name (car finders))
-               "project finder returned an invalid result"
-               result)])))))
+  (define (discover-with-finder finder start probe)
+    (let loop ([current start] [unavailable? #f])
+      (let ([result
+              ((project-finder-procedure finder)
+               current
+               probe)])
+        (cond
+          [(project? result) (values result unavailable?)]
+          [(or (not result)
+               (eq? result project-discovery-unavailable))
+           (let* ([unavailable?
+                    (or
+                      unavailable?
+                      (eq? result project-discovery-unavailable))]
+                  [parent (directory-parent current)])
+             (if (string=? parent current)
+                 (values #f unavailable?)
+                 (loop parent unavailable?)))]
+          [else
+           (assertion-violation
+             (project-finder-name finder)
+             "project finder returned an invalid result"
+             result)]))))
 
   (define (project-catalog-discover catalog directory probe)
     (require-catalog 'project-catalog-discover catalog)
@@ -532,44 +535,44 @@
         'project-catalog-discover
         "probe must be a procedure"
         probe))
-    (let* ([start (vfs-normalize-path directory)]
-           [positive
+    (let* ((start (vfs-normalize-path directory))
+           (positive
              (hashtable-ref
                (project-catalog-positive-cache catalog)
                start
-               #f)])
+               #f)))
       (cond
-        [positive positive]
-        [(hashtable-contains?
+        (positive positive)
+        ((hashtable-contains?
            (project-catalog-negative-cache catalog)
            start)
-         #f]
-        [else
-         (let loop ([current start] [unavailable? #f])
-           (let-values
-             ([(found current-unavailable?)
-               (discover-at-directory catalog current probe)])
-             (cond
-               [found
-                (let ([canonical (intern-project! catalog found)])
-                  (hashtable-set!
-                    (project-catalog-positive-cache catalog)
-                    start
-                    canonical)
-                  canonical)]
-               [else
-                (let* ([unavailable?
-                         (or unavailable? current-unavailable?)]
-                       [parent (directory-parent current)])
-                  (if (string=? parent current)
-                      (begin
-                        (unless unavailable?
-                          (hashtable-set!
-                            (project-catalog-negative-cache catalog)
-                            start
-                            #t))
-                        #f)
-                      (loop parent unavailable?)))])))])))
+         #f)
+        (else
+         (let loop
+           ((finders (project-catalog-finders catalog))
+            (unavailable? #f))
+           (if
+             (null? finders)
+             (begin
+               (unless unavailable?
+                 (hashtable-set!
+                   (project-catalog-negative-cache catalog)
+                   start
+                   #t))
+               #f)
+             (let-values
+               (((found current-unavailable?)
+                 (discover-with-finder (car finders) start probe)))
+               (if found
+                   (let ((canonical (intern-project! catalog found)))
+                     (hashtable-set!
+                       (project-catalog-positive-cache catalog)
+                       start
+                       canonical)
+                     canonical)
+                   (loop
+                     (cdr finders)
+                     (or unavailable? current-unavailable?))))))))))
 
   (define (project-catalog-find-known catalog id)
     (require-catalog 'project-catalog-find-known catalog)

@@ -246,4 +246,27 @@
   (eq? (project-kind priority-project) 'high)
   "higher-priority finders must run first")
 
+(define nested-marker-catalog (make-project-catalog))
+(for-each
+  (lambda (finder)
+    (project-catalog-register-finder! nested-marker-catalog finder))
+  (built-in-project-finders))
+(define nested-marker-project
+  (project-catalog-discover
+    nested-marker-catalog
+    "/workspace/soda/src/editor"
+    (lambda (path)
+      (cond
+        [(string=? path "/workspace/soda/.soda-project") 'present]
+        [(string=? path "/workspace/soda/src/CMakeLists.txt") 'present]
+        [(string=? path "/workspace/soda/.git") 'present]
+        [else 'absent]))))
+(check
+  (and
+    (eq? (project-kind nested-marker-project) 'soda)
+    (string=?
+      (project-primary-root nested-marker-project)
+      "/workspace/soda"))
+  "an explicit Project marker must override nested generic build markers")
+
 (display "project tests passed\n")
