@@ -199,6 +199,10 @@
       (git-status-session-process-set! session process)
       (buffer-set-local! buffer 'git-status-session session)
       (register-git-status-actions! buffer session)
+      (buffer-set-result-refresh!
+        buffer
+        (lambda (refresh-context refresh-buffer)
+          (start-git-status! refresh-context project)))
       (hashtable-set! active-git-statuses editor session)
       (editor-set-current-location-list! editor locations)
       (append

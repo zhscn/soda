@@ -12,6 +12,7 @@
 | 基于文本属性的 Result Buffer 与 next/previous/group navigation | 已实现 |
 | 隐藏 Result Buffer 的 Buffer-local navigation point | 已实现 |
 | Result Buffer 的可发现 item action | 已实现 |
+| Result Buffer 的 producer refresh callback | 已实现 |
 | Scheme definition/reference/diagnostic producer | 已实现 |
 | navigation origin 与 LanguageAttachment provenance | 已实现 |
 | Workbench 级语义 `JumpGraph` 与持久化 | 已实现 |
@@ -169,6 +170,11 @@ Buffer 的真实 point，再激活 point 下的 item；`N`/`P` 按 `result-group
 下 `result-item` 的适用性判断和执行过程。键位仍由 mode keymap 决定；which-key、菜单
 或其他 TUI 组件可以枚举 point 下的可用 action，而无需识别领域 payload。Git status
 的 stage、unstage 和 diff 使用该协议。
+
+可重新生成内容的 Result Buffer 注册 buffer-local refresh callback。`g` 调用当前
+Buffer 的 producer，而不判断它来自搜索、版本控制或语义服务。producer 负责替换
+session、取消仍在运行的旧任务并重新建立属性；Project search 和 Git status 使用该
+协议。
 
 Result Buffer 在不可见时仍保存当前 item。全局 next/previous locus 使用最近实际导航的
 Result Buffer，并跳过已经关闭的 Buffer；它不依赖 Result Buffer 当前是否显示在某个

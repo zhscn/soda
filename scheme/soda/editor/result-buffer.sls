@@ -9,6 +9,9 @@
           buffer-register-result-action!
           buffer-result-actions-at
           invoke-buffer-item-action
+          buffer-set-result-refresh!
+          buffer-result-refreshable?
+          refresh-buffer-items
           buffer-set-result-interface!
           buffer-result-interface-ref
           editor-note-result-buffer!
@@ -73,7 +76,29 @@
     (buffer-set-local! buffer 'result-buffer-interface interface)
     (buffer-set-local! buffer 'result-current-index #f)
     (buffer-set-local! buffer 'result-actions '())
+    (buffer-set-local! buffer 'result-refresh #f)
     buffer)
+
+  (define (buffer-set-result-refresh! buffer refresh)
+    (unless (and (buffer? buffer)
+                 (or (not refresh) (procedure? refresh)))
+      (assertion-violation
+        'buffer-set-result-refresh!
+        "expected a Buffer and optional refresh procedure"
+        buffer refresh))
+    (unless (buffer-result-interface-ref buffer)
+      (assertion-violation
+        'buffer-set-result-refresh!
+        "Buffer has no result interface"
+        buffer))
+    (buffer-set-local! buffer 'result-refresh refresh)
+    buffer)
+
+  (define (buffer-result-refreshable? buffer)
+    (unless (buffer? buffer)
+      (assertion-violation
+        'buffer-result-refreshable? "expected a Buffer" buffer))
+    (procedure? (buffer-local-ref buffer 'result-refresh #f)))
 
   (define (buffer-register-result-action! buffer action)
     (unless (and (buffer? buffer) (result-action? action))
@@ -317,6 +342,14 @@
             name))
         ((result-action-invoke action) context buffer item index))))
 
+  (define (refresh-buffer-items context)
+    (let* ([buffer (view-buffer (command-context-view context))]
+           [refresh (buffer-local-ref buffer 'result-refresh #f)])
+      (unless (procedure? refresh)
+        (editor-user-error
+          'buffer-item.refresh "Current result Buffer cannot be refreshed"))
+      (refresh context buffer)))
+
   (define (activate-selected context disposition)
     (let-values ([(buffer interface item index)
                   (selected-item context 'buffer-item.activate)])
@@ -517,6 +550,9 @@
         (list 'buffer-item.quit
               quit-buffer-items
               "Close the current navigable Buffer.")
+        (list 'buffer-item.refresh
+              refresh-buffer-items
+              "Regenerate the current result Buffer from its producer.")
         (list 'buffer-item.next-global
               (lambda (context) (move-global-item context 1))
               "Advance the most recent visible navigable Buffer.")

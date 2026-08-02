@@ -940,6 +940,9 @@
           buffer-register-result-action!
           buffer-result-actions-at
           invoke-buffer-item-action
+          buffer-set-result-refresh!
+          buffer-result-refreshable?
+          refresh-buffer-items
           buffer-set-result-interface!
           buffer-result-interface-ref
           editor-note-result-buffer!

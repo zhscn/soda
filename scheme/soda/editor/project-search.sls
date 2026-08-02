@@ -21,6 +21,7 @@
           (soda editor managed-process)
           (soda editor project)
           (soda editor resource-resolver)
+          (soda editor result-buffer)
           (soda editor state)
           (soda editor workspace-edit)
           (soda json)
@@ -279,6 +280,10 @@
       (buffer-set-local! buffer 'project-search-session session)
       (buffer-clear-local! buffer 'edit-guard)
       (buffer-set-local-setting! buffer 'read-only? #t)
+      (buffer-set-result-refresh!
+        buffer
+        (lambda (refresh-context refresh-buffer)
+          (start-project-search! refresh-context project query)))
       (hashtable-set! active-project-searches editor session)
       (editor-set-current-location-list! editor locations)
       (append

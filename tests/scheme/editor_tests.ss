@@ -703,7 +703,9 @@
         'project-search-mode)
       (eq?
         (location-list-source (editor-current-location-list editor))
-        'project-search))
+        'project-search)
+      (buffer-result-refreshable?
+        (view-buffer (editor-active-view editor))))
     (error 'editor-tests "Project search command differs" effects))
   (let ([items
           (project-search-json-line->locations
@@ -820,6 +822,8 @@
          (eq?
            (buffer-major-mode-name (view-buffer (editor-active-view editor)))
            'git-status-mode)
+         (buffer-result-refreshable?
+           (view-buffer (editor-active-view editor)))
          (equal?
            (git-status-record-fields " M src/file with spaces.cpp")
            '(" M" "src/file with spaces.cpp")))
