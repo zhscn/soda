@@ -57,6 +57,16 @@
   (define-record-type git-discard-request
     (fields status-session paths))
 
+  (define-record-type git-commit-request
+    (fields status-session))
+
+  (define (nonblank-string? value)
+    (and
+      (string? value)
+      (exists
+        (lambda (character) (not (char-whitespace? character)))
+        (string->list value))))
+
   (define (rename-status? status)
     (and (= (string-length status) 2)
          (or (memv (string-ref status 0) '(#\R #\C))
@@ -493,7 +503,76 @@
             editor "Git discard was not applied")
           '()))))
 
+  (define (git-status-has-staged-changes? buffer)
+    (and
+      (eq? (buffer-result-producer-state buffer) 'ready)
+      (exists
+        (lambda (range)
+          (let ([item
+                  (buffer-text-property-ref
+                    buffer (car range) 'result-item #f)])
+            (and item (index-change? (item-status item)))))
+        (buffer-text-property-ranges buffer 'result-index))))
+
+  (define (request-git-commit! context buffer)
+    (let* ([editor (command-context-editor context)]
+           [session (buffer-local-ref buffer 'git-status-session #f)])
+      (unless
+        (and
+          (git-status-session? session)
+          (session-current? editor session)
+          (git-status-has-staged-changes? buffer))
+        (editor-user-error
+          'git.commit "No staged changes are ready to commit"))
+      (editor-open-prompt!
+        editor
+        (make-prompt-request
+          "Commit message: "
+          ""
+          'git-commit-message
+          #f
+          'free
+          nonblank-string?
+          'git.apply-commit
+          #f
+          (make-git-commit-request session)))
+      '()))
+
+  (define (apply-git-commit context)
+    (let* ([editor (command-context-editor context)]
+           [result (command-context-argument context)]
+           [request
+             (and (prompt-result? result) (prompt-result-data result))]
+           [message
+             (and (prompt-result? result) (prompt-result-value result))]
+           [session
+             (and
+               (git-commit-request? request)
+               (git-commit-request-status-session request))])
+      (if
+        (and
+          session
+          (eq? (prompt-result-status result) 'accepted)
+          (nonblank-string? message)
+          (session-current? editor session)
+          (git-status-has-staged-changes?
+            (git-status-session-buffer session)))
+        (start-git-operation
+          session
+          "Git commit"
+          (list "git" "commit" "-m" message))
+        (begin
+          (editor-set-status-message! editor "Git commit was not started")
+          '()))))
+
   (define (register-git-status-actions! buffer session)
+    (buffer-register-result-panel-action!
+      buffer
+      (make-result-panel-action
+        'commit
+        "Commit staged changes"
+        git-status-has-staged-changes?
+        request-git-commit!))
     (for-each
       (lambda (action)
         (buffer-register-result-action! buffer action))
@@ -566,6 +645,9 @@
   (define (discard-git-entry context)
     (invoke-buffer-item-action context 'discard))
 
+  (define (commit-git-status context)
+    (invoke-result-panel-action context 'commit))
+
   (define (bind-status-key! keymap character command)
     (keymap-bind!
       keymap
@@ -586,6 +668,7 @@
       (bind-status-key! keymap #\d 'git.diff)
       (bind-status-key! keymap #\D 'git.diff-staged)
       (bind-status-key! keymap #\x 'git.discard)
+      (bind-status-key! keymap #\c 'git.commit)
       (keymap-catalog-register!
         (editor-keymap-catalog editor) 'git-status-mode-map keymap))
     (for-each
@@ -601,7 +684,9 @@
         (list 'git.diff-staged diff-staged-git-entry
               "Show the staged diff for the Git entry at point.")
         (list 'git.discard discard-git-entry
-              "Discard tracked worktree changes after confirmation.")))
+              "Discard tracked worktree changes after confirmation.")
+        (list 'git.commit commit-git-status
+              "Commit staged changes from the Git status Buffer.")))
     (for-each
       (lambda (entry)
         (editor-register-internal-command!
@@ -620,6 +705,8 @@
         (list 'git.operation-exit apply-git-operation-exit
               "Finalize a Git operation and refresh status.")
         (list 'git.apply-discard apply-git-discard
-              "Apply a confirmed Git worktree discard.")))
+              "Apply a confirmed Git worktree discard.")
+        (list 'git.apply-commit apply-git-commit
+              "Start a Git commit with the accepted message.")))
     editor)
 )

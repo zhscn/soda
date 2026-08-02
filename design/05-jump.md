@@ -190,6 +190,9 @@ staged diff action，因此两个版本都可访问。tracked worktree change �
 `yes` 确认的 discard action，并对标记条目执行单次批量 `git restore --worktree`；
 untracked 文件不进入该动作。Git diff 和构建输出使用继承
 `location-results-mode` 的 `compilation-mode`，保留通用导航、刷新和取消契约。
+存在 staged entry 且 status producer 为 ready 时，面板提供 commit action。commit
+message 由 minibuffer 读取，并作为单个 argv 值传给 `git commit -m`；operation 沿用
+同一 stop、stderr、失败状态和成功后 status refresh 生命周期。
 
 可重新生成内容的 Result Buffer 注册 buffer-local refresh callback。`g` 调用当前
 Buffer 的 producer，而不判断它来自搜索、版本控制或语义服务。producer 负责替换

@@ -1136,6 +1136,76 @@
     (make-command-context
       editor (editor-active-view editor) #f #f #f)
     '()))
+(let* ([context
+         (make-command-context
+           editor (editor-active-view editor) #f #f #f)]
+       [status-effects
+         (execute-command!
+           (editor-command-registry editor)
+           'project.git-status
+           context
+           '())]
+       [panel (view-buffer (editor-active-view editor))]
+       [staged
+         (make-location-item
+           #f
+           "/virtual/repository/staged.cpp"
+           0 0 0
+           "staged.cpp"
+           '((git-status . "M ")))])
+  (editor-append-location-results! editor panel (list staged))
+  (buffer-set-result-producer-state! panel 'ready)
+  (unless
+    (memq
+      'commit
+      (map
+        result-panel-action-name
+        (buffer-result-panel-actions panel)))
+    (error 'editor-tests
+           "Git status did not expose commit for staged changes"))
+  (editor-update! editor (make-command-message 'git.commit #f))
+  (let* ([prompt (editor-active-prompt editor)]
+         [prompt-view
+           (and prompt
+                (editor-view-ref editor (prompt-session-view-id prompt)))]
+         [prompt-buffer (and prompt-view (view-buffer prompt-view))])
+    (unless prompt-buffer
+      (error 'editor-tests "Git commit did not request a message"))
+    (buffer-replace-range!
+      prompt-buffer
+      0
+      (bytevector-length (buffer-bytes prompt-buffer))
+      (string->utf8 "Fix parser's state"))
+    (view-set-caret! prompt-view 18)
+    (let* ([reply (editor-accept-prompt! editor)]
+           [commit-effects
+             (editor-update!
+               editor
+               (make-internal-command-message
+                 (prompt-reply-command reply)
+                 (prompt-reply-result reply)))]
+           [process
+             (and
+               (= (length commit-effects) 1)
+               (eq? (command-effect-kind (car commit-effects))
+                    'managed-process.start)
+               (command-effect-payload (car commit-effects)))])
+      (unless
+        (and
+          (managed-process? process)
+          (equal?
+            (managed-process-arguments process)
+            '("git" "commit" "-m" "Fix parser's state"))
+          (eq? (buffer-result-producer-state panel) 'running))
+        (error 'editor-tests
+               "Git commit message was not passed as one argv value"
+               status-effects commit-effects))))
+  (execute-command!
+    (editor-command-registry editor)
+    'buffer-item.quit
+    (make-command-context
+      editor (editor-active-view editor) #f #f #f)
+    '()))
 (let ([context
         (editor-view-resource-context
           editor
