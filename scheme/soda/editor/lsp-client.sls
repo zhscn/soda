@@ -2364,21 +2364,6 @@
               #f)])
       (or (eq? capability #t) (json-object? capability))))
 
-  (define (document-highlight-annotation buffer index value)
-    (guard (condition [else #f])
-      (let* ([range
-               (lsp-range-from-json (json-object-ref value "range" #f))]
-             [start (lsp-buffer-offset-at buffer (lsp-range-start range))]
-             [end (lsp-buffer-offset-at buffer (lsp-range-end range))])
-        (and start end
-             (make-annotation
-               (list index start end (json-object-ref value "kind" 1))
-               start end
-               'document-highlight
-               'symbol-highlight
-               #f #f
-               value)))))
-
   (define (publish-document-highlights! editor session buffer revision result)
     (guard (condition [else #f])
       (when
@@ -2389,17 +2374,7 @@
                    (hashtable-ref
                      lsp-document-highlight-generations session 0))]
               [annotations
-                (let loop ([values (json-array-values result)] [index 0])
-                  (if (null? values)
-                      '()
-                      (let ([annotation
-                              (and
-                                (json-object? (car values))
-                                (document-highlight-annotation
-                                  buffer index (car values)))])
-                        (if annotation
-                            (cons annotation (loop (cdr values) (+ index 1)))
-                            (loop (cdr values) (+ index 1))))))])
+                (decode-lsp-document-highlights buffer result)])
           (hashtable-set!
             lsp-document-highlight-generations session generation)
           (editor-publish-annotation-set!

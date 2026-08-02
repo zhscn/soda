@@ -1,6 +1,7 @@
 (library (soda editor lsp-annotation-decoder)
   (export decode-lsp-diagnostic
-          decode-lsp-semantic-tokens)
+          decode-lsp-semantic-tokens
+          decode-lsp-document-highlights)
   (import (rnrs)
           (soda editor annotation)
           (soda editor buffer)
@@ -130,4 +131,38 @@
                              (semantic-token-face type)
                              #f #f
                              (list type modifiers))
-                           annotations))))))))])))))
+                           annotations))))))))]))))
+
+  (define (decode-document-highlight buffer index value)
+    (guard (condition [else #f])
+      (let* ([range
+               (lsp-range-from-json
+                 (json-object-ref value "range" #f))]
+             [start (lsp-buffer-offset-at buffer (lsp-range-start range))]
+             [end (lsp-buffer-offset-at buffer (lsp-range-end range))])
+        (and
+          start
+          end
+          (make-annotation
+            (list index start end (json-object-ref value "kind" 1))
+            start end
+            'document-highlight
+            'symbol-highlight
+            #f #f
+            value)))))
+
+  (define (decode-lsp-document-highlights buffer value)
+    (and
+      (json-array? value)
+      (let loop ([values (json-array-values value)] [index 0])
+        (if
+          (null? values)
+          '()
+          (let ([annotation
+                  (and
+                    (json-object? (car values))
+                    (decode-document-highlight buffer index (car values)))])
+            (if
+              annotation
+              (cons annotation (loop (cdr values) (+ index 1)))
+              (loop (cdr values) (+ index 1)))))))))
