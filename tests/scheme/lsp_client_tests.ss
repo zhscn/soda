@@ -1452,6 +1452,24 @@
       (cons "result" rename-workspace-edit))))
 (check
   (and
+    (eq?
+      (buffer-major-mode-name (view-buffer (editor-active-view editor)))
+      'workspace-edit-preview-mode)
+    (bytevector=?
+      (buffer-bytes source)
+      (string->utf8 "// Widget\n// Generated\nint main() {}\n"))
+    (bytevector=?
+      (buffer-bytes rename-target)
+      (string->utf8 "int Widget;\n")))
+  "LSP rename did not present an unapplied workspace edit preview")
+(editor-update!
+  editor
+  (make-command-message 'workspace-edit.accept #f))
+(editor-update!
+  editor
+  (make-command-message 'buffer-item.quit #f))
+(check
+  (and
     (bytevector=?
       (buffer-bytes source)
       (string->utf8 "// Gadget\n// Generated\nint main() {}\n"))

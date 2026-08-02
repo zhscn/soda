@@ -1655,6 +1655,7 @@
           (soda editor window)
           (soda editor window-runtime)
           (soda editor workbench)
+          (soda editor workspace-edit-preview)
           (soda editor workbench-commands)
           (soda editor workbench-session)
           (soda tui application))
@@ -1891,6 +1892,7 @@
         (make-scheme-runtime-completion-provider editor))
       (install-file-commands! editor)
       (install-lsp-commands! editor)
+      (install-workspace-edit-preview! editor)
       (install-scheme-interface-commands!
         editor scheme-environments)
       (install-scheme-project-session-commands!

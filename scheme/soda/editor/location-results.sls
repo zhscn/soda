@@ -206,8 +206,8 @@
         who "invalid result Buffer request"
         title locations origin-view-id jump-kind close-command)))
 
-  (define (editor-open-result-buffer!
-            editor resource title locations origin-view-id jump-kind
+  (define (%editor-open-result-buffer!
+            editor resource mode title locations origin-view-id jump-kind
             close-command close-argument)
     (validate-result-request
       'editor-open-result-buffer!
@@ -220,7 +220,7 @@
              (cond
                [(not existing)
                 (editor-create-buffer!
-                  editor resource 'location-results-mode "")]
+                  editor resource mode "")]
                [(location-results-buffer? existing) existing]
                [else
                 (editor-user-error
@@ -232,6 +232,7 @@
                title locations origin-view-id jump-kind
                close-command close-argument #f)]
            [heading (string-append title "\n")])
+      (buffer-set-major-mode! buffer mode)
       (buffer-clear-text-properties! buffer)
       (buffer-replace-range-internal!
         buffer 0 (buffer-size buffer) (string->utf8 heading))
@@ -257,6 +258,19 @@
         (ensure-view-visible! view))
       (editor-invalidate! editor 'document)
       buffer))
+
+  (define editor-open-result-buffer!
+    (case-lambda
+      [(editor resource title locations origin-view-id jump-kind
+               close-command close-argument)
+       (%editor-open-result-buffer!
+         editor resource 'location-results-mode title locations origin-view-id
+         jump-kind close-command close-argument)]
+      [(editor resource mode title locations origin-view-id jump-kind
+               close-command close-argument)
+       (%editor-open-result-buffer!
+         editor resource mode title locations origin-view-id jump-kind
+         close-command close-argument)]))
 
   (define (editor-append-result-text! editor buffer text ranges)
     (unless (and (location-results-buffer? buffer)

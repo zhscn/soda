@@ -59,6 +59,7 @@
           (soda editor project-workspace)
           (soda editor state)
           (soda editor workspace-edit)
+          (soda editor workspace-edit-preview)
           (soda editor xref)
           (soda json)
           (soda runtime))
@@ -125,7 +126,8 @@
             edits
             resources
             description
-            after-apply))
+            after-apply
+            preview?))
 
   (define-record-type lsp-code-action
     (fields title kind raw resolved?))
@@ -3287,13 +3289,8 @@
     (case-lambda
       [(editor view-id source-buffer-id source-revision edits description)
        (lsp-apply-workspace-edits!
-         editor
-         view-id
-         source-buffer-id
-         source-revision
-         edits
-         description
-         (lambda (current-editor) '()))]
+         editor view-id source-buffer-id source-revision edits description
+         (lambda (current-editor) '()) #f)]
       [(editor
          view-id
          source-buffer-id
@@ -3301,6 +3298,17 @@
          edits
          description
          after-apply)
+       (lsp-apply-workspace-edits!
+         editor view-id source-buffer-id source-revision edits description
+         after-apply #f)]
+      [(editor
+         view-id
+         source-buffer-id
+         source-revision
+         edits
+         description
+         after-apply
+         preview?)
        (unless (procedure? after-apply)
          (assertion-violation
            'lsp-apply-workspace-edits!
@@ -3325,7 +3333,8 @@
                          edits
                          missing
                          description
-                         after-apply))
+                         after-apply
+                         preview?))
                      (editor-set-status-message!
                        editor
                        (string-append
@@ -3344,16 +3353,23 @@
                            (editor-set-status-message!
                              editor "Language-server workspace edit has invalid ranges")
                            '())
-                         (begin
-                           (workspace-text-edits-apply! editor resolved)
-                           (editor-set-status-message!
-                             editor
-                             (string-append
-                               description
-                               " in "
-                               (number->string (length resolved))
-                               (if (= (length resolved) 1) " place" " places")))
-                           (after-apply editor))))))))]))
+                         (if preview?
+                             (begin
+                               (editor-show-workspace-edit-preview!
+                                 editor view-id resolved description after-apply)
+                               '())
+                             (begin
+                               (workspace-text-edits-apply! editor resolved)
+                               (editor-set-status-message!
+                                 editor
+                                 (string-append
+                                   description
+                                   " in "
+                                   (number->string (length resolved))
+                                   (if (= (length resolved) 1)
+                                       " place"
+                                       " places")))
+                               (after-apply editor)))))))))]))
 
   (define (lsp-after-open-result context arguments effects)
     (let* ([editor (command-context-editor context)]
@@ -3388,7 +3404,8 @@
                      (lsp-pending-workspace-edit-source-revision pending)
                      (lsp-pending-workspace-edit-edits pending)
                      (lsp-pending-workspace-edit-description pending)
-                     (lsp-pending-workspace-edit-after-apply pending))])
+                     (lsp-pending-workspace-edit-after-apply pending)
+                     (lsp-pending-workspace-edit-preview? pending))])
              (when (pair? follow-up-effects)
                (editor-queue-tui-effects! editor follow-up-effects)))]))))
 
@@ -3945,7 +3962,9 @@
                  (buffer-id buffer)
                  revision
                  edits
-                 "Renamed")]))))))
+                 "Renamed"
+                 (lambda (current-editor) '())
+                 #t)]))))))
 
 
   (define (install-lsp-commands! editor)
