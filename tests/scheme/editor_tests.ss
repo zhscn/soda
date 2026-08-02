@@ -987,6 +987,48 @@
             (error 'editor-tests
                    "Git status panel disappeared after closing its diff"))
           (editor-select-view-window! editor (view-id panel-view)))))
+    (let* ([worktree-range
+             (car (buffer-text-property-ranges panel 'result-index))]
+           [view (editor-active-view editor)])
+      (view-set-caret! view (car worktree-range))
+      (let* ([stage-effects
+               (editor-update!
+                 editor (make-command-message 'git.stage #f))]
+             [operation-process
+               (and
+                 (= (length stage-effects) 1)
+                 (eq? (command-effect-kind (car stage-effects))
+                      'managed-process.start)
+                 (command-effect-payload (car stage-effects)))]
+             [stop-effects
+               (editor-update!
+                 editor (make-command-message 'buffer-panel.stop #f))]
+             [cancel-effects
+               (if (and (= (length stop-effects) 1)
+                        (eq? (command-effect-kind (car stop-effects))
+                             'command.invoke))
+                   (editor-update!
+                     editor (command-effect-payload (car stop-effects)))
+                   stop-effects)]
+             [signal
+               (find
+                 (lambda (effect)
+                   (eq? (command-effect-kind effect)
+                        'managed-process.signal))
+                 cancel-effects)]
+             [request (and signal (command-effect-payload signal))])
+        (unless
+          (and
+            (managed-process? operation-process)
+            (managed-process-signal-request? request)
+            (eq?
+              (managed-process-signal-request-process request)
+              operation-process)
+            (= (managed-process-signal-request-signal request) 15)
+            (eq? (buffer-result-producer-state panel) 'cancelled))
+          (error 'editor-tests
+                 "stopping Git stage did not signal its operation process"
+                 stage-effects stop-effects cancel-effects))))
     (buffer-set-result-producer-state! panel 'running)
     (when
       (exists

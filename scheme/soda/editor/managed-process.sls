@@ -27,6 +27,9 @@
           managed-process-write-request-process
           managed-process-write-request-data
           make-managed-process-signal-request
+          managed-process-signal-request?
+          managed-process-signal-request-process
+          managed-process-signal-request-signal
           make-managed-process-resize-request
           install-managed-process-runtime!
           managed-process-runtime?

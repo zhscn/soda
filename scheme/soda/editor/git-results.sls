@@ -26,6 +26,7 @@
     (git-status-session %make-git-status-session git-status-session?)
     (fields project root origin-view-id workbench-id locations
             (mutable buffer) (mutable process)
+            (mutable operation-process)
             (mutable pending-output) (mutable stderr-output)
             (mutable rename-record) (mutable closed?)))
 
@@ -36,6 +37,18 @@
 
   (define (active-git-status editor scope)
     (scoped-session-table-ref active-git-statuses editor scope #f))
+
+  (define (git-status-session-active-process session)
+    (let ([operation (git-status-session-operation-process session)]
+          [status (git-status-session-process session)])
+      (cond
+        ;; An operation belongs to the session as soon as its start effect is
+        ;; emitted.  It may still be in the created state until the runtime
+        ;; consumes that effect, but it is already the task that cancellation
+        ;; must target.
+        [operation operation]
+        [(and status (managed-process-running? status)) status]
+        [else #f])))
 
   (define-record-type git-operation
     (fields status-session label (mutable stderr-output)))
@@ -140,8 +153,6 @@
           (let ([pending (git-status-session-rename-record session)])
             (append-status! editor session (car pending) (cadr pending) #f)
             (git-status-session-rename-record-set! session #f)))
-        (scoped-session-table-delete!
-          active-git-statuses editor (git-status-session-scope session))
         (let* ([status (managed-process-event-status event)]
                [count
                  (length
@@ -180,20 +191,25 @@
            [session (command-context-argument context)])
       (if (not (git-status-session? session))
           '()
-          (let ([process (git-status-session-process session)])
+          (let* ([operation
+                   (git-status-session-operation-process session)]
+                 [process (git-status-session-active-process session)]
+                 [operation? (and operation (eq? process operation))])
             (git-status-session-closed?-set! session #t)
             (when (git-status-session-buffer session)
               (editor-finish-result-producer!
                 editor
                 (git-status-session-buffer session)
                 'cancelled
-                "Git status cancelled."
+                (if operation?
+                    "Git operation cancelled."
+                    "Git status cancelled.")
                 'warning))
             (let ([scope (git-status-session-scope session)])
               (when (eq? (active-git-status editor scope) session)
                 (scoped-session-table-delete!
                   active-git-statuses editor scope)))
-            (if (and process (managed-process-running? process))
+            (if process
                 (list
                   (make-command-effect
                     'managed-process.signal
@@ -211,7 +227,7 @@
            [locations (make-location-list 'git-status '())]
            [session
              (%make-git-status-session
-               project root origin-view-id scope locations #f #f
+               project root origin-view-id scope locations #f #f #f
                (make-bytevector 0) (make-bytevector 0) #f #f)]
            [process
              (make-managed-process
@@ -237,18 +253,18 @@
       (scoped-session-table-set!
         active-git-statuses editor scope session)
       (editor-set-current-location-list! editor locations)
-      (append
-        (if (and old (git-status-session-process old)
-                 (managed-process-running? (git-status-session-process old)))
-            (begin
-              (git-status-session-closed?-set! old #t)
+      (let ([old-process
+              (and old (git-status-session-active-process old))])
+        (when old
+          (git-status-session-closed?-set! old #t))
+        (append
+          (if old-process
               (list
                 (make-command-effect
                   'managed-process.signal
-                  (make-managed-process-signal-request
-                    (git-status-session-process old) 15))))
-            '())
-        (list (make-command-effect 'managed-process.start process)))))
+                  (make-managed-process-signal-request old-process 15)))
+              '())
+          (list (make-command-effect 'managed-process.start process))))))
 
   (define (item-status item)
     (let ([entry
@@ -268,6 +284,13 @@
                          (managed-process-event-process event))]
            [operation (and process (managed-process-owner process))])
       (when (and (git-operation? operation)
+                 (let ([session
+                         (git-operation-status-session operation)])
+                   (and
+                     (not (git-status-session-closed? session))
+                     (eq?
+                       process
+                       (git-status-session-operation-process session))))
                  (= (managed-process-event-flags event) process-stderr))
         (git-operation-stderr-output-set!
           operation
@@ -287,42 +310,53 @@
           (let* ([status (managed-process-event-status event)]
                  [session (git-operation-status-session operation)]
                  [view (status-result-view editor session)])
-            (if (zero? status)
+            (if (or (git-status-session-closed? session)
+                    (not
+                      (eq? process
+                           (git-status-session-operation-process session))))
+                '()
                 (begin
-                  (editor-set-status-message!
-                    editor (string-append (git-operation-label operation) " succeeded"))
-                  (if view
-                      (start-git-status!
-                        (make-command-context editor view #f #f #f)
-                        (git-status-session-project session))
+                  (git-status-session-operation-process-set! session #f)
+                  (if (zero? status)
                       (begin
+                        (editor-set-status-message!
+                          editor
+                          (string-append
+                            (git-operation-label operation)
+                            " succeeded"))
+                        (if view
+                            (start-git-status!
+                              (make-command-context editor view #f #f #f)
+                              (git-status-session-project session))
+                            (begin
+                              (editor-finish-result-producer!
+                                editor
+                                (git-status-session-buffer session)
+                                'ready
+                                (string-append
+                                  (git-operation-label operation)
+                                  " succeeded.")
+                                'info)
+                              '())))
+                      (let ([message
+                              (let ([stderr
+                                      (git-operation-stderr-output operation)])
+                                (if (zero? (bytevector-length stderr))
+                                    (string-append
+                                      (git-operation-label operation)
+                                      " failed with status "
+                                      (number->string status))
+                                    (guard
+                                      (condition [else "Git operation failed"])
+                                      (utf8->string stderr))))])
                         (editor-finish-result-producer!
                           editor
                           (git-status-session-buffer session)
-                          'ready
-                          (string-append
-                            (git-operation-label operation) " succeeded.")
-                          'info)
-                        '())))
-                (begin
-                  (let ([message
-                          (let ([stderr
-                                  (git-operation-stderr-output operation)])
-                            (if (zero? (bytevector-length stderr))
-                                (string-append
-                                  (git-operation-label operation)
-                                  " failed with status "
-                                  (number->string status))
-                                (guard (condition [else "Git operation failed"])
-                                  (utf8->string stderr))))])
-                    (editor-finish-result-producer!
-                      editor
-                      (git-status-session-buffer session)
-                      'failed
-                      message
-                      'error)
-                    (editor-set-status-message! editor message))
-                  '()))))))
+                          'failed
+                          message
+                          'error)
+                        (editor-set-status-message! editor message)
+                        '()))))))))
 
   (define (start-git-operation session label arguments)
     (let* ([operation
@@ -333,6 +367,7 @@
                'git.operation-output 'git.operation-exit)])
       (buffer-set-result-producer-state!
         (git-status-session-buffer session) 'running)
+      (git-status-session-operation-process-set! session process)
       (list (make-command-effect 'managed-process.start process))))
 
   (define (git-status-item? buffer item)
