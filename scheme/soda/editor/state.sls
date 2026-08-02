@@ -309,6 +309,7 @@
           (soda editor debugger-action)
           (soda editor display)
           (soda editor display-map)
+          (soda editor editor-storage)
           (soda editor entity-registry)
           (soda editor event)
           (soda editor fold)
@@ -337,110 +338,6 @@
           (soda editor window)
           (soda editor workbench)
           (soda vfs))
-
-  (define-record-type (editor %make-editor editor?)
-    (fields
-      (immutable buffers editor-buffer-registry)
-      (immutable resource-table editor-resource-table)
-      (mutable buffer-registry-generation
-               editor-buffer-registry-generation
-               editor-buffer-registry-generation-set!)
-      (mutable next-document-id
-               editor-next-document-id
-               editor-next-document-id-set!)
-      (immutable views editor-view-registry)
-      (mutable active-view-id
-               editor-active-view-id
-               editor-active-view-id-set!)
-      (mutable next-window-id
-               editor-next-window-id
-               editor-next-window-id-set!)
-      (immutable workbenches editor-workbench-registry)
-      (mutable active-workbench-id
-               editor-active-workbench-id
-               editor-active-workbench-id-set!)
-      (immutable prompt-store editor-prompt-store)
-      (immutable completions editor-completion-registry)
-      (immutable interactions editor-interaction-registry)
-      (immutable tui-applications editor-tui-application-registry)
-      (mutable effects editor-effects editor-effects-set!)
-      (mutable evaluator editor-evaluator editor-evaluator-set!)
-      (mutable debugger editor-debugger editor-debugger-set!)
-      (immutable commands editor-command-registry)
-      (immutable hooks editor-hook-registry)
-      (immutable keymaps editor-keymap-catalog)
-      (immutable languages editor-language-catalog)
-      (immutable language-sessions editor-language-session-registry)
-      (immutable auto-modes editor-auto-mode-catalog)
-      (immutable projects editor-project-catalog)
-      (immutable project-resource-snapshots
-                 editor-project-resource-snapshots)
-      (immutable settings editor-setting-store)
-      (immutable completion-providers
-                 editor-completion-provider-catalog)
-      (mutable status-message
-               %editor-status-message
-               %editor-status-message-set!)
-      (mutable kill-ring editor-kill-ring editor-kill-ring-set!)
-      (immutable global-marks editor-global-marks)
-      (immutable changes editor-changes)
-      (mutable bookmarks editor-bookmarks editor-bookmarks-set!)
-      (mutable save-places editor-save-places editor-save-places-set!)
-      (mutable last-yank editor-last-yank editor-last-yank-set!)
-      (mutable annotation-sets
-               editor-annotation-sets
-               editor-annotation-sets-set!)
-      (mutable pending-prefix
-               editor-pending-prefix
-               editor-pending-prefix-set!)
-      (mutable last-command-class
-               editor-last-command-class
-               editor-last-command-class-set!)
-      (mutable active-command-invocation
-               editor-active-command-invocation
-               editor-active-command-invocation-set!)
-      (mutable next-command-invocation-id
-               editor-next-command-invocation-id
-               editor-next-command-invocation-id-set!)
-      (mutable current-command
-               editor-current-command
-               editor-current-command-set!)
-      (mutable last-command
-               editor-last-command
-               editor-last-command-set!)
-      (mutable command-history
-               editor-command-history
-               editor-command-history-set!)
-      (immutable minor-modes editor-minor-mode-catalog)
-      (mutable global-minor-modes
-               editor-global-minor-modes
-               editor-global-minor-modes-set!)
-      (immutable theme-catalog editor-theme-catalog)
-      (mutable theme editor-theme editor-theme-set!)
-      (mutable frame-rows editor-frame-rows editor-frame-rows-set!)
-      (mutable frame-columns
-               editor-frame-columns
-               editor-frame-columns-set!)
-      (mutable render-generation
-               editor-render-generation
-               editor-render-generation-set!)
-      (mutable dirty-reasons
-               editor-dirty-reasons
-               editor-dirty-reasons-set!)
-      (mutable extension-baseline
-               editor-extension-baseline
-               editor-extension-baseline-set!)
-      (mutable extensions editor-extensions editor-extensions-set!)
-      (mutable rebuilding-extensions?
-               editor-rebuilding-extensions?
-               editor-rebuilding-extensions?-set!)
-      (mutable extension-cleanup-scope
-               editor-extension-cleanup-scope
-               editor-extension-cleanup-scope-set!)
-      (mutable configuration-transaction-depth
-               editor-configuration-transaction-depth
-               editor-configuration-transaction-depth-set!)
-      (mutable closed? editor-closed? editor-closed?-set!)))
 
   (define (editor-window-root value)
     (workbench-layout (editor-active-workbench value)))
@@ -5727,7 +5624,7 @@
                #f
                (make-navigation-walk))]
            [value
-             (%make-editor
+             (make-editor-storage
                buffers
                resources
                0
