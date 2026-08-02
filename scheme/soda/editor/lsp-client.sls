@@ -55,6 +55,7 @@
           (soda editor lsp-json-rpc)
           (soda editor lsp-annotation-decoder)
           (soda editor lsp-completion-decoder)
+          (soda editor lsp-location-decoder)
           (soda editor lsp-position)
           (soda editor lsp-protocol)
           (soda editor lsp-workspace-edit-decoder)
@@ -2493,74 +2494,16 @@
               editor "The language server does not provide signature help")
             '()))))
 
-  (define (lsp-first-location value)
-    (cond
-      [(json-array? value)
-       (and (pair? (json-array-values value)) (car (json-array-values value)))]
-      [(json-object? value) value]
-      [else #f]))
-
-  (define (lsp-location-range location)
-    (and
-      (json-object? location)
-      (let ([range
-              (or (json-object-ref location "range" #f)
-                  (json-object-ref location "targetSelectionRange" #f))])
-        (guard (condition [else #f]) (lsp-range-from-json range)))))
-
-  (define (lsp-location-resource location)
-    (and
-      (json-object? location)
-      (let ([uri
-              (or (json-object-ref location "uri" #f)
-                  (json-object-ref location "targetUri" #f))])
-        (and (string? uri)
-             (guard (condition [else #f]) (lsp-uri-file-path uri))))))
-
   (define lsp-location-item
     (case-lambda
       [(editor location)
        (lsp-location-item editor location #f)]
       [(editor location language-context)
-       (guard (condition [else #f])
-         (let* ([path (lsp-location-resource location)]
-                [range (lsp-location-range location)]
-                [buffer (and path (editor-buffer-for-resource editor path))])
-           (and path range
-             (if buffer
-                 (let ([start
-                         (lsp-buffer-offset-at buffer (lsp-range-start range))]
-                       [end
-                         (lsp-buffer-offset-at buffer (lsp-range-end range))])
-                   (and start end
-                        (make-location-item
-                          (buffer-id buffer)
-                          path
-                          (buffer-revision buffer)
-                          start
-                          end
-                          #f
-                          location
-                          language-context)))
-                 (make-location-item
-                   #f
-                   path
-                   0
-                   0
-                   0
-                   #f
-                   (list
-                     (cons
-                       'file-open-position
-                       (make-file-utf16-position
-                         (lsp-position-line (lsp-range-start range))
-                         (lsp-position-character (lsp-range-start range))))
-                     (cons
-                       'file-open-end-position
-                       (make-file-utf16-position
-                         (lsp-position-line (lsp-range-end range))
-                         (lsp-position-character (lsp-range-end range)))))
-                   language-context)))))]))
+       (decode-lsp-location-item
+         (lambda (resource)
+           (editor-buffer-for-resource editor resource))
+         location
+         language-context)]))
 
   (define (lsp-jump-to-location-item! editor view item kind)
     (editor-visit-location-item! editor view item kind))
@@ -2576,17 +2519,11 @@
              '()))]))
 
   (define (lsp-reference-items editor value language-context)
-    (if (json-array? value)
-        (let loop ([locations (json-array-values value)] [items '()])
-          (if (null? locations)
-              (reverse items)
-              (let ([item
-                      (lsp-location-item
-                        editor (car locations) language-context)])
-                (loop
-                  (cdr locations)
-                  (if item (cons item items) items)))))
-        '()))
+    (decode-lsp-location-items
+      (lambda (resource)
+        (editor-buffer-for-resource editor resource))
+      value
+      language-context))
 
   (define (lsp-xref-request-for-result? request result-buffer-id)
     (let ([context (lsp-client-pending-request-context request)])
