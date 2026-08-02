@@ -331,6 +331,7 @@
           (soda editor resource-context)
           (soda editor save-place)
           (soda editor setting)
+          (soda editor status)
           (soda editor theme)
           (soda editor themes catppuccin)
           (soda editor tui-application)
@@ -4601,38 +4602,6 @@
   (define (editor-set-pending-keys! value sequence)
     (require-open-editor 'editor-set-pending-keys! value)
     (view-pending-keys-set! (editor-active-view value) sequence))
-
-  (define editor-set-status-message!
-    (case-lambda
-      [(value message)
-       (editor-set-status-message! value message #f)]
-      [(value message severity)
-       (require-open-editor 'editor-set-status-message! value)
-       (unless (or (not message) (string? message))
-         (assertion-violation
-           'editor-set-status-message!
-           "status message must be a string or #f"
-           message))
-       (unless (memq severity '(#f info warning error))
-         (assertion-violation
-           'editor-set-status-message!
-           "status severity must be #f, info, warning, or error"
-           severity))
-       (%editor-status-message-set!
-         value
-         (if (and message severity)
-             (cons severity message)
-             message))]))
-
-  (define (editor-status-message value)
-    (let ([message (%editor-status-message value)])
-      (if (pair? message)
-          (cdr message)
-          message)))
-
-  (define (editor-status-message-severity value)
-    (let ([message (%editor-status-message value)])
-      (and (pair? message) (car message))))
 
   (define (editor-invalidate! value reason)
     (require-open-editor 'editor-invalidate! value)
