@@ -7,10 +7,6 @@
           prompt-store-allocate-prompt-id!
           prompt-store-push-prompt!
           prompt-store-pop-prompt!
-          prompt-store-allocate-completion-id!
-          prompt-store-register-completion!
-          prompt-store-unregister-completion!
-          prompt-store-completion-ref
           prompt-store-history-ref
           prompt-store-ensure-history!
           prompt-store-history-entries
@@ -19,7 +15,6 @@
           prompt-store-history-next!
           prompt-store-clear!)
   (import (rnrs)
-          (soda editor completion)
           (soda editor prompt))
 
   (define-record-type
@@ -33,17 +28,11 @@
       (mutable next-prompt-id
                %prompt-store-next-prompt-id
                %prompt-store-next-prompt-id-set!)
-      (immutable completions %prompt-store-completions)
-      (mutable next-completion-id
-               %prompt-store-next-completion-id
-               %prompt-store-next-completion-id-set!)
       (immutable histories %prompt-store-histories)))
 
   (define (make-prompt-store)
     (%make-prompt-store
       '()
-      1
-      (make-eqv-hashtable)
       1
       (make-eq-hashtable)))
 
@@ -84,40 +73,6 @@
       store
       (cdr (prompt-store-prompts store)))
     session)
-
-  (define (prompt-store-allocate-completion-id! store)
-    (let ([id (%prompt-store-next-completion-id store)])
-      (%prompt-store-next-completion-id-set! store (+ id 1))
-      id))
-
-  (define (prompt-store-register-completion! store completion)
-    (let ([id (completion-session-id completion)])
-      (when (hashtable-ref (%prompt-store-completions store) id #f)
-        (assertion-violation
-          'prompt-store-register-completion!
-          "completion session id is already registered"
-          id))
-      (hashtable-set!
-        (%prompt-store-completions store)
-        id
-        completion))
-    completion)
-
-  (define (prompt-store-unregister-completion! store completion)
-    (let* ([id (completion-session-id completion)]
-           [registered
-             (hashtable-ref
-               (%prompt-store-completions store)
-               id
-               #f)])
-      (when (eq? registered completion)
-        (hashtable-delete!
-          (%prompt-store-completions store)
-          id)))
-    completion)
-
-  (define (prompt-store-completion-ref store id)
-    (hashtable-ref (%prompt-store-completions store) id #f))
 
   (define (prompt-store-history-ref store id)
     (and id (hashtable-ref (%prompt-store-histories store) id #f)))
@@ -196,5 +151,4 @@
 
   (define (prompt-store-clear! store)
     (prompt-store-prompts-set! store '())
-    (hashtable-clear! (%prompt-store-completions store))
     (hashtable-clear! (%prompt-store-histories store))))

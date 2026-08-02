@@ -454,6 +454,7 @@
                editor-active-workbench-id
                editor-active-workbench-id-set!)
       (immutable prompt-store editor-prompt-store)
+      (immutable completions editor-completion-registry)
       (immutable interactions editor-interaction-registry)
       (immutable tui-applications editor-tui-application-registry)
       (mutable effects editor-effects editor-effects-set!)
@@ -2744,9 +2745,13 @@
       (view-completion (editor-active-view value))))
 
   (define (editor-completion-ref value id)
-    (prompt-store-completion-ref
-      (editor-prompt-store value)
-      id))
+    (entity-registry-ref (editor-completion-registry value) id))
+
+  (define (register-completion! value completion)
+    (entity-registry-register!
+      (editor-completion-registry value)
+      (completion-session-id completion)
+      completion))
 
   (define (editor-root-viewport-columns value)
     (require-open-editor
@@ -2814,9 +2819,9 @@
         (pop-completion-input-state! view)))
 
   (define (release-completion! value completion release-requests!)
-    (prompt-store-unregister-completion!
-      (editor-prompt-store value)
-      completion)
+    (entity-registry-remove!
+      (editor-completion-registry value)
+      (completion-session-id completion))
     (completion-session-close!
       completion
       (lambda (request) (release-requests! value request))))
@@ -3026,8 +3031,8 @@
              caret))
          (cancel-view-completion! value view)
          (let* ([id
-                  (prompt-store-allocate-completion-id!
-                    (editor-prompt-store value))]
+                  (entity-registry-next-id
+                    (editor-completion-registry value))]
                 [target
                   (make-document-completion-target
                     (view-id view)
@@ -3043,9 +3048,7 @@
                     target
                     source
                     provider-names)])
-           (prompt-store-register-completion!
-             (editor-prompt-store value)
-             completion)
+           (register-completion! value completion)
            (view-completion-set! view completion)
            (editor-refresh-document-completion! value #f)
            completion))]))
@@ -3611,7 +3614,8 @@
            [completion-id
              (and
                source
-               (prompt-store-allocate-completion-id! store))]
+               (entity-registry-next-id
+                 (editor-completion-registry value)))]
            [origin-view-id (editor-active-view-id value)]
            [origin-view (editor-active-view value)]
            [buffer
@@ -3663,9 +3667,7 @@
       (ensure-view-visible! view)
       (prompt-store-push-prompt! store session)
       (when completion
-        (prompt-store-register-completion!
-          store
-          completion))
+        (register-completion! value completion))
       (editor-active-view-id-set! value (view-id view))
       (editor-set-status-message! value #f)
       (editor-refresh-prompt-completion! value)
@@ -6156,6 +6158,7 @@
            [interactions (make-entity-registry 1)]
            [workbenches (make-entity-registry 2)]
            [prompt-store (make-prompt-store)]
+           [completions (make-entity-registry 1)]
            [keymaps (make-keymap-catalog)]
            [view
              (%make-view
@@ -6208,6 +6211,7 @@
                workbenches
                1
                prompt-store
+               completions
                interactions
                (make-tui-application-registry)
                '()
