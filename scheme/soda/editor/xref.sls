@@ -5,6 +5,7 @@
           editor-register-xref-backend!
           dispatch-xref
           install-xref-results!
+          editor-begin-xref-results!
           editor-show-xref-results!)
   (import (rnrs)
           (only (chezscheme) make-weak-eq-hashtable)
@@ -120,6 +121,28 @@
           editor buffer "No references." 'info))
       (when refresh
         (buffer-set-result-refresh! buffer refresh))
+      buffer))
+
+  (define (editor-begin-xref-results! editor origin-view-id refresh)
+    (unless (and (editor? editor)
+                 (integer? origin-view-id) (exact? origin-view-id)
+                 (positive? origin-view-id)
+                 (procedure? refresh))
+      (assertion-violation
+        'editor-begin-xref-results!
+        "expected an Editor, origin View id, and refresh procedure"
+        editor origin-view-id refresh))
+    (let* ([locations (make-location-list 'lsp-references '())]
+           [buffer
+             (editor-open-result-buffer!
+               editor "*Xref*" 'xref-results-mode
+               "References" locations origin-view-id
+               'xref #f #f)])
+      (editor-set-current-location-list! editor locations)
+      (buffer-set-result-refresh! buffer refresh)
+      (buffer-set-result-producer-state! buffer 'running)
+      (editor-append-result-message!
+        editor buffer "Searching references..." 'info)
       buffer))
 
   (define editor-show-xref-results!

@@ -22,6 +22,17 @@
   (unless condition
     (apply assertion-violation 'lsp-client-tests message irritants)))
 
+(define (string-has-substring? value needle)
+  (let ([limit (- (string-length value) (string-length needle))])
+    (let loop ([index 0])
+      (and
+        (<= index limit)
+        (or
+          (string=?
+            (substring value index (+ index (string-length needle)))
+            needle)
+          (loop (+ index 1)))))))
+
 (define (effect-method effect)
   (and
     (eq? (command-effect-kind effect) 'managed-process.write)
@@ -1856,6 +1867,22 @@
             'managed-process.write))
   "find-references did not issue an LSP request"
   lsp-reference-effects)
+(define pending-reference-results-buffer
+  (view-buffer (editor-active-view editor)))
+(check
+  (and
+    (eq? (buffer-major-mode-name pending-reference-results-buffer)
+         'xref-results-mode)
+    (eq? (buffer-result-producer-state pending-reference-results-buffer)
+         'running)
+    (exists
+      (lambda (range) (eq? (caddr range) 'info))
+      (buffer-text-property-ranges
+        pending-reference-results-buffer 'result-message))
+    (string-has-substring?
+      (utf8->string (buffer-bytes pending-reference-results-buffer))
+      "Searching references"))
+  "find-references did not present its pending Result Buffer")
 (define lsp-reference-message
   (car
     (lsp-json-rpc-decode!
@@ -1940,6 +1967,9 @@
     "LSP references did not publish a navigable location list"))
 (define lsp-reference-results-buffer
   (view-buffer (editor-active-view editor)))
+(check
+  (eq? lsp-reference-results-buffer pending-reference-results-buffer)
+  "find-references replaced rather than fulfilled its pending Result Buffer")
 (let* ([effects (editor-execute-command! editor 'buffer-item.next)]
        [request
          (and
@@ -2045,6 +2075,34 @@
         lsp-reference-results-buffer 'result-message)))
   "empty xref refresh did not atomically replace stale results")
 
+(define single-reference-refresh-effects
+  (editor-execute-command! editor 'buffer-item.refresh))
+(define single-reference-refresh-message
+  (car
+    (lsp-json-rpc-decode!
+      (make-lsp-json-rpc-decoder)
+      (managed-process-write-request-data
+        (command-effect-payload (car single-reference-refresh-effects))))))
+(lsp-client-handle-json-message!
+  editor session
+  (make-json-object
+    (list
+      (cons "jsonrpc" "2.0")
+      (cons "id" (json-object-ref single-reference-refresh-message "id" #f))
+      (cons
+        "result"
+        (make-json-array (list (car (json-array-values reference-result))))))))
+(check
+  (and
+    (eq? (view-buffer (editor-active-view editor))
+         lsp-reference-results-buffer)
+    (=
+      (length
+        (buffer-text-property-ranges
+          lsp-reference-results-buffer 'result-index))
+      1))
+  "a single reference bypassed the xref Result Buffer")
+
 (define successful-reference-refresh-effects
   (editor-execute-command! editor 'buffer-item.refresh))
 (define successful-reference-refresh-message
@@ -2073,9 +2131,11 @@
     (eq?
       (buffer-result-producer-state lsp-reference-results-buffer)
       'running)
-    (null?
-      (buffer-text-property-ranges
-        lsp-reference-results-buffer 'result-index)))
+    (=
+      (length
+        (buffer-text-property-ranges
+          lsp-reference-results-buffer 'result-index))
+      1))
   "a superseded xref response replaced the latest refresh")
 (lsp-client-handle-json-message!
   editor session

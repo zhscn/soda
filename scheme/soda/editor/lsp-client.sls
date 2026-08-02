@@ -2967,88 +2967,97 @@
         (lsp-find-references-at-view!
           editor origin-view refresh-buffer))))
 
+  (define (complete-lsp-xref-request request-context)
+    (lambda (editor session result)
+      (let ([current-result-buffer
+              (xref-result-buffer-for-context editor request-context)])
+        (if (not current-result-buffer)
+            '()
+            (let* ([items (lsp-reference-items editor result)]
+                   [locations (make-location-list 'lsp-references items)]
+                   [origin-view-id
+                     (lsp-xref-request-context-origin-view-id
+                       request-context)]
+                   [buffer
+                     (editor-show-xref-results!
+                       editor
+                       locations
+                       origin-view-id
+                       (lsp-xref-refresh-procedure origin-view-id))])
+              (editor-set-current-location-list!
+                editor (if (null? items) #f locations))
+              (editor-set-status-message!
+                editor
+                (if (null? items)
+                    "No references found"
+                    (string-append
+                      "References: "
+                      (number->string (length items)))))
+              (buffer-set-local!
+                buffer
+                'lsp-xref-generation
+                (lsp-xref-request-context-generation request-context))
+              (editor-finish-result-producer! editor buffer 'ready)
+              '())))))
+
+  (define (fail-lsp-xref-request editor session error context)
+    (let ([buffer (xref-result-buffer-for-context editor context)]
+          [message
+            (string-append
+              "LSP references failed: " (error-message error))])
+      (when buffer
+        (editor-finish-result-producer!
+          editor buffer 'failed message 'error))
+      (editor-set-status-message! editor message 'error)
+      '()))
+
+  (define (cancel-lsp-xref-request editor session reason context)
+    (let ([buffer (xref-result-buffer-for-context editor context)])
+      (when buffer
+        (editor-finish-result-producer!
+          editor
+          buffer
+          'cancelled
+          "LSP reference request cancelled."
+          'warning))
+      '()))
+
   (define lsp-find-references-at-view!
     (case-lambda
       [(editor view)
        (lsp-find-references-at-view! editor view #f)]
       [(editor view result-buffer)
-       (let ([request-context
-               (begin-lsp-xref-request! editor view result-buffer)])
-         (lsp-request-at-view-point!
-        editor
-        view
-        "textDocument/references"
-        (list
-          (cons "context"
-                (make-json-object
-                  (list (cons "includeDeclaration" #t)))))
-        (lambda (response-editor response-session result)
-          (let ([current-result-buffer
-                  (xref-result-buffer-for-context
-                    response-editor request-context)])
-            (if (and result-buffer (not current-result-buffer))
-                '()
-                (let* ([items (lsp-reference-items response-editor result)]
-                       [locations
-                         (make-location-list 'lsp-references items)])
-                  (editor-set-current-location-list!
-                    response-editor
-                    (if (null? items) #f locations))
-                  (editor-set-status-message!
-                    response-editor
-                    (if (null? items)
-                        "No references found"
-                        (string-append
-                          "References: "
-                          (number->string (length items)))))
-                  (cond
-                    [(or current-result-buffer (> (length items) 1))
-                     (let ([buffer
-                             (editor-show-xref-results!
-                               response-editor
-                               locations
-                               (lsp-xref-request-context-origin-view-id
-                                 request-context)
-                               (lsp-xref-refresh-procedure
-                                 (lsp-xref-request-context-origin-view-id
-                                   request-context)))])
-                       (buffer-set-local!
-                         buffer
-                         'lsp-xref-generation
-                         (lsp-xref-request-context-generation request-context))
-                       (editor-finish-result-producer!
-                         response-editor buffer 'ready)
-                       '())]
-                    [(pair? items)
-                     (lsp-jump-to-location-item!
-                       response-editor
-                       view
-                       (location-list-current locations)
-                       'xref)]
-                    [else '()])))))
-        (lambda (response-editor response-session error context)
-          (let ([buffer
-                  (xref-result-buffer-for-context response-editor context)]
-                [message
-                  (string-append
-                    "LSP references failed: " (error-message error))])
-            (when buffer
-              (editor-finish-result-producer!
-                response-editor buffer 'failed message 'error))
-            (editor-set-status-message! response-editor message 'error)
-            '()))
-        (lambda (response-editor response-session reason context)
-          (let ([buffer
-                  (xref-result-buffer-for-context response-editor context)])
-            (when buffer
-              (editor-finish-result-producer!
-                response-editor
-                buffer
-                'cancelled
-                "LSP reference request cancelled."
-                'warning))
-            '()))
-        request-context))]))
+       (let* ([origin-view-id (view-id view)]
+              [refresh
+                (lsp-xref-refresh-procedure origin-view-id)]
+              [request-buffer
+                (or result-buffer
+                    (editor-begin-xref-results!
+                      editor origin-view-id refresh))]
+              [request-context
+                (begin-lsp-xref-request! editor view request-buffer)]
+              [effects
+                (lsp-request-at-view-point!
+                  editor
+                  view
+                  "textDocument/references"
+                  (list
+                    (cons
+                      "context"
+                      (make-json-object
+                        (list (cons "includeDeclaration" #t)))))
+                  (complete-lsp-xref-request request-context)
+                  fail-lsp-xref-request
+                  cancel-lsp-xref-request
+                  request-context)])
+         (when (null? effects)
+           (editor-finish-result-producer!
+             editor
+             request-buffer
+             'failed
+             "No ready language server at point."
+             'error))
+         effects)]))
 
   (define (lsp-find-references! editor)
     (lsp-find-references-at-view! editor (editor-active-view editor)))
