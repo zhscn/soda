@@ -758,6 +758,13 @@
                'scheme-mode
                source-text)])
       (editor-append-location-results! editor results-buffer items)
+      (unless
+        (memq
+          'edit-results
+          (map result-panel-action-name
+               (buffer-result-panel-actions results-buffer)))
+        (error 'editor-tests
+               "Project search did not expose its Buffer-level edit action"))
       (let ([edit-effects
               (execute-command!
                 (editor-command-registry editor)
@@ -4624,14 +4631,14 @@
   (unless
     (and
       completion
-      (= (length (completion-session-items completion)) 2)
+      (= (length (completion-session-items completion)) 4)
       (for-all
         (lambda (name)
           (exists
             (lambda (item)
               (eq? (completion-item-payload item) name))
             (completion-session-items completion)))
-        '(inspect secondary)))
+        '(inspect secondary refresh close)))
     (error 'editor-tests
            "result action picker did not expose applicable actions"
            (and completion
@@ -4651,6 +4658,33 @@
        (not (editor-active-command-invocation xref-editor)))
   (error 'editor-tests
          "result action picker did not invoke the selected action"))
+(view-set-caret! (editor-active-view xref-editor) 0)
+(editor-update!
+  xref-editor
+  (make-command-message 'buffer-item.actions #f))
+(let ([completion (editor-active-prompt-completion xref-editor)])
+  (unless
+    (and
+      completion
+      (= (length (completion-session-items completion)) 2)
+      (for-all
+        (lambda (name)
+          (exists
+            (lambda (item)
+              (eq? (completion-item-payload item) name))
+            (completion-session-items completion)))
+        '(close refresh)))
+    (error 'editor-tests
+           "result action picker did not expose panel actions away from an item"
+           (and completion
+                (map completion-item-payload
+                     (completion-session-items completion))))))
+(send! xref-editor (make-input-decoder) (bytes 7))
+(let ([range
+        (car
+          (buffer-text-property-ranges
+            xref-results-buffer 'result-index))])
+  (view-set-caret! (editor-active-view xref-editor) (car range)))
 (editor-update!
   xref-editor
   (make-command-message 'buffer-item.toggle-mark #f))

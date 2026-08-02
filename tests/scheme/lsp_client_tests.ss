@@ -13,6 +13,7 @@
         (soda editor prompt)
         (soda editor project)
         (soda editor project-workspace)
+        (soda editor result-buffer)
         (soda editor state)
         (soda editor workbench)
         (soda editor core)
@@ -1530,6 +1531,16 @@
         '("/workspace/src/main.cpp"
           "/workspace/src/other.cpp")))
     "WorkspaceEdit preview did not group changes by resource"))
+(let ([names
+        (map result-panel-action-name
+             (buffer-result-panel-actions
+               (view-buffer (editor-active-view editor))))])
+  (check
+    (and (memq 'apply names)
+         (memq 'edit names)
+         (memq 'close names))
+    "WorkspaceEdit preview did not expose panel-level actions"
+    names))
 (editor-update!
   editor
   (make-command-message 'workspace-edit.edit #f))

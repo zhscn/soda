@@ -14,6 +14,7 @@
           (soda editor language)
           (soda editor location)
           (soda editor location-results)
+          (soda editor result-buffer)
           (soda editor result-edit)
           (soda editor state)
           (soda editor workspace-edit))
@@ -162,6 +163,30 @@
                         buffer edit replacement-start replacement-end)))))))
           items edits))
       (buffer-set-local! buffer 'workspace-edit-preview preview)
+      (buffer-register-result-panel-action!
+        buffer
+        (make-result-panel-action
+          'apply "Apply all changes"
+          (lambda (candidate)
+            (let ([value
+                    (buffer-local-ref
+                      candidate 'workspace-edit-preview #f)])
+              (and (workspace-edit-preview? value)
+                   (not (workspace-edit-preview-accepted? value)))))
+          (lambda (context candidate)
+            (accept-workspace-edit-preview context))))
+      (buffer-register-result-panel-action!
+        buffer
+        (make-result-panel-action
+          'edit "Edit replacement text"
+          (lambda (candidate)
+            (let ([value
+                    (buffer-local-ref
+                      candidate 'workspace-edit-preview #f)])
+              (and (workspace-edit-preview? value)
+                   (not (workspace-edit-preview-accepted? value)))))
+          (lambda (context candidate)
+            (edit-workspace-edit-preview context))))
       (install-edit-guard! buffer preview)
       (let ([ranges (buffer-text-property-ranges buffer 'result-index)])
         (when (pair? ranges)
@@ -278,7 +303,7 @@
       (keymap-bind!
         keymap
         (list (make-key-stroke 'character (char->integer #\a) 0))
-        'workspace-edit.accept)
+        'buffer-item.actions)
       (keymap-bind!
         keymap
         (list (make-key-stroke 'character (char->integer #\e) 0))

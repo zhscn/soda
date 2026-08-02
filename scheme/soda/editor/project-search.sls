@@ -329,6 +329,20 @@
         buffer
         (lambda (refresh-context refresh-buffer)
           (start-project-search! refresh-context project query)))
+      (buffer-register-result-panel-action!
+        buffer
+        (make-result-panel-action
+          'edit-results "Edit matches"
+          (lambda (candidate)
+            (let ([ready?
+                    (buffer-local-ref
+                      candidate 'result-edit-ready? #f)])
+              (and (procedure? ready?) (eq? (ready?) #t))))
+          (lambda (action-context candidate)
+            (list
+              (make-command-effect
+                'command.invoke
+                (make-command-message 'result-edit.begin #f))))))
       (scoped-session-table-set!
         active-project-searches editor scope session)
       (editor-set-current-location-list! editor locations)

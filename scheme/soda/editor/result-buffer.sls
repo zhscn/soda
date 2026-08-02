@@ -8,8 +8,14 @@
           result-action-name
           result-action-label
           result-action-batch-invoke
+          make-result-panel-action
+          result-panel-action?
+          result-panel-action-name
+          result-panel-action-label
           buffer-register-result-action!
+          buffer-register-result-panel-action!
           buffer-result-actions-at
+          buffer-result-panel-actions
           buffer-result-marked-indices
           buffer-result-marked-items
           buffer-result-item-marked?
@@ -17,6 +23,7 @@
           buffer-clear-result-marks!
           buffer-reconcile-result-selection!
           invoke-buffer-item-action
+          invoke-result-panel-action
           buffer-set-result-refresh!
           buffer-result-refreshable?
           buffer-set-result-producer-state!
@@ -110,6 +117,21 @@
        (%make-result-action
          name label applicable? invoke batch-invoke)]))
 
+  (define-record-type
+    (result-panel-action %make-result-panel-action result-panel-action?)
+    (fields name label applicable? invoke))
+
+  (define (make-result-panel-action name label applicable? invoke)
+    (unless (and (symbol? name)
+                 (string? label)
+                 (procedure? applicable?)
+                 (procedure? invoke))
+      (assertion-violation
+        'make-result-panel-action
+        "invalid Result Buffer panel action"
+        name label applicable? invoke))
+    (%make-result-panel-action name label applicable? invoke))
+
   (define (buffer-set-result-interface! buffer interface)
     (unless (and (buffer? buffer)
                  (result-buffer-interface? interface))
@@ -120,6 +142,7 @@
     (buffer-set-local! buffer 'result-buffer-interface interface)
     (buffer-set-local! buffer 'result-current-index #f)
     (buffer-set-local! buffer 'result-actions '())
+    (buffer-set-local! buffer 'result-panel-actions '())
     (buffer-set-local! buffer 'result-marked-indices '())
     (buffer-set-local! buffer 'result-refresh #f)
     (buffer-set-local! buffer 'result-producer-state 'idle)
@@ -397,6 +420,21 @@
         'buffer-register-result-action!
         "Buffer has no result interface"
         buffer))
+    (when (memq (result-action-name action) '(refresh close))
+      (assertion-violation
+        'buffer-register-result-action!
+        "action name is reserved by the Result Buffer interface"
+        (result-action-name action)))
+    (when
+      (exists
+        (lambda (candidate)
+          (eq? (result-panel-action-name candidate)
+               (result-action-name action)))
+        (buffer-local-ref buffer 'result-panel-actions '()))
+      (assertion-violation
+        'buffer-register-result-action!
+        "item action name conflicts with a panel action"
+        (result-action-name action)))
     (buffer-set-local!
       buffer
       'result-actions
@@ -408,6 +446,79 @@
                       (result-action-name action))))
           (buffer-local-ref buffer 'result-actions '()))))
     action)
+
+  (define (buffer-register-result-panel-action! buffer action)
+    (unless (and (buffer? buffer) (result-panel-action? action))
+      (assertion-violation
+        'buffer-register-result-panel-action!
+        "expected a result Buffer and ResultPanelAction"
+        buffer action))
+    (unless (buffer-result-interface-ref buffer)
+      (assertion-violation
+        'buffer-register-result-panel-action!
+        "Buffer has no result interface"
+        buffer))
+    (when (memq (result-panel-action-name action) '(refresh close))
+      (assertion-violation
+        'buffer-register-result-panel-action!
+        "action name is reserved by the Result Buffer interface"
+        (result-panel-action-name action)))
+    (when
+      (exists
+        (lambda (candidate)
+          (eq? (result-action-name candidate)
+               (result-panel-action-name action)))
+        (buffer-local-ref buffer 'result-actions '()))
+      (assertion-violation
+        'buffer-register-result-panel-action!
+        "panel action name conflicts with an item action"
+        (result-panel-action-name action)))
+    (buffer-set-local!
+      buffer
+      'result-panel-actions
+      (cons
+        action
+        (filter
+          (lambda (candidate)
+            (not (eq? (result-panel-action-name candidate)
+                      (result-panel-action-name action))))
+          (buffer-local-ref buffer 'result-panel-actions '()))))
+    action)
+
+  (define (registered-result-panel-actions buffer)
+    (filter
+      (lambda (action)
+        ((result-panel-action-applicable? action) buffer))
+      (reverse (buffer-local-ref buffer 'result-panel-actions '()))))
+
+  (define (buffer-result-panel-actions buffer)
+    (unless (buffer? buffer)
+      (assertion-violation
+        'buffer-result-panel-actions "expected a Buffer" buffer))
+    (unless (buffer-result-interface-ref buffer)
+      (assertion-violation
+        'buffer-result-panel-actions
+        "Buffer has no result interface"
+        buffer))
+    (append
+      (registered-result-panel-actions buffer)
+      (if (buffer-result-refreshable? buffer)
+          (list
+            (make-result-panel-action
+              'refresh "Refresh results"
+              (lambda (candidate) #t)
+              (lambda (context candidate)
+                (refresh-buffer-items context))))
+          '())
+      (list
+        (make-result-panel-action
+          'close
+          (if (eq? (buffer-result-producer-state buffer) 'running)
+              "Cancel and close"
+              "Close results")
+          (lambda (candidate) #t)
+          (lambda (context candidate)
+            (quit-buffer-items context))))))
 
   (define (buffer-result-actions-at buffer position)
     (unless (and (buffer? buffer)
@@ -976,6 +1087,24 @@
               ((result-action-invoke action)
                context buffer (cdr current) (car current)))))))
 
+  (define (invoke-result-panel-action context name)
+    (unless (symbol? name)
+      (assertion-violation
+        'invoke-result-panel-action "action name must be a symbol" name))
+    (let-values ([(buffer interface)
+                  (require-interface context 'buffer-panel.action)])
+      (let ([action
+              (find
+                (lambda (candidate)
+                  (eq? (result-panel-action-name candidate) name))
+                (buffer-result-panel-actions buffer))])
+        (unless action
+          (editor-user-error
+            'buffer-panel.action
+            "Action is not available for the current result Buffer"
+            name))
+        ((result-panel-action-invoke action) context buffer))))
+
   (define (set-selected-item-mark! context marked?)
     (let-values ([(buffer interface item index)
                   (selected-item context 'buffer-item.mark)])
@@ -998,12 +1127,22 @@
       (editor-invalidate! (command-context-editor context) 'overlay)
       '()))
 
+  (define (result-action-name* action)
+    (if (result-panel-action? action)
+        (result-panel-action-name action)
+        (result-action-name action)))
+
+  (define (result-action-label* action)
+    (if (result-panel-action? action)
+        (result-panel-action-label action)
+        (result-action-label action)))
+
   (define (result-action-choice-source actions)
     (let ([items
             (map
               (lambda (action)
-                (let* ([name (result-action-name action)]
-                       [label (result-action-label action)])
+                (let* ([name (result-action-name* action)]
+                       [label (result-action-label* action)])
                   (make-completion-item
                     name
                     'result-action
@@ -1032,13 +1171,12 @@
     (interactive-completing-read
       "Action: "
       (lambda (context)
-        (let-values ([(buffer current marked actions)
+        (let-values ([(buffer current marked item-actions)
                       (available-actions context 'buffer-item.actions)])
-            (when (null? actions)
-              (editor-user-error
-                'buffer-item.actions
-                "No actions are available for the item at point"))
-            (result-action-choice-source actions)))
+          (result-action-choice-source
+            (append
+              item-actions
+              (buffer-result-panel-actions buffer)))))
       'must-match
       'result-action
       ""
@@ -1052,9 +1190,17 @@
           (list (completion-item-payload candidate))))))
 
   (define-command (choose-buffer-item-action context name)
-    "Choose and invoke an action available for the result item at point."
+    "Choose and invoke an action for the result item or result Buffer."
     (interactive result-action-reader)
-    (invoke-buffer-item-action context name))
+    (let* ([buffer (view-buffer (command-context-view context))]
+           [panel-action
+             (find
+               (lambda (candidate)
+                 (eq? (result-panel-action-name candidate) name))
+               (buffer-result-panel-actions buffer))])
+      (if panel-action
+          (invoke-result-panel-action context name)
+          (invoke-buffer-item-action context name))))
 
   (define (refresh-buffer-items context)
     (let* ([buffer (view-buffer (command-context-view context))]

@@ -948,8 +948,14 @@
           result-action-name
           result-action-label
           result-action-batch-invoke
+          make-result-panel-action
+          result-panel-action?
+          result-panel-action-name
+          result-panel-action-label
           buffer-register-result-action!
+          buffer-register-result-panel-action!
           buffer-result-actions-at
+          buffer-result-panel-actions
           buffer-result-marked-indices
           buffer-result-marked-items
           buffer-result-item-marked?
@@ -957,6 +963,7 @@
           buffer-clear-result-marks!
           buffer-reconcile-result-selection!
           invoke-buffer-item-action
+          invoke-result-panel-action
           buffer-set-result-refresh!
           buffer-result-refreshable?
           buffer-set-result-producer-state!
