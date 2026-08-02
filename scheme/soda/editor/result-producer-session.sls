@@ -8,7 +8,6 @@
           result-producer-session-buffer
           result-producer-session-buffer-set!
           result-producer-session-closed?
-          result-producer-session-closed?-set!
           process-result-producer-session
           make-process-result-producer-session
           process-result-producer-session?

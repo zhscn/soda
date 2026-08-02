@@ -12,7 +12,6 @@
           interaction-transcript-last-output-start
           interaction-transcript-last-output-end
           interaction-transcript-fields
-          interaction-transcript-field-at
           interaction-field?
           interaction-field-kind
           interaction-field-start
@@ -345,30 +344,6 @@
           'input
           (interaction-transcript-input-start transcript)
           (buffer-byte-size buffer)))))
-
-  (define (interaction-transcript-field-at transcript buffer offset)
-    (unless (exact-non-negative-integer? offset)
-      (assertion-violation
-        'interaction-transcript-field-at
-        "offset must be a non-negative exact integer"
-        offset))
-    (when (> offset (buffer-byte-size buffer))
-      (assertion-violation
-        'interaction-transcript-field-at
-        "offset is outside the transcript buffer"
-        offset))
-    (let ([fields
-            (interaction-transcript-fields transcript buffer)])
-      (find
-        (lambda (field)
-          (or
-            (and
-              (<= (interaction-field-start field) offset)
-              (< offset (interaction-field-end field)))
-            (and
-              (= offset (buffer-byte-size buffer))
-              (eq? (interaction-field-kind field) 'input))))
-        fields)))
 
   (define (interaction-transcript-current-input transcript buffer)
     (require-open-transcript
