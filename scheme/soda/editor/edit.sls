@@ -49,6 +49,12 @@
         'buffer-replace-range!
         "buffer is read-only"
         (buffer-id buffer)))
+    (let ([guard (buffer-local-ref buffer 'edit-guard #f)])
+      (when guard
+        (unless (procedure? guard)
+          (assertion-violation
+            'buffer-replace-range! "Buffer edit guard is not a procedure" guard))
+        (guard buffer start end bytes)))
     (replace-buffer-range!
       'buffer-replace-range!
       buffer

@@ -5,6 +5,7 @@
         (soda editor buffer)
         (soda editor command)
         (soda editor completion-provider)
+        (soda editor edit)
         (soda editor file)
         (soda editor language-session)
         (soda editor lsp-client)
@@ -1464,6 +1465,13 @@
   "LSP rename did not present an unapplied workspace edit preview")
 (editor-update!
   editor
+  (make-command-message 'workspace-edit.edit #f))
+(let* ([preview-view (editor-active-view editor)]
+       [point (view-caret preview-view)])
+  (buffer-replace-range!
+    (view-buffer preview-view) point point (string->utf8 "X")))
+(editor-update!
+  editor
   (make-command-message 'workspace-edit.accept #f))
 (editor-update!
   editor
@@ -1472,7 +1480,7 @@
   (and
     (bytevector=?
       (buffer-bytes source)
-      (string->utf8 "// Gadget\n// Generated\nint main() {}\n"))
+      (string->utf8 "// XGadget\n// Generated\nint main() {}\n"))
     (bytevector=?
       (buffer-bytes rename-target)
       (string->utf8 "int Gadget;\n")))

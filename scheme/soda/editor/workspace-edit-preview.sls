@@ -17,10 +17,25 @@
           (soda editor workspace-edit))
 
   (define-record-type workspace-edit-preview
-    (fields edits
+    (fields (mutable projections)
             description
             after-apply
             (mutable accepted?)))
+
+  (define-record-type workspace-edit-projection
+    (fields edit start-anchor end-anchor))
+
+  (define (buffer-size buffer)
+    (let ([snapshot (document-snapshot (buffer-document buffer))])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (let ([text (snapshot-text snapshot)])
+            (dynamic-wind
+              (lambda () #f)
+              (lambda () (text-size text))
+              (lambda () (text-close! text)))))
+        (lambda () (snapshot-close! snapshot)))))
 
   (define (buffer-substring buffer start end)
     (let ([snapshot (document-snapshot (buffer-document buffer))])
@@ -68,13 +83,44 @@
         edit)))
 
   (define (preview-row item edit)
-    (string-append
-      (location-item-resource item)
-      ": "
-      (single-line (or (location-item-excerpt item) ""))
-      "  =>  "
-      (single-line (workspace-text-edit-text edit))
-      "\n"))
+    (let ([prefix
+            (string-append
+              (location-item-resource item)
+              ": "
+              (single-line (or (location-item-excerpt item) ""))
+              "  =>  ")]
+          [replacement (workspace-text-edit-text edit)])
+      (values prefix replacement (string-append prefix replacement "\n"))))
+
+  (define (projection-range buffer projection)
+    (let ([document (buffer-document buffer)])
+      (cons
+        (document-anchor-offset
+          document (workspace-edit-projection-start-anchor projection))
+        (document-anchor-offset
+          document (workspace-edit-projection-end-anchor projection)))))
+
+  (define (install-edit-guard! buffer preview)
+    (buffer-set-local!
+      buffer
+      'edit-guard
+      (lambda (guarded-buffer start end bytes)
+        (unless
+          (exists
+            (lambda (projection)
+              (let ([range (projection-range guarded-buffer projection)])
+                (and (<= (car range) start)
+                     (<= end (cdr range)))))
+            (workspace-edit-preview-projections preview))
+          (editor-user-error
+            'workspace-edit "Only replacement text is editable" start end)))))
+
+  (define (make-projection! buffer edit start end)
+    (let ([document (buffer-document buffer)])
+      (make-workspace-edit-projection
+        edit
+        (document-create-anchor! document start anchor-before-insertion)
+        (document-create-anchor! document end anchor-after-insertion))))
 
   (define (editor-show-workspace-edit-preview!
             editor origin-view-id edits description after-apply)
@@ -90,7 +136,7 @@
         editor origin-view-id edits description after-apply))
     (let* ([items (map (lambda (edit) (edit-location-item editor edit)) edits)]
            [locations (make-location-list 'workspace-edit-preview '())]
-           [preview (make-workspace-edit-preview edits description after-apply #f)]
+           [preview (make-workspace-edit-preview '() description after-apply #f)]
            [buffer
              (editor-open-result-buffer!
                editor
@@ -104,13 +150,30 @@
                preview)])
       (for-each
         (lambda (item edit)
-          (let ([row (preview-row item edit)])
-            (editor-append-result-text!
-              editor buffer row
-              (list
-                (list 0 (bytevector-length (string->utf8 row)) item)))))
+          (let-values ([(prefix replacement row) (preview-row item edit)])
+            (let* ([base (buffer-size buffer)]
+                   [replacement-start
+                     (+ base (bytevector-length (string->utf8 prefix)))]
+                   [replacement-end
+                     (+ replacement-start
+                        (bytevector-length (string->utf8 replacement)))])
+              (editor-append-result-text!
+                editor buffer row
+                (list
+                  (list 0 (bytevector-length (string->utf8 row)) item)))
+              (workspace-edit-preview-projections-set!
+                preview
+                (append
+                  (workspace-edit-preview-projections preview)
+                  (list
+                    (make-projection!
+                      buffer edit replacement-start replacement-end)))))))
         items edits)
       (buffer-set-local! buffer 'workspace-edit-preview preview)
+      (install-edit-guard! buffer preview)
+      (let ([ranges (buffer-text-property-ranges buffer 'location-index)])
+        (when (pair? ranges)
+          (view-set-caret! (editor-active-view editor) (caar ranges))))
       (editor-set-status-message!
         editor
         (string-append
@@ -130,7 +193,19 @@
   (define (accept-workspace-edit-preview context)
     (let* ([editor (command-context-editor context)]
            [preview (active-preview context 'workspace-edit.accept)]
-           [edits (workspace-edit-preview-edits preview)])
+           [buffer (view-buffer (command-context-view context))]
+           [edits
+             (map
+               (lambda (projection)
+                 (let* ([edit (workspace-edit-projection-edit projection)]
+                        [range (projection-range buffer projection)])
+                   (make-workspace-text-edit
+                     (workspace-text-edit-resource edit)
+                     (workspace-text-edit-revision edit)
+                     (workspace-text-edit-start edit)
+                     (workspace-text-edit-end edit)
+                     (buffer-substring buffer (car range) (cdr range)))))
+               (workspace-edit-preview-projections preview))])
       (workspace-text-edits-apply! editor edits)
       (workspace-edit-preview-accepted?-set! preview #t)
       (editor-set-status-message!
@@ -145,6 +220,24 @@
           (make-command-effect
             'command.invoke
             (make-command-message 'buffer-item.quit #f))))))
+
+  (define (edit-workspace-edit-preview context)
+    (let* ([editor (command-context-editor context)]
+           [buffer (view-buffer (command-context-view context))])
+      (active-preview context 'workspace-edit.edit)
+      (buffer-set-major-mode! buffer 'workspace-edit-mode)
+      (buffer-set-local-setting! buffer 'read-only? #f)
+      (let ([projections
+              (workspace-edit-preview-projections
+                (active-preview context 'workspace-edit.edit))])
+        (when (pair? projections)
+          (view-set-caret!
+            (command-context-view context)
+            (car (projection-range buffer (car projections))))))
+      (editor-set-status-message!
+        editor "Edit replacement text; C-c C-c applies, C-c C-k discards")
+      (editor-invalidate! editor 'chrome)
+      '()))
 
   (define (discard-workspace-edit-preview context)
     (let ([preview (command-context-argument context)])
@@ -166,11 +259,24 @@
         'interface
         'workspace-edit-preview-mode-map
         '((track-modified? . #f) (read-only? . #t))))
+    (register-major-mode!
+      (editor-language-catalog editor)
+      (make-major-mode
+        'workspace-edit-mode
+        'fundamental-mode
+        #f
+        'editing
+        'workspace-edit-mode-map
+        '((track-modified? . #f) (read-only? . #f))))
     (let ([keymap (make-keymap)])
       (keymap-bind!
         keymap
         (list (make-key-stroke 'character (char->integer #\a) 0))
         'workspace-edit.accept)
+      (keymap-bind!
+        keymap
+        (list (make-key-stroke 'character (char->integer #\e) 0))
+        'workspace-edit.edit)
       (keymap-bind!
         keymap
         (list (make-key-stroke 'character (char->integer #\c) 4))
@@ -179,12 +285,34 @@
         (editor-keymap-catalog editor)
         'workspace-edit-preview-mode-map
         keymap))
+    (let ([keymap (make-keymap)]
+          [control-c
+            (make-key-stroke 'character (char->integer #\c) 4)])
+      (keymap-bind!
+        keymap
+        (list control-c control-c)
+        'workspace-edit.accept)
+      (keymap-bind!
+        keymap
+        (list control-c
+              (make-key-stroke 'character (char->integer #\k) 4))
+        'buffer-item.quit)
+      (keymap-catalog-register!
+        (editor-keymap-catalog editor)
+        'workspace-edit-mode-map
+        keymap))
     (editor-register-command!
       editor
       (make-interactive-context-command
         'workspace-edit.accept
         accept-workspace-edit-preview
         "Apply every change in the current workspace edit preview."))
+    (editor-register-command!
+      editor
+      (make-interactive-context-command
+        'workspace-edit.edit
+        edit-workspace-edit-preview
+        "Edit replacement text in the current workspace edit preview."))
     (editor-register-internal-command!
       editor
       (make-internal-context-command
