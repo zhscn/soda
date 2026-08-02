@@ -28,11 +28,16 @@
           buffer-result-refreshable?
           buffer-set-result-producer-state!
           buffer-result-producer-state
+          buffer-result-producer-stop-invoked?
+          buffer-set-result-producer-stop-invoked!
+          buffer-result-current-index
+          buffer-set-result-current-index!
           editor-finish-result-producer!
           buffer-capture-result-group-folds!
           editor-reconcile-result-group-folds!
           refresh-buffer-items
           buffer-set-result-interface!
+          buffer-clear-result-interface!
           buffer-result-interface-ref
           editor-note-result-buffer!
           editor-present-result-buffer!
@@ -70,6 +75,26 @@
             item-key
             activate
             quit))
+
+  (define-record-type
+    (result-buffer-state %make-result-buffer-state result-buffer-state?)
+    (fields interface
+            (mutable current-index)
+            (mutable actions)
+            (mutable panel-actions)
+            (mutable marked-indices)
+            (mutable refresh)
+            (mutable producer-state)
+            (mutable producer-stop-invoked?)))
+
+  (define (buffer-result-state-ref buffer)
+    (buffer-local-ref buffer 'result-buffer-state #f))
+
+  (define (require-result-state buffer who)
+    (let ([state (buffer-result-state-ref buffer)])
+      (unless (result-buffer-state? state)
+        (assertion-violation who "Buffer has no result state" buffer))
+      state))
 
   (define-record-type result-display-restoration
     (fields action
@@ -139,20 +164,26 @@
         'buffer-set-result-interface!
         "expected a Buffer and navigation interface"
         buffer interface))
-    (buffer-set-local! buffer 'result-buffer-interface interface)
-    (buffer-set-local! buffer 'result-current-index #f)
-    (buffer-set-local! buffer 'result-actions '())
-    (buffer-set-local! buffer 'result-panel-actions '())
-    (buffer-set-local! buffer 'result-marked-indices '())
-    (buffer-set-local! buffer 'result-refresh #f)
-    (buffer-set-local! buffer 'result-producer-state 'idle)
+    (buffer-set-local!
+      buffer
+      'result-buffer-state
+      (%make-result-buffer-state
+        interface #f '() '() '() #f 'idle #f))
+    buffer)
+
+  (define (buffer-clear-result-interface! buffer)
+    (unless (buffer? buffer)
+      (assertion-violation
+        'buffer-clear-result-interface! "expected a Buffer" buffer))
+    (buffer-clear-local! buffer 'result-buffer-state)
     buffer)
 
   (define (buffer-result-marked-indices buffer)
     (unless (buffer? buffer)
       (assertion-violation
         'buffer-result-marked-indices "expected a Buffer" buffer))
-    (buffer-local-ref buffer 'result-marked-indices '()))
+    (result-buffer-state-marked-indices
+      (require-result-state buffer 'buffer-result-marked-indices)))
 
   (define (buffer-result-item-marked? buffer index)
     (unless (and (buffer? buffer)
@@ -182,9 +213,8 @@
             (filter
               (lambda (candidate) (not (= candidate index)))
               (buffer-result-marked-indices buffer))])
-      (buffer-set-local!
-        buffer
-        'result-marked-indices
+      (result-buffer-state-marked-indices-set!
+        (require-result-state buffer 'buffer-set-result-item-marked!)
         (if marked?
             (list-sort < (cons index marks))
             marks)))
@@ -194,7 +224,8 @@
     (unless (buffer? buffer)
       (assertion-violation
         'buffer-clear-result-marks! "expected a Buffer" buffer))
-    (buffer-set-local! buffer 'result-marked-indices '())
+    (result-buffer-state-marked-indices-set!
+      (require-result-state buffer 'buffer-clear-result-marks!) '())
     buffer)
 
   (define (buffer-result-marked-items buffer)
@@ -237,7 +268,7 @@
   (define (capture-result-selection buffer interface)
     (let* ([entries (result-entries buffer interface)]
            [current-index
-             (buffer-local-ref buffer 'result-current-index #f)]
+             (buffer-result-current-index buffer)]
            [current
              (and current-index
                   (find
@@ -303,13 +334,15 @@
                  '()
                  entries)])
         (unless (null? mark-keys)
-          (buffer-set-local!
-            buffer 'result-marked-indices marked-indices))
+          (result-buffer-state-marked-indices-set!
+            (require-result-state
+              buffer 'buffer-reconcile-result-selection!)
+            marked-indices))
         (when finalize?
           (buffer-set-local! buffer 'result-restore-mark-keys '()))
         (when current
           (let ([index (car current)] [position (cadr current)])
-            (buffer-set-local! buffer 'result-current-index index)
+            (buffer-set-result-current-index! buffer index)
             (buffer-set-local! buffer 'result-restore-current-key #f)
             (buffer-set-local! buffer 'result-restore-current-index #f)
             (for-each
@@ -348,16 +381,59 @@
         "Buffer has no result interface"
         buffer))
     (when (eq? state 'running)
-      (buffer-set-local!
-        buffer 'result-producer-stop-invoked? #f))
-    (buffer-set-local! buffer 'result-producer-state state)
+      (buffer-set-result-producer-stop-invoked! buffer #f))
+    (result-buffer-state-producer-state-set!
+      (require-result-state buffer 'buffer-set-result-producer-state!)
+      state)
     state)
 
   (define (buffer-result-producer-state buffer)
     (unless (buffer? buffer)
       (assertion-violation
         'buffer-result-producer-state "expected a Buffer" buffer))
-    (buffer-local-ref buffer 'result-producer-state 'idle))
+    (result-buffer-state-producer-state
+      (require-result-state buffer 'buffer-result-producer-state)))
+
+  (define (buffer-result-producer-stop-invoked? buffer)
+    (unless (buffer? buffer)
+      (assertion-violation
+        'buffer-result-producer-stop-invoked? "expected a Buffer" buffer))
+    (result-buffer-state-producer-stop-invoked?
+      (require-result-state
+        buffer 'buffer-result-producer-stop-invoked?)))
+
+  (define (buffer-set-result-producer-stop-invoked! buffer value)
+    (unless (and (buffer? buffer) (boolean? value))
+      (assertion-violation
+        'buffer-set-result-producer-stop-invoked!
+        "expected a Buffer and boolean"
+        buffer value))
+    (result-buffer-state-producer-stop-invoked?-set!
+      (require-result-state
+        buffer 'buffer-set-result-producer-stop-invoked!)
+      value)
+    value)
+
+  (define (buffer-result-current-index buffer)
+    (unless (buffer? buffer)
+      (assertion-violation
+        'buffer-result-current-index "expected a Buffer" buffer))
+    (result-buffer-state-current-index
+      (require-result-state buffer 'buffer-result-current-index)))
+
+  (define (buffer-set-result-current-index! buffer index)
+    (unless (and (buffer? buffer)
+                 (or (not index)
+                     (and (integer? index) (exact? index)
+                          (not (negative? index)))))
+      (assertion-violation
+        'buffer-set-result-current-index!
+        "expected a Buffer and optional non-negative index"
+        buffer index))
+    (result-buffer-state-current-index-set!
+      (require-result-state buffer 'buffer-set-result-current-index!)
+      index)
+    index)
 
   (define terminal-result-producer-states
     '(ready failed cancelled))
@@ -403,14 +479,17 @@
         'buffer-set-result-refresh!
         "Buffer has no result interface"
         buffer))
-    (buffer-set-local! buffer 'result-refresh refresh)
+    (result-buffer-state-refresh-set!
+      (require-result-state buffer 'buffer-set-result-refresh!) refresh)
     buffer)
 
   (define (buffer-result-refreshable? buffer)
     (unless (buffer? buffer)
       (assertion-violation
         'buffer-result-refreshable? "expected a Buffer" buffer))
-    (procedure? (buffer-local-ref buffer 'result-refresh #f)))
+    (procedure?
+      (result-buffer-state-refresh
+        (require-result-state buffer 'buffer-result-refreshable?))))
 
   (define (buffer-register-result-action! buffer action)
     (unless (and (buffer? buffer) (result-action? action))
@@ -433,21 +512,22 @@
         (lambda (candidate)
           (eq? (result-panel-action-name candidate)
                (result-action-name action)))
-        (buffer-local-ref buffer 'result-panel-actions '()))
+        (result-buffer-state-panel-actions
+          (require-result-state buffer 'buffer-register-result-action!)))
       (assertion-violation
         'buffer-register-result-action!
         "item action name conflicts with a panel action"
         (result-action-name action)))
-    (buffer-set-local!
-      buffer
-      'result-actions
+    (result-buffer-state-actions-set!
+      (require-result-state buffer 'buffer-register-result-action!)
       (cons
         action
         (filter
           (lambda (candidate)
             (not (eq? (result-action-name candidate)
                       (result-action-name action))))
-          (buffer-local-ref buffer 'result-actions '()))))
+          (result-buffer-state-actions
+            (require-result-state buffer 'buffer-register-result-action!)))))
     action)
 
   (define (buffer-register-result-panel-action! buffer action)
@@ -471,28 +551,32 @@
         (lambda (candidate)
           (eq? (result-action-name candidate)
                (result-panel-action-name action)))
-        (buffer-local-ref buffer 'result-actions '()))
+        (result-buffer-state-actions
+          (require-result-state buffer 'buffer-register-result-panel-action!)))
       (assertion-violation
         'buffer-register-result-panel-action!
         "panel action name conflicts with an item action"
         (result-panel-action-name action)))
-    (buffer-set-local!
-      buffer
-      'result-panel-actions
+    (result-buffer-state-panel-actions-set!
+      (require-result-state buffer 'buffer-register-result-panel-action!)
       (cons
         action
         (filter
           (lambda (candidate)
             (not (eq? (result-panel-action-name candidate)
                       (result-panel-action-name action))))
-          (buffer-local-ref buffer 'result-panel-actions '()))))
+          (result-buffer-state-panel-actions
+            (require-result-state
+              buffer 'buffer-register-result-panel-action!)))))
     action)
 
   (define (registered-result-panel-actions buffer)
     (filter
       (lambda (action)
         ((result-panel-action-applicable? action) buffer))
-      (reverse (buffer-local-ref buffer 'result-panel-actions '()))))
+      (reverse
+        (result-buffer-state-panel-actions
+          (require-result-state buffer 'buffer-result-panel-actions)))))
 
   (define (buffer-result-panel-actions buffer)
     (unless (buffer? buffer)
@@ -543,14 +627,17 @@
           (filter
             (lambda (action)
               ((result-action-applicable? action) buffer item))
-            (reverse (buffer-local-ref buffer 'result-actions '())))
+            (reverse
+              (result-buffer-state-actions
+                (require-result-state buffer 'buffer-result-actions-at))))
           '())))
 
   (define (buffer-result-interface-ref buffer)
     (unless (buffer? buffer)
       (assertion-violation
         'buffer-result-interface-ref "expected a Buffer" buffer))
-    (buffer-local-ref buffer 'result-buffer-interface #f))
+    (let ([state (buffer-result-state-ref buffer)])
+      (and state (result-buffer-state-interface state))))
 
   (define (editor-note-result-buffer! editor buffer)
     (unless (and (editor? editor) (buffer? buffer)
@@ -1053,7 +1140,7 @@
                  buffer position 'result-index #f)])
         (unless (and item (integer? index) (exact? index))
           (editor-user-error who "Point is not on a navigable item"))
-        (buffer-set-local! buffer 'result-current-index index)
+        (buffer-set-result-current-index! buffer index)
         (values buffer interface item index))))
 
   (define (current-result-entry buffer view)
@@ -1088,8 +1175,10 @@
                          (and current
                               (action-applicable-to-entry?
                                 action buffer current)))))
-                 (reverse
-                   (buffer-local-ref buffer 'result-actions '())))])
+                   (reverse
+                     (result-buffer-state-actions
+                       (require-result-state
+                         buffer 'buffer-item.actions))))])
         (values buffer current marked actions))))
 
   (define (invoke-buffer-item-action context name)
@@ -1234,7 +1323,9 @@
 
   (define (refresh-buffer-items context)
     (let* ([buffer (view-buffer (command-context-view context))]
-           [refresh (buffer-local-ref buffer 'result-refresh #f)])
+           [refresh
+             (result-buffer-state-refresh
+               (require-result-state buffer 'buffer-item.refresh))])
       (when (or (buffer-local-ref buffer 'result-edit-active? #f)
                 (buffer-local-ref buffer 'result-edit-pending #f))
         (editor-user-error
@@ -1271,8 +1362,7 @@
                      (if view
                          (buffer-text-property-ref
                            buffer (view-caret view) 'result-index #f)
-                         (buffer-local-ref
-                           buffer 'result-current-index #f))]
+                         (buffer-result-current-index buffer))]
                    [current-visible-index
                      (and
                        current
@@ -1318,7 +1408,7 @@
               (when view
                 (view-set-caret! view position)
                 (ensure-view-visible! view))
-              (buffer-set-local! buffer 'result-current-index index)
+              (buffer-set-result-current-index! buffer index)
               ((result-buffer-interface-activate interface)
                context buffer item index 'preview)))))
 
@@ -1356,8 +1446,7 @@
                    (if view
                        (view-caret view)
                        (let ([index
-                               (buffer-local-ref
-                                 buffer 'result-current-index #f)])
+                               (buffer-result-current-index buffer)])
                          (if (and index (< index (length items)))
                              (car (list-ref items index))
                              0)))]
@@ -1390,7 +1479,7 @@
                   (when view
                     (view-set-caret! view item-position)
                     (ensure-view-visible! view))
-                  (buffer-set-local! buffer 'result-current-index index)
+                  (buffer-set-result-current-index! buffer index)
                   ((result-buffer-interface-activate interface)
                    context buffer item index 'preview)))))))
 

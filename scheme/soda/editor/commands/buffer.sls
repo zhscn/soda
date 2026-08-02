@@ -313,9 +313,9 @@
         targets)
       (buffer-reconcile-result-selection! editor panel #t)
       (when (and (pair? targets)
-                 (not (buffer-local-ref panel 'result-current-index #f)))
+                 (not (buffer-result-current-index panel)))
         (let ([range (car (buffer-text-property-ranges panel 'result-index))])
-          (buffer-set-local! panel 'result-current-index (caddr range))
+          (buffer-set-result-current-index! panel (caddr range))
           (for-each
             (lambda (view)
               (when (eq? (view-buffer view) panel)

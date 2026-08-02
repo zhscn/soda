@@ -341,11 +341,9 @@
             (and
               (eq? (buffer-result-producer-state candidate) 'running)
               (not
-                (buffer-local-ref
-                  candidate 'result-producer-stop-invoked? #f))))
+                (buffer-result-producer-stop-invoked? candidate))))
           (lambda (context candidate)
-            (buffer-set-local!
-              candidate 'result-producer-stop-invoked? #t)
+            (buffer-set-result-producer-stop-invoked! candidate #t)
             (list
               (make-command-effect
                 'command.invoke
@@ -381,7 +379,7 @@
         (bytevector-length (string->utf8 heading))
         '((face . application.heading) (result-heading . #t)))
       (buffer-set-local! buffer 'location-results-state state)
-      (buffer-set-local! buffer 'result-producer-stop-invoked? #f)
+      (buffer-set-result-producer-stop-invoked! buffer #f)
       (register-result-producer-stop-action! buffer state)
       buffer))
 
@@ -495,8 +493,7 @@
              [close-command (location-results-state-close-command state)]
              [close-argument (location-results-state-close-argument state)]
              [stop-invoked?
-               (buffer-local-ref
-                 buffer 'result-producer-stop-invoked? #f)])
+               (buffer-result-producer-stop-invoked? buffer)])
         (when origin-view
           (view-clear-navigation-target! origin-view)
           (editor-select-view-window! editor (view-id origin-view)))
@@ -552,7 +549,7 @@
                     [positions (location-property-positions buffer)])
                 (when (pair? positions)
                   (view-set-caret! view (caar positions))
-                  (buffer-set-local! buffer 'result-current-index 0)
+                  (buffer-set-result-current-index! buffer 0)
                   (ensure-view-visible! view)))))
             (editor-invalidate! editor 'document)
             buffer))))
@@ -607,8 +604,7 @@
                         buffer 'result-index)])
                 (when (pair? ranges)
                   (let ([position (caar ranges)])
-                    (buffer-set-local!
-                      buffer 'result-current-index 0)
+                    (buffer-set-result-current-index! buffer 0)
                     (for-each
                       (lambda (view)
                         (when (eq? (view-buffer view) buffer)

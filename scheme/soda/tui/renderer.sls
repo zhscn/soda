@@ -10,6 +10,7 @@
           (soda editor modeline)
           (soda editor minor-mode-runtime)
           (soda editor presentation)
+          (soda editor result-buffer)
           (soda editor tui-application)
           (soda editor window)
           (soda tui application)
@@ -821,9 +822,11 @@
                editor
                (buffer-id buffer))]
            [result-producer-state
-             (buffer-local-ref buffer 'result-producer-state 'idle)]
+             (if (buffer-result-interface-ref buffer)
+                 (buffer-result-producer-state buffer)
+                 'idle)]
            [result-interface
-             (buffer-local-ref buffer 'result-buffer-interface #f)]
+             (buffer-result-interface-ref buffer)]
            [result-count
              (if result-interface
                  (length
@@ -831,11 +834,11 @@
                  0)]
            [result-index
              (and result-interface
-                  (buffer-local-ref buffer 'result-current-index #f))]
+                  (buffer-result-current-index buffer))]
            [result-mark-count
              (if result-interface
                  (length
-                   (buffer-local-ref buffer 'result-marked-indices '()))
+                   (buffer-result-marked-indices buffer))
                  0)]
            [message
              (and (editor-render-context-focused? context)
@@ -916,7 +919,7 @@
                    'end)
                  (modeline-segment
                    'result
-                   (if result-interface
+                   (if (and result-interface (positive? result-count))
                        (string-append
                          " ["
                          (if (and result-index (< result-index result-count))
@@ -1133,7 +1136,9 @@
                      '()))
                '())]
            [result-marks
-             (buffer-local-ref buffer 'result-marked-indices '())]
+             (if (buffer-result-interface-ref buffer)
+                 (buffer-result-marked-indices buffer)
+                 '())]
            [collapsed-group-decorations
              (fold-right
                (lambda (range runs)

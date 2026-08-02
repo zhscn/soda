@@ -39,6 +39,7 @@
               project-resource-request-continuation)
         (soda editor project-search)
         (soda editor repl)
+        (soda editor result-buffer)
         (soda editor result-producer-session)
         (soda editor save-place-store)
         (soda editor scheme-interface-index)
@@ -5728,10 +5729,8 @@
       (workbench-id scoped-result-secondary)))
   (error 'editor-tests
          "Result Buffer identity crossed Workbench scopes"))
-(buffer-set-local!
-  scoped-result-primary-buffer 'result-current-index #f)
-(buffer-set-local!
-  scoped-result-secondary-buffer 'result-current-index #f)
+(buffer-set-result-current-index! scoped-result-primary-buffer #f)
+(buffer-set-result-current-index! scoped-result-secondary-buffer #f)
 (editor-note-result-buffer!
   scoped-result-editor scoped-result-secondary-buffer)
 (editor-select-view-window!
@@ -5742,12 +5741,10 @@
 (unless
   (and
     (equal?
-      (buffer-local-ref
-        scoped-result-primary-buffer 'result-current-index #f)
+      (buffer-result-current-index scoped-result-primary-buffer)
       0)
     (not
-      (buffer-local-ref
-        scoped-result-secondary-buffer 'result-current-index #f)))
+      (buffer-result-current-index scoped-result-secondary-buffer)))
   (error 'editor-tests
          "global result navigation crossed Workbench scopes"))
 (editor-close! scoped-result-editor)
@@ -11351,7 +11348,13 @@
   (error 'editor-tests
          "full modeline did not use Helix-style segments"
          full-modeline-text))
-(buffer-set-local! modeline-buffer 'result-producer-state 'running)
+(buffer-set-result-interface!
+  modeline-buffer
+  (make-result-buffer-interface
+    #t
+    (lambda (context buffer item index disposition) '())
+    (lambda (context buffer) '())))
+(buffer-set-result-producer-state! modeline-buffer 'running)
 (let ([text
         (frame-row-text
           (render-editor-frame modeline-editor 3 80)
@@ -11360,16 +11363,16 @@
     (error 'editor-tests
            "modeline omitted the Result producer state"
            text)))
-(buffer-clear-local! modeline-buffer 'result-producer-state)
-(buffer-set-local! modeline-buffer 'result-buffer-interface #t)
-(buffer-set-local! modeline-buffer 'result-current-index 1)
-(buffer-set-local! modeline-buffer 'result-marked-indices '(0 2))
+(buffer-set-result-producer-state! modeline-buffer 'idle)
+(buffer-set-result-current-index! modeline-buffer 1)
 (buffer-add-text-properties!
   modeline-buffer 0 1 '((result-index . 0) (result-item . first)))
 (buffer-add-text-properties!
   modeline-buffer 1 2 '((result-index . 1) (result-item . second)))
 (buffer-add-text-properties!
   modeline-buffer 2 3 '((result-index . 2) (result-item . third)))
+(buffer-set-result-item-marked! modeline-buffer 0 #t)
+(buffer-set-result-item-marked! modeline-buffer 2 #t)
 (let ([text
         (frame-row-text
           (render-editor-frame modeline-editor 3 140)
@@ -11378,9 +11381,7 @@
     (error 'editor-tests
            "modeline omitted Result position or mark count"
            text)))
-(buffer-clear-local! modeline-buffer 'result-buffer-interface)
-(buffer-clear-local! modeline-buffer 'result-current-index)
-(buffer-clear-local! modeline-buffer 'result-marked-indices)
+(buffer-clear-result-interface! modeline-buffer)
 (buffer-clear-text-properties! modeline-buffer)
 (define narrow-modeline-frame
   (render-editor-frame modeline-editor 3 12))
