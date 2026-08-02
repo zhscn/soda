@@ -143,18 +143,6 @@
             "Bookmark not found"))
       '()))
 
-  (define (buffer-size buffer)
-    (let ([snapshot (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda () (text-size text))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
-
   (define (bookmark-list-text editor)
     (define (object->string value)
       (let-values ([(port extract) (open-string-output-port)])
@@ -197,7 +185,7 @@
                      (view-id (command-context-view context)))))])
       (when existing
         (buffer-replace-range-internal!
-          buffer 0 (buffer-size buffer) contents))
+          buffer 0 (buffer-byte-size buffer) contents))
       (buffer-set-local-setting! buffer 'track-modified? #f)
       (buffer-set-local-setting! buffer 'read-only? #t)
       (editor-set-view-buffer!

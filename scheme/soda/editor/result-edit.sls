@@ -37,18 +37,6 @@
       (result-edit-session?
         (buffer-local-ref buffer 'result-edit-session #f))))
 
-  (define (buffer-size buffer)
-    (let ([snapshot (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda () (text-size text))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
-
   (define (buffer-substring buffer start end)
     (let ([snapshot (document-snapshot (buffer-document buffer))])
       (dynamic-wind
@@ -124,7 +112,7 @@
              (buffer-substring result-buffer (car range) (cadr range))])
       (unless (and source-buffer
                    (<= 0 source-start source-end
-                       (buffer-size source-buffer)))
+                       (buffer-byte-size source-buffer)))
         (editor-user-error
           'result-edit.begin "Result target cannot be resolved" resource))
       (unless

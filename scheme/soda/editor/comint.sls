@@ -30,18 +30,6 @@
           (soda editor interaction-transcript)
           (soda editor state))
 
-  (define (buffer-size buffer)
-    (let ([snapshot (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda () (text-size text))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
-
   (define (activate-interaction-view! editor session keymap-layers)
     (let* ([buffer-id (interaction-session-buffer-id session)]
            [origin-view-id (view-id (editor-active-view editor))]
@@ -61,7 +49,7 @@
         (view-set-first-line! view 0)
         (view-set-first-column! view 0))
       (view-set-keymap-layers! view keymap-layers)
-      (view-set-caret! view (buffer-size (view-buffer view)))
+      (view-set-caret! view (buffer-byte-size (view-buffer view)))
       (ensure-view-visible! view)
       view))
 
@@ -318,7 +306,7 @@
            [view (command-context-view context)])
       (view-set-caret!
         view
-        (buffer-size (comint-session-buffer
+        (buffer-byte-size (comint-session-buffer
                        (command-context-editor context)
                        session)))
       '()))

@@ -76,18 +76,6 @@
   (define-record-type tracked-interaction-field
     (fields kind start-anchor end-anchor))
 
-  (define (buffer-size buffer)
-    (let ([snapshot (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda () (text-size text))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
-
   (define (buffer-string-range buffer start end)
     (let ([snapshot (document-snapshot (buffer-document buffer))])
       (dynamic-wind
@@ -107,7 +95,7 @@
              (if (bytevector? value)
                  value
                  (string->utf8 value))]
-           [offset (buffer-size buffer)]
+           [offset (buffer-byte-size buffer)]
            [change #f])
       (dynamic-wind
         (lambda () #f)
@@ -260,7 +248,7 @@
     (unless
       (and
         (exact-non-negative-integer? input-start)
-        (<= input-start (buffer-size buffer)))
+        (<= input-start (buffer-byte-size buffer)))
       (assertion-violation
         'make-interaction-transcript
         "input start must be a valid buffer byte offset"
@@ -392,7 +380,7 @@
         (make-interaction-field
           'input
           (interaction-transcript-input-start transcript)
-          (buffer-size buffer)))))
+          (buffer-byte-size buffer)))))
 
   (define (interaction-transcript-field-at transcript buffer offset)
     (unless (exact-non-negative-integer? offset)
@@ -400,7 +388,7 @@
         'interaction-transcript-field-at
         "offset must be a non-negative exact integer"
         offset))
-    (when (> offset (buffer-size buffer))
+    (when (> offset (buffer-byte-size buffer))
       (assertion-violation
         'interaction-transcript-field-at
         "offset is outside the transcript buffer"
@@ -414,7 +402,7 @@
               (<= (interaction-field-start field) offset)
               (< offset (interaction-field-end field)))
             (and
-              (= offset (buffer-size buffer))
+              (= offset (buffer-byte-size buffer))
               (eq? (interaction-field-kind field) 'input))))
         fields)))
 
@@ -429,7 +417,7 @@
     (buffer-string-range
       buffer
       (interaction-transcript-input-start transcript)
-      (buffer-size buffer)))
+      (buffer-byte-size buffer)))
 
   (define (interaction-transcript-replace-input!
             transcript
@@ -450,7 +438,7 @@
     (replace-buffer-range!
       buffer
       (interaction-transcript-input-start transcript)
-      (buffer-size buffer)
+      (buffer-byte-size buffer)
       input))
 
   (define (interaction-transcript-stash-input! transcript input)
@@ -537,7 +525,7 @@
       transcript
       buffer)
     (let* ([start (interaction-transcript-input-start transcript)]
-           [input-end (buffer-size buffer)]
+           [input-end (buffer-byte-size buffer)]
            [end (append-buffer! buffer "\n")])
       (append-tracked-field!
         transcript
@@ -568,7 +556,7 @@
         'interaction-transcript-append-output!
         "output must be a string or bytevector"
         output))
-    (let* ([output-start (buffer-size buffer)]
+    (let* ([output-start (buffer-byte-size buffer)]
            [output-end (append-buffer! buffer output)]
            [prompt-start output-end]
            [input-start

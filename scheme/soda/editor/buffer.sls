@@ -26,6 +26,7 @@
           buffer-text-property-decoration-runs
           buffer-adopt-setting-store!
           buffer-revision
+          buffer-byte-size
           buffer-file-path
           buffer-set-file-path!
           buffer-saved-revision
@@ -789,6 +790,16 @@
         (lambda () #f)
         (lambda () (text-size text))
         (lambda () (text-close! text)))))
+
+  (define (buffer-byte-size buffer)
+    (unless (buffer? buffer)
+      (assertion-violation
+        'buffer-byte-size "expected a Buffer" buffer))
+    (let ([snapshot (document-snapshot (buffer-document buffer))])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda () (snapshot-size snapshot))
+        (lambda () (snapshot-close! snapshot)))))
 
   (define (build-injection-index profile session snapshot)
     (let ([provider (language-profile-syntax profile)])

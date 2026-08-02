@@ -25,18 +25,6 @@
             after-apply
             (mutable applied-count)))
 
-  (define (buffer-size buffer)
-    (let ([snapshot (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda () (text-size text))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
-
   (define (buffer-substring buffer start end)
     (let ([snapshot (document-snapshot (buffer-document buffer))])
       (dynamic-wind
@@ -92,7 +80,7 @@
       (values prefix replacement (string-append prefix replacement "\n"))))
 
   (define (append-resource-heading! editor buffer resource)
-    (let* ([base (buffer-size buffer)]
+    (let* ([base (buffer-byte-size buffer)]
            [heading (string-append resource "\n")]
            [end (+ base (bytevector-length (string->utf8 heading)))])
       (editor-append-result-text! editor buffer heading '())
@@ -144,7 +132,7 @@
                 (append-resource-heading! editor buffer resource)
                 (set! last-resource resource)))
             (let-values ([(prefix replacement row) (preview-row item edit)])
-              (let* ([base (buffer-size buffer)]
+              (let* ([base (buffer-byte-size buffer)]
                      [replacement-start
                        (+ base (bytevector-length (string->utf8 prefix)))]
                      [replacement-end

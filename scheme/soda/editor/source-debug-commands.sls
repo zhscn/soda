@@ -15,20 +15,6 @@
   (define breakpoint-buffer-resource
     "*scheme-breakpoints*")
 
-  (define (buffer-size buffer)
-    (let ([snapshot
-            (document-snapshot
-              (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda () (text-size text))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
-
   (define (view-line-location view)
     (let* ([buffer (view-buffer view)]
            [resource (buffer-resource buffer)])
@@ -158,7 +144,7 @@
         (buffer-replace-range-internal!
           buffer
           0
-          (buffer-size buffer)
+          (buffer-byte-size buffer)
           (string->utf8 text)))
       (buffer-set-local-setting!
         buffer

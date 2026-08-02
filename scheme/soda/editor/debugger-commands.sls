@@ -37,20 +37,6 @@
           "editor")
       "*"))
 
-  (define (buffer-size buffer)
-    (let ([snapshot
-            (document-snapshot
-              (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda () (text-size text))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
-
   (define (debugger-buffer editor debugger)
     (let ([id (debugger-session-buffer-id debugger)])
       (and
@@ -73,7 +59,7 @@
         (buffer-replace-range-internal!
           buffer
           0
-          (buffer-size buffer)
+          (buffer-byte-size buffer)
           (string->utf8
             (debugger-session->string debugger)))
         (for-each
@@ -177,7 +163,7 @@
                         view
                         (min
                           (debugger-session-return-caret debugger)
-                          (buffer-size return-buffer)))))))))
+                          (buffer-byte-size return-buffer)))))))))
           (filter
             (lambda (view)
               (= (buffer-id (view-buffer view))
@@ -510,7 +496,7 @@
              target
              (min
                (source-location-start stop-location)
-               (buffer-size source-buffer))))
+               (buffer-byte-size source-buffer))))
          '()]
         [(and stop-location (string? stop-resource))
          (let ([target

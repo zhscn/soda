@@ -627,18 +627,6 @@
           '()
           (workbench-session-snapshot-workbenches snapshot)))))
 
-  (define (buffer-size buffer)
-    (let ([snapshot (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda () (text-size text))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
-
   (define (resolve-project! editor root)
     (or
       (find
@@ -674,7 +662,7 @@
         buffer
         (make-buffer-location
           buffer
-          (min (cadr datum) (buffer-size buffer))))))
+          (min (cadr datum) (buffer-byte-size buffer))))))
 
   (define (restore-location-item buffer-loader datum role kind)
     (let ([buffer (buffer-loader (car datum))]
@@ -687,7 +675,7 @@
             (set! location
               (make-buffer-location
                 buffer
-                (min (cadr datum) (buffer-size buffer))))
+                (min (cadr datum) (buffer-byte-size buffer))))
             (editor-location->item location role kind))
           (lambda ()
             (when location (editor-location-close! location)))))))
@@ -799,7 +787,7 @@
                editor
                (buffer-id buffer)
                context)]
-           [end (buffer-size buffer)]
+           [end (buffer-byte-size buffer)]
            [point (min (list-ref datum 1) end)]
            [mark
              (and

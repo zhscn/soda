@@ -30,18 +30,6 @@
   (define repl-continuation-prompt ". ")
   (define repl-header "Soda Chez Scheme REPL\n> ")
 
-  (define (buffer-size buffer)
-    (let ([snapshot (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda () (text-size text))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
-
   (define (input-field-continuation-runs
             text
             field
@@ -153,7 +141,7 @@
                      (editor-view-resource-context
                        editor
                        (view-id (editor-active-view editor))))]
-                 [input-start (buffer-size buffer)]
+                 [input-start (buffer-byte-size buffer)]
                  [session
                    (editor-register-interaction!
                      editor
@@ -303,7 +291,7 @@
           "active buffer is not a REPL transcript"
           (buffer-id buffer)))
       (let* ([start (interaction-session-input-start session)]
-             [end (buffer-size buffer)]
+             [end (buffer-byte-size buffer)]
              [source (comint-current-input editor session)])
         (if (source-complete? source)
             (session-submit-source!

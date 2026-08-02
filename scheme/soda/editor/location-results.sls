@@ -183,18 +183,6 @@
         (and target-start (+ prefix-size target-start))
         (and target-end (+ prefix-size target-end)))))
 
-  (define (buffer-size buffer)
-    (let ([snapshot (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda () (text-size text))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
-
   (define (render-location-results editor title locations)
     (let ([chunks '()] [properties '()] [position 0] [last-resource #f])
       (define (emit! text values)
@@ -577,7 +565,7 @@
       (let* ([state (location-results-state-for-buffer buffer)]
              [locations (location-results-state-locations state)]
              [start-index (length (location-list-items locations))]
-             [start-position (buffer-size buffer)])
+             [start-position (buffer-byte-size buffer)])
         (buffer-capture-result-group-folds! editor buffer)
         (let-values ([(text properties last-resource)
                       (render-appended-locations

@@ -696,18 +696,6 @@
       (lambda (range) (cons (car range) (caddr range)))
       (buffer-text-property-ranges buffer 'result-index)))
 
-  (define (buffer-size buffer)
-    (let ([snapshot (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda () (text-size text))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
-
   (define (editor-append-result-items! editor buffer value ranges)
     (unless
       (and (editor? editor)
@@ -728,7 +716,7 @@
         'editor-append-result-items!
         "invalid attributed result text"
         editor buffer value ranges))
-    (let* ([base (buffer-size buffer)]
+    (let* ([base (buffer-byte-size buffer)]
            [bytes (string->utf8 value)]
            [size (bytevector-length bytes)]
            [start-index
@@ -767,7 +755,7 @@
         'editor-append-result-message!
         "invalid Result Buffer message"
         editor buffer message severity))
-    (let* ([base (buffer-size buffer)]
+    (let* ([base (buffer-byte-size buffer)]
            [length (string-length message)]
            [text
              (if (char=? (string-ref message (- length 1)) #\newline)
@@ -870,7 +858,7 @@
       (buffer-set-major-mode! buffer mode)
       (buffer-clear-text-properties! buffer)
       (buffer-replace-range-internal!
-        buffer 0 (buffer-size buffer) (string->utf8 text))
+        buffer 0 (buffer-byte-size buffer) (string->utf8 text))
       (buffer-set-result-interface! buffer interface)
       (when preserved
         (buffer-set-local!
@@ -1010,7 +998,7 @@
   (define (result-group-ranges buffer)
     (let ([groups
             (buffer-text-property-ranges buffer 'result-group)]
-          [size (buffer-size buffer)])
+          [size (buffer-byte-size buffer)])
       (let loop ([remaining groups] [result '()])
         (if (null? remaining)
             (reverse result)

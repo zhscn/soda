@@ -476,23 +476,9 @@
                    origin-view-id
                    (scheme-environment-id environment)))))))])))
 
-  (define (buffer-size buffer)
-    (let ([snapshot
-            (document-snapshot
-              (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda () (text-size text))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
-
   (define (replace-buffer! buffer bytes)
     (let ([change #f]
-          [size (buffer-size buffer)]
+          [size (buffer-byte-size buffer)]
           [data
             (if
               (bytevector? bytes)
@@ -510,14 +496,14 @@
                     transaction 0 size data))))
             (lambda (result committed-change)
               (set! change committed-change)
-              (buffer-size buffer))))
+              (buffer-byte-size buffer))))
         (lambda ()
           (when change
             (change-close! change))))))
 
   (define (append-buffer! buffer bytes)
     (let ([change #f]
-          [start (buffer-size buffer)]
+          [start (buffer-byte-size buffer)]
           [data
             (if
               (bytevector? bytes)
@@ -574,7 +560,7 @@
       editor
       (view-id view)
       (buffer-id buffer))
-    (let ([end (buffer-size buffer)])
+    (let ([end (buffer-byte-size buffer)])
       (view-set-caret! view end)
       (ensure-view-visible! view))
     buffer)

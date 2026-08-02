@@ -12,19 +12,6 @@
           (soda editor scheme-indentation)
           (soda editor state))
 
-  (define (buffer-size buffer)
-    (let ([snapshot
-            (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda () (text-size text))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
-
   (define (buffer-range-source buffer start end)
     (let ([snapshot
             (document-snapshot (buffer-document buffer))])
@@ -233,7 +220,7 @@
                'scheme.repl-indent-entry
                context)]
            [start (interaction-session-input-start session)]
-           [end (buffer-size buffer)]
+           [end (buffer-byte-size buffer)]
            [source (comint-current-input editor session)]
            [replacement
              (scheme-reindent-entry

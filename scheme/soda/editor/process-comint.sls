@@ -200,18 +200,6 @@
          output-filter
          sentinel)]))
 
-  (define (buffer-size buffer)
-    (let ([snapshot (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda () (text-size text))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
-
   (define (session-process who session)
     (let ([process (interaction-session-evaluator session)])
       (unless
@@ -277,7 +265,7 @@
           ":"
           (number->string (buffer-id buffer))
           "*"))
-      (let* ([input-start (buffer-size buffer)]
+      (let* ([input-start (buffer-byte-size buffer)]
              [session
                (editor-register-interaction!
                  editor
