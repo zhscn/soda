@@ -887,6 +887,51 @@
            (git-status-record-fields " M src/file with spaces.cpp")
            '(" M" "src/file with spaces.cpp")))
     (error 'editor-tests "Project Git status command differs" effects))
+  (let* ([panel (view-buffer (editor-active-view editor))]
+         [items
+           (map
+             (lambda (entry)
+               (make-location-item
+                 #f
+                 (string-append "/virtual/repository/" (car entry))
+                 0 0 0
+                 (car entry)
+                 (list (cons 'git-status (cdr entry)))))
+             '(("worktree.cpp" . " M")
+               ("index.cpp" . "M ")
+               ("both.cpp" . "MM")
+               ("new.cpp" . "??")))])
+    (editor-append-location-results! editor panel items)
+    (buffer-set-result-producer-state! panel 'ready)
+    (let ([ranges (buffer-text-property-ranges panel 'result-index)])
+      (for-each
+        (lambda (range expected)
+          (view-set-caret!
+            (editor-active-view editor) (car range))
+          (unless
+            (equal?
+              (map result-action-name
+                   (buffer-result-actions-at panel (car range)))
+              expected)
+            (error 'editor-tests
+                   "Git status exposed actions incompatible with XY state"
+                   (caddr range)
+                   (map result-action-name
+                        (buffer-result-actions-at panel (car range)))
+                   expected)))
+        ranges
+        '((stage diff)
+          (unstage diff)
+          (stage unstage diff)
+          (stage))))
+    (buffer-set-result-producer-state! panel 'running)
+    (when
+      (exists
+        (lambda (range)
+          (pair? (buffer-result-actions-at panel (car range))))
+        (buffer-text-property-ranges panel 'result-index))
+      (error 'editor-tests
+             "Git status actions remained enabled during a producer operation")))
   (let ([refresh-effects
           (execute-command!
             (editor-command-registry editor)

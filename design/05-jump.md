@@ -175,7 +175,9 @@ LocationItem。select 才携带 display intent 并把焦点交给 source View。
 领域 mode 可以向 Buffer 注册命名 `result-action`。action 包含显示名称、针对 point
 下 `result-item` 的适用性判断和执行过程。键位仍由 mode keymap 决定；which-key、菜单
 或其他 TUI 组件可以枚举 point 下的可用 action，而无需识别领域 payload。Git status
-的 stage、unstage 和 diff 使用该协议。
+的 stage、unstage 和 diff 使用该协议。action applicability 消费 porcelain XY 状态：
+worktree change 提供 stage，index change 提供 unstage，tracked change 提供 diff；producer
+运行期间领域 action 暂停，只保留面板级取消/关闭能力。
 
 可重新生成内容的 Result Buffer 注册 buffer-local refresh callback。`g` 调用当前
 Buffer 的 producer，而不判断它来自搜索、版本控制或语义服务。producer 负责替换

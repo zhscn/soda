@@ -338,6 +338,43 @@
   (define (git-status-item? buffer item)
     (and (location-item? item) (item-status item)))
 
+  (define (git-status-action-ready? buffer item)
+    (and
+      (eq? (buffer-result-producer-state buffer) 'ready)
+      (git-status-item? buffer item)))
+
+  (define (untracked-status? status)
+    (and (string? status) (string=? status "??")))
+
+  (define (index-change? status)
+    (and
+      (string? status)
+      (= (string-length status) 2)
+      (not (memv (string-ref status 0) '(#\space #\? #\!)))))
+
+  (define (worktree-change? status)
+    (and
+      (string? status)
+      (= (string-length status) 2)
+      (or
+        (untracked-status? status)
+        (not (memv (string-ref status 1) '(#\space #\!))))))
+
+  (define (git-stageable-item? buffer item)
+    (and
+      (git-status-action-ready? buffer item)
+      (worktree-change? (item-status item))))
+
+  (define (git-unstageable-item? buffer item)
+    (and
+      (git-status-action-ready? buffer item)
+      (index-change? (item-status item))))
+
+  (define (git-diffable-item? buffer item)
+    (and
+      (git-status-action-ready? buffer item)
+      (not (untracked-status? (item-status item)))))
+
   (define (marked-git-paths entries)
     (map
       (lambda (entry) (location-item-excerpt (cdr entry)))
@@ -350,7 +387,7 @@
       (list
         (make-result-action
           'stage "Stage"
-          git-status-item?
+          git-stageable-item?
           (lambda (context buffer item index)
             (start-git-operation
               session "Git stage"
@@ -363,7 +400,7 @@
                 (marked-git-paths entries)))))
         (make-result-action
           'unstage "Unstage"
-          git-status-item?
+          git-unstageable-item?
           (lambda (context buffer item index)
             (start-git-operation
               session "Git unstage"
@@ -376,7 +413,7 @@
                 (marked-git-paths entries)))))
         (make-result-action
           'diff "Show diff"
-          git-status-item?
+          git-diffable-item?
           (lambda (context buffer item index)
             (let* ([status (item-status item)]
                    [cached?
