@@ -232,7 +232,9 @@
 
   (define (start-project-search! context project query)
     (let* ([editor (command-context-editor context)]
-           [origin-view-id (view-id (command-context-view context))]
+           [origin-view-id
+             (editor-result-origin-view-id
+               editor (command-context-view context))]
            [root (project-primary-root project)]
            [locations (make-location-list 'project-search '())]
            [session

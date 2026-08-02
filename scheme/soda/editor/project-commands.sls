@@ -4,6 +4,7 @@
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
+          (soda editor compilation)
           (soda editor completion)
           (soda editor event)
           (soda editor file)
@@ -68,12 +69,13 @@
       (project-command-state-last-task-set! state profile))
     profile)
 
-  (define (project-task-effects state project task)
-    (profile-effect
-      (remember-command-profile!
-        state
-        (task-profile project task)
-        #t)))
+  (define (compilation-profile-effects context state profile task?)
+    (remember-command-profile! state profile task?)
+    (start-compilation!
+      context
+      (process-comint-profile-name profile)
+      (process-comint-profile-arguments profile)
+      (process-comint-profile-working-directory profile)))
 
   (define (lifecycle-default marker phase)
     (let ([table
@@ -537,23 +539,24 @@
           "No Project found"))
       '()))
 
-  (define (run-project-task-effects state selection)
+  (define (run-project-task-effects context state selection)
     (if (not selection)
         '()
         (let* ([project (vector-ref selection 0)]
                [task (vector-ref selection 1)])
-          (project-task-effects state project task))))
+          (compilation-profile-effects
+            context state (task-profile project task) #t))))
 
   (define (make-run-project-task-command state)
     (let ([implementation
             (lambda (context selection)
-              (run-project-task-effects state selection))])
+              (run-project-task-effects context state selection))])
       (make-command-definition
         'project.run-task
         implementation
         (lambda (context arguments)
           (apply implementation context arguments))
-        "Run a known Project task in a process interaction buffer."
+        "Run a known Project task in a Compilation Buffer."
         #f
         (make-interactive-plan (list known-project-task-reader))
         '())))
@@ -568,22 +571,22 @@
          '()]
         [(project-find-task project phase) =>
          (lambda (task)
-           (project-task-effects state project task))]
+           (compilation-profile-effects
+             context state (task-profile project task) #t))]
         [(lifecycle-default (project-marker project) phase) =>
          (lambda (command)
-           (profile-effect
-             (remember-command-profile!
-               state
-               (project-profile
-                 project
-                 (string-append
-                   (symbol->string phase)
-                   ": "
-                   (project-primary-root project))
-                 (list "/bin/sh" "-lc" command)
-                 ""
-                 'pipe)
-               #t)))]
+           (compilation-profile-effects
+             context state
+             (project-profile
+               project
+               (string-append
+                 (symbol->string phase)
+                 ": "
+                 (project-primary-root project))
+               (list "/bin/sh" "-lc" command)
+               ""
+               'pipe)
+             #t))]
         [else
          (editor-set-status-message!
            editor
@@ -679,7 +682,9 @@
                 (project-command-state-last-task state)
                 (project-command-state-last-command state))])
       (if profile
-          (profile-effect profile)
+          (if task?
+              (compilation-profile-effects context state profile #t)
+              (profile-effect profile))
           (begin
             (editor-set-status-message!
               (command-context-editor context)
@@ -738,6 +743,7 @@
           '())))
 
   (define (install-project-commands! editor)
+    (install-compilation! editor)
     (install-project-search! editor)
     (let ([state (make-project-command-state #f #f)])
       (editor-register-command!

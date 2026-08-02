@@ -660,24 +660,19 @@
            'project.compile
            context
            '())]
-       [message
+       [process
          (and
            (= (length effects) 1)
-           (eq? (command-effect-kind (car effects)) 'command.invoke)
-           (command-effect-payload (car effects)))]
-       [profile
-         (and
-           (command-message? message)
-           (eq? (command-message-name message) 'process.start)
-           (command-message-argument message))])
+           (eq? (command-effect-kind (car effects)) 'managed-process.start)
+           (command-effect-payload (car effects)))])
   (unless
     (and
-      (process-comint-profile? profile)
+      (managed-process? process)
       (equal?
-        (process-comint-profile-arguments profile)
+        (managed-process-arguments process)
         '("/bin/sh" "-lc" "cmake --build build"))
       (string=?
-        (process-comint-profile-working-directory profile)
+        (managed-process-working-directory process)
         "/virtual/repository"))
     (error 'editor-tests "Project lifecycle command differs" effects)))
 (let* ([context

@@ -4,6 +4,7 @@
           editor-append-result-text!
           editor-show-location-results!
           editor-append-location-results!
+          editor-result-origin-view-id
           location-results-buffer?)
   (import (rnrs)
           (soda document)
@@ -181,6 +182,15 @@
     (and (buffer? buffer)
          (location-results-state?
            (location-results-state-for-buffer buffer))))
+
+  (define (editor-result-origin-view-id editor view)
+    (unless (and (editor? editor) (view? view))
+      (assertion-violation
+        'editor-result-origin-view-id "expected an Editor and View" editor view))
+    (let ([state (location-results-state-for-buffer (view-buffer view))])
+      (if (location-results-state? state)
+          (location-results-state-origin-view-id state)
+          (view-id view))))
 
   (define (validate-result-request
             who title locations origin-view-id jump-kind close-command)
