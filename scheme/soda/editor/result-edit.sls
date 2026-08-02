@@ -1,5 +1,6 @@
 (library (soda editor result-edit)
   (export install-result-edit!
+          buffer-enable-result-edit-action!
           editor-begin-projection-edit!
           buffer-projection-edit-active?
           accept-projection-edit)
@@ -57,6 +58,39 @@
 
   (define (target-ranges buffer)
     (buffer-text-property-ranges buffer 'result-target))
+
+  (define (result-edit-ready? buffer)
+    (let ([ready? (buffer-local-ref buffer 'result-edit-ready? #t)])
+      (and
+        (memq (buffer-result-producer-state buffer) '(idle ready))
+        (not (buffer-local-ref buffer 'result-edit-session #f))
+        (not (buffer-local-ref buffer 'result-edit-pending #f))
+        (pair? (target-ranges buffer))
+        (let ([status (if (procedure? ready?) (ready?) ready?)])
+          (eq? status #t)))))
+
+  (define buffer-enable-result-edit-action!
+    (case-lambda
+      [(buffer)
+       (buffer-enable-result-edit-action! buffer "Edit result targets")]
+      [(buffer label)
+       (unless (and (buffer? buffer) (string? label)
+                    (positive? (string-length label)))
+         (assertion-violation
+           'buffer-enable-result-edit-action!
+           "expected a result Buffer and action label"
+           buffer label))
+       (buffer-register-result-panel-action!
+         buffer
+         (make-result-panel-action
+           'edit-results
+           label
+           result-edit-ready?
+           (lambda (context candidate)
+             (list
+               (make-command-effect
+                 'command.invoke
+                 (make-command-message 'result-edit.begin #f))))))]))
 
   (define (result-item-count buffer)
     (length (buffer-text-property-ranges buffer 'result-index)))

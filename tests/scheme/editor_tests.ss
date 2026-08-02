@@ -758,6 +758,14 @@
                'scheme-mode
                source-text)])
       (editor-append-location-results! editor results-buffer items)
+      (when
+        (memq
+          'edit-results
+          (map result-panel-action-name
+               (buffer-result-panel-actions results-buffer)))
+        (error 'editor-tests
+               "Project search exposed editing while its producer was running"))
+      (buffer-set-result-producer-state! results-buffer 'ready)
       (unless
         (memq
           'edit-results
@@ -4631,14 +4639,14 @@
   (unless
     (and
       completion
-      (= (length (completion-session-items completion)) 4)
+      (= (length (completion-session-items completion)) 5)
       (for-all
         (lambda (name)
           (exists
             (lambda (item)
               (eq? (completion-item-payload item) name))
             (completion-session-items completion)))
-        '(inspect secondary refresh close)))
+        '(inspect secondary edit-results refresh close)))
     (error 'editor-tests
            "result action picker did not expose applicable actions"
            (and completion
@@ -4666,14 +4674,14 @@
   (unless
     (and
       completion
-      (= (length (completion-session-items completion)) 2)
+      (= (length (completion-session-items completion)) 3)
       (for-all
         (lambda (name)
           (exists
             (lambda (item)
               (eq? (completion-item-payload item) name))
             (completion-session-items completion)))
-        '(close refresh)))
+        '(close edit-results refresh)))
     (error 'editor-tests
            "result action picker did not expose panel actions away from an item"
            (and completion

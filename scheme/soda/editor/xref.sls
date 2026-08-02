@@ -17,6 +17,7 @@
           (soda editor location)
           (soda editor location-results)
           (soda editor result-buffer)
+          (soda editor result-edit)
           (soda editor state))
 
   (define editor-xref-backends
@@ -121,6 +122,9 @@
           editor buffer "No references." 'info))
       (when refresh
         (buffer-set-result-refresh! buffer refresh))
+      (when refresh
+        (buffer-enable-result-edit-action!
+          buffer "Edit reference targets"))
       buffer))
 
   (define (editor-begin-xref-results! editor origin-view-id refresh)
@@ -140,6 +144,8 @@
                'xref #f #f)])
       (editor-set-current-location-list! editor locations)
       (buffer-set-result-refresh! buffer refresh)
+      (buffer-enable-result-edit-action!
+        buffer "Edit reference targets")
       (buffer-set-result-producer-state! buffer 'running)
       (editor-append-result-message!
         editor buffer "Searching references..." 'info)
