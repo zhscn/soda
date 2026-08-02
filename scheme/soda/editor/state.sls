@@ -330,6 +330,7 @@
           (soda editor project-resource)
           (soda editor presentation)
           (soda editor resource-context)
+          (soda editor save-place)
           (soda editor setting)
           (soda editor theme)
           (soda editor themes catppuccin)
@@ -557,14 +558,6 @@
       line
       column
       annotation))
-
-  (define-record-type save-place
-    (fields resource
-            point
-            first-line
-            first-visual-row
-            first-column
-            mark))
 
   (define-record-type
     (editor-buffer-configuration-state
@@ -5474,37 +5467,11 @@
           (close-bookmark! entry)))
       (editor-bookmarks editor)))
 
-  (define (valid-save-place? value)
-    (and
-      (save-place? value)
-      (string? (save-place-resource value))
-      (positive? (string-length (save-place-resource value)))
-      (exact-non-negative-integer? (save-place-point value))
-      (exact-non-negative-integer? (save-place-first-line value))
-      (exact-non-negative-integer?
-        (save-place-first-visual-row value))
-      (exact-non-negative-integer? (save-place-first-column value))
-      (or (not (save-place-mark value))
-          (exact-non-negative-integer? (save-place-mark value)))))
-
   (define (editor-replace-save-places! editor places)
     (require-open-editor 'editor-replace-save-places! editor)
-    (unless (and (list? places) (for-all valid-save-place? places))
-      (assertion-violation
-        'editor-replace-save-places!
-        "expected valid save-place entries"
-        places))
-    (let loop ([remaining places] [seen '()] [kept '()])
-      (if (null? remaining)
-          (editor-save-places-set! editor (reverse kept))
-          (let* ([entry (car remaining)]
-                 [resource (save-place-resource entry)])
-            (if (member resource seen)
-                (loop (cdr remaining) seen kept)
-                (loop
-                  (cdr remaining)
-                  (cons resource seen)
-                  (cons entry kept))))))
+    (editor-save-places-set!
+      editor
+      (normalize-save-places places))
     (editor-save-places editor))
 
   (define (save-place-for-resource editor resource)

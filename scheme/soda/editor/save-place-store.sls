@@ -11,7 +11,7 @@
                 getenv
                 mkdir
                 path-parent)
-          (soda editor state))
+          (soda editor save-place))
 
   (define schema-name 'soda-save-place)
   (define schema-version 1)
@@ -54,33 +54,12 @@
       (newline port)
       (string->utf8 (extract))))
 
-  (define (valid-offset? value)
-    (and (integer? value) (exact? value) (not (negative? value))))
-
   (define (datum->entry datum)
     (and
       (list? datum)
       (= (length datum) 6)
-      (let ([resource (list-ref datum 0)]
-            [point (list-ref datum 1)]
-            [first-line (list-ref datum 2)]
-            [first-visual-row (list-ref datum 3)]
-            [first-column (list-ref datum 4)]
-            [mark (list-ref datum 5)])
-        (and
-          (non-empty-string? resource)
-          (valid-offset? point)
-          (valid-offset? first-line)
-          (valid-offset? first-visual-row)
-          (valid-offset? first-column)
-          (or (not mark) (valid-offset? mark))
-          (make-save-place
-            resource
-            point
-            first-line
-            first-visual-row
-            first-column
-            mark)))))
+      (guard (condition [else #f])
+        (apply make-save-place datum))))
 
   (define (save-place-state-decode bytes)
     (unless (bytevector? bytes)
