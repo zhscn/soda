@@ -754,7 +754,7 @@
       (let ([edit-effects
               (execute-command!
                 (editor-command-registry editor)
-                'project-search.edit
+                'result-edit.begin
                 (make-command-context
                   editor (editor-active-view editor) #f #f #f)
                 '())])
@@ -763,9 +763,28 @@
             (null? edit-effects)
             (eq?
               (buffer-major-mode-name results-buffer)
-              'project-search-edit-mode))
+              'project-search-mode)
+            (editor-minor-mode-active?
+              editor results-buffer 'result-edit-mode))
           (error 'editor-tests
                  "Project search did not enter editable projection mode")))
+      (for-each
+        (lambda (command)
+          (unless
+            (guard
+              (condition [else #t])
+              (execute-command!
+                (editor-command-registry editor)
+                command
+                (make-command-context
+                  editor (editor-active-view editor) #f #f #f)
+                '())
+              #f)
+            (error
+              'editor-tests
+              "Result edit session allowed a destructive lifecycle command"
+              command)))
+        '(buffer-item.refresh buffer-item.quit))
       (let* ([result-view (editor-active-view editor)]
              [start (view-caret result-view)])
         (buffer-replace-range!
@@ -773,7 +792,7 @@
       (let ([accept-effects
               (execute-command!
                 (editor-command-registry editor)
-                'project-search.accept
+                'result-edit.accept
                 (make-command-context
                   editor (editor-active-view editor) #f #f #f)
                 '())])

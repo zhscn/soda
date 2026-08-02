@@ -1656,6 +1656,7 @@
           (soda editor project-workspace)
           (soda editor repl)
           (soda editor result-buffer)
+          (soda editor result-edit)
           (soda editor resource-context)
           (soda editor resource-resolver)
           (soda editor scheme-completion)
@@ -1923,6 +1924,7 @@
         (make-scheme-runtime-completion-provider editor))
       (install-file-commands! editor)
       (install-resource-resolver! editor)
+      (install-result-edit! editor)
       (install-lsp-commands! editor)
       (install-workspace-edit-preview! editor)
       (install-scheme-interface-commands!

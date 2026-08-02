@@ -345,6 +345,10 @@
   (define (refresh-buffer-items context)
     (let* ([buffer (view-buffer (command-context-view context))]
            [refresh (buffer-local-ref buffer 'result-refresh #f)])
+      (when (buffer-local-ref buffer 'result-edit-active? #f)
+        (editor-user-error
+          'buffer-item.refresh
+          "Finish or discard Result Buffer edits before refreshing"))
       (unless (procedure? refresh)
         (editor-user-error
           'buffer-item.refresh "Current result Buffer cannot be refreshed"))
@@ -481,6 +485,10 @@
   (define (quit-buffer-items context)
     (let-values ([(buffer interface)
                   (require-interface context 'buffer-item.quit)])
+      (when (buffer-local-ref buffer 'result-edit-active? #f)
+        (editor-user-error
+          'buffer-item.quit
+          "Apply or discard Result Buffer edits before quitting"))
       ((result-buffer-interface-quit interface) context buffer)))
 
   (define (global-navigation-context context)

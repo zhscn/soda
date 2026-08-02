@@ -10,6 +10,8 @@
           (only (chezscheme) make-weak-eq-hashtable)
           (soda editor command)
           (soda editor condition)
+          (soda editor event)
+          (soda editor keymap)
           (soda editor language)
           (soda editor location)
           (soda editor location-results)
@@ -82,8 +84,17 @@
       (editor-language-catalog editor)
       (make-major-mode
         'xref-results-mode 'location-results-mode #f 'interface
-        #f
+        'xref-results-mode-map
         '((track-modified? . #f) (read-only? . #t))))
+    (let ([keymap (make-keymap)])
+      (keymap-bind!
+        keymap
+        (list
+          (make-key-stroke
+            'character (char->integer #\e) 0))
+        'result-edit.begin)
+      (keymap-catalog-register!
+        (editor-keymap-catalog editor) 'xref-results-mode-map keymap))
     editor)
 
   (define (%editor-show-xref-results!

@@ -4,12 +4,10 @@
           project-search-json-line->locations)
   (import (rnrs)
           (only (chezscheme) make-weak-eq-hashtable)
-          (soda document)
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
           (soda editor condition)
-          (soda editor editable-projection)
           (soda editor effect)
           (soda editor event)
           (soda editor file)
@@ -20,10 +18,8 @@
           (soda editor line-stream)
           (soda editor managed-process)
           (soda editor project)
-          (soda editor resource-resolver)
           (soda editor result-buffer)
           (soda editor state)
-          (soda editor workspace-edit)
           (soda json)
           (soda runtime)
           (soda vfs))
@@ -39,7 +35,6 @@
             (mutable process)
             (mutable pending-output)
             (mutable stderr-output)
-            (mutable projections)
             (mutable closed?)))
 
   (define active-project-searches
@@ -253,7 +248,7 @@
            [session
              (%make-project-search-session
                project root query origin-view-id locations
-               #f #f (make-bytevector 0) (make-bytevector 0) '() #f)]
+               #f #f (make-bytevector 0) (make-bytevector 0) #f)]
            [process
              (make-managed-process
                (string-append "project-search:" query)
@@ -278,6 +273,18 @@
       (project-search-session-buffer-set! session buffer)
       (project-search-session-process-set! session process)
       (buffer-set-local! buffer 'project-search-session session)
+      (buffer-set-local!
+        buffer
+        'result-edit-ready?
+        (lambda ()
+          (cond
+            [(project-search-session-closed? session)
+             "Search result Buffer is no longer current"]
+            [(and (project-search-session-process session)
+                  (managed-process-running?
+                    (project-search-session-process session)))
+             "Wait for the search to finish"]
+            [else #t])))
       (buffer-clear-local! buffer 'edit-guard)
       (buffer-set-local-setting! buffer 'read-only? #t)
       (buffer-set-result-refresh!
@@ -301,190 +308,6 @@
             '())
         (list (make-command-effect 'managed-process.start process)))))
 
-  (define (buffer-substring buffer start end)
-    (let ([snapshot (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda ()
-                (utf8->string (text-subbytevector text start end)))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
-
-  (define (result-target-range buffer item)
-    (find
-      (lambda (range) (eq? (caddr range) item))
-      (buffer-text-property-ranges buffer 'result-target)))
-
-  (define (search-projection! editor result-buffer item)
-    (let* ([source-buffer
-             (editor-buffer-for-resource
-               editor (location-item-resource item))]
-           [result-range (result-target-range result-buffer item)])
-      (unless
-        (and source-buffer result-range)
-        (editor-user-error
-          'project-search.edit "Search result cannot be projected"))
-      (let* ([projection-start (car result-range)]
-             [projection-end (cadr result-range)]
-             [source-start (location-item-start item)]
-             [source-end (location-item-end item)]
-             [shown
-               (buffer-substring
-                 result-buffer projection-start projection-end)]
-             [current
-               (buffer-substring source-buffer source-start source-end)])
-        (unless (string=? shown current)
-          (editor-user-error
-            'project-search.edit
-            "Source changed since the search result was produced"
-            (location-item-resource item)))
-        (make-editable-projection!
-          result-buffer
-          (make-workspace-text-edit
-            (location-item-resource item)
-            (buffer-revision source-buffer)
-            source-start source-end shown)
-          projection-start projection-end))))
-
-  (define (begin-project-search-edit! editor buffer session)
-    (unless
-      (and (eq? (buffer-local-ref buffer 'project-search-session #f) session)
-           (not (project-search-session-closed? session)))
-      (editor-user-error
-        'project-search.edit "Search result Buffer is no longer current"))
-    (let ([projections
-            (let loop ([items
-                         (location-list-items
-                           (project-search-session-locations session))]
-                       [result '()])
-              (if (null? items)
-                  (reverse result)
-                  (loop
-                    (cdr items)
-                    (cons
-                      (search-projection!
-                        editor buffer (car items))
-                      result))))])
-      (when (null? projections)
-        (editor-user-error 'project-search.edit "Search has no matches"))
-      (project-search-session-projections-set! session projections)
-      (buffer-install-projection-edit-guard!
-        buffer projections 'project-search.edit
-        "Only matched text is editable")
-      (buffer-set-major-mode! buffer 'project-search-edit-mode)
-      (buffer-set-local-setting! buffer 'read-only? #f)
-      (let ([view
-              (find
-                (lambda (candidate) (eq? (view-buffer candidate) buffer))
-                (editor-views editor))])
-        (when view
-          (view-set-caret!
-            view
-            (car (editable-projection-range buffer (car projections))))))
-      (editor-set-status-message!
-        editor "Edit matches; C-c C-c applies, C-c C-k discards")
-      (editor-invalidate! editor 'chrome)))
-
-  (define (active-search-session context who)
-    (let* ([buffer (view-buffer (command-context-view context))]
-           [session
-             (buffer-local-ref buffer 'project-search-session #f)])
-      (unless (project-search-session? session)
-        (editor-user-error who "Current Buffer is not a project search"))
-      (values buffer session)))
-
-  (define (unique-resources items)
-    (reverse
-      (fold-left
-        (lambda (resources item)
-          (let ([resource (location-item-resource item)])
-            (if (member resource resources)
-                resources
-                (cons resource resources))))
-        '()
-        items)))
-
-  (define (edit-project-search context)
-    (let-values ([(buffer session)
-                  (active-search-session context 'project-search.edit)])
-      (let ([process (project-search-session-process session)])
-        (when (and process (managed-process-running? process))
-          (editor-user-error
-            'project-search.edit "Wait for the search to finish")))
-      (let ([resources
-              (unique-resources
-                (location-list-items
-                  (project-search-session-locations session)))])
-        (editor-resolve-resources!
-          (command-context-editor context)
-          resources
-          (lambda (editor buffers)
-            (when
-              (and
-                (exists
-                  (lambda (candidate) (eq? candidate buffer))
-                  (editor-buffers editor))
-                (not (project-search-session-closed? session))
-                (eq?
-                  (buffer-local-ref buffer 'project-search-session #f)
-                  session))
-              (begin-project-search-edit! editor buffer session)))
-          (lambda (editor resource status)
-            (when
-              (and
-                (exists
-                  (lambda (candidate) (eq? candidate buffer))
-                  (editor-buffers editor))
-                (not (project-search-session-closed? session)))
-              (editor-set-status-message!
-                editor
-                (string-append
-                  "Cannot edit search results: failed to read " resource))))))))
-
-  (define (restart-project-search context session)
-    (start-project-search!
-      context
-      (project-search-session-project session)
-      (project-search-session-query session)))
-
-  (define (accept-project-search-edit context)
-    (let-values ([(buffer session)
-                  (active-search-session context 'project-search.accept)])
-      (let ([projections (project-search-session-projections session)])
-        (unless (pair? projections)
-          (editor-user-error
-            'project-search.accept "Search Buffer has no editable matches"))
-        (workspace-text-edits-apply!
-          (command-context-editor context)
-          (map
-            (lambda (projection)
-              (let ([edit (editable-projection-source projection)])
-                (make-workspace-text-edit
-                  (workspace-text-edit-resource edit)
-                  (workspace-text-edit-revision edit)
-                  (workspace-text-edit-start edit)
-                  (workspace-text-edit-end edit)
-                  (editable-projection-text buffer projection))))
-            projections))
-        (editor-set-status-message!
-          (command-context-editor context)
-          (string-append
-            "Updated " (number->string (length projections))
-            " search matches"))
-        (list
-          (make-command-effect
-            'command.invoke
-            (make-command-message 'buffer-item.quit #f))))))
-
-  (define (discard-project-search-edit context)
-    (let-values ([(buffer session)
-                  (active-search-session context 'project-search.discard)])
-      (restart-project-search context session)))
-
   (define (bind-search-key! keymap character modifiers command)
     (keymap-bind!
       keymap
@@ -500,43 +323,10 @@
         'project-search-mode 'location-results-mode #f 'interface
         'project-search-mode-map
         '((track-modified? . #f) (read-only? . #t))))
-    (register-major-mode!
-      (editor-language-catalog editor)
-      (make-major-mode
-        'project-search-edit-mode 'fundamental-mode #f 'editing
-        'project-search-edit-mode-map
-        '((track-modified? . #f) (read-only? . #f))))
     (let ([keymap (make-keymap)])
-      (bind-search-key! keymap #\e 0 'project-search.edit)
+      (bind-search-key! keymap #\e 0 'result-edit.begin)
       (keymap-catalog-register!
         (editor-keymap-catalog editor) 'project-search-mode-map keymap))
-    (let ([keymap (make-keymap)]
-          [control-c
-            (make-key-stroke 'character (char->integer #\c) 4)])
-      (keymap-bind!
-        keymap
-        (list control-c control-c)
-        'project-search.accept)
-      (keymap-bind!
-        keymap
-        (list control-c
-              (make-key-stroke 'character (char->integer #\k) 4))
-        'project-search.discard)
-      (keymap-catalog-register!
-        (editor-keymap-catalog editor) 'project-search-edit-mode-map keymap))
-    (for-each
-      (lambda (entry)
-        (editor-register-command!
-          editor
-          (make-interactive-context-command
-            (car entry) (cadr entry) (caddr entry))))
-      (list
-        (list 'project-search.edit edit-project-search
-              "Edit project search matches in the result Buffer.")
-        (list 'project-search.accept accept-project-search-edit
-              "Apply edited project search matches.")
-        (list 'project-search.discard discard-project-search-edit
-              "Discard edits and refresh project search results.")))
     (for-each
       (lambda (entry)
         (editor-register-internal-command!
