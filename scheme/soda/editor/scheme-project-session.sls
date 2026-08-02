@@ -21,6 +21,7 @@
           (soda editor edit)
           (soda editor file)
           (soda editor resource-context)
+          (soda editor string)
           (soda editor scheme-environment)
           (soda editor scheme-interface-commands)
           (soda editor scheme-workspace)
@@ -515,21 +516,6 @@
       (view-set-caret! view end)
       (ensure-view-visible! view))
     buffer)
-
-  (define (string-join values separator)
-    (if
-      (null? values)
-      ""
-      (let loop
-        ([remaining (cdr values)]
-         [result (car values)])
-        (if
-          (null? remaining)
-          result
-          (loop
-            (cdr remaining)
-            (string-append
-              result separator (car remaining)))))))
 
   (define (start-project-build!
             state
