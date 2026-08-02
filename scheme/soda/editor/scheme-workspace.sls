@@ -911,22 +911,6 @@
                 '()))
             ids)))))
 
-  (define (diagnostic-excerpt bytes diagnostic)
-    (let* ([start
-             (scheme-bytevector-line-start
-               bytes
-               (scheme-diagnostic-start diagnostic))]
-           [end
-             (scheme-bytevector-line-end
-               bytes
-               (scheme-diagnostic-end diagnostic))]
-           [result
-             (make-bytevector (- end start))])
-      (bytevector-copy!
-        bytes start result 0 (- end start))
-      (guard (condition [else #f])
-        (utf8->string result))))
-
   (define (workspace-document-diagnostics document)
     (map
       (lambda (diagnostic)
@@ -934,7 +918,7 @@
           (scheme-workspace-document-buffer-id document)
           (scheme-workspace-document-resource document)
           (scheme-workspace-document-revision document)
-          (diagnostic-excerpt
+          (scheme-diagnostic-excerpt
             (scheme-workspace-document-bytes document)
             diagnostic)
           diagnostic))

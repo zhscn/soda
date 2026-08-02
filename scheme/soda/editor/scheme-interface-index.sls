@@ -13,7 +13,8 @@
           scheme-interface-index-write-file!
           scheme-sources->interface-index-file!
           scheme-bytevector-line-start
-          scheme-bytevector-line-end)
+          scheme-bytevector-line-end
+          scheme-diagnostic-excerpt)
   (import (chezscheme)
           (soda editor contract)
           (soda editor scheme-api-indexer)
@@ -319,7 +320,7 @@
           offset
           (loop (+ offset 1))))))
 
-  (define (diagnostic-excerpt bytes diagnostic)
+  (define (scheme-diagnostic-excerpt bytes diagnostic)
     (let* ([start
              (scheme-bytevector-line-start
                bytes
@@ -358,7 +359,7 @@
           (scheme-diagnostic-end diagnostic)
           (scheme-diagnostic-severity diagnostic)
           (scheme-diagnostic-message diagnostic)
-          (diagnostic-excerpt bytes diagnostic)))
+          (scheme-diagnostic-excerpt bytes diagnostic)))
       (scheme-semantic-snapshot-diagnostics snapshot)))
 
   (define (sources->interface-analysis
