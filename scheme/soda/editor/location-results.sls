@@ -1,5 +1,7 @@
 (library (soda editor location-results)
   (export install-location-results!
+          editor-open-result-buffer!
+          editor-append-result-text!
           editor-show-location-results!
           editor-append-location-results!
           location-results-buffer?)
@@ -179,6 +181,110 @@
     (and (buffer? buffer)
          (location-results-state?
            (location-results-state-for-buffer buffer))))
+
+  (define (validate-result-request
+            who title locations origin-view-id jump-kind close-command)
+    (unless (and (string? title)
+                 (positive? (string-length title))
+                 (location-list? locations)
+                 (integer? origin-view-id) (exact? origin-view-id)
+                 (positive? origin-view-id)
+                 (symbol? jump-kind)
+                 (or (not close-command) (symbol? close-command)))
+      (assertion-violation
+        who "invalid result Buffer request"
+        title locations origin-view-id jump-kind close-command)))
+
+  (define (editor-open-result-buffer!
+            editor resource title locations origin-view-id jump-kind
+            close-command close-argument)
+    (validate-result-request
+      'editor-open-result-buffer!
+      title locations origin-view-id jump-kind close-command)
+    (unless (and (string? resource) (positive? (string-length resource)))
+      (assertion-violation
+        'editor-open-result-buffer! "resource must be a non-empty string" resource))
+    (let* ([existing (editor-buffer-for-resource editor resource)]
+           [buffer
+             (cond
+               [(not existing)
+                (editor-create-buffer!
+                  editor resource 'location-results-mode "")]
+               [(location-results-buffer? existing) existing]
+               [else
+                (editor-user-error
+                  'editor-open-result-buffer!
+                  "Result resource belongs to another Buffer"
+                  resource)])]
+           [state
+             (make-location-results-state
+               title locations origin-view-id jump-kind
+               close-command close-argument #f)]
+           [heading (string-append title "\n")])
+      (buffer-clear-text-properties! buffer)
+      (buffer-replace-range-internal!
+        buffer 0 (buffer-size buffer) (string->utf8 heading))
+      (buffer-add-text-properties!
+        buffer
+        0
+        (bytevector-length (string->utf8 heading))
+        '((face . application.heading) (result-heading . #t)))
+      (buffer-set-local! buffer 'location-results-state state)
+      (let ([view
+              (editor-display-buffer!
+                editor
+                (make-display-request
+                  (buffer-id buffer) 'tools origin-view-id #f
+                  (editor-view-resource-context editor origin-view-id)))])
+        (view-set-caret! view 0)
+        (ensure-view-visible! view))
+      (editor-invalidate! editor 'document)
+      buffer))
+
+  (define (editor-append-result-text! editor buffer text ranges)
+    (unless (and (location-results-buffer? buffer)
+                 (string? text)
+                 (list? ranges)
+                 (for-all
+                   (lambda (range)
+                     (and (list? range)
+                          (= (length range) 3)
+                          (integer? (car range)) (exact? (car range))
+                          (integer? (cadr range)) (exact? (cadr range))
+                          (<= 0 (car range) (cadr range))
+                          (location-item? (caddr range))))
+                   ranges))
+      (assertion-violation
+        'editor-append-result-text!
+        "expected attributed result text"
+        buffer text ranges))
+    (let* ([state (location-results-state-for-buffer buffer)]
+           [locations (location-results-state-locations state)]
+           [base (buffer-size buffer)]
+           [text-size (bytevector-length (string->utf8 text))]
+           [start-index (length (location-list-items locations))])
+      (for-each
+        (lambda (range)
+          (unless (<= (cadr range) text-size)
+            (assertion-violation
+              'editor-append-result-text!
+              "result range exceeds appended text"
+              range text-size)))
+        ranges)
+      (buffer-replace-range-internal!
+        buffer base base (string->utf8 text))
+      (let loop ([ranges ranges] [index start-index] [items '()])
+        (if (null? ranges)
+            (location-list-append-items! locations (reverse items))
+            (let* ([range (car ranges)] [item (caddr range)])
+              (buffer-add-text-properties!
+                buffer
+                (+ base (car range))
+                (+ base (cadr range))
+                `((location-item . ,item) (location-index . ,index)))
+              (loop (cdr ranges) (+ index 1) (cons item items)))))
+      (editor-invalidate! editor 'document)
+      buffer))
 
   (define (active-location-results context who)
     (let* ([view (command-context-view context)]
