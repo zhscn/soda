@@ -450,10 +450,6 @@
                editor-active-view-id
                editor-active-view-id-set!)
       (mutable next-view-id editor-next-view-id editor-next-view-id-set!)
-      (mutable window-root editor-window-root editor-window-root-set!)
-      (mutable active-window-id
-               editor-active-window-id
-               editor-active-window-id-set!)
       (mutable next-window-id
                editor-next-window-id
                editor-next-window-id-set!)
@@ -564,6 +560,12 @@
                editor-configuration-transaction-depth
                editor-configuration-transaction-depth-set!)
       (mutable closed? editor-closed? editor-closed?-set!)))
+
+  (define (editor-window-root value)
+    (workbench-layout (editor-active-workbench value)))
+
+  (define (editor-active-window-id value)
+    (workbench-active-window-id (editor-active-workbench value)))
 
   (define-record-type global-mark-entry
     (fields buffer-id anchor))
@@ -2352,15 +2354,6 @@
     (let ([workbench (editor-workbench-ref value workbench-id)])
       (replace-workbench-layout! value workbench layout)
       (when (= workbench-id (editor-active-workbench-id value))
-        (editor-window-root-set! value layout)
-        (unless
-          (window-node-find layout (editor-active-window-id value))
-          (editor-active-window-id-set!
-            value
-            (window-leaf-id (car (window-node-leaves layout)))))
-        (workbench-set-active-window-id!
-          workbench
-          (editor-active-window-id value))
         (editor-reconcile-viewports! value))
       (editor-invalidate! value 'layout)
       layout))
@@ -2425,13 +2418,9 @@
     (let ([target (editor-workbench-ref value id)])
       (unless (= id (editor-active-workbench-id value))
         (editor-active-workbench-id-set! value id)
-        (editor-window-root-set! value (workbench-layout target))
         (editor-current-location-list-set!
           value
           (workbench-current-location-list target))
-        (editor-active-window-id-set!
-          value
-          (workbench-active-window-id target))
         (let ([leaf
                 (window-node-find
                   (workbench-layout target)
@@ -2549,7 +2538,6 @@
           'editor-set-active-window-id!
           "active window must identify a window leaf"
           id))
-      (editor-active-window-id-set! value id)
       (workbench-set-active-window-id!
         (editor-active-workbench value)
         id)))
@@ -6541,8 +6529,6 @@
                '(1)
                1
                2
-               (make-window-leaf 1 1)
-               1
                2
                workbenches
                '(1)
@@ -6608,7 +6594,7 @@
           1
           "main"
           '()
-          (editor-window-root value)
+          (make-window-leaf 1 1)
           1
           (list (buffer-id buffer))
           '()
