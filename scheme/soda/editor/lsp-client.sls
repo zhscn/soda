@@ -56,6 +56,7 @@
           (soda editor lsp-completion-decoder)
           (soda editor lsp-position)
           (soda editor lsp-protocol)
+          (soda editor lsp-workspace-edit-decoder)
           (soda editor managed-process)
           (soda editor navigation)
           (soda editor prompt)
@@ -133,9 +134,6 @@
   (define-record-type
     (lsp-client-registry %make-lsp-client-registry lsp-client-registry?)
     (fields profiles sessions))
-
-  (define-record-type lsp-workspace-text-edit
-    (fields resource range text))
 
   (define-record-type lsp-workspace-edit-origin
     (fields preferred-view-id workbench-id))
@@ -1174,7 +1172,7 @@
     (let* ([workspace-edit
              (and (json-object? params)
                   (json-object-ref params "edit" #f))]
-           [edits (lsp-workspace-edits workspace-edit)])
+           [edits (decode-lsp-workspace-edits workspace-edit)])
       (cond
         [(not edits)
          (server-request-result
@@ -3251,86 +3249,6 @@
               editor "No ready language server for workspace symbol search")
             '()))))
 
-  (define (lsp-workspace-edits-for-resource uri values)
-    (let ([resource
-            (and (string? uri)
-                 (guard (condition [else #f]) (lsp-uri-file-path uri)))])
-      (and
-        resource
-        (json-array? values)
-        (let loop ([remaining (json-array-values values)] [edits '()])
-          (if (null? remaining)
-              (reverse edits)
-              (let ([value (car remaining)])
-                (if (not (json-object? value))
-                    #f
-                    (let ([range
-                            (guard
-                              (condition [else #f])
-                              (lsp-range-from-json
-                                (json-object-ref value "range" #f)))]
-                          [text (json-object-ref value "newText" #f)])
-                      (and range
-                           (string? text)
-                           (loop
-                             (cdr remaining)
-                             (cons
-                               (make-lsp-workspace-text-edit resource range text)
-                               edits)))))))))))
-
-  (define (lsp-changes-edits changes)
-    (and
-      (json-object? changes)
-      (let loop ([entries (json-object-entries changes)] [edits '()])
-        (if (null? entries)
-            (reverse edits)
-            (let ([resource-edits
-                    (lsp-workspace-edits-for-resource
-                      (caar entries) (cdar entries))])
-              (and resource-edits
-                   (loop (cdr entries) (append (reverse resource-edits) edits))))))))
-
-  (define (lsp-document-changes-edits changes)
-    (and
-      (json-array? changes)
-      (let loop ([remaining (json-array-values changes)] [edits '()])
-        (if (null? remaining)
-            (reverse edits)
-            (let ([change (car remaining)])
-              (and
-                (json-object? change)
-                (let ([document (json-object-ref change "textDocument" #f)]
-                      [document-edits (json-object-ref change "edits" #f)])
-                  (and
-                    (json-object? document)
-                    (let* ([uri (json-object-ref document "uri" #f)]
-                           [resource-edits
-                            (lsp-workspace-edits-for-resource uri document-edits)])
-                      (and resource-edits
-                           (loop
-                             (cdr remaining)
-                             (append (reverse resource-edits) edits))))))))))))
-
-  (define (lsp-workspace-edits result)
-    (and
-      (json-object? result)
-      (let ([changes (json-object-ref result "changes" #f)]
-            [document-changes (json-object-ref result "documentChanges" #f)])
-        (cond
-          [(json-object? changes) (lsp-changes-edits changes)]
-          [(json-array? document-changes)
-           (lsp-document-changes-edits document-changes)]
-          [else #f]))))
-
-  (define (lsp-workspace-edit-resources edits)
-    (reverse
-      (fold-left
-        (lambda (resources edit)
-          (let ([resource (lsp-workspace-text-edit-resource edit)])
-            (if (member resource resources) resources (cons resource resources))))
-        '()
-        edits)))
-
   (define (lsp-workspace-edit-missing-resources editor edits)
     (filter
       (lambda (resource) (not (editor-buffer-for-resource editor resource)))
@@ -3571,7 +3489,7 @@
   (define (lsp-format-result-edits buffer result)
     (and
       (json-array? result)
-      (lsp-workspace-edits-for-resource
+      (decode-lsp-workspace-edits-for-resource
         (lsp-file-uri (require-file-buffer 'lsp.format buffer))
         result)))
 
@@ -3845,7 +3763,7 @@
   (define (lsp-code-action-workspace-edits action)
     (let ([raw (lsp-code-action-raw action)])
       (if (json-object-has-key? raw "edit")
-          (or (lsp-workspace-edits (json-object-ref raw "edit" #f)) 'invalid)
+          (or (decode-lsp-workspace-edits (json-object-ref raw "edit" #f)) 'invalid)
           'none)))
 
   (define (lsp-code-action-resolve-supported? session)
@@ -4153,7 +4071,7 @@
         "textDocument/rename"
         (list (cons "newName" new-name))
         (lambda (response-editor response-session result)
-          (let ([edits (lsp-workspace-edits result)])
+          (let ([edits (decode-lsp-workspace-edits result)])
             (cond
               [(not edits)
                (editor-set-status-message!
