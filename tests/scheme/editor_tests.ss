@@ -4417,6 +4417,10 @@
         (and
           (eq? (buffer-major-mode-name results-buffer) 'xref-results-mode)
           (buffer-result-refreshable? results-buffer)
+          (= (length
+               (buffer-text-property-ranges
+                 results-buffer 'result-target))
+             3)
           (location-item?
             (buffer-text-property-ref
               results-buffer point 'result-item #f)))))

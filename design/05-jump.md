@@ -158,6 +158,7 @@ xref、project search、diagnostics、compilation 和 Git 等 producer 把结果
 result-item   领域 payload
 result-index  Buffer 内稳定的导航次序
 result-group  文件、诊断来源或其他逻辑分组
+result-target 结果行中对应源 range 的精确区间
 face          普通文本装饰
 ```
 
@@ -194,8 +195,9 @@ Editable projection 使用 DocumentAnchor 标记 Result Buffer 中允许修改�
 区间关联到领域 source。编辑 guard 只允许修改完整落在 projection 内的文本。接受操作
 读取 projection 的当前内容，由领域 mode 生成原子 workspace edits；放弃操作恢复或重新
 生成 producer 结果。Project search 把 `rg --json` 的绝对 range 和行内 match range
-投影到搜索结果，进入编辑模式前异步打开全部目标文件，并校验显示文本仍与源 Buffer
-一致。接受后源 Buffer 保持 modified 状态，结果 Buffer 关闭以避免继续使用旧位置。
+呈现为 `result-target`，进入编辑模式前异步打开全部目标文件，并校验该属性覆盖的文本仍
+与源 Buffer 一致。接受后源 Buffer 保持 modified 状态，结果 Buffer 关闭以避免继续使用
+旧位置。领域编辑逻辑只消费标准 target property，不依赖结果行的前缀或布局。
 
 ## Excerpt 组合视图
 

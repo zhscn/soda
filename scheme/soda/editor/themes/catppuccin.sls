@@ -77,6 +77,7 @@
         (cons 'status.error (pface 'red 'inherit '(bold)))
         (cons 'application (pface 'text 'base '()))
         (cons 'application.heading (pface 'mauve 'inherit '(bold)))
+        (cons 'result.match (pface 'yellow 'inherit '(bold)))
         (cons 'application.border (pface 'overlay1 'inherit '()))
         (cons 'application.selection (pface 'text 'surface1 '(bold)))
         (cons 'application.disabled (pface 'overlay0 'inherit '()))

@@ -47,6 +47,11 @@
               character))
         (string->list value))))
 
+  (define (item-metadata-ref item key)
+    (let ([metadata (location-item-metadata item)])
+      (let ([entry (and (list? metadata) (assq key metadata))])
+        (and entry (cdr entry)))))
+
   (define (buffer-location-presentation buffer item)
     (let ([snapshot (document-snapshot (buffer-document buffer))])
       (dynamic-wind
@@ -64,7 +69,14 @@
                        [end (text-line-content-end text line)]
                        [excerpt
                          (utf8->string (text-subbytevector text start end))])
-                  (list line column (single-line excerpt))))
+                  (list
+                    line
+                    column
+                    (single-line excerpt)
+                    (and (<= start (location-item-start item) end)
+                         (- (location-item-start item) start))
+                    (and (<= start (location-item-end item) end)
+                         (- (location-item-end item) start)))))
               (lambda () (text-close! text)))))
         (lambda () (snapshot-close! snapshot)))))
 
@@ -81,9 +93,14 @@
          (list
            (file-utf16-position-line open-position)
            (file-utf16-position-character open-position)
-           (or (location-item-excerpt item) ""))]
+           (or (location-item-excerpt item) "")
+           (item-metadata-ref item 'search-match-start)
+           (item-metadata-ref item 'search-match-end))]
         [else
-         (list 0 0 (or (location-item-excerpt item) ""))])))
+         (list
+           0 0 (or (location-item-excerpt item) "")
+           (item-metadata-ref item 'search-match-start)
+           (item-metadata-ref item 'search-match-end))])))
 
   (define (location-resource-label item)
     (or (location-item-resource item)
@@ -95,11 +112,19 @@
         "<buffer>"))
 
   (define (location-row editor item)
-    (let ([presentation (location-presentation editor item)])
-      (string-append
-        "  " (number->string (+ (car presentation) 1))
-        ":" (number->string (+ (cadr presentation) 1))
-        "  " (caddr presentation))))
+    (let* ([presentation (location-presentation editor item)]
+           [prefix
+             (string-append
+               "  " (number->string (+ (car presentation) 1))
+               ":" (number->string (+ (cadr presentation) 1))
+               "  ")]
+           [prefix-size (bytevector-length (string->utf8 prefix))]
+           [target-start (list-ref presentation 3)]
+           [target-end (list-ref presentation 4)])
+      (values
+        (string-append prefix (caddr presentation) "\n")
+        (and target-start (+ prefix-size target-start))
+        (and target-end (+ prefix-size target-end)))))
 
   (define (buffer-size buffer)
     (let ([snapshot (document-snapshot (buffer-document buffer))])
@@ -134,9 +159,22 @@
                 (string-append resource "\n")
                 `((face . application.heading) (result-group . ,resource)))
               (set! last-resource resource))
-            (emit!
-              (string-append (location-row editor item) "\n")
-              `((result-item . ,item) (result-index . ,index)))
+            (let ([row-start position])
+              (let-values ([(row target-start target-end)
+                            (location-row editor item)])
+                (emit!
+                  row
+                  `((result-item . ,item) (result-index . ,index)))
+                (when (and target-start target-end
+                           (< target-start target-end))
+                  (set! properties
+                    (cons
+                      (list
+                        (+ row-start target-start)
+                        (+ row-start target-end)
+                        `((result-target . ,item)
+                          (face . result.match)))
+                      properties)))))
             (loop (cdr items) (+ index 1)))))
       (values
         (apply string-append (reverse chunks))
@@ -163,9 +201,22 @@
                 (string-append resource "\n")
                 `((face . application.heading) (result-group . ,resource)))
               (set! last-resource resource))
-            (emit!
-              (string-append (location-row editor item) "\n")
-              `((result-item . ,item) (result-index . ,index)))
+            (let ([row-start position])
+              (let-values ([(row target-start target-end)
+                            (location-row editor item)])
+                (emit!
+                  row
+                  `((result-item . ,item) (result-index . ,index)))
+                (when (and target-start target-end
+                           (< target-start target-end))
+                  (set! properties
+                    (cons
+                      (list
+                        (+ row-start target-start)
+                        (+ row-start target-end)
+                        `((result-target . ,item)
+                          (face . result.match)))
+                      properties)))))
             (loop (cdr items) (+ index 1)))))
       (values
         (apply string-append (reverse chunks))

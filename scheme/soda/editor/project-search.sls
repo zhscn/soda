@@ -314,36 +314,22 @@
               (lambda () (text-close! text)))))
         (lambda () (snapshot-close! snapshot)))))
 
-  (define (item-metadata-ref item key)
-    (let ([metadata (location-item-metadata item)])
-      (let ([entry (and (list? metadata) (assq key metadata))])
-        (and entry (cdr entry)))))
-
-  (define (result-range-for-index buffer index)
+  (define (result-target-range buffer item)
     (find
-      (lambda (range) (= (caddr range) index))
-      (buffer-text-property-ranges buffer 'result-index)))
+      (lambda (range) (eq? (caddr range) item))
+      (buffer-text-property-ranges buffer 'result-target)))
 
-  (define (search-projection! editor result-buffer item index)
+  (define (search-projection! editor result-buffer item)
     (let* ([source-buffer
              (editor-buffer-for-resource
                editor (location-item-resource item))]
-           [result-range (result-range-for-index result-buffer index)]
-           [match-start (item-metadata-ref item 'search-match-start)]
-           [match-end (item-metadata-ref item 'search-match-end)]
-           [excerpt (or (location-item-excerpt item) "")]
-           [excerpt-size (bytevector-length (string->utf8 excerpt))])
+           [result-range (result-target-range result-buffer item)])
       (unless
-        (and source-buffer result-range
-             (integer? match-start) (exact? match-start)
-             (integer? match-end) (exact? match-end)
-             (<= 0 match-start match-end excerpt-size))
+        (and source-buffer result-range)
         (editor-user-error
           'project-search.edit "Search result cannot be projected"))
-      (let* ([result-end (- (cadr result-range) 1)]
-             [result-start (- result-end excerpt-size)]
-             [projection-start (+ result-start match-start)]
-             [projection-end (+ result-start match-end)]
+      (let* ([projection-start (car result-range)]
+             [projection-end (cadr result-range)]
              [source-start (location-item-start item)]
              [source-end (location-item-end item)]
              [shown
@@ -374,16 +360,14 @@
             (let loop ([items
                          (location-list-items
                            (project-search-session-locations session))]
-                       [index 0]
                        [result '()])
               (if (null? items)
                   (reverse result)
                   (loop
                     (cdr items)
-                    (+ index 1)
                     (cons
                       (search-projection!
-                        editor buffer (car items) index)
+                        editor buffer (car items))
                       result))))])
       (when (null? projections)
         (editor-user-error 'project-search.edit "Search has no matches"))
