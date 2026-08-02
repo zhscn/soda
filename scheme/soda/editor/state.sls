@@ -300,6 +300,7 @@
           (only (chezscheme) current-directory)
           (soda document)
           (soda editor annotation)
+          (soda editor anchored-location-ring)
           (soda editor auto-mode)
           (soda editor buffer)
           (soda editor command)
@@ -347,7 +348,7 @@
       (mutable caret-anchor view-caret-anchor view-caret-anchor-set!)
       (mutable mark-anchor view-mark-anchor view-mark-anchor-set!)
       (mutable mark-active? view-mark-active? view-mark-active?-set!)
-      (mutable mark-ring view-mark-ring-anchors view-mark-ring-anchors-set!)
+      (immutable mark-ring view-mark-ring-state)
       (mutable preferred-column
                view-preferred-column
                view-preferred-column-set!)
@@ -475,15 +476,8 @@
                %editor-status-message
                %editor-status-message-set!)
       (mutable kill-ring editor-kill-ring editor-kill-ring-set!)
-      (mutable global-mark-ring-entries
-               editor-global-mark-ring-entries
-               editor-global-mark-ring-entries-set!)
-      (mutable change-ring-entries
-               editor-change-ring-entries
-               editor-change-ring-entries-set!)
-      (mutable change-ring-index
-               editor-change-ring-index
-               editor-change-ring-index-set!)
+      (immutable global-marks editor-global-marks)
+      (immutable changes editor-changes)
       (mutable bookmarks editor-bookmarks editor-bookmarks-set!)
       (mutable save-places editor-save-places editor-save-places-set!)
       (mutable last-yank editor-last-yank editor-last-yank-set!)
@@ -550,12 +544,6 @@
 
   (define (editor-current-location-list value)
     (workbench-current-location-list (editor-active-workbench value)))
-
-  (define-record-type global-mark-entry
-    (fields buffer-id anchor))
-
-  (define-record-type change-ring-entry
-    (fields buffer-id anchor class))
 
   (define-record-type
     (bookmark %make-bookmark bookmark?)
@@ -2147,7 +2135,7 @@
                  anchor-after-insertion)
                #f
                #f
-               '()
+               (make-anchored-location-ring 16)
                #f
                #f
                0
@@ -2220,11 +2208,9 @@
         (document-remove-anchor!
           (buffer-document (view-buffer view))
           (view-mark-anchor view)))
-      (for-each
-        (lambda (anchor)
-          (document-remove-anchor!
-            (buffer-document (view-buffer view)) anchor))
-        (view-mark-ring-anchors view))
+      (anchored-location-ring-clear!
+        (view-mark-ring-state view)
+        (view-buffer-ref-or-false view))
       (document-remove-anchor!
         (buffer-document (view-buffer view))
         (view-caret-anchor view))
@@ -2603,16 +2589,13 @@
           (document-remove-anchor!
             (buffer-document (view-buffer view))
             (view-mark-anchor view)))
-        (for-each
-          (lambda (anchor)
-            (document-remove-anchor!
-              (buffer-document (view-buffer view)) anchor))
-          (view-mark-ring-anchors view))
+        (anchored-location-ring-clear!
+          (view-mark-ring-state view)
+          (view-buffer-ref-or-false view))
         (view-buffer-set! view buffer)
         (view-caret-anchor-set! view anchor)
         (view-mark-anchor-set! view #f)
         (view-mark-active?-set! view #f)
-        (view-mark-ring-anchors-set! view '())
         (view-display-map-set! view #f)
         (when
           (view-language-context?
@@ -5162,18 +5145,15 @@
     (unless (view? value)
       (assertion-violation 'view-mark-ring "expected a view" value))
     (map
-      (lambda (anchor)
-        (document-anchor-offset
-          (buffer-document (view-buffer value)) anchor))
-      (view-mark-ring-anchors value)))
+      cadr
+      (anchored-location-ring-locations
+        (view-mark-ring-state value)
+        (view-buffer-ref-or-false value))))
 
-  (define (split-mark-ring ring limit)
-    (let loop ([remaining ring] [count 0] [kept '()])
-      (if
-        (or (null? remaining) (= count limit))
-        (values (reverse kept) remaining)
-        (loop (cdr remaining) (+ count 1)
-              (cons (car remaining) kept)))))
+  (define (view-buffer-ref-or-false view)
+    (lambda (id)
+      (let ([buffer (view-buffer view)])
+        (and (= id (buffer-id buffer)) buffer))))
 
   (define (view-push-mark! value offset)
     (unless (view? value)
@@ -5183,32 +5163,22 @@
         'view-push-mark!
         "offset must be a non-negative exact integer"
         offset))
-    (let* ([document (buffer-document (view-buffer value))]
-           [anchor
-             (document-create-anchor!
-               document offset anchor-before-insertion)]
-           [ring (cons anchor (view-mark-ring-anchors value))])
-      (call-with-values
-        (lambda () (split-mark-ring ring 16))
-        (lambda (kept discarded)
-          (for-each
-            (lambda (old) (document-remove-anchor! document old))
-            discarded)
-          (view-mark-ring-anchors-set! value kept))))
+    (anchored-location-ring-push!
+      (view-mark-ring-state value)
+      (view-buffer value)
+      offset
+      #f
+      (view-buffer-ref-or-false value))
     offset)
 
   (define (view-pop-mark! value)
     (unless (view? value)
       (assertion-violation 'view-pop-mark! "expected a view" value))
-    (let ([ring (view-mark-ring-anchors value)])
-      (and
-        (pair? ring)
-        (let* ([document (buffer-document (view-buffer value))]
-               [anchor (car ring)]
-               [offset (document-anchor-offset document anchor)])
-          (document-remove-anchor! document anchor)
-          (view-mark-ring-anchors-set! value (cdr ring))
-          offset))))
+    (let ([location
+            (anchored-location-ring-pop!
+              (view-mark-ring-state value)
+              (view-buffer-ref-or-false value))])
+      (and location (cadr location))))
 
   (define (view-deactivate-mark! value)
     (unless (view? value)
@@ -5254,32 +5224,22 @@
         entries))
     (editor-kill-ring-set! value entries))
 
-  (define (global-mark-entry-location editor entry)
-    (let* ([buffer
-             (editor-buffer-ref
-               editor
-               (global-mark-entry-buffer-id entry))]
-           [offset
-             (document-anchor-offset
-               (buffer-document buffer)
-               (global-mark-entry-anchor entry))])
-      (cons (buffer-id buffer) offset)))
+  (define (editor-buffer-ref-or-false editor)
+    (lambda (id)
+      (entity-registry-ref
+        (editor-buffer-registry editor)
+        id)))
+
+  (define (ring-location->pair location)
+    (and location (cons (car location) (cadr location))))
 
   (define (editor-global-mark-ring value)
     (require-open-editor 'editor-global-mark-ring value)
     (map
-      (lambda (entry) (global-mark-entry-location value entry))
-      (editor-global-mark-ring-entries value)))
-
-  (define (close-global-mark-entry! editor entry)
-    (let ([buffer
-            (entity-registry-ref
-              (editor-buffer-registry editor)
-              (global-mark-entry-buffer-id entry))])
-      (when buffer
-        (document-remove-anchor!
-          (buffer-document buffer)
-          (global-mark-entry-anchor entry)))))
+      ring-location->pair
+      (anchored-location-ring-locations
+        (editor-global-marks value)
+        (editor-buffer-ref-or-false value))))
 
   (define (editor-push-global-mark! value buffer offset)
     (require-open-editor 'editor-push-global-mark! value)
@@ -5297,78 +5257,35 @@
         'editor-push-global-mark!
         "offset must be a non-negative exact integer"
         offset))
-    (let* ([entry
-             (make-global-mark-entry
-               (buffer-id buffer)
-               (document-create-anchor!
-                 (buffer-document buffer)
-                 offset
-                 anchor-before-insertion))]
-           [ring
-             (cons entry (editor-global-mark-ring-entries value))])
-      (call-with-values
-        (lambda () (split-mark-ring ring 16))
-        (lambda (kept discarded)
-          (for-each
-            (lambda (old) (close-global-mark-entry! value old))
-            discarded)
-          (editor-global-mark-ring-entries-set! value kept))))
+    (anchored-location-ring-push!
+      (editor-global-marks value)
+      buffer
+      offset
+      #f
+      (editor-buffer-ref-or-false value))
     offset)
 
   (define (editor-pop-global-mark! value)
     (require-open-editor 'editor-pop-global-mark! value)
-    (let ([ring (editor-global-mark-ring-entries value)])
-      (and
-        (pair? ring)
-        (let* ([entry (car ring)]
-               [location (global-mark-entry-location value entry)])
-          (close-global-mark-entry! value entry)
-          (editor-global-mark-ring-entries-set! value (cdr ring))
-          location))))
+    (ring-location->pair
+      (anchored-location-ring-pop!
+        (editor-global-marks value)
+        (editor-buffer-ref-or-false value))))
 
   (define (editor-clear-buffer-global-marks! value buffer)
-    (let-values ([(removed kept)
-                  (partition
-                    (lambda (entry)
-                      (= (global-mark-entry-buffer-id entry)
-                         (buffer-id buffer)))
-                    (editor-global-mark-ring-entries value))])
-      (for-each
-        (lambda (entry) (close-global-mark-entry! value entry))
-        removed)
-      (editor-global-mark-ring-entries-set! value kept)))
-
-  (define (change-ring-entry-location editor entry)
-    (let* ([buffer
-             (editor-buffer-ref
-               editor
-               (change-ring-entry-buffer-id entry))]
-           [offset
-             (document-anchor-offset
-               (buffer-document buffer)
-               (change-ring-entry-anchor entry))])
-      (cons (buffer-id buffer) offset)))
-
-  (define (close-change-ring-entry! editor entry)
-    (let ([buffer
-            (entity-registry-ref
-              (editor-buffer-registry editor)
-              (change-ring-entry-buffer-id entry))])
-      (when buffer
-        (document-remove-anchor!
-          (buffer-document buffer)
-          (change-ring-entry-anchor entry)))))
+    (anchored-location-ring-remove-buffer!
+      (editor-global-marks value)
+      (buffer-id buffer)
+      (editor-buffer-ref-or-false value)))
 
   (define (editor-change-ring value)
     (require-open-editor 'editor-change-ring value)
     (map
-      (lambda (entry)
-        (let ([location (change-ring-entry-location value entry)])
-          (list
-            (car location)
-            (cdr location)
-            (change-ring-entry-class entry))))
-      (editor-change-ring-entries value)))
+      (lambda (location)
+        (list (car location) (cadr location) (caddr location)))
+      (anchored-location-ring-locations
+        (editor-changes value)
+        (editor-buffer-ref-or-false value))))
 
   (define (coalescing-change-class? class)
     (memq class '(self-insert kill yank)))
@@ -5384,36 +5301,28 @@
     (let* ([command (editor-current-command editor)]
            [class (and command (editor-current-command-class editor))])
       (when command
-        (let* ([entries (editor-change-ring-entries editor)]
+        (let* ([entries
+                 (anchored-location-ring-entries
+                   (editor-changes editor))]
                [top (and (pair? entries) (car entries))]
                [coalesce?
                  (and
                    (coalescing-change-class? class)
                    top
-                   (= (change-ring-entry-buffer-id top)
+                   (= (anchored-location-entry-buffer-id top)
                       (buffer-id buffer))
-                   (eq? (change-ring-entry-class top) class)
+                   (eq? (anchored-location-entry-payload top) class)
                    (eq? (editor-last-command-class editor) class))])
           (unless coalesce?
-            (let* ([range (change-affected-new-range change)]
-                   [entry
-                     (make-change-ring-entry
-                       (buffer-id buffer)
-                       (document-create-anchor!
-                         (buffer-document buffer)
-                         (car range)
-                         anchor-before-insertion)
-                       class)]
-                   [ring (cons entry entries)])
-              (call-with-values
-                (lambda () (split-mark-ring ring 64))
-                (lambda (kept discarded)
-                  (for-each
-                    (lambda (old)
-                      (close-change-ring-entry! editor old))
-                    discarded)
-                  (editor-change-ring-entries-set! editor kept)))))
-          (editor-change-ring-index-set! editor -1)))))
+            (let ([range (change-affected-new-range change)])
+              (anchored-location-ring-push!
+                (editor-changes editor)
+                buffer
+                (car range)
+                class
+                (editor-buffer-ref-or-false editor))))))
+        (anchored-location-ring-reset!
+          (editor-changes editor))))
 
   (define (attach-editor-change-observer! editor buffer)
     (buffer-add-change-observer!
@@ -5425,42 +5334,25 @@
         (editor-touch-buffer-registry!
           editor changed-buffer 'modified))))
 
-  (define (editor-change-at-index editor index)
-    (and
-      (<= 0 index)
-      (< index (length (editor-change-ring-entries editor)))
-      (change-ring-entry-location
-        editor
-        (list-ref (editor-change-ring-entries editor) index))))
-
   (define (editor-previous-change! editor)
     (require-open-editor 'editor-previous-change! editor)
-    (let ([index (+ (editor-change-ring-index editor) 1)])
-      (let ([location (editor-change-at-index editor index)])
-        (when location
-          (editor-change-ring-index-set! editor index))
-        location)))
+    (ring-location->pair
+      (anchored-location-ring-previous!
+        (editor-changes editor)
+        (editor-buffer-ref-or-false editor))))
 
   (define (editor-next-change! editor)
     (require-open-editor 'editor-next-change! editor)
-    (let ([index (- (editor-change-ring-index editor) 1)])
-      (let ([location (editor-change-at-index editor index)])
-        (when location
-          (editor-change-ring-index-set! editor index))
-        location)))
+    (ring-location->pair
+      (anchored-location-ring-next!
+        (editor-changes editor)
+        (editor-buffer-ref-or-false editor))))
 
   (define (editor-clear-buffer-changes! editor buffer)
-    (let-values ([(removed kept)
-                  (partition
-                    (lambda (entry)
-                      (= (change-ring-entry-buffer-id entry)
-                         (buffer-id buffer)))
-                    (editor-change-ring-entries editor))])
-      (for-each
-        (lambda (entry) (close-change-ring-entry! editor entry))
-        removed)
-      (editor-change-ring-entries-set! editor kept)
-      (editor-change-ring-index-set! editor -1)))
+    (anchored-location-ring-remove-buffer!
+      (editor-changes editor)
+      (buffer-id buffer)
+      (editor-buffer-ref-or-false editor)))
 
   (define (editor-find-bookmark editor name)
     (require-open-editor 'editor-find-bookmark editor)
@@ -6403,7 +6295,7 @@
                  anchor-after-insertion)
                #f
                #f
-               '()
+               (make-anchored-location-ring 16)
                #f
                #f
                0
@@ -6460,9 +6352,8 @@
                (make-completion-provider-catalog)
                #f
                '()
-               '()
-               '()
-               -1
+               (make-anchored-location-ring 16)
+               (make-anchored-location-ring 64)
                '()
                '()
                #f
@@ -6601,15 +6492,12 @@
         annotation-set-close!
         (editor-annotation-sets value))
       (editor-annotation-sets-set! value '())
-      (for-each
-        (lambda (entry) (close-global-mark-entry! value entry))
-        (editor-global-mark-ring-entries value))
-      (editor-global-mark-ring-entries-set! value '())
-      (for-each
-        (lambda (entry) (close-change-ring-entry! value entry))
-        (editor-change-ring-entries value))
-      (editor-change-ring-entries-set! value '())
-      (editor-change-ring-index-set! value -1)
+      (anchored-location-ring-clear!
+        (editor-global-marks value)
+        (editor-buffer-ref-or-false value))
+      (anchored-location-ring-clear!
+        (editor-changes value)
+        (editor-buffer-ref-or-false value))
       (for-each close-bookmark! (editor-bookmarks value))
       (editor-bookmarks-set! value '())
       (for-each
@@ -6625,12 +6513,9 @@
               (buffer-document (view-buffer view))
               (view-mark-anchor view))
             (view-mark-anchor-set! view #f))
-          (for-each
-            (lambda (anchor)
-              (document-remove-anchor!
-                (buffer-document (view-buffer view)) anchor))
-            (view-mark-ring-anchors view))
-          (view-mark-ring-anchors-set! view '())
+          (anchored-location-ring-clear!
+            (view-mark-ring-state view)
+            (view-buffer-ref-or-false view))
           (document-remove-anchor!
             (buffer-document (view-buffer view))
             (view-caret-anchor view))
