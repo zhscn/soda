@@ -7,6 +7,7 @@
           (soda editor command-runtime)
           (soda editor command-target)
           (soda editor condition)
+          (soda editor edit)
           (soda editor keymap)
           (soda editor line-range)
           (soda editor setting)
@@ -39,30 +40,6 @@
                    (- end 1)
                    end)))])
       (cons start-line end-line)))
-
-  (define (commit-replacements! buffer replacements)
-    (let ([change #f])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (call-with-values
-            (lambda ()
-              (call-with-buffer-transaction
-                buffer
-                (lambda (transaction)
-                  (for-each
-                    (lambda (replacement)
-                      (transaction-replace!
-                        transaction
-                        (car replacement)
-                        (cadr replacement)
-                        (caddr replacement)))
-                    replacements))))
-            (lambda (result committed-change)
-              (set! change committed-change)
-              result)))
-        (lambda ()
-          (when change (change-close! change))))))
 
   (define (line-comment-replacements text first last prefix)
     (let* ([positions
@@ -121,7 +98,7 @@
            buffer
            (lambda (text)
              (let ([lines (target-line-range text target)])
-               (commit-replacements!
+               (buffer-replace-ranges!
                  buffer
                  (line-comment-replacements
                    text (car lines) (cdr lines) line-prefix)))))]
@@ -145,7 +122,7 @@
                                  text
                                  (- end (bytevector-length close))
                                  block-end))])
-                       (commit-replacements!
+                       (buffer-replace-ranges!
                          buffer
                          (if commented?
                              (list
