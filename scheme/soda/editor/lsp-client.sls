@@ -105,7 +105,9 @@
       %make-lsp-xref-request-context
       lsp-xref-request-context?)
     (parent result-producer-session)
-    (fields query language-context generation))
+    (fields query language-context))
+
+  (define active-lsp-xrefs (make-result-producer-registry))
 
   (define-record-type
     (lsp-client-session %make-lsp-client-session lsp-client-session?)
@@ -2576,7 +2578,8 @@
   (define (xref-result-buffer-for-context editor context)
     (and
       (lsp-xref-request-context? context)
-      (not (result-producer-session-closed? context))
+      (result-producer-registry-current?
+        active-lsp-xrefs editor context)
       (let ([buffer (result-producer-session-buffer context)])
         (and
           buffer
@@ -2584,33 +2587,27 @@
           (equal?
             (result-producer-session-scope context)
             (buffer-result-workbench-id buffer))
-          (=
-            (buffer-local-ref buffer 'lsp-xref-generation -1)
-            (lsp-xref-request-context-generation context))
           buffer))))
 
   (define (begin-lsp-xref-request!
             editor query origin-view-id language-context result-buffer)
-    (let ([generation
-            (if result-buffer
-                (+ 1
-                   (buffer-local-ref
-                     result-buffer 'lsp-xref-generation 0))
-                0)])
-      (when result-buffer
-        (buffer-set-local!
-          result-buffer 'lsp-xref-generation generation)
-        (buffer-set-result-producer-state! result-buffer 'running)
-        (editor-invalidate! editor 'chrome))
-      (%make-lsp-xref-request-context
-        origin-view-id
-        (buffer-result-workbench-id result-buffer)
-        #f
-        result-buffer
-        #f
-        query
-        language-context
-        generation)))
+    (let* ([context
+             (%make-lsp-xref-request-context
+               origin-view-id
+               (buffer-result-workbench-id result-buffer)
+               #f
+               result-buffer
+               #f
+               query
+               language-context)]
+           [old
+             (result-producer-registry-activate!
+               active-lsp-xrefs editor context)])
+      (when old
+        (result-producer-retire! old #f))
+      (buffer-set-result-producer-state! result-buffer 'running)
+      (editor-invalidate! editor 'chrome)
+      context))
 
   (define (lsp-xref-refresh-procedure)
     (lambda (refresh-context refresh-buffer)
@@ -2631,10 +2628,11 @@
     (lambda (editor session result)
       (let ([current-result-buffer
               (xref-result-buffer-for-context editor request-context)])
+        (result-producer-registry-close!
+          active-lsp-xrefs editor request-context)
         (if (not current-result-buffer)
             '()
             (begin
-              (result-producer-session-closed?-set! request-context #t)
               (let* ([items
                      (lsp-reference-items
                        editor
@@ -2662,10 +2660,6 @@
                     (string-append
                       "References: "
                       (number->string (length items)))))
-              (buffer-set-local!
-                buffer
-                'lsp-xref-generation
-                (lsp-xref-request-context-generation request-context))
               (editor-finish-result-producer! editor buffer 'ready)
               '()))))))
 
@@ -2675,16 +2669,17 @@
             (string-append
               "LSP references failed: " (error-message error))])
       (when buffer
-        (result-producer-session-closed?-set! context #t)
         (editor-finish-result-producer!
           editor buffer 'failed message 'error))
+      (result-producer-registry-close!
+        active-lsp-xrefs editor context)
       (editor-set-status-message! editor message 'error)
       '()))
 
   (define (cancel-lsp-xref-request editor session reason context)
     (let ([buffer (xref-result-buffer-for-context editor context)])
-      (when buffer
-        (result-producer-session-closed?-set! context #t))
+      (result-producer-registry-close!
+        active-lsp-xrefs editor context)
       (unless (eq? reason 'superseded)
         (when buffer
           (editor-finish-result-producer!
@@ -2783,6 +2778,8 @@
                    cancel-lsp-xref-request
                    request-context)])
           (when (null? effects)
+            (result-producer-registry-close!
+              active-lsp-xrefs editor request-context)
             (editor-finish-result-producer!
               editor
               result-buffer
