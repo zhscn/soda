@@ -21,7 +21,7 @@
           (soda editor language)
           (soda editor location)
           (soda editor location-visit)
-          (soda editor navigable-buffer)
+          (soda editor result-buffer)
           (soda editor resource-context)
           (soda editor state)
           (soda editor window-runtime))
@@ -240,13 +240,13 @@
         (bytevector-length (string->utf8 heading))
         '((face . application.heading) (result-heading . #t)))
       (buffer-set-local! buffer 'location-results-state state)
-      (buffer-set-navigation-interface!
+      (buffer-set-result-interface!
         buffer
-        (make-buffer-navigation-interface
+        (make-result-buffer-interface
           #t
           activate-location-result
           quit-location-results))
-      (editor-note-navigation-buffer! editor buffer)
+      (editor-note-result-buffer! editor buffer)
       (let ([view
               (editor-display-buffer!
                 editor
@@ -436,13 +436,13 @@
               buffer (car entry) (cadr entry) (caddr entry)))
           properties)
         (buffer-set-local! buffer 'location-results-state state)
-        (buffer-set-navigation-interface!
+        (buffer-set-result-interface!
           buffer
-          (make-buffer-navigation-interface
+          (make-result-buffer-interface
             #t
             activate-location-result
             quit-location-results))
-        (editor-note-navigation-buffer! editor buffer)
+        (editor-note-result-buffer! editor buffer)
         (location-results-state-last-resource-set! state last-resource)
         (let ([view
                 (editor-display-buffer!
@@ -535,5 +535,5 @@
         'buffer-item.preview)
       (keymap-catalog-register!
         (editor-keymap-catalog editor) 'result-list-mode-map keymap))
-    (install-navigable-buffer-commands! editor)
+    (install-result-buffer-commands! editor)
     editor))

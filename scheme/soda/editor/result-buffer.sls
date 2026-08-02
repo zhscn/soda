@@ -1,11 +1,11 @@
-(library (soda editor navigable-buffer)
-  (export make-buffer-navigation-interface
-          buffer-navigation-interface?
-          buffer-navigation-interface-cyclic?
-          buffer-set-navigation-interface!
-          buffer-navigation-interface-ref
-          editor-note-navigation-buffer!
-          install-navigable-buffer-commands!)
+(library (soda editor result-buffer)
+  (export make-result-buffer-interface
+          result-buffer-interface?
+          result-buffer-interface-cyclic?
+          buffer-set-result-interface!
+          buffer-result-interface-ref
+          editor-note-result-buffer!
+          install-result-buffer-commands!)
   (import (rnrs)
           (only (chezscheme) make-weak-eq-hashtable)
           (soda editor buffer)
@@ -15,77 +15,77 @@
           (soda editor state)
           (soda editor window-runtime))
 
-  (define editor-navigation-buffers (make-weak-eq-hashtable))
+  (define editor-result-buffers (make-weak-eq-hashtable))
 
   (define-record-type
-    (buffer-navigation-interface
-      %make-buffer-navigation-interface
-      buffer-navigation-interface?)
+    (result-buffer-interface
+      %make-result-buffer-interface
+      result-buffer-interface?)
     (fields cyclic?
             activate
             quit))
 
-  (define (make-buffer-navigation-interface cyclic? activate quit)
+  (define (make-result-buffer-interface cyclic? activate quit)
     (unless (and (boolean? cyclic?)
                  (procedure? activate)
                  (procedure? quit))
       (assertion-violation
-        'make-buffer-navigation-interface
+        'make-result-buffer-interface
         "invalid Buffer navigation interface"
         cyclic? activate quit))
-    (%make-buffer-navigation-interface cyclic? activate quit))
+    (%make-result-buffer-interface cyclic? activate quit))
 
-  (define (buffer-set-navigation-interface! buffer interface)
+  (define (buffer-set-result-interface! buffer interface)
     (unless (and (buffer? buffer)
-                 (buffer-navigation-interface? interface))
+                 (result-buffer-interface? interface))
       (assertion-violation
-        'buffer-set-navigation-interface!
+        'buffer-set-result-interface!
         "expected a Buffer and navigation interface"
         buffer interface))
-    (buffer-set-local! buffer 'navigation-interface interface)
+    (buffer-set-local! buffer 'result-buffer-interface interface)
     (buffer-set-local! buffer 'result-current-index #f)
     buffer)
 
-  (define (buffer-navigation-interface-ref buffer)
+  (define (buffer-result-interface-ref buffer)
     (unless (buffer? buffer)
       (assertion-violation
-        'buffer-navigation-interface-ref "expected a Buffer" buffer))
-    (buffer-local-ref buffer 'navigation-interface #f))
+        'buffer-result-interface-ref "expected a Buffer" buffer))
+    (buffer-local-ref buffer 'result-buffer-interface #f))
 
-  (define (editor-note-navigation-buffer! editor buffer)
+  (define (editor-note-result-buffer! editor buffer)
     (unless (and (editor? editor) (buffer? buffer)
-                 (buffer-navigation-interface?
-                   (buffer-navigation-interface-ref buffer)))
+                 (result-buffer-interface?
+                   (buffer-result-interface-ref buffer)))
       (assertion-violation
-        'editor-note-navigation-buffer!
+        'editor-note-result-buffer!
         "expected an Editor and navigable Buffer"
         editor buffer))
     (let ([id (buffer-id buffer)])
       (hashtable-set!
-        editor-navigation-buffers
+        editor-result-buffers
         editor
         (cons
           id
           (filter
             (lambda (candidate) (not (= candidate id)))
-            (hashtable-ref editor-navigation-buffers editor '())))))
+            (hashtable-ref editor-result-buffers editor '())))))
     buffer)
 
   (define (available-navigation-buffer editor)
-    (let loop ([ids (hashtable-ref editor-navigation-buffers editor '())]
+    (let loop ([ids (hashtable-ref editor-result-buffers editor '())]
                [retained '()])
       (if (null? ids)
           (begin
             (hashtable-set!
-              editor-navigation-buffers editor (reverse retained))
+              editor-result-buffers editor (reverse retained))
             #f)
           (let ([buffer
                   (guard (condition [else #f])
                     (editor-buffer-ref editor (car ids)))])
-            (if (and buffer (buffer-navigation-interface-ref buffer))
+            (if (and buffer (buffer-result-interface-ref buffer))
                 (begin
                   (hashtable-set!
-                    editor-navigation-buffers
+                    editor-result-buffers
                     editor
                     (append (reverse retained) ids))
                   buffer)
@@ -93,8 +93,8 @@
 
   (define (require-interface context who)
     (let* ([buffer (view-buffer (command-context-view context))]
-           [interface (buffer-navigation-interface-ref buffer)])
-      (unless (buffer-navigation-interface? interface)
+           [interface (buffer-result-interface-ref buffer)])
+      (unless (result-buffer-interface? interface)
         (editor-user-error who "Current Buffer is not navigable"))
       (values buffer interface)))
 
@@ -123,8 +123,8 @@
   (define (activate-selected context disposition)
     (let-values ([(buffer interface item index)
                   (selected-item context 'buffer-item.activate)])
-      (editor-note-navigation-buffer! (command-context-editor context) buffer)
-      ((buffer-navigation-interface-activate interface)
+      (editor-note-result-buffer! (command-context-editor context) buffer)
+      ((result-buffer-interface-activate interface)
        context buffer item index disposition)))
 
   (define (bounded-index current delta size cyclic?)
@@ -155,7 +155,7 @@
                    [target
                      (bounded-index
                        base delta (length positions)
-                       (buffer-navigation-interface-cyclic? interface))]
+                       (result-buffer-interface-cyclic? interface))]
                    [entry (list-ref positions target)]
                    [position (car entry)]
                    [index (cdr entry)]
@@ -166,13 +166,13 @@
                 (view-set-caret! view position)
                 (ensure-view-visible! view))
               (buffer-set-local! buffer 'result-current-index index)
-              ((buffer-navigation-interface-activate interface)
+              ((result-buffer-interface-activate interface)
                context buffer item index 'preview)))))
 
   (define (move-item context delta)
     (let-values ([(buffer interface)
                   (require-interface context 'buffer-item.next)])
-      (editor-note-navigation-buffer! (command-context-editor context) buffer)
+      (editor-note-result-buffer! (command-context-editor context) buffer)
       (move-buffer-item
         context buffer interface (command-context-view context) delta)))
 
@@ -216,7 +216,7 @@
                  [target
                    (bounded-index
                      base direction (length groups)
-                     (buffer-navigation-interface-cyclic? interface))]
+                     (result-buffer-interface-cyclic? interface))]
                  [group-start (list-ref groups target)]
                  [group-limit
                    (and (< (+ target 1) (length groups))
@@ -238,20 +238,20 @@
                     (view-set-caret! view item-position)
                     (ensure-view-visible! view))
                   (buffer-set-local! buffer 'result-current-index index)
-                  ((buffer-navigation-interface-activate interface)
+                  ((result-buffer-interface-activate interface)
                    context buffer item index 'preview)))))))
 
   (define (move-group context direction)
     (let-values ([(buffer interface)
                   (require-interface context 'buffer-item.next-group)])
-      (editor-note-navigation-buffer! (command-context-editor context) buffer)
+      (editor-note-result-buffer! (command-context-editor context) buffer)
       (move-buffer-group
         context buffer interface (command-context-view context) direction)))
 
   (define (quit-buffer-items context)
     (let-values ([(buffer interface)
                   (require-interface context 'buffer-item.quit)])
-      ((buffer-navigation-interface-quit interface) context buffer)))
+      ((result-buffer-interface-quit interface) context buffer)))
 
   (define (global-navigation-context context)
     (let* ([editor (command-context-editor context)]
@@ -265,7 +265,7 @@
                               (buffer-id buffer)))
                           (editor-views editor)))])
       (unless (and buffer
-                   (buffer-navigation-interface-ref buffer))
+                   (buffer-result-interface-ref buffer))
         (editor-user-error
           'buffer-item.next-global
           "No navigable result Buffer"))
@@ -274,17 +274,17 @@
   (define (move-global-item context direction)
     (let ([active-buffer
             (view-buffer (command-context-view context))])
-      (if (buffer-navigation-interface-ref active-buffer)
+      (if (buffer-result-interface-ref active-buffer)
           (move-item context (* direction (command-context-count context)))
           (let-values ([(buffer view) (global-navigation-context context)])
             (move-buffer-item
               context
               buffer
-              (buffer-navigation-interface-ref buffer)
+              (buffer-result-interface-ref buffer)
               view
               (* direction (command-context-count context)))))))
 
-  (define (install-navigable-buffer-commands! editor)
+  (define (install-result-buffer-commands! editor)
     (for-each
       (lambda (spec)
         (editor-register-command!
