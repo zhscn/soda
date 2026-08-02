@@ -186,7 +186,9 @@ Buffer 使用其 display restoration 恢复原 Buffer，不依赖已删除的 Vi
 worktree change 提供 stage，index change 提供 unstage，tracked change 提供 diff；producer
 运行期间领域 action 暂停，只保留面板级取消/关闭能力。默认 diff 对纯 index change
 读取 `--cached`，对 worktree change 读取工作区；同时包含两种 change 的条目额外提供
-staged diff action，因此两个版本都可访问。Git diff 和构建输出使用继承
+staged diff action，因此两个版本都可访问。tracked worktree change 还提供带显式
+`yes` 确认的 discard action，并对标记条目执行单次批量 `git restore --worktree`；
+untracked 文件不进入该动作。Git diff 和构建输出使用继承
 `location-results-mode` 的 `compilation-mode`，保留通用导航、刷新和取消契约。
 
 可重新生成内容的 Result Buffer 注册 buffer-local refresh callback。`g` 调用当前

@@ -936,9 +936,9 @@
                         (buffer-result-actions-at panel (car range)))
                    expected)))
         ranges
-        '((stage diff)
+        '((stage diff discard)
           (unstage diff diff-staged)
-          (stage unstage diff diff-staged)
+          (stage unstage diff diff-staged discard)
           (stage))))
     (let* ([both-range
              (list-ref
@@ -991,15 +991,36 @@
              (car (buffer-text-property-ranges panel 'result-index))]
            [view (editor-active-view editor)])
       (view-set-caret! view (car worktree-range))
-      (let* ([stage-effects
-               (editor-update!
-                 editor (make-command-message 'git.stage #f))]
+      (editor-update!
+        editor (make-command-message 'git.discard #f))
+      (let* ([prompt (editor-active-prompt editor)]
+             [prompt-view
+               (and prompt
+                    (editor-view-ref
+                      editor (prompt-session-view-id prompt)))]
+             [prompt-buffer (and prompt-view (view-buffer prompt-view))])
+        (unless prompt-buffer
+          (error 'editor-tests
+                 "Git discard did not request confirmation"))
+        (buffer-replace-range!
+          prompt-buffer
+          0
+          (bytevector-length (buffer-bytes prompt-buffer))
+          (string->utf8 "yes"))
+        (view-set-caret! prompt-view 3)
+        (let* ([reply (editor-accept-prompt! editor)]
+               [discard-effects
+                 (editor-update!
+                   editor
+                   (make-internal-command-message
+                     (prompt-reply-command reply)
+                     (prompt-reply-result reply)))]
              [operation-process
                (and
-                 (= (length stage-effects) 1)
-                 (eq? (command-effect-kind (car stage-effects))
+                 (= (length discard-effects) 1)
+                 (eq? (command-effect-kind (car discard-effects))
                       'managed-process.start)
-                 (command-effect-payload (car stage-effects)))]
+                 (command-effect-payload (car discard-effects)))]
              [stop-effects
                (editor-update!
                  editor (make-command-message 'buffer-panel.stop #f))]
@@ -1020,6 +1041,9 @@
         (unless
           (and
             (managed-process? operation-process)
+            (equal?
+              (managed-process-arguments operation-process)
+              '("git" "restore" "--worktree" "--" "worktree.cpp"))
             (managed-process-signal-request? request)
             (eq?
               (managed-process-signal-request-process request)
@@ -1027,8 +1051,8 @@
             (= (managed-process-signal-request-signal request) 15)
             (eq? (buffer-result-producer-state panel) 'cancelled))
           (error 'editor-tests
-                 "stopping Git stage did not signal its operation process"
-                 stage-effects stop-effects cancel-effects))))
+                 "confirmed Git discard was not cancellable"
+                 discard-effects stop-effects cancel-effects)))))
     (buffer-set-result-producer-state! panel 'running)
     (when
       (exists

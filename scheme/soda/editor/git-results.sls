@@ -15,6 +15,7 @@
           (soda editor location)
           (soda editor location-results)
           (soda editor managed-process)
+          (soda editor prompt)
           (soda editor project)
           (soda editor result-buffer)
           (soda editor scoped-session-table)
@@ -52,6 +53,9 @@
 
   (define-record-type git-operation
     (fields status-session label (mutable stderr-output)))
+
+  (define-record-type git-discard-request
+    (fields status-session paths))
 
   (define (rename-status? status)
     (and (= (string-length status) 2)
@@ -415,6 +419,12 @@
       (git-status-action-ready? buffer item)
       (index-change? (item-status item))))
 
+  (define (git-discardable-item? buffer item)
+    (and
+      (git-status-action-ready? buffer item)
+      (worktree-change? (item-status item))
+      (not (untracked-status? (item-status item)))))
+
   (define (start-git-diff context session item cached?)
     (let ([arguments
             (append
@@ -433,6 +443,55 @@
     (map
       (lambda (entry) (location-item-excerpt (cdr entry)))
       entries))
+
+  (define (request-git-discard! context session paths)
+    (let ([editor (command-context-editor context)]
+          [count (length paths)])
+      (editor-open-prompt!
+        editor
+        (make-prompt-request
+          (string-append
+            "Discard worktree changes in "
+            (number->string count)
+            (if (= count 1) " path" " paths")
+            "? Type yes: ")
+          ""
+          #f
+          #f
+          'free
+          (lambda (value) (string-ci=? value "yes"))
+          'git.apply-discard
+          #f
+          (make-git-discard-request session paths)))
+      '()))
+
+  (define (apply-git-discard context)
+    (let* ([editor (command-context-editor context)]
+           [result (command-context-argument context)]
+           [request
+             (and (prompt-result? result) (prompt-result-data result))])
+      (if
+        (and
+          (git-discard-request? request)
+          (eq? (prompt-result-status result) 'accepted)
+          (string-ci=? (prompt-result-value result) "yes")
+          (session-current?
+            editor (git-discard-request-status-session request))
+          (eq?
+            (buffer-result-producer-state
+              (git-status-session-buffer
+                (git-discard-request-status-session request)))
+            'ready))
+        (start-git-operation
+          (git-discard-request-status-session request)
+          "Git discard worktree changes"
+          (append
+            (list "git" "restore" "--worktree" "--")
+            (git-discard-request-paths request)))
+        (begin
+          (editor-set-status-message!
+            editor "Git discard was not applied")
+          '()))))
 
   (define (register-git-status-actions! buffer session)
     (for-each
@@ -480,7 +539,16 @@
           'diff-staged "Show staged diff"
           git-staged-diffable-item?
           (lambda (context buffer item index)
-            (start-git-diff context session item #t)))))
+            (start-git-diff context session item #t)))
+        (make-result-action
+          'discard "Discard worktree changes"
+          git-discardable-item?
+          (lambda (context buffer item index)
+            (request-git-discard!
+              context session (list (location-item-excerpt item))))
+          (lambda (context buffer entries)
+            (request-git-discard!
+              context session (marked-git-paths entries))))))
     buffer)
 
   (define (stage-git-entry context)
@@ -494,6 +562,9 @@
 
   (define (diff-staged-git-entry context)
     (invoke-buffer-item-action context 'diff-staged))
+
+  (define (discard-git-entry context)
+    (invoke-buffer-item-action context 'discard))
 
   (define (bind-status-key! keymap character command)
     (keymap-bind!
@@ -514,6 +585,7 @@
       (bind-status-key! keymap #\u 'git.unstage)
       (bind-status-key! keymap #\d 'git.diff)
       (bind-status-key! keymap #\D 'git.diff-staged)
+      (bind-status-key! keymap #\x 'git.discard)
       (keymap-catalog-register!
         (editor-keymap-catalog editor) 'git-status-mode-map keymap))
     (for-each
@@ -527,7 +599,9 @@
         (list 'git.unstage unstage-git-entry "Unstage the Git entry at point.")
         (list 'git.diff diff-git-entry "Show the default diff for the Git entry at point.")
         (list 'git.diff-staged diff-staged-git-entry
-              "Show the staged diff for the Git entry at point.")))
+              "Show the staged diff for the Git entry at point.")
+        (list 'git.discard discard-git-entry
+              "Discard tracked worktree changes after confirmation.")))
     (for-each
       (lambda (entry)
         (editor-register-internal-command!
@@ -544,6 +618,8 @@
         (list 'git.operation-output apply-git-operation-output
               "Collect output from a Git operation.")
         (list 'git.operation-exit apply-git-operation-exit
-              "Finalize a Git operation and refresh status.")))
+              "Finalize a Git operation and refresh status.")
+        (list 'git.apply-discard apply-git-discard
+              "Apply a confirmed Git worktree discard.")))
     editor)
 )
