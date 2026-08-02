@@ -60,8 +60,36 @@
         'editor-note-navigation-buffer!
         "expected an Editor and navigable Buffer"
         editor buffer))
-    (hashtable-set! editor-navigation-buffers editor (buffer-id buffer))
+    (let ([id (buffer-id buffer)])
+      (hashtable-set!
+        editor-navigation-buffers
+        editor
+        (cons
+          id
+          (filter
+            (lambda (candidate) (not (= candidate id)))
+            (hashtable-ref editor-navigation-buffers editor '())))))
     buffer)
+
+  (define (available-navigation-buffer editor)
+    (let loop ([ids (hashtable-ref editor-navigation-buffers editor '())]
+               [retained '()])
+      (if (null? ids)
+          (begin
+            (hashtable-set!
+              editor-navigation-buffers editor (reverse retained))
+            #f)
+          (let ([buffer
+                  (guard (condition [else #f])
+                    (editor-buffer-ref editor (car ids)))])
+            (if (and buffer (buffer-navigation-interface-ref buffer))
+                (begin
+                  (hashtable-set!
+                    editor-navigation-buffers
+                    editor
+                    (append (reverse retained) ids))
+                  buffer)
+                (loop (cdr ids) retained))))))
 
   (define (require-interface context who)
     (let* ([buffer (view-buffer (command-context-view context))]
@@ -95,6 +123,7 @@
   (define (activate-selected context disposition)
     (let-values ([(buffer interface item index)
                   (selected-item context 'buffer-item.activate)])
+      (editor-note-navigation-buffer! (command-context-editor context) buffer)
       ((buffer-navigation-interface-activate interface)
        context buffer item index disposition)))
 
@@ -143,6 +172,7 @@
   (define (move-item context delta)
     (let-values ([(buffer interface)
                   (require-interface context 'buffer-item.next)])
+      (editor-note-navigation-buffer! (command-context-editor context) buffer)
       (move-buffer-item
         context buffer interface (command-context-view context) delta)))
 
@@ -214,6 +244,7 @@
   (define (move-group context direction)
     (let-values ([(buffer interface)
                   (require-interface context 'buffer-item.next-group)])
+      (editor-note-navigation-buffer! (command-context-editor context) buffer)
       (move-buffer-group
         context buffer interface (command-context-view context) direction)))
 
@@ -224,19 +255,14 @@
 
   (define (global-navigation-context context)
     (let* ([editor (command-context-editor context)]
-           [latest-buffer-id
-                   (hashtable-ref editor-navigation-buffers editor #f)]
-           [buffer
-                   (and latest-buffer-id
-                        (guard (condition [else #f])
-                          (editor-buffer-ref editor latest-buffer-id)))]
+           [buffer (available-navigation-buffer editor)]
            [view
-                   (and latest-buffer-id
+                   (and buffer
                         (find
                           (lambda (candidate)
                             (=
                               (buffer-id (view-buffer candidate))
-                              latest-buffer-id))
+                              (buffer-id buffer)))
                           (editor-views editor)))])
       (unless (and buffer
                    (buffer-navigation-interface-ref buffer))
