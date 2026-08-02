@@ -550,7 +550,6 @@
           language-attachment-opened-revision
           view-language-context?
           view-language-context-attachment-id
-          editor-language-session-registry
           editor-ensure-language-session!
           editor-attach-language-session!
           editor-buffer-language-attachments
@@ -789,7 +788,6 @@
           setting-definition-validator
           setting-definition-documentation
           setting-definition-impact
-          editor-setting-store
           editor-setting-names
           editor-setting-definition
           editor-register-setting!
@@ -1041,7 +1039,6 @@
           annotation-set-decoration-runs
           annotation-set-location-items
           annotation-set-close!
-          editor-annotation-sets
           editor-annotation-sets-for-buffer
           editor-publish-annotation-set!
           editor-clear-annotation-sets!
