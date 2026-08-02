@@ -302,16 +302,13 @@
   (define %change-affected-new-end
     (foreign-procedure __atomic "soda_change_affected_new_end" (void*) unsigned-32))
 
-  (define (native-error who)
-    (error who (%last-error)))
+  (define native-error (make-native-error %last-error))
 
   (define (null-pointer? pointer)
     (or (not pointer)
         (and (integer? pointer) (zero? pointer))))
 
-  (define (check-status who status)
-    (when (negative? status)
-      (native-error who)))
+  (define check-status (make-native-status-checker native-error))
 
   (define (check-pointer who pointer)
     (when (null-pointer? pointer)

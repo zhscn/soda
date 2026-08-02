@@ -1,8 +1,19 @@
 (library (soda native)
-  (export load-soda-native-library!)
+  (export load-soda-native-library!
+          make-native-error
+          make-native-status-checker)
   (import (chezscheme))
 
   (define loaded-paths (make-hashtable string-hash string=?))
+
+  (define (make-native-error last-error)
+    (lambda (who)
+      (error who (last-error))))
+
+  (define (make-native-status-checker native-error)
+    (lambda (who status)
+      (when (negative? status)
+        (native-error who))))
 
   (define (load-soda-native-library! environment-variable)
     (let ([path

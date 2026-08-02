@@ -166,12 +166,9 @@
   (define-record-type (indent-result %make-indent-result indent-result?)
     (fields (mutable pointer)))
 
-  (define (native-error who)
-    (error who (%last-error)))
+  (define native-error (make-native-error %last-error))
 
-  (define (check-status who status)
-    (when (negative? status)
-      (native-error who)))
+  (define check-status (make-native-status-checker native-error))
 
   (define (require-style who value)
     (unless (cpp-indent-style? value)

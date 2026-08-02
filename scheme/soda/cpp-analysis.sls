@@ -183,12 +183,9 @@
                        (void* unsigned-32 void* void*)
                        int))
 
-  (define (native-error who)
-    (error who (%last-error)))
+  (define native-error (make-native-error %last-error))
 
-  (define (check-status who status)
-    (when (negative? status)
-      (native-error who)))
+  (define check-status (make-native-status-checker native-error))
 
   (define (require-open who value)
     (unless (cpp-analyzer? value)
