@@ -2,6 +2,7 @@
   (export make-result-buffer-interface
           result-buffer-interface?
           result-buffer-interface-cyclic?
+          result-buffer-interface-item-key
           make-result-action
           result-action?
           result-action-name
@@ -14,6 +15,7 @@
           buffer-result-item-marked?
           buffer-set-result-item-marked!
           buffer-clear-result-marks!
+          buffer-reconcile-result-selection!
           invoke-buffer-item-action
           buffer-set-result-refresh!
           buffer-result-refreshable?
@@ -48,18 +50,28 @@
       %make-result-buffer-interface
       result-buffer-interface?)
     (fields cyclic?
+            item-key
             activate
             quit))
 
-  (define (make-result-buffer-interface cyclic? activate quit)
-    (unless (and (boolean? cyclic?)
-                 (procedure? activate)
-                 (procedure? quit))
-      (assertion-violation
-        'make-result-buffer-interface
-        "invalid Buffer navigation interface"
-        cyclic? activate quit))
-    (%make-result-buffer-interface cyclic? activate quit))
+  (define make-result-buffer-interface
+    (case-lambda
+      [(cyclic? activate quit)
+       (make-result-buffer-interface
+         cyclic?
+         (lambda (buffer item index) index)
+         activate
+         quit)]
+      [(cyclic? item-key activate quit)
+       (unless (and (boolean? cyclic?)
+                    (procedure? item-key)
+                    (procedure? activate)
+                    (procedure? quit))
+         (assertion-violation
+           'make-result-buffer-interface
+           "invalid Buffer navigation interface"
+           cyclic? item-key activate quit))
+       (%make-result-buffer-interface cyclic? item-key activate quit)]))
 
   (define-record-type
     (result-action %make-result-action result-action?)
@@ -161,6 +173,126 @@
               items)))
       '()
       (buffer-text-property-ranges buffer 'result-index)))
+
+  (define (result-entry-key interface buffer range)
+    (let* ([index (caddr range)]
+           [item
+             (buffer-text-property-ref
+               buffer (car range) 'result-item #f)])
+      (and item
+           (list
+             index
+             (car range)
+             item
+             ((result-buffer-interface-item-key interface)
+              buffer item index)))))
+
+  (define (result-entries buffer interface)
+    (fold-right
+      (lambda (range entries)
+        (let ([entry (result-entry-key interface buffer range)])
+          (if entry (cons entry entries) entries)))
+      '()
+      (buffer-text-property-ranges buffer 'result-index)))
+
+  (define (capture-result-selection buffer interface)
+    (let* ([entries (result-entries buffer interface)]
+           [current-index
+             (buffer-local-ref buffer 'result-current-index #f)]
+           [current
+             (and current-index
+                  (find
+                    (lambda (entry) (= (car entry) current-index))
+                    entries))]
+           [marks (buffer-result-marked-indices buffer)])
+      (list
+        (and current (list-ref current 3))
+        current-index
+        (fold-right
+          (lambda (entry keys)
+            (if (memv (car entry) marks)
+                (cons (list-ref entry 3) keys)
+                keys))
+          '()
+          entries))))
+
+  (define (%buffer-reconcile-result-selection! editor buffer finalize?)
+    (unless (and (editor? editor) (buffer? buffer))
+      (assertion-violation
+        'buffer-reconcile-result-selection!
+        "expected an Editor and Buffer"
+        editor buffer))
+    (let ([interface (buffer-result-interface-ref buffer)])
+      (unless interface
+        (editor-user-error
+          'buffer-reconcile-result-selection!
+          "Buffer has no result interface"))
+      (let* ([entries (result-entries buffer interface)]
+             [current-key
+               (buffer-local-ref
+                 buffer 'result-restore-current-key #f)]
+             [old-index
+               (buffer-local-ref
+                 buffer 'result-restore-current-index #f)]
+             [mark-keys
+               (buffer-local-ref
+                 buffer 'result-restore-mark-keys '())]
+             [matched-current
+               (and current-key
+                    (find
+                      (lambda (entry)
+                        (equal? (list-ref entry 3) current-key))
+                      entries))]
+             [current
+               (or
+                 matched-current
+                 (and finalize?
+                      old-index
+                      (pair? entries)
+                      (list-ref
+                        entries
+                        (min old-index (- (length entries) 1)))))]
+             [marked-indices
+               (fold-right
+                 (lambda (entry indices)
+                   (if (exists
+                         (lambda (key)
+                           (equal? (list-ref entry 3) key))
+                         mark-keys)
+                       (cons (car entry) indices)
+                       indices))
+                 '()
+                 entries)])
+        (unless (null? mark-keys)
+          (buffer-set-local!
+            buffer 'result-marked-indices marked-indices))
+        (when finalize?
+          (buffer-set-local! buffer 'result-restore-mark-keys '()))
+        (when current
+          (let ([index (car current)] [position (cadr current)])
+            (buffer-set-local! buffer 'result-current-index index)
+            (buffer-set-local! buffer 'result-restore-current-key #f)
+            (buffer-set-local! buffer 'result-restore-current-index #f)
+            (for-each
+              (lambda (view)
+                (when (eq? (view-buffer view) buffer)
+                  (view-set-caret! view position)
+                  (ensure-view-visible! view)))
+              (editor-views editor))))
+        (and current #t))))
+
+  (define buffer-reconcile-result-selection!
+    (case-lambda
+      [(editor buffer)
+       (%buffer-reconcile-result-selection! editor buffer #f)]
+      [(editor buffer finalize?)
+       (unless (boolean? finalize?)
+         (assertion-violation
+           'buffer-reconcile-result-selection!
+           "finalize flag must be a boolean"
+           finalize?))
+       (%buffer-reconcile-result-selection!
+         editor buffer finalize?)]))
 
   (define result-producer-states
     '(idle running ready failed cancelled))
@@ -393,12 +525,25 @@
                 (editor-user-error
                   'editor-present-result-buffer!
                   "Result resource belongs to another Buffer"
-                  resource)])])
+                  resource)])]
+           [preserved
+             (and
+               existing
+               (buffer-result-interface-ref existing)
+               (capture-result-selection
+                 existing (buffer-result-interface-ref existing)))])
       (buffer-set-major-mode! buffer mode)
       (buffer-clear-text-properties! buffer)
       (buffer-replace-range-internal!
         buffer 0 (buffer-size buffer) (string->utf8 text))
       (buffer-set-result-interface! buffer interface)
+      (when preserved
+        (buffer-set-local!
+          buffer 'result-restore-current-key (car preserved))
+        (buffer-set-local!
+          buffer 'result-restore-current-index (cadr preserved))
+        (buffer-set-local!
+          buffer 'result-restore-mark-keys (caddr preserved)))
       (editor-note-result-buffer! editor buffer)
       (let ([view
               (editor-display-buffer!

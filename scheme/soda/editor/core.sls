@@ -942,6 +942,7 @@
           make-result-buffer-interface
           result-buffer-interface?
           result-buffer-interface-cyclic?
+          result-buffer-interface-item-key
           make-result-action
           result-action?
           result-action-name
@@ -954,6 +955,7 @@
           buffer-result-item-marked?
           buffer-set-result-item-marked!
           buffer-clear-result-marks!
+          buffer-reconcile-result-selection!
           invoke-buffer-item-action
           buffer-set-result-refresh!
           buffer-result-refreshable?

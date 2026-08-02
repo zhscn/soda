@@ -134,6 +134,8 @@
             (git-status-session-rename-record-set! session #f)))
         (hashtable-delete! active-git-statuses editor)
         (let ([status (managed-process-event-status event)])
+          (buffer-reconcile-result-selection!
+            editor (git-status-session-buffer session) #t)
           (buffer-set-result-producer-state!
             (git-status-session-buffer session)
             (if (zero? status) 'ready 'failed))

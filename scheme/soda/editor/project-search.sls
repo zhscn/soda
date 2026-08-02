@@ -205,6 +205,8 @@
         (hashtable-delete! active-project-searches editor)
         (let ([status (managed-process-event-status event)]
               [count (search-result-count session)])
+          (buffer-reconcile-result-selection!
+            editor (project-search-session-buffer session) #t)
           (buffer-set-result-producer-state!
             (project-search-session-buffer session)
             (if (or (= status 0) (= status 1)) 'ready 'failed))

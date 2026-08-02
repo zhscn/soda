@@ -365,6 +365,7 @@
               origin-view-id 'diagnostic #f #f)])
       (editor-set-current-location-list! editor locations)
       (editor-append-location-results! editor buffer items)
+      (buffer-reconcile-result-selection! editor buffer #t)
       (when refresh
         (buffer-set-result-refresh! buffer refresh))
       (decorate-diagnostic-results! buffer)))

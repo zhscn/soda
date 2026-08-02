@@ -5550,17 +5550,41 @@
            "diagnostics did not publish a sorted location list")))
 (editor-update!
   highlight-editor
+  (make-command-message 'buffer-item.next #f))
+(editor-update!
+  highlight-editor
+  (make-command-message 'buffer-item.toggle-mark #f))
+(define diagnostics-selected-before-refresh
+  (let* ([buffer (view-buffer (editor-active-view highlight-editor))]
+         [point (view-caret (editor-active-view highlight-editor))])
+    (buffer-text-property-ref buffer point 'result-item #f)))
+(editor-update!
+  highlight-editor
   (make-command-message 'buffer-item.refresh #f))
 (unless
-  (and
-    (= (length
-         (location-list-items
-           (editor-current-location-list highlight-editor)))
-       2)
-    (eq?
-      (buffer-major-mode-name
-        (view-buffer (editor-active-view highlight-editor)))
-      'diagnostics-mode))
+  (let* ([buffer (view-buffer (editor-active-view highlight-editor))]
+         [point (view-caret (editor-active-view highlight-editor))]
+         [selected
+           (buffer-text-property-ref buffer point 'result-item #f)])
+    (and
+      (= (length
+           (location-list-items
+             (editor-current-location-list highlight-editor)))
+         2)
+      (eq? (buffer-major-mode-name buffer) 'diagnostics-mode)
+      (location-item? selected)
+      (equal?
+        (list
+          (location-item-resource selected)
+          (location-item-start selected)
+          (location-item-end selected)
+          (location-item-excerpt selected))
+        (list
+          (location-item-resource diagnostics-selected-before-refresh)
+          (location-item-start diagnostics-selected-before-refresh)
+          (location-item-end diagnostics-selected-before-refresh)
+          (location-item-excerpt diagnostics-selected-before-refresh)))
+      (equal? (buffer-result-marked-indices buffer) '(1))))
   (error 'editor-tests "diagnostics Result producer did not refresh"))
 (editor-set-active-view!
   highlight-editor (view-id highlight-source-view))
@@ -5585,7 +5609,7 @@
   (make-command-message 'xref.next-location #f))
 (unless
   (and
-    (= (view-caret (editor-active-view highlight-editor)) 15)
+    (= (view-caret (editor-active-view highlight-editor)) 8)
     (let* ([result-view
              (find
                (lambda (view)
@@ -5599,7 +5623,7 @@
                     (view-buffer result-view) 'result-index))])
       (and result-view
            (= (length ranges) 2)
-           (= (view-caret result-view) (car (cadr ranges)))
+           (= (view-caret result-view) (caar ranges))
            (eq?
              (buffer-text-property-ref
                (view-buffer result-view)

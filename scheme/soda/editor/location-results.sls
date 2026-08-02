@@ -231,6 +231,14 @@
          (location-results-state?
            (location-results-state-for-buffer buffer))))
 
+  (define (location-result-item-key buffer item index)
+    (list
+      (or (location-item-resource item)
+          (location-item-buffer-id item))
+      (location-item-start item)
+      (location-item-end item)
+      (location-item-excerpt item)))
+
   (define (editor-result-origin-view-id editor view)
     (unless (and (editor? editor) (view? view))
       (assertion-violation
@@ -271,7 +279,10 @@
              (editor-present-result-buffer!
                editor resource mode heading origin-view-id
                (make-result-buffer-interface
-                 #t activate-location-result quit-location-results))])
+                 #t
+                 location-result-item-key
+                 activate-location-result
+                 quit-location-results))])
       (buffer-add-text-properties!
         buffer
         0
@@ -440,7 +451,10 @@
                close-command close-argument #f)]
            [interface
              (make-result-buffer-interface
-               #t activate-location-result quit-location-results)])
+               #t
+               location-result-item-key
+               activate-location-result
+               quit-location-results)])
       (let-values ([(text properties last-resource)
                     (render-location-results editor title locations)])
         (let ([buffer
@@ -454,13 +468,17 @@
             properties)
           (buffer-set-local! buffer 'location-results-state state)
           (location-results-state-last-resource-set! state last-resource)
-          (let ([view (editor-active-view editor)])
-          (let ([positions (location-property-positions buffer)])
-            (when (pair? positions)
-              (view-set-caret! view (caar positions))
-              (ensure-view-visible! view)))
-          (editor-invalidate! editor 'document)
-            buffer)))))
+          (let ([restored?
+                  (buffer-reconcile-result-selection! editor buffer #t)])
+            (unless restored?
+              (let ([view (editor-active-view editor)]
+                    [positions (location-property-positions buffer)])
+                (when (pair? positions)
+                  (view-set-caret! view (caar positions))
+                  (buffer-set-local! buffer 'result-current-index 0)
+                  (ensure-view-visible! view)))))
+            (editor-invalidate! editor 'document)
+            buffer))))
 
   (define editor-show-location-results!
     (case-lambda
@@ -502,20 +520,22 @@
             properties)
           (location-list-append-items! locations items)
           (location-results-state-last-resource-set! state last-resource)
-          (when (= start-index 0)
-            (let ([ranges
-                    (buffer-text-property-ranges
-                      buffer 'result-index)])
-              (when (pair? ranges)
-                (let ([position (caar ranges)])
-                  (buffer-set-local!
-                    buffer 'result-current-index 0)
-                  (for-each
-                    (lambda (view)
-                      (when (eq? (view-buffer view) buffer)
-                        (view-set-caret! view position)
-                        (ensure-view-visible! view)))
-                    (editor-views editor))))))
+          (let ([restored?
+                  (buffer-reconcile-result-selection! editor buffer)])
+            (when (and (= start-index 0) (not restored?))
+              (let ([ranges
+                      (buffer-text-property-ranges
+                        buffer 'result-index)])
+                (when (pair? ranges)
+                  (let ([position (caar ranges)])
+                    (buffer-set-local!
+                      buffer 'result-current-index 0)
+                    (for-each
+                      (lambda (view)
+                        (when (eq? (view-buffer view) buffer)
+                          (view-set-caret! view position)
+                          (ensure-view-visible! view)))
+                      (editor-views editor)))))))
           (editor-invalidate! editor 'document))))
     buffer)
 
