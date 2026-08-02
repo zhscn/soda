@@ -66,8 +66,6 @@
           editor-take-completion-effects!
           editor-refresh-prompt-completion!
           editor-invalidate-prompt-completion!
-          editor-prompt-completion-next!
-          editor-prompt-completion-previous!
           editor-prompt-history-previous!
           editor-prompt-history-next!
           editor-history-entries
@@ -3321,11 +3319,11 @@
                               "Completion edit no longer applies")
                             #f))))))))))]))
 
-  (define (editor-completion-next! value)
-    (require-open-editor 'editor-completion-next! value)
+  (define (editor-move-completion-selection! value who move!)
+    (require-open-editor who value)
     (let ([completion (editor-active-completion value)])
       (when completion
-        (completion-session-select-next! completion)
+        (move! completion)
         (let ([item
                 (completion-session-selected-item completion)])
           (when item
@@ -3333,17 +3331,17 @@
               value completion item))))
       completion))
 
+  (define (editor-completion-next! value)
+    (editor-move-completion-selection!
+      value
+      'editor-completion-next!
+      completion-session-select-next!))
+
   (define (editor-completion-previous! value)
-    (require-open-editor 'editor-completion-previous! value)
-    (let ([completion (editor-active-completion value)])
-      (when completion
-        (completion-session-select-previous! completion)
-        (let ([item
-                (completion-session-selected-item completion)])
-          (when item
-            (editor-resolve-completion-item!
-              value completion item))))
-      completion))
+    (editor-move-completion-selection!
+      value
+      'editor-completion-previous!
+      completion-session-select-previous!))
 
   (define (completion-response-target-matches?
             value
@@ -3589,12 +3587,6 @@
             'editor-invalidate-prompt-completion!
             value)))
       completion))
-
-  (define (editor-prompt-completion-next! value)
-    (editor-completion-next! value))
-
-  (define (editor-prompt-completion-previous! value)
-    (editor-completion-previous! value))
 
   (define (editor-open-prompt! value request)
     (require-open-editor 'editor-open-prompt! value)

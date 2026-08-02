@@ -170,8 +170,6 @@
           editor-take-completion-effects!
           editor-refresh-prompt-completion!
           editor-invalidate-prompt-completion!
-          editor-prompt-completion-next!
-          editor-prompt-completion-previous!
           editor-prompt-history-previous!
           editor-prompt-history-next!
           editor-history-entries

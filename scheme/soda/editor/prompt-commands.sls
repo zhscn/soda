@@ -47,12 +47,12 @@
     '())
 
   (define (next-completion-command context)
-    (editor-prompt-completion-next!
+    (editor-completion-next!
       (command-context-editor context))
     '())
 
   (define (previous-completion-command context)
-    (editor-prompt-completion-previous!
+    (editor-completion-previous!
       (command-context-editor context))
     '())
 

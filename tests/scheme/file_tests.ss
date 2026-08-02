@@ -669,12 +669,12 @@
     (error 'file-tests
            "find-file completion exposed invalid directory entries")))
 (let ([completion (editor-active-prompt-completion editor)])
-  (editor-prompt-completion-previous! editor)
+  (editor-completion-previous! editor)
   (unless
     (eq? (completion-session-selection-state completion) 'input)
     (error 'file-tests
            "find-file previous completion did not select the input"))
-  (editor-prompt-completion-next! editor)
+  (editor-completion-next! editor)
   (unless
     (= (completion-session-selected-index completion) 0)
     (error 'file-tests

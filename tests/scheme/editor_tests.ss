@@ -7820,7 +7820,7 @@
         (editor-active-prompt-completion prompt-editor)])
   (do ([count 0 (+ count 1)])
       ((= count 6))
-    (editor-prompt-completion-next! prompt-editor))
+    (editor-completion-next! prompt-editor))
   (unless
     (and
       (= (completion-session-selected-index completion) 6)
@@ -7853,7 +7853,7 @@
              "completion scrollbar did not follow the viewport"
              thumb-row
              (completion-session-viewport-start completion))))
-  (editor-prompt-completion-previous! prompt-editor)
+  (editor-completion-previous! prompt-editor)
   (let* ([frame (render-editor-frame prompt-editor 10 40)]
          [node
            (component-node-find
@@ -8372,13 +8372,13 @@
            "M-x did not preselect its first matching command")))
 (let ([completion
         (editor-active-prompt-completion prompt-editor)])
-  (editor-prompt-completion-next! prompt-editor)
-  (editor-prompt-completion-previous! prompt-editor)
+  (editor-completion-next! prompt-editor)
+  (editor-completion-previous! prompt-editor)
   (unless
     (= (completion-session-selected-index completion) 0)
     (error 'editor-tests
            "must-match completion navigated into prompt input")))
-(editor-prompt-completion-next! prompt-editor)
+(editor-completion-next! prompt-editor)
 (send! prompt-editor prompt-decoder (string->utf8 "a"))
 (let ([completion (editor-active-prompt-completion prompt-editor)])
   (unless
@@ -8547,7 +8547,7 @@
              "free prompt selection was not represented by */N"
              (cell-text (frame-cell-ref frame row 0))
              (cell-face (frame-cell-ref frame row 13)))))
-  (editor-prompt-completion-next! prompt-editor)
+  (editor-completion-next! prompt-editor)
   (unless
     (= (completion-session-selected-index completion) 0)
     (error 'editor-tests
@@ -8567,7 +8567,7 @@
              "candidate selection was not represented by its index"
              (cell-text (frame-cell-ref frame row 0))
              (cell-face (frame-cell-ref frame row 13)))))
-  (editor-prompt-completion-previous! prompt-editor)
+  (editor-completion-previous! prompt-editor)
   (unless
     (not (completion-session-selected-index completion))
     (error 'editor-tests
