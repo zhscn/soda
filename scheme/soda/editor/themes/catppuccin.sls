@@ -65,6 +65,7 @@
         (cons 'modeline.mode (pface 'subtext0 'inherit '()))
         (cons 'modeline.minor-modes (pface 'mauve 'inherit '(bold)))
         (cons 'modeline.process (pface 'green 'inherit '()))
+        (cons 'modeline.result (pface 'sapphire 'inherit '()))
         (cons 'modeline.message (pface 'text 'inherit '()))
         (cons 'minibuffer.input (pface 'text 'mantle '()))
         (cons 'minibuffer.prompt (pface 'base 'mauve '(bold)))

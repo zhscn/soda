@@ -10001,6 +10001,27 @@
            "modeline omitted the Result producer state"
            text)))
 (buffer-clear-local! modeline-buffer 'result-producer-state)
+(buffer-set-local! modeline-buffer 'result-buffer-interface #t)
+(buffer-set-local! modeline-buffer 'result-current-index 1)
+(buffer-set-local! modeline-buffer 'result-marked-indices '(0 2))
+(buffer-add-text-properties!
+  modeline-buffer 0 1 '((result-index . 0) (result-item . first)))
+(buffer-add-text-properties!
+  modeline-buffer 1 2 '((result-index . 1) (result-item . second)))
+(buffer-add-text-properties!
+  modeline-buffer 2 3 '((result-index . 2) (result-item . third)))
+(let ([text
+        (frame-row-text
+          (render-editor-frame modeline-editor 3 140)
+          2)])
+  (unless (string-contains? text "[2/3, 2 marked]")
+    (error 'editor-tests
+           "modeline omitted Result position or mark count"
+           text)))
+(buffer-clear-local! modeline-buffer 'result-buffer-interface)
+(buffer-clear-local! modeline-buffer 'result-current-index)
+(buffer-clear-local! modeline-buffer 'result-marked-indices)
+(buffer-clear-text-properties! modeline-buffer)
 (define narrow-modeline-frame
   (render-editor-frame modeline-editor 3 12))
 (define narrow-modeline-text

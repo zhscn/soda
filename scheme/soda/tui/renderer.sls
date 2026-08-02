@@ -740,6 +740,7 @@
       buffer
       right-align
       message
+      result
       process
       position
       major-mode
@@ -814,6 +815,21 @@
                (buffer-id buffer))]
            [result-producer-state
              (buffer-local-ref buffer 'result-producer-state 'idle)]
+           [result-interface
+             (buffer-local-ref buffer 'result-buffer-interface #f)]
+           [result-count
+             (if result-interface
+                 (length
+                   (buffer-text-property-ranges buffer 'result-index))
+                 0)]
+           [result-index
+             (and result-interface
+                  (buffer-local-ref buffer 'result-current-index #f))]
+           [result-mark-count
+             (if result-interface
+                 (length
+                   (buffer-local-ref buffer 'result-marked-indices '()))
+                 0)]
            [message
              (and (editor-render-context-focused? context)
                   (editor-status-message editor))]
@@ -889,6 +905,28 @@
                    (if (null? hidden) "" " ≡")
                    'modeline.minor-modes
                    50
+                   0
+                   'end)
+                 (modeline-segment
+                   'result
+                   (if result-interface
+                       (string-append
+                         " ["
+                         (if (and result-index (< result-index result-count))
+                             (number->string (+ result-index 1))
+                             "0")
+                         "/"
+                         (number->string result-count)
+                         (if (positive? result-mark-count)
+                             (string-append
+                               ", "
+                               (number->string result-mark-count)
+                               " marked")
+                             "")
+                         "]")
+                       "")
+                   'modeline.result
+                   45
                    0
                    'end)
                  (modeline-segment
