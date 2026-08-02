@@ -1,6 +1,8 @@
 (library (soda editor completion-commands)
   (export install-completion-commands!
-          editor-auto-trigger-completion!)
+          editor-auto-trigger-completion!
+          completion-next-command
+          completion-previous-command)
   (import (rnrs)
           (soda document)
           (soda editor buffer)
@@ -283,12 +285,12 @@
       (command-context-editor context))
     '())
 
-  (define (next-completion-command context)
+  (define (completion-next-command context)
     (editor-completion-next!
       (command-context-editor context))
     '())
 
-  (define (previous-completion-command context)
+  (define (completion-previous-command context)
     (editor-completion-previous!
       (command-context-editor context))
     '())
@@ -325,11 +327,11 @@
           "Cancel completion.")
         (list
           'completion.next
-          next-completion-command
+          completion-next-command
           "Select the next completion candidate.")
         (list
           'completion.previous
-          previous-completion-command
+          completion-previous-command
           "Select the previous completion candidate.")))
     (let ([keymap (make-keymap)])
       (for-each

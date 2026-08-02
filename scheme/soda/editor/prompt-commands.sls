@@ -5,6 +5,7 @@
           (soda editor command)
           (soda editor command-runtime)
           (soda editor completion)
+          (soda editor completion-commands)
           (soda editor event)
           (soda editor input-state)
           (soda editor keymap)
@@ -43,16 +44,6 @@
 
   (define (next-history-command context)
     (editor-prompt-history-next!
-      (command-context-editor context))
-    '())
-
-  (define (next-completion-command context)
-    (editor-completion-next!
-      (command-context-editor context))
-    '())
-
-  (define (previous-completion-command context)
-    (editor-completion-previous!
       (command-context-editor context))
     '())
 
@@ -383,11 +374,11 @@
           "Replace minibuffer input with the next history entry.")
         (list
           'prompt.completion-next
-          next-completion-command
+          completion-next-command
           "Select the next minibuffer completion.")
         (list
           'prompt.completion-previous
-          previous-completion-command
+          completion-previous-command
           "Select the previous minibuffer completion.")
         (list
           'execute-extended-command
