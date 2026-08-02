@@ -969,6 +969,7 @@
           editor-present-result-buffer!
           editor-append-result-items!
           editor-append-result-message!
+          editor-save-buffer!
           editor-resolve-resources!
           location-item-open-position
           editor-visit-location-item!

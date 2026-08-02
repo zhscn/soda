@@ -10195,30 +10195,70 @@
     "*alpha*"
     'fundamental-mode))
 (define buffer-list-editor (make-editor buffer-list-buffer))
-(editor-add-buffer!
-  buffer-list-editor
+(define buffer-list-beta
   (make-buffer
     953
     (make-document "beta" 953)
     "*beta*"
     'fundamental-mode))
+(editor-add-buffer!
+  buffer-list-editor
+  buffer-list-beta)
 (editor-update!
   buffer-list-editor
   (make-command-message 'buffer.list #f))
+(define buffer-list-panel
+  (view-buffer (editor-active-view buffer-list-editor)))
 (unless
   (and
-    (string=?
-      (buffer-resource
-        (view-buffer
-          (editor-active-view buffer-list-editor)))
-      "*Buffer List*")
+    (string=? (buffer-resource buffer-list-panel) "*Buffer List*")
+    (eq? (buffer-major-mode-name buffer-list-panel) 'buffer-list-mode)
+    (= (length
+         (buffer-text-property-ranges buffer-list-panel 'result-index))
+       2)
     (string-contains?
-      (utf8->string
-        (buffer-bytes
-          (view-buffer
-            (editor-active-view buffer-list-editor))))
+      (utf8->string (buffer-bytes buffer-list-panel))
       "*beta*"))
   (error 'editor-tests "buffer list did not display registered buffers"))
+(unless
+  (equal?
+    (map result-action-name
+         (buffer-result-actions-at
+           buffer-list-panel
+           (view-caret (editor-active-view buffer-list-editor))))
+    '(kill))
+  (error 'editor-tests "buffer list did not expose management actions"))
+(editor-update!
+  buffer-list-editor
+  (make-command-message 'buffer-item.next #f))
+(unless
+  (exists
+    (lambda (view) (eq? (view-buffer view) buffer-list-beta))
+    (editor-views buffer-list-editor))
+  (error 'editor-tests "buffer list navigation did not preview the target"))
+(editor-update!
+  buffer-list-editor
+  (make-command-message 'buffer-list.kill #f))
+(unless
+  (and
+    (not (exists
+           (lambda (buffer) (eq? buffer buffer-list-beta))
+           (editor-buffers buffer-list-editor)))
+    (= (length
+         (buffer-text-property-ranges
+           (view-buffer (editor-active-view buffer-list-editor))
+           'result-index))
+       1))
+  (error 'editor-tests "buffer list did not kill and remove its target"))
+(editor-update!
+  buffer-list-editor
+  (make-command-message 'buffer-item.activate-and-close #f))
+(unless
+  (and
+    (eq? (view-buffer (editor-active-view buffer-list-editor))
+         buffer-list-buffer)
+    (not (editor-buffer-for-resource buffer-list-editor "*Buffer List*")))
+  (error 'editor-tests "buffer list did not visit and close on RET"))
 (editor-close! buffer-list-editor)
 
 (define help-document (make-document "help" 954))

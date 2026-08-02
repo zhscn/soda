@@ -1,15 +1,19 @@
 (library (soda editor commands buffer)
   (export install-buffer-commands!)
   (import (rnrs)
-          (soda document)
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
           (soda editor completion)
+          (soda editor condition)
           (soda editor edit)
+          (only (soda editor file) editor-save-buffer!)
           (soda editor keymap)
+          (soda editor language)
           (soda editor prompt)
-          (soda editor state))
+          (soda editor result-buffer)
+          (soda editor state)
+          (soda editor window-runtime))
 
   (define (exact-non-negative-integer? value)
     (and (integer? value) (exact? value) (not (negative? value))))
@@ -235,66 +239,192 @@
       (view-buffer (command-context-view context))
       #t))
 
-  (define (buffer-size buffer)
-    (let ([snapshot (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda () (text-size text))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
+  (define buffer-list-resource "*Buffer List*")
 
-  (define (buffer-list-text editor)
-    (apply
-      string-append
-      "MR  Buffer                                  Mode\n"
-      "--  ------                                  ----\n"
-      (map
-        (lambda (buffer)
-          (string-append
-            (if (buffer-modified? buffer) "* " "  ")
-            "  "
-            (buffer-display-label editor buffer)
-            "\t"
-            (symbol->string (buffer-major-mode-name buffer))
-            "\n"))
-        (editor-buffers editor))))
+  (define (buffer-list-targets editor)
+    (filter
+      (lambda (buffer)
+        (not (equal? (buffer-resource buffer) buffer-list-resource)))
+      (editor-buffers editor)))
+
+  (define (buffer-list-row editor buffer)
+    (string-append
+      (if (buffer-modified? buffer) "*" " ")
+      (if (buffer-setting-ref buffer 'read-only? #f) "%" " ")
+      "  "
+      (buffer-display-label editor buffer)
+      "\t"
+      (symbol->string (buffer-major-mode-name buffer))
+      "\n"))
+
+  (define (buffer-list-origin-view editor panel)
+    (let ([id (buffer-local-ref panel 'buffer-list-origin-view-id #f)])
+      (and id
+           (guard (condition [else #f])
+             (editor-view-ref editor id)))))
+
+  (define (activate-buffer-list-item context panel item index disposition)
+    (let* ([editor (command-context-editor context)]
+           [origin (buffer-list-origin-view editor panel)])
+      (unless (and (buffer? item) origin)
+        (editor-user-error 'buffer-item.activate "Buffer list item is stale"))
+      (editor-set-view-buffer! editor (view-id origin) (buffer-id item))
+      (when (memq disposition '(select select-and-close))
+        (editor-select-view-window! editor (view-id origin)))
+      (when (eq? disposition 'select-and-close)
+        (editor-dismiss-result-buffer! editor panel origin))
+      '()))
+
+  (define (quit-buffer-list context panel)
+    (let* ([editor (command-context-editor context)]
+           [origin (buffer-list-origin-view editor panel)])
+      (when origin
+        (editor-dismiss-result-buffer! editor panel origin))
+      '()))
+
+  (define (buffer-list-item-live? editor item)
+    (and (buffer? item)
+         (exists (lambda (candidate) (eq? candidate item))
+                 (editor-buffers editor))))
+
+  (define (buffer-list-refresh! editor origin-view-id)
+    (let* ([heading "MR  Buffer\tMode\n--  ------\t----\n"]
+           [targets (buffer-list-targets editor)]
+           [panel
+             (editor-present-result-buffer!
+               editor buffer-list-resource 'buffer-list-mode heading
+               origin-view-id
+               (make-result-buffer-interface
+                 #t
+                 (lambda (buffer item index) (buffer-id item))
+                 activate-buffer-list-item
+                 quit-buffer-list))])
+      (buffer-set-local! panel 'buffer-list-origin-view-id origin-view-id)
+      (buffer-add-text-properties!
+        panel 0 (bytevector-length (string->utf8 heading))
+        '((face . application.heading) (result-heading . #t)))
+      (for-each
+        (lambda (target)
+          (let* ([row (buffer-list-row editor target)]
+                 [length (bytevector-length (string->utf8 row))])
+            (editor-append-result-items!
+              editor panel row (list (list 0 length target)))))
+        targets)
+      (buffer-reconcile-result-selection! editor panel #t)
+      (when (and (pair? targets)
+                 (not (buffer-local-ref panel 'result-current-index #f)))
+        (let ([range (car (buffer-text-property-ranges panel 'result-index))])
+          (buffer-set-local! panel 'result-current-index (caddr range))
+          (for-each
+            (lambda (view)
+              (when (eq? (view-buffer view) panel)
+                (view-set-caret! view (car range))
+                (ensure-view-visible! view)))
+            (editor-views editor))))
+      (buffer-set-result-refresh!
+        panel
+        (lambda (refresh-editor refresh-buffer)
+          (buffer-list-refresh! refresh-editor origin-view-id)
+          '()))
+      (register-buffer-list-actions! editor panel)
+      panel))
+
+  (define (refresh-buffer-list-after! editor panel effects)
+    (let ([origin (buffer-list-origin-view editor panel)])
+      (when origin
+        (buffer-list-refresh! editor (view-id origin))))
+    effects)
+
+  (define (kill-buffer-list-item context panel item index)
+    (let ([editor (command-context-editor context)])
+      (try-kill-buffer! editor item #f)
+      (refresh-buffer-list-after! editor panel '())))
+
+  (define (save-buffer-list-item context panel item index)
+    (let ([editor (command-context-editor context)])
+      (refresh-buffer-list-after!
+        editor panel (editor-save-buffer! editor item))))
+
+  (define (kill-buffer-list-items context panel entries)
+    (let ([editor (command-context-editor context)])
+      (when
+        (exists
+          (lambda (entry)
+            (or (buffer-modified? (cdr entry))
+                (buffer-save-pending? (cdr entry))))
+          entries)
+        (editor-user-error
+          'buffer-list.kill "Save modified buffers before killing them"))
+      (for-each
+        (lambda (entry) (try-kill-buffer! editor (cdr entry) #f))
+        entries)
+      (refresh-buffer-list-after! editor panel '())))
+
+  (define (save-buffer-list-items context panel entries)
+    (let ([editor (command-context-editor context)])
+      (refresh-buffer-list-after!
+        editor panel
+        (apply append
+          (map
+            (lambda (entry) (editor-save-buffer! editor (cdr entry)))
+            entries)))))
+
+  (define (register-buffer-list-actions! editor panel)
+    (buffer-register-result-action!
+      panel
+      (make-result-action
+        'kill "Kill buffer"
+        (lambda (buffer item) (buffer-list-item-live? editor item))
+        kill-buffer-list-item
+        kill-buffer-list-items))
+    (buffer-register-result-action!
+      panel
+      (make-result-action
+        'save "Save buffer"
+        (lambda (buffer item)
+          (and (buffer-list-item-live? editor item)
+               (buffer-file-path item)
+               (buffer-modified? item)
+               (not (buffer-save-pending? item))))
+        save-buffer-list-item
+        save-buffer-list-items)))
 
   (define (list-buffers-command context)
     (let* ([editor (command-context-editor context)]
-           [resource "*Buffer List*"]
-           [existing (editor-buffer-for-resource editor resource)]
-           [contents (string->utf8 (buffer-list-text editor))]
-           [buffer
-             (or
-               existing
-               (editor-create-buffer!
-                 editor
-                 resource
-                 'fundamental-mode
-                 contents
-                 (editor-view-resource-context
-                   editor
-                   (view-id (command-context-view context)))))])
-      (when existing
-        (buffer-replace-range-internal!
-          buffer
-          0
-          (buffer-size buffer)
-          contents))
-      (buffer-set-local-setting! buffer 'track-modified? #f)
-      (buffer-set-local-setting! buffer 'read-only? #t)
-      (editor-set-view-buffer!
-        editor
-        (view-id (command-context-view context))
-        (buffer-id buffer))
+           [view (command-context-view context)]
+           [current (view-buffer view)]
+           [origin-id
+             (if (equal? (buffer-resource current) buffer-list-resource)
+                 (or (buffer-local-ref current 'buffer-list-origin-view-id #f)
+                     (view-id view))
+                 (view-id view))])
+      (buffer-list-refresh! editor origin-id)
       (editor-set-status-message! editor "Buffer list"))
     '())
 
+  (define (buffer-list-action-command name)
+    (lambda (context)
+      (invoke-buffer-item-action context name)))
+
   (define (install-buffer-commands! editor)
+    (register-major-mode!
+      (editor-language-catalog editor)
+      (make-major-mode
+        'buffer-list-mode 'result-list-mode #f 'interface
+        'buffer-list-mode-map
+        '((track-modified? . #f) (read-only? . #t))))
+    (let ([keymap (make-keymap)])
+      (keymap-bind!
+        keymap (list (make-key-stroke 'enter 13 0))
+        'buffer-item.activate-and-close)
+      (keymap-bind!
+        keymap (list (make-key-stroke 'character (char->integer #\k) 0))
+        'buffer-list.kill)
+      (keymap-bind!
+        keymap (list (make-key-stroke 'character (char->integer #\s) 0))
+        'buffer-list.save)
+      (keymap-catalog-register!
+        (editor-keymap-catalog editor) 'buffer-list-mode-map keymap))
     (editor-register-command!
       editor
       (make-interactive-context-command
@@ -331,6 +461,18 @@
         'buffer.list
         list-buffers-command
         "Display the editor buffer list."))
+    (editor-register-command!
+      editor
+      (make-interactive-context-command
+        'buffer-list.kill
+        (buffer-list-action-command 'kill)
+        "Kill the buffer at point, or all marked buffers."))
+    (editor-register-command!
+      editor
+      (make-interactive-context-command
+        'buffer-list.save
+        (buffer-list-action-command 'save)
+        "Save the buffer at point, or all marked buffers."))
     (editor-bind-key!
       editor
       (list

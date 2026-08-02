@@ -1,5 +1,6 @@
 (library (soda editor file)
   (export install-file-commands!
+          editor-save-buffer!
           interactive-file-name
           detect-file-line-ending
           file-major-mode-for-path
@@ -1871,6 +1872,29 @@
          (editor-set-status-message!
            editor
            "No changes need saving")
+         '()]
+        [else
+         (begin-save! editor buffer path #f)])))
+
+  (define (editor-save-buffer! editor buffer)
+    (unless (and (editor? editor) (buffer? buffer))
+      (assertion-violation
+        'editor-save-buffer! "expected an Editor and Buffer" editor buffer))
+    (unless
+      (exists (lambda (candidate) (eq? candidate buffer))
+              (editor-buffers editor))
+      (assertion-violation
+        'editor-save-buffer! "Buffer does not belong to Editor" buffer))
+    (let ([path (buffer-file-path buffer)])
+      (cond
+        [(not path)
+         (editor-user-error
+           'editor-save-buffer! "Buffer has no file name")]
+        [(buffer-save-pending? buffer)
+         (editor-user-error
+           'editor-save-buffer! "Save already in progress")]
+        [(not (buffer-modified? buffer))
+         (editor-set-status-message! editor "No changes need saving")
          '()]
         [else
          (begin-save! editor buffer path #f)])))
