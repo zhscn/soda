@@ -505,7 +505,12 @@
       (if (buffer-result-refreshable? buffer)
           (list
             (make-result-panel-action
-              'refresh "Refresh results"
+              'refresh
+              (case (buffer-result-producer-state buffer)
+                [(failed) "Retry task"]
+                [(cancelled) "Run task again"]
+                [(running) "Restart task"]
+                [else "Refresh results"])
               (lambda (candidate) #t)
               (lambda (context candidate)
                 (refresh-buffer-items context))))
@@ -1105,6 +1110,9 @@
             name))
         ((result-panel-action-invoke action) context buffer))))
 
+  (define (stop-result-producer context)
+    (invoke-result-panel-action context 'stop))
+
   (define (set-selected-item-mark! context marked?)
     (let-values ([(buffer interface item index)
                   (selected-item context 'buffer-item.mark)])
@@ -1538,6 +1546,9 @@
         (list 'buffer-item.actions
               choose-buffer-item-action
               "Choose an action available for the result item at point.")
+        (list 'buffer-panel.stop
+              stop-result-producer
+              "Stop the producer for the current Result Buffer without closing it.")
         (list 'buffer-item.mark
               (lambda (context) (set-selected-item-mark! context #t))
               "Mark the result item at point.")

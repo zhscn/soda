@@ -594,6 +594,12 @@
       (bind-result-key! keymap 'character (char->integer #\q) 'buffer-item.quit)
       (keymap-bind!
         keymap
+        (list
+          (make-key-stroke 'character (char->integer #\c) 4)
+          (make-key-stroke 'character (char->integer #\k) 4))
+        'buffer-panel.stop)
+      (keymap-bind!
+        keymap
         (list (make-key-stroke 'character (char->integer #\o) 4))
         'buffer-item.preview)
       (keymap-catalog-register!

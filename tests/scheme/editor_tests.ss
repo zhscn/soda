@@ -5053,6 +5053,21 @@
     "*empty-xref-source*"
     'fundamental-mode))
 (define empty-xref-editor (make-editor empty-xref-source))
+(call-with-values
+  (lambda ()
+    (keymap-resolve
+      (keymap-catalog-ref
+        (editor-keymap-catalog empty-xref-editor)
+        'result-list-mode-map)
+      (list
+        (make-key-stroke 'character (char->integer #\c) 4)
+        (make-key-stroke 'character (char->integer #\k) 4))))
+  (lambda (status command)
+    (unless
+      (and (eq? status 'command)
+           (eq? command 'buffer-panel.stop))
+      (error 'editor-tests
+             "Result Buffer did not expose the standard producer stop key"))))
 (define empty-xref-buffer
   (editor-show-xref-results!
     empty-xref-editor
@@ -5104,6 +5119,30 @@
         empty-xref-buffer 'result-message)))
   (error 'editor-tests
          "Result producer outcome was not persisted atomically"))
+(buffer-set-result-refresh!
+  empty-xref-buffer
+  (lambda (context buffer) '()))
+(let ([refresh
+        (find
+          (lambda (action)
+            (eq? (result-panel-action-name action) 'refresh))
+          (buffer-result-panel-actions empty-xref-buffer))])
+  (unless
+    (and refresh
+         (string=? (result-panel-action-label refresh) "Run task again"))
+    (error 'editor-tests
+           "Cancelled Result producer did not expose a rerun action")))
+(buffer-set-result-producer-state! empty-xref-buffer 'failed)
+(let ([refresh
+        (find
+          (lambda (action)
+            (eq? (result-panel-action-name action) 'refresh))
+          (buffer-result-panel-actions empty-xref-buffer))])
+  (unless
+    (and refresh
+         (string=? (result-panel-action-label refresh) "Retry task"))
+    (error 'editor-tests
+           "Failed Result producer did not expose a retry action")))
 (editor-update!
   empty-xref-editor
   (make-command-message 'buffer-item.next #f))
