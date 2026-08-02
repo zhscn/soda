@@ -1,6 +1,7 @@
 (library (soda editor project-navigation-commands)
   (export install-project-navigation-commands!)
   (import (rnrs)
+          (soda editor string)
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
@@ -40,12 +41,6 @@
         (view-id view)
         project
         (resource-context-language-context current))))
-
-  (define (string-prefix? prefix value)
-    (let ([length (string-length prefix)])
-      (and
-        (<= length (string-length value))
-        (string=? prefix (substring value 0 length)))))
 
   (define (project-relative-resource project resource)
     (or

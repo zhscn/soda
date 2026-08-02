@@ -126,6 +126,7 @@
           completion-session-select-previous!)
   (import (rnrs)
           (soda editor contract)
+          (soda editor string)
           (soda document)
           (soda editor fuzzy))
 
@@ -758,13 +759,6 @@
 
   (define (normalize-string value ignore-case?)
     (if ignore-case? (string-downcase value) value))
-
-  (define (string-prefix? prefix value)
-    (and
-      (<= (string-length prefix) (string-length value))
-      (string=?
-        prefix
-        (substring value 0 (string-length prefix)))))
 
   (define (substring-index needle value)
     (let ([needle-length (string-length needle)]

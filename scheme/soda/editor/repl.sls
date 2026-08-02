@@ -3,6 +3,7 @@
           install-interaction-effect-handler!
           editor-open-repl!)
   (import (rnrs)
+          (soda editor string)
           (only (chezscheme) port-position)
           (soda document)
           (soda editor buffer)
@@ -99,21 +100,6 @@
               (interaction-session-transcript session)
               buffer))
           '()))))
-
-  (define (string-contains? value needle)
-    (let ([limit (- (string-length value)
-                    (string-length needle))])
-      (let loop ([index 0])
-        (and
-          (<= index limit)
-          (or
-            (string=?
-              (substring
-                value
-                index
-                (+ index (string-length needle)))
-              needle)
-            (loop (+ index 1)))))))
 
   (define (incomplete-read-condition? condition)
     (and

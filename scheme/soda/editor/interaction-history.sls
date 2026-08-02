@@ -10,7 +10,8 @@
           interaction-history-search-previous!
           interaction-history-search-next!
           interaction-history-reset!)
-  (import (rnrs))
+  (import (rnrs)
+          (only (soda editor string) string-contains?))
 
   (define-record-type
     (interaction-history %make-interaction-history interaction-history?)
@@ -146,21 +147,6 @@
         (string=?
           prefix
           (substring value start (+ start prefix-length))))))
-
-  (define (string-contains? value needle)
-    (let ([limit
-            (- (string-length value) (string-length needle))])
-      (let loop ([index 0])
-        (and
-          (<= index limit)
-          (or
-            (string=?
-              needle
-              (substring
-                value
-                index
-                (+ index (string-length needle))))
-            (loop (+ index 1)))))))
 
   (define (history-match? kind key entry)
     (case kind

@@ -20,6 +20,7 @@
           lsp-json-response-error)
   (import (rnrs)
           (soda editor contract)
+          (soda editor string)
           (soda json)
           (soda vfs))
 
@@ -153,10 +154,6 @@
                    (vfs-path-separator? (string-ref normalized 0)))
         (assertion-violation 'lsp-file-uri "LSP file URI requires an absolute path" path))
       (string-append "file://" (uri-encode-path normalized))))
-
-  (define (string-prefix? prefix value)
-    (and (<= (string-length prefix) (string-length value))
-         (string=? prefix (substring value 0 (string-length prefix)))))
 
   (define (lsp-uri-file-path uri)
     (unless (string? uri)

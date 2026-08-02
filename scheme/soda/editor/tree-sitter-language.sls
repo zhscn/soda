@@ -24,6 +24,7 @@
           tree-sitter-language-available?)
   (import (rnrs)
           (soda editor contract)
+          (soda editor string)
           (soda document)
           (soda editor auto-mode)
           (soda editor buffer)
@@ -561,30 +562,6 @@
                           column))))))
             (lambda () (text-close! text)))))
       (lambda (context) #f)))
-
-  (define (string-prefix? prefix value)
-    (and
-      (<= (string-length prefix)
-          (string-length value))
-      (string=?
-        prefix
-        (substring
-          value
-          0
-          (string-length prefix)))))
-
-  (define (string-suffix? suffix value)
-    (and
-      (<= (string-length suffix)
-          (string-length value))
-      (string=?
-        suffix
-        (substring
-          value
-          (-
-            (string-length value)
-            (string-length suffix))
-          (string-length value)))))
 
   (define (text-object-descriptor capture)
     (let* ([raw

@@ -16,7 +16,8 @@
           auto-mode-catalog-resolve
           auto-mode-catalog-snapshot
           auto-mode-catalog-restore!)
-  (import (rnrs))
+  (import (rnrs)
+          (soda editor string))
 
   (define-record-type
     (auto-mode-rule %make-auto-mode-rule auto-mode-rule?)
@@ -58,18 +59,6 @@
         "major mode must be a symbol"
         major-mode))
     (%make-auto-mode-rule name priority matcher major-mode))
-
-  (define (string-suffix? suffix value)
-    (let ([suffix-length (string-length suffix)]
-          [value-length (string-length value)])
-      (and
-        (<= suffix-length value-length)
-        (string=?
-          suffix
-          (substring
-            value
-            (- value-length suffix-length)
-            value-length)))))
 
   (define (make-file-suffix-auto-mode-rule
             name

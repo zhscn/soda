@@ -99,6 +99,7 @@
           save-result-observed-state)
   (import (rnrs)
           (soda editor contract)
+          (soda editor string)
           (only (chezscheme)
                 current-directory)
           (soda document)
@@ -629,16 +630,6 @@
                   (begin
                     (put-u8 port byte)
                     (loop (+ index 1))))))))))
-
-  (define (string-suffix? suffix value)
-    (and
-      (<= (string-length suffix) (string-length value))
-      (string=?
-        suffix
-        (substring
-          value
-          (- (string-length value) (string-length suffix))
-          (string-length value)))))
 
   (define (make-file-choice-source base-directory)
     (make-choice-source
