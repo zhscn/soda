@@ -4333,6 +4333,40 @@
              ":"
              (number->string
                (frame-cursor-column multi-window-frame))))))
+(define inactive-window-document
+  (make-document "inactive\nview" 982))
+(define inactive-window-buffer
+  (make-buffer
+    982
+    inactive-window-document
+    "*inactive-window*"
+    'fundamental-mode))
+(editor-add-buffer! window-editor inactive-window-buffer)
+(editor-set-view-buffer!
+  window-editor
+  (view-id first-window-view)
+  (buffer-id inactive-window-buffer))
+(define distinct-buffer-window-frame
+  (render-editor-frame window-editor 6 20))
+(unless
+  (let row-loop ([row 0])
+    (or
+      (= row 6)
+      (and
+        (let column-loop ([column 0])
+          (or
+            (= column 20)
+            (and
+              (not
+                (memq
+                  'cursor.inactive
+                  (cell-faces
+                    (frame-cell-ref
+                      distinct-buffer-window-frame row column))))
+              (column-loop (+ column 1)))))
+        (row-loop (+ row 1)))))
+  (error 'editor-tests
+         "inactive split rendered a second editing cursor"))
 (send! window-editor window-decoder (bytes 27 120))
 (editor-update! window-editor (make-resize-message 7 20))
 (define multi-window-prompt-frame

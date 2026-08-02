@@ -1338,16 +1338,9 @@
                       [(beam) 'bar]
                       [(underline) 'underline]
                       [else 'block])))
-                (let ([active-buffer
-                        (view-buffer
-                          (editor-active-view
-                            (editor-render-context-editor context)))])
-                  (when
-                    (or
-                      (not (eq? buffer active-buffer))
-                      (view-navigation-target view))
-                    (draw-inactive-cursor!
-                      frame cursor-row cursor-column theme view))))
+                (when (view-navigation-target view)
+                  (draw-inactive-cursor!
+                    frame cursor-row cursor-column theme view)))
             (when (editor-render-context-focused? context)
               (frame-set-cursor! frame 0 0 #f))))))
 
