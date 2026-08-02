@@ -4414,6 +4414,34 @@
 (let ([results-view
         (find
           (lambda (view)
+            (eq? (view-buffer view) xref-results-buffer))
+          (editor-views xref-editor))])
+  (unless results-view
+    (error 'editor-tests "xref results view disappeared before global navigation"))
+  (editor-set-view-buffer!
+    xref-editor (view-id results-view) (buffer-id xref-buffer))
+  (editor-update!
+    xref-editor
+    (make-command-message 'xref.next-location #f))
+  (unless
+    (and
+      (= (location-list-index (editor-current-location-list xref-editor)) 3)
+      (= (view-caret xref-view) 8))
+    (error 'editor-tests
+           "global result navigation required a visible result Buffer"))
+  (editor-set-view-buffer!
+    xref-editor (view-id results-view) (buffer-id xref-results-buffer))
+  (let ([entry
+          (find
+            (lambda (range) (= (caddr range) 2))
+            (buffer-text-property-ranges
+              xref-results-buffer 'result-index))])
+    (unless entry
+      (error 'editor-tests "xref result selection property disappeared"))
+    (view-set-caret! results-view (car entry))))
+(let ([results-view
+        (find
+          (lambda (view)
             (eq? (buffer-major-mode-name (view-buffer view))
                  'location-results-mode))
           (editor-views xref-editor))])
@@ -4430,7 +4458,7 @@
   (make-command-message 'buffer-item.preview #f))
 (unless
   (and
-    (= (view-caret xref-view) 28)
+    (= (view-caret xref-view) 8)
     (string? (editor-status-message xref-editor)))
   (error 'editor-tests
          "xref moved through a stale location list"

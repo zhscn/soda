@@ -43,6 +43,7 @@
         "expected a Buffer and navigation interface"
         buffer interface))
     (buffer-set-local! buffer 'navigation-interface interface)
+    (buffer-set-local! buffer 'result-current-index #f)
     buffer)
 
   (define (buffer-navigation-interface-ref buffer)
@@ -85,13 +86,14 @@
                  buffer position 'result-index #f)])
         (unless (and item (integer? index) (exact? index))
           (editor-user-error who "Point is not on a navigable item"))
-        (values interface item index))))
+        (buffer-set-local! buffer 'result-current-index index)
+        (values buffer interface item index))))
 
   (define (activate-selected context disposition)
-    (let-values ([(interface item index)
+    (let-values ([(buffer interface item index)
                   (selected-item context 'buffer-item.activate)])
       ((buffer-navigation-interface-activate interface)
-       context item index disposition)))
+       context buffer item index disposition)))
 
   (define (bounded-index current delta size cyclic?)
     (let ([candidate (+ current delta)])
@@ -101,19 +103,19 @@
         [(>= candidate size) (- size 1)]
         [else candidate])))
 
-  (define (move-item context delta)
-    (let-values ([(buffer interface)
-                  (require-interface context 'buffer-item.next)])
+  (define (move-buffer-item context buffer interface view delta)
       (let ([positions (property-positions buffer interface)])
         (if (null? positions)
             (begin
               (editor-set-status-message!
                 (command-context-editor context) "No navigable items")
               '())
-            (let* ([view (command-context-view context)]
-                   [current
-                     (buffer-text-property-ref
-                       buffer (view-caret view) 'result-index #f)]
+            (let* ([current
+                     (or
+                       (and view
+                            (buffer-text-property-ref
+                              buffer (view-caret view) 'result-index #f))
+                       (buffer-local-ref buffer 'result-current-index #f))]
                    [base
                      (if current
                          current
@@ -128,24 +130,33 @@
                    [item
                      (buffer-text-property-ref
                        buffer position 'result-item #f)])
-              (view-set-caret! view position)
-              (ensure-view-visible! view)
+              (when view
+                (view-set-caret! view position)
+                (ensure-view-visible! view))
+              (buffer-set-local! buffer 'result-current-index index)
               ((buffer-navigation-interface-activate interface)
-               context item index 'preview))))))
+               context buffer item index 'preview)))))
+
+  (define (move-item context delta)
+    (let-values ([(buffer interface)
+                  (require-interface context 'buffer-item.next)])
+      (move-buffer-item
+        context buffer interface (command-context-view context) delta)))
 
   (define (quit-buffer-items context)
     (let-values ([(buffer interface)
                   (require-interface context 'buffer-item.quit)])
-      ((buffer-navigation-interface-quit interface) context)))
+      ((buffer-navigation-interface-quit interface) context buffer)))
 
   (define (global-navigation-context context)
     (let* ([editor (command-context-editor context)]
-           [active-view (command-context-view context)])
-      (if (buffer-navigation-interface-ref (view-buffer active-view))
-          context
-          (let* ([latest-buffer-id
+           [latest-buffer-id
                    (hashtable-ref editor-navigation-buffers editor #f)]
-                 [view
+           [buffer
+                   (and latest-buffer-id
+                        (guard (condition [else #f])
+                          (editor-buffer-ref editor latest-buffer-id)))]
+           [view
                    (and latest-buffer-id
                         (find
                           (lambda (candidate)
@@ -153,21 +164,25 @@
                               (buffer-id (view-buffer candidate))
                               latest-buffer-id))
                           (editor-views editor)))])
-            (unless view
-              (editor-user-error
-                'buffer-item.next-global
-                "No visible navigable result Buffer"))
-            (make-command-context
-              editor
-              view
-              (command-context-event context)
-              (command-context-argument context)
-              (command-context-prefix context))))))
+      (unless (and buffer
+                   (buffer-navigation-interface-ref buffer))
+        (editor-user-error
+          'buffer-item.next-global
+          "No navigable result Buffer"))
+      (values buffer view)))
 
   (define (move-global-item context direction)
-    (move-item
-      (global-navigation-context context)
-      (* direction (command-context-count context))))
+    (let ([active-buffer
+            (view-buffer (command-context-view context))])
+      (if (buffer-navigation-interface-ref active-buffer)
+          (move-item context (* direction (command-context-count context)))
+          (let-values ([(buffer view) (global-navigation-context context)])
+            (move-buffer-item
+              context
+              buffer
+              (buffer-navigation-interface-ref buffer)
+              view
+              (* direction (command-context-count context)))))))
 
   (define (install-navigable-buffer-commands! editor)
     (for-each

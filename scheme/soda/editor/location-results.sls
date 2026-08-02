@@ -390,9 +390,11 @@
           (editor-views editor))
         (editor-remove-buffer! editor (buffer-id buffer)))))
 
-  (define (activate-location-result context item index disposition)
-    (let-values ([(buffer state)
-                  (active-location-results context 'buffer-item.activate)])
+  (define (activate-location-result context buffer item index disposition)
+    (let ([state (location-results-state-for-buffer buffer)])
+      (unless (location-results-state? state)
+        (editor-user-error
+          'buffer-item.activate "Result Buffer has no location model"))
       (let* ([editor (command-context-editor context)]
              [origin-view
                (editor-view-ref
@@ -406,9 +408,11 @@
             editor buffer origin-view))
         effects)))
 
-  (define (quit-location-results context)
-    (let-values ([(buffer state)
-                  (active-location-results context 'buffer-item.quit)])
+  (define (quit-location-results context buffer)
+    (let ([state (location-results-state-for-buffer buffer)])
+      (unless (location-results-state? state)
+        (editor-user-error
+          'buffer-item.quit "Result Buffer has no location model"))
       (let* ([editor (command-context-editor context)]
              [origin-view
                (editor-view-ref
