@@ -314,6 +314,7 @@
           (soda editor hook)
           (soda editor input-state)
           (soda editor interaction)
+          (soda editor prompt-completion-store)
           (soda editor jump-graph)
           (soda editor keymap)
           (soda editor language)
@@ -466,16 +467,7 @@
       (mutable next-workbench-id
                editor-next-workbench-id
                editor-next-workbench-id-set!)
-      (immutable prompt-table editor-prompt-table)
-      (mutable prompt-ids editor-prompt-ids editor-prompt-ids-set!)
-      (mutable next-prompt-id
-               editor-next-prompt-id
-               editor-next-prompt-id-set!)
-      (mutable next-completion-id
-               editor-next-completion-id
-               editor-next-completion-id-set!)
-      (immutable completion-table editor-completion-table)
-      (immutable prompt-histories editor-prompt-histories)
+      (immutable prompt-completions editor-prompt-completion-store)
       (immutable interaction-table editor-interaction-table)
       (mutable interaction-ids
                editor-interaction-ids
@@ -499,9 +491,6 @@
       (immutable settings editor-setting-store)
       (immutable completion-providers
                  editor-completion-provider-catalog)
-      (mutable completion-effects
-               editor-completion-effects
-               editor-completion-effects-set!)
       (mutable status-message
                %editor-status-message
                %editor-status-message-set!)
@@ -1124,19 +1113,16 @@
     (completion-provider-catalog-bind-request!
       (editor-completion-provider-catalog value)
       request)
-    (editor-completion-effects-set!
-      value
-      (cons
-        (make-command-effect kind request)
-        (editor-completion-effects value))))
+    (prompt-completion-store-enqueue-effect!
+      (editor-prompt-completion-store value)
+      (make-command-effect kind request)))
 
   (define (editor-take-completion-effects! value)
     (require-open-editor
       'editor-take-completion-effects!
       value)
-    (let ([effects (reverse (editor-completion-effects value))])
-      (editor-completion-effects-set! value '())
-      effects))
+    (prompt-completion-store-take-effects!
+      (editor-prompt-completion-store value)))
 
   (define (queue-completion-generation! value completion)
     (call-with-values
@@ -1190,8 +1176,11 @@
                   (editor-completion-provider-catalog value)
                   request)
                 request)))))
-      (reverse (editor-completion-effects value)))
-    (editor-completion-effects-set! value '()))
+      (reverse
+        (prompt-completion-store-effects
+          (editor-prompt-completion-store value))))
+    (prompt-completion-store-clear-effects!
+      (editor-prompt-completion-store value)))
 
   (define (editor-buffers value)
     (require-open-editor 'editor-buffers value)
@@ -2210,9 +2199,8 @@
   (define (prompt-for-view value id)
     (find
       (lambda (session) (= (prompt-session-view-id session) id))
-      (table-values
-        (editor-prompt-table value)
-        (editor-prompt-ids value))))
+      (prompt-completion-store-prompts
+        (editor-prompt-completion-store value))))
 
   (define (close-view-unchecked! value id)
     (let ([view (editor-view-ref value id)])
@@ -2756,18 +2744,13 @@
 
   (define (editor-prompts value)
     (require-open-editor 'editor-prompts value)
-    (table-values
-      (editor-prompt-table value)
-      (editor-prompt-ids value)))
+    (prompt-completion-store-prompts
+      (editor-prompt-completion-store value)))
 
   (define (editor-active-prompt value)
     (require-open-editor 'editor-active-prompt value)
-    (and
-      (pair? (editor-prompt-ids value))
-      (hashtable-ref
-        (editor-prompt-table value)
-        (car (editor-prompt-ids value))
-        #f)))
+    (prompt-completion-store-active-prompt
+      (editor-prompt-completion-store value)))
 
   (define (last-prompt sessions)
     (if (null? (cdr sessions))
@@ -2858,31 +2841,19 @@
       (view-completion (editor-active-view value))))
 
   (define (register-completion! value completion)
-    (let ([id (completion-session-id completion)])
-      (when (hashtable-ref (editor-completion-table value) id #f)
-        (assertion-violation
-          'register-completion!
-          "completion session id is already registered"
-          id))
-      (hashtable-set!
-        (editor-completion-table value)
-        id
-        completion))
-    completion)
+    (prompt-completion-store-register-completion!
+      (editor-prompt-completion-store value)
+      completion))
 
   (define (unregister-completion! value completion)
-    (let* ([id (completion-session-id completion)]
-           [registered
-             (hashtable-ref
-               (editor-completion-table value)
-               id
-               #f)])
-      (when (eq? registered completion)
-        (hashtable-delete! (editor-completion-table value) id)))
-    completion)
+    (prompt-completion-store-unregister-completion!
+      (editor-prompt-completion-store value)
+      completion))
 
   (define (editor-completion-ref value id)
-    (hashtable-ref (editor-completion-table value) id #f))
+    (prompt-completion-store-completion-ref
+      (editor-prompt-completion-store value)
+      id))
 
   (define (editor-root-viewport-columns value)
     (require-open-editor
@@ -3164,7 +3135,9 @@
              replacement-end
              caret))
          (cancel-view-completion! value view)
-         (let* ([id (editor-next-completion-id value)]
+         (let* ([id
+                  (prompt-completion-store-allocate-completion-id!
+                    (editor-prompt-completion-store value))]
                 [target
                   (make-document-completion-target
                     (view-id view)
@@ -3180,7 +3153,6 @@
                     target
                     source
                     provider-names)])
-           (editor-next-completion-id-set! value (+ id 1))
            (register-completion! value completion)
            (view-completion-set! view completion)
            (editor-refresh-document-completion! value #f)
@@ -3504,10 +3476,9 @@
                 (document-completion-target-revision target))))]
         [(prompt-completion-target? target)
          (let ([prompt
-                 (hashtable-ref
-                   (editor-prompt-table value)
-                   (prompt-completion-target-prompt-id target)
-                   #f)])
+                 (prompt-completion-store-prompt-ref
+                   (editor-prompt-completion-store value)
+                   (prompt-completion-target-prompt-id target))])
            (and
              prompt
              (= (prompt-session-id prompt)
@@ -3574,11 +3545,10 @@
           (prompt-completion-target?
             (completion-session-target completion)))
         (let ([prompt
-                (hashtable-ref
-                  (editor-prompt-table value)
+                (prompt-completion-store-prompt-ref
+                  (editor-prompt-completion-store value)
                   (prompt-completion-target-prompt-id
-                    (completion-session-target completion))
-                  #f)])
+                    (completion-session-target completion)))])
           (when prompt
             (configure-prompt-view-viewport! value prompt))))
       (when
@@ -3771,8 +3741,12 @@
           source
           initial
           (string-length initial)))
-      (let* ([id (editor-next-prompt-id value)]
-           [completion-id (editor-next-completion-id value)]
+      (let* ([store (editor-prompt-completion-store value)]
+           [id (prompt-completion-store-allocate-prompt-id! store)]
+           [completion-id
+             (and
+               source
+               (prompt-completion-store-allocate-completion-id! store))]
            [origin-view-id (editor-active-view-id value)]
            [origin-view (editor-active-view value)]
            [buffer
@@ -3822,16 +3796,9 @@
           '(prompt.input)
           'accept))
       (ensure-view-visible! view)
-      (hashtable-set! (editor-prompt-table value) id session)
-      (editor-prompt-ids-set!
-        value
-        (cons id (editor-prompt-ids value)))
-      (editor-next-prompt-id-set! value (+ id 1))
+      (prompt-completion-store-push-prompt! store session)
       (when completion
-        (register-completion! value completion)
-        (editor-next-completion-id-set!
-          value
-          (+ completion-id 1)))
+        (register-completion! value completion))
       (editor-active-view-id-set! value (view-id view))
       (editor-set-status-message! value #f)
       (editor-refresh-prompt-completion! value)
@@ -3841,16 +3808,13 @@
   (define (history-for value id create?)
     (and
       id
-      (or
-        (hashtable-ref (editor-prompt-histories value) id #f)
-        (and
-          create?
-          (let ([history (make-prompt-history id '())])
-            (hashtable-set!
-              (editor-prompt-histories value)
-              id
-              history)
-            history)))))
+      (if create?
+          (prompt-completion-store-ensure-history!
+            (editor-prompt-completion-store value)
+            id)
+          (prompt-completion-store-history-ref
+            (editor-prompt-completion-store value)
+            id))))
 
   (define (editor-history-entries value id)
     (require-open-editor 'editor-history-entries value)
@@ -3914,8 +3878,9 @@
           value
           (prompt-session-completion session)))
       (prompt-session-state-set! session status)
-      (editor-prompt-ids-set! value (cdr (editor-prompt-ids value)))
-      (hashtable-delete! (editor-prompt-table value) id)
+      (prompt-completion-store-pop-prompt!
+        (editor-prompt-completion-store value)
+        session)
       (editor-active-view-id-set! value origin-view-id)
       (close-view-unchecked! value view-id)
       (editor-remove-buffer! value buffer-id)
@@ -6537,10 +6502,8 @@
            [resources (make-hashtable string-hash string=?)]
            [views (make-eqv-hashtable)]
            [interactions (make-eqv-hashtable)]
-           [prompts (make-eqv-hashtable)]
-           [completions (make-eqv-hashtable)]
            [workbenches (make-eqv-hashtable)]
-           [prompt-histories (make-eq-hashtable)]
+           [prompt-completions (make-prompt-completion-store)]
            [keymaps (make-keymap-catalog)]
            [view
              (%make-view
@@ -6600,12 +6563,7 @@
                '(1)
                1
                2
-               prompts
-               '()
-               1
-               1
-               completions
-               prompt-histories
+               prompt-completions
                interactions
                '()
                1
@@ -6623,7 +6581,6 @@
                (make-hashtable equal-hash equal?)
                (buffer-setting-store buffer)
                (make-completion-provider-catalog)
-               '()
                #f
                '()
                '()
@@ -6746,9 +6703,8 @@
                 (prompt-session-completion session))))
           (prompt-session-state-set! session 'aborted))
         (editor-prompts value))
-      (editor-prompt-ids-set! value '())
-      (hashtable-clear! (editor-prompt-table value))
-      (hashtable-clear! (editor-completion-table value))
+      (prompt-completion-store-clear!
+        (editor-prompt-completion-store value))
       (when (editor-active-command-invocation value)
         (command-invocation-set-state!
           (editor-active-command-invocation value)
