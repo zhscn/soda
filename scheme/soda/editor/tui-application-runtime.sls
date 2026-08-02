@@ -30,6 +30,7 @@
           (soda editor condition)
           (soda editor display-placement)
           (soda editor edit)
+          (soda editor editor-storage)
           (soda editor event)
           (soda editor keymap)
           (soda editor presentation)

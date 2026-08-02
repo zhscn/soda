@@ -72,13 +72,11 @@
           editor-interaction-ref
           editor-interaction-for-buffer
           editor-register-interaction!
-          editor-tui-application-registry
           editor-evaluator
           editor-set-evaluator!
           editor-debugger
           editor-set-debugger!
           editor-command-registry
-          editor-hook-registry
           editor-add-hook!
           editor-remove-hook!
           editor-hook-names
