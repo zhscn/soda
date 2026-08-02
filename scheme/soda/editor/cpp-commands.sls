@@ -10,6 +10,7 @@
           (soda editor cpp-language)
           (soda editor edit)
           (soda editor editor-storage)
+          (soda editor indentation-runtime)
           (soda editor keymap)
           (soda editor view)
           (soda indentation))
@@ -146,17 +147,6 @@
             (when style
               (cpp-indent-style-close! style)))))
       '()))
-
-  (define (line-whitespace-end text line)
-    (let ([start (text-line-start text line)]
-          [end (text-line-content-end text line)])
-      (let loop ([offset start])
-        (if
-          (and
-            (< offset end)
-            (memv (text-byte-at text offset) '(9 32)))
-          (loop (+ offset 1))
-          offset))))
 
   (define (indent-one-line! buffer session style line caret)
     (let ([snapshot #f]

@@ -1,7 +1,8 @@
 (library (soda editor indentation-runtime)
   (export buffer-indentation-provider
           buffer-reindent-range!
-          buffer-reindent-line!)
+          buffer-reindent-line!
+          line-whitespace-end)
   (import (rnrs)
           (soda document)
           (soda editor buffer)

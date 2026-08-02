@@ -63,16 +63,6 @@
   (define (newline-bytes count)
     (make-bytevector count 10))
 
-  (define (line-whitespace-end text line)
-    (let ([end (text-line-content-end text line)])
-      (let loop ([offset (text-line-start text line)])
-        (if
-          (and
-            (< offset end)
-            (memv (text-byte-at text offset) '(9 32)))
-          (loop (+ offset 1))
-          offset))))
-
   (define (newline-replacement buffer offset count)
     (let ([newlines (newline-bytes count)])
       (if
