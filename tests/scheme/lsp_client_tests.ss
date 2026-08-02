@@ -1826,13 +1826,13 @@
                   (view-buffer (editor-active-view editor))]
                 [point (view-caret (editor-active-view editor))])
            (and
-             (eq? (buffer-major-mode-name results-buffer) 'xref-results-mode)
+             (eq? (buffer-major-mode-name results-buffer) 'location-results-mode)
              (location-item?
                (buffer-text-property-ref
                  results-buffer point 'location-item #f)))))
     "LSP references did not publish a navigable location list"))
 (define reference-next-effects
-  (editor-execute-command! editor 'xref.results-next))
+  (editor-execute-command! editor 'result.next))
 (check
   (and
     (= (length reference-next-effects) 1)

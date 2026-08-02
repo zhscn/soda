@@ -14,7 +14,7 @@
           (soda editor scheme-semantics)
           (soda editor scheme-workspace)
           (soda editor state)
-          (soda editor xref))
+          (soda editor location-results))
 
   (define scheme-diagnostic-namespace
     'scheme-semantic-diagnostics)

@@ -4284,33 +4284,33 @@
                (view-buffer (editor-active-view xref-editor))]
              [point (view-caret (editor-active-view xref-editor))])
         (and
-          (eq? (buffer-major-mode-name results-buffer) 'xref-results-mode)
+          (eq? (buffer-major-mode-name results-buffer) 'location-results-mode)
           (location-item?
             (buffer-text-property-ref
               results-buffer point 'location-item #f)))))
     (error 'editor-tests "Scheme xref did not publish references")))
 (editor-update!
   xref-editor
-  (make-command-message 'xref.results-next #f))
+  (make-command-message 'result.next #f))
 (unless (= (location-list-index (editor-current-location-list xref-editor)) 1)
   (error 'editor-tests "xref results did not synchronize location selection"))
 (unless (= (view-caret xref-view) 21)
   (error 'editor-tests "xref next did not preview the first use"))
 (editor-update!
   xref-editor
-  (make-command-message 'xref.results-next #f))
+  (make-command-message 'result.next #f))
 (unless (= (view-caret xref-view) 28)
   (error 'editor-tests "xref next did not preview the next use"))
 (editor-update!
   xref-editor
-  (make-command-message 'xref.visit #f))
+  (make-command-message 'result.visit #f))
 (unless (= (view-id (editor-active-view xref-editor)) (view-id xref-view))
   (error 'editor-tests "xref visit did not select the source view"))
 (let ([results-view
         (find
           (lambda (view)
             (eq? (buffer-major-mode-name (view-buffer view))
-                 'xref-results-mode))
+                 'location-results-mode))
           (editor-views xref-editor))])
   (unless results-view
     (error 'editor-tests "xref results view disappeared after visiting"))
@@ -4322,7 +4322,7 @@
   (string->utf8 "; changed"))
 (editor-update!
   xref-editor
-  (make-command-message 'xref.preview #f))
+  (make-command-message 'result.preview #f))
 (unless
   (and
     (= (view-caret xref-view) 28)
@@ -4335,14 +4335,14 @@
          (editor-status-message xref-editor)))
 (editor-update!
   xref-editor
-  (make-command-message 'xref.results-quit #f))
+  (make-command-message 'result.quit #f))
 (unless
   (and
     (= (view-id (editor-active-view xref-editor)) (view-id xref-view))
     (not
       (exists
         (lambda (buffer)
-          (eq? (buffer-major-mode-name buffer) 'xref-results-mode))
+          (eq? (buffer-major-mode-name buffer) 'location-results-mode))
         (editor-buffers xref-editor))))
   (error 'editor-tests
          "xref results quit did not restore the source view"
@@ -4725,7 +4725,7 @@
       (eq?
         (buffer-major-mode-name
           (view-buffer (editor-active-view project-diagnostic-editor)))
-        'xref-results-mode))
+        'location-results-mode))
     (error
       'editor-tests
       "workspace diagnostics did not include navigable background sources"
@@ -5117,7 +5117,7 @@
       (eq?
         (buffer-major-mode-name
           (view-buffer (editor-active-view highlight-editor)))
-        'xref-results-mode))
+        'location-results-mode))
     (error 'editor-tests
            "diagnostics did not publish a sorted location list")))
 (editor-set-active-view!
