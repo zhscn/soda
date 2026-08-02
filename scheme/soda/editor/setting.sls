@@ -19,8 +19,7 @@
           setting-store-clear!
           setting-store-validate
           setting-store-snapshot
-          setting-store-restore!
-          call-with-setting-store-transaction)
+          setting-store-restore!)
   (import (rnrs))
 
   (define-record-type
@@ -274,19 +273,4 @@
     (setting-store-generation-set!
       store
       (setting-snapshot-generation snapshot))
-    store)
-
-  (define (call-with-setting-store-transaction store procedure)
-    (require-store 'call-with-setting-store-transaction store)
-    (unless (procedure? procedure)
-      (assertion-violation
-        'call-with-setting-store-transaction
-        "expected a procedure"
-        procedure))
-    (let ([snapshot (setting-store-snapshot store)])
-      (guard
-        (condition
-          [else
-           (setting-store-restore! store snapshot)
-           (raise condition)])
-        (procedure)))))
+    store))
