@@ -60,6 +60,14 @@
           view-deactivate-mark!
           view-clear-mark!
           view-region
+          view-set-caret!
+          view-set-vertical-caret!
+          view-set-visual-caret!
+          view-set-first-line!
+          view-set-first-visual-row!
+          view-set-first-column!
+          view-set-viewport!
+          view-invalidate-viewport!
           make-view-navigation-target
           view-navigation-target?
           view-navigation-target-buffer-id
@@ -267,6 +275,115 @@
       (and mark
            (let ([caret (view-caret view)])
              (cons (min mark caret) (max mark caret))))))
+
+  (define (replace-view-caret-anchor! view offset)
+    (view-clear-navigation-target! view)
+    (let* ([document (buffer-document (view-buffer view))]
+           [anchor
+             (document-create-anchor!
+               document offset anchor-after-insertion)]
+           [previous (view-caret-anchor view)])
+      (document-remove-anchor! document previous)
+      (view-caret-anchor-set! view anchor)))
+
+  (define (view-set-caret! view offset)
+    (unless (view? view)
+      (assertion-violation 'view-set-caret! "expected a view" view))
+    (unless (exact-non-negative-integer? offset)
+      (assertion-violation
+        'view-set-caret!
+        "offset must be a non-negative exact integer"
+        offset))
+    (replace-view-caret-anchor! view offset)
+    (view-preferred-column-set! view #f)
+    (view-caret-display-affinity-set! view #f))
+
+  (define (view-set-vertical-caret! view offset column)
+    (unless (view? view)
+      (assertion-violation
+        'view-set-vertical-caret! "expected a view" view))
+    (unless (and (exact-non-negative-integer? offset)
+                 (exact-non-negative-integer? column))
+      (assertion-violation
+        'view-set-vertical-caret!
+        "offset and column must be non-negative exact integers"
+        offset
+        column))
+    (replace-view-caret-anchor! view offset)
+    (view-preferred-column-set! view column)
+    (view-caret-display-affinity-set! view #f))
+
+  (define (view-set-visual-caret! view offset column affinity)
+    (unless (view? view)
+      (assertion-violation
+        'view-set-visual-caret! "expected a view" view))
+    (unless (and (exact-non-negative-integer? offset)
+                 (exact-non-negative-integer? column)
+                 (memq affinity '(#f upstream downstream)))
+      (assertion-violation
+        'view-set-visual-caret!
+        "invalid offset, column, or display affinity"
+        offset
+        column
+        affinity))
+    (replace-view-caret-anchor! view offset)
+    (view-preferred-column-set! view column)
+    (view-caret-display-affinity-set! view affinity))
+
+  (define (view-set-first-line! view line)
+    (unless (view? view)
+      (assertion-violation 'view-set-first-line! "expected a view" view))
+    (unless (exact-non-negative-integer? line)
+      (assertion-violation
+        'view-set-first-line!
+        "line must be a non-negative exact integer"
+        line))
+    (view-first-line-set! view line)
+    (view-first-visual-row-set! view 0))
+
+  (define (view-set-first-visual-row! view row)
+    (unless (view? view)
+      (assertion-violation
+        'view-set-first-visual-row! "expected a view" view))
+    (unless (exact-non-negative-integer? row)
+      (assertion-violation
+        'view-set-first-visual-row!
+        "row must be a non-negative exact integer"
+        row))
+    (view-first-visual-row-set! view row))
+
+  (define (view-set-first-column! view column)
+    (unless (view? view)
+      (assertion-violation
+        'view-set-first-column! "expected a view" view))
+    (unless (exact-non-negative-integer? column)
+      (assertion-violation
+        'view-set-first-column!
+        "column must be a non-negative exact integer"
+        column))
+    (view-first-column-set! view column))
+
+  (define (view-set-viewport! view rows columns)
+    (unless (view? view)
+      (assertion-violation 'view-set-viewport! "expected a view" view))
+    (unless (and (exact-non-negative-integer? rows)
+                 (positive? rows)
+                 (exact-non-negative-integer? columns)
+                 (positive? columns))
+      (assertion-violation
+        'view-set-viewport!
+        "rows and columns must be positive exact integers"
+        rows
+        columns))
+    (view-viewport-rows-set! view rows)
+    (view-viewport-columns-set! view columns)
+    (view-viewport-ready?-set! view #t))
+
+  (define (view-invalidate-viewport! view)
+    (unless (view? view)
+      (assertion-violation
+        'view-invalidate-viewport! "expected a view" view))
+    (view-viewport-ready?-set! view #f))
 
   (define-record-type
     (projection-cache make-projection-cache projection-cache?)
