@@ -218,6 +218,13 @@ Result Buffer 的会话身份由基础 resource 名称和 source View 所属 Wor
 producer 的 active session 也按 Workbench 隔离，因此一个 Workbench 中的刷新只取消
 该 Workbench 的旧任务。
 
+`diagnostics.list` 物化当前 Buffer 的诊断；`diagnostics.list-workspace` 聚合当前
+Workbench MRU 中所有 Buffer 的 diagnostic annotation provider。Scheme environment
+存在时，同一列表还合并尚未打开的静态索引诊断。聚合按 resource、range、severity、
+origin、code 和 message 去重并稳定排序，因此 Scheme 的 live annotation 与后台索引
+不会产生重复行，LSP 与其他 provider 仍保留各自 payload 供 code action 使用。severity
+filter、refresh、location preview 和 ResultAction 对两种作用域使用同一实现。
+
 LocationList 的 index 与 Result Buffer 当前 item 同步，用于语义 API 和 session 数据。
 从任意 Result Buffer 激活或预览位置时，该列表同时成为所在 Workbench 的 current
 LocationList；在多个 xref、搜索或诊断面板之间往返不会留下另一个 producer 的列表。

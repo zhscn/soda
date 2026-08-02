@@ -6879,6 +6879,76 @@
   (error 'editor-tests
          "closing the editor did not release annotation anchors"))
 
+(define workbench-diagnostic-primary
+  (make-buffer
+    9631
+    (make-document "primary" 9631)
+    "/virtual/diagnostics/primary.cpp"
+    'fundamental-mode))
+(define workbench-diagnostic-editor
+  (make-editor workbench-diagnostic-primary))
+(define workbench-diagnostic-secondary
+  (make-buffer
+    9632
+    (make-document "secondary" 9632)
+    "/virtual/diagnostics/secondary.cpp"
+    'fundamental-mode))
+(editor-add-buffer!
+  workbench-diagnostic-editor workbench-diagnostic-secondary)
+(editor-publish-annotation-set!
+  workbench-diagnostic-editor
+  (make-buffer-annotation-set
+    workbench-diagnostic-primary
+    'primary-provider
+    (buffer-revision workbench-diagnostic-primary)
+    1
+    (list
+      (make-diagnostic
+        'primary-error 0 7 'error "primary failed" 'primary))))
+(editor-publish-annotation-set!
+  workbench-diagnostic-editor
+  (make-buffer-annotation-set
+    workbench-diagnostic-secondary
+    'secondary-provider
+    (buffer-revision workbench-diagnostic-secondary)
+    1
+    (list
+      (make-diagnostic
+        'secondary-warning 0 9 'warning "secondary failed" 'secondary))))
+(let ([view (editor-active-view workbench-diagnostic-editor)])
+  (editor-set-view-buffer!
+    workbench-diagnostic-editor
+    (view-id view)
+    (buffer-id workbench-diagnostic-secondary))
+  (editor-set-view-buffer!
+    workbench-diagnostic-editor
+    (view-id view)
+    (buffer-id workbench-diagnostic-primary)))
+(editor-update!
+  workbench-diagnostic-editor
+  (make-command-message 'diagnostics.list-workspace #f))
+(let ([locations
+        (editor-current-location-list workbench-diagnostic-editor)])
+  (unless
+    (and
+      (location-list? locations)
+      (eq? (location-list-source locations) 'workspace-diagnostics)
+      (= (length (location-list-items locations)) 2)
+      (equal?
+        (map location-item-resource (location-list-items locations))
+        '("/virtual/diagnostics/primary.cpp"
+          "/virtual/diagnostics/secondary.cpp"))
+      (string-contains?
+        (utf8->string
+          (buffer-bytes
+            (view-buffer
+              (editor-active-view workbench-diagnostic-editor))))
+        "Workbench diagnostics"))
+    (error 'editor-tests
+           "Workbench diagnostics did not aggregate annotation providers"
+           locations)))
+(editor-close! workbench-diagnostic-editor)
+
 (define scheme-indent-source
   "(define (value x)\n(+ x\n1))\n")
 (define scheme-indent-document

@@ -19,6 +19,7 @@
           (soda editor state)
           (soda editor location-results)
           (soda editor result-buffer)
+          (soda editor workbench)
           (soda json))
 
   (define scheme-diagnostic-namespace
@@ -639,54 +640,144 @@
         (scheme-workspace-diagnostic-excerpt value)
         diagnostic)))
 
+  (define (diagnostic-message-text item)
+    (let ([metadata (location-item-metadata item)])
+      (cond
+        [(annotation? metadata) (annotation-message metadata)]
+        [(scheme-diagnostic? metadata)
+         (scheme-diagnostic-message metadata)]
+        [else (location-item-presentation item)])))
+
+  (define (diagnostic-item-key item)
+    (list
+      (or (location-item-resource item)
+          (location-item-buffer-id item))
+      (location-item-start item)
+      (location-item-end item)
+      (diagnostic-severity item)
+      (diagnostic-origin item)
+      (diagnostic-code item)
+      (diagnostic-message-text item)))
+
+  (define (deduplicate-diagnostic-items items)
+    (let loop ([remaining items] [keys '()] [result '()])
+      (if (null? remaining)
+          (reverse result)
+          (let ([key (diagnostic-item-key (car remaining))])
+            (if (member key keys)
+                (loop (cdr remaining) keys result)
+                (loop
+                  (cdr remaining)
+                  (cons key keys)
+                  (cons (car remaining) result)))))))
+
+  (define (diagnostic-resource-key item)
+    (or
+      (location-item-resource item)
+      (and
+        (location-item-buffer-id item)
+        (string-append
+          "<buffer "
+          (number->string (location-item-buffer-id item))
+          ">"))
+      "<buffer>"))
+
+  (define (workspace-diagnostic-item-before? left right)
+    (let ([left-resource (diagnostic-resource-key left)]
+          [right-resource (diagnostic-resource-key right)])
+      (cond
+        [(string<? left-resource right-resource) #t]
+        [(string<? right-resource left-resource) #f]
+        [else (item-before? left right)])))
+
+  (define (sort-workspace-diagnostic-items items)
+    (fold-left
+      (lambda (result item)
+        (let insert ([remaining result])
+          (cond
+            [(null? remaining) (list item)]
+            [(workspace-diagnostic-item-before? item (car remaining))
+             (cons item remaining)]
+            [else
+             (cons (car remaining) (insert (cdr remaining)))])))
+      '()
+      items))
+
+  (define (workbench-diagnostic-items editor workbench)
+    (apply
+      append
+      (map
+        (lambda (buffer-id)
+          (guard (condition [else '()])
+            (current-diagnostic-items
+              editor (editor-buffer-ref editor buffer-id))))
+        (workbench-mru workbench))))
+
+  (define (scheme-workspace-diagnostic-items
+            environments editor origin-view-id)
+    (if
+      (not environments)
+      '()
+      (guard
+        (condition [else '()])
+        (let ([index
+                (scheme-semantic-index-for-view
+                  environments editor origin-view-id)])
+          (map
+            workspace-diagnostic-item
+            (scheme-workspace-diagnostics index editor))))))
+
+  (define (current-workbench-diagnostic-items
+            environments editor workbench origin-view-id)
+    (sort-workspace-diagnostic-items
+      (deduplicate-diagnostic-items
+        (append
+          (scheme-workspace-diagnostic-items
+            environments editor origin-view-id)
+          (workbench-diagnostic-items editor workbench)))))
+
   (define (list-workspace-diagnostics-command
             environments
             context)
     (let* ([editor (command-context-editor context)]
            [origin-view-id (view-id (command-context-view context))]
-           [index
-             (scheme-semantic-index-for-view
-               environments editor origin-view-id)]
+           [workbench (editor-active-workbench editor)]
            [items
-             (map
-               workspace-diagnostic-item
-               (scheme-workspace-diagnostics
-                 index editor))])
+             (current-workbench-diagnostic-items
+               environments editor workbench origin-view-id)])
       (letrec ([refresh
                  (lambda (refresh-context refresh-buffer)
                    (let* ([current-origin-view-id
                             (editor-result-origin-view-id
                               editor
                               (command-context-view refresh-context))]
-                          [current-index
-                            (scheme-semantic-index-for-view
-                              environments editor current-origin-view-id)]
                           [current
-                            (map
-                              workspace-diagnostic-item
-                              (scheme-workspace-diagnostics
-                                current-index editor))])
+                            (current-workbench-diagnostic-items
+                              environments
+                              editor
+                              workbench
+                              current-origin-view-id)])
                      (show-diagnostics!
                        editor
                        "*Workspace Diagnostics*"
-                       "Workspace diagnostics"
+                       "Workbench diagnostics"
                        'workspace-diagnostics
                        current
                        current-origin-view-id
                        refresh)
                      (diagnostic-status!
-                       editor "Workspace diagnostics" current)
+                       editor "Workbench diagnostics" current)
                      '()))])
         (show-diagnostics!
           editor
           "*Workspace Diagnostics*"
-          "Workspace diagnostics"
+          "Workbench diagnostics"
           'workspace-diagnostics
           items
           origin-view-id
           refresh)
         (diagnostic-status!
-          editor "Workspace diagnostics" items)
+          editor "Workbench diagnostics" items)
         '())))
 
   (define (stroke character modifiers)
@@ -723,24 +814,22 @@
         'diagnostics.list
         list-diagnostics-command
         "Publish current-buffer diagnostics as a location list."))
-    (when environments
-      (editor-register-command!
-        editor
-        (make-interactive-context-command
-          'diagnostics.list-workspace
-          (lambda (context)
-            (list-workspace-diagnostics-command
-              environments context))
-          "Publish Scheme workspace diagnostics as a location list.")))
+    (editor-register-command!
+      editor
+      (make-interactive-context-command
+        'diagnostics.list-workspace
+        (lambda (context)
+          (list-workspace-diagnostics-command
+            environments context))
+        "Publish Workbench diagnostics as a location list."))
     (editor-bind-key!
       editor
       (list (stroke #\g 2) (stroke #\d 0))
       'diagnostics.list)
-    (when environments
-      (editor-bind-key!
-        editor
-        (list (stroke #\g 2) (stroke #\d 2))
-        'diagnostics.list-workspace))
+    (editor-bind-key!
+      editor
+      (list (stroke #\g 2) (stroke #\d 2))
+      'diagnostics.list-workspace)
     (for-each
       (lambda (phase)
         (editor-add-hook!
