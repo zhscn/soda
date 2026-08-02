@@ -309,6 +309,7 @@
           (soda editor debugger-action)
           (soda editor display)
           (soda editor display-map)
+          (soda editor entity-registry)
           (soda editor event)
           (soda editor fold)
           (soda editor hook)
@@ -432,45 +433,27 @@
 
   (define-record-type (editor %make-editor editor?)
     (fields
-      (immutable buffer-table editor-buffer-table)
+      (immutable buffers editor-buffer-registry)
       (immutable resource-table editor-resource-table)
-      (mutable buffer-ids editor-buffer-ids editor-buffer-ids-set!)
       (mutable buffer-registry-generation
                editor-buffer-registry-generation
                editor-buffer-registry-generation-set!)
-      (mutable next-buffer-id
-               editor-next-buffer-id
-               editor-next-buffer-id-set!)
       (mutable next-document-id
                editor-next-document-id
                editor-next-document-id-set!)
-      (immutable view-table editor-view-table)
-      (mutable view-ids editor-view-ids editor-view-ids-set!)
+      (immutable views editor-view-registry)
       (mutable active-view-id
                editor-active-view-id
                editor-active-view-id-set!)
-      (mutable next-view-id editor-next-view-id editor-next-view-id-set!)
       (mutable next-window-id
                editor-next-window-id
                editor-next-window-id-set!)
-      (immutable workbench-table editor-workbench-table)
-      (mutable workbench-ids
-               editor-workbench-ids
-               editor-workbench-ids-set!)
+      (immutable workbenches editor-workbench-registry)
       (mutable active-workbench-id
                editor-active-workbench-id
                editor-active-workbench-id-set!)
-      (mutable next-workbench-id
-               editor-next-workbench-id
-               editor-next-workbench-id-set!)
       (immutable prompt-completions editor-prompt-completion-store)
-      (immutable interaction-table editor-interaction-table)
-      (mutable interaction-ids
-               editor-interaction-ids
-               editor-interaction-ids-set!)
-      (mutable next-interaction-id
-               editor-next-interaction-id
-               editor-next-interaction-id-set!)
+      (immutable interactions editor-interaction-registry)
       (immutable tui-applications editor-tui-application-registry)
       (mutable tui-effects editor-tui-effects editor-tui-effects-set!)
       (mutable evaluator editor-evaluator editor-evaluator-set!)
@@ -878,9 +861,6 @@
       (editor-pending-prefix-set! editor #f)
       prefix))
 
-  (define (table-values table ids)
-    (map (lambda (id) (hashtable-ref table id #f)) ids))
-
   (define (editor-add-hook! value phase name procedure)
     (require-open-editor 'editor-add-hook! value)
     (let ([registered
@@ -1184,9 +1164,7 @@
 
   (define (editor-buffers value)
     (require-open-editor 'editor-buffers value)
-    (table-values
-      (editor-buffer-table value)
-      (editor-buffer-ids value)))
+    (entity-registry-values (editor-buffer-registry value)))
 
   (define (editor-buffer-ref value id)
     (require-open-editor 'editor-buffer-ref value)
@@ -1195,7 +1173,7 @@
         'editor-buffer-ref
         "buffer id must be a non-negative exact integer"
         id))
-    (or (hashtable-ref (editor-buffer-table value) id #f)
+    (or (entity-registry-ref (editor-buffer-registry value) id)
         (assertion-violation
           'editor-buffer-ref
           "unknown buffer id"
@@ -1276,10 +1254,9 @@
         resource))
     (unless
       (eq?
-        (hashtable-ref
-          (editor-buffer-table value)
-          (buffer-id buffer)
-          #f)
+        (entity-registry-ref
+          (editor-buffer-registry value)
+          (buffer-id buffer))
         buffer)
       (assertion-violation
         'editor-set-buffer-resource!
@@ -1342,7 +1319,7 @@
         buffer
         (editor-setting-store value)))
     (let ([id (buffer-id buffer)])
-      (when (hashtable-contains? (editor-buffer-table value) id)
+      (when (entity-registry-contains? (editor-buffer-registry value) id)
         (assertion-violation
           'editor-add-buffer!
           "buffer id is already registered"
@@ -1350,19 +1327,19 @@
           (buffer-resource buffer)
           (buffer-major-mode-name buffer)
           (let ([existing
-                  (hashtable-ref (editor-buffer-table value) id #f)])
+                  (entity-registry-ref
+                    (editor-buffer-registry value)
+                    id)])
             (and existing
                  (list
                    (buffer-resource existing)
                    (buffer-major-mode-name existing))))))
       (register-buffer-resource! value buffer)
-      (hashtable-set! (editor-buffer-table value) id buffer)
+      (entity-registry-register!
+        (editor-buffer-registry value)
+        id
+        buffer)
       (attach-editor-change-observer! value buffer)
-      (editor-buffer-ids-set!
-        value
-        (append (editor-buffer-ids value) (list id)))
-      (when (>= id (editor-next-buffer-id value))
-        (editor-next-buffer-id-set! value (+ id 1)))
       (let ([document-id (document-id (buffer-document buffer))])
         (when (>= document-id (editor-next-document-id value))
           (editor-next-document-id-set! value (+ document-id 1))))
@@ -1401,7 +1378,9 @@
            'editor-create-buffer!
            "creation context must be a ResourceContext or #f"
            creation-context))
-       (let* ([id (editor-next-buffer-id value)]
+       (let* ([id
+                (entity-registry-next-id
+                  (editor-buffer-registry value))]
               [new-document-id (editor-next-document-id value)]
               [document (make-document bytes new-document-id)]
               [buffer
@@ -1424,9 +1403,7 @@
         (exists
           (lambda (session)
             (= (interaction-session-buffer-id session) id))
-          (table-values
-            (editor-interaction-table value)
-            (editor-interaction-ids value)))
+          (editor-interactions value))
         (assertion-violation
           'editor-remove-buffer!
           "buffer belongs to an interaction session"
@@ -1434,9 +1411,7 @@
       (when
         (exists
           (lambda (view) (eq? (view-buffer view) buffer))
-          (table-values
-            (editor-view-table value)
-            (editor-view-ids value)))
+          (editor-views value))
         (assertion-violation
           'editor-remove-buffer!
           "buffer is displayed by a view"
@@ -1464,7 +1439,7 @@
       (language-session-registry-detach-buffer!
         (editor-language-session-registry value)
         id)
-      (hashtable-delete! (editor-buffer-table value) id)
+      (entity-registry-remove! (editor-buffer-registry value) id)
       (let ([resource (buffer-resource buffer)])
         (when
           (and
@@ -1476,19 +1451,12 @@
                 #f)
               buffer))
           (hashtable-delete! (editor-resource-table value) resource)))
-      (editor-buffer-ids-set!
-        value
-        (filter
-          (lambda (registered-id) (not (= registered-id id)))
-          (editor-buffer-ids value)))
       (for-each
         (lambda (view)
           (navigation-walk-detach-buffer!
             (view-navigation-walk view)
             id))
-        (table-values
-          (editor-view-table value)
-          (editor-view-ids value)))
+        (editor-views value))
       (when
         (let ([locations (editor-current-location-list value)])
           (and
@@ -1523,9 +1491,7 @@
 
   (define (editor-interactions value)
     (require-open-editor 'editor-interactions value)
-    (table-values
-      (editor-interaction-table value)
-      (editor-interaction-ids value)))
+    (entity-registry-values (editor-interaction-registry value)))
 
   (define (editor-interaction-ref value id)
     (require-open-editor 'editor-interaction-ref value)
@@ -1535,7 +1501,7 @@
         "interaction id must be a non-negative exact integer"
         id))
     (or
-      (hashtable-ref (editor-interaction-table value) id #f)
+      (entity-registry-ref (editor-interaction-registry value) id)
       (assertion-violation
         'editor-interaction-ref
         "unknown interaction id"
@@ -1582,7 +1548,9 @@
           'editor-register-interaction!
           "buffer already belongs to an interaction session"
           buffer-id))
-      (let* ([id (editor-next-interaction-id value)]
+      (let* ([id
+               (entity-registry-next-id
+                 (editor-interaction-registry value))]
              [session
                (make-interaction-session
                  id
@@ -1592,14 +1560,10 @@
                  evaluator
                  prompt
                  input-start)])
-        (hashtable-set!
-          (editor-interaction-table value)
+        (entity-registry-register!
+          (editor-interaction-registry value)
           id
           session)
-        (editor-interaction-ids-set!
-          value
-          (append (editor-interaction-ids value) (list id)))
-        (editor-next-interaction-id-set! value (+ id 1))
         session)))
 
   (define (editor-tui-application-catalog value)
@@ -1677,10 +1641,9 @@
       (when session
         (let ([failure #f]
               [buffer
-                (hashtable-ref
-                  (editor-buffer-table value)
-                  (tui-session-buffer-id session)
-                  #f)])
+                (entity-registry-ref
+                  (editor-buffer-registry value)
+                  (tui-session-buffer-id session))])
           (for-each
             (lambda (view)
               (when (and buffer (eq? (view-buffer view) buffer))
@@ -1762,7 +1725,7 @@
 
   (define (editor-views value)
     (require-open-editor 'editor-views value)
-    (table-values (editor-view-table value) (editor-view-ids value)))
+    (entity-registry-values (editor-view-registry value)))
 
   (define (view-tui-session value view)
     (let ([presentation (buffer-presentation (view-buffer view))])
@@ -1806,7 +1769,7 @@
         'editor-view-ref
         "view id must be a non-negative exact integer"
         id))
-    (or (hashtable-ref (editor-view-table value) id #f)
+    (or (entity-registry-ref (editor-view-registry value) id)
         (assertion-violation 'editor-view-ref "unknown view id" id)))
 
   (define (unique-workbench-project value view resource)
@@ -2146,7 +2109,9 @@
            "expected a resource context"
            source-context))
        (let* ([buffer (editor-buffer-ref value buffer-id)]
-              [id (editor-next-view-id value)]
+              [id
+                (entity-registry-next-id
+                  (editor-view-registry value))]
               [context
                 (resource-context-with-origin
                   (adapt-language-context-to-buffer
@@ -2187,11 +2152,10 @@
                context
                #f
                (make-navigation-walk))])
-      (hashtable-set! (editor-view-table value) id view)
-      (editor-view-ids-set!
-        value
-        (append (editor-view-ids value) (list id)))
-      (editor-next-view-id-set! value (+ id 1))
+      (entity-registry-register!
+        (editor-view-registry value)
+        id
+        view)
       (attach-tui-view-state! value view)
       view)]))
 
@@ -2217,7 +2181,9 @@
           'editor-close-view!
           "displayed views are owned by their workbench window"
           id))
-      (when (= (length (editor-view-ids value)) 1)
+      (when (= (length
+                 (entity-registry-ids (editor-view-registry value)))
+               1)
         (assertion-violation
           'editor-close-view!
           "an open editor requires at least one view"
@@ -2244,12 +2210,9 @@
         (buffer-document (view-buffer view))
         (view-caret-anchor view))
       (navigation-walk-close! (view-navigation-walk view)))
-    (hashtable-delete! (editor-view-table value) id)
+    (entity-registry-remove! (editor-view-registry value) id)
     (let ([remaining
-            (filter
-              (lambda (registered-id) (not (= registered-id id)))
-              (editor-view-ids value))])
-      (editor-view-ids-set! value remaining)
+            (entity-registry-ids (editor-view-registry value))])
       (when (= (editor-active-view-id value) id)
         (editor-active-view-id-set! value (car remaining)))))
 
@@ -2268,9 +2231,7 @@
 
   (define (editor-workbenches value)
     (require-open-editor 'editor-workbenches value)
-    (table-values
-      (editor-workbench-table value)
-      (editor-workbench-ids value)))
+    (entity-registry-values (editor-workbench-registry value)))
 
   (define (editor-workbench-ref value id)
     (require-open-editor 'editor-workbench-ref value)
@@ -2280,7 +2241,7 @@
         "workbench id must be a positive exact integer"
         id))
     (or
-      (hashtable-ref (editor-workbench-table value) id #f)
+      (entity-registry-ref (editor-workbench-registry value) id)
       (assertion-violation
         'editor-workbench-ref
         "unknown workbench id"
@@ -2384,7 +2345,9 @@
                (buffer-id (view-buffer source)))]
            [window-id (editor-allocate-window-id! value)]
            [layout (make-window-leaf window-id (view-id view))]
-           [id (editor-next-workbench-id value)]
+           [id
+             (entity-registry-next-id
+               (editor-workbench-registry value))]
            [workbench
              (make-workbench
                id
@@ -2395,15 +2358,11 @@
                (list (buffer-id (view-buffer view)))
                '()
                '())])
-      (hashtable-set!
-        (editor-workbench-table value)
+      (entity-registry-register!
+        (editor-workbench-registry value)
         id
         workbench)
       (view-workbench-id-set! view id)
-      (editor-workbench-ids-set!
-        value
-        (append (editor-workbench-ids value) (list id)))
-      (editor-next-workbench-id-set! value (+ id 1))
       workbench))
 
   (define (editor-switch-workbench! value id)
@@ -2428,7 +2387,10 @@
 
   (define (editor-close-workbench! value id)
     (require-open-editor 'editor-close-workbench! value)
-    (when (null? (cdr (editor-workbench-ids value)))
+    (when (null?
+            (cdr
+              (entity-registry-ids
+                (editor-workbench-registry value))))
       (assertion-violation
         'editor-close-workbench!
         "an open editor requires at least one workbench"))
@@ -2444,11 +2406,9 @@
           value
           (find
             (lambda (candidate) (not (= candidate id)))
-            (editor-workbench-ids value))))
-      (hashtable-delete! (editor-workbench-table value) id)
-      (editor-workbench-ids-set!
-        value
-        (remv id (editor-workbench-ids value)))
+            (entity-registry-ids
+              (editor-workbench-registry value)))))
+      (entity-registry-remove! (editor-workbench-registry value) id)
       (for-each
         (lambda (view-id)
           (view-workbench-id-set!
@@ -3430,10 +3390,9 @@
       (cond
         [(document-completion-target? target)
          (let ([view
-                 (hashtable-ref
-                   (editor-view-table value)
-                   (document-completion-target-view-id target)
-                   #f)])
+                 (entity-registry-ref
+                   (editor-view-registry value)
+                   (document-completion-target-view-id target))])
            (and
              view
              (= (view-id view)
@@ -3509,10 +3468,9 @@
             (completion-session-target completion)))
         (let* ([target (completion-session-target completion)]
                [view
-                 (hashtable-ref
-                   (editor-view-table value)
-                   (document-completion-target-view-id target)
-                   #f)])
+                 (entity-registry-ref
+                   (editor-view-registry value)
+                   (document-completion-target-view-id target))])
           (when view
             (sync-completion-input-state! view completion))))
       (when
@@ -3536,10 +3494,9 @@
           (not (completion-session-pending? completion)))
         (let* ([target (completion-session-target completion)]
                [view
-                 (hashtable-ref
-                   (editor-view-table value)
-                   (document-completion-target-view-id target)
-                   #f)])
+                 (entity-registry-ref
+                   (editor-view-registry value)
+                   (document-completion-target-view-id target))])
           (when view
             (cancel-view-completion! value view)))
         (editor-set-status-message! value "No completions"))
@@ -4329,10 +4286,9 @@
       (assertion-violation who "expected a buffer" buffer))
     (unless
       (eq?
-        (hashtable-ref
-          (editor-buffer-table editor)
-          (buffer-id buffer)
-          #f)
+        (entity-registry-ref
+          (editor-buffer-registry editor)
+          (buffer-id buffer))
         buffer)
       (assertion-violation
         who
@@ -4405,9 +4361,7 @@
                 (buffer-setting-ref
                   buffer
                   (setting-definition-name definition))))
-            (table-values
-              (editor-buffer-table value)
-              (editor-buffer-ids value)))
+            (editor-buffers value))
           (editor-invalidate!
             value
             (setting-definition-impact definition))
@@ -4520,9 +4474,7 @@
             (map
               (lambda (buffer)
                 (cons buffer (buffer-settings-snapshot buffer)))
-              (table-values
-                (editor-buffer-table value)
-                (editor-buffer-ids value)))])
+              (editor-buffers value))])
       (guard
         (condition
           [else
@@ -4550,9 +4502,7 @@
             buffer
             (buffer-major-mode-name buffer)
             (buffer-settings-snapshot buffer)))
-        (table-values
-          (editor-buffer-table value)
-          (editor-buffer-ids value)))
+        (editor-buffers value))
       (command-registry-snapshot (editor-command-registry value))
       (hook-registry-snapshot (editor-hook-registry value))
       (keymap-catalog-snapshot (editor-keymap-catalog value))
@@ -4570,9 +4520,7 @@
 
   (define (same-configuration-buffers? value states)
     (let ([current
-            (table-values
-              (editor-buffer-table value)
-              (editor-buffer-ids value))]
+            (editor-buffers value)]
           [captured
             (map editor-buffer-configuration-state-buffer states)])
       (and
@@ -4655,9 +4603,7 @@
                             current
                             'fundamental-mode)))])
               (buffer-set-major-mode! buffer mode))))
-        (table-values
-          (editor-buffer-table value)
-          (editor-buffer-ids value)))
+        (editor-buffers value))
       (editor-invalidate! value 'configuration)
       value))
 
@@ -5061,9 +5007,7 @@
   (define (refresh-buffers! value)
     (for-each
       buffer-refresh-language!
-      (table-values
-        (editor-buffer-table value)
-        (editor-buffer-ids value))))
+      (editor-buffers value)))
 
   (define (editor-register-language-profile! value profile)
     (require-open-editor 'editor-register-language-profile! value)
@@ -5350,10 +5294,9 @@
 
   (define (close-global-mark-entry! editor entry)
     (let ([buffer
-            (hashtable-ref
-              (editor-buffer-table editor)
-              (global-mark-entry-buffer-id entry)
-              #f)])
+            (entity-registry-ref
+              (editor-buffer-registry editor)
+              (global-mark-entry-buffer-id entry))])
       (when buffer
         (document-remove-anchor!
           (buffer-document buffer)
@@ -5363,10 +5306,9 @@
     (require-open-editor 'editor-push-global-mark! value)
     (unless (and (buffer? buffer)
                  (eq? buffer
-                      (hashtable-ref
-                        (editor-buffer-table value)
-                        (buffer-id buffer)
-                        #f)))
+                      (entity-registry-ref
+                        (editor-buffer-registry value)
+                        (buffer-id buffer))))
       (assertion-violation
         'editor-push-global-mark!
         "buffer does not belong to the editor"
@@ -5430,10 +5372,9 @@
 
   (define (close-change-ring-entry! editor entry)
     (let ([buffer
-            (hashtable-ref
-              (editor-buffer-table editor)
-              (change-ring-entry-buffer-id entry)
-              #f)])
+            (entity-registry-ref
+              (editor-buffer-registry editor)
+              (change-ring-entry-buffer-id entry))])
       (when buffer
         (document-remove-anchor!
           (buffer-document buffer)
@@ -5580,10 +5521,9 @@
                  (positive? (string-length name))
                  (buffer? buffer)
                  (eq? buffer
-                      (hashtable-ref
-                        (editor-buffer-table editor)
-                        (buffer-id buffer)
-                        #f))
+                      (entity-registry-ref
+                        (editor-buffer-registry editor)
+                        (buffer-id buffer)))
                  (exact-non-negative-integer? offset))
       (assertion-violation
         'editor-set-bookmark!
@@ -6465,11 +6405,12 @@
         buffer))
     (when (buffer-closed? buffer)
       (assertion-violation 'make-editor-state "buffer is closed" buffer))
-    (let* ([buffers (make-eqv-hashtable)]
+    (let* ([buffers
+             (make-entity-registry (+ (buffer-id buffer) 1))]
            [resources (make-hashtable string-hash string=?)]
-           [views (make-eqv-hashtable)]
-           [interactions (make-eqv-hashtable)]
-           [workbenches (make-eqv-hashtable)]
+           [views (make-entity-registry 2)]
+           [interactions (make-entity-registry 1)]
+           [workbenches (make-entity-registry 2)]
            [prompt-completions (make-prompt-completion-store)]
            [keymaps (make-keymap-catalog)]
            [view
@@ -6515,23 +6456,15 @@
              (%make-editor
                buffers
                resources
-               (list (buffer-id buffer))
                0
-               (+ (buffer-id buffer) 1)
                (+ (document-id (buffer-document buffer)) 1)
                views
-               '(1)
                1
-               2
                2
                workbenches
-               '(1)
                1
-               2
                prompt-completions
                interactions
-               '()
-               1
                (make-tui-application-registry)
                '()
                #f
@@ -6576,11 +6509,11 @@
                #f
                0
                #f)])
-      (hashtable-set! buffers (buffer-id buffer) buffer)
+      (entity-registry-register! buffers (buffer-id buffer) buffer)
       (attach-editor-change-observer! value buffer)
       (register-buffer-resource! value buffer)
-      (hashtable-set! views 1 view)
-      (hashtable-set!
+      (entity-registry-register! views 1 view)
+      (entity-registry-register!
         workbenches
         1
         (make-workbench
@@ -6686,14 +6619,10 @@
             (debugger-session-close!
               (interaction-session-debugger session))
             (interaction-session-set-debugger! session #f)))
-        (table-values
-          (editor-interaction-table value)
-          (editor-interaction-ids value)))
+        (editor-interactions value))
       (for-each
         interaction-session-close!
-        (table-values
-          (editor-interaction-table value)
-          (editor-interaction-ids value)))
+        (editor-interactions value))
       (for-each
         annotation-set-close!
         (editor-annotation-sets value))
@@ -6739,7 +6668,7 @@
             (buffer-document (view-buffer view))
             (view-caret-anchor view))
           (navigation-walk-close! (view-navigation-walk view)))
-        (table-values (editor-view-table value) (editor-view-ids value)))
+        (editor-views value))
       (for-each
         (lambda (workbench)
           (jump-graph-close! (workbench-jump-graph workbench)))
@@ -6748,7 +6677,5 @@
         (lambda (buffer)
           (unless (buffer-closed? buffer)
             (buffer-close! buffer)))
-        (table-values
-          (editor-buffer-table value)
-          (editor-buffer-ids value)))
+        (editor-buffers value))
       (editor-closed?-set! value #t))))
