@@ -1828,21 +1828,22 @@
       (cons "end"
             (make-json-object
               (list (cons "line" 2) (cons "character" 7)))))))
+(define reference-result
+  (make-json-array
+    (list
+      (make-json-object
+        (list (cons "uri" "file:///workspace/src/main.cpp")
+              (cons "range" reference-source-range)))
+      (make-json-object
+        (list (cons "uri" "file:///workspace/src/external.txt")
+              (cons "range" reference-external-range))))))
 (lsp-client-handle-json-message!
   editor session
   (make-json-object
     (list
       (cons "jsonrpc" "2.0")
       (cons "id" (json-object-ref lsp-reference-message "id" #f))
-      (cons "result"
-            (make-json-array
-              (list
-                (make-json-object
-                  (list (cons "uri" "file:///workspace/src/main.cpp")
-                        (cons "range" reference-source-range)))
-                (make-json-object
-                  (list (cons "uri" "file:///workspace/src/external.cpp")
-                        (cons "range" reference-external-range)))))))))
+      (cons "result" reference-result))))
 (let ([locations (editor-current-location-list editor)])
   (check
     (and locations
@@ -1852,11 +1853,38 @@
                   (view-buffer (editor-active-view editor))]
                 [point (view-caret (editor-active-view editor))])
            (and
-             (eq? (buffer-major-mode-name results-buffer) 'location-results-mode)
+             (eq? (buffer-major-mode-name results-buffer) 'xref-results-mode)
+             (buffer-result-refreshable? results-buffer)
              (location-item?
                (buffer-text-property-ref
                  results-buffer point 'result-item #f)))))
     "LSP references did not publish a navigable location list"))
+(define lsp-reference-refresh-effects
+  (editor-execute-command! editor 'buffer-item.refresh))
+(define lsp-reference-refresh-message
+  (and
+    (= (length lsp-reference-refresh-effects) 1)
+    (eq? (command-effect-kind (car lsp-reference-refresh-effects))
+         'managed-process.write)
+    (car
+      (lsp-json-rpc-decode!
+        (make-lsp-json-rpc-decoder)
+        (managed-process-write-request-data
+          (command-effect-payload (car lsp-reference-refresh-effects)))))))
+(check
+  (and lsp-reference-refresh-message
+       (string=?
+         (json-object-ref lsp-reference-refresh-message "method" #f)
+         "textDocument/references"))
+  "refreshing the xref Buffer did not rerun its source-view request"
+  lsp-reference-refresh-effects)
+(lsp-client-handle-json-message!
+  editor session
+  (make-json-object
+    (list
+      (cons "jsonrpc" "2.0")
+      (cons "id" (json-object-ref lsp-reference-refresh-message "id" #f))
+      (cons "result" reference-result))))
 (define reference-next-effects
   (editor-execute-command! editor 'buffer-item.next))
 (check
@@ -1870,6 +1898,44 @@
            (= (file-utf16-position-line position) 2)
            (= (file-utf16-position-character position) 1))))
   "xref navigation did not preserve an unopened LSP reference UTF-16 position")
+(define reference-results-view (editor-active-view editor))
+(define reference-open-request
+  (command-effect-payload (car reference-next-effects)))
+(editor-execute-command!
+  editor
+  'file.apply-open-result
+  #f
+  (make-open-result
+    reference-open-request
+    0
+    (string->utf8 "zero\none\n abcdef\n")
+    #f))
+(define reference-origin-view
+  (find
+    (lambda (view)
+      (string=?
+        (buffer-resource (view-buffer view))
+        "/workspace/src/external.txt"))
+    (editor-views editor)))
+(check
+  (and reference-origin-view
+       (eq? (editor-active-view editor) reference-results-view)
+       (= (view-caret reference-origin-view) 10))
+  "async xref preview stole focus from the result Buffer")
+(editor-execute-command! editor 'buffer-item.previous)
+(check
+  (and
+    (eq? (editor-active-view editor) reference-results-view)
+    (eq? (view-buffer reference-origin-view) source)
+    (= (view-caret reference-origin-view) 3)
+    (=
+      (buffer-text-property-ref
+        (view-buffer reference-results-view)
+        (view-caret reference-results-view)
+        'result-index
+        -1)
+      0))
+  "xref p did not return from an asynchronously opened preview")
 
 (define updated-project
   (make-project

@@ -1911,9 +1911,9 @@
                           (+ count 1))
                     (loop (+ index 1) effects count))))))))
 
-  (define (active-view-lsp-session editor)
+  (define (view-lsp-session editor view)
     (let ([attachment
-            (editor-view-language-attachment editor (view-id (editor-active-view editor)))])
+            (editor-view-language-attachment editor (view-id view))])
       (and
         attachment
         (let ([language-session
@@ -1921,6 +1921,9 @@
                   (editor-language-session-registry editor)
                   (language-attachment-session-id attachment))])
           (editor-lsp-session-for-language-session editor language-session)))))
+
+  (define (active-view-lsp-session editor)
+    (view-lsp-session editor (editor-active-view editor)))
 
   (define (completion-request-session editor request)
     (and
@@ -2389,12 +2392,8 @@
                 (+ index 1)
                 (append (reverse cancelled) effects)))))))
 
-  (define lsp-request-at-active-point!
-    (case-lambda
-      [(editor method additional-parameters continuation)
-       (lsp-request-at-active-point!
-         editor method additional-parameters continuation #f)]
-      [(editor method additional-parameters continuation request-context)
+  (define (lsp-request-at-view-point!
+            editor view method additional-parameters continuation request-context)
     (unless (and (list? additional-parameters)
                  (for-all
                    (lambda (entry)
@@ -2403,12 +2402,11 @@
                           (json-value? (cdr entry))))
                    additional-parameters))
       (assertion-violation
-        'lsp-request-at-active-point!
+        'lsp-request-at-view-point!
         "additional LSP parameters must be JSON object entries"
         additional-parameters))
-    (let* ([view (editor-active-view editor)]
-           [buffer (view-buffer view)]
-           [session (active-view-lsp-session editor)]
+    (let* ([buffer (view-buffer view)]
+           [session (view-lsp-session editor view)]
            [document (and session (find-document session (buffer-id buffer)))]
            [position (and (buffer? buffer)
                           (lsp-buffer-position-at buffer (view-caret view)))])
@@ -2431,7 +2429,18 @@
               request-context))
           (begin
             (editor-set-status-message! editor "No ready language server at point")
-            '())))]))
+            '()))))
+
+  (define lsp-request-at-active-point!
+    (case-lambda
+      [(editor method additional-parameters continuation)
+       (lsp-request-at-active-point!
+         editor method additional-parameters continuation #f)]
+      [(editor method additional-parameters continuation request-context)
+       (lsp-request-at-view-point!
+         editor
+         (editor-active-view editor)
+         method additional-parameters continuation request-context)]))
 
   (define (session-semantic-namespace session)
     (string->symbol
@@ -2879,10 +2888,10 @@
                   (if item (cons item items) items)))))
         '()))
 
-  (define (lsp-find-references! editor)
-    (let ([view (editor-active-view editor)])
-      (lsp-request-at-active-point!
+  (define (lsp-find-references-at-view! editor view)
+    (lsp-request-at-view-point!
         editor
+        view
         "textDocument/references"
         (list
           (cons "context"
@@ -2905,13 +2914,26 @@
                   (if (> (length items) 1)
                       (begin
                         (editor-show-xref-results!
-                          response-editor locations (view-id view))
+                          response-editor
+                          locations
+                          (view-id view)
+                          (let ([origin-view-id (view-id view)])
+                            (lambda (refresh-context refresh-buffer)
+                              (lsp-find-references-at-view!
+                                (command-context-editor refresh-context)
+                                (editor-view-ref
+                                  (command-context-editor refresh-context)
+                                  origin-view-id)))))
                         '())
                       (lsp-jump-to-location-item!
                         response-editor
                         view
                         (location-list-current locations)
-                        'xref)))))))))
+                        'xref))))))
+        #f))
+
+  (define (lsp-find-references! editor)
+    (lsp-find-references-at-view! editor (editor-active-view editor)))
 
   (define (lsp-find-location! editor method kind absent-message)
     (let ([view (editor-active-view editor)])

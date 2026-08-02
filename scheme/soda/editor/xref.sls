@@ -10,7 +10,11 @@
           (only (chezscheme) make-weak-eq-hashtable)
           (soda editor command)
           (soda editor condition)
-          (soda editor location-results))
+          (soda editor language)
+          (soda editor location)
+          (soda editor location-results)
+          (soda editor result-buffer)
+          (soda editor state))
 
   (define editor-xref-backends
     (make-weak-eq-hashtable))
@@ -73,9 +77,43 @@
        context)))
 
   (define (install-xref-results! editor)
-    (install-location-results! editor))
+    (install-location-results! editor)
+    (register-major-mode!
+      (editor-language-catalog editor)
+      (make-major-mode
+        'xref-results-mode 'location-results-mode #f 'interface
+        #f
+        '((track-modified? . #f) (read-only? . #t))))
+    editor)
 
-  (define (editor-show-xref-results! editor locations origin-view-id)
-    (editor-show-location-results!
-      editor "References" locations origin-view-id 'xref))
+  (define (%editor-show-xref-results!
+            editor locations origin-view-id refresh)
+    (unless (and (location-list? locations)
+                 (or (not refresh) (procedure? refresh)))
+      (assertion-violation
+        'editor-show-xref-results!
+        "expected a LocationList and optional refresh procedure"
+        locations refresh))
+    (let* ([presentation
+             (make-location-list (location-list-source locations) '())]
+           [buffer
+             (editor-open-result-buffer!
+               editor "*Xref*" 'xref-results-mode
+               "References" presentation origin-view-id
+               'xref #f #f)])
+      (editor-set-current-location-list! editor presentation)
+      (editor-append-location-results!
+        editor buffer (location-list-items locations))
+      (when refresh
+        (buffer-set-result-refresh! buffer refresh))
+      buffer))
+
+  (define editor-show-xref-results!
+    (case-lambda
+      [(editor locations origin-view-id)
+       (%editor-show-xref-results!
+         editor locations origin-view-id #f)]
+      [(editor locations origin-view-id refresh)
+       (%editor-show-xref-results!
+         editor locations origin-view-id refresh)]))
 )

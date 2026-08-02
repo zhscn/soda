@@ -166,6 +166,11 @@ face          普通文本装饰
 Buffer 的真实 point，再激活 point 下的 item；`N`/`P` 按 `result-group` 移动到相邻组
 的首项。RET 选择源位置，TAB 选择并关闭结果窗口，`C-o` 只预览。
 
+`xref-results-mode` 继承 location result 行为，并保存产生列表的 source View 与
+refresh callback。`g` 从该 View 的语言上下文重新执行查询。preview 更新专用 source
+View，但保持 Result Buffer 的 Window 为 active；该规则同样适用于需要异步打开文件的
+LocationItem。select 才携带 display intent 并把焦点交给 source View。
+
 领域 mode 可以向 Buffer 注册命名 `result-action`。action 包含显示名称、针对 point
 下 `result-item` 的适用性判断和执行过程。键位仍由 mode keymap 决定；which-key、菜单
 或其他 TUI 组件可以枚举 point 下的可用 action，而无需识别领域 payload。Git status

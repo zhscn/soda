@@ -288,7 +288,8 @@
       (lambda (range) (cons (car range) (caddr range)))
       (buffer-text-property-ranges buffer 'result-index)))
 
-  (define (preview-location-result! context item index state)
+  (define (preview-location-result!
+            context item index state display-intent)
     (let* ([editor (command-context-editor context)]
            [locations (location-results-state-locations state)]
            [origin-view
@@ -296,7 +297,11 @@
                editor (location-results-state-origin-view-id state))])
       (location-list-set-index! locations index)
       (editor-visit-location-item!
-        editor origin-view item (location-results-state-jump-kind state))))
+        editor
+        origin-view
+        item
+        (location-results-state-jump-kind state)
+        display-intent)))
 
   (define (close-location-results-buffer! editor buffer origin-view)
     (let ([result-view
@@ -329,7 +334,13 @@
                (editor-view-ref
                  editor (location-results-state-origin-view-id state))]
              [effects
-               (preview-location-result! context item index state)])
+               (preview-location-result!
+                 context
+                 item
+                 index
+                 state
+                 (and (memq disposition '(select select-and-close))
+                      'jump))])
         (when (memq disposition '(select select-and-close))
           (editor-select-view-window! editor (view-id origin-view)))
         (when (eq? disposition 'select-and-close)

@@ -227,7 +227,20 @@
                      (> (length items) 1))
                 (begin
                   (editor-show-xref-results!
-                    editor locations (view-id view))
+                    editor
+                    locations
+                    (view-id view)
+                    (let ([origin-view-id (view-id view)])
+                      (lambda (refresh-context refresh-buffer)
+                        (let* ([refresh-editor
+                                 (command-context-editor refresh-context)]
+                               [origin-view
+                                 (editor-view-ref
+                                   refresh-editor origin-view-id)])
+                          (dispatch-xref
+                            (make-command-context
+                              refresh-editor origin-view #f #f #f)
+                            'xref.find-references)))))
                   #f)
                 (jump-to-item!
                   context

@@ -4415,7 +4415,8 @@
                (view-buffer (editor-active-view xref-editor))]
              [point (view-caret (editor-active-view xref-editor))])
         (and
-          (eq? (buffer-major-mode-name results-buffer) 'location-results-mode)
+          (eq? (buffer-major-mode-name results-buffer) 'xref-results-mode)
+          (buffer-result-refreshable? results-buffer)
           (location-item?
             (buffer-text-property-ref
               results-buffer point 'result-item #f)))))
@@ -4502,6 +4503,25 @@
   (make-command-message 'buffer-item.next #f))
 (unless (= (view-caret xref-view) 28)
   (error 'editor-tests "xref next did not preview the next use"))
+(send! xref-editor (make-input-decoder) (string->utf8 "p"))
+(unless
+  (and
+    (= (location-list-index (editor-current-location-list xref-editor)) 1)
+    (= (view-caret xref-view) 21)
+    (=
+      (buffer-text-property-ref
+        xref-results-buffer
+        (view-caret (editor-active-view xref-editor))
+        'result-index
+        -1)
+      1))
+  (error 'editor-tests "xref p did not preview the previous item"))
+(send! xref-editor (make-input-decoder) (string->utf8 "n"))
+(unless
+  (and
+    (= (location-list-index (editor-current-location-list xref-editor)) 2)
+    (= (view-caret xref-view) 28))
+  (error 'editor-tests "xref n did not restore forward navigation"))
 (editor-update!
   xref-editor
   (make-command-message 'buffer-item.activate #f))
@@ -4539,7 +4559,7 @@
         (find
           (lambda (view)
             (eq? (buffer-major-mode-name (view-buffer view))
-                 'location-results-mode))
+                 'xref-results-mode))
           (editor-views xref-editor))])
   (unless results-view
     (error 'editor-tests "xref results view disappeared after visiting"))
@@ -4571,7 +4591,7 @@
     (not
       (exists
         (lambda (buffer)
-          (eq? (buffer-major-mode-name buffer) 'location-results-mode))
+          (eq? (buffer-major-mode-name buffer) 'xref-results-mode))
         (editor-buffers xref-editor))))
   (error 'editor-tests
          "xref results quit did not restore the source view"

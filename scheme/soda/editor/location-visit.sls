@@ -28,11 +28,14 @@
           (resource-context-with-language-context base language-context)
           base)))
 
-  (define (editor-visit-location-item! editor view item kind)
+  (define (%editor-visit-location-item!
+            editor view item kind display-intent)
     (unless (and (editor? editor)
                  (view? view)
                  (location-item? item)
-                 (symbol? kind))
+                 (symbol? kind)
+                 (or (not display-intent)
+                     (memq display-intent '(edit jump tools doc pop))))
       (assertion-violation
         'editor-visit-location-item!
         "invalid location visit request"
@@ -66,6 +69,14 @@
                   (view-id view)
                   resource
                   position
-                  'jump
+                  display-intent
                   context)))))))
+
+  (define editor-visit-location-item!
+    (case-lambda
+      [(editor view item kind)
+       (%editor-visit-location-item! editor view item kind 'jump)]
+      [(editor view item kind display-intent)
+       (%editor-visit-location-item!
+         editor view item kind display-intent)]))
 )
