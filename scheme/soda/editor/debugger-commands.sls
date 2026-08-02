@@ -570,11 +570,6 @@
                (write (car remaining) port)
                (loop (cdr remaining) #f)))]))))
 
-  (define (condition->string condition)
-    (call-with-string-output-port
-      (lambda (port)
-        (display-condition condition port))))
-
   (define (debug-eval-frame-command context)
     (let* ([editor (command-context-editor context)]
            [target
@@ -592,7 +587,7 @@
                 editor
                 (string-append
                   "Debugger evaluation failed: "
-                  (condition->string condition)))])
+                  (condition-display-string condition)))])
            (let ([values
                    (debugger-session-evaluate
                      debugger
@@ -657,7 +652,7 @@
                        editor
                        (string-append
                          "Debugger evaluation failed: "
-                         (condition->string condition)))])
+                         (condition-display-string condition)))])
                   (let ([values
                           (debugger-session-evaluate
                             debugger
@@ -907,7 +902,7 @@
              who
              (string-append
                "Inspector rendering failed: "
-               (condition->string condition)))])
+               (condition-display-string condition)))])
         (debugger-session-inspection-render!
           debugger
           style))
@@ -936,7 +931,7 @@
            'scheme.debug-inspect-find
            (string-append
              "Inspector search failed: "
-             (condition->string condition)))])
+             (condition-display-string condition)))])
       (unless
         (debugger-session-inspection-find!
           debugger
@@ -1027,7 +1022,7 @@
              'scheme.debug-inspect-find-next
              (string-append
                "Inspector search failed: "
-               (condition->string condition)))])
+               (condition-display-string condition)))])
         (unless
           (debugger-session-inspection-find-next!
             debugger)
@@ -1121,7 +1116,7 @@
            editor
            (string-append
              "Inspector assignment failed: "
-             (condition->string condition)))])
+             (condition-display-string condition)))])
       (let ([values
               (debugger-session-set-inspected-value!
                 debugger
@@ -1238,7 +1233,7 @@
                  editor
                  (string-append
                    "Inspector apply failed: "
-                   (condition->string condition)))
+                   (condition-display-string condition)))
                '()])
             (let ([values
                     (debugger-session-apply-inspected
@@ -1696,7 +1691,7 @@
                editor
                (string-append
                  "Replacement evaluation failed: "
-                 (condition->string condition)))
+                 (condition-display-string condition)))
              '()])
           (let ([values
                   (debugger-session-evaluate-in-frame

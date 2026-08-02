@@ -66,6 +66,7 @@
           debugger-variable-name
           debugger-variable-preview)
   (import (chezscheme)
+          (soda editor condition)
           (soda editor debugger-action)
           (soda editor evaluator)
           (soda editor inspector)
@@ -708,7 +709,7 @@
              (debugger-frame-index frame)
              source
              'condition
-             (condition->string condition)))
+             (condition-display-string condition)))
          (debugger-session-touch! debugger)
          (raise condition)])
       (let ([values
@@ -1240,11 +1241,6 @@
           (debugger-session-touch! debugger)
           values))))
 
-  (define (condition->string condition)
-    (call-with-string-output-port
-      (lambda (port)
-        (display-condition condition port))))
-
   (define (value->preview value)
     (safe-call
       "#<unavailable>"
@@ -1488,7 +1484,7 @@
         (newline port)
         (display "Condition: " port)
         (display
-          (condition->string
+          (condition-display-string
             (debugger-session-condition debugger))
           port)
         (newline port)

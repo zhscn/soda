@@ -3,6 +3,7 @@
           file-runtime?
           file-runtime-handle-event)
   (import (chezscheme)
+          (soda editor condition)
           (soda editor effect)
           (soda editor event)
           (soda editor file)
@@ -35,11 +36,6 @@
       %make-insert-file-operation
       insert-file-operation?)
     (fields request (mutable phase)))
-
-  (define (condition->string condition)
-    (call-with-string-output-port
-      (lambda (port)
-        (display-condition condition port))))
 
   (define (register-pending! adapter source operation)
     (hashtable-set!
@@ -165,7 +161,7 @@
                             request
                             -1
                             (make-bytevector 0)
-                            (condition->string condition)))))])
+                            (condition-display-string condition)))))])
             (let* ([operation
                      (%make-open-operation
                        path
@@ -205,7 +201,7 @@
                     (make-save-result
                       request
                       -1
-                      (condition->string condition)))))])
+                      (condition-display-string condition)))))])
       (let* ([expected (save-request-expected-state request)]
              [operation
                (%make-save-operation
@@ -233,7 +229,7 @@
                       request
                       -1
                       (make-bytevector 0)
-                      (condition->string condition)
+                      (condition-display-string condition)
                       #f))))])
       (let ([operation
               (%make-reload-operation
@@ -260,7 +256,7 @@
                       request
                       -1
                       (make-bytevector 0)
-                      (condition->string condition)))))])
+                      (condition-display-string condition)))))])
       (let ([operation
               (%make-insert-file-operation request 'stat)])
         (register-pending!
@@ -348,7 +344,7 @@
                      -1
                      (make-bytevector 0)
                      #f
-                     (condition->string condition)
+                     (condition-display-string condition)
                      #f
                      #f)])
            (open-operation-stat-set!
@@ -419,7 +415,7 @@
                 (save-result-message
                   operation
                   -1
-                  (condition->string condition)
+                  (condition-display-string condition)
                   #f)])
         (start-save-write! adapter operation)
         #f)
@@ -439,7 +435,7 @@
                   -1
                   (string-append
                     "File was written but its state cannot be refreshed: "
-                    (condition->string condition))
+                    (condition-display-string condition))
                   #f)])
         (save-operation-phase-set! operation 'postflight)
         (register-pending!
@@ -493,7 +489,7 @@
                    operation
                    -1
                    (make-bytevector 0)
-                   (condition->string condition)
+                   (condition-display-string condition)
                    #f)])
          (reload-operation-stat-set!
            operation
@@ -544,7 +540,7 @@
                    operation
                    -1
                    (make-bytevector 0)
-                   (condition->string condition)
+                   (condition-display-string condition)
                    #f)])
          (insert-file-operation-phase-set! operation 'read)
          (register-pending!

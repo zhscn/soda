@@ -1,7 +1,9 @@
 (library (soda editor condition)
   (export editor-user-error
-          editor-user-error-condition?)
-  (import (rnrs))
+          editor-user-error-condition?
+          condition-display-string)
+  (import (rnrs)
+          (only (chezscheme) display-condition))
 
   (define-condition-type
     &editor-user-error
@@ -25,4 +27,9 @@
         (make-editor-user-error-condition)
         (make-who-condition who)
         (make-message-condition message)
-        (make-irritants-condition irritants)))))
+        (make-irritants-condition irritants))))
+
+  (define (condition-display-string value)
+    (call-with-string-output-port
+      (lambda (port)
+        (display-condition value port)))))

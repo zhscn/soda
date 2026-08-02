@@ -3,6 +3,7 @@
           scheme-project-build-runtime?
           scheme-project-build-runtime-handle-event)
   (import (rnrs)
+          (soda editor condition)
           (only (chezscheme) display-condition)
           (soda editor effect)
           (soda editor event)
@@ -15,11 +16,6 @@
       scheme-project-build-runtime?)
     (fields runtime pending))
 
-  (define (condition->string condition)
-    (call-with-string-output-port
-      (lambda (port)
-        (display-condition condition port))))
-
   (define (failed-build-message request condition)
     (make-internal-command-message
       'scheme.apply-environment-build-result
@@ -29,7 +25,7 @@
         -1
         0
         (string->utf8
-          (condition->string condition)))))
+          (condition-display-string condition)))))
 
   (define (start-build! adapter request)
     (guard

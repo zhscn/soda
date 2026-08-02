@@ -3,6 +3,7 @@
           scheme-interface-runtime?
           scheme-interface-runtime-handle-event)
   (import (rnrs)
+          (soda editor condition)
           (only (chezscheme) display-condition)
           (soda editor effect)
           (soda editor event)
@@ -15,11 +16,6 @@
       %make-scheme-interface-runtime
       scheme-interface-runtime?)
     (fields runtime pending))
-
-  (define (condition->string condition)
-    (call-with-string-output-port
-      (lambda (port)
-        (display-condition condition port))))
 
   (define (start-load! adapter request)
     (guard
@@ -41,7 +37,7 @@
                    request)
                  -1
                  (make-bytevector 0)
-                 (condition->string condition)))))])
+                 (condition-display-string condition)))))])
       (let ([source
               (runtime-read-file!
                 (scheme-interface-runtime-runtime adapter)
@@ -71,7 +67,7 @@
                    request)
                  -1
                  (make-bytevector 0)
-                 (condition->string condition)))))])
+                 (condition-display-string condition)))))])
       (let ([source
               (runtime-read-file!
                 (scheme-interface-runtime-runtime adapter)
