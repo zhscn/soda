@@ -132,6 +132,20 @@
               (lambda () (text-close! text)))))
         (lambda () (snapshot-close! snapshot)))))
 
+  (define (snapshot-substring document start end)
+    (let ([snapshot (document-snapshot document)])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (let ([text (snapshot-text snapshot)])
+            (dynamic-wind
+              (lambda () #f)
+              (lambda ()
+                (utf8->string
+                  (text-subbytevector text start end)))
+              (lambda () (text-close! text)))))
+        (lambda () (snapshot-close! snapshot)))))
+
   (define (close-entries! document entries)
     (for-each
       (lambda (entry)
@@ -419,8 +433,13 @@
                 revision
                 (car range)
                 (cdr range)
+                (snapshot-substring
+                  (annotation-set-document value)
+                  (car range)
+                  (cdr range))
                 (annotation-message annotation)
-                annotation)))
+                annotation
+                #f)))
           (annotation-set-entries value))))
 
   (define (annotation-set-close! value)

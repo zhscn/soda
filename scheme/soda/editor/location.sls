@@ -17,6 +17,7 @@
           location-item-start
           location-item-end
           location-item-excerpt
+          location-item-presentation
           location-item-metadata
           location-item-language-context
           location-item-with-language-context
@@ -79,6 +80,7 @@
             start
             end
             excerpt
+            presentation
             metadata
             language-context))
 
@@ -121,13 +123,25 @@
     (case-lambda
       [(buffer-id resource revision start end excerpt metadata)
        (make-location-item
-         buffer-id resource revision start end excerpt metadata #f)]
+         buffer-id resource revision start end excerpt #f metadata #f)]
       [(buffer-id
          resource
          revision
          start
          end
          excerpt
+         metadata
+         language-context)
+       (make-location-item
+         buffer-id resource revision start end excerpt #f metadata
+         language-context)]
+      [(buffer-id
+         resource
+         revision
+         start
+         end
+         excerpt
+         presentation
          metadata
          language-context)
        (unless (and (or
@@ -144,7 +158,8 @@
                  (integer? end)
                  (exact? end)
                  (<= 0 start end)
-                 (or (not excerpt) (string? excerpt)))
+                 (or (not excerpt) (string? excerpt))
+                 (or (not presentation) (string? presentation)))
          (assertion-violation
            'make-location-item
            "invalid location item"
@@ -153,9 +168,10 @@
            revision
            start
            end
-           excerpt))
+           excerpt
+           presentation))
        (%make-location-item
-         buffer-id resource revision start end excerpt metadata
+         buffer-id resource revision start end excerpt presentation metadata
          language-context)]))
 
   (define (location-item-with-language-context item language-context)
@@ -171,6 +187,7 @@
       (location-item-start item)
       (location-item-end item)
       (location-item-excerpt item)
+      (location-item-presentation item)
       (location-item-metadata item)
       language-context))
 

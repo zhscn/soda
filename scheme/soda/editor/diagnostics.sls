@@ -17,7 +17,8 @@
           (soda editor scheme-workspace)
           (soda editor state)
           (soda editor location-results)
-          (soda editor result-buffer))
+          (soda editor result-buffer)
+          (soda json))
 
   (define scheme-diagnostic-namespace
     'scheme-semantic-diagnostics)
@@ -338,7 +339,77 @@
          (scheme-diagnostic-code (annotation-payload metadata))]
         [(scheme-diagnostic? metadata)
          (scheme-diagnostic-code metadata)]
+        [(and (annotation? metadata)
+              (json-object? (annotation-payload metadata)))
+         (let ([code
+                 (json-object-ref
+                   (annotation-payload metadata) "code" #f)])
+           (and (not (json-null? code)) code))]
         [else #f])))
+
+  (define (diagnostic-origin item)
+    (let ([metadata (location-item-metadata item)])
+      (cond
+        [(and (annotation? metadata)
+              (json-object? (annotation-payload metadata)))
+         (let ([source
+                 (json-object-ref
+                   (annotation-payload metadata) "source" #f)])
+           (and (string? source) source))]
+        [(or (scheme-diagnostic? metadata)
+             (and (annotation? metadata)
+                  (scheme-diagnostic?
+                    (annotation-payload metadata))))
+         "scheme"]
+        [else #f])))
+
+  (define (diagnostic-field->string value)
+    (cond
+      [(string? value) value]
+      [(symbol? value) (symbol->string value)]
+      [(number? value) (number->string value)]
+      [else #f]))
+
+  (define (join-diagnostic-fields fields)
+    (if (null? fields)
+        ""
+        (let loop ([remaining (cdr fields)] [result (car fields)])
+          (if (null? remaining)
+              result
+              (loop
+                (cdr remaining)
+                (string-append result " " (car remaining)))))))
+
+  (define (diagnostic-display-item item)
+    (let* ([severity (diagnostic-severity item)]
+           [origin (diagnostic-origin item)]
+           [code (diagnostic-field->string (diagnostic-code item))]
+           [fields
+             (filter
+               (lambda (value) value)
+               (list
+                 (and severity (symbol->string severity))
+                 origin
+                 code))]
+           [prefix
+             (if (null? fields)
+                 ""
+                 (string-append
+                   "[" (join-diagnostic-fields fields) "] "))])
+      (make-location-item
+        (location-item-buffer-id item)
+        (location-item-resource item)
+        (location-item-revision item)
+        (location-item-start item)
+        (location-item-end item)
+        (location-item-excerpt item)
+        (string-append
+          prefix
+          (or (location-item-presentation item)
+              (location-item-excerpt item)
+              ""))
+        (location-item-metadata item)
+        (location-item-language-context item))))
 
   (define (decorate-diagnostic-results! buffer)
     (for-each
@@ -358,15 +429,16 @@
 
   (define (show-diagnostics!
             editor resource title source items origin-view-id refresh)
-    (let* ([locations (make-location-list source '())]
+    (let* ([presented-items (map diagnostic-display-item items)]
+           [locations (make-location-list source '())]
            [buffer
             (editor-open-result-buffer!
               editor resource 'diagnostics-mode title locations
               origin-view-id 'diagnostic #f #f)])
       (editor-set-current-location-list!
-        editor (if (null? items) #f locations))
-      (editor-append-location-results! editor buffer items)
-      (when (null? items)
+        editor (if (null? presented-items) #f locations))
+      (editor-append-location-results! editor buffer presented-items)
+      (when (null? presented-items)
         (editor-append-result-message!
           editor buffer "No diagnostics." 'info))
       (when refresh

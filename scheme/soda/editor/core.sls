@@ -925,6 +925,7 @@
           location-item-start
           location-item-end
           location-item-excerpt
+          location-item-presentation
           location-item-metadata
           location-item-language-context
           location-item-with-language-context

@@ -6062,14 +6062,36 @@
       (location-list? locations)
       (eq? (location-list-source locations) 'diagnostics)
       (= (length (location-list-items locations)) 2)
+      (string=?
+        (location-item-excerpt
+          (car (location-list-items locations)))
+        "answer")
+      (string=?
+        (location-item-presentation
+          (car (location-list-items locations)))
+        "[error] answer is invalid")
       (eq?
         (buffer-major-mode-name
           (view-buffer (editor-active-view highlight-editor)))
         'diagnostics-mode)
       (buffer-result-refreshable?
-        (view-buffer (editor-active-view highlight-editor))))
+        (view-buffer (editor-active-view highlight-editor)))
+      (string-contains?
+        (utf8->string
+          (buffer-bytes
+            (view-buffer (editor-active-view highlight-editor))))
+        "[error] answer is invalid")
+      (string-contains?
+        (utf8->string
+          (buffer-bytes
+            (view-buffer (editor-active-view highlight-editor))))
+        "[warning] string needs review"))
     (error 'editor-tests
-           "diagnostics did not publish a sorted location list")))
+           "diagnostics did not publish a sorted location list"
+           locations
+           (utf8->string
+             (buffer-bytes
+               (view-buffer (editor-active-view highlight-editor)))))))
 (editor-update!
   highlight-editor
   (make-command-message 'buffer-item.next #f))

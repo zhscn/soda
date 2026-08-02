@@ -86,21 +86,26 @@
              (and buffer-id
                   (guard (condition [else #f])
                     (editor-buffer-ref editor buffer-id)))]
-           [open-position (location-open-position item)])
-      (cond
-        [buffer (buffer-location-presentation buffer item)]
-        [open-position
-         (list
-           (file-utf16-position-line open-position)
-           (file-utf16-position-character open-position)
-           (or (location-item-excerpt item) "")
-           (item-metadata-ref item 'search-match-start)
-           (item-metadata-ref item 'search-match-end))]
-        [else
-         (list
-           0 0 (or (location-item-excerpt item) "")
-           (item-metadata-ref item 'search-match-start)
-           (item-metadata-ref item 'search-match-end))])))
+           [open-position (location-open-position item)]
+           [base
+             (cond
+               [buffer (buffer-location-presentation buffer item)]
+               [open-position
+                (list
+                  (file-utf16-position-line open-position)
+                  (file-utf16-position-character open-position)
+                  (or (location-item-excerpt item) "")
+                  (item-metadata-ref item 'search-match-start)
+                  (item-metadata-ref item 'search-match-end))]
+               [else
+                (list
+                  0 0 (or (location-item-excerpt item) "")
+                  (item-metadata-ref item 'search-match-start)
+                  (item-metadata-ref item 'search-match-end))])]
+           [presentation (location-item-presentation item)])
+      (if presentation
+          (list (car base) (cadr base) presentation #f #f)
+          base)))
 
   (define (location-resource-label item)
     (or (location-item-resource item)

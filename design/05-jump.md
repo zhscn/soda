@@ -104,6 +104,7 @@ LocationItem {
   range,
   coordinate_encoding: byte | utf16,
   excerpt,
+  presentation?,
   language_context?,
   metadata,
   resolved: (BufferId, AnchorRange, stale)?
@@ -120,8 +121,8 @@ LocationList {
 LocationList 是 producer 与 presentation 之间的惰性数据模型。Workbench 可以保存
 current LocationList 供 session 恢复和语义查询使用；交互选择和全局位置导航由物化后的
 Result Buffer 持有。已解析 LocationItem
-带 Buffer identity、resource、source revision、byte range、excerpt 和 provider
-metadata；实际跳转前必须再次验证 Buffer revision。尚未打开的 LocationItem 使用
+带 Buffer identity、resource、source revision、byte range、source excerpt、可选
+presentation 和 provider metadata；实际跳转前必须再次验证 Buffer revision。尚未打开的 LocationItem 使用
 resource、revision 与 byte range，跳转时发出异步文件读取请求。Buffer 移除时，
 引用该 Buffer 的 current list 一并失效，纯 resource item 保持有效。provider
 通过 editor 公共 API 发布列表。
@@ -141,8 +142,10 @@ Scheme definition 与 references 由
 [11-scheme-semantics.md](11-scheme-semantics.md) 的 DefinitionId 和 environment
 倒排索引产生。provider 返回 LocationList，不直接打开 Buffer 或选择 Window。
 
-excerpt 同时用于显示和内容校验。item 在首次跳转或对应 buffer 打开时提升为
-AnchorRange。未提升 item 的落点顺序为：
+excerpt 只保存源 range 的原始文本，用于内容校验和重锚定。presentation 是 Result
+Buffer 可选的领域显示文本，例如诊断消息；缺省时结果行显示当前源文本。两者分离后，
+诊断、符号和搜索 producer 可以改变列表的信息密度，而不会破坏 stale location
+恢复。item 在首次跳转或对应 buffer 打开时提升为 AnchorRange。未提升 item 的落点顺序为：
 
 1. range 处内容与 excerpt 一致；
 2. 在 range 邻域搜索唯一 excerpt；
