@@ -62,6 +62,7 @@
           (soda editor project-workspace)
           (soda editor result-buffer)
           (soda editor state)
+          (soda editor workbench)
           (soda editor workspace-edit)
           (soda editor workspace-edit-preview)
           (soda editor xref)
@@ -129,8 +130,11 @@
   (define-record-type lsp-workspace-text-edit
     (fields resource range text))
 
+  (define-record-type lsp-workspace-edit-origin
+    (fields preferred-view-id workbench-id))
+
   (define-record-type lsp-pending-workspace-edit
-    (fields view-id
+    (fields origin
             source-buffer-id
             source-revision
             edits
@@ -143,7 +147,7 @@
     (fields title kind raw resolved?))
 
   (define-record-type lsp-code-action-context
-    (fields session view-id buffer-id revision actions))
+    (fields session origin buffer-id revision actions))
 
   (define-record-type lsp-completion-data
     (fields session completion-id generation buffer-id revision raw))
@@ -3580,24 +3584,61 @@
                        (lsp-workspace-text-edit-text edit))
                      resolved)))))))
 
+  (define (make-workspace-edit-origin-for-view editor view-id)
+    (make-lsp-workspace-edit-origin
+      view-id
+      (workbench-id (editor-workbench-for-view editor view-id))))
+
+  (define (workspace-edit-origin editor value)
+    (cond
+      [(lsp-workspace-edit-origin? value) value]
+      [(and (integer? value) (exact? value) (positive? value))
+       (make-workspace-edit-origin-for-view editor value)]
+      [else
+       (assertion-violation
+         'lsp-apply-workspace-edits!
+         "expected a workspace edit origin or View id"
+         value)]))
+
+  (define (workspace-edit-origin-view-id editor origin)
+    (let ([workbench-id (lsp-workspace-edit-origin-workbench-id origin)])
+      (or
+        (let ([preferred
+                (find
+                  (lambda (view)
+                    (=
+                      (view-id view)
+                      (lsp-workspace-edit-origin-preferred-view-id origin)))
+                  (editor-views editor))])
+          (and
+            preferred
+            (equal? (view-workbench-id preferred) workbench-id)
+            (view-id preferred)))
+        (let ([fallback
+                (find
+                  (lambda (view)
+                    (equal? (view-workbench-id view) workbench-id))
+                  (editor-views editor))])
+          (and fallback (view-id fallback))))))
+
   (define lsp-apply-workspace-edits!
     (case-lambda
-      [(editor view-id source-buffer-id source-revision edits description)
+      [(editor origin source-buffer-id source-revision edits description)
        (lsp-apply-workspace-edits!
-         editor view-id source-buffer-id source-revision edits description
+         editor origin source-buffer-id source-revision edits description
          (lambda (current-editor) '()) #f)]
       [(editor
-         view-id
+         origin
          source-buffer-id
          source-revision
          edits
          description
          after-apply)
        (lsp-apply-workspace-edits!
-         editor view-id source-buffer-id source-revision edits description
+         editor origin source-buffer-id source-revision edits description
          after-apply #f)]
       [(editor
-         view-id
+         origin-value
          source-buffer-id
          source-revision
          edits
@@ -3609,7 +3650,8 @@
            'lsp-apply-workspace-edits!
            "after-apply must be a procedure"
            after-apply))
-       (let ([source (editor-buffer-ref editor source-buffer-id)])
+       (let ([source (editor-buffer-ref editor source-buffer-id)]
+             [origin (workspace-edit-origin editor origin-value)])
          (if (not (= (buffer-revision source) source-revision))
              (begin
                (editor-set-status-message!
@@ -3622,7 +3664,7 @@
                        pending-lsp-workspace-edits
                        editor
                        (make-lsp-pending-workspace-edit
-                         view-id
+                         origin
                          source-buffer-id
                          source-revision
                          edits
@@ -3649,10 +3691,20 @@
                              editor "Language-server workspace edit has invalid ranges")
                            '())
                          (if preview?
-                             (begin
-                               (editor-show-workspace-edit-preview!
-                                 editor view-id resolved description after-apply)
-                               '())
+                             (let ([origin-view-id
+                                     (workspace-edit-origin-view-id
+                                       editor origin)])
+                               (if origin-view-id
+                                   (begin
+                                     (editor-show-workspace-edit-preview!
+                                       editor origin-view-id resolved
+                                       description after-apply)
+                                     '())
+                                   (begin
+                                     (editor-set-status-message!
+                                       editor
+                                       "Workspace edit origin is no longer available")
+                                     '())))
                              (begin
                                (workspace-text-edits-apply! editor resolved)
                                (editor-set-status-message!
@@ -3694,7 +3746,7 @@
            (let ([follow-up-effects
                    (lsp-apply-workspace-edits!
                      editor
-                     (lsp-pending-workspace-edit-view-id pending)
+                     (lsp-pending-workspace-edit-origin pending)
                      (lsp-pending-workspace-edit-source-buffer-id pending)
                      (lsp-pending-workspace-edit-source-revision pending)
                      (lsp-pending-workspace-edit-edits pending)
@@ -3747,6 +3799,9 @@
   (define (lsp-format! context target)
     (let* ([editor (command-context-editor context)]
            [view (command-context-view context)]
+           [origin
+             (make-workspace-edit-origin-for-view
+               editor (view-id view))]
            [buffer (view-buffer view)]
            [session (active-view-lsp-session editor)]
            [document (and session (find-document session (buffer-id buffer)))]
@@ -3807,7 +3862,7 @@
                         [else
                          (lsp-apply-workspace-edits!
                            response-editor
-                           (view-id view)
+                           origin
                            (buffer-id buffer)
                            revision
                            edits
@@ -3936,6 +3991,9 @@
 
   (define (lsp-code-lenses! editor)
     (let* ([view (editor-active-view editor)]
+           [origin
+             (make-workspace-edit-origin-for-view
+               editor (view-id view))]
            [buffer (view-buffer view)]
            [revision (buffer-revision buffer)]
            [session (active-view-lsp-session editor)]
@@ -3966,7 +4024,7 @@
                                 'must-match (lsp-code-action-choice-source actions)
                                 'lsp.apply-code-action #f
                                 (make-lsp-code-action-context
-                                  session (view-id view) (buffer-id buffer)
+                                  session origin (buffer-id buffer)
                                   revision actions)))
                             '())))))))
           (begin (editor-set-status-message!
@@ -4115,7 +4173,7 @@
         [else
          (lsp-apply-workspace-edits!
            editor
-           (lsp-code-action-context-view-id context)
+           (lsp-code-action-context-origin context)
            (lsp-code-action-context-buffer-id context)
            (lsp-code-action-context-revision context)
            edits
@@ -4131,6 +4189,9 @@
 
   (define (lsp-request-code-actions-at-view! editor view range)
     (let* ([buffer (view-buffer view)]
+           [origin
+             (make-workspace-edit-origin-for-view
+               editor (view-id view))]
            [session (view-lsp-session editor view)]
            [document (and session (find-document session (buffer-id buffer)))]
            [start (lsp-buffer-position-at buffer (car range))]
@@ -4191,7 +4252,7 @@
                                   #f
                                   (make-lsp-code-action-context
                                     session
-                                    (view-id view)
+                                    origin
                                     (buffer-id buffer)
                                     source-revision
                                     actions)))
@@ -4304,7 +4365,10 @@
   (define (lsp-rename! editor new-name)
     (let* ([view (editor-active-view editor)]
            [buffer (view-buffer view)]
-           [revision (buffer-revision buffer)])
+           [revision (buffer-revision buffer)]
+           [origin
+             (make-workspace-edit-origin-for-view
+               editor (view-id view))])
       (lsp-request-at-active-point!
         editor
         "textDocument/rename"
@@ -4322,7 +4386,7 @@
               [else
                (lsp-apply-workspace-edits!
                  response-editor
-                 (view-id view)
+                 origin
                  (buffer-id buffer)
                  revision
                  edits

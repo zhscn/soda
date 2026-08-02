@@ -1576,6 +1576,11 @@
   (editor-create-buffer!
     editor "/workspace/src/other.cpp" 'cpp-mode "int Widget;\n"))
 (buffer-set-file-path! rename-target "/workspace/src/other.cpp")
+(define rename-origin-leaf
+  (editor-split-window! editor 'vertical))
+(define rename-origin-view-id
+  (window-leaf-view-id rename-origin-leaf))
+(editor-select-view-window! editor rename-origin-view-id)
 (view-set-caret! (editor-active-view editor) 3)
 (define rename-effects
   ((command-procedure (editor-command-registry editor) 'lsp.rename)
@@ -1649,6 +1654,13 @@
             (make-json-array
               (list rename-source-document-change
                     rename-target-document-change))))))
+(editor-delete-window! editor)
+(check
+  (not
+    (find
+      (lambda (view) (= (view-id view) rename-origin-view-id))
+      (editor-views editor)))
+  "rename test did not close its request origin View")
 (lsp-client-handle-json-message!
   editor session
   (make-json-object
@@ -1667,7 +1679,7 @@
     (bytevector=?
       (buffer-bytes rename-target)
       (string->utf8 "int Widget;\n")))
-  "LSP rename did not present an unapplied workspace edit preview")
+  "LSP rename did not present its preview after the request origin View closed")
 (let* ([preview-buffer (view-buffer (editor-active-view editor))]
        [groups
          (buffer-text-property-ranges

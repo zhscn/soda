@@ -262,6 +262,12 @@ Workspace edit preview 将每项协议 edit 映射为一个可编辑 projection�
 目标 revision 或只读状态变化时保留预览并报告可恢复的 stale-preview user error，
 不会进入 debugger 或提交部分修改。
 
+异步 WorkspaceEdit 请求冻结来源 Workbench 和首选展示 View。响应到达时仍存活且属于
+该 Workbench 的首选 View 负责承载预览；首选 View 已关闭时，展示层选择同一 Workbench
+中的存活 View。目标资源的异步读取沿用同一来源描述符，因此 rename、formatting 和
+code action 不依赖请求发出后仍然存在的 Window identity，也不会把结果投递到当前偶然
+获得焦点的其他 Workbench。
+
 ## Excerpt 组合视图
 
 组合视图把多个底层 buffer 的 anchor range 投影为一个连续 view：
