@@ -3,6 +3,7 @@
         (soda document)
         (soda editor buffer)
         (soda editor display-placement)
+        (soda editor editor-storage)
         (soda editor language)
         (soda editor language-session)
         (soda editor jump-graph)

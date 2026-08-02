@@ -24,10 +24,6 @@
           editor-start-project-lsp-for-active-view!
           editor-start-lsp-session!
           lsp-client-handle-json-message!
-          lsp-client-handle-process-output!
-          lsp-client-handle-process-exit!
-          lsp-client-sync-buffer!
-          lsp-client-close-buffer!
           lsp-client-stop!
           install-lsp-commands!)
   (import (rnrs)
@@ -44,6 +40,7 @@
           (soda editor condition)
           (soda editor diagnostics)
           (soda editor effect)
+          (soda editor editor-storage)
           (soda editor event)
           (soda editor file)
           (soda editor language)
@@ -493,6 +490,16 @@
   (define (default-request-cancel editor session reason context)
     '())
 
+  ;; All protocol output follows the same managed-process effect path.  Keep
+  ;; framing and process routing in one helper so request, notification, and
+  ;; server-response paths cannot drift apart.
+  (define (session-write-effect session message)
+    (make-command-effect
+      'managed-process.write
+      (make-managed-process-write-request
+        (lsp-client-session-process session)
+        (lsp-json-rpc-frame message))))
+
   (define session-request!
     (case-lambda
       [(session method params result)
@@ -508,11 +515,9 @@
              (make-lsp-client-pending-request
                id method result error cancel context)
              (lsp-client-session-pending session)))
-         (make-command-effect
-           'managed-process.write
-           (make-managed-process-write-request
-             (lsp-client-session-process session)
-             (lsp-json-rpc-frame (lsp-json-request id method params)))))]))
+         (session-write-effect
+           session
+           (lsp-json-request id method params)))]))
 
   (define (cancel-request-effect session request)
     (session-notification-effect
@@ -566,11 +571,7 @@
             (= (lsp-document-request-context-buffer-id context) buffer-id))))))
 
   (define (session-notification-effect session method params)
-    (make-command-effect
-      'managed-process.write
-      (make-managed-process-write-request
-        (lsp-client-session-process session)
-        (lsp-json-rpc-frame (lsp-json-notification method params)))))
+    (session-write-effect session (lsp-json-notification method params)))
 
   (define (workspace-folders-json workspace)
     (make-json-array
@@ -1238,13 +1239,11 @@
             (let ([method (json-object-ref message "method" #f)])
               (if (string? method)
                   (list
-                    (make-command-effect
-                      'managed-process.write
-                      (make-managed-process-write-request
-                        (lsp-client-session-process session)
-                        (lsp-json-rpc-frame
-                          (server-request-response
-                            editor session id method (json-object-ref message "params" #f))))))
+                    (session-write-effect
+                      session
+                      (server-request-response
+                        editor session id method
+                        (json-object-ref message "params" #f))))
                   '()))]
            [else '()]))]
       [else

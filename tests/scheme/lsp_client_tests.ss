@@ -7,6 +7,7 @@
         (soda editor command)
         (soda editor completion-provider)
         (soda editor edit)
+        (soda editor editor-storage)
         (soda editor file)
         (soda editor language-session)
         (soda editor location-results)

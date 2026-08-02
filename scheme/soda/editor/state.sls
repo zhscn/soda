@@ -97,13 +97,11 @@
           editor-set-global-minor-modes!
           editor-keymap-catalog
           editor-language-catalog
-          editor-language-session-registry
           editor-auto-mode-catalog
           editor-register-auto-mode-rule!
           editor-major-mode-for-path
           editor-select-buffer-major-mode!
           editor-project-catalog
-          editor-setting-store
           editor-configuration-snapshot
           editor-restore-configuration!
           call-with-editor-configuration-transaction
@@ -169,7 +167,6 @@
           editor-set-last-yank!
           editor-current-location-list
           editor-set-current-location-list!
-          editor-annotation-sets
           editor-pending-prefix
           editor-set-pending-prefix!
           editor-clear-pending-prefix!
