@@ -3,6 +3,7 @@
           string-suffix?
           string-contains?
           string-join
+          string-pad-left
           string-single-line
           stable-resource?)
   (import (rnrs))
@@ -46,6 +47,13 @@
               (loop
                 (cdr remaining)
                 (string-append result separator (car remaining)))))))
+
+  (define (string-pad-left value width character)
+    (if (>= (string-length value) width)
+        value
+        (string-append
+          (make-string (- width (string-length value)) character)
+          value)))
 
   (define (string-single-line value)
     (unless (string? value)

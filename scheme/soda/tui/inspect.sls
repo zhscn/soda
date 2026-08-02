@@ -345,14 +345,6 @@
         (write value port)
         (extract))))
 
-  (define (pad-left value width character)
-    (if (>= (string-length value) width)
-        value
-        (pad-left
-          (string-append (string character) value)
-          width
-          character)))
-
   (define (color->string color)
     (if (vector? color)
         (string-append
@@ -404,7 +396,7 @@
               (value->string character)
               " U+"
               (string-upcase
-                (pad-left
+                (string-pad-left
                   (number->string
                     (character-description-codepoint value)
                     16)
