@@ -53,6 +53,11 @@
                 (buffer-revision buffer)))
             (editor-jump-view-to-buffer!
               editor view buffer (location-item-start item) kind)
+            (view-set-navigation-target!
+              view
+              (location-item-start item)
+              (location-item-end item)
+              kind)
             '())
           (let ([resource (location-item-resource item)]
                 [position

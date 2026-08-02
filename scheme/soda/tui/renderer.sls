@@ -1060,6 +1060,45 @@
                    'view
                    (view-id view)))
                '())]
+           [navigation-target (view-navigation-target view)]
+           [navigation-target-decorations
+             (if
+               (and
+                 navigation-target
+                 (= (view-navigation-target-buffer-id navigation-target)
+                    (buffer-id buffer))
+                 (= (view-navigation-target-revision navigation-target)
+                    (buffer-revision buffer)))
+               (let* ([start (view-navigation-target-start navigation-target)]
+                      [end (view-navigation-target-end navigation-target)]
+                      [size (text-size text)]
+                      [range-end (min size (max end (+ start 1)))])
+                 (if (and (< start size)
+                          (< start visible-end)
+                          (< visible-start range-end))
+                     (append
+                       (list
+                         (make-decoration-run
+                           (max start visible-start)
+                           (min range-end visible-end)
+                           'navigation.target
+                           'transient
+                           20
+                           'view
+                           (view-id view)))
+                       (if (<= visible-start start (- visible-end 1))
+                           (list
+                             (make-decoration-run
+                               start
+                               (+ start 1)
+                               'navigation.target-cursor
+                               'transient
+                               30
+                               'view
+                               (view-id view)))
+                           '()))
+                     '()))
+               '())]
            [styled-chunks
              (make-styled-chunk-cursor
                (decoration-runs->styled-chunks
@@ -1067,7 +1106,8 @@
                    syntax-decorations
                    text-property-decorations
                    external-decorations
-                   selection-decorations)
+                   selection-decorations
+                   navigation-target-decorations)
                  visible-start
                  visible-end)
                visible-start)])

@@ -40,6 +40,15 @@
           editor-clear-view-display-map!
           editor-replace-view-folds!
           editor-clear-view-folds!
+          view-navigation-target?
+          view-navigation-target-buffer-id
+          view-navigation-target-revision
+          view-navigation-target-start
+          view-navigation-target-end
+          view-navigation-target-kind
+          view-navigation-target
+          view-set-navigation-target!
+          view-clear-navigation-target!
           editor-base-view
           editor-window-root
           editor-active-window-id

@@ -4578,11 +4578,38 @@
 (editor-update!
   xref-editor
   (make-command-message 'buffer-item.next #f))
-(unless
-  (and
-    (= (location-list-index (editor-current-location-list xref-editor)) 0)
-    (= (view-caret xref-view) 8))
-  (error 'editor-tests "result navigation skipped the first item from a heading"))
+(let* ([locations (editor-current-location-list xref-editor)]
+       [item (location-list-current locations)]
+       [target (view-navigation-target xref-view)])
+  (unless
+    (and
+      (= (location-list-index locations) 0)
+      (= (view-caret xref-view) 8)
+      target
+      (= (view-navigation-target-buffer-id target) (buffer-id xref-buffer))
+      (= (view-navigation-target-start target) (location-item-start item))
+      (= (view-navigation-target-end target) (location-item-end item)))
+    (error 'editor-tests
+           "result navigation skipped the first item from a heading")))
+(editor-update! xref-editor (make-resize-message 12 80))
+(let ([frame (render-editor-frame xref-editor 12 80)])
+  (unless
+    (let row-loop ([row 0])
+      (and
+        (< row (frame-rows frame))
+        (or
+          (let column-loop ([column 0])
+            (and
+              (< column (frame-columns frame))
+              (let ([cell (frame-cell-ref frame row column)])
+                (or
+                  (and
+                    (equal? (cell-document-position cell) 8)
+                    (memq 'navigation.target-cursor (cell-faces cell)))
+                  (column-loop (+ column 1))))))
+          (row-loop (+ row 1)))))
+    (error 'editor-tests
+           "location preview did not render its transient target marker")))
 (editor-update!
   xref-editor
   (make-command-message 'buffer-item.next #f))
@@ -4590,6 +4617,8 @@
   (error 'editor-tests "xref results did not synchronize location selection"))
 (unless (= (view-caret xref-view) 21)
   (error 'editor-tests "xref next did not preview the first use"))
+(unless (= (view-navigation-target-start (view-navigation-target xref-view)) 21)
+  (error 'editor-tests "xref next did not move its preview target"))
 (editor-update!
   xref-editor
   (make-command-message 'buffer-item.next #f))
@@ -4617,8 +4646,12 @@
 (editor-update!
   xref-editor
   (make-command-message 'buffer-item.activate #f))
-(unless (= (view-id (editor-active-view xref-editor)) (view-id xref-view))
-  (error 'editor-tests "xref visit did not select the source view"))
+(unless
+  (and
+    (= (view-id (editor-active-view xref-editor)) (view-id xref-view))
+    (not (view-navigation-target xref-view)))
+  (error 'editor-tests
+         "xref visit did not select the source view or clear its preview"))
 (let ([results-view
         (find
           (lambda (view)

@@ -393,6 +393,7 @@
                  (and (memq disposition '(select select-and-close))
                       'jump))])
         (when (memq disposition '(select select-and-close))
+          (view-clear-navigation-target! origin-view)
           (editor-select-view-window! editor (view-id origin-view)))
         (when (eq? disposition 'select-and-close)
           (close-location-results-buffer!
@@ -410,6 +411,7 @@
                  editor (location-results-state-origin-view-id state))]
              [close-command (location-results-state-close-command state)]
              [close-argument (location-results-state-close-argument state)])
+        (view-clear-navigation-target! origin-view)
         (editor-select-view-window! editor (view-id origin-view))
         (close-location-results-buffer! editor buffer origin-view)
         (if close-command

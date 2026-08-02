@@ -51,6 +51,8 @@
         (cons 'editor.foreground (pface 'text 'inherit '()))
         (cons 'cursor (pface 'base 'rosewater '()))
         (cons 'cursor.inactive (pface 'inherit 'inherit '(reverse)))
+        (cons 'navigation.target (pface 'inherit 'surface1 '()))
+        (cons 'navigation.target-cursor (pface 'base 'rosewater '(bold)))
         (cons 'modeline (pface 'subtext1 'mantle '()))
         (cons 'modeline.active (pface 'inherit 'inherit '()))
         (cons 'modeline.inactive (pface 'overlay0 'mantle '()))

@@ -261,6 +261,16 @@
           editor-replace-view-folds!
           editor-clear-view-folds!
           view-navigation-walk
+          make-view-navigation-target
+          view-navigation-target?
+          view-navigation-target-buffer-id
+          view-navigation-target-revision
+          view-navigation-target-start
+          view-navigation-target-end
+          view-navigation-target-kind
+          view-navigation-target
+          view-set-navigation-target!
+          view-clear-navigation-target!
           view-resource-context
           view-completion
           view-current-input-state
@@ -369,7 +379,47 @@
       (mutable resource-context
                view-resource-context
                view-resource-context-set!)
+      (mutable navigation-target
+               view-navigation-target
+               view-navigation-target-set!)
       (immutable navigation-walk view-navigation-walk)))
+
+  (define-record-type
+    (view-navigation-target-record
+      make-view-navigation-target
+      view-navigation-target?)
+    (fields
+      (immutable buffer-id view-navigation-target-buffer-id)
+      (immutable revision view-navigation-target-revision)
+      (immutable start view-navigation-target-start)
+      (immutable end view-navigation-target-end)
+      (immutable kind view-navigation-target-kind)))
+
+  (define (view-clear-navigation-target! view)
+    (unless (view? view)
+      (assertion-violation
+        'view-clear-navigation-target! "expected a View" view))
+    (view-navigation-target-set! view #f))
+
+  (define (view-set-navigation-target! view start end kind)
+    (unless (and (view? view)
+                 (exact-non-negative-integer? start)
+                 (exact-non-negative-integer? end)
+                 (<= start end)
+                 (symbol? kind))
+      (assertion-violation
+        'view-set-navigation-target!
+        "invalid View navigation target"
+        view start end kind))
+    (let ([buffer (view-buffer view)])
+      (view-navigation-target-set!
+        view
+        (make-view-navigation-target
+          (buffer-id buffer)
+          (buffer-revision buffer)
+          start
+          end
+          kind))))
 
   (define-record-type
     (projection-cache %make-projection-cache projection-cache?)
@@ -2123,6 +2173,7 @@
                '()
                #f
                context
+               #f
                (make-navigation-walk))])
       (hashtable-set! (editor-view-table value) id view)
       (editor-view-ids-set!
@@ -2166,6 +2217,7 @@
           (lambda (state) (run-input-state-exit! view state))
           states))
       (cancel-view-completion! value view)
+      (view-clear-navigation-target! view)
       (for-each fold-close! (view-folds view))
       (view-folds-set! view '())
       (when (view-mark-anchor view)
@@ -5768,6 +5820,7 @@
               entry))))))
 
   (define (replace-view-caret-anchor! value offset)
+    (view-clear-navigation-target! value)
     (let* ([document (buffer-document (view-buffer value))]
            [anchor
              (document-create-anchor!
@@ -6501,6 +6554,7 @@
                  1
                  #f
                  #f)
+               #f
                (make-navigation-walk))]
            [value
              (%make-editor
