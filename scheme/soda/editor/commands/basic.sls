@@ -28,18 +28,6 @@
           (soda editor tui-application-runtime)
           (soda editor workspace-edit))
 
-  (define (with-document-text document procedure)
-    (let ([snapshot (document-snapshot document)])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda () (procedure text))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
-
   (define (context-view context)
     (command-context-view context))
 
@@ -92,7 +80,7 @@
             'auto-indent?
             #f))
         newlines
-        (with-document-text
+        (call-with-document-text
           (buffer-document buffer)
           (lambda (text)
             (let* ([line (car (text-position text offset))]
@@ -108,7 +96,7 @@
                   prefix-end))))))))
 
   (define (move-vertical! view delta)
-    (with-document-text
+    (call-with-document-text
       (buffer-document (view-buffer view))
       (lambda (text)
         (let* ([position (text-position text (view-caret view))]
@@ -230,7 +218,7 @@
                  wrap-column))))]))
 
   (define (move-visual! view delta)
-    (with-document-text
+    (call-with-document-text
       (buffer-document (view-buffer view))
       (lambda (text)
         (call-with-values
@@ -273,7 +261,7 @@
                 (cdr location))))))))
 
   (define (move-visual-boundary! view end?)
-    (with-document-text
+    (call-with-document-text
       (buffer-document (view-buffer view))
       (lambda (text)
         (call-with-values
@@ -341,7 +329,7 @@
     (let ([point
             (view-caret
               (command-context-view context))])
-      (with-document-text
+      (call-with-document-text
         (context-document context)
         (lambda (text)
           (let ([target
@@ -625,7 +613,7 @@
                    'edit.shift-region-right)
                context
                target)])
-      (with-document-text
+      (call-with-document-text
         (buffer-document buffer)
         (lambda (text)
           (let* ([lines
@@ -729,7 +717,7 @@
                 [replacement
                   (if (buffer-setting-ref buffer 'use-tabs? #f)
                       (repeat-bytes (make-bytevector 1 9) count)
-                      (with-document-text
+                      (call-with-document-text
                         (buffer-document buffer)
                         (lambda (text)
                           (let ([column
@@ -761,7 +749,7 @@
       (if (eq? (command-target-source target) 'region)
           (shift-region-command context target #t)
           (when (positive? count)
-            (with-document-text
+            (call-with-document-text
               (buffer-document buffer)
               (lambda (text)
                 (let* ([caret (command-target-point target)]
@@ -856,7 +844,7 @@
     (let* ([editor (command-context-editor context)]
            [view (context-view context)]
            [buffer (context-buffer context)])
-      (with-document-text
+      (call-with-document-text
         (buffer-document buffer)
         (lambda (text)
           (let* ([caret (view-caret view)]
@@ -896,7 +884,7 @@
     (let ([view (context-view context)])
       (view-set-caret!
         view
-        (with-document-text
+        (call-with-document-text
           (context-document context)
           (lambda (text)
             (let loop ([remaining count]
@@ -1033,7 +1021,7 @@
     (let ([view (context-view context)])
       (view-set-caret!
         view
-        (with-document-text
+        (call-with-document-text
           (context-document context)
           (lambda (text)
             (sentence-motion-target
@@ -1060,7 +1048,7 @@
                 (if (command-context-prefix context)
                     (command-context-count context)
                     (max 1 (- rows 2))))])
-      (with-document-text
+      (call-with-document-text
         (context-document context)
         (lambda (text)
           (let* ([line-count (text-line-count text)]
@@ -1095,7 +1083,7 @@
 
   (define (recenter-command context)
     (let ([view (context-view context)])
-      (with-document-text
+      (call-with-document-text
         (context-document context)
         (lambda (text)
           (let* ([rows (max 1 (view-viewport-rows view))]
@@ -1162,7 +1150,7 @@
     (let* ([editor (command-context-editor context)]
            [view (context-view context)]
            [position
-             (with-document-text
+             (call-with-document-text
                (context-document context)
                (lambda (text)
                  (text-position text (view-caret view))))])
@@ -1205,7 +1193,7 @@
            "Go-to origin view is no longer available")
          '()]
         [else
-         (with-document-text
+         (call-with-document-text
            (buffer-document (view-buffer view))
            (lambda (text)
              (let* ([tab-width
@@ -1258,7 +1246,7 @@
     (let ([view (context-view context)])
       (view-set-caret!
         view
-        (with-document-text
+        (call-with-document-text
           (context-document context)
           (lambda (text)
             (text-line-start
@@ -1270,7 +1258,7 @@
     (let ([view (context-view context)])
       (view-set-caret!
         view
-        (with-document-text
+        (call-with-document-text
           (context-document context)
           (lambda (text)
             (text-line-content-end
@@ -1286,7 +1274,7 @@
     (let ([view (context-view context)])
       (view-set-caret!
         view
-        (with-document-text
+        (call-with-document-text
           (context-document context)
           text-size)))
     '())
@@ -1300,7 +1288,7 @@
               (command-context-view context))])
       (call-with-values
         (lambda ()
-          (with-document-text
+          (call-with-document-text
             (context-document context)
             (lambda (text)
               (let find-start ([offset caret])
@@ -1373,7 +1361,7 @@
       (view-set-caret! view 0)
       (view-set-mark!
         view
-        (with-document-text
+        (call-with-document-text
           (buffer-document buffer)
           text-size))
       (editor-set-status-message! editor "Buffer marked")
@@ -1564,7 +1552,7 @@
              (view-caret
                (command-context-view context))]
            [end
-             (with-document-text
+             (call-with-document-text
                (context-document context)
                (lambda (text)
                  (let* ([size (text-size text)]
@@ -1612,7 +1600,7 @@
              (view-caret
                (command-context-view context))]
            [end
-             (with-document-text
+             (call-with-document-text
                (context-document context)
                (lambda (text)
                  (sentence-motion-target

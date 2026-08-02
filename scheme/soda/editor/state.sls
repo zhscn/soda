@@ -5610,7 +5610,7 @@
         buffer
         offset))
     (let ([position
-            (with-document-text
+            (call-with-document-text
               (buffer-document buffer)
               (lambda (text) (text-position text offset)))])
       (editor-delete-bookmark! editor name)
@@ -5662,7 +5662,7 @@
         (document-anchor-offset
           (buffer-document buffer)
           (bookmark-anchor entry))
-        (with-document-text
+        (call-with-document-text
           (buffer-document buffer)
           (lambda (text)
             (let* ([line
@@ -5781,7 +5781,7 @@
                (buffer-file-path buffer))])
       (and
         entry
-        (with-document-text
+        (call-with-document-text
           (buffer-document buffer)
           (lambda (text)
             (let* ([size (text-size text)]
@@ -6078,18 +6078,6 @@
         (lambda (state) (run-input-state-exit! value state))
         removed)))
 
-  (define (with-document-text document procedure)
-    (let ([snapshot (document-snapshot document)])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda () (procedure text))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
-
   (define (display-line-leading-end text line)
     (let ([end (text-line-content-end text line)])
       (let loop ([offset (text-line-start text line)])
@@ -6159,7 +6147,7 @@
                            (display-map-valid-for? base document-id revision)
                            (not (display-map-identity? base))
                            base)
-                      (with-document-text
+                      (call-with-document-text
                         document
                         (lambda (text)
                           (let* ([provider-runs
@@ -6234,7 +6222,7 @@
                    setting
                    8))]
            [view-state
-             (with-document-text
+             (call-with-document-text
                document
                (lambda (text)
                  (let* ([caret (view-caret view)]

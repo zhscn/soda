@@ -17,21 +17,9 @@
           (soda editor setting)
           (soda editor state))
 
-  (define (with-document-text document procedure)
-    (let ([snapshot (document-snapshot document)])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda () (procedure text))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
-
   (define (transpose-character-once! view)
     (let ([buffer (view-buffer view)])
-      (with-document-text
+      (call-with-document-text
         (buffer-document buffer)
         (lambda (text)
           (let* ([size (text-size text)]
@@ -103,7 +91,7 @@
                   (= second-start second-end)
                   (> first-end second-start))
               #f
-              (with-document-text
+              (call-with-document-text
                 (buffer-document buffer)
                 (lambda (text)
                   (let ([first
@@ -176,7 +164,7 @@
           "Transpose line count must be non-negative"))
       (when (positive? count)
         (let ([buffer (view-buffer view)])
-          (with-document-text
+          (call-with-document-text
             (buffer-document buffer)
             (lambda (text)
               (let* ([line-count (text-line-count text)]
@@ -239,7 +227,7 @@
   (define (join-line-command context)
     (let ([view (command-context-view context)])
       (let ([buffer (view-buffer view)])
-        (with-document-text
+        (call-with-document-text
           (buffer-document buffer)
           (lambda (text)
             (let* ([line-count (text-line-count text)]
@@ -301,7 +289,7 @@
   (define (delete-blank-lines-command context)
     (let* ([view (command-context-view context)]
            [buffer (view-buffer view)])
-      (with-document-text
+      (call-with-document-text
         (buffer-document buffer)
         (lambda (text)
           (let* ([point-line
@@ -373,7 +361,7 @@
         (editor-user-error 'edit.sort-lines "The region target is stale"))
       (when (< start end)
         (let ([replacement
-                (with-document-text
+                (call-with-document-text
                   (buffer-document buffer)
                   (lambda (text)
                     (let* ([trailing-newline?
@@ -401,7 +389,7 @@
         (editor-user-error
           'edit.reverse-region
           "The region target is stale"))
-      (with-document-text
+      (call-with-document-text
         (buffer-document buffer)
         (lambda (text)
           (let ([range
@@ -486,7 +474,7 @@
           "The region target is stale"))
       (if (= start end)
           (editor-set-status-message! editor "Deleted 0 duplicate lines")
-          (with-document-text
+          (call-with-document-text
             (buffer-document buffer)
             (lambda (text)
               (let ([trailing-newline?
@@ -569,7 +557,7 @@
       (when (zero? (string-length pattern))
         (editor-user-error 'edit.align-regexp "Regexp must not be empty"))
       (when (< start end)
-        (with-document-text
+        (call-with-document-text
           (buffer-document buffer)
           (lambda (text)
             (let* ([trailing-newline?
@@ -643,7 +631,7 @@
           'edit.whitespace-cleanup
           "The cleanup target is stale"))
       (when (< start end)
-        (with-document-text
+        (call-with-document-text
           (buffer-document buffer)
           (lambda (text)
             (let* ([fragments
@@ -711,7 +699,7 @@
           "The word target is stale"))
       (when (< start end)
         (let ([replacement
-                (with-document-text
+                (call-with-document-text
                   (buffer-document buffer)
                   (lambda (text)
                     (string->utf8

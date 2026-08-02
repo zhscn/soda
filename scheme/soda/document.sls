@@ -24,6 +24,7 @@
           document-id
           document-revision
           document-snapshot
+          call-with-document-text
           document-begin-transaction
           document-can-undo?
           document-can-redo?
@@ -638,6 +639,21 @@
     (require-open 'snapshot-text snapshot? snapshot-pointer value)
     (%make-text
       (check-pointer 'snapshot-text (%snapshot-text (snapshot-pointer value)))))
+
+  (define (call-with-document-text document procedure)
+    (unless (procedure? procedure)
+      (assertion-violation
+        'call-with-document-text "expected a procedure" procedure))
+    (let ([snapshot (document-snapshot document)])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (let ([text (snapshot-text snapshot)])
+            (dynamic-wind
+              (lambda () #f)
+              (lambda () (procedure text))
+              (lambda () (text-close! text)))))
+        (lambda () (snapshot-close! snapshot)))))
 
   (define (transaction-close! value)
     (when (and (transaction? value)

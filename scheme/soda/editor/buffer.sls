@@ -799,16 +799,7 @@
         'call-with-buffer-text
         "expected a Buffer and procedure"
         buffer procedure))
-    (let ([snapshot (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda () (procedure text))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
+    (call-with-document-text (buffer-document buffer) procedure))
 
   (define (buffer-byte-size buffer)
     (call-with-buffer-text buffer text-size))
