@@ -2709,30 +2709,6 @@
             (prompt-session-origin-view-id
               (last-prompt sessions))))))
 
-  (define (buffer-text-string buffer)
-    (let ([snapshot (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda () (utf8->string (text->bytevector text)))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
-
-  (define (buffer-text-size buffer)
-    (let ([snapshot (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda () (text-size text))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
-
   (define (replace-buffer-text! buffer value)
     (let ([change #f])
       (dynamic-wind
@@ -2746,7 +2722,7 @@
                   (transaction-replace!
                     transaction
                     0
-                    (buffer-text-size buffer)
+                    (buffer-byte-size buffer)
                     (string->utf8 value)))))
             (lambda (result committed-change)
               (set! change committed-change)
@@ -2769,7 +2745,7 @@
              (editor-buffer-ref
                value
                (prompt-session-buffer-id session))])
-      (buffer-text-string buffer)))
+      (buffer-string-range buffer 0 (buffer-byte-size buffer))))
 
   (define (editor-active-prompt-completion value)
     (require-open-editor 'editor-active-prompt-completion value)
@@ -3721,7 +3697,7 @@
       (configure-prompt-view-viewport! value session)
       (view-set-caret!
         view
-        (buffer-text-size buffer))
+        (buffer-byte-size buffer))
       (view-push-input-state!
         view
         (make-input-state
@@ -3995,7 +3971,7 @@
       (replace-buffer-text! buffer input)
       (view-set-caret!
         view
-        (buffer-text-size buffer))
+        (buffer-byte-size buffer))
       (ensure-view-visible! view)
       (editor-refresh-prompt-completion! value)
       input))

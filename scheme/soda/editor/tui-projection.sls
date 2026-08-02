@@ -4,7 +4,6 @@
           tui-focused-accessibility
           tui-focused-copy-bytes)
   (import (rnrs)
-          (soda document)
           (soda editor buffer)
           (soda editor edit)
           (soda editor state)
@@ -26,18 +25,6 @@
                "text projection must return a string or bytevector"
                (tui-application-definition-name definition)
                value)])))))
-
-  (define (buffer-text-size buffer)
-    (let ([snapshot (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda () (text-size text))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
 
   (define (tui-ensure-session-text-projection! editor session)
     (require-open-editor 'tui-ensure-session-text-projection! editor)
@@ -62,7 +49,7 @@
                    (tui-session-arguments session)))])
         (when bytes
           (buffer-replace-range-internal!
-            buffer 0 (buffer-text-size buffer) bytes))
+            buffer 0 (buffer-byte-size buffer) bytes))
         (tui-session-set-projection-generation!
           session
           (tui-session-generation session))))
