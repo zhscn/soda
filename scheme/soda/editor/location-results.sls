@@ -266,6 +266,29 @@
         who "invalid result Buffer request"
         title locations origin-view-id jump-kind close-command)))
 
+  (define (register-result-producer-stop-action! buffer state)
+    (when (location-results-state-close-command state)
+      (buffer-register-result-panel-action!
+        buffer
+        (make-result-panel-action
+          'stop
+          "Stop task"
+          (lambda (candidate)
+            (and
+              (eq? (buffer-result-producer-state candidate) 'running)
+              (not
+                (buffer-local-ref
+                  candidate 'result-producer-stop-invoked? #f))))
+          (lambda (context candidate)
+            (buffer-set-local!
+              candidate 'result-producer-stop-invoked? #t)
+            (list
+              (make-command-effect
+                'command.invoke
+                (make-internal-command-message
+                  (location-results-state-close-command state)
+                  (location-results-state-close-argument state)))))))))
+
   (define (%editor-open-result-buffer!
             editor resource mode title locations origin-view-id jump-kind
             close-command close-argument)
@@ -294,6 +317,8 @@
         (bytevector-length (string->utf8 heading))
         '((face . application.heading) (result-heading . #t)))
       (buffer-set-local! buffer 'location-results-state state)
+      (buffer-set-local! buffer 'result-producer-stop-invoked? #f)
+      (register-result-producer-stop-action! buffer state)
       buffer))
 
   (define editor-open-result-buffer!
@@ -405,11 +430,14 @@
                (editor-view-ref
                  editor (location-results-state-origin-view-id state))]
              [close-command (location-results-state-close-command state)]
-             [close-argument (location-results-state-close-argument state)])
+             [close-argument (location-results-state-close-argument state)]
+             [stop-invoked?
+               (buffer-local-ref
+                 buffer 'result-producer-stop-invoked? #f)])
         (view-clear-navigation-target! origin-view)
         (editor-select-view-window! editor (view-id origin-view))
         (editor-dismiss-result-buffer! editor buffer origin-view)
-        (if close-command
+        (if (and close-command (not stop-invoked?))
             (list
               (make-command-effect
                 'command.invoke

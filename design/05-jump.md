@@ -186,7 +186,9 @@ worktree change 提供 stage，index change 提供 unstage，tracked change 提�
 可重新生成内容的 Result Buffer 注册 buffer-local refresh callback。`g` 调用当前
 Buffer 的 producer，而不判断它来自搜索、版本控制或语义服务。producer 负责替换
 session、取消仍在运行的旧任务并重新建立属性；Project search 和 Git status 使用该
-协议。
+协议。带 cancellation command 的运行中 producer 还提供面板级 `stop` action；它停止
+任务但保留已经生成的文本和 LocationItem。`close` 仍可取消并关闭面板，已经显式停止
+的任务在关闭时不会重复提交 cancellation。
 
 Result Buffer 在不可见时仍保存当前 item。全局 next/previous locus 使用当前 Workbench
 中最近实际导航的 Result Buffer，并跳过已经关闭的 Buffer；它不依赖 Result Buffer

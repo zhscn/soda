@@ -712,7 +712,13 @@
       (eq?
         (buffer-result-producer-state
           (view-buffer (editor-active-view editor)))
-        'running))
+        'running)
+      (memq
+        'stop
+        (map
+          result-panel-action-name
+          (buffer-result-panel-actions
+            (view-buffer (editor-active-view editor))))))
     (error 'editor-tests "Project search command differs" effects))
   (let ([items
           (project-search-json-line->locations
@@ -766,6 +772,13 @@
         (error 'editor-tests
                "Project search exposed editing while its producer was running"))
       (buffer-set-result-producer-state! results-buffer 'ready)
+      (when
+        (memq
+          'stop
+          (map result-panel-action-name
+               (buffer-result-panel-actions results-buffer)))
+        (error 'editor-tests
+               "Completed Project search retained its stop action"))
       (unless
         (memq
           'edit-results
