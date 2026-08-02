@@ -65,6 +65,13 @@
             (make-cell-source 'view (view-id view) 'inactive-cursor)
             (cell-sources cell))))))
 
+  (define (collapsed-result-group? view heading-end)
+    (exists
+      (lambda (fold)
+        (and (eq? (fold-capture fold) 'result-group)
+             (= (fold-start fold) heading-end)))
+      (view-folds view)))
+
   (define (decode-text bytes)
     (utf8->string bytes))
 
@@ -1127,6 +1134,27 @@
                '())]
            [result-marks
              (buffer-local-ref buffer 'result-marked-indices '())]
+           [collapsed-group-decorations
+             (fold-right
+               (lambda (range runs)
+                 (let ([start (car range)]
+                       [end (cadr range)])
+                   (if (and (collapsed-result-group? view end)
+                            (< start visible-end)
+                            (< visible-start end))
+                       (cons
+                         (make-decoration-run
+                           (max start visible-start)
+                           (min end visible-end)
+                           'result.group.collapsed
+                           'transient
+                           12
+                           'view
+                           (view-id view))
+                         runs)
+                       runs)))
+               '()
+               (buffer-text-property-ranges buffer 'result-group))]
            [result-mark-decorations
              (fold-right
                (lambda (range runs)
@@ -1158,6 +1186,7 @@
                    external-decorations
                    selection-decorations
                    result-mark-decorations
+                   collapsed-group-decorations
                    navigation-target-decorations)
                  visible-start
                  visible-end)

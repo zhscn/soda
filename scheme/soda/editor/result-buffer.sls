@@ -21,6 +21,8 @@
           buffer-result-refreshable?
           buffer-set-result-producer-state!
           buffer-result-producer-state
+          buffer-capture-result-group-folds!
+          editor-reconcile-result-group-folds!
           refresh-buffer-items
           buffer-set-result-interface!
           buffer-result-interface-ref
@@ -38,6 +40,7 @@
           (soda editor condition)
           (soda editor display-placement)
           (soda editor edit)
+          (soda editor fold)
           (soda editor prompt)
           (soda editor resource-context)
           (soda editor state)
@@ -431,7 +434,7 @@
         (editor-user-error who "Current Buffer is not navigable"))
       (values buffer interface)))
 
-  (define (property-positions buffer interface)
+  (define (property-positions buffer)
     (map
       (lambda (range) (cons (car range) (caddr range)))
       (buffer-text-property-ranges buffer 'result-index)))
@@ -532,6 +535,8 @@
                (buffer-result-interface-ref existing)
                (capture-result-selection
                  existing (buffer-result-interface-ref existing)))])
+      (when existing
+        (buffer-capture-result-group-folds! editor buffer))
       (buffer-set-major-mode! buffer mode)
       (buffer-clear-text-properties! buffer)
       (buffer-replace-range-internal!
@@ -558,6 +563,128 @@
 
   (define (property-starts buffer property)
     (map car (buffer-text-property-ranges buffer property)))
+
+  (define (result-group-ranges buffer)
+    (let ([groups
+            (buffer-text-property-ranges buffer 'result-group)]
+          [size (buffer-size buffer)])
+      (let loop ([remaining groups] [result '()])
+        (if (null? remaining)
+            (reverse result)
+            (let* ([group (car remaining)]
+                   [next (and (pair? (cdr remaining)) (cadr remaining))])
+              (loop
+                (cdr remaining)
+                (cons
+                  (list
+                    (car group)
+                    (cadr group)
+                    (if next (car next) size)
+                    (caddr group))
+                  result)))))))
+
+  (define (result-group-fold? fold)
+    (and (fold? fold)
+         (eq? (fold-capture fold) 'result-group)))
+
+  (define (result-group-folded? view group)
+    (exists
+      (lambda (fold)
+        (and (result-group-fold? fold)
+             (= (fold-start fold) (cadr group))
+             (= (fold-end fold) (caddr group))))
+      (view-folds view)))
+
+  (define (result-position-visible? view position)
+    (or (not view)
+        (not
+          (exists
+            (lambda (fold)
+              (and (result-group-fold? fold)
+                   (<= (fold-start fold) position)
+                   (< position (fold-end fold))))
+            (view-folds view)))))
+
+  (define (visible-property-positions buffer view)
+    (filter
+      (lambda (entry)
+        (result-position-visible? view (car entry)))
+      (property-positions buffer)))
+
+  (define (result-group-at buffer position)
+    (let loop ([groups (result-group-ranges buffer)] [found #f])
+      (cond
+        [(null? groups) found]
+        [(< position (caar groups)) found]
+        [(< position (caddar groups)) (car groups)]
+        [else (loop (cdr groups) (car groups))])))
+
+  (define (result-group-labels-for-view buffer view)
+    (fold-right
+      (lambda (group labels)
+        (if (result-group-folded? view group)
+            (cons (cadddr group) labels)
+            labels))
+      '()
+      (result-group-ranges buffer)))
+
+  (define (buffer-capture-result-group-folds! editor buffer)
+    (buffer-set-local!
+      buffer
+      'result-pending-collapsed-groups
+      (fold-right
+        (lambda (view entries)
+          (if (eq? (view-buffer view) buffer)
+              (cons
+                (cons
+                  (view-id view)
+                  (result-group-labels-for-view buffer view))
+                entries)
+              entries))
+        '()
+        (editor-views editor))))
+
+  (define (replace-result-group-folds! editor buffer view labels)
+    (let* ([groups (result-group-ranges buffer)]
+           [retained
+             (filter
+               (lambda (fold) (not (result-group-fold? fold)))
+               (view-folds view))]
+           [folds
+             (fold-right
+               (lambda (group result)
+                 (if (and (member (cadddr group) labels)
+                          (< (cadr group) (caddr group)))
+                     (cons
+                       (make-fold
+                         (buffer-document buffer)
+                         (cadr group)
+                         (caddr group)
+                         'result-group
+                         'result-group)
+                       result)
+                     result))
+               retained
+               groups)])
+      (editor-replace-view-folds! editor (view-id view) folds)))
+
+  (define (editor-reconcile-result-group-folds! editor buffer)
+    (let ([pending
+            (buffer-local-ref
+              buffer 'result-pending-collapsed-groups '())])
+      (for-each
+        (lambda (entry)
+          (let ([view
+                  (find
+                    (lambda (candidate)
+                      (= (view-id candidate) (car entry)))
+                    (editor-views editor))])
+            (when (and view (eq? (view-buffer view) buffer))
+              (replace-result-group-folds!
+                editor buffer view (cdr entry)))))
+        pending)
+      (buffer-set-local!
+        buffer 'result-pending-collapsed-groups '())))
 
   (define (selected-item context who)
     (let-values ([(buffer interface) (require-interface context who)])
@@ -740,7 +867,7 @@
         [else candidate])))
 
   (define (move-buffer-item context buffer interface view delta)
-      (let ([positions (property-positions buffer interface)])
+      (let ([positions (visible-property-positions buffer view)])
         (if (null? positions)
             (begin
               (editor-set-status-message!
@@ -752,10 +879,38 @@
                            buffer (view-caret view) 'result-index #f)
                          (buffer-local-ref
                            buffer 'result-current-index #f))]
+                   [current-visible-index
+                     (and
+                       current
+                       (let loop ([remaining positions] [index 0])
+                         (cond
+                           [(null? remaining) #f]
+                           [(= (cdar remaining) current) index]
+                           [else
+                            (loop (cdr remaining) (+ index 1))])))]
                    [base
-                     (if current
-                         current
-                         (if (positive? delta) -1 (length positions)))]
+                     (cond
+                       [current-visible-index current-visible-index]
+                       [(and view (positive? delta))
+                        (let loop
+                          ([remaining positions]
+                           [index 0]
+                           [last -1])
+                          (cond
+                            [(null? remaining) last]
+                            [(<= (caar remaining) (view-caret view))
+                             (loop
+                               (cdr remaining) (+ index 1) index)]
+                            [else last]))]
+                       [(and view (negative? delta))
+                        (let loop ([remaining positions] [index 0])
+                          (cond
+                            [(null? remaining) (length positions)]
+                            [(>= (caar remaining) (view-caret view)) index]
+                            [else
+                             (loop (cdr remaining) (+ index 1))]))]
+                       [else
+                        (if (positive? delta) -1 (length positions))])]
                    [target
                      (bounded-index
                        base delta (length positions)
@@ -797,7 +952,7 @@
 
   (define (move-buffer-group context buffer interface view direction)
     (let* ([groups (property-starts buffer 'result-group)]
-           [items (property-positions buffer interface)])
+           [items (visible-property-positions buffer view)])
       (if (or (null? groups) (null? items))
           (begin
             (editor-set-status-message!
@@ -860,6 +1015,65 @@
           'buffer-item.quit
           "Apply or discard Result Buffer edits before quitting"))
       ((result-buffer-interface-quit interface) context buffer)))
+
+  (define (set-result-group-folded! context folded?)
+    (let-values ([(buffer interface)
+                  (require-interface context 'buffer-group.toggle)])
+      (let* ([editor (command-context-editor context)]
+             [view (command-context-view context)]
+             [group (result-group-at buffer (view-caret view))])
+        (unless group
+          (editor-user-error
+            'buffer-group.toggle "Point is not in a result group"))
+        (let* ([label (cadddr group)]
+               [labels (result-group-labels-for-view buffer view)]
+               [next-labels
+                 (if folded?
+                     (if (member label labels)
+                         labels
+                         (cons label labels))
+                     (filter
+                       (lambda (candidate)
+                         (not (equal? candidate label)))
+                       labels))])
+          (replace-result-group-folds!
+            editor buffer view next-labels)
+          (view-set-caret! view (car group))
+          (ensure-view-visible! view)
+          '()))))
+
+  (define (toggle-result-group context)
+    (let-values ([(buffer interface)
+                  (require-interface context 'buffer-group.toggle)])
+      (let* ([view (command-context-view context)]
+             [group (result-group-at buffer (view-caret view))])
+        (unless group
+          (editor-user-error
+            'buffer-group.toggle "Point is not in a result group"))
+        (set-result-group-folded!
+          context (not (result-group-folded? view group))))))
+
+  (define (set-all-result-groups-folded! context folded?)
+    (let-values ([(buffer interface)
+                  (require-interface context 'buffer-group.fold-all)])
+      (let ([editor (command-context-editor context)]
+            [view (command-context-view context)])
+        (replace-result-group-folds!
+          editor
+          buffer
+          view
+          (if folded?
+              (map cadddr (result-group-ranges buffer))
+              '()))
+        '())))
+
+  (define (visit-or-toggle-result-group context)
+    (let* ([view (command-context-view context)]
+           [buffer (view-buffer view)])
+      (if (buffer-text-property-ref
+            buffer (view-caret view) 'result-group #f)
+          (toggle-result-group context)
+          (activate-selected context 'select-and-close))))
 
   (define (global-navigation-context context)
     (let* ([editor (command-context-editor context)]
@@ -925,6 +1139,28 @@
         (list 'buffer-item.activate-and-close
               (lambda (context) (activate-selected context 'select-and-close))
               "Activate the item at point and close its presenting Buffer.")
+        (list 'buffer-item.visit-or-toggle-group
+              visit-or-toggle-result-group
+              "Visit the item at point or toggle its result group.")
+        (list 'buffer-group.toggle
+              toggle-result-group
+              "Toggle the result group containing point.")
+        (list 'buffer-group.fold
+              (lambda (context)
+                (set-result-group-folded! context #t))
+              "Collapse the result group containing point.")
+        (list 'buffer-group.unfold
+              (lambda (context)
+                (set-result-group-folded! context #f))
+              "Expand the result group containing point.")
+        (list 'buffer-group.fold-all
+              (lambda (context)
+                (set-all-result-groups-folded! context #t))
+              "Collapse every group in the current result Buffer.")
+        (list 'buffer-group.unfold-all
+              (lambda (context)
+                (set-all-result-groups-folded! context #f))
+              "Expand every group in the current result Buffer.")
         (list 'buffer-item.quit
               quit-buffer-items
               "Close the current navigable Buffer.")

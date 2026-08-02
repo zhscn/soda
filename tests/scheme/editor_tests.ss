@@ -4473,6 +4473,56 @@
     (error 'editor-tests "Scheme xref did not publish references")))
 (define xref-results-buffer
   (view-buffer (editor-active-view xref-editor)))
+(let* ([view (editor-active-view xref-editor)]
+       [group
+         (car
+           (buffer-text-property-ranges
+             xref-results-buffer 'result-group))]
+       [heading-start (car group)]
+       [heading-end (cadr group)])
+  (view-set-caret! view heading-start)
+  (editor-update!
+    xref-editor
+    (make-command-message 'buffer-item.visit-or-toggle-group #f))
+  (unless
+    (and (= (length (view-folds view)) 1)
+         (eq? (fold-capture (car (view-folds view))) 'result-group)
+         (= (fold-start (car (view-folds view))) heading-end))
+    (error 'editor-tests
+           "result heading did not create a View-local group fold"))
+  (editor-update! xref-editor (make-resize-message 12 80))
+  (let ([frame (render-editor-frame xref-editor 12 80)])
+    (unless
+      (let row-loop ([row 0])
+        (and
+          (< row (frame-rows frame))
+          (or
+            (let column-loop ([column 0])
+              (and
+                (< column (frame-columns frame))
+                (let ([cell (frame-cell-ref frame row column)])
+                  (or
+                    (and
+                      (equal? (cell-document-position cell) heading-start)
+                      (memq 'result.group.collapsed (cell-faces cell)))
+                    (column-loop (+ column 1))))))
+            (row-loop (+ row 1)))))
+      (error 'editor-tests
+             "collapsed result heading did not expose its visual state")))
+  (editor-update!
+    xref-editor
+    (make-command-message 'buffer-item.next #f))
+  (unless (equal? (editor-status-message xref-editor) "No navigable items")
+    (error 'editor-tests
+           "result navigation entered a collapsed group"))
+  (editor-update!
+    xref-editor
+    (make-command-message 'buffer-group.toggle #f))
+  (unless (null? (view-folds view))
+    (error 'editor-tests "result group did not expand"))
+  (editor-update!
+    xref-editor
+    (make-command-message 'buffer-item.next #f)))
 (define result-action-invocation #f)
 (buffer-register-result-action!
   xref-results-buffer
@@ -4604,8 +4654,27 @@
     13
     "hello"
     '((test . appended))))
+(let* ([view (editor-active-view xref-editor)]
+       [group
+         (car
+           (buffer-text-property-ranges
+             xref-results-buffer 'result-group))])
+  (view-set-caret! view (car group))
+  (editor-update!
+    xref-editor
+    (make-command-message 'buffer-group.toggle #f)))
 (editor-append-location-results!
   xref-editor xref-results-buffer (list appended-xref-item))
+(let ([folds (view-folds (editor-active-view xref-editor))])
+  (unless
+    (and (= (length folds) 1)
+         (= (fold-end (car folds))
+            (bytevector-length (buffer-bytes xref-results-buffer))))
+    (error 'editor-tests
+           "streaming append did not preserve and resize a result group fold"))
+  (editor-update!
+    xref-editor
+    (make-command-message 'buffer-group.toggle #f)))
 (unless
   (and
     (= (length

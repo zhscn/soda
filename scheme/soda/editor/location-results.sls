@@ -468,6 +468,7 @@
             properties)
           (buffer-set-local! buffer 'location-results-state state)
           (location-results-state-last-resource-set! state last-resource)
+          (editor-reconcile-result-group-folds! editor buffer)
           (let ([restored?
                   (buffer-reconcile-result-selection! editor buffer #t)])
             (unless restored?
@@ -504,6 +505,7 @@
              [locations (location-results-state-locations state)]
              [start-index (length (location-list-items locations))]
              [start-position (buffer-size buffer)])
+        (buffer-capture-result-group-folds! editor buffer)
         (let-values ([(text properties last-resource)
                       (render-appended-locations
                         editor
@@ -518,6 +520,7 @@
               (buffer-add-text-properties!
                 buffer (car entry) (cadr entry) (caddr entry)))
             properties)
+          (editor-reconcile-result-group-folds! editor buffer)
           (location-list-append-items! locations items)
           (location-results-state-last-resource-set! state last-resource)
           (let ([restored?
@@ -561,8 +564,11 @@
     (let ([keymap (make-keymap)])
       (bind-result-key! keymap 'down #f 'buffer-item.next)
       (bind-result-key! keymap 'up #f 'buffer-item.previous)
+      (bind-result-key! keymap 'left #f 'buffer-group.fold)
+      (bind-result-key! keymap 'right #f 'buffer-group.unfold)
       (bind-result-key! keymap 'enter 13 'buffer-item.activate)
-      (bind-result-key! keymap 'tab 9 'buffer-item.activate-and-close)
+      (bind-result-key!
+        keymap 'tab 9 'buffer-item.visit-or-toggle-group)
       (bind-result-key! keymap 'character (char->integer #\n) 'buffer-item.next)
       (bind-result-key! keymap 'character (char->integer #\p) 'buffer-item.previous)
       (bind-result-key! keymap 'character (char->integer #\N) 'buffer-item.next-group)
