@@ -233,7 +233,9 @@ origin、code 和 message 去重并稳定排序，因此 Scheme 的 live annotat
 LocationItem；跨 Buffer preview 会在目标 View 应用该上下文，LSP code action 因而根据
 诊断所属的目标 Buffer 和 session 发起，而不依赖打开结果面板时的源 View。LSP 与其他
 provider 仍保留各自 payload。severity filter、refresh、location preview 和
-ResultAction 对两种作用域使用同一实现。
+ResultAction 对两种作用域使用同一实现。severity filter 与 refresh 都通过 Result
+Buffer 的来源解析器取得展示 View；原来源 Window 已关闭时，它们在同一 Workbench 中
+重绑定或建立 source View，不保存只能使用一次的 Window identity。
 
 LocationList 的 index 与 Result Buffer 当前 item 同步，用于语义 API 和 session 数据。
 从任意 Result Buffer 激活或预览位置时，该列表同时成为所在 Workbench 的 current

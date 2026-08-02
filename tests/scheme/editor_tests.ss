@@ -7070,6 +7070,36 @@
     (error 'editor-tests
            "Workbench diagnostics did not aggregate annotation providers"
            locations)))
+(let* ([result-view (editor-active-view workbench-diagnostic-editor)]
+       [result-buffer (view-buffer result-view)]
+       [source-view
+         (find
+           (lambda (view) (not (eq? view result-view)))
+           (editor-views workbench-diagnostic-editor))])
+  (unless source-view
+    (error 'editor-tests
+           "Workbench diagnostics did not create a source/result window pair"))
+  (editor-select-view-window!
+    workbench-diagnostic-editor (view-id source-view))
+  (editor-delete-window! workbench-diagnostic-editor)
+  (invoke-result-panel-action
+    (make-command-context
+      workbench-diagnostic-editor
+      (editor-active-view workbench-diagnostic-editor)
+      #f #f #f)
+    'toggle-warning)
+  (unless
+    (and
+      (not (editor-debugger workbench-diagnostic-editor))
+      (eq? (view-buffer (editor-active-view workbench-diagnostic-editor))
+           result-buffer)
+      (= (length
+           (location-list-items
+             (editor-current-location-list workbench-diagnostic-editor)))
+         1)
+      (= (length (editor-window-leaves workbench-diagnostic-editor)) 2))
+    (error 'editor-tests
+           "Diagnostics filter did not recover after its source View closed")))
 (editor-close! workbench-diagnostic-editor)
 
 (define scheme-indent-source

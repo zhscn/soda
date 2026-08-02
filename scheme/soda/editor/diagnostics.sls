@@ -479,7 +479,7 @@
           diagnostic-severities)))
 
   (define (register-diagnostic-filter-actions!
-            editor buffer resource title source origin-view-id refresh)
+            editor buffer resource title source refresh)
     (let ([all-items
             (buffer-local-ref buffer 'diagnostic-source-items '())])
       (for-each
@@ -510,7 +510,11 @@
                     (severity-label severity))
                   (lambda (candidate) #t)
                   (lambda (context candidate)
-                    (let* ([current
+                    (let* ([current-origin-view-id
+                             (editor-result-origin-view-id
+                               editor
+                               (command-context-view context))]
+                           [current
                              (buffer-local-ref
                                candidate
                                'diagnostic-visible-severities
@@ -520,7 +524,7 @@
                         candidate 'diagnostic-visible-severities next)
                       (show-diagnostics!
                         editor resource title source all-items
-                        origin-view-id refresh)
+                        current-origin-view-id refresh)
                       (let ([shown
                               (length
                                 (diagnostic-items-for-severities
@@ -575,7 +579,7 @@
           (hashtable-ref
             editor-diagnostic-result-actions editor '())))
       (register-diagnostic-filter-actions!
-        editor buffer resource title source origin-view-id refresh)))
+        editor buffer resource title source refresh)))
 
   (define (diagnostic-status! editor label items)
     (editor-set-status-message!
