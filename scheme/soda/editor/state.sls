@@ -12,7 +12,6 @@
           editor-remove-buffer!
           editor-buffer-for-resource
           editor-set-buffer-resource!
-          editor-buffer-registry-generation
           editor-touch-buffer-registry!
           editor-views
           editor-view-ref
