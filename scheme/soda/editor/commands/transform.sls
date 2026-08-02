@@ -15,6 +15,7 @@
           (soda editor motion-runtime)
           (soda editor regexp)
           (soda editor setting)
+          (soda editor editor-settings)
           (soda editor state))
 
   (define (transpose-character-once! view)

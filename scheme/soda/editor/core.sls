@@ -1706,6 +1706,7 @@
           (soda editor scheme-rename)
           (soda editor scheme-xref)
           (soda editor search)
+          (soda editor editor-settings)
           (soda editor setting)
           (soda editor source-debug)
           (soda editor source-debug-commands)

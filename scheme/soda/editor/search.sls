@@ -13,6 +13,7 @@
           (soda editor prompt)
           (soda editor regexp)
           (soda editor setting)
+          (soda editor editor-settings)
           (soda editor state)
           (soda editor tui-projection))
 

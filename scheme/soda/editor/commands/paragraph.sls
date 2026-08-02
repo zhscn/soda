@@ -11,6 +11,7 @@
           (soda editor minor-mode)
           (soda editor minor-mode-runtime)
           (soda editor setting)
+          (soda editor editor-settings)
           (soda editor state))
 
   (define (line-blank? text line)

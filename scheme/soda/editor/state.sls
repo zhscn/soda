@@ -105,16 +105,6 @@
           editor-select-buffer-major-mode!
           editor-project-catalog
           editor-setting-store
-          editor-setting-names
-          editor-setting-definition
-          editor-register-setting!
-          editor-setting-ref
-          editor-global-setting-ref
-          editor-set-global-setting!
-          editor-clear-global-setting!
-          editor-set-buffer-setting!
-          editor-clear-buffer-setting!
-          call-with-editor-setting-transaction
           editor-configuration-snapshot
           editor-restore-configuration!
           call-with-editor-configuration-transaction

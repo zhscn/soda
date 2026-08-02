@@ -23,6 +23,7 @@
           (soda editor minor-mode-runtime)
           (soda editor navigation)
           (soda editor prompt)
+          (soda editor editor-settings)
           (soda editor state)
           (soda editor tui-application)
           (soda editor tui-state)

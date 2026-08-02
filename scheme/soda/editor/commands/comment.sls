@@ -9,6 +9,7 @@
           (soda editor condition)
           (soda editor keymap)
           (soda editor setting)
+          (soda editor editor-settings)
           (soda editor state))
 
   (define (bytevector-prefix-at? text offset prefix)
