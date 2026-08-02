@@ -790,6 +790,17 @@
               editor results-buffer 'result-edit-mode))
           (error 'editor-tests
                  "Project search did not enter editable projection mode")))
+      (unless
+        (and
+          (procedure? (buffer-local-ref results-buffer 'search-ranges #f))
+          (equal?
+            ((buffer-local-ref results-buffer 'search-ranges #f))
+            (map
+              (lambda (range) (cons (car range) (cadr range)))
+              (buffer-text-property-ranges
+                results-buffer 'result-target))))
+        (error 'editor-tests
+               "Result edit did not publish its projected search domain"))
       (for-each
         (lambda (command)
           (unless
@@ -832,6 +843,9 @@
                  "Project search edits did not update the source Buffer"
                  accept-effects
                  (utf8->string (buffer-bytes source-buffer)))))
+      (when (buffer-local-ref results-buffer 'search-ranges #f)
+        (error 'editor-tests
+               "Result edit did not restore the Buffer search domain"))
       (editor-remove-buffer! editor (buffer-id source-buffer)))
   (execute-command!
     (editor-command-registry editor)
@@ -4147,6 +4161,30 @@
       (editor-status-message search-editor)
       "Replaced 4"))
   (error 'editor-tests "query-replace all did not replace remaining matches"))
+
+(buffer-replace-range!
+  search-buffer
+  0
+  (bytevector-length (buffer-bytes search-buffer))
+  (string->utf8 "foo outside foo tail"))
+(buffer-set-local!
+  search-buffer
+  'search-ranges
+  (lambda () (list (cons 12 15))))
+(view-set-caret! search-view 0)
+(search-send! (bytes 27 37))
+(search-send! (string->utf8 "foo"))
+(search-send! (bytes 13))
+(search-send! (string->utf8 "bar"))
+(search-send! (bytes 13))
+(search-send! (string->utf8 "!"))
+(unless
+  (bytevector=?
+    (buffer-bytes search-buffer)
+    (string->utf8 "foo outside bar tail"))
+  (error 'editor-tests
+         "query-replace did not honor the Buffer search domain"))
+(buffer-clear-local! search-buffer 'search-ranges)
 
 (buffer-replace-range!
   search-buffer

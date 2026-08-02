@@ -23,7 +23,13 @@
           (soda editor workspace-edit))
 
   (define-record-type result-edit-session
-    (fields original-read-only? projections accept discard))
+    (fields original-read-only?
+            original-search-ranges
+            projections
+            accept
+            discard))
+
+  (define missing-search-ranges (list 'missing-search-ranges))
 
   (define (buffer-projection-edit-active? buffer)
     (and
@@ -162,11 +168,21 @@
     (let ([session
             (make-result-edit-session
               (buffer-setting-ref buffer 'read-only? #f)
+              (buffer-local-ref
+                buffer 'search-ranges missing-search-ranges)
               projections
               accept
               discard)])
       (buffer-set-local! buffer 'result-edit-session session)
       (buffer-set-local! buffer 'result-edit-active? #t)
+      (buffer-set-local!
+        buffer
+        'search-ranges
+        (lambda ()
+          (map
+            (lambda (projection)
+              (editable-projection-range buffer projection))
+            projections)))
       (buffer-install-projection-edit-guard!
         buffer projections 'result-edit
         "Only projected source text is editable")
@@ -289,6 +305,13 @@
     (buffer-clear-local! buffer 'result-edit-active?)
     (buffer-clear-local! buffer 'result-edit-session)
     (editor-disable-minor-mode! editor buffer 'result-edit-mode)
+    (if (eq? (result-edit-session-original-search-ranges session)
+             missing-search-ranges)
+        (buffer-clear-local! buffer 'search-ranges)
+        (buffer-set-local!
+          buffer
+          'search-ranges
+          (result-edit-session-original-search-ranges session)))
     (buffer-set-local-setting!
       buffer
       'read-only?

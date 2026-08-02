@@ -201,7 +201,10 @@ LocationList 的 index 与 Result Buffer 当前 item 同步，用于语义 API �
 Editable projection 使用 DocumentAnchor 标记 Result Buffer 中允许修改的区间，并把每个
 区间关联到领域 source。编辑 guard 只允许修改完整落在 projection 内的文本。接受操作
 读取 projection 的当前内容，由领域 mode 生成原子 workspace edits；放弃操作恢复或重新
-生成 producer 结果。Project search 把 `rg --json` 的绝对 range 和行内 match range
+生成 producer 结果。编辑 session 同时把 projection anchors 发布为 Buffer 的
+`search-ranges` capability，因此普通 query replace 可在所有 projected targets 间导航和
+替换，而不会匹配标题、路径、上下文 excerpt 或跨越两个 target。Project search 把
+`rg --json` 的绝对 range 和行内 match range
 呈现为 `result-target`，进入编辑模式前异步打开全部目标文件，并校验该属性覆盖的文本仍
 与源 Buffer 一致。接受后源 Buffer 保持 modified 状态，结果 Buffer 关闭以避免继续使用
 旧位置。领域编辑逻辑只消费标准 target property，不依赖结果行的前缀或布局。

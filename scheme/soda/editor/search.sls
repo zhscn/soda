@@ -474,6 +474,49 @@
   (define (query-replace-buffer editor session)
     (view-buffer (query-replace-origin-view editor session)))
 
+  (define (query-replace-ranges buffer size)
+    (let* ([provider (buffer-local-ref buffer 'search-ranges #f)]
+           [ranges
+             (if (procedure? provider)
+                 (provider)
+                 (list (cons 0 size)))])
+      (unless
+        (and
+          (list? ranges)
+          (for-all
+            (lambda (range)
+              (and
+                (pair? range)
+                (integer? (car range)) (exact? (car range))
+                (integer? (cdr range)) (exact? (cdr range))
+                (<= 0 (car range) (cdr range) size)))
+            ranges))
+        (assertion-violation
+          'query-replace
+          "Buffer search ranges are invalid"
+          ranges))
+      (list-sort
+        (lambda (left right)
+          (or (< (car left) (car right))
+              (and (= (car left) (car right))
+                   (< (cdr left) (cdr right)))))
+        ranges)))
+
+  (define (query-replace-next-match
+            program source scan size case-fold? ranges)
+    (let loop ([remaining ranges])
+      (if (null? remaining)
+          #f
+          (let* ([range (car remaining)]
+                 [start (car range)]
+                 [end (cdr range)])
+            (if (> scan end)
+                (loop (cdr remaining))
+                (or
+                  (regexp-program-search-forward
+                    program source (max scan start) end case-fold?)
+                  (loop (cdr remaining))))))))
+
   (define (query-replace-show-next! editor session)
     (let* ([buffer (query-replace-buffer editor session)]
            [query (query-replace-session-query session)]
@@ -489,8 +532,9 @@
            [result
              (and
                (<= scan size)
-               (regexp-program-search-forward
-                 program source scan size case-fold?))]
+               (query-replace-next-match
+                 program source scan size case-fold?
+                 (query-replace-ranges buffer size)))]
            [match-range
              (and result (regexp-match-group result 0))])
       (query-replace-session-match-result-set!

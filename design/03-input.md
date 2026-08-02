@@ -122,6 +122,10 @@ durable state 描述该 View 的常态编辑姿态，major mode 描述 Buffer �
 KeyEvent 先经过 keymap。未消费且携带文本的事件按 `text_policy` 交给
 `text_command`；`TextInputEvent` 清除 pending key sequence 后原子提交。单键读取、
 query-replace decision 和退出确认使用 transient state，不启动递归 command loop。
+Buffer 可以通过 buffer-local `search-ranges` procedure 提供有序、互不要求连续的
+byte ranges。query replace 只在这些 range 内查找匹配，且不会让 regexp 跨越 range
+边界；每次替换后重新查询 range，使 DocumentAnchor 支撑的动态范围能随编辑移动。
+未提供该 capability 的 Buffer 使用整个文本范围。
 
 通用 TUI application 扩展后的完整 `InputState` 和 handler contract 只在
 [16-tui-applications.md](16-tui-applications.md) 中定义。
