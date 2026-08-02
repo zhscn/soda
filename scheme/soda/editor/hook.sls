@@ -14,7 +14,8 @@
           hook-registry-clear-buffer!
           hook-registry-snapshot
           hook-registry-restore!)
-  (import (rnrs))
+  (import (rnrs)
+          (soda editor hashtable-state))
 
   (define-record-type (hook-registry %make-hook-registry hook-registry?)
     (fields entries buffer-entries))
@@ -246,27 +247,10 @@
         'hook-registry-restore!
         "expected a hook registry snapshot"
         snapshot))
-    (hashtable-clear! (hook-registry-entries registry))
-    (hashtable-clear! (hook-registry-buffer-entries registry))
-    (let-values
-      ([(phases hooks)
-        (hashtable-entries (hook-registry-state-entries snapshot))])
-      (let loop ([index 0])
-        (unless (= index (vector-length phases))
-          (hashtable-set!
-            (hook-registry-entries registry)
-            (vector-ref phases index)
-            (vector-ref hooks index))
-          (loop (+ index 1)))))
-    (let-values
-      ([(keys hooks)
-        (hashtable-entries
-          (hook-registry-state-buffer-entries snapshot))])
-      (let loop ([index 0])
-        (unless (= index (vector-length keys))
-          (hashtable-set!
-            (hook-registry-buffer-entries registry)
-            (vector-ref keys index)
-            (vector-ref hooks index))
-          (loop (+ index 1)))))
+    (replace-hashtable!
+      (hook-registry-entries registry)
+      (hook-registry-state-entries snapshot))
+    (replace-hashtable!
+      (hook-registry-buffer-entries registry)
+      (hook-registry-state-buffer-entries snapshot))
     registry))

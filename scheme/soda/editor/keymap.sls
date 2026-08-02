@@ -35,7 +35,8 @@
           keymap-catalog-ref
           keymap-catalog-names)
   (import (rnrs)
-          (soda editor event))
+          (soda editor event)
+          (soda editor hashtable-state))
 
   (define-record-type key-stroke
     (fields key codepoint modifiers))
@@ -213,17 +214,6 @@
                      (append next (cdr remaining))
                      captured))]))))))
 
-  (define (replace-catalog-entries! target source)
-    (hashtable-clear! target)
-    (let-values ([(names keymaps) (hashtable-entries source)])
-      (let loop ([index 0])
-        (unless (= index (vector-length names))
-          (hashtable-set!
-            target
-            (vector-ref names index)
-            (vector-ref keymaps index))
-          (loop (+ index 1))))))
-
   (define (keymap-catalog-snapshot catalog)
     (unless (keymap-catalog? catalog)
       (assertion-violation
@@ -258,7 +248,7 @@
           (keymap-state-keymap state)
           (keymap-state-parent state)))
       (keymap-catalog-state-keymaps snapshot))
-    (replace-catalog-entries!
+    (replace-hashtable!
       (keymap-catalog-entries catalog)
       (keymap-catalog-state-entries snapshot))
     catalog)

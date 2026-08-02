@@ -74,6 +74,7 @@
           command-effect-payload)
   (import (rnrs)
           (soda editor contract)
+          (soda editor hashtable-state)
           (soda editor prefix))
 
   (define-record-type (command-registry %make-command-registry command-registry?)
@@ -168,17 +169,6 @@
                   (registered-command-advice command))))
             (loop (+ index 1)))))
       copy))
-
-  (define (replace-hashtable! target source)
-    (hashtable-clear! target)
-    (let-values ([(keys values) (hashtable-entries source)])
-      (let loop ([index 0])
-        (unless (= index (vector-length keys))
-          (hashtable-set!
-            target
-            (vector-ref keys index)
-            (vector-ref values index))
-          (loop (+ index 1))))))
 
   (define (command-registry-snapshot registry)
     (unless (command-registry? registry)

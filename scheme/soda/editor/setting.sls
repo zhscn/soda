@@ -20,7 +20,8 @@
           setting-store-validate
           setting-store-snapshot
           setting-store-restore!)
-  (import (rnrs))
+  (import (rnrs)
+          (soda editor hashtable-state))
 
   (define-record-type
     (setting-definition %make-setting-definition setting-definition?)
@@ -228,26 +229,6 @@
             (+ (setting-store-generation store) 1)))
         old)))
 
-  (define (hashtable->alist table)
-    (let-values ([(keys values) (hashtable-entries table)])
-      (let loop ([index 0] [result '()])
-        (if (= index (vector-length keys))
-            (reverse result)
-            (loop
-              (+ index 1)
-              (cons
-                (cons
-                  (vector-ref keys index)
-                  (vector-ref values index))
-                result))))))
-
-  (define (restore-table! table entries)
-    (hashtable-clear! table)
-    (for-each
-      (lambda (entry)
-        (hashtable-set! table (car entry) (cdr entry)))
-      entries))
-
   (define (setting-store-snapshot store)
     (require-store 'setting-store-snapshot store)
     (%make-setting-snapshot
@@ -263,10 +244,10 @@
         'setting-store-restore!
         "expected a setting snapshot"
         snapshot))
-    (restore-table!
+    (restore-hashtable!
       (setting-store-definitions store)
       (setting-snapshot-definitions snapshot))
-    (restore-table!
+    (restore-hashtable!
       (setting-store-values store)
       (setting-snapshot-values snapshot))
     (setting-store-names-set! store (setting-snapshot-names snapshot))

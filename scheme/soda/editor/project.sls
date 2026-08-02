@@ -51,6 +51,7 @@
           built-in-project-finders)
   (import (rnrs)
           (soda editor contract)
+          (soda editor hashtable-state)
           (soda vfs))
 
   (define-record-type
@@ -650,19 +651,6 @@
           (+ (project-catalog-generation catalog) 1)))
       existing))
 
-  (define (hashtable->alist table)
-    (let-values ([(keys values) (hashtable-entries table)])
-      (let loop ([index 0] [result '()])
-        (if (= index (vector-length keys))
-            result
-            (loop
-              (+ index 1)
-              (cons
-                (cons
-                  (vector-ref keys index)
-                  (vector-ref values index))
-                result))))))
-
   (define (project-catalog-snapshot catalog)
     (require-catalog 'project-catalog-snapshot catalog)
     (%make-project-catalog-state
@@ -685,21 +673,11 @@
     (project-catalog-generation-set!
       catalog
       (project-catalog-state-generation state))
-    (hashtable-clear! (project-catalog-projects catalog))
-    (for-each
-      (lambda (entry)
-        (hashtable-set!
-          (project-catalog-projects catalog)
-          (car entry)
-          (cdr entry)))
+    (restore-hashtable!
+      (project-catalog-projects catalog)
       (project-catalog-state-projects state))
-    (hashtable-clear! (project-catalog-project-generations catalog))
-    (for-each
-      (lambda (entry)
-        (hashtable-set!
-          (project-catalog-project-generations catalog)
-          (car entry)
-          (cdr entry)))
+    (restore-hashtable!
+      (project-catalog-project-generations catalog)
       (project-catalog-state-project-generations state))
     (project-catalog-known-ids-set!
       catalog

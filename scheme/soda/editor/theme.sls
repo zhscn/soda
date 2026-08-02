@@ -20,7 +20,8 @@
           theme-catalog-ref
           theme-catalog-names
           theme-catalog-themes)
-  (import (rnrs))
+  (import (rnrs)
+          (soda editor hashtable-state))
 
   (define-record-type
     (face-spec %make-face-spec face-spec?)
@@ -254,17 +255,9 @@
         'theme-catalog-restore!
         "expected a theme catalog snapshot"
         snapshot))
-    (hashtable-clear! (theme-catalog-table catalog))
-    (let-values
-      ([(names themes)
-        (hashtable-entries (theme-catalog-state-table snapshot))])
-      (let loop ([index 0])
-        (unless (= index (vector-length names))
-          (hashtable-set!
-            (theme-catalog-table catalog)
-            (vector-ref names index)
-            (vector-ref themes index))
-          (loop (+ index 1)))))
+    (replace-hashtable!
+      (theme-catalog-table catalog)
+      (theme-catalog-state-table snapshot))
     (theme-catalog-names-set!
       catalog
       (theme-catalog-state-names snapshot))

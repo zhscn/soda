@@ -18,7 +18,8 @@
           make-completion-response-for-request)
   (import (rnrs)
           (soda editor completion)
-          (soda editor event))
+          (soda editor event)
+          (soda editor hashtable-state))
 
   (define-record-type
     (completion-provider %make-completion-provider completion-provider?)
@@ -183,18 +184,9 @@
         'completion-provider-catalog-restore!
         "expected a completion provider catalog snapshot"
         snapshot))
-    (hashtable-clear! (completion-provider-catalog-entries catalog))
-    (let-values
-      ([(names providers)
-        (hashtable-entries
-          (completion-provider-catalog-state-entries snapshot))])
-      (let loop ([index 0])
-        (unless (= index (vector-length names))
-          (hashtable-set!
-            (completion-provider-catalog-entries catalog)
-            (vector-ref names index)
-            (vector-ref providers index))
-          (loop (+ index 1)))))
+    (replace-hashtable!
+      (completion-provider-catalog-entries catalog)
+      (completion-provider-catalog-state-entries snapshot))
     catalog)
 
   (define (completion-provider-catalog-register! catalog provider)

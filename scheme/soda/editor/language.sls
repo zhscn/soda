@@ -57,6 +57,7 @@
           major-mode-syntax-capabilities)
   (import (rnrs)
           (soda editor contract)
+          (soda editor hashtable-state)
           (soda document)
           (soda editor decoration)
           (soda editor indentation-protocol)
@@ -370,17 +371,6 @@
       language-catalog-state?)
     (fields profiles modes))
 
-  (define (replace-language-table! target source)
-    (hashtable-clear! target)
-    (let-values ([(keys values) (hashtable-entries source)])
-      (let loop ([index 0])
-        (unless (= index (vector-length keys))
-          (hashtable-set!
-            target
-            (vector-ref keys index)
-            (vector-ref values index))
-          (loop (+ index 1))))))
-
   (define (language-catalog-snapshot catalog)
     (unless (language-catalog? catalog)
       (assertion-violation
@@ -402,10 +392,10 @@
         'language-catalog-restore!
         "expected a language catalog snapshot"
         snapshot))
-    (replace-language-table!
+    (replace-hashtable!
       (language-catalog-profiles catalog)
       (language-catalog-state-profiles snapshot))
-    (replace-language-table!
+    (replace-hashtable!
       (language-catalog-modes catalog)
       (language-catalog-state-modes snapshot))
     catalog)

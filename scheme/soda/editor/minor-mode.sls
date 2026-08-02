@@ -20,7 +20,8 @@
           minor-mode-add-hook!
           minor-mode-remove-hook!
           minor-mode-hooks)
-  (import (rnrs))
+  (import (rnrs)
+          (soda editor hashtable-state))
 
   (define-record-type
     (minor-mode-definition
@@ -115,17 +116,6 @@
       (make-eq-hashtable)
       (make-eq-hashtable)))
 
-  (define (replace-minor-mode-table! target source)
-    (hashtable-clear! target)
-    (let-values ([(keys values) (hashtable-entries source)])
-      (let loop ([index 0])
-        (unless (= index (vector-length keys))
-          (hashtable-set!
-            target
-            (vector-ref keys index)
-            (vector-ref values index))
-          (loop (+ index 1))))))
-
   (define (minor-mode-catalog-snapshot catalog)
     (require-catalog 'minor-mode-catalog-snapshot catalog)
     (%make-minor-mode-catalog-state
@@ -141,10 +131,10 @@
         'minor-mode-catalog-restore!
         "expected a minor mode catalog snapshot"
         snapshot))
-    (replace-minor-mode-table!
+    (replace-hashtable!
       (minor-mode-catalog-definitions catalog)
       (minor-mode-catalog-state-definitions snapshot))
-    (replace-minor-mode-table!
+    (replace-hashtable!
       (minor-mode-catalog-hooks catalog)
       (minor-mode-catalog-state-hooks snapshot))
     catalog)
