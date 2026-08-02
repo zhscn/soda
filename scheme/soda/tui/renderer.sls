@@ -1114,27 +1114,15 @@
                  (if (and (< start size)
                           (< start visible-end)
                           (< visible-start range-end))
-                     (append
-                       (list
-                         (make-decoration-run
-                           (max start visible-start)
-                           (min range-end visible-end)
-                           'navigation.target
-                           'transient
-                           20
-                           'view
-                           (view-id view)))
-                       (if (<= visible-start start (- visible-end 1))
-                           (list
-                             (make-decoration-run
-                               start
-                               (+ start 1)
-                               'navigation.target-cursor
-                               'transient
-                               30
-                               'view
-                               (view-id view)))
-                           '()))
+                     (list
+                       (make-decoration-run
+                         (max start visible-start)
+                         (min range-end visible-end)
+                         'navigation.target
+                         'transient
+                         20
+                         'view
+                         (view-id view)))
                      '()))
                '())]
            [result-marks

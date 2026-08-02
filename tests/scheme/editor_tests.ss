@@ -4657,11 +4657,12 @@
                 (or
                   (and
                     (equal? (cell-document-position cell) 8)
-                    (memq 'navigation.target-cursor (cell-faces cell)))
+                    (memq 'navigation.target (cell-faces cell))
+                    (memq 'cursor.inactive (cell-faces cell)))
                   (column-loop (+ column 1))))))
           (row-loop (+ row 1)))))
     (error 'editor-tests
-           "location preview did not render its transient target marker")))
+           "location preview did not combine its range with the source View cursor")))
 (editor-update!
   xref-editor
   (make-command-message 'buffer-item.next #f))
