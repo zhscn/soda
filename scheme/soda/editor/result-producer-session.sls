@@ -1,7 +1,6 @@
 (library (soda editor result-producer-session)
   (export result-producer-session
           make-result-producer-session
-          result-producer-session?
           result-producer-session-origin-view-id
           result-producer-session-scope
           result-producer-session-locations
@@ -9,8 +8,6 @@
           result-producer-session-buffer-set!
           result-producer-session-closed?
           process-result-producer-session
-          make-process-result-producer-session
-          process-result-producer-session?
           result-producer-session-process
           result-producer-session-process-set!
           result-producer-session-pending-output
@@ -18,7 +15,6 @@
           result-producer-session-error-output
           result-producer-session-error-output-set!
           make-result-producer-registry
-          result-producer-registry?
           result-producer-registry-ref
           result-producer-registry-current?
           result-producer-registry-activate!

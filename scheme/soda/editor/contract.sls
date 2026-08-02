@@ -1,5 +1,6 @@
 (library (soda editor contract)
   (export exact-non-negative-integer?
+          exact-integer?
           exact-positive-integer?
           non-empty-string?
           symbol-list?
@@ -8,6 +9,9 @@
 
   (define (exact-non-negative-integer? value)
     (and (integer? value) (exact? value) (not (negative? value))))
+
+  (define (exact-integer? value)
+    (and (integer? value) (exact? value)))
 
   (define (exact-positive-integer? value)
     (and (integer? value) (exact? value) (positive? value)))

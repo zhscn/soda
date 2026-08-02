@@ -30,12 +30,8 @@
           (soda tui clipboard)
           (soda tui input)
           (soda tui output)
+          (soda tui presenter)
           (soda tui renderer))
-
-  (define escape (string (integer->char 27)))
-
-  (define (ansi suffix)
-    (string-append escape suffix))
 
   (define (handle-editor-message! editor executor message)
     (let loop ([messages (list message)])

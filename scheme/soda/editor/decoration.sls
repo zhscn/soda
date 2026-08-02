@@ -24,7 +24,8 @@
           styled-chunk-cursor?
           styled-chunk-cursor-at!
           decoration-runs-in-range)
-  (import (rnrs))
+  (import (rnrs)
+          (soda editor contract))
 
   (define-record-type
     (decoration-run %make-decoration-run decoration-run?)
@@ -64,9 +65,6 @@
 
   (define valid-layers
     '(base-syntax semantic diagnostic search selection transient))
-
-  (define (exact-integer? value)
-    (and (integer? value) (exact? value)))
 
   (define (make-decoration-run
             start

@@ -14,6 +14,7 @@
           syntax-capture-name
           syntax-capture-start
           syntax-capture-end
+          syntax-capture-span
           syntax-capture-node-kind
           syntax-capture-properties
           syntax-capture-depth
@@ -81,6 +82,10 @@
   (define-record-type
     (syntax-capture %make-syntax-capture syntax-capture?)
     (fields name start end node-kind properties depth))
+
+  (define (syntax-capture-span capture)
+    (- (syntax-capture-end capture)
+       (syntax-capture-start capture)))
 
   (define (make-syntax-capture
             name start end node-kind properties depth)

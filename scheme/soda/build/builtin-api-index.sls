@@ -5,6 +5,7 @@
           built-in-api-index-build-cache-hits
           built-in-api-index-build-cache-misses)
   (import (chezscheme)
+          (soda editor string)
           (soda editor scheme-api-indexer)
           (soda hash))
 
@@ -18,17 +19,10 @@
   (define-record-type built-in-api-index-build
     (fields source-count cache-hits cache-misses))
 
-  (define (pad-left value width character)
-    (if (>= (string-length value) width)
-        value
-        (string-append
-          (make-string (- width (string-length value)) character)
-          value)))
-
   (define (fingerprint-bytes bytes)
     (string-append
       "fnv1a64:"
-      (pad-left
+      (string-pad-left
         (number->string
           (fnv1a64-bytevector fnv1a64-offset-basis bytes)
           16)
@@ -88,7 +82,7 @@
               analyzer-relative-paths)])
       (string-append
         "fnv1a64:"
-        (pad-left (number->string hash 16) 16 #\0))))
+        (string-pad-left (number->string hash 16) 16 #\0))))
 
   (define (valid-cache-entry? entry)
     (and

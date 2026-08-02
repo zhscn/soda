@@ -12,14 +12,12 @@
           interaction-transcript-last-output-start
           interaction-transcript-last-output-end
           interaction-transcript-fields
-          interaction-field?
           interaction-field-kind
           interaction-field-start
           interaction-field-end
           interaction-transcript-current-input
           interaction-transcript-replace-input!
           interaction-transcript-stash-input!
-          interaction-transcript-take-stashed-input!
           interaction-transcript-commit-input!
           interaction-transcript-append-output!
           interaction-transcript-insert-output!

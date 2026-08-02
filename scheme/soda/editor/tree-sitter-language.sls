@@ -376,16 +376,12 @@
           (< start (syntax-capture-end capture))))
       captures))
 
-  (define (capture-span capture)
-    (- (syntax-capture-end capture)
-       (syntax-capture-start capture)))
-
   (define (more-specific-capture left right)
     (or
       (not right)
-      (< (capture-span left) (capture-span right))
+      (< (syntax-capture-span left) (syntax-capture-span right))
       (and
-        (= (capture-span left) (capture-span right))
+        (= (syntax-capture-span left) (syntax-capture-span right))
         (> (syntax-capture-depth left)
            (syntax-capture-depth right)))))
 

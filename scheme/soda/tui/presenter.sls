@@ -1,5 +1,5 @@
 (library (soda tui presenter)
-  (export frame->ansi frame-diff->ansi)
+  (export ansi frame->ansi frame-diff->ansi)
   (import (rnrs)
           (soda editor string)
           (soda tui frame))

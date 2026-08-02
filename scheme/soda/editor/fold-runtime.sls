@@ -44,15 +44,11 @@
             (lambda () (snapshot-close! snapshot))))
         '())))
 
-  (define (capture-span capture)
-    (- (syntax-capture-end capture)
-       (syntax-capture-start capture)))
-
   (define (better-containing? candidate best)
     (or
       (not best)
-      (< (capture-span candidate)
-         (capture-span best))))
+      (< (syntax-capture-span candidate)
+         (syntax-capture-span best))))
 
   (define (better-next? candidate best)
     (or
@@ -62,8 +58,8 @@
       (and
         (= (syntax-capture-start candidate)
            (syntax-capture-start best))
-        (> (capture-span candidate)
-           (capture-span best)))))
+        (> (syntax-capture-span candidate)
+           (syntax-capture-span best)))))
 
   (define (fold-capture-at-or-next captures point)
     (let ([containing

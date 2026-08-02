@@ -9,7 +9,9 @@
           call-with-scheme-interface-build
           compile-scheme-program-with-interface!)
   (import (chezscheme)
+          (soda editor contract)
           (soda editor scheme-interface-index)
+          (soda editor string)
           (soda hash)
           (soda vfs))
 
@@ -23,11 +25,6 @@
       source-roots
       entry-sources
       output))
-
-  (define (non-empty-string? value)
-    (and
-      (string? value)
-      (positive? (string-length value))))
 
   (define (string-list? value)
     (and
@@ -104,16 +101,6 @@
         (open-file-input-port path)
         get-bytevector-all)))
 
-  (define (pad-left value width character)
-    (if
-      (>= (string-length value) width)
-      value
-      (string-append
-        (make-string
-          (- width (string-length value))
-          character)
-        value)))
-
   (define (sources-revision sources)
     (let ([hash
             (fold-left
@@ -127,7 +114,7 @@
               sources)])
       (string-append
         "fnv1a64:"
-        (pad-left
+        (string-pad-left
           (number->string hash 16)
           16
           #\0))))
