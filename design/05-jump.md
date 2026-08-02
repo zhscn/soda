@@ -188,6 +188,13 @@ Window。多个结果 Buffer 按最近使用次序参与选择。源位置访问
 完成，统一处理 live Buffer revision、异步文件打开、UTF-16 fallback 和
 LanguageAttachment 传播。
 
+Result Buffer 的会话身份由基础 resource 名称和 source View 所属 Workbench 共同确定。
+同一 Workbench 内重新执行 producer 会刷新原有 Buffer；不同 Workbench 可以同时保留
+各自的 xref、搜索、诊断、编译和 Git 结果。Buffer registry 需要唯一名称时为后续实例
+分配 `<N>` 后缀，领域 producer 仍使用不带后缀的基础 resource 识别自己的会话。异步
+producer 的 active session 也按 Workbench 隔离，因此一个 Workbench 中的刷新只取消
+该 Workbench 的旧任务。
+
 LocationList 的 index 与 Result Buffer 当前 item 同步，用于语义 API 和 session 数据，
 但不承担 point、Window 或 preview 生命周期。
 

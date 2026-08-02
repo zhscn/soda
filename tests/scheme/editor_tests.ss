@@ -40,6 +40,7 @@
         (soda editor project-search)
         (soda editor repl)
         (soda editor save-place-store)
+        (soda editor scoped-session-table)
         (soda editor scheme-interface-index)
         (soda editor scheme-semantics)
         (soda editor scheme-document-highlight)
@@ -4975,6 +4976,84 @@
   (error 'editor-tests
          "empty result message became a navigable result item"))
 (editor-close! empty-xref-editor)
+
+(define scoped-session-table-test (make-scoped-session-table))
+(define scoped-session-owner (list 'editor-owner))
+(scoped-session-table-set!
+  scoped-session-table-test scoped-session-owner 1 'primary)
+(scoped-session-table-set!
+  scoped-session-table-test scoped-session-owner 2 'secondary)
+(scoped-session-table-delete!
+  scoped-session-table-test scoped-session-owner 1)
+(unless
+  (and
+    (eq?
+      (scoped-session-table-ref
+        scoped-session-table-test scoped-session-owner 1 'missing)
+      'missing)
+    (eq?
+      (scoped-session-table-ref
+        scoped-session-table-test scoped-session-owner 2 'missing)
+      'secondary))
+  (error 'editor-tests
+         "scoped session deletion affected another Workbench"))
+
+(define scoped-result-source
+  (make-buffer
+    19835
+    (make-document "source\n" 19835)
+    "*scoped-result-source*"
+    'fundamental-mode))
+(define scoped-result-editor (make-editor scoped-result-source))
+(define scoped-result-primary
+  (editor-active-workbench scoped-result-editor))
+(define scoped-result-primary-view
+  (editor-active-view scoped-result-editor))
+(define scoped-result-primary-buffer
+  (editor-show-xref-results!
+    scoped-result-editor
+    (make-location-list 'primary-xref '())
+    (view-id scoped-result-primary-view)))
+(editor-select-view-window!
+  scoped-result-editor (view-id scoped-result-primary-view))
+(define scoped-result-secondary
+  (editor-create-workbench! scoped-result-editor "secondary" '()))
+(editor-switch-workbench!
+  scoped-result-editor (workbench-id scoped-result-secondary))
+(define scoped-result-secondary-view
+  (editor-active-view scoped-result-editor))
+(define scoped-result-secondary-buffer
+  (editor-show-xref-results!
+    scoped-result-editor
+    (make-location-list 'secondary-xref '())
+    (view-id scoped-result-secondary-view)))
+(editor-switch-workbench!
+  scoped-result-editor (workbench-id scoped-result-primary))
+(define scoped-result-primary-buffer-again
+  (editor-show-xref-results!
+    scoped-result-editor
+    (make-location-list 'primary-xref '())
+    (view-id scoped-result-primary-view)))
+(unless
+  (and
+    (eq? scoped-result-primary-buffer-again
+         scoped-result-primary-buffer)
+    (not (eq? scoped-result-primary-buffer
+              scoped-result-secondary-buffer))
+    (string=? (buffer-resource scoped-result-primary-buffer) "*Xref*")
+    (string=?
+      (buffer-resource scoped-result-secondary-buffer) "*Xref*<2>")
+    (=
+      (buffer-local-ref
+        scoped-result-primary-buffer 'result-workbench-id #f)
+      (workbench-id scoped-result-primary))
+    (=
+      (buffer-local-ref
+        scoped-result-secondary-buffer 'result-workbench-id #f)
+      (workbench-id scoped-result-secondary)))
+  (error 'editor-tests
+         "Result Buffer identity crossed Workbench scopes"))
+(editor-close! scoped-result-editor)
 
 (define result-restore-source
   (make-buffer

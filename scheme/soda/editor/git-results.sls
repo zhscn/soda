@@ -1,7 +1,6 @@
 (library (soda editor git-results)
   (export install-git-results! start-git-status! git-status-record-fields)
   (import (rnrs)
-          (only (chezscheme) make-weak-eq-hashtable)
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
@@ -18,18 +17,25 @@
           (soda editor managed-process)
           (soda editor project)
           (soda editor result-buffer)
+          (soda editor scoped-session-table)
           (soda editor state)
           (soda runtime)
           (soda vfs))
 
   (define-record-type
     (git-status-session %make-git-status-session git-status-session?)
-    (fields project root origin-view-id locations
+    (fields project root origin-view-id workbench-id locations
             (mutable buffer) (mutable process)
             (mutable pending-output) (mutable stderr-output)
             (mutable rename-record) (mutable closed?)))
 
-  (define active-git-statuses (make-weak-eq-hashtable))
+  (define active-git-statuses (make-scoped-session-table))
+
+  (define (git-status-session-scope session)
+    (git-status-session-workbench-id session))
+
+  (define (active-git-status editor scope)
+    (scoped-session-table-ref active-git-statuses editor scope #f))
 
   (define-record-type git-operation
     (fields status-session label (mutable stderr-output)))
@@ -87,7 +93,9 @@
 
   (define (session-current? editor session)
     (and (not (git-status-session-closed? session))
-         (eq? (hashtable-ref active-git-statuses editor #f) session)))
+         (eq?
+           (active-git-status editor (git-status-session-scope session))
+           session)))
 
   (define (apply-git-status-output context)
     (let* ([editor (command-context-editor context)]
@@ -132,7 +140,8 @@
           (let ([pending (git-status-session-rename-record session)])
             (append-status! editor session (car pending) (cadr pending) #f)
             (git-status-session-rename-record-set! session #f)))
-        (hashtable-delete! active-git-statuses editor)
+        (scoped-session-table-delete!
+          active-git-statuses editor (git-status-session-scope session))
         (let* ([status (managed-process-event-status event)]
                [count
                  (length
@@ -180,8 +189,10 @@
                 'cancelled
                 "Git status cancelled."
                 'warning))
-            (when (eq? (hashtable-ref active-git-statuses editor #f) session)
-              (hashtable-delete! active-git-statuses editor))
+            (let ([scope (git-status-session-scope session)])
+              (when (eq? (active-git-status editor scope) session)
+                (scoped-session-table-delete!
+                  active-git-statuses editor scope)))
             (if (and process (managed-process-running? process))
                 (list
                   (make-command-effect
@@ -193,11 +204,14 @@
     (let* ([editor (command-context-editor context)]
            [origin-view-id
              (editor-result-origin-view-id editor (command-context-view context))]
+           [scope
+             (view-workbench-id
+               (editor-view-ref editor origin-view-id))]
            [root (project-primary-root project)]
            [locations (make-location-list 'git-status '())]
            [session
              (%make-git-status-session
-               project root origin-view-id locations #f #f
+               project root origin-view-id scope locations #f #f
                (make-bytevector 0) (make-bytevector 0) #f #f)]
            [process
              (make-managed-process
@@ -205,7 +219,7 @@
                (list "git" "status" "--porcelain=v1" "-z"
                      "--untracked-files=all")
                root session 'git.status-output 'git.status-exit)]
-           [old (hashtable-ref active-git-statuses editor #f)]
+           [old (active-git-status editor scope)]
            [buffer
              (editor-open-result-buffer!
                editor "*Git Status*" 'git-status-mode
@@ -220,7 +234,8 @@
         buffer
         (lambda (refresh-context refresh-buffer)
           (start-git-status! refresh-context project)))
-      (hashtable-set! active-git-statuses editor session)
+      (scoped-session-table-set!
+        active-git-statuses editor scope session)
       (editor-set-current-location-list! editor locations)
       (append
         (if (and old (git-status-session-process old)

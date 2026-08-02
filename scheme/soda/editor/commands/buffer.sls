@@ -244,7 +244,10 @@
   (define (buffer-list-targets editor)
     (filter
       (lambda (buffer)
-        (not (equal? (buffer-resource buffer) buffer-list-resource)))
+        (not
+          (equal?
+            (buffer-result-base-resource buffer)
+            buffer-list-resource)))
       (editor-buffers editor)))
 
   (define (buffer-list-row editor buffer)

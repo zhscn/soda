@@ -3,7 +3,6 @@
           start-project-search!
           project-search-json-line->locations)
   (import (rnrs)
-          (only (chezscheme) make-weak-eq-hashtable)
           (soda editor buffer)
           (soda editor command)
           (soda editor command-runtime)
@@ -19,6 +18,7 @@
           (soda editor managed-process)
           (soda editor project)
           (soda editor result-buffer)
+          (soda editor scoped-session-table)
           (soda editor state)
           (soda json)
           (soda runtime)
@@ -30,6 +30,7 @@
             root
             query
             origin-view-id
+            workbench-id
             locations
             (mutable buffer)
             (mutable process)
@@ -38,7 +39,13 @@
             (mutable closed?)))
 
   (define active-project-searches
-    (make-weak-eq-hashtable))
+    (make-scoped-session-table))
+
+  (define (project-search-session-scope session)
+    (project-search-session-workbench-id session))
+
+  (define (active-project-search editor scope)
+    (scoped-session-table-ref active-project-searches editor scope #f))
 
   (define (json-text object key)
     (let ([value (and (json-object? object)
@@ -137,7 +144,10 @@
 
   (define (session-current? editor session)
     (and (not (project-search-session-closed? session))
-         (eq? (hashtable-ref active-project-searches editor #f) session)))
+         (eq?
+           (active-project-search
+             editor (project-search-session-scope session))
+           session)))
 
   (define (append-output-lines! editor session lines)
     (let ([items
@@ -212,7 +222,10 @@
           (unless (zero? (bytevector-length remainder))
             (append-output-lines! editor session (list remainder))))
         (project-search-session-pending-output-set! session (make-bytevector 0))
-        (hashtable-delete! active-project-searches editor)
+        (scoped-session-table-delete!
+          active-project-searches
+          editor
+          (project-search-session-scope session))
         (let* ([status (managed-process-event-status event)]
                [count (search-result-count session)]
                [success? (or (= status 0) (= status 1))])
@@ -248,8 +261,10 @@
                 'cancelled
                 "Project search cancelled."
                 'warning))
-            (when (eq? (hashtable-ref active-project-searches editor #f) session)
-              (hashtable-delete! active-project-searches editor))
+            (let ([scope (project-search-session-scope session)])
+              (when (eq? (active-project-search editor scope) session)
+                (scoped-session-table-delete!
+                  active-project-searches editor scope)))
             (if (and process (managed-process-running? process))
                 (list
                   (make-command-effect
@@ -262,11 +277,14 @@
            [origin-view-id
              (editor-result-origin-view-id
                editor (command-context-view context))]
+           [scope
+             (view-workbench-id
+               (editor-view-ref editor origin-view-id))]
            [root (project-primary-root project)]
            [locations (make-location-list 'project-search '())]
            [session
              (%make-project-search-session
-               project root query origin-view-id locations
+               project root query origin-view-id scope locations
                #f #f (make-bytevector 0) (make-bytevector 0) #f)]
            [process
              (make-managed-process
@@ -277,7 +295,7 @@
                session
                'project.search-output
                'project.search-exit)]
-           [old (hashtable-ref active-project-searches editor #f)]
+           [old (active-project-search editor scope)]
            [buffer
              (editor-open-result-buffer!
                editor
@@ -311,7 +329,8 @@
         buffer
         (lambda (refresh-context refresh-buffer)
           (start-project-search! refresh-context project query)))
-      (hashtable-set! active-project-searches editor session)
+      (scoped-session-table-set!
+        active-project-searches editor scope session)
       (editor-set-current-location-list! editor locations)
       (append
         (if (and old

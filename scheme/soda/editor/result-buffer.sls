@@ -32,6 +32,8 @@
           editor-dismiss-result-buffer!
           editor-append-result-items!
           editor-append-result-message!
+          buffer-result-base-resource
+          buffer-result-workbench-id
           install-result-buffer-commands!)
   (import (rnrs)
           (only (chezscheme) make-weak-eq-hashtable)
@@ -572,6 +574,39 @@
       (editor-invalidate! editor 'document)
       buffer))
 
+  (define (buffer-result-base-resource buffer)
+    (unless (buffer? buffer)
+      (assertion-violation
+        'buffer-result-base-resource "expected a Buffer" buffer))
+    (buffer-local-ref
+      buffer 'result-base-resource (buffer-resource buffer)))
+
+  (define (buffer-result-workbench-id buffer)
+    (unless (buffer? buffer)
+      (assertion-violation
+        'buffer-result-workbench-id "expected a Buffer" buffer))
+    (buffer-local-ref buffer 'result-workbench-id #f))
+
+  (define (result-buffer-for-scope editor resource workbench-id)
+    (find
+      (lambda (candidate)
+        (and
+          (buffer-result-interface-ref candidate)
+          (equal? (buffer-result-base-resource candidate) resource)
+          (equal? (buffer-result-workbench-id candidate) workbench-id)))
+      (editor-buffers editor)))
+
+  (define (allocate-result-resource editor base)
+    (if (not (editor-buffer-for-resource editor base))
+        base
+        (let loop ([suffix 2])
+          (let ([candidate
+                  (string-append
+                    base "<" (number->string suffix) ">")])
+            (if (editor-buffer-for-resource editor candidate)
+                (loop (+ suffix 1))
+                candidate)))))
+
   (define (editor-present-result-buffer!
             editor resource mode text origin-view-id interface)
     (unless (and (editor? editor)
@@ -585,18 +620,27 @@
         'editor-present-result-buffer!
         "invalid result Buffer presentation"
         editor resource mode text origin-view-id interface))
-    (let* ([existing
-             (or
-               (editor-buffer-for-resource editor resource)
-               (find
-                 (lambda (candidate)
-                   (and (buffer-result-interface-ref candidate)
-                        (equal? (buffer-resource candidate) resource)))
-                 (editor-buffers editor)))]
+    (let* ([origin-workbench
+             (editor-workbench-for-view editor origin-view-id)]
+           [workbench-id (workbench-id origin-workbench)]
+           [existing
+             (result-buffer-for-scope editor resource workbench-id)]
            [buffer
              (cond
                [(not existing)
-                (editor-create-buffer! editor resource mode "")]
+                (let ([created
+                        (editor-create-buffer!
+                          editor
+                          (allocate-result-resource editor resource)
+                          mode
+                          ""
+                          (editor-view-resource-context
+                            editor origin-view-id))])
+                  (buffer-set-local!
+                    created 'result-base-resource resource)
+                  (buffer-set-local!
+                    created 'result-workbench-id workbench-id)
+                  created)]
                [(buffer-result-interface-ref existing) existing]
                [else
                 (editor-user-error

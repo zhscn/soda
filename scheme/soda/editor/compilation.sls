@@ -2,7 +2,6 @@
   (export install-compilation!
           start-compilation!)
   (import (rnrs)
-          (only (chezscheme) make-weak-eq-hashtable)
           (soda editor command)
           (soda editor command-runtime)
           (soda editor effect)
@@ -13,6 +12,7 @@
           (soda editor location-results)
           (soda editor managed-process)
           (soda editor result-buffer)
+          (soda editor scoped-session-table)
           (soda editor state)
           (soda runtime)
           (soda vfs))
@@ -22,6 +22,7 @@
     (fields label
             working-directory
             origin-view-id
+            workbench-id
             locations
             (mutable buffer)
             (mutable process)
@@ -29,7 +30,13 @@
             (mutable stderr-pending)
             (mutable closed?)))
 
-  (define active-compilations (make-weak-eq-hashtable))
+  (define active-compilations (make-scoped-session-table))
+
+  (define (compilation-session-scope session)
+    (compilation-session-workbench-id session))
+
+  (define (active-compilation editor scope)
+    (scoped-session-table-ref active-compilations editor scope #f))
 
   (define (ascii-digit? character)
     (char<=? #\0 character #\9))
@@ -103,7 +110,9 @@
 
   (define (session-current? editor session)
     (and (not (compilation-session-closed? session))
-         (eq? (hashtable-ref active-compilations editor #f) session)))
+         (eq?
+           (active-compilation editor (compilation-session-scope session))
+           session)))
 
   (define (append-lines! editor session lines)
     (for-each
@@ -174,7 +183,8 @@
       (when (and (compilation-session? session)
                  (session-current? editor session))
         (flush-pending! editor session)
-        (hashtable-delete! active-compilations editor)
+        (scoped-session-table-delete!
+          active-compilations editor (compilation-session-scope session))
         (let* ([status (managed-process-event-status event)]
                [message
                  (string-append
@@ -206,8 +216,10 @@
                 'cancelled
                 "Compilation cancelled."
                 'warning))
-            (when (eq? (hashtable-ref active-compilations editor #f) session)
-              (hashtable-delete! active-compilations editor))
+            (let ([scope (compilation-session-scope session)])
+              (when (eq? (active-compilation editor scope) session)
+                (scoped-session-table-delete!
+                  active-compilations editor scope)))
             (if (and process (managed-process-running? process))
                 (list
                   (make-command-effect
@@ -225,16 +237,19 @@
            [origin-view-id
              (editor-result-origin-view-id
                editor (command-context-view context))]
+           [scope
+             (view-workbench-id
+               (editor-view-ref editor origin-view-id))]
            [locations (make-location-list 'compilation '())]
            [session
              (%make-compilation-session
-               label working-directory origin-view-id locations #f #f
+               label working-directory origin-view-id scope locations #f #f
                (make-bytevector 0) (make-bytevector 0) #f)]
            [process
              (make-managed-process
                label arguments working-directory session
                'compilation.process-output 'compilation.process-exit)]
-           [old (hashtable-ref active-compilations editor #f)]
+           [old (active-compilation editor scope)]
            [buffer
              (editor-open-result-buffer!
                editor "*compilation*" label locations origin-view-id
@@ -247,7 +262,8 @@
         (lambda (refresh-context refresh-buffer)
           (start-compilation!
             refresh-context label arguments working-directory)))
-      (hashtable-set! active-compilations editor session)
+      (scoped-session-table-set!
+        active-compilations editor scope session)
       (editor-set-current-location-list! editor locations)
       (append
         (if (and old

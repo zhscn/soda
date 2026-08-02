@@ -969,6 +969,8 @@
           editor-present-result-buffer!
           editor-append-result-items!
           editor-append-result-message!
+          buffer-result-base-resource
+          buffer-result-workbench-id
           editor-save-buffer!
           editor-resolve-resources!
           location-item-open-position
