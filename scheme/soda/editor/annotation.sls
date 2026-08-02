@@ -117,18 +117,6 @@
       message
       payload))
 
-  (define (snapshot-size document)
-    (let ([snapshot (document-snapshot document)])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda () (text-size text))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
-
   (define (snapshot-substring document start end)
     (let ([snapshot (document-snapshot document)])
       (dynamic-wind
@@ -281,7 +269,7 @@
         source-revision
         (buffer-revision buffer)))
     (let* ([document (buffer-document buffer)]
-           [size (snapshot-size document)]
+           [size (document-byte-size document)]
            [entries '()]
            [complete? #f])
       (dynamic-wind
@@ -372,7 +360,7 @@
         (annotation-entry-end-anchor entry))))
 
   (define (stale-decoration-runs value start end)
-    (let ([source-size (snapshot-size (annotation-set-document value))])
+    (let ([source-size (document-byte-size (annotation-set-document value))])
       (decoration-index-runs-in-range
         (make-decoration-index
           (filter

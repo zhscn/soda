@@ -786,13 +786,6 @@
             (language-runtime-session runtime)
             snapshot)))))
 
-  (define (snapshot-size snapshot)
-    (let ([text (snapshot-text snapshot)])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda () (text-size text))
-        (lambda () (text-close! text)))))
-
   (define (call-with-buffer-text buffer procedure)
     (unless (and (buffer? buffer) (procedure? procedure))
       (assertion-violation
@@ -802,7 +795,7 @@
     (call-with-document-text (buffer-document buffer) procedure))
 
   (define (buffer-byte-size buffer)
-    (call-with-buffer-text buffer text-size))
+    (document-byte-size (buffer-document buffer)))
 
   (define (buffer-string-range buffer start end)
     (call-with-buffer-text
@@ -824,7 +817,7 @@
             session
             'injection
             0
-            (snapshot-size snapshot))))))
+            (snapshot-byte-size snapshot))))))
 
   (define (rebuild-injections! runtime snapshot)
     (let ([index

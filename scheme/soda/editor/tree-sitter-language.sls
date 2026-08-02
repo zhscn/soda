@@ -200,13 +200,6 @@
           query-kinds)
         hidden?)))
 
-  (define (snapshot-size snapshot)
-    (let ([text (snapshot-text snapshot)])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda () (text-size text))
-        (lambda () (text-close! text)))))
-
   (define (query-source bundle kind)
     (apply
       string-append
@@ -453,7 +446,7 @@
           session
           'indent
           0
-          (snapshot-size snapshot)))
+          (snapshot-byte-size snapshot)))
       (tree-sitter-indent-context-revision-set!
         context
         (snapshot-revision snapshot))))
@@ -785,7 +778,7 @@
               session
               'text-object
               0
-              (snapshot-size snapshot))]
+              (snapshot-byte-size snapshot))]
            [descriptors
              (map text-object-descriptor captures)]
            [outers
@@ -858,7 +851,7 @@
                     (make-decoration-index '())))
                 (tree-sitter-language-session-highlights-set!
                   session
-                  (highlight-index session (snapshot-size snapshot)))
+                  (highlight-index session (snapshot-byte-size snapshot)))
                 (set! complete? #t)
                 session)
               (lambda ()
@@ -885,7 +878,7 @@
             snapshot)
           (tree-sitter-language-session-highlights-set!
             session
-            (highlight-index session (snapshot-size snapshot))))
+            (highlight-index session (snapshot-byte-size snapshot))))
         #f
         #f
         (lambda (session start end)

@@ -25,6 +25,7 @@
           document-revision
           document-snapshot
           call-with-document-text
+          document-byte-size
           document-begin-transaction
           document-can-undo?
           document-can-redo?
@@ -47,6 +48,7 @@
           snapshot-document-id
           snapshot-revision
           snapshot-text
+          snapshot-byte-size
           transaction?
           transaction-close!
           transaction-replace!
@@ -654,6 +656,16 @@
               (lambda () (procedure text))
               (lambda () (text-close! text)))))
         (lambda () (snapshot-close! snapshot)))))
+
+  (define (document-byte-size document)
+    (call-with-document-text document text-size))
+
+  (define (snapshot-byte-size snapshot)
+    (let ([text (snapshot-text snapshot)])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda () (text-size text))
+        (lambda () (text-close! text)))))
 
   (define (transaction-close! value)
     (when (and (transaction? value)
