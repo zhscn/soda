@@ -8,11 +8,14 @@
 | source/target `LocationItem` jump history entry | 已实现 |
 | anchor-backed bookmark 与列表 Buffer | 已实现 |
 | 文件 Buffer 的 save-place 恢复与持久化 | 已实现 |
-| `LocationItem`、`LocationList` 与 next/previous navigation | 已实现 |
+| `LocationItem`、`LocationList` producer model | 已实现 |
+| 基于文本属性的 Result Buffer 与 next/previous/group navigation | 已实现 |
+| 隐藏 Result Buffer 的 Buffer-local navigation point | 已实现 |
 | Scheme definition/reference/diagnostic producer | 已实现 |
 | navigation origin 与 LanguageAttachment provenance | 已实现 |
 | Workbench 级语义 `JumpGraph` 与持久化 | 已实现 |
-| 可编辑 excerpt 组合视图 | 未实现 |
+| WorkspaceEdit 可编辑投影视图 | 已实现 |
+| 任意 Result Buffer 的可编辑 projection capability | 未实现 |
 | 通用跨 Buffer 原子事务与 group undo | 未实现 |
 
 ## 导航的两个层次
@@ -111,15 +114,14 @@ LocationList {
 }
 ```
 
-Editor 保存一个 current LocationList 及其当前 index。provider 发布列表后可以跳到
-首项；`xref.next-location` 和 `xref.previous-location` 按 prefix count 在列表内
-双向回绕，并通过普通 navigation jump 写入当前 View 的 walk。已解析 LocationItem
+LocationList 是 producer 与 presentation 之间的惰性数据模型。Workbench 可以保存
+current LocationList 供 session 恢复和语义查询使用；交互选择和全局位置导航由物化后的
+Result Buffer 持有。已解析 LocationItem
 带 Buffer identity、resource、source revision、byte range、excerpt 和 provider
 metadata；实际跳转前必须再次验证 Buffer revision。尚未打开的 LocationItem 使用
 resource、revision 与 byte range，跳转时发出异步文件读取请求。Buffer 移除时，
 引用该 Buffer 的 current list 一并失效，纯 resource item 保持有效。provider
-通过 editor 公共 API 发布列表；列表游标也是公共操作，因此 grep、diagnostics 和
-build provider 可以复用同一导航命令。
+通过 editor 公共 API 发布列表。
 
 grep、references、implementations、diagnostics、build errors 和外部语义索引只是
 不同 producer。创建列表不打开文件；坐标保持 producer 的原始编码，直到资源被
@@ -144,9 +146,31 @@ AnchorRange。未提升 item 的落点顺序为：
 3. 在整个 buffer 搜索唯一 excerpt；
 4. 使用 fallback range 并标记 stale。
 
-一个 Workbench 持有 location-list stack 与 current list。发布新结果只更新明确的
-current 引用，不注册全局 next-error callback。列表可由 picker 消费，也可物化为
-只读工具 buffer；两种形式共享 item identity 与当前索引。
+## Result Buffer
+
+xref、project search、diagnostics、compilation 和 Git 等 producer 把结果物化为普通
+文本 Buffer。公共属性构成 presentation 协议：
+
+```text
+result-item   领域 payload
+result-index  Buffer 内稳定的导航次序
+result-group  文件、诊断来源或其他逻辑分组
+face          普通文本装饰
+```
+
+`result-list-mode` 提供只读策略和基础 keymap。领域 mode 继承该 mode，并通过
+`result-buffer-interface` 提供 item activation 和 quit 行为。`n`/`p` 移动 Result
+Buffer 的真实 point，再激活 point 下的 item；`N`/`P` 按 `result-group` 移动到相邻组
+的首项。RET 选择源位置，TAB 选择并关闭结果窗口，`C-o` 只预览。
+
+Result Buffer 在不可见时仍保存当前 item。全局 next/previous locus 使用最近实际导航的
+Result Buffer，并跳过已经关闭的 Buffer；它不依赖 Result Buffer 当前是否显示在某个
+Window。多个结果 Buffer 按最近使用次序参与选择。源位置访问由公共 location visitor
+完成，统一处理 live Buffer revision、异步文件打开、UTF-16 fallback 和
+LanguageAttachment 传播。
+
+LocationList 的 index 与 Result Buffer 当前 item 同步，用于语义 API 和 session 数据，
+但不承担 point、Window 或 preview 生命周期。
 
 ## Excerpt 组合视图
 
