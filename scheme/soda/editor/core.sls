@@ -938,6 +938,7 @@
           editor-note-result-buffer!
           editor-present-result-buffer!
           editor-append-result-items!
+          editor-resolve-resources!
           location-item-open-position
           editor-visit-location-item!
           make-editable-projection!
@@ -1646,6 +1647,7 @@
           (soda editor repl)
           (soda editor result-buffer)
           (soda editor resource-context)
+          (soda editor resource-resolver)
           (soda editor scheme-completion)
           (soda editor scheme-commands)
           (soda editor scheme-document-highlight)
@@ -1910,6 +1912,7 @@
         editor
         (make-scheme-runtime-completion-provider editor))
       (install-file-commands! editor)
+      (install-resource-resolver! editor)
       (install-lsp-commands! editor)
       (install-workspace-edit-preview! editor)
       (install-scheme-interface-commands!
