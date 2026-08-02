@@ -76,57 +76,6 @@
   (define-record-type tracked-interaction-field
     (fields kind start-anchor end-anchor))
 
-  (define (replace-buffer-range! buffer start end value)
-    (let ([bytes
-            (if (bytevector? value)
-                value
-                (string->utf8 value))]
-          [change #f])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (call-with-values
-            (lambda ()
-              (call-with-buffer-transaction
-                buffer
-                (lambda (transaction)
-                  (transaction-replace!
-                    transaction
-                    start
-                    end
-                    bytes))))
-            (lambda (result committed-change)
-              (set! change committed-change)
-              (+ start (bytevector-length bytes)))))
-        (lambda ()
-          (when change
-            (change-close! change))))))
-
-  (define (insert-buffer! buffer offset value)
-    (let ([bytes
-            (if (bytevector? value)
-                value
-                (string->utf8 value))]
-          [change #f])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (call-with-values
-            (lambda ()
-              (call-with-buffer-transaction
-                buffer
-                (lambda (transaction)
-                  (transaction-insert!
-                    transaction
-                    offset
-                    bytes))))
-            (lambda (result committed-change)
-              (set! change committed-change)
-              (+ offset (bytevector-length bytes)))))
-        (lambda ()
-          (when change
-            (change-close! change))))))
-
   (define (make-anchor document offset)
     (document-create-anchor!
       document
@@ -374,11 +323,14 @@
         'interaction-transcript-replace-input!
         "input must be a string or bytevector"
         input))
-    (replace-buffer-range!
-      buffer
-      (interaction-transcript-input-start transcript)
-      (buffer-byte-size buffer)
-      input))
+    (let* ([start (interaction-transcript-input-start transcript)]
+           [bytes (if (bytevector? input) input (string->utf8 input))])
+      (buffer-replace-range-internal!
+        buffer
+        start
+        (buffer-byte-size buffer)
+        bytes)
+      (+ start (bytevector-length bytes))))
 
   (define (interaction-transcript-stash-input! transcript input)
     (require-open-transcript
@@ -560,7 +512,7 @@
           "prompt size must fit within the output"
           prompt-size))
       (let* ([start (interaction-transcript-input-start transcript)]
-             [end (insert-buffer! buffer start output)]
+             [end (buffer-insert-internal! buffer start output)]
              [prompt-start (- end prompt-size)])
         (clear-current-prompt! transcript)
         (append-tracked-field!

@@ -1,6 +1,7 @@
 (library (soda editor edit)
   (export buffer-replace-range!
           buffer-replace-range-internal!
+          buffer-insert-internal!
           buffer-append-internal!
           buffer-delete-range!
           buffer-replace-ranges!)
@@ -91,6 +92,29 @@
             (lambda (result committed-change)
               (set! change committed-change)
               (+ offset (bytevector-length bytes)))))
+        (lambda ()
+          (when change
+              (change-close! change))))))
+
+  (define (buffer-insert-internal! buffer offset value)
+    (let* ([bytes
+             (if (bytevector? value)
+                 value
+                 (string->utf8 value))]
+           [change #f])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (call-with-values
+            (lambda ()
+              (call-with-buffer-transaction
+                buffer
+                (lambda (transaction)
+                  (transaction-insert! transaction offset bytes)
+                  (+ offset (bytevector-length bytes)))))
+            (lambda (result committed-change)
+              (set! change committed-change)
+              result)))
         (lambda ()
           (when change
             (change-close! change))))))
