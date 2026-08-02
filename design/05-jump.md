@@ -19,7 +19,7 @@
 | WorkspaceEdit 可编辑投影视图 | 已实现 |
 | 任意 Result Buffer 的可编辑 projection capability | 已实现 |
 | Project search 的 wgrep 式匹配编辑 | 已实现 |
-| 通用跨 Buffer 原子事务与 group undo | 未实现 |
+| 通用跨 Buffer 原子事务与 group undo | 已实现 |
 
 ## 导航的两个层次
 
@@ -272,7 +272,10 @@ workspace edit 是一组带源 revision 的 per-buffer edit：
 4. 记录每个 undo-tree 边为一个 transaction group。
 
 group undo 不改变各 Document 的 undo 数据结构，只协调它们跳到成组边的另一端。
-某成员已在分支上继续编辑时，policy 可以跳过并报告冲突，或显式选择跨分支跳转。
+只有所有成员都位于 transaction group 对应的 undo 边界时，普通 undo 或 redo 才整体
+移动该组。某成员存在后续编辑时，命令先沿当前 Buffer 的普通历史移动；所有成员重新
+到达组边界后，下一次命令恢复成组行为。已经关闭或进入其他历史分支的成员使该组保持
+不可用。
 LSP rename、code action 和可编辑组合视图使用同一机制。
 
 ## 设计依据

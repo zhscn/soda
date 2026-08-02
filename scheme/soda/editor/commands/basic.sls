@@ -23,7 +23,8 @@
           (soda editor prompt)
           (soda editor state)
           (soda editor tui-application)
-          (soda editor tui-application-runtime))
+          (soda editor tui-application-runtime)
+          (soda editor workspace-edit))
 
   (define (with-document-text document procedure)
     (let ([snapshot (document-snapshot document)])
@@ -1714,18 +1715,36 @@
       '()))
 
   (define (undo-command context)
-    (apply-history-command
-      context
-      buffer-undo!
-      "No undo information"
-      "Undo"))
+    (let ([editor (command-context-editor context)]
+          [buffer (context-buffer context)])
+      (if (editor-undo-workspace-edit! editor buffer)
+          (begin
+            (view-set-caret!
+              (context-view context)
+              (view-caret (context-view context)))
+            (editor-set-status-message! editor "Undo workspace edit")
+            '())
+          (apply-history-command
+            context
+            buffer-undo!
+            "No undo information"
+            "Undo"))))
 
   (define (redo-command context)
-    (apply-history-command
-      context
-      buffer-redo!
-      "No redo information"
-      "Redo"))
+    (let ([editor (command-context-editor context)]
+          [buffer (context-buffer context)])
+      (if (editor-redo-workspace-edit! editor buffer)
+          (begin
+            (view-set-caret!
+              (context-view context)
+              (view-caret (context-view context)))
+            (editor-set-status-message! editor "Redo workspace edit")
+            '())
+          (apply-history-command
+            context
+            buffer-redo!
+            "No redo information"
+            "Redo"))))
 
   (define (buffer-by-id editor id)
     (find

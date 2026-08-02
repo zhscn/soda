@@ -5403,6 +5403,80 @@
            message)))
 (editor-close! stale-workspace-editor)
 
+(define workspace-undo-primary
+  (make-buffer
+    19841
+    (make-document "alpha" 19841)
+    "/virtual/workspace-undo-primary.sls"
+    'scheme-mode))
+(define workspace-undo-editor (make-editor workspace-undo-primary))
+(define workspace-undo-secondary
+  (make-buffer
+    19842
+    (make-document "beta" 19842)
+    "/virtual/workspace-undo-secondary.sls"
+    'scheme-mode))
+(editor-add-buffer! workspace-undo-editor workspace-undo-secondary)
+(workspace-text-edits-apply!
+  workspace-undo-editor
+  (list
+    (make-workspace-text-edit
+      (buffer-resource workspace-undo-primary)
+      (buffer-revision workspace-undo-primary)
+      0 5 "ALPHA")
+    (make-workspace-text-edit
+      (buffer-resource workspace-undo-secondary)
+      (buffer-revision workspace-undo-secondary)
+      0 4 "BETA")))
+(buffer-replace-range!
+  workspace-undo-primary 5 5 (string->utf8 "!"))
+(editor-update!
+  workspace-undo-editor
+  (make-command-message 'edit.undo #f))
+(unless
+  (and
+    (bytevector=?
+      (buffer-bytes workspace-undo-primary)
+      (string->utf8 "ALPHA"))
+    (bytevector=?
+      (buffer-bytes workspace-undo-secondary)
+      (string->utf8 "BETA")))
+  (error 'editor-tests
+         "ordinary edits did not remain above a WorkspaceEdit undo group"))
+(editor-update!
+  workspace-undo-editor
+  (make-command-message 'edit.undo #f))
+(unless
+  (and
+    (bytevector=?
+      (buffer-bytes workspace-undo-primary)
+      (string->utf8 "alpha"))
+    (bytevector=?
+      (buffer-bytes workspace-undo-secondary)
+      (string->utf8 "beta"))
+    (string=?
+      (editor-status-message workspace-undo-editor)
+      "Undo workspace edit"))
+  (error 'editor-tests
+         "undo did not revert every Buffer in the WorkspaceEdit"))
+(editor-update!
+  workspace-undo-editor
+  (make-command-message 'edit.redo #f))
+(unless
+  (and
+    (bytevector=?
+      (buffer-bytes workspace-undo-primary)
+      (string->utf8 "ALPHA"))
+    (bytevector=?
+      (buffer-bytes workspace-undo-secondary)
+      (string->utf8 "BETA"))
+    (string=?
+      (editor-status-message workspace-undo-editor)
+      "Redo workspace edit"))
+  (error 'editor-tests
+         "redo did not restore every Buffer in the WorkspaceEdit"))
+(editor-close! workspace-undo-editor)
+
 (define scoped-session-table-test (make-scoped-session-table))
 (define scoped-session-owner (list 'editor-owner))
 (scoped-session-table-set!

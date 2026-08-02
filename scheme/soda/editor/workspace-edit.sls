@@ -8,11 +8,29 @@
           workspace-text-edit-text
           workspace-text-edits-missing-resources
           workspace-text-edits-validation-error
-          workspace-text-edits-apply!)
+          workspace-text-edits-apply!
+          editor-undo-workspace-edit!
+          editor-redo-workspace-edit!)
   (import (rnrs)
+          (only (chezscheme) make-weak-eq-hashtable)
           (soda document)
           (soda editor buffer)
           (soda editor state))
+
+  (define-record-type workspace-undo-entry
+    (fields buffer-id before after))
+
+  (define-record-type
+    (workspace-undo-group
+      make-workspace-undo-group
+      workspace-undo-group?)
+    (fields entries
+            (mutable state
+                     workspace-undo-group-state
+                     workspace-undo-group-state-set!)))
+
+  (define editor-workspace-undo-groups (make-weak-eq-hashtable))
+  (define workspace-undo-history-limit 64)
 
   (define-record-type
     (workspace-text-edit %make-workspace-text-edit workspace-text-edit?)
@@ -158,6 +176,145 @@
             (lambda (result committed-change) (set! change committed-change))))
         (lambda () (when change (change-close! change))))))
 
+  (define (take values limit)
+    (if (or (zero? limit) (null? values))
+        '()
+        (cons (car values) (take (cdr values) (- limit 1)))))
+
+  (define (record-workspace-undo-group!
+            editor buffer-ids undo-positions)
+    (when (> (vector-length buffer-ids) 1)
+      (let ([entries
+              (let loop ([index 0] [result '()])
+                (if (= index (vector-length buffer-ids))
+                    (reverse result)
+                    (let* ([buffer-id (vector-ref buffer-ids index)]
+                           [buffer (editor-buffer-ref editor buffer-id)])
+                      (loop
+                        (+ index 1)
+                        (cons
+                          (make-workspace-undo-entry
+                            buffer-id
+                            (hashtable-ref undo-positions buffer-id #f)
+                            (document-undo-position
+                              (buffer-document buffer)))
+                          result)))))])
+        (hashtable-set!
+          editor-workspace-undo-groups
+          editor
+          (take
+            (cons
+              (make-workspace-undo-group entries 'applied)
+              (hashtable-ref editor-workspace-undo-groups editor '()))
+            workspace-undo-history-limit)))))
+
+  (define (live-entry-buffer editor entry)
+    (guard (condition [else #f])
+      (editor-buffer-ref editor (workspace-undo-entry-buffer-id entry))))
+
+  (define (group-contains-buffer? group buffer)
+    (exists
+      (lambda (entry)
+        (= (workspace-undo-entry-buffer-id entry) (buffer-id buffer)))
+      (workspace-undo-group-entries group)))
+
+  (define (group-at-position? editor group accessor)
+    (for-all
+      (lambda (entry)
+        (let ([buffer (live-entry-buffer editor entry)])
+          (and
+            buffer
+            (=
+              (document-undo-position (buffer-document buffer))
+              (accessor entry)))))
+      (workspace-undo-group-entries group)))
+
+  (define (matching-workspace-undo-group editor buffer state accessor)
+    (find
+      (lambda (group)
+        (and
+          (eq? (workspace-undo-group-state group) state)
+          (group-contains-buffer? group buffer)
+          (group-at-position? editor group accessor)))
+      (hashtable-ref editor-workspace-undo-groups editor '())))
+
+  (define (close-change! change)
+    (when change (change-close! change)))
+
+  (define (undo-workspace-group! editor group)
+    (let ([committed '()])
+      (guard
+        (condition
+          [else
+           (for-each
+             (lambda (entry)
+               (close-change!
+                 (buffer-redo! (live-entry-buffer editor entry))))
+             committed)
+           (raise condition)])
+        (for-each
+          (lambda (entry)
+            (close-change!
+              (buffer-undo-to!
+                (live-entry-buffer editor entry)
+                (workspace-undo-entry-before entry)))
+            (set! committed (cons entry committed)))
+          (workspace-undo-group-entries group)))
+      (workspace-undo-group-state-set! group 'undone)
+      (editor-invalidate! editor 'document)
+      #t))
+
+  (define (redo-workspace-group! editor group)
+    (let ([committed '()])
+      (guard
+        (condition
+          [else
+           (for-each
+             (lambda (entry)
+               (close-change!
+                 (buffer-undo-to!
+                   (live-entry-buffer editor entry)
+                   (workspace-undo-entry-before entry))))
+             committed)
+           (raise condition)])
+        (for-each
+          (lambda (entry)
+            (let ([change
+                    (buffer-redo! (live-entry-buffer editor entry))])
+              (unless change
+                (assertion-violation
+                  'editor-redo-workspace-edit!
+                  "workspace edit redo branch is unavailable"
+                  (workspace-undo-entry-buffer-id entry)))
+              (close-change! change)
+              (set! committed (cons entry committed))))
+          (workspace-undo-group-entries group)))
+      (workspace-undo-group-state-set! group 'applied)
+      (editor-invalidate! editor 'document)
+      #t))
+
+  (define (editor-undo-workspace-edit! editor buffer)
+    (unless (and (editor? editor) (buffer? buffer))
+      (assertion-violation
+        'editor-undo-workspace-edit!
+        "expected an Editor and Buffer"
+        editor buffer))
+    (let ([group
+            (matching-workspace-undo-group
+              editor buffer 'applied workspace-undo-entry-after)])
+      (and group (undo-workspace-group! editor group))))
+
+  (define (editor-redo-workspace-edit! editor buffer)
+    (unless (and (editor? editor) (buffer? buffer))
+      (assertion-violation
+        'editor-redo-workspace-edit!
+        "expected an Editor and Buffer"
+        editor buffer))
+    (let ([group
+            (matching-workspace-undo-group
+              editor buffer 'undone workspace-undo-entry-before)])
+      (and group (redo-workspace-group! editor group))))
+
   (define (workspace-text-edits-apply! editor edits)
     (unless (and (list? edits) (pair? edits)
                  (for-all workspace-text-edit? edits))
@@ -197,7 +354,9 @@
                   (editor-buffer-ref editor buffer-id)
                   (vector-ref edit-vectors index))
                 (set! committed (cons buffer-id committed)))
-              (commit (+ index 1))))))
+              (commit (+ index 1)))))
+        (record-workspace-undo-group!
+          editor buffer-ids undo-positions))
     (editor-invalidate! editor 'document)
     (length edits))
 ))
