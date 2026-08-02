@@ -9,6 +9,8 @@
           text->bytevector
           text-subbytevector
           text-byte-at
+          text-previous-character-offset
+          text-next-character-offset
           text-line-start
           text-line-content-end
           text-position
@@ -376,6 +378,35 @@
     (require-open 'text-byte-at text? text-pointer value)
     (let ([byte (%text-byte-at (text-pointer value) offset)])
       (if (negative? byte) (native-error 'text-byte-at) byte)))
+
+  (define (text-previous-character-offset value offset)
+    (if (zero? offset)
+        0
+        (let loop ([candidate (- offset 1)])
+          (if (or
+                (zero? candidate)
+                (not
+                  (= (bitwise-and
+                       (text-byte-at value candidate)
+                       #xc0)
+                     #x80)))
+              candidate
+              (loop (- candidate 1))))))
+
+  (define (text-next-character-offset value offset)
+    (let ([size (text-size value)])
+      (if (>= offset size)
+          size
+          (let loop ([candidate (+ offset 1)])
+            (if (or
+                  (>= candidate size)
+                  (not
+                    (= (bitwise-and
+                         (text-byte-at value candidate)
+                         #xc0)
+                       #x80)))
+                candidate
+                (loop (+ candidate 1)))))))
 
   (define (checked-text-offset who operation)
     (let ([offset (operation)])

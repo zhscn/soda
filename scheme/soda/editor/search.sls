@@ -121,14 +121,7 @@
     (let ([size (text-size text)])
       (if (>= offset size)
           (+ size 1)
-          (let* ([lead (text-byte-at text offset)]
-                 [width
-                   (cond
-                     [(< lead #x80) 1]
-                     [(< lead #xe0) 2]
-                     [(< lead #xf0) 3]
-                     [else 4])])
-            (min size (+ offset width))))))
+          (text-next-character-offset text offset))))
 
   (define (buffer-regexp-source buffer)
     (call-with-buffer-text

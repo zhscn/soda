@@ -40,25 +40,6 @@
               (lambda () (text-close! text)))))
         (lambda () (snapshot-close! snapshot)))))
 
-  (define (previous-character-offset text caret)
-    (if (zero? caret)
-        0
-        (let loop ([offset (- caret 1)])
-          (if (or (zero? offset)
-                  (not (= (bitwise-and (text-byte-at text offset) #xc0) #x80)))
-              offset
-              (loop (- offset 1))))))
-
-  (define (next-character-offset text caret)
-    (let ([size (text-size text)])
-      (if (>= caret size)
-          size
-          (let loop ([offset (+ caret 1)])
-            (if (or (>= offset size)
-                    (not (= (bitwise-and (text-byte-at text offset) #xc0) #x80)))
-                offset
-                (loop (+ offset 1)))))))
-
   (define (context-view context)
     (command-context-view context))
 
@@ -365,8 +346,8 @@
         (lambda (text)
           (let ([target
                   (if (eq? direction 'backward)
-                      (previous-character-offset text point)
-                      (next-character-offset text point))])
+                      (text-previous-character-offset text point)
+                      (text-next-character-offset text point))])
             (command-context-range-target
               context
               'character
@@ -925,11 +906,11 @@
                 [(positive? remaining)
                  (loop
                    (- remaining 1)
-                   (next-character-offset text offset))]
+                   (text-next-character-offset text offset))]
                 [else
                  (loop
                    (+ remaining 1)
-                   (previous-character-offset text offset))])))))
+                   (text-previous-character-offset text offset))])))))
       '()))
 
   (define (backward-character-command context)

@@ -29,33 +29,6 @@
               (lambda () (text-close! text)))))
         (lambda () (snapshot-close! snapshot)))))
 
-  (define (previous-character-offset text offset)
-    (if (zero? offset)
-        0
-        (let loop ([candidate (- offset 1)])
-          (if (or (zero? candidate)
-                  (not
-                    (= (bitwise-and
-                         (text-byte-at text candidate)
-                         #xc0)
-                       #x80)))
-              candidate
-              (loop (- candidate 1))))))
-
-  (define (next-character-offset text offset)
-    (let ([size (text-size text)])
-      (if (>= offset size)
-          size
-          (let loop ([candidate (+ offset 1)])
-            (if (or (>= candidate size)
-                    (not
-                      (= (bitwise-and
-                           (text-byte-at text candidate)
-                           #xc0)
-                         #x80)))
-                candidate
-                (loop (+ candidate 1)))))))
-
   (define (transpose-character-once! view)
     (let ([buffer (view-buffer view)])
       (with-document-text
@@ -68,11 +41,11 @@
               [else
                (let* ([middle
                         (if (= caret size)
-                            (previous-character-offset text caret)
+                            (text-previous-character-offset text caret)
                             caret)]
                       [start
-                        (previous-character-offset text middle)]
-                      [end (next-character-offset text middle)]
+                        (text-previous-character-offset text middle)]
+                      [end (text-next-character-offset text middle)]
                       [left (text-subbytevector text start middle)]
                       [right (text-subbytevector text middle end)])
                  (buffer-replace-range!

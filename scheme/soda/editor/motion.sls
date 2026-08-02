@@ -41,33 +41,6 @@
           target))
       target))
 
-  (define (previous-character-offset text offset)
-    (if (zero? offset)
-        0
-        (let loop ([candidate (- offset 1)])
-          (if (or (zero? candidate)
-                  (not
-                    (= (bitwise-and
-                         (text-byte-at text candidate)
-                         #xc0)
-                       #x80)))
-              candidate
-              (loop (- candidate 1))))))
-
-  (define (next-character-offset text offset)
-    (let ([size (text-size text)])
-      (if (>= offset size)
-          size
-          (let loop ([candidate (+ offset 1)])
-            (if (or (>= candidate size)
-                    (not
-                      (= (bitwise-and
-                           (text-byte-at text candidate)
-                           #xc0)
-                         #x80)))
-                candidate
-                (loop (+ candidate 1)))))))
-
   (define (character-at text start end)
     (string-ref
       (utf8->string (text-subbytevector text start end))
@@ -81,32 +54,32 @@
 
   (define (word-character-at? text offset)
     (and (< offset (text-size text))
-         (let ([end (next-character-offset text offset)])
+         (let ([end (text-next-character-offset text offset)])
            (word-character? (character-at text offset end)))))
 
   (define (word-character-before? text offset)
     (and (positive? offset)
-         (let ([start (previous-character-offset text offset)])
+         (let ([start (text-previous-character-offset text offset)])
            (word-character? (character-at text start offset)))))
 
   (define (forward-one-word text offset)
     (let skip-separators ([offset offset])
       (if (and (< offset (text-size text))
                (not (word-character-at? text offset)))
-          (skip-separators (next-character-offset text offset))
+          (skip-separators (text-next-character-offset text offset))
           (let skip-word ([offset offset])
             (if (word-character-at? text offset)
-                (skip-word (next-character-offset text offset))
+                (skip-word (text-next-character-offset text offset))
                 offset)))))
 
   (define (backward-one-word text offset)
     (let skip-separators ([offset offset])
       (if (and (positive? offset)
                (not (word-character-before? text offset)))
-          (skip-separators (previous-character-offset text offset))
+          (skip-separators (text-previous-character-offset text offset))
           (let skip-word ([offset offset])
             (if (word-character-before? text offset)
-                (skip-word (previous-character-offset text offset))
+                (skip-word (text-previous-character-offset text offset))
                 offset)))))
 
   (define default-word-motion
