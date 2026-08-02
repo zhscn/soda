@@ -10,6 +10,7 @@
           (soda editor process-comint)
           (soda editor project)
           (soda editor project-resource)
+          (soda editor project-search)
           (soda editor project-target)
           (soda editor prompt)
           (soda editor resource-context)
@@ -629,22 +630,7 @@
          (editor-set-status-message! editor "No Project found")
          '()]
         [else
-         (profile-effect
-           (project-profile
-             project
-             (string-append "Project search: " query)
-             (list
-               "rg"
-               "--line-number"
-               "--column"
-               "--no-heading"
-               "--color=never"
-               "--smart-case"
-               "--"
-               query
-               ".")
-             ""
-             'pipe))])))
+         (start-project-search! context project query)])))
 
   (define (open-project-program-command context name arguments prompt)
     (let* ([editor (command-context-editor context)]
@@ -752,6 +738,7 @@
           '())))
 
   (define (install-project-commands! editor)
+    (install-project-search! editor)
     (let ([state (make-project-command-state #f #f)])
       (editor-register-command!
         editor

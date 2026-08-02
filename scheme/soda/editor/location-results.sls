@@ -287,11 +287,13 @@
             (let* ([view (command-context-view context)]
                    [current
                      (buffer-text-property-ref
-                       buffer (view-caret view) 'location-index
-                       (location-list-index
-                         (location-results-state-locations state)))]
+                       buffer (view-caret view) 'location-index #f)]
                    [target-index
-                     (mod (+ (or current 0) delta) (length positions))]
+                     (mod
+                       (if current
+                           (+ current delta)
+                           (if (positive? delta) (- delta 1) delta))
+                       (length positions))]
                    [entry (list-ref positions target-index)]
                    [position (car entry)]
                    [index (cdr entry)]

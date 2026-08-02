@@ -36,6 +36,7 @@
               project-resource-request?
               project-resource-request-project
               project-resource-request-continuation)
+        (soda editor project-search)
         (soda editor repl)
         (soda editor save-place-store)
         (soda editor scheme-interface-index)
@@ -688,24 +689,55 @@
            'project.search
            context
            '("project-resource"))]
-       [message
+       [process
          (and
            (= (length effects) 1)
-           (eq? (command-effect-kind (car effects)) 'command.invoke)
-           (command-effect-payload (car effects)))]
-       [profile
-         (and
-           (command-message? message)
-           (command-message-argument message))])
+           (eq? (command-effect-kind (car effects)) 'managed-process.start)
+           (command-effect-payload (car effects)))])
   (unless
     (and
-      (process-comint-profile? profile)
+      (managed-process? process)
       (equal?
-        (process-comint-profile-arguments profile)
-        '("rg" "--line-number" "--column" "--no-heading"
-          "--color=never" "--smart-case" "--"
-          "project-resource" ".")))
-    (error 'editor-tests "Project search command differs" effects)))
+        (managed-process-arguments process)
+        '("rg" "--json" "--smart-case" "--no-messages"
+          "--" "project-resource" "."))
+      (eq?
+        (buffer-major-mode-name
+          (view-buffer (editor-active-view editor)))
+        'location-results-mode)
+      (eq?
+        (location-list-source (editor-current-location-list editor))
+        'project-search))
+    (error 'editor-tests "Project search command differs" effects))
+  (let ([items
+          (project-search-json-line->locations
+            "/virtual/repository"
+            (string->utf8
+              (string-append
+                "{\"type\":\"match\",\"data\":{"
+                "\"path\":{\"text\":\"src/main.sls\"},"
+                "\"lines\":{\"text\":\"(project-resource x)\\n\"},"
+                "\"line_number\":4,\"absolute_offset\":20,"
+                "\"submatches\":[{\"match\":{\"text\":\"project-resource\"},"
+                "\"start\":1,\"end\":17}]}}")))])
+    (unless
+      (and
+        (= (length items) 1)
+        (string=?
+          (location-item-resource (car items))
+          "/virtual/repository/src/main.sls")
+        (= (location-item-start (car items)) 21)
+        (= (file-utf16-position-line
+             (cdr (assq 'file-open-position
+                    (location-item-metadata (car items)))))
+           3))
+      (error 'editor-tests "Project search JSON decoding differs" items)))
+  (execute-command!
+    (editor-command-registry editor)
+    'result.quit
+    (make-command-context
+      editor (editor-active-view editor) #f #f #f)
+    '()))
 (let ([context
         (editor-view-resource-context
           editor
@@ -4323,6 +4355,15 @@
                       xref-results-buffer position size)])
               (loop (if (> next position) next (+ position 1)))))))))
   (error 'editor-tests "location results did not append attributed text"))
+(view-set-caret! (editor-active-view xref-editor) 0)
+(editor-update!
+  xref-editor
+  (make-command-message 'result.next #f))
+(unless
+  (and
+    (= (location-list-index (editor-current-location-list xref-editor)) 0)
+    (= (view-caret xref-view) 8))
+  (error 'editor-tests "result navigation skipped the first item from a heading"))
 (editor-update!
   xref-editor
   (make-command-message 'result.next #f))
