@@ -2828,11 +2828,7 @@
         (push-completion-input-state! view)
         (pop-completion-input-state! view)))
 
-  (define (retire-completion! value completion)
-    (prompt-completion-store-unregister-completion!
-      (editor-prompt-completion-store value)
-      completion)
-    (queue-completion-cancellation! value completion)
+  (define (close-completion-source-and-target! completion)
     (choice-source-cancel!
       (completion-session-source completion)
       (completion-session-generation completion))
@@ -2840,6 +2836,20 @@
       (when (document-completion-target? target)
         (document-completion-target-close! target)))
     completion)
+
+  (define (retire-completion! value completion)
+    (prompt-completion-store-unregister-completion!
+      (editor-prompt-completion-store value)
+      completion)
+    (queue-completion-cancellation! value completion)
+    (close-completion-source-and-target! completion))
+
+  (define (dispose-completion-now! value completion)
+    (prompt-completion-store-unregister-completion!
+      (editor-prompt-completion-store value)
+      completion)
+    (cancel-completion-requests-now! value completion)
+    (close-completion-source-and-target! completion))
 
   (define (cancel-view-completion! value view)
     (let ([completion (view-completion view)])
@@ -6566,14 +6576,9 @@
       (for-each
         (lambda (session)
           (when (prompt-session-completion session)
-            (cancel-completion-requests-now!
+            (dispose-completion-now!
               value
-              (prompt-session-completion session))
-            (choice-source-cancel!
-              (completion-session-source
-                (prompt-session-completion session))
-              (completion-session-generation
-                (prompt-session-completion session))))
+              (prompt-session-completion session)))
           (prompt-session-state-set! session 'aborted))
         (editor-prompts value))
       (prompt-completion-store-clear!
@@ -6617,14 +6622,7 @@
       (for-each
         (lambda (view)
           (when (view-completion view)
-            (cancel-completion-requests-now!
-              value
-              (view-completion view))
-            (choice-source-cancel!
-              (completion-session-source
-                (view-completion view))
-              (completion-session-generation
-                (view-completion view)))
+            (dispose-completion-now! value (view-completion view))
             (view-completion-set! view #f))
           (view-pending-keys-set! view '())
           (for-each fold-close! (view-folds view))
