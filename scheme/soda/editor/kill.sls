@@ -19,16 +19,6 @@
   (define-record-type yank-state
     (fields view-id buffer-id revision start end index))
 
-  (define (copy-bytevector value)
-    (let ([result (make-bytevector (bytevector-length value))])
-      (bytevector-copy!
-        value
-        0
-        result
-        0
-        (bytevector-length value))
-      result))
-
   (define (take-prefix values count)
     (if (or (zero? count) (null? values))
         '()
@@ -45,7 +35,7 @@
         bytes))
     (let ([entries
             (cons
-              (copy-bytevector bytes)
+              (bytevector-copy bytes)
               (editor-kill-ring editor))])
       (editor-set-kill-ring!
         editor
@@ -84,10 +74,10 @@
     (require-open-editor 'editor-current-kill editor)
     (and
       (pair? (editor-kill-ring editor))
-      (copy-bytevector (car (editor-kill-ring editor)))))
+      (bytevector-copy (car (editor-kill-ring editor)))))
 
   (define (ring-entry ring index)
-    (copy-bytevector (list-ref ring index)))
+    (bytevector-copy (list-ref ring index)))
 
   (define (editor-yank! editor view target)
     (require-open-editor 'editor-yank! editor)

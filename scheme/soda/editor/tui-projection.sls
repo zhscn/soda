@@ -104,11 +104,6 @@
            [node (and session (focused-node editor session view-id))])
       (and node (tui-node-accessibility node))))
 
-  (define (copy-bytevector value)
-    (let ([copy (make-bytevector (bytevector-length value))])
-      (bytevector-copy! value 0 copy 0 (bytevector-length value))
-      copy))
-
   (define (tui-focused-copy-bytes editor view-id)
     (let ([metadata (tui-focused-accessibility editor view-id)])
       (and
@@ -116,5 +111,5 @@
         (let ([value (tui-accessibility-copy-value metadata)])
           (cond
             [(string? value) (string->utf8 value)]
-            [(bytevector? value) (copy-bytevector value)]
+            [(bytevector? value) (bytevector-copy value)]
             [else #f]))))))
