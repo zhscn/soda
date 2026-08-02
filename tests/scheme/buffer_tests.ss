@@ -427,6 +427,59 @@
        1))
   (error 'buffer-tests "highlight snapshot did not follow revision"))
 
+(buffer-set-local! highlight-cache-buffer 'result-owner 'xref)
+(unless (eq? (buffer-local-ref highlight-cache-buffer 'result-owner) 'xref)
+  (error 'buffer-tests "buffer-local data was not retained"))
+(buffer-clear-local! highlight-cache-buffer 'result-owner)
+(unless (eq? (buffer-local-ref highlight-cache-buffer 'result-owner 'missing)
+             'missing)
+  (error 'buffer-tests "buffer-local data was not cleared"))
+
+(buffer-add-text-properties!
+  highlight-cache-buffer
+  1
+  4
+  '((location . target) (face . search-match)))
+(unless
+  (and
+    (eq? (buffer-text-property-ref
+           highlight-cache-buffer 2 'location)
+         'target)
+    (not (buffer-text-property-ref
+           highlight-cache-buffer 4 'location #f))
+    (= (buffer-next-text-property-change highlight-cache-buffer 0 7) 1)
+    (= (buffer-next-text-property-change highlight-cache-buffer 1 7) 4)
+    (= (buffer-previous-text-property-change highlight-cache-buffer 7 0) 4)
+    (equal?
+      (map decoration-run-face
+        (buffer-text-property-decoration-runs
+          highlight-cache-buffer 0 7))
+      '(search-match)))
+  (error 'buffer-tests "text property lookup or decoration projection failed"))
+
+(define property-anchor-change #f)
+(call-with-values
+  (lambda ()
+    (call-with-buffer-transaction
+      highlight-cache-buffer
+      (lambda (transaction)
+        (transaction-insert! transaction 0 "x"))))
+  (lambda (result committed-change)
+    (set! property-anchor-change committed-change)))
+(unless
+  (and
+    (not (buffer-text-property-ref
+           highlight-cache-buffer 1 'location #f))
+    (eq? (buffer-text-property-ref
+           highlight-cache-buffer 2 'location)
+         'target))
+  (error 'buffer-tests "text properties did not follow Document edits"))
+(change-close! property-anchor-change)
+(buffer-clear-text-properties! highlight-cache-buffer)
+(unless
+  (null? (buffer-text-properties-at highlight-cache-buffer 2))
+  (error 'buffer-tests "text properties were not cleared"))
+
 (let* ([low
          (make-decoration-run
            0 8 'low 'base-syntax 0 'test 'low)]

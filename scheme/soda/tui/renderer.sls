@@ -997,6 +997,11 @@
                buffer
                visible-start
                visible-end)]
+           [text-property-decorations
+             (buffer-text-property-decoration-runs
+               buffer
+               visible-start
+               visible-end)]
            [external-decorations
              (fold-left
                (lambda (runs set)
@@ -1034,6 +1039,7 @@
                (decoration-runs->styled-chunks
                  (append
                    syntax-decorations
+                   text-property-decorations
                    external-decorations
                    selection-decorations)
                  visible-start

@@ -13,6 +13,16 @@
           buffer-close!
           buffer-language-catalog
           buffer-setting-store
+          buffer-local-ref
+          buffer-set-local!
+          buffer-clear-local!
+          buffer-add-text-properties!
+          buffer-clear-text-properties!
+          buffer-text-properties-at
+          buffer-text-property-ref
+          buffer-next-text-property-change
+          buffer-previous-text-property-change
+          buffer-text-property-decoration-runs
           buffer-adopt-setting-store!
           buffer-revision
           buffer-file-path
@@ -61,7 +71,8 @@
           (soda editor presentation)
           (soda editor resource-context)
           (soda editor setting)
-          (soda editor structure))
+          (soda editor structure)
+          (soda editor text-property))
 
   (define-record-type
     (language-runtime %make-language-runtime language-runtime?)
@@ -92,6 +103,8 @@
                buffer-creation-context
                buffer-creation-context-set!)
       (immutable local-settings buffer-local-settings)
+      (immutable locals buffer-locals)
+      (immutable text-properties buffer-text-property-store)
       (immutable language-catalog buffer-language-catalog)
       (mutable setting-store
                buffer-setting-store
@@ -237,6 +250,8 @@
                  (make-document-presentation)
                  #f
                  (make-eq-hashtable)
+                 (make-eq-hashtable)
+                 (make-text-property-store document)
                  catalog
                  setting-store
                  (document-revision document)
@@ -466,8 +481,70 @@
       (close-runtime! (buffer-language-runtime value))
       (buffer-language-runtime-set! value #f)
       (hashtable-clear! (buffer-change-observers value))
+      (hashtable-clear! (buffer-locals value))
+      (text-property-store-close! (buffer-text-property-store value))
       (document-close! (buffer-document value))
       (buffer-closed?-set! value #t)))
+
+  (define buffer-local-ref
+    (case-lambda
+      [(value key) (buffer-local-ref value key #f)]
+      [(value key fallback)
+       (require-open-buffer 'buffer-local-ref value)
+       (unless (symbol? key)
+         (assertion-violation 'buffer-local-ref "key must be a symbol" key))
+       (hashtable-ref (buffer-locals value) key fallback)]))
+
+  (define (buffer-set-local! value key datum)
+    (require-open-buffer 'buffer-set-local! value)
+    (unless (symbol? key)
+      (assertion-violation 'buffer-set-local! "key must be a symbol" key))
+    (hashtable-set! (buffer-locals value) key datum)
+    datum)
+
+  (define (buffer-clear-local! value key)
+    (require-open-buffer 'buffer-clear-local! value)
+    (unless (symbol? key)
+      (assertion-violation 'buffer-clear-local! "key must be a symbol" key))
+    (hashtable-delete! (buffer-locals value) key))
+
+  (define (buffer-add-text-properties! value start end properties)
+    (require-open-buffer 'buffer-add-text-properties! value)
+    (text-property-store-add!
+      (buffer-text-property-store value) start end properties))
+
+  (define (buffer-clear-text-properties! value)
+    (require-open-buffer 'buffer-clear-text-properties! value)
+    (text-property-store-clear! (buffer-text-property-store value)))
+
+  (define (buffer-text-properties-at value position)
+    (require-open-buffer 'buffer-text-properties-at value)
+    (text-property-store-properties-at
+      (buffer-text-property-store value) position))
+
+  (define buffer-text-property-ref
+    (case-lambda
+      [(value position key)
+       (buffer-text-property-ref value position key #f)]
+      [(value position key fallback)
+       (require-open-buffer 'buffer-text-property-ref value)
+       (text-property-store-ref
+         (buffer-text-property-store value) position key fallback)]))
+
+  (define (buffer-next-text-property-change value position limit)
+    (require-open-buffer 'buffer-next-text-property-change value)
+    (text-property-store-next-change
+      (buffer-text-property-store value) position limit))
+
+  (define (buffer-previous-text-property-change value position limit)
+    (require-open-buffer 'buffer-previous-text-property-change value)
+    (text-property-store-previous-change
+      (buffer-text-property-store value) position limit))
+
+  (define (buffer-text-property-decoration-runs value start end)
+    (require-open-buffer 'buffer-text-property-decoration-runs value)
+    (text-property-store-decoration-runs
+      (buffer-text-property-store value) start end))
 
   (define (buffer-major-mode-name value)
     (require-open-buffer 'buffer-major-mode-name value)

@@ -10,6 +10,15 @@
           editor-remove-buffer!
           editor-buffer-for-resource
           editor-set-buffer-resource!
+          buffer-local-ref
+          buffer-set-local!
+          buffer-clear-local!
+          buffer-add-text-properties!
+          buffer-clear-text-properties!
+          buffer-text-properties-at
+          buffer-text-property-ref
+          buffer-next-text-property-change
+          buffer-previous-text-property-change
           buffer-creation-context
           buffer-set-creation-context!
           buffer-presentation
