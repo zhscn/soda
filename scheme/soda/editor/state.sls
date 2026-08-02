@@ -14,6 +14,7 @@
           editor-set-buffer-resource!
           editor-touch-buffer-registry!
           editor-views
+          editor-find-view
           editor-view-ref
           editor-open-view!
           editor-close-view!
@@ -1082,6 +1083,13 @@
   (define (editor-views value)
     (require-open-editor 'editor-views value)
     (entity-registry-values (editor-view-registry value)))
+
+  (define (editor-find-view value id)
+    (and
+      id
+      (find
+        (lambda (view) (= (view-id view) id))
+        (editor-views value))))
 
   (define editor-open-view!
     (case-lambda

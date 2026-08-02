@@ -74,13 +74,6 @@
   (define-record-type scheme-project-session-state
     (fields environments manifests builds))
 
-  (define (editor-find-view editor id)
-    (and
-      id
-      (find
-        (lambda (view) (= (view-id view) id))
-        (editor-views editor))))
-
   (define make-scheme-project-load-request
     (case-lambda
       [(path) (make-scheme-project-load-request path #f #f)]

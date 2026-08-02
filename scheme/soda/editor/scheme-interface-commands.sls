@@ -31,13 +31,6 @@
       scheme-interface-load-result?)
     (fields path origin-view-id origin-buffer-id environment-id status data detail))
 
-  (define (editor-find-view editor id)
-    (and
-      id
-      (find
-        (lambda (view) (= (view-id view) id))
-        (editor-views editor))))
-
   (define make-scheme-interface-load-request
     (case-lambda
       [(path)
