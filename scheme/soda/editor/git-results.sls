@@ -18,30 +18,23 @@
           (soda editor prompt)
           (soda editor project)
           (soda editor result-buffer)
-          (soda editor scoped-session-table)
+          (soda editor result-producer-session)
           (soda editor state)
           (soda runtime)
           (soda vfs))
 
   (define-record-type
     (git-status-session %make-git-status-session git-status-session?)
-    (fields project root origin-view-id workbench-id locations
-            (mutable buffer) (mutable process)
+    (parent result-producer-session)
+    (fields project root
             (mutable operation-process)
-            (mutable pending-output) (mutable stderr-output)
-            (mutable rename-record) (mutable closed?)))
+            (mutable rename-record)))
 
-  (define active-git-statuses (make-scoped-session-table))
-
-  (define (git-status-session-scope session)
-    (git-status-session-workbench-id session))
-
-  (define (active-git-status editor scope)
-    (scoped-session-table-ref active-git-statuses editor scope #f))
+  (define active-git-statuses (make-result-producer-registry))
 
   (define (git-status-session-active-process session)
     (let ([operation (git-status-session-operation-process session)]
-          [status (git-status-session-process session)])
+          [status (result-producer-session-process session)])
       (cond
         ;; An operation belongs to the session as soon as its start effect is
         ;; emitted.  It may still be in the created state until the runtime
@@ -97,7 +90,7 @@
                "\n")]
            [item (status-item (git-status-session-root session) status path)])
       (editor-append-result-text!
-        editor (git-status-session-buffer session) line
+        editor (result-producer-session-buffer session) line
         (if item
             (list (list 0 (bytevector-length (string->utf8 line)) item))
             '()))))
@@ -118,12 +111,6 @@
                    (append-status! editor session (car fields) (cadr fields) #f)))])))
       records))
 
-  (define (session-current? editor session)
-    (and (not (git-status-session-closed? session))
-         (eq?
-           (active-git-status editor (git-status-session-scope session))
-           session)))
-
   (define (apply-git-status-output context)
     (let* ([editor (command-context-editor context)]
            [event (command-context-argument context)]
@@ -131,24 +118,25 @@
                          (managed-process-event-process event))]
            [session (and process (managed-process-owner process))])
       (when (and (git-status-session? session)
-                 (session-current? editor session)
+                 (result-producer-registry-current?
+                   active-git-statuses editor session)
                  (= (managed-process-event-generation event)
                     (managed-process-generation process)))
         (cond
           [(= (managed-process-event-flags event) process-stdout)
            (let ([combined
                    (bytevector-append
-                     (git-status-session-pending-output session)
+                     (result-producer-session-pending-output session)
                      (managed-process-event-data event))])
              (let-values ([(records remainder)
                            (split-complete-records combined 0)])
-               (git-status-session-pending-output-set! session remainder)
+               (result-producer-session-pending-output-set! session remainder)
                (consume-records! editor session records)))]
           [(= (managed-process-event-flags event) process-stderr)
-           (git-status-session-stderr-output-set!
+           (result-producer-session-error-output-set!
              session
              (bytevector-append
-               (git-status-session-stderr-output session)
+               (result-producer-session-error-output session)
                (managed-process-event-data event)))]))
       '()))
 
@@ -159,8 +147,9 @@
                          (managed-process-event-process event))]
            [session (and process (managed-process-owner process))])
       (when (and (git-status-session? session)
-                 (session-current? editor session))
-        (let ([remainder (git-status-session-pending-output session)])
+                 (result-producer-registry-current?
+                   active-git-statuses editor session))
+        (let ([remainder (result-producer-session-pending-output session)])
           (unless (zero? (bytevector-length remainder))
             (consume-records! editor session (list remainder))))
         (when (git-status-session-rename-record session)
@@ -171,16 +160,16 @@
                [count
                  (length
                    (location-list-items
-                     (git-status-session-locations session)))])
+                     (result-producer-session-locations session)))])
           (editor-finish-result-producer!
             editor
-            (git-status-session-buffer session)
+            (result-producer-session-buffer session)
             (if (zero? status) 'ready 'failed)
             (cond
               [(and (zero? status) (zero? count))
                "Working tree clean."]
               [(not (zero? status))
-               (let ([stderr (git-status-session-stderr-output session)])
+               (let ([stderr (result-producer-session-error-output session)])
                  (if (zero? (bytevector-length stderr))
                      (string-append
                        "Git status failed with status "
@@ -209,26 +198,14 @@
                    (git-status-session-operation-process session)]
                  [process (git-status-session-active-process session)]
                  [operation? (and operation (eq? process operation))])
-            (git-status-session-closed?-set! session #t)
-            (when (git-status-session-buffer session)
-              (editor-finish-result-producer!
-                editor
-                (git-status-session-buffer session)
-                'cancelled
-                (if operation?
-                    "Git operation cancelled."
-                    "Git status cancelled.")
-                'warning))
-            (let ([scope (git-status-session-scope session)])
-              (when (eq? (active-git-status editor scope) session)
-                (scoped-session-table-delete!
-                  active-git-statuses editor scope)))
-            (if process
-                (list
-                  (make-command-effect
-                    'managed-process.signal
-                    (make-managed-process-signal-request process 15)))
-                '())))))
+            (result-producer-cancel!
+              active-git-statuses
+              editor
+              session
+              process
+              (if operation?
+                  "Git operation cancelled."
+                  "Git status cancelled."))))))
 
   (define (start-git-status! context project)
     (let* ([editor (command-context-editor context)]
@@ -241,22 +218,25 @@
            [locations (make-location-list 'git-status '())]
            [session
              (%make-git-status-session
-               project root origin-view-id scope locations #f #f #f
-               (make-bytevector 0) (make-bytevector 0) #f #f)]
+               origin-view-id scope locations #f #f
+               (make-bytevector 0) (make-bytevector 0) #f
+               project root #f #f)]
            [process
              (make-managed-process
                "git-status"
                (list "git" "status" "--porcelain=v1" "-z"
                      "--untracked-files=all")
                root session 'git.status-output 'git.status-exit)]
-           [old (active-git-status editor scope)]
+           [old
+             (result-producer-registry-ref
+               active-git-statuses editor scope)]
            [buffer
              (editor-open-result-buffer!
                editor "*Git Status*" 'git-status-mode
                "Git status" locations origin-view-id
                'git-status 'git.status-cancel session)])
-      (git-status-session-buffer-set! session buffer)
-      (git-status-session-process-set! session process)
+      (result-producer-session-buffer-set! session buffer)
+      (result-producer-session-process-set! session process)
       (buffer-set-result-producer-state! buffer 'running)
       (buffer-set-local! buffer 'git-status-session session)
       (register-git-status-actions! buffer session)
@@ -264,19 +244,14 @@
         buffer
         (lambda (refresh-context refresh-buffer)
           (start-git-status! refresh-context project)))
-      (scoped-session-table-set!
-        active-git-statuses editor scope session)
+      (result-producer-registry-activate!
+        active-git-statuses editor session)
       (editor-set-current-location-list! editor locations)
       (let ([old-process
               (and old (git-status-session-active-process old))])
-        (when old
-          (git-status-session-closed?-set! old #t))
         (append
-          (if old-process
-              (list
-                (make-command-effect
-                  'managed-process.signal
-                  (make-managed-process-signal-request old-process 15)))
+          (if old
+              (result-producer-retire! old old-process)
               '())
           (list (make-command-effect 'managed-process.start process))))))
 
@@ -289,7 +264,7 @@
   (define (status-result-view editor session)
     (find
       (lambda (view)
-        (eq? (view-buffer view) (git-status-session-buffer session)))
+        (eq? (view-buffer view) (result-producer-session-buffer session)))
       (editor-views editor)))
 
   (define (apply-git-operation-output context)
@@ -301,7 +276,7 @@
                  (let ([session
                          (git-operation-status-session operation)])
                    (and
-                     (not (git-status-session-closed? session))
+                     (not (result-producer-session-closed? session))
                      (eq?
                        process
                        (git-status-session-operation-process session))))
@@ -324,7 +299,7 @@
           (let* ([status (managed-process-event-status event)]
                  [session (git-operation-status-session operation)]
                  [view (status-result-view editor session)])
-            (if (or (git-status-session-closed? session)
+            (if (or (result-producer-session-closed? session)
                     (not
                       (eq? process
                            (git-status-session-operation-process session))))
@@ -345,7 +320,7 @@
                             (begin
                               (editor-finish-result-producer!
                                 editor
-                                (git-status-session-buffer session)
+                                (result-producer-session-buffer session)
                                 'ready
                                 (string-append
                                   (git-operation-label operation)
@@ -365,7 +340,7 @@
                                       (utf8->string stderr))))])
                         (editor-finish-result-producer!
                           editor
-                          (git-status-session-buffer session)
+                          (result-producer-session-buffer session)
                           'failed
                           message
                           'error)
@@ -380,7 +355,7 @@
                label arguments (git-status-session-root session) operation
                'git.operation-output 'git.operation-exit)])
       (buffer-set-result-producer-state!
-        (git-status-session-buffer session) 'running)
+        (result-producer-session-buffer session) 'running)
       (git-status-session-operation-process-set! session process)
       (list (make-command-effect 'managed-process.start process))))
 
@@ -485,11 +460,13 @@
           (git-discard-request? request)
           (eq? (prompt-result-status result) 'accepted)
           (string-ci=? (prompt-result-value result) "yes")
-          (session-current?
-            editor (git-discard-request-status-session request))
+          (result-producer-registry-current?
+            active-git-statuses
+            editor
+            (git-discard-request-status-session request))
           (eq?
             (buffer-result-producer-state
-              (git-status-session-buffer
+              (result-producer-session-buffer
                 (git-discard-request-status-session request)))
             'ready))
         (start-git-operation
@@ -520,7 +497,8 @@
       (unless
         (and
           (git-status-session? session)
-          (session-current? editor session)
+          (result-producer-registry-current?
+            active-git-statuses editor session)
           (git-status-has-staged-changes? buffer))
         (editor-user-error
           'git.commit "No staged changes are ready to commit"))
@@ -554,9 +532,10 @@
           session
           (eq? (prompt-result-status result) 'accepted)
           (nonblank-string? message)
-          (session-current? editor session)
+          (result-producer-registry-current?
+            active-git-statuses editor session)
           (git-status-has-staged-changes?
-            (git-status-session-buffer session)))
+            (result-producer-session-buffer session)))
         (start-git-operation
           session
           "Git commit"

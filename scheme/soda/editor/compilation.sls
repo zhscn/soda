@@ -13,31 +13,17 @@
           (soda editor location-results)
           (soda editor managed-process)
           (soda editor result-buffer)
-          (soda editor scoped-session-table)
+          (soda editor result-producer-session)
           (soda editor state)
           (soda runtime)
           (soda vfs))
 
   (define-record-type
     (compilation-session %make-compilation-session compilation-session?)
-    (fields label
-            working-directory
-            origin-view-id
-            workbench-id
-            locations
-            (mutable buffer)
-            (mutable process)
-            (mutable stdout-pending)
-            (mutable stderr-pending)
-            (mutable closed?)))
+    (parent result-producer-session)
+    (fields label working-directory))
 
-  (define active-compilations (make-scoped-session-table))
-
-  (define (compilation-session-scope session)
-    (compilation-session-workbench-id session))
-
-  (define (active-compilation editor scope)
-    (scoped-session-table-ref active-compilations editor scope #f))
+  (define active-compilations (make-result-producer-registry))
 
   (define (ascii-digit? character)
     (char<=? #\0 character #\9))
@@ -109,12 +95,6 @@
                    (- (cadr fields) 1)
                    (- (caddr fields) 1))))))))
 
-  (define (session-current? editor session)
-    (and (not (compilation-session-closed? session))
-         (eq?
-           (active-compilation editor (compilation-session-scope session))
-           session)))
-
   (define (append-lines! editor session lines)
     (for-each
       (lambda (bytes)
@@ -127,7 +107,7 @@
                    (compilation-session-working-directory session) line)])
           (editor-append-result-text!
             editor
-            (compilation-session-buffer session)
+            (result-producer-session-buffer session)
             text
             (if item
                 (list (list 0 (bytevector-length (string->utf8 line)) item))
@@ -138,13 +118,13 @@
     (let ([combined
             (bytevector-append
               (if stdout?
-                  (compilation-session-stdout-pending session)
-                  (compilation-session-stderr-pending session))
+                  (result-producer-session-pending-output session)
+                  (result-producer-session-error-output session))
               data)])
       (let-values ([(lines remainder) (split-complete-lines combined)])
         (if stdout?
-            (compilation-session-stdout-pending-set! session remainder)
-            (compilation-session-stderr-pending-set! session remainder))
+            (result-producer-session-pending-output-set! session remainder)
+            (result-producer-session-error-output-set! session remainder))
         (append-lines! editor session lines))))
 
   (define (apply-compilation-output context)
@@ -154,7 +134,8 @@
                          (managed-process-event-process event))]
            [session (and process (managed-process-owner process))])
       (when (and (compilation-session? session)
-                 (session-current? editor session)
+                 (result-producer-registry-current?
+                   active-compilations editor session)
                  (= (managed-process-event-generation event)
                     (managed-process-generation process)))
         (cond
@@ -170,10 +151,12 @@
         (unless (zero? (bytevector-length bytes))
           (append-lines! editor session (list bytes))))
       (list
-        (compilation-session-stdout-pending session)
-        (compilation-session-stderr-pending session)))
-    (compilation-session-stdout-pending-set! session (make-bytevector 0))
-    (compilation-session-stderr-pending-set! session (make-bytevector 0)))
+        (result-producer-session-pending-output session)
+        (result-producer-session-error-output session)))
+    (result-producer-session-pending-output-set!
+      session (make-bytevector 0))
+    (result-producer-session-error-output-set!
+      session (make-bytevector 0)))
 
   (define (apply-compilation-exit context)
     (let* ([editor (command-context-editor context)]
@@ -182,10 +165,11 @@
                          (managed-process-event-process event))]
            [session (and process (managed-process-owner process))])
       (when (and (compilation-session? session)
-                 (session-current? editor session))
+                 (result-producer-registry-current?
+                   active-compilations editor session))
         (flush-pending! editor session)
-        (scoped-session-table-delete!
-          active-compilations editor (compilation-session-scope session))
+        (result-producer-registry-release!
+          active-compilations editor session)
         (let* ([status (managed-process-event-status event)]
                [message
                  (string-append
@@ -194,7 +178,7 @@
                    " with status " (number->string status) ".\n")])
           (editor-finish-result-producer!
             editor
-            (compilation-session-buffer session)
+            (result-producer-session-buffer session)
             (if (zero? status) 'ready 'failed)
             message
             (if (zero? status) 'info 'error))
@@ -208,25 +192,16 @@
            [session (command-context-argument context)])
       (if (not (compilation-session? session))
           '()
-          (let ([process (compilation-session-process session)])
-            (compilation-session-closed?-set! session #t)
-            (when (compilation-session-buffer session)
-              (editor-finish-result-producer!
-                editor
-                (compilation-session-buffer session)
-                'cancelled
-                "Compilation cancelled."
-                'warning))
-            (let ([scope (compilation-session-scope session)])
-              (when (eq? (active-compilation editor scope) session)
-                (scoped-session-table-delete!
-                  active-compilations editor scope)))
-            (if (and process (managed-process-running? process))
-                (list
-                  (make-command-effect
-                    'managed-process.signal
-                    (make-managed-process-signal-request process 15)))
-                '())))))
+          (result-producer-cancel!
+            active-compilations
+            editor
+            session
+            (and
+              (result-producer-session-process session)
+              (managed-process-running?
+                (result-producer-session-process session))
+              (result-producer-session-process session))
+            "Compilation cancelled."))))
 
   (define (start-compilation! context label arguments working-directory)
     (unless (and (string? label) (pair? arguments) (for-all string? arguments)
@@ -244,40 +219,39 @@
            [locations (make-location-list 'compilation '())]
            [session
              (%make-compilation-session
-               label working-directory origin-view-id scope locations #f #f
-               (make-bytevector 0) (make-bytevector 0) #f)]
+               origin-view-id scope locations #f #f
+               (make-bytevector 0) (make-bytevector 0) #f
+               label working-directory)]
            [process
              (make-managed-process
                label arguments working-directory session
                'compilation.process-output 'compilation.process-exit)]
-           [old (active-compilation editor scope)]
+           [old
+             (result-producer-registry-ref
+               active-compilations editor scope)]
            [buffer
              (editor-open-result-buffer!
                editor "*compilation*" 'compilation-mode
                label locations origin-view-id
                'compilation 'compilation.cancel session)])
-      (compilation-session-buffer-set! session buffer)
-      (compilation-session-process-set! session process)
+      (result-producer-session-buffer-set! session buffer)
+      (result-producer-session-process-set! session process)
       (buffer-set-result-producer-state! buffer 'running)
       (buffer-set-result-refresh!
         buffer
         (lambda (refresh-context refresh-buffer)
           (start-compilation!
             refresh-context label arguments working-directory)))
-      (scoped-session-table-set!
-        active-compilations editor scope session)
+      (result-producer-registry-activate!
+        active-compilations editor session)
       (editor-set-current-location-list! editor locations)
       (append
         (if (and old
-                 (compilation-session-process old)
-                 (managed-process-running? (compilation-session-process old)))
-            (begin
-              (compilation-session-closed?-set! old #t)
-              (list
-                (make-command-effect
-                  'managed-process.signal
-                  (make-managed-process-signal-request
-                    (compilation-session-process old) 15))))
+                 (result-producer-session-process old)
+                 (managed-process-running?
+                   (result-producer-session-process old)))
+            (result-producer-retire!
+              old (result-producer-session-process old))
             '())
         (list (make-command-effect 'managed-process.start process)))))
 

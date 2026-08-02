@@ -20,7 +20,7 @@
           (soda editor prompt)
           (soda editor result-buffer)
           (soda editor result-edit)
-          (soda editor scoped-session-table)
+          (soda editor result-producer-session)
           (soda editor state)
           (soda json)
           (soda runtime)
@@ -28,29 +28,14 @@
 
   (define-record-type
     (project-search-session %make-project-search-session project-search-session?)
-    (fields project
-            root
-            query
-            origin-view-id
-            workbench-id
-            locations
-            (mutable buffer)
-            (mutable process)
-            (mutable pending-output)
-            (mutable stderr-output)
-            (mutable closed?)))
+    (parent result-producer-session)
+    (fields project root query))
 
   (define active-project-searches
-    (make-scoped-session-table))
+    (make-result-producer-registry))
 
   (define (non-empty-string? value)
     (and (string? value) (positive? (string-length value))))
-
-  (define (project-search-session-scope session)
-    (project-search-session-workbench-id session))
-
-  (define (active-project-search editor scope)
-    (scoped-session-table-ref active-project-searches editor scope #f))
 
   (define (json-text object key)
     (let ([value (and (json-object? object)
@@ -147,13 +132,6 @@
         root line))
     (match-message->locations root (json-parse-bytevector line)))
 
-  (define (session-current? editor session)
-    (and (not (project-search-session-closed? session))
-         (eq?
-           (active-project-search
-             editor (project-search-session-scope session))
-           session)))
-
   (define (append-output-lines! editor session lines)
     (let ([items
             (apply append
@@ -167,7 +145,7 @@
                 lines))])
       (when (pair? items)
         (editor-append-location-results!
-          editor (project-search-session-buffer session) items))))
+          editor (result-producer-session-buffer session) items))))
 
   (define (apply-project-search-output context)
     (let* ([editor (command-context-editor context)]
@@ -176,7 +154,8 @@
                          (managed-process-event-process event))]
            [session (and process (managed-process-owner process))])
       (if (not (and (project-search-session? session)
-                    (session-current? editor session)
+                    (result-producer-registry-current?
+                      active-project-searches editor session)
                     (= (managed-process-event-generation event)
                        (managed-process-generation process))))
           '()
@@ -184,18 +163,18 @@
             [(= (managed-process-event-flags event) process-stdout)
              (let ([combined
                      (bytevector-append
-                       (project-search-session-pending-output session)
+                       (result-producer-session-pending-output session)
                        (managed-process-event-data event))])
                (let-values ([(lines remainder)
                              (split-complete-lines combined)])
-                 (project-search-session-pending-output-set! session remainder)
+                 (result-producer-session-pending-output-set! session remainder)
                  (append-output-lines! editor session lines)))
              '()]
             [(= (managed-process-event-flags event) process-stderr)
-             (project-search-session-stderr-output-set!
+             (result-producer-session-error-output-set!
                session
                (bytevector-append
-                 (project-search-session-stderr-output session)
+                 (result-producer-session-error-output session)
                  (managed-process-event-data event)))
              '()]
             [else '()]))))
@@ -203,10 +182,10 @@
   (define (search-result-count session)
     (length
       (location-list-items
-        (project-search-session-locations session))))
+        (result-producer-session-locations session))))
 
   (define (project-search-error-message session status)
-    (let ([stderr (project-search-session-stderr-output session)])
+    (let ([stderr (result-producer-session-error-output session)])
       (if (zero? (bytevector-length stderr))
           (string-append
             "Project search failed with status "
@@ -222,21 +201,21 @@
                          (managed-process-event-process event))]
            [session (and process (managed-process-owner process))])
       (when (and (project-search-session? session)
-                 (session-current? editor session))
-        (let ([remainder (project-search-session-pending-output session)])
+                 (result-producer-registry-current?
+                   active-project-searches editor session))
+        (let ([remainder (result-producer-session-pending-output session)])
           (unless (zero? (bytevector-length remainder))
             (append-output-lines! editor session (list remainder))))
-        (project-search-session-pending-output-set! session (make-bytevector 0))
-        (scoped-session-table-delete!
-          active-project-searches
-          editor
-          (project-search-session-scope session))
+        (result-producer-session-pending-output-set!
+          session (make-bytevector 0))
+        (result-producer-registry-release!
+          active-project-searches editor session)
         (let* ([status (managed-process-event-status event)]
                [count (search-result-count session)]
                [success? (or (= status 0) (= status 1))])
           (editor-finish-result-producer!
             editor
-            (project-search-session-buffer session)
+            (result-producer-session-buffer session)
             (if success? 'ready 'failed)
             (if success?
                 (and (zero? count) "No matches.")
@@ -257,28 +236,15 @@
            [session (command-context-argument context)])
       (if (not (project-search-session? session))
           '()
-          (let ([process (project-search-session-process session)])
-            (project-search-session-closed?-set! session #t)
-            (when (project-search-session-buffer session)
-              (editor-finish-result-producer!
-                editor
-                (project-search-session-buffer session)
-                'cancelled
-                "Project search cancelled."
-                'warning))
-            (let ([scope (project-search-session-scope session)])
-              (when (eq? (active-project-search editor scope) session)
-                (scoped-session-table-delete!
-                  active-project-searches editor scope)))
-            (if (and process (managed-process-running? process))
-                (list
-                  (make-command-effect
-                    'managed-process.signal
-                    (make-managed-process-signal-request process 15)))
-                '())))))
+          (result-producer-cancel!
+            active-project-searches
+            editor
+            session
+            (result-producer-session-process session)
+            "Project search cancelled."))))
 
   (define (project-search-session-live-buffer editor session)
-    (let ([buffer (project-search-session-buffer session)])
+    (let ([buffer (result-producer-session-buffer session)])
       (and
         buffer
         (exists (lambda (candidate) (eq? candidate buffer))
@@ -344,8 +310,9 @@
            [locations (make-location-list 'project-search '())]
            [session
              (%make-project-search-session
-               project root query origin-view-id scope locations
-               #f #f (make-bytevector 0) (make-bytevector 0) #f)]
+               origin-view-id scope locations #f #f
+               (make-bytevector 0) (make-bytevector 0) #f
+               project root query)]
            [process
              (make-managed-process
                (string-append "project-search:" query)
@@ -355,7 +322,9 @@
                session
                'project.search-output
                'project.search-exit)]
-           [old (active-project-search editor scope)]
+           [old
+             (result-producer-registry-ref
+               active-project-searches editor scope)]
            [buffer
              (editor-open-result-buffer!
                editor
@@ -369,8 +338,8 @@
                'project-search
                'project.search-cancel
                session)])
-      (project-search-session-buffer-set! session buffer)
-      (project-search-session-process-set! session process)
+      (result-producer-session-buffer-set! session buffer)
+      (result-producer-session-process-set! session process)
       (buffer-set-result-producer-state! buffer 'running)
       (buffer-set-local! buffer 'project-search-session session)
       (buffer-set-local!
@@ -378,11 +347,11 @@
         'result-edit-ready?
         (lambda ()
           (cond
-            [(project-search-session-closed? session)
+            [(result-producer-session-closed? session)
              "Search result Buffer is no longer current"]
-            [(and (project-search-session-process session)
+            [(and (result-producer-session-process session)
                   (managed-process-running?
-                    (project-search-session-process session)))
+                    (result-producer-session-process session)))
              "Wait for the search to finish"]
             [else #t])))
       (buffer-clear-local! buffer 'edit-guard)
@@ -403,21 +372,16 @@
                 (buffer-local-ref candidate 'result-edit-pending #f))))
           edit-project-search-query))
       (buffer-enable-result-edit-action! buffer "Edit matches")
-      (scoped-session-table-set!
-        active-project-searches editor scope session)
+      (result-producer-registry-activate!
+        active-project-searches editor session)
       (editor-set-current-location-list! editor locations)
       (append
         (if (and old
-                 (project-search-session-process old)
+                 (result-producer-session-process old)
                  (managed-process-running?
-                   (project-search-session-process old)))
-            (begin
-              (project-search-session-closed?-set! old #t)
-              (list
-                (make-command-effect
-                  'managed-process.signal
-                  (make-managed-process-signal-request
-                    (project-search-session-process old) 15))))
+                   (result-producer-session-process old)))
+            (result-producer-retire!
+              old (result-producer-session-process old))
             '())
         (list (make-command-effect 'managed-process.start process)))))
 

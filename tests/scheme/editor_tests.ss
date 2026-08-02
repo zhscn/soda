@@ -39,8 +39,8 @@
               project-resource-request-continuation)
         (soda editor project-search)
         (soda editor repl)
+        (soda editor result-producer-session)
         (soda editor save-place-store)
-        (soda editor scoped-session-table)
         (soda editor scheme-interface-index)
         (soda editor scheme-semantics)
         (soda editor scheme-document-highlight)
@@ -5624,26 +5624,33 @@
          "redo did not restore every Buffer in the WorkspaceEdit"))
 (editor-close! workspace-undo-editor)
 
-(define scoped-session-table-test (make-scoped-session-table))
+(define scoped-session-table-test (make-result-producer-registry))
 (define scoped-session-owner (list 'editor-owner))
-(scoped-session-table-set!
-  scoped-session-table-test scoped-session-owner 1 'primary)
-(scoped-session-table-set!
-  scoped-session-table-test scoped-session-owner 2 'secondary)
-(scoped-session-table-delete!
-  scoped-session-table-test scoped-session-owner 1)
+(define scoped-primary-session
+  (make-result-producer-session
+    1 1 #f #f #f (make-bytevector 0) (make-bytevector 0) #f))
+(define scoped-secondary-session
+  (make-result-producer-session
+    2 2 #f #f #f (make-bytevector 0) (make-bytevector 0) #f))
+(result-producer-registry-activate!
+  scoped-session-table-test scoped-session-owner scoped-primary-session)
+(result-producer-registry-activate!
+  scoped-session-table-test scoped-session-owner scoped-secondary-session)
+(result-producer-registry-release!
+  scoped-session-table-test scoped-session-owner scoped-primary-session)
 (unless
   (and
+    (not
+      (result-producer-registry-ref
+        scoped-session-table-test scoped-session-owner 1))
     (eq?
-      (scoped-session-table-ref
-        scoped-session-table-test scoped-session-owner 1 'missing)
-      'missing)
-    (eq?
-      (scoped-session-table-ref
-        scoped-session-table-test scoped-session-owner 2 'missing)
-      'secondary))
+      (result-producer-registry-ref
+        scoped-session-table-test scoped-session-owner 2)
+      scoped-secondary-session)
+    (result-producer-registry-current?
+      scoped-session-table-test scoped-session-owner scoped-secondary-session))
   (error 'editor-tests
-         "scoped session deletion affected another Workbench"))
+         "Result producer release affected another Workbench"))
 
 (define scoped-result-source
   (make-buffer
