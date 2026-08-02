@@ -48,20 +48,13 @@
 
   (define (paragraph-target context)
     (let* ([view (command-context-view context)]
-           [buffer (view-buffer view)]
-           [snapshot (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda ()
-                (let ([range (paragraph-range text (view-caret view))])
-                  (command-context-range-target
-                    context 'paragraph (car range) (cdr range))))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
+           [buffer (view-buffer view)])
+      (call-with-buffer-text
+        buffer
+        (lambda (text)
+          (let ([range (paragraph-range text (view-caret view))])
+            (command-context-range-target
+              context 'paragraph (car range) (cdr range)))))))
 
   (define target-reader
     (make-command-target-reader
@@ -202,16 +195,11 @@
   (define (fill-target! context target)
     (let* ([view (command-context-view context)]
            [buffer (view-buffer view)]
-           [width (buffer-setting-ref buffer 'fill-column 80)]
-           [snapshot (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda ()
-                (let* ([start (command-target-start target)]
+           [width (buffer-setting-ref buffer 'fill-column 80)])
+      (call-with-buffer-text
+        buffer
+        (lambda (text)
+          (let* ([start (command-target-start target)]
                        [replacement
                          (filled-paragraph
                            buffer
@@ -220,11 +208,9 @@
                            width)])
                   (buffer-replace-range!
                     buffer start (command-target-end target) replacement)
-                  (view-set-caret!
-                    view
-                    (+ start (bytevector-length replacement)))))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
+            (view-set-caret!
+              view
+              (+ start (bytevector-length replacement))))))))
 
   (define-command (fill-paragraph-command context target)
     "Fill the paragraph at point to `fill-column`."
@@ -241,21 +227,14 @@
       (lambda (editor buffer) #f)))
 
   (define (point-after-fill-column? buffer point)
-    (let ([snapshot (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda ()
-                (and
-                  (positive? point)
-                  (memv (text-byte-at text (- point 1)) '(9 32))
-                  (> (cdr (text-position text point))
-                     (buffer-setting-ref buffer 'fill-column 80))))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
+    (call-with-buffer-text
+      buffer
+      (lambda (text)
+        (and
+          (positive? point)
+          (memv (text-byte-at text (- point 1)) '(9 32))
+          (> (cdr (text-position text point))
+             (buffer-setting-ref buffer 'fill-column 80))))))
 
   (define (auto-fill-after-command
             context definition arguments effects condition)

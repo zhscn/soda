@@ -22,17 +22,10 @@
         (editor-user-error
           'scheme.debug-toggle-breakpoint
           "The current Buffer has no source resource"))
-      (let ([snapshot
-              (document-snapshot
-                (buffer-document buffer))])
-        (dynamic-wind
-          (lambda () #f)
-          (lambda ()
-            (let ([text (snapshot-text snapshot)])
-              (dynamic-wind
-                (lambda () #f)
-                (lambda ()
-                  (let* ([position
+      (call-with-buffer-text
+        buffer
+        (lambda (text)
+          (let* ([position
                            (text-position
                              text
                              (view-caret view))]
@@ -48,12 +41,7 @@
                       (editor-user-error
                         'scheme.debug-toggle-breakpoint
                         "Cannot place a breakpoint on an empty final line"))
-                    (make-source-location
-                      resource
-                      start
-                      end)))
-                (lambda () (text-close! text)))))
-          (lambda () (snapshot-close! snapshot))))))
+            (make-source-location resource start end))))))
 
   (define (editor-source-debugger editor)
     (chez-evaluator-source-debugger

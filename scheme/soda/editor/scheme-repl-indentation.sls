@@ -12,21 +12,6 @@
           (soda editor scheme-indentation)
           (soda editor state))
 
-  (define (buffer-range-source buffer start end)
-    (let ([snapshot
-            (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda ()
-                (utf8->string
-                  (text-subbytevector text start end)))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
-
   (define (repl-command-session who context)
     (let* ([editor (command-context-editor context)]
            [buffer (view-buffer (command-context-view context))]
@@ -63,17 +48,11 @@
            [input-start
              (interaction-session-input-start session)]
            [caret
-             (max input-start (view-caret view))]
-           [snapshot
-             (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda ()
-                (let* ([line
+             (max input-start (view-caret view))])
+      (call-with-buffer-text
+        buffer
+        (lambda (text)
+          (let* ([line
                          (car (text-position text caret))]
                        [start
                          (max
@@ -84,10 +63,9 @@
                          (leading-whitespace-end text start end)]
                        [indentation
                          (scheme-line-indent
-                           (buffer-range-source
-                             buffer
-                             input-start
-                             start)
+                           (utf8->string
+                             (text-subbytevector
+                               text input-start start))
                            (buffer-setting-ref
                              buffer
                              'indent-width
@@ -116,9 +94,7 @@
                           (if
                             (<= caret whitespace-end)
                             (+ start indentation)
-                            (+ caret delta))))))))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot))))
+                            (+ caret delta))))))))))
     '())
 
   (define (string-line-position source offset)

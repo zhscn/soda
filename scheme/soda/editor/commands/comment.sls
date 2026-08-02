@@ -124,35 +124,23 @@
         (editor-user-error 'edit.comment-dwim "The comment target is stale"))
       (cond
         [(and line-prefix (not (string=? line-prefix "")))
-         (let ([snapshot (document-snapshot (buffer-document buffer))])
-           (dynamic-wind
-             (lambda () #f)
-             (lambda ()
-               (let ([text (snapshot-text snapshot)])
-                 (dynamic-wind
-                   (lambda () #f)
-                   (lambda ()
-                     (let ([lines (target-line-range text target)])
-                       (commit-replacements!
-                         buffer
-                         (line-comment-replacements
-                           text (car lines) (cdr lines) line-prefix))))
-                   (lambda () (text-close! text)))))
-             (lambda () (snapshot-close! snapshot))))]
+         (call-with-buffer-text
+           buffer
+           (lambda (text)
+             (let ([lines (target-line-range text target)])
+               (commit-replacements!
+                 buffer
+                 (line-comment-replacements
+                   text (car lines) (cdr lines) line-prefix)))))]
         [(and block-start block-end)
          (let* ([start (command-target-start target)]
                 [end (command-target-end target)]
                 [open (string->utf8 block-start)]
-                [close (string->utf8 block-end)]
-                [snapshot (document-snapshot (buffer-document buffer))])
-           (dynamic-wind
-             (lambda () #f)
-             (lambda ()
-               (let ([text (snapshot-text snapshot)])
-                 (dynamic-wind
-                   (lambda () #f)
-                   (lambda ()
-                     (let ([commented?
+                [close (string->utf8 block-end)])
+           (call-with-buffer-text
+             buffer
+             (lambda (text)
+               (let ([commented?
                              (and
                                (bytevector-prefix-at?
                                  text start block-start)
@@ -176,11 +164,9 @@
                                  start
                                  (+ start (bytevector-length open))
                                  (make-bytevector 0)))
-                             (list
-                               (list end end close)
-                               (list start start open))))))
-                   (lambda () (text-close! text)))))
-             (lambda () (snapshot-close! snapshot))))]
+                     (list
+                       (list end end close)
+                       (list start start open))))))))]
         [else
          (editor-user-error
            'edit.comment-dwim

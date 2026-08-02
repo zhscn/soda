@@ -969,17 +969,10 @@
         (editor-views editor))))
 
   (define (source-position-offset buffer position)
-    (let ([snapshot
-            (document-snapshot
-              (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda ()
-                (let* ([line
+    (call-with-buffer-text
+      buffer
+      (lambda (text)
+        (let* ([line
                          (min
                            (file-source-position-line position)
                            (- (text-line-count text) 1))]
@@ -993,26 +986,16 @@
                          (min
                            (file-source-position-character position)
                            (string-length line-text))])
-                  (+ start
-                     (bytevector-length
-                       (string->utf8
-                         (substring
-                           line-text
-                           0
-                           character))))))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
+          (+ start
+             (bytevector-length
+               (string->utf8
+                 (substring line-text 0 character))))))))
 
   (define (utf16-position-offset buffer position)
-    (let ([snapshot (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda ()
-                (let* ([line (min (file-utf16-position-line position)
+    (call-with-buffer-text
+      buffer
+      (lambda (text)
+        (let* ([line (min (file-utf16-position-line position)
                                   (- (text-line-count text) 1))]
                        [start (text-line-start text line)]
                        [end (text-line-content-end text line)]
@@ -1024,9 +1007,7 @@
                         (let ([next (+ units (if (> (char->integer (string-ref line-text index)) #xffff) 2 1))])
                           (if (> next target)
                               (+ start (bytevector-length (string->utf8 (substring line-text 0 index))))
-                              (loop (+ index 1) next)))))))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
+                              (loop (+ index 1) next)))))))))
 
   (define (open-target-offset buffer target)
     (cond
@@ -1047,7 +1028,7 @@
                 (open-target-offset
                   buffer (file-navigation-target-end target))])
           (when (and start end)
-            (let ([size (buffer-byte-length buffer)])
+            (let ([size (buffer-byte-size buffer)])
               (view-set-navigation-target!
                 view
                 (min start size)
@@ -1072,7 +1053,7 @@
                buffer
                (open-request-offset request))]
            [target-offset
-             (and offset (min offset (buffer-byte-length buffer)))])
+             (and offset (min offset (buffer-byte-size buffer)))])
       (and
         view
         (let ([intent (open-request-display-intent request)])
@@ -1602,18 +1583,6 @@
          (create-open-result-buffer! editor result #f)
          '()])))
 
-  (define (buffer-byte-length buffer)
-    (let ([snapshot (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda () (text-size text))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
-
   (define (run-before-file-hook!
             editor
             phase
@@ -1753,7 +1722,7 @@
              (buffer-replace-range!
                buffer
                0
-               (buffer-byte-length buffer)
+               (buffer-byte-size buffer)
                normalized))
            (buffer-mark-saved! buffer)
            (buffer-clear-local-setting!

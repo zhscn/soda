@@ -194,28 +194,17 @@
       end))
 
   (define (buffer-range-source buffer start end)
-    (let ([snapshot (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda ()
-                (unless (and (integer? start)
-                             (exact? start)
-                             (integer? end)
-                             (exact? end)
-                             (<= 0 start end (text-size text)))
-                  (assertion-violation
-                    'buffer-range-source
-                    "evaluation range is outside the buffer"
-                    start
-                    end))
-                (utf8->string
-                  (text-subbytevector text start end)))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
+    (unless (and (integer? start)
+                 (exact? start)
+                 (integer? end)
+                 (exact? end)
+                 (<= 0 start end (buffer-byte-size buffer)))
+      (assertion-violation
+        'buffer-range-source
+        "evaluation range is outside the buffer"
+        start
+        end))
+    (buffer-string-range buffer start end))
 
   (define (session-submit-source! editor session source echo? origin)
     (when (eq? (interaction-session-state session) 'evaluating)

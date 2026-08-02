@@ -2905,25 +2905,17 @@
             (< (view-caret view) start)
             (> (view-caret view) replacement-end))
           #f
-          (let* ([buffer (view-buffer view)]
-                 [end (view-caret view)]
-                 [snapshot
-                   (document-snapshot (buffer-document buffer))])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda ()
-                (let ([text (snapshot-text snapshot)])
-                  (dynamic-wind
-                    (lambda () #f)
-                    (lambda ()
-                      (and
-                        (<= end (text-size text))
-                        (cons
-                          (utf8->string
-                            (text-subbytevector text start end))
-                          target)))
-                    (lambda () (text-close! text)))))
-              (lambda () (snapshot-close! snapshot)))))))
+          (let ([buffer (view-buffer view)]
+                [end (view-caret view)])
+            (call-with-buffer-text
+              buffer
+              (lambda (text)
+                (and
+                  (<= end (text-size text))
+                  (cons
+                    (utf8->string
+                      (text-subbytevector text start end))
+                    target))))))))
 
   (define (editor-refresh-document-completion!
             value
@@ -3131,17 +3123,7 @@
       (string->utf8 (completion-text-edit-new-text edit))))
 
   (define (validate-completion-edits! document primary additional)
-    (let ([size
-            (let ([snapshot (document-snapshot document)])
-              (dynamic-wind
-                (lambda () #f)
-                (lambda ()
-                  (let ([text (snapshot-text snapshot)])
-                    (dynamic-wind
-                      (lambda () #f)
-                      (lambda () (text-size text))
-                      (lambda () (text-close! text)))))
-                (lambda () (snapshot-close! snapshot))))]
+    (let ([size (document-byte-size document)]
           [edits (cons primary additional)])
       (for-each
         (lambda (edit)
@@ -3530,17 +3512,11 @@
                (prompt-session-view-id session))]
            [buffer (view-buffer view)]
            [caret (view-caret view)]
-           [source (completion-session-source completion)]
-           [snapshot
-             (document-snapshot (buffer-document buffer))])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let ([text (snapshot-text snapshot)])
-            (dynamic-wind
-              (lambda () #f)
-              (lambda ()
-                (let* ([size (text-size text)]
+           [source (completion-session-source completion)])
+      (call-with-buffer-text
+        buffer
+        (lambda (text)
+          (let* ([size (text-size text)]
                        [input
                          (utf8->string
                            (text-subbytevector text 0 size))]
@@ -3562,19 +3538,17 @@
                           (bytevector-length
                             (string->utf8
                               (substring input 0 (cdr range))))])
-                    (values
-                      (substring input (car range) point)
-                      (make-prompt-completion-target
-                        (prompt-session-id session)
-                        start
-                        caret
-                        replacement-end)
-                      (make-prompt-completion-context
-                        input
-                        point
-                        (choice-source-metadata source))))))
-              (lambda () (text-close! text)))))
-        (lambda () (snapshot-close! snapshot)))))
+            (values
+              (substring input (car range) point)
+              (make-prompt-completion-target
+                (prompt-session-id session)
+                start
+                caret
+                replacement-end)
+              (make-prompt-completion-context
+                input
+                point
+                (choice-source-metadata source)))))))))
 
   (define (editor-refresh-prompt-completion! value)
     (require-open-editor 'editor-refresh-prompt-completion! value)
