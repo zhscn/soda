@@ -9,8 +9,9 @@
           (soda editor condition)
           (soda editor cpp-language)
           (soda editor edit)
+          (soda editor editor-storage)
           (soda editor keymap)
-          (soda editor state)
+          (soda editor view)
           (soda indentation))
 
   (define style-properties

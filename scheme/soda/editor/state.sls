@@ -390,12 +390,6 @@
             theme
             evaluator))
 
-  (define (require-open-editor who value)
-    (unless (editor? value)
-      (assertion-violation who "expected an editor" value))
-    (when (editor-closed? value)
-      (assertion-violation who "editor is closed" value)))
-
   (define (editor-set-pending-prefix! editor prefix)
     (require-open-editor 'editor-set-pending-prefix! editor)
     (unless (or (not prefix) (prefix-argument? prefix))
@@ -1282,83 +1276,6 @@
       (buffer-close! buffer)
       (editor-touch-buffer-registry! value buffer 'removed)
       (when close-failure (raise close-failure))))
-
-  (define (editor-interactions value)
-    (require-open-editor 'editor-interactions value)
-    (entity-registry-values (editor-interaction-registry value)))
-
-  (define (editor-interaction-ref value id)
-    (require-open-editor 'editor-interaction-ref value)
-    (unless (exact-non-negative-integer? id)
-      (assertion-violation
-        'editor-interaction-ref
-        "interaction id must be a non-negative exact integer"
-        id))
-    (or
-      (entity-registry-ref (editor-interaction-registry value) id)
-      (assertion-violation
-        'editor-interaction-ref
-        "unknown interaction id"
-        id)))
-
-  (define (editor-interaction-for-buffer value buffer-id)
-    (require-open-editor 'editor-interaction-for-buffer value)
-    (unless (exact-non-negative-integer? buffer-id)
-      (assertion-violation
-        'editor-interaction-for-buffer
-        "buffer id must be a non-negative exact integer"
-        buffer-id))
-    (find
-      (lambda (session)
-        (= (interaction-session-buffer-id session) buffer-id))
-      (editor-interactions value)))
-
-  (define (editor-set-evaluator! value evaluator)
-    (require-open-editor 'editor-set-evaluator! value)
-    (unless evaluator
-      (assertion-violation
-        'editor-set-evaluator!
-        "evaluator must not be #f"))
-    (editor-evaluator-set! value evaluator)
-    (for-each
-      (lambda (session)
-        (when (eq? (interaction-session-kind session) 'repl)
-          (interaction-session-set-evaluator! session evaluator)))
-      (editor-interactions value))
-    evaluator)
-
-  (define (editor-register-interaction!
-            value
-            kind
-            name
-            buffer-id
-            evaluator
-            prompt
-            input-start)
-    (require-open-editor 'editor-register-interaction! value)
-    (let ([buffer (editor-buffer-ref value buffer-id)])
-      (when (editor-interaction-for-buffer value buffer-id)
-        (assertion-violation
-          'editor-register-interaction!
-          "buffer already belongs to an interaction session"
-          buffer-id))
-      (let* ([id
-               (entity-registry-next-id
-                 (editor-interaction-registry value))]
-             [session
-               (make-interaction-session
-                 id
-                 kind
-                 name
-                 buffer
-                 evaluator
-                 prompt
-                 input-start)])
-        (entity-registry-register!
-          (editor-interaction-registry value)
-          id
-          session)
-        session)))
 
   (define (editor-tui-application-catalog value)
     (require-open-editor 'editor-tui-application-catalog value)

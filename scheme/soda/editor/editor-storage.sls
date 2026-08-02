@@ -1,6 +1,7 @@
 (library (soda editor editor-storage)
   (export make-editor-storage
           editor?
+          require-open-editor
           editor-buffer-registry
           editor-resource-table
           editor-buffer-registry-generation
@@ -193,4 +194,10 @@
       (mutable configuration-transaction-depth
                editor-configuration-transaction-depth
                editor-configuration-transaction-depth-set!)
-      (mutable closed? editor-closed? editor-closed?-set!))))
+      (mutable closed? editor-closed? editor-closed?-set!)))
+
+  (define (require-open-editor who editor)
+    (unless (editor? editor)
+      (assertion-violation who "expected an editor" editor))
+    (when (editor-closed? editor)
+      (assertion-violation who "editor is closed" editor))))

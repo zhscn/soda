@@ -7,10 +7,11 @@
           (soda editor command-target)
           (soda editor condition)
           (soda editor edit)
+          (soda editor editor-storage)
           (soda editor indentation-runtime)
           (soda editor keymap)
           (soda editor scheme-indentation)
-          (soda editor state))
+          (soda editor view))
 
   (define (buffer-range-source buffer start end)
     (buffer-string-range buffer start end))

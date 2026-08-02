@@ -10,7 +10,7 @@
           (soda editor interaction)
           (soda editor keymap)
           (soda editor scheme-indentation)
-          (soda editor state))
+          (soda editor view))
 
   (define (repl-command-session who context)
     (let* ([editor (command-context-editor context)]

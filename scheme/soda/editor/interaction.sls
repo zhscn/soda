@@ -39,6 +39,11 @@
           interaction-session-dismiss-failure!
           interaction-session-close!
           interaction-session-closed?
+          editor-interactions
+          editor-interaction-ref
+          editor-interaction-for-buffer
+          editor-register-interaction!
+          editor-set-evaluator!
           make-evaluation-origin
           evaluation-origin?
           evaluation-origin-buffer-id
@@ -76,6 +81,8 @@
           interaction-transcript-closed?)
   (import (rnrs)
           (soda editor contract)
+          (soda editor editor-storage)
+          (soda editor entity-registry)
           (soda editor interaction-history)
           (soda editor interaction-transcript))
 
@@ -109,6 +116,76 @@
   (define-record-type
     (evaluation-origin %make-evaluation-origin evaluation-origin?)
     (fields buffer-id resource revision start end))
+
+  (define (editor-interactions editor)
+    (require-open-editor 'editor-interactions editor)
+    (entity-registry-values (editor-interaction-registry editor)))
+
+  (define (editor-interaction-ref editor id)
+    (require-open-editor 'editor-interaction-ref editor)
+    (unless (exact-non-negative-integer? id)
+      (assertion-violation
+        'editor-interaction-ref
+        "interaction id must be a non-negative exact integer"
+        id))
+    (or
+      (entity-registry-ref (editor-interaction-registry editor) id)
+      (assertion-violation
+        'editor-interaction-ref "unknown interaction id" id)))
+
+  (define (editor-interaction-for-buffer editor buffer-id)
+    (require-open-editor 'editor-interaction-for-buffer editor)
+    (unless (exact-non-negative-integer? buffer-id)
+      (assertion-violation
+        'editor-interaction-for-buffer
+        "buffer id must be a non-negative exact integer"
+        buffer-id))
+    (find
+      (lambda (session)
+        (= (interaction-session-buffer-id session) buffer-id))
+      (editor-interactions editor)))
+
+  (define (editor-set-evaluator! editor evaluator)
+    (require-open-editor 'editor-set-evaluator! editor)
+    (unless evaluator
+      (assertion-violation
+        'editor-set-evaluator! "evaluator must not be #f"))
+    (editor-evaluator-set! editor evaluator)
+    (for-each
+      (lambda (session)
+        (when (eq? (interaction-session-kind session) 'repl)
+          (interaction-session-set-evaluator! session evaluator)))
+      (editor-interactions editor))
+    evaluator)
+
+  (define (editor-register-interaction!
+            editor kind name buffer-id evaluator prompt input-start)
+    (require-open-editor 'editor-register-interaction! editor)
+    (let ([buffer
+            (or
+              (entity-registry-ref
+                (editor-buffer-registry editor)
+                buffer-id)
+              (assertion-violation
+                'editor-register-interaction!
+                "unknown buffer id"
+                buffer-id))])
+      (when (editor-interaction-for-buffer editor buffer-id)
+        (assertion-violation
+          'editor-register-interaction!
+          "buffer already belongs to an interaction session"
+          buffer-id))
+      (let* ([id
+               (entity-registry-next-id
+                 (editor-interaction-registry editor))]
+             [session
+               (make-interaction-session
+                 id kind name buffer evaluator prompt input-start)])
+        (entity-registry-register!
+          (editor-interaction-registry editor)
+          id
+          session)
+        session)))
 
   (define-record-type evaluation-request
     (fields session-id generation source origin))

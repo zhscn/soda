@@ -10,7 +10,6 @@
           (soda editor evaluator)
           (soda editor event)
           (soda editor interaction)
-          (soda editor state)
           (soda runtime))
 
   (define default-slice-ticks 50000)
