@@ -170,7 +170,7 @@
         (let ([candidate (prompt-result-candidate result)])
           (list
             (and candidate
-                 (completion-item-payload candidate)))))))
+                 (completion-item-provider-data candidate)))))))
 
   (define (project-open? editor project)
     (exists
@@ -196,7 +196,7 @@
         (let ([candidate (prompt-result-candidate result)])
           (list
             (and candidate
-                 (completion-item-payload candidate)))))))
+                 (completion-item-provider-data candidate)))))))
 
   (define (task-choice-source editor)
     (let ([items
@@ -252,7 +252,7 @@
         (let ([candidate (prompt-result-candidate result)])
           (list
             (and candidate
-                 (completion-item-payload candidate)))))))
+                 (completion-item-provider-data candidate)))))))
 
   (define (workspace-project editor view)
     (editor-resolve-project editor view 'workspace))

@@ -1934,7 +1934,7 @@
            [selected
              (and
                candidate
-               (completion-item-payload candidate))]
+               (completion-item-provider-data candidate))]
            [saved
              (and
                (prompt-result? result)

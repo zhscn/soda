@@ -5,7 +5,8 @@
           built-in-api-index-build-cache-hits
           built-in-api-index-build-cache-misses)
   (import (chezscheme)
-          (soda editor scheme-api-indexer))
+          (soda editor scheme-api-indexer)
+          (soda hash))
 
   (define cache-tag 'soda-scheme-api-cache)
   (define cache-version 1)
@@ -16,26 +17,6 @@
 
   (define-record-type built-in-api-index-build
     (fields source-count cache-hits cache-misses))
-
-  (define fnv-offset-basis 14695981039346656037)
-  (define fnv-prime 1099511628211)
-  (define fnv-mask #xffffffffffffffff)
-
-  (define (hash-byte hash byte)
-    (bitwise-and
-      (* (bitwise-xor hash byte) fnv-prime)
-      fnv-mask))
-
-  (define (hash-bytevector hash bytes)
-    (let loop ([position 0] [hash hash])
-      (if (= position (bytevector-length bytes))
-          hash
-          (loop
-            (+ position 1)
-            (hash-byte hash (bytevector-u8-ref bytes position))))))
-
-  (define (hash-string hash value)
-    (hash-bytevector hash (string->utf8 value)))
 
   (define (pad-left value width character)
     (if (>= (string-length value) width)
@@ -49,7 +30,7 @@
       "fnv1a64:"
       (pad-left
         (number->string
-          (hash-bytevector fnv-offset-basis bytes)
+          (fnv1a64-bytevector fnv1a64-offset-basis bytes)
           16)
         16
         #\0)))
@@ -98,12 +79,12 @@
               (lambda (hash relative-path)
                 (let* ([path (path-join analyzer-root relative-path)]
                        [bytes (read-bytes path)])
-                  (hash-bytevector
-                    (hash-byte
-                      (hash-string hash relative-path)
+                  (fnv1a64-bytevector
+                    (fnv1a64-byte
+                      (fnv1a64-string hash relative-path)
                       0)
                     bytes)))
-              fnv-offset-basis
+              fnv1a64-offset-basis
               analyzer-relative-paths)])
       (string-append
         "fnv1a64:"

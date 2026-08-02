@@ -427,7 +427,7 @@
                 (prompt-result-candidate result)])
           (if
             candidate
-            (list (completion-item-payload candidate))
+            (list (completion-item-provider-data candidate))
             (list #f))))))
 
   (define (document-symbol-reader environments)
@@ -445,7 +445,7 @@
                 (prompt-result-candidate result)])
           (if
             candidate
-            (list (completion-item-payload candidate))
+            (list (completion-item-provider-data candidate))
             (list #f))))))
 
   (define (find-workspace-symbol symbols key)

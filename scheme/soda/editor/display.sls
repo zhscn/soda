@@ -3,6 +3,7 @@
           character-byte-length
           next-tab-stop
           string-cell-width
+          string-cell-end-column
           text-cell-column
           text-offset-at-cell-column
           line-number-gutter-width)
@@ -46,7 +47,10 @@
         (+ column (character-cell-width character))))
 
   (define (string-cell-width value tab-width)
-    (let loop ([index 0] [column 0])
+    (string-cell-end-column value 0 tab-width))
+
+  (define (string-cell-end-column value start-column tab-width)
+    (let loop ([index 0] [column start-column])
       (if (= index (string-length value))
           column
           (loop

@@ -1323,10 +1323,10 @@
       (lambda (context result)
         (let ([candidate (prompt-result-candidate result)])
           (unless (and candidate
-                       (symbol? (completion-item-payload candidate)))
+                       (symbol? (completion-item-provider-data candidate)))
             (editor-user-error
               'buffer-item.actions "No result action was selected"))
-          (list (completion-item-payload candidate))))))
+          (list (completion-item-provider-data candidate))))))
 
   (define-command (choose-buffer-item-action context name)
     "Choose and invoke an action for the result item or result Buffer."

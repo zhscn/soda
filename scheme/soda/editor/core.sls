@@ -1447,7 +1447,6 @@
           completion-item?
           completion-item-id
           completion-item-provider
-          completion-item-source
           completion-item-filter-text
           completion-item-label
           completion-item-insert-text
@@ -1466,7 +1465,6 @@
           completion-documentation-format
           completion-documentation-text
           completion-item-provider-data
-          completion-item-payload
           make-completion-text-edit
           completion-text-edit?
           completion-text-edit-start

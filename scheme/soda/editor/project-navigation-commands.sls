@@ -137,7 +137,7 @@
 
   (define (candidate-payload context result)
     (let ([candidate (prompt-result-candidate result)])
-      (list (and candidate (completion-item-payload candidate)))))
+      (list (and candidate (completion-item-provider-data candidate)))))
 
   (define project-file-reader
     (interactive-completing-read

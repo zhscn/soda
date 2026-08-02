@@ -64,8 +64,8 @@
         (or
           (and
             candidate
-            (theme? (completion-item-payload candidate))
-            (completion-item-payload candidate))
+            (theme? (completion-item-provider-data candidate))
+            (completion-item-provider-data candidate))
           (let ([value (prompt-result-value result)])
             (and
               (positive? (string-length value))

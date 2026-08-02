@@ -404,17 +404,6 @@
                            (+ column width)
                            column)])))))))))
 
-  (define (display-string-end-column value start-column tab-width)
-    (let loop ([index 0] [column start-column])
-      (if (= index (string-length value))
-          column
-          (let ([character (string-ref value index)])
-            (loop
-              (+ index 1)
-              (if (char=? character #\tab)
-                  (next-tab-stop column tab-width)
-                  (+ column (character-cell-width character))))))))
-
   (define (display-chunks-column-at chunks position tab-width)
     (let loop ([remaining chunks] [column 0])
       (if (null? remaining)
@@ -446,17 +435,17 @@
                       [length (- position start)]
                       [prefix (make-bytevector length)])
                  (bytevector-copy! bytes 0 prefix 0 length)
-                 (display-string-end-column
-                   (utf8->string prefix)
-                   column
-                   tab-width))]
+                 (string-cell-end-column
+                      (utf8->string prefix)
+                      column
+                      tab-width))]
               [else
                (loop
                  (cdr remaining)
-                 (display-string-end-column
-                   (display-chunk-text chunk)
-                   column
-                   tab-width))])))))
+                 (string-cell-end-column
+                      (display-chunk-text chunk)
+                      column
+                      tab-width))])))))
 
   (define (make-line-projection visual-line)
     (vector
@@ -2310,7 +2299,7 @@
                              (make-cell-source
                                'completion
                                (completion-item-id item)
-                               (completion-item-source item))
+                               (completion-item-provider item))
                              (component-source component-id))])
                     (frame-fill-rect!
                       frame

@@ -10,6 +10,7 @@
           compile-scheme-program-with-interface!)
   (import (chezscheme)
           (soda editor scheme-interface-index)
+          (soda hash)
           (soda vfs))
 
   (define-record-type
@@ -103,29 +104,6 @@
         (open-file-input-port path)
         get-bytevector-all)))
 
-  (define fnv-offset-basis 14695981039346656037)
-  (define fnv-prime 1099511628211)
-  (define fnv-mask #xffffffffffffffff)
-
-  (define (hash-byte hash byte)
-    (bitwise-and
-      (* (bitwise-xor hash byte) fnv-prime)
-      fnv-mask))
-
-  (define (hash-bytevector hash bytes)
-    (let loop ([index 0] [hash hash])
-      (if
-        (= index (bytevector-length bytes))
-        hash
-        (loop
-          (+ index 1)
-          (hash-byte
-            hash
-            (bytevector-u8-ref bytes index))))))
-
-  (define (hash-string hash value)
-    (hash-bytevector hash (string->utf8 value)))
-
   (define (pad-left value width character)
     (if
       (>= (string-length value) width)
@@ -140,12 +118,12 @@
     (let ([hash
             (fold-left
               (lambda (hash source)
-                (hash-bytevector
-                  (hash-byte
-                    (hash-string hash (car source))
+                (fnv1a64-bytevector
+                  (fnv1a64-byte
+                    (fnv1a64-string hash (car source))
                     0)
                   (cdr source)))
-              fnv-offset-basis
+              fnv1a64-offset-basis
               sources)])
       (string-append
         "fnv1a64:"

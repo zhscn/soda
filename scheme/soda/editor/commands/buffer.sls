@@ -84,8 +84,8 @@
              (and
                candidate
                (exact-non-negative-integer?
-                 (completion-item-payload candidate))
-               (completion-item-payload candidate))])
+                 (completion-item-provider-data candidate))
+               (completion-item-provider-data candidate))])
       (cond
         [candidate-id
          (find-buffer-by-id editor candidate-id)]

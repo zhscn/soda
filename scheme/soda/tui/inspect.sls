@@ -50,20 +50,6 @@
             style
             sources))
 
-  (define (next-character-offset text position)
-    (let ([size (text-size text)])
-      (if (>= position size)
-          size
-          (let loop ([offset (+ position 1)])
-            (if (or (>= offset size)
-                    (not
-                      (= (bitwise-and
-                           (text-byte-at text offset)
-                           #xc0)
-                         #x80)))
-                offset
-                (loop (+ offset 1)))))))
-
   (define (character-at text position)
     (if (= position (text-size text))
         #f
@@ -72,7 +58,7 @@
                   (text-subbytevector
                     text
                     position
-                    (next-character-offset text position)))])
+                    (text-next-character-offset text position)))])
           (and (positive? (string-length value))
                (string-ref value 0)))))
 

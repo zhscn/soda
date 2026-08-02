@@ -1255,14 +1255,14 @@
            (map
              (lambda (item)
                (debugger-action-id
-                 (completion-item-payload item)))
+                 (completion-item-provider-data item)))
              (completion-session-items completion)))])
   (unless
     (and
       selected
       (eq?
         (debugger-action-id
-          (completion-item-payload selected))
+          (completion-item-provider-data selected))
         'retry)
       (= (length actions) 4)
       (for-all

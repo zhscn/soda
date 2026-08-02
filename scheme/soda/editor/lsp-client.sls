@@ -3781,7 +3781,7 @@
              (and (prompt-result? result) (prompt-result-candidate result))]
            [action
              (and candidate
-                  (completion-item-payload candidate))]
+                  (completion-item-provider-data candidate))]
            [saved
              (and (prompt-result? result) (prompt-result-data result))])
       (if (and (lsp-code-action? action)

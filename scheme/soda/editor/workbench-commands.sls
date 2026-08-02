@@ -59,7 +59,7 @@
         (let ([candidate (prompt-result-candidate result)])
           (list
             (and candidate
-                 (completion-item-payload candidate)))))))
+                 (completion-item-provider-data candidate)))))))
 
   (define-command (create-workbench-command context name)
     "Create and select an empty-scope Workbench."

@@ -157,8 +157,8 @@
            [candidate-command
              (and
                candidate
-               (symbol? (completion-item-payload candidate))
-               (completion-item-payload candidate))])
+               (symbol? (completion-item-provider-data candidate))
+               (completion-item-provider-data candidate))])
       (cond
         [(or (not value) (zero? (string-length value)))
          (editor-set-status-message! editor "No command name")
@@ -215,8 +215,8 @@
               (prompt-result-candidate result))])
       (or
         (and candidate
-             (symbol? (completion-item-payload candidate))
-             (completion-item-payload candidate))
+             (symbol? (completion-item-provider-data candidate))
+             (completion-item-provider-data candidate))
         (and (prompt-result? result)
              (eq? (prompt-result-status result) 'accepted)
              (positive? (string-length (prompt-result-value result)))

@@ -1200,7 +1200,7 @@
 (define switch-candidate
   (find
     (lambda (item)
-      (= (completion-item-payload item) (buffer-id buffer)))
+      (= (completion-item-provider-data item) (buffer-id buffer)))
     (choice-source-candidates switch-source "")))
 (unless switch-candidate
   (error 'file-tests "buffer prompt omitted an editor buffer"))

@@ -1012,7 +1012,7 @@
           (prompt-session-request prompt))
         "Workspace symbol: ")
       candidate
-      (pair? (completion-item-payload candidate)))
+      (pair? (completion-item-provider-data candidate)))
     (error
       'embedded-api-index-tests
       "workspace symbol command did not expose the embedded API catalog")))

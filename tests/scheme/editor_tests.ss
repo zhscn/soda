@@ -217,7 +217,7 @@
       #f
       (lambda (context result)
         (list
-          (completion-item-payload
+          (completion-item-provider-data
             (prompt-result-candidate result))
           (prompt-result-value result)))))
   (set! completing-command-result (list value input))
@@ -4984,13 +4984,13 @@
         (lambda (name)
           (exists
             (lambda (item)
-              (eq? (completion-item-payload item) name))
+              (eq? (completion-item-provider-data item) name))
             (completion-session-items completion)))
         '(inspect secondary edit-results refresh close)))
     (error 'editor-tests
            "result action picker did not expose applicable actions"
            (and completion
-                (map completion-item-payload
+                (map completion-item-provider-data
                      (completion-session-items completion))))))
 (send! xref-editor (make-input-decoder) (string->utf8 "Inspect reference"))
 (let ([reply (editor-accept-prompt! xref-editor)])
@@ -5019,13 +5019,13 @@
         (lambda (name)
           (exists
             (lambda (item)
-              (eq? (completion-item-payload item) name))
+              (eq? (completion-item-provider-data item) name))
             (completion-session-items completion)))
         '(close edit-results refresh)))
     (error 'editor-tests
            "result action picker did not expose panel actions away from an item"
            (and completion
-                (map completion-item-payload
+                (map completion-item-provider-data
                      (completion-session-items completion))))))
 (send! xref-editor (make-input-decoder) (bytes 7))
 (let ([range
@@ -8403,12 +8403,12 @@
   (unless (and selected
                (string=? (completion-item-insert-text selected)
                          "test.choice-alpha")
-               (eq? (completion-item-payload selected)
+               (eq? (completion-item-provider-data selected)
                     'test.choice-alpha))
     (error 'editor-tests
            "completion selection did not retain candidate identity"
            (and selected (completion-item-insert-text selected))
-           (and selected (completion-item-payload selected)))))
+           (and selected (completion-item-provider-data selected)))))
 (define selected-effects
   (send! prompt-editor prompt-decoder (bytes 13)))
 (dispatch-prompt-effects! selected-effects)
@@ -12850,7 +12850,7 @@
          (lambda (name)
            (find
              (lambda (item)
-               (eq? (completion-item-payload item) name))
+               (eq? (completion-item-provider-data item) name))
              items))]
        [extended (item-for 'execute-extended-command)]
        [find-file (item-for 'file.find)])
