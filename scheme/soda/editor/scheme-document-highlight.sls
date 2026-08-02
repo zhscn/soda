@@ -10,7 +10,8 @@
           (soda editor scheme-query)
           (soda editor scheme-semantics)
           (soda editor scheme-workspace)
-          (soda editor state))
+          (soda editor state)
+          (soda editor annotation-state))
 
   (define document-highlight-namespace
     'scheme-document-highlight)

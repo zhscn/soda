@@ -2,6 +2,7 @@
 (import (rnrs)
         (soda document)
         (soda editor annotation)
+        (soda editor annotation-state)
         (soda editor buffer)
         (soda editor command)
         (soda editor completion-provider)

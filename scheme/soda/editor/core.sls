@@ -1709,6 +1709,7 @@
           (soda editor setting)
           (soda editor source-debug)
           (soda editor source-debug-commands)
+          (soda editor annotation-state)
           (soda editor state)
           (soda editor language-state)
           (soda editor project-state)

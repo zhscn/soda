@@ -181,9 +181,6 @@
           editor-current-location-list
           editor-set-current-location-list!
           editor-annotation-sets
-          editor-annotation-sets-for-buffer
-          editor-publish-annotation-set!
-          editor-clear-annotation-sets!
           editor-pending-prefix
           editor-set-pending-prefix!
           editor-clear-pending-prefix!

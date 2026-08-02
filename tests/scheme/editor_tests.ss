@@ -11,6 +11,7 @@
               completion-session-select-next!
               completion-session-schedule-requests!)
         (soda editor core)
+        (soda editor annotation-state)
         (soda editor cpp-language)
         (soda editor project-state)
         (soda editor diagnostics)

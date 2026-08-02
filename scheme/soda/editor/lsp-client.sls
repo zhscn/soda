@@ -67,6 +67,7 @@
           (soda editor project-workspace)
           (soda editor result-buffer)
           (soda editor result-producer-session)
+          (soda editor annotation-state)
           (soda editor state)
           (soda editor language-state)
           (soda editor tui-state)

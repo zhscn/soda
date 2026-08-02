@@ -4,6 +4,7 @@
           (soda document)
           (soda editor annotation)
           (soda editor buffer)
+          (soda editor annotation-state)
           (soda editor core)
           (soda editor decoration)
           (soda editor display)

@@ -16,6 +16,7 @@
           (soda editor scheme-query)
           (soda editor scheme-semantics)
           (soda editor scheme-workspace)
+          (soda editor annotation-state)
           (soda editor state)
           (soda editor location-results)
           (soda editor result-buffer)
