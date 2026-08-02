@@ -133,30 +133,41 @@
             (append-status! editor session (car pending) (cadr pending) #f)
             (git-status-session-rename-record-set! session #f)))
         (hashtable-delete! active-git-statuses editor)
-        (let ([status (managed-process-event-status event)])
+        (let* ([status (managed-process-event-status event)]
+               [count
+                 (length
+                   (location-list-items
+                     (git-status-session-locations session)))])
+          (cond
+            [(and (zero? status) (zero? count))
+             (editor-append-result-message!
+               editor
+               (git-status-session-buffer session)
+               "Working tree clean."
+               'info)]
+            [(not (zero? status))
+             (let ([stderr (git-status-session-stderr-output session)])
+               (editor-append-result-message!
+                 editor
+                 (git-status-session-buffer session)
+                 (if (zero? (bytevector-length stderr))
+                     (string-append
+                       "Git status failed with status "
+                       (number->string status))
+                     (guard (condition [else "Git status produced invalid UTF-8"])
+                       (utf8->string stderr)))
+                 'error))])
           (buffer-reconcile-result-selection!
             editor (git-status-session-buffer session) #t)
           (buffer-set-result-producer-state!
             (git-status-session-buffer session)
             (if (zero? status) 'ready 'failed))
-          (when (and (not (zero? status))
-                     (positive?
-                       (bytevector-length
-                         (git-status-session-stderr-output session))))
-            (editor-append-result-text!
-              editor
-              (git-status-session-buffer session)
-              (guard (condition [else "Git status produced invalid UTF-8\n"])
-                (utf8->string (git-status-session-stderr-output session)))
-              '()))
           (editor-set-status-message!
             editor
             (if (zero? status)
                 (string-append
                   "Git status: "
-                  (number->string
-                    (length (location-list-items
-                              (git-status-session-locations session))))
+                  (number->string count)
                   " files")
                 (string-append
                   "Git status failed with status " (number->string status))))))

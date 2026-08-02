@@ -30,6 +30,7 @@
           editor-present-result-buffer!
           editor-dismiss-result-buffer!
           editor-append-result-items!
+          editor-append-result-message!
           install-result-buffer-commands!)
   (import (rnrs)
           (only (chezscheme) make-weak-eq-hashtable)
@@ -504,6 +505,37 @@
               `((result-item . ,(caddr range))
                 (result-index . ,index))))
           (loop (cdr pending) (+ index 1))))
+      (editor-invalidate! editor 'document)
+      buffer))
+
+  (define (editor-append-result-message! editor buffer message severity)
+    (unless
+      (and (editor? editor)
+           (buffer? buffer)
+           (result-buffer-interface? (buffer-result-interface-ref buffer))
+           (string? message)
+           (positive? (string-length message))
+           (memq severity '(info warning error)))
+      (assertion-violation
+        'editor-append-result-message!
+        "invalid Result Buffer message"
+        editor buffer message severity))
+    (let* ([base (buffer-size buffer)]
+           [length (string-length message)]
+           [text
+             (if (char=? (string-ref message (- length 1)) #\newline)
+                 message
+                 (string-append message "\n"))])
+      (editor-append-result-items! editor buffer text '())
+      (buffer-add-text-properties!
+        buffer
+        base
+        (+ base (bytevector-length (string->utf8 text)))
+        `((result-message . ,severity)
+          (face . ,(case severity
+                     [(warning) 'status.warning]
+                     [(error) 'status.error]
+                     [else 'status.info]))))
       (editor-invalidate! editor 'document)
       buffer))
 

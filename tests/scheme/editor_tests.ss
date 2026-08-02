@@ -46,6 +46,8 @@
         (soda editor scheme-environment)
         (soda editor scheme-workspace)
         (soda editor scheme-xref)
+        (only (soda editor xref)
+              editor-show-xref-results!)
         (only (soda editor state)
               editor-refresh-completion-after-command!
               ensure-view-visible!
@@ -4884,6 +4886,49 @@
              (list (buffer-id buffer) (buffer-major-mode-name buffer)))
            (editor-buffers xref-editor))))
 (editor-close! xref-editor)
+
+(define empty-xref-source
+  (make-buffer
+    19829
+    (make-document "source\n" 19829)
+    "*empty-xref-source*"
+    'fundamental-mode))
+(define empty-xref-editor (make-editor empty-xref-source))
+(define empty-xref-buffer
+  (editor-show-xref-results!
+    empty-xref-editor
+    (make-location-list 'empty-xref '())
+    (view-id (editor-active-view empty-xref-editor))))
+(unless
+  (and
+    (null?
+      (buffer-text-property-ranges
+        empty-xref-buffer 'result-index))
+    (equal?
+      (map caddr
+        (buffer-text-property-ranges
+          empty-xref-buffer 'result-message))
+      '(info))
+    (exists
+      (lambda (range)
+        (eq?
+          (buffer-text-property-ref
+            empty-xref-buffer (car range) 'face #f)
+          'status.info))
+      (buffer-text-property-ranges
+        empty-xref-buffer 'result-message)))
+  (error 'editor-tests
+         "empty xref result did not retain its informational message"))
+(editor-update!
+  empty-xref-editor
+  (make-command-message 'buffer-item.next #f))
+(unless
+  (string=?
+    (editor-status-message empty-xref-editor)
+    "No navigable items")
+  (error 'editor-tests
+         "empty result message became a navigable result item"))
+(editor-close! empty-xref-editor)
 
 (define result-restore-source
   (make-buffer

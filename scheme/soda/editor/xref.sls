@@ -115,6 +115,9 @@
       (editor-set-current-location-list! editor presentation)
       (editor-append-location-results!
         editor buffer (location-list-items locations))
+      (when (null? (location-list-items locations))
+        (editor-append-result-message!
+          editor buffer "No references." 'info))
       (when refresh
         (buffer-set-result-refresh! buffer refresh))
       buffer))

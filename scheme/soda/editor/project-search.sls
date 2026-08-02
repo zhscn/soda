@@ -190,6 +190,16 @@
       (location-list-items
         (project-search-session-locations session))))
 
+  (define (project-search-error-message session status)
+    (let ([stderr (project-search-session-stderr-output session)])
+      (if (zero? (bytevector-length stderr))
+          (string-append
+            "Project search failed with status "
+            (number->string status))
+          (single-line
+            (guard (condition [else "Project search failed"])
+              (utf8->string stderr))))))
+
   (define (apply-project-search-exit context)
     (let* ([editor (command-context-editor context)]
            [event (command-context-argument context)]
@@ -203,28 +213,32 @@
             (append-output-lines! editor session (list remainder))))
         (project-search-session-pending-output-set! session (make-bytevector 0))
         (hashtable-delete! active-project-searches editor)
-        (let ([status (managed-process-event-status event)]
-              [count (search-result-count session)])
+        (let* ([status (managed-process-event-status event)]
+               [count (search-result-count session)]
+               [success? (or (= status 0) (= status 1))])
+          (let ([message
+                  (if success?
+                      (and (zero? count) "No matches.")
+                      (project-search-error-message session status))])
+            (when message
+              (editor-append-result-message!
+                editor
+                (project-search-session-buffer session)
+                message
+                (if success? 'info 'error))))
           (buffer-reconcile-result-selection!
             editor (project-search-session-buffer session) #t)
           (buffer-set-result-producer-state!
             (project-search-session-buffer session)
-            (if (or (= status 0) (= status 1)) 'ready 'failed))
+            (if success? 'ready 'failed))
           (editor-set-status-message!
             editor
             (cond
-              [(or (= status 0) (= status 1))
+              [success?
                (string-append
                  "Project search: " (number->string count) " matches")]
               [else
-               (let ([stderr (project-search-session-stderr-output session)])
-                 (if (zero? (bytevector-length stderr))
-                     (string-append
-                       "Project search failed with status "
-                       (number->string status))
-                     (single-line
-                       (guard (condition [else "Project search failed"])
-                         (utf8->string stderr)))))]))))
+               (project-search-error-message session status)]))))
       '()))
 
   (define (cancel-project-search context)

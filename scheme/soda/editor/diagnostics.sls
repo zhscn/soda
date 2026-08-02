@@ -365,6 +365,9 @@
               origin-view-id 'diagnostic #f #f)])
       (editor-set-current-location-list! editor locations)
       (editor-append-location-results! editor buffer items)
+      (when (null? items)
+        (editor-append-result-message!
+          editor buffer "No diagnostics." 'info))
       (buffer-reconcile-result-selection! editor buffer #t)
       (when refresh
         (buffer-set-result-refresh! buffer refresh))
