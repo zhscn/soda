@@ -8,6 +8,7 @@
           (soda editor command)
           (soda editor command-runtime)
           (soda editor keymap)
+          (soda editor language)
           (soda editor location)
           (soda editor scheme-environment)
           (soda editor scheme-query)
@@ -319,6 +320,51 @@
             editor
             (buffer-id buffer))))))
 
+  (define (diagnostic-severity item)
+    (let ([metadata (location-item-metadata item)])
+      (cond
+        [(annotation? metadata) (annotation-severity metadata)]
+        [(scheme-diagnostic? metadata)
+         (scheme-diagnostic-severity metadata)]
+        [else #f])))
+
+  (define (diagnostic-code item)
+    (let ([metadata (location-item-metadata item)])
+      (cond
+        [(and (annotation? metadata)
+              (scheme-diagnostic? (annotation-payload metadata)))
+         (scheme-diagnostic-code (annotation-payload metadata))]
+        [(scheme-diagnostic? metadata)
+         (scheme-diagnostic-code metadata)]
+        [else #f])))
+
+  (define (decorate-diagnostic-results! buffer)
+    (for-each
+      (lambda (range)
+        (let* ([item
+                 (buffer-text-property-ref
+                   buffer (car range) 'result-item #f)]
+               [severity (and item (diagnostic-severity item))]
+               [code (and item (diagnostic-code item))])
+          (when severity
+            (buffer-add-text-properties!
+              buffer (car range) (cadr range)
+              `((diagnostic-severity . ,severity)
+                (diagnostic-code . ,code))))))
+      (buffer-text-property-ranges buffer 'result-index))
+    buffer)
+
+  (define (show-diagnostics!
+            editor resource title source items origin-view-id)
+    (let* ([locations (make-location-list source '())]
+           [buffer
+            (editor-open-result-buffer!
+              editor resource 'diagnostics-mode title locations
+              origin-view-id 'diagnostic #f #f)])
+      (editor-set-current-location-list! editor locations)
+      (editor-append-location-results! editor buffer items)
+      (decorate-diagnostic-results! buffer)))
+
   (define (list-diagnostics-command context)
     (let* ([editor (command-context-editor context)]
            [buffer
@@ -332,15 +378,14 @@
             (editor-set-status-message!
               editor
               "No current diagnostics"))
-          (let ([locations
-                  (make-location-list 'diagnostics items)])
-            (editor-set-current-location-list! editor locations)
-            (editor-show-location-results!
+          (begin
+            (show-diagnostics!
               editor
+              "*Diagnostics*"
               "Diagnostics"
-              locations
-              (view-id (command-context-view context))
-              'diagnostic)
+              'diagnostics
+              items
+              (view-id (command-context-view context)))
             (editor-set-status-message!
               editor
               (string-append
@@ -382,18 +427,14 @@
             editor
             "No workspace diagnostics")
           '())
-        (let ([locations
-                (make-location-list
-                  'workspace-diagnostics
-                  items)])
-          (editor-set-current-location-list!
-            editor locations)
-          (editor-show-location-results!
+        (begin
+          (show-diagnostics!
             editor
+            "*Workspace Diagnostics*"
             "Workspace diagnostics"
-            locations
-            (view-id (command-context-view context))
-            'diagnostic)
+            'workspace-diagnostics
+            items
+            (view-id (command-context-view context)))
           (editor-set-status-message!
             editor
             (string-append
@@ -423,6 +464,12 @@
           editor-environments editor environments)
         (hashtable-delete!
           editor-environments editor))
+    (register-major-mode!
+      (editor-language-catalog editor)
+      (make-major-mode
+        'diagnostics-mode 'location-results-mode #f 'interface
+        #f
+        '((track-modified? . #f) (read-only? . #t))))
     (editor-register-command!
       editor
       (make-interactive-context-command

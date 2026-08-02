@@ -4922,7 +4922,7 @@
       (eq?
         (buffer-major-mode-name
           (view-buffer (editor-active-view project-diagnostic-editor)))
-        'location-results-mode))
+        'diagnostics-mode))
     (error
       'editor-tests
       "workspace diagnostics did not include navigable background sources"
@@ -5314,7 +5314,7 @@
       (eq?
         (buffer-major-mode-name
           (view-buffer (editor-active-view highlight-editor)))
-        'location-results-mode))
+        'diagnostics-mode))
     (error 'editor-tests
            "diagnostics did not publish a sorted location list")))
 (editor-set-active-view!
@@ -5346,7 +5346,7 @@
                (lambda (view)
                  (eq?
                    (buffer-major-mode-name (view-buffer view))
-                   'location-results-mode))
+                   'diagnostics-mode))
                (editor-views highlight-editor))]
            [ranges
              (and result-view
@@ -5354,7 +5354,14 @@
                     (view-buffer result-view) 'result-index))])
       (and result-view
            (= (length ranges) 2)
-           (= (view-caret result-view) (car (cadr ranges))))))
+           (= (view-caret result-view) (car (cadr ranges)))
+           (eq?
+             (buffer-text-property-ref
+               (view-buffer result-view)
+               (caar ranges)
+               'diagnostic-severity
+               #f)
+             'error))))
   (error 'editor-tests
          "generic next-location did not navigate diagnostics"))
 

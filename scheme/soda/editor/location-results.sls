@@ -438,6 +438,20 @@
             properties)
           (location-list-append-items! locations items)
           (location-results-state-last-resource-set! state last-resource)
+          (when (= start-index 0)
+            (let ([ranges
+                    (buffer-text-property-ranges
+                      buffer 'result-index)])
+              (when (pair? ranges)
+                (let ([position (caar ranges)])
+                  (buffer-set-local!
+                    buffer 'result-current-index 0)
+                  (for-each
+                    (lambda (view)
+                      (when (eq? (view-buffer view) buffer)
+                        (view-set-caret! view position)
+                        (ensure-view-visible! view)))
+                    (editor-views editor))))))
           (editor-invalidate! editor 'document))))
     buffer)
 
