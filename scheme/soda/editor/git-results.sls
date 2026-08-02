@@ -272,8 +272,13 @@
                       (start-git-status!
                         (make-command-context editor view #f #f #f)
                         (git-status-session-project session))
-                      '()))
+                      (begin
+                        (buffer-set-result-producer-state!
+                          (git-status-session-buffer session) 'ready)
+                        '())))
                 (begin
+                  (buffer-set-result-producer-state!
+                    (git-status-session-buffer session) 'failed)
                   (editor-set-status-message!
                     editor
                     (let ([stderr (git-operation-stderr-output operation)])
@@ -292,6 +297,8 @@
              (make-managed-process
                label arguments (git-status-session-root session) operation
                'git.operation-output 'git.operation-exit)])
+      (buffer-set-result-producer-state!
+        (git-status-session-buffer session) 'running)
       (list (make-command-effect 'managed-process.start process))))
 
   (define (git-status-item? buffer item)

@@ -181,6 +181,8 @@
                    "\nProcess "
                    (if (zero? status) "finished" "failed")
                    " with status " (number->string status) ".\n")])
+          (buffer-reconcile-result-selection!
+            editor (compilation-session-buffer session) #t)
           (buffer-set-result-producer-state!
             (compilation-session-buffer session)
             (if (zero? status) 'ready 'failed))
@@ -237,6 +239,11 @@
       (compilation-session-buffer-set! session buffer)
       (compilation-session-process-set! session process)
       (buffer-set-result-producer-state! buffer 'running)
+      (buffer-set-result-refresh!
+        buffer
+        (lambda (refresh-context refresh-buffer)
+          (start-compilation!
+            refresh-context label arguments working-directory)))
       (hashtable-set! active-compilations editor session)
       (editor-set-current-location-list! editor locations)
       (append

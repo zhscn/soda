@@ -84,12 +84,23 @@
   (define (preview-row item edit)
     (let ([prefix
             (string-append
-              (location-item-resource item)
-              ": "
+              "  "
               (single-line (or (location-item-excerpt item) ""))
               "  =>  ")]
           [replacement (workspace-text-edit-text edit)])
       (values prefix replacement (string-append prefix replacement "\n"))))
+
+  (define (append-resource-heading! editor buffer resource)
+    (let* ([base (buffer-size buffer)]
+           [heading (string-append resource "\n")]
+           [end (+ base (bytevector-length (string->utf8 heading)))])
+      (editor-append-result-text! editor buffer heading '())
+      (buffer-add-text-properties!
+        buffer
+        base
+        end
+        `((face . application.heading)
+          (result-group . ,resource)))))
 
   (define (install-edit-guard! buffer preview)
     (buffer-install-projection-edit-guard!
@@ -124,27 +135,32 @@
                'workspace-edit
                'workspace-edit.discard
                preview)])
-      (for-each
-        (lambda (item edit)
-          (let-values ([(prefix replacement row) (preview-row item edit)])
-            (let* ([base (buffer-size buffer)]
-                   [replacement-start
-                     (+ base (bytevector-length (string->utf8 prefix)))]
-                   [replacement-end
-                     (+ replacement-start
-                        (bytevector-length (string->utf8 replacement)))])
-              (editor-append-result-text!
-                editor buffer row
-                (list
-                  (list 0 (bytevector-length (string->utf8 row)) item)))
-              (workspace-edit-preview-projections-set!
-                preview
-                (append
-                  (workspace-edit-preview-projections preview)
+      (let ([last-resource #f])
+        (for-each
+          (lambda (item edit)
+            (let ([resource (location-item-resource item)])
+              (unless (equal? resource last-resource)
+                (append-resource-heading! editor buffer resource)
+                (set! last-resource resource)))
+            (let-values ([(prefix replacement row) (preview-row item edit)])
+              (let* ([base (buffer-size buffer)]
+                     [replacement-start
+                       (+ base (bytevector-length (string->utf8 prefix)))]
+                     [replacement-end
+                       (+ replacement-start
+                          (bytevector-length (string->utf8 replacement)))])
+                (editor-append-result-text!
+                  editor buffer row
                   (list
-                    (make-editable-projection!
-                      buffer edit replacement-start replacement-end)))))))
-        items edits)
+                    (list 0 (bytevector-length (string->utf8 row)) item)))
+                (workspace-edit-preview-projections-set!
+                  preview
+                  (append
+                    (workspace-edit-preview-projections preview)
+                    (list
+                      (make-editable-projection!
+                        buffer edit replacement-start replacement-end)))))))
+          items edits))
       (buffer-set-local! buffer 'workspace-edit-preview preview)
       (install-edit-guard! buffer preview)
       (let ([ranges (buffer-text-property-ranges buffer 'result-index)])

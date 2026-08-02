@@ -1463,6 +1463,18 @@
       (buffer-bytes rename-target)
       (string->utf8 "int Widget;\n")))
   "LSP rename did not present an unapplied workspace edit preview")
+(let* ([preview-buffer (view-buffer (editor-active-view editor))]
+       [groups
+         (buffer-text-property-ranges
+           preview-buffer 'result-group)])
+  (check
+    (and
+      (= (length groups) 2)
+      (equal?
+        (map caddr groups)
+        '("/workspace/src/main.cpp"
+          "/workspace/src/other.cpp")))
+    "WorkspaceEdit preview did not group changes by resource"))
 (editor-update!
   editor
   (make-command-message 'workspace-edit.edit #f))
