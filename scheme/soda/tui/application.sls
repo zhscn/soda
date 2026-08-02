@@ -93,7 +93,8 @@
           tui-surface-arranged-tree
           tui-surface-focus-ring
           tui-surface-cursor
-          tui-render-surface)
+          tui-render-surface
+          resolve-faces)
   (import (rnrs)
           (soda editor display)
           (soda editor theme)

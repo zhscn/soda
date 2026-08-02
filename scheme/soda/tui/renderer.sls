@@ -39,17 +39,6 @@
       completion-popup-layout?)
     (fields candidates documentation))
 
-  (define (resolve-faces theme faces)
-    (let ([spec (theme-resolve-faces theme faces)])
-      (make-style
-        (if (eq? (face-spec-foreground spec) 'inherit)
-            'default
-            (face-spec-foreground spec))
-        (if (eq? (face-spec-background spec) 'inherit)
-            'default
-            (face-spec-background spec))
-        (face-spec-attributes-add spec))))
-
   (define (draw-inactive-cursor! frame row column theme view)
     (let* ([cell (frame-cell-ref frame row column)]
            [faces (append (cell-faces cell) '(cursor.inactive))])
