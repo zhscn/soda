@@ -189,19 +189,9 @@
       (values buffer state)))
 
   (define (location-property-positions buffer)
-    (let ([size (buffer-size buffer)])
-      (let loop ([position 0] [result '()])
-        (if (>= position size)
-            (reverse result)
-            (let* ([index
-                     (buffer-text-property-ref
-                       buffer position 'location-index #f)]
-                   [next
-                     (buffer-next-text-property-change
-                       buffer position size)])
-              (loop
-                (if (> next position) next (+ position 1))
-                (if index (cons (cons position index) result) result)))))))
+    (map
+      (lambda (range) (cons (car range) (caddr range)))
+      (buffer-text-property-ranges buffer 'location-index)))
 
   (define (visit-location-item! editor view item kind)
     (let ([buffer-id (location-item-buffer-id item)])

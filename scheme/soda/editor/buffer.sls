@@ -20,6 +20,7 @@
           buffer-clear-text-properties!
           buffer-text-properties-at
           buffer-text-property-ref
+          buffer-text-property-ranges
           buffer-next-text-property-change
           buffer-previous-text-property-change
           buffer-text-property-decoration-runs
@@ -530,6 +531,11 @@
        (require-open-buffer 'buffer-text-property-ref value)
        (text-property-store-ref
          (buffer-text-property-store value) position key fallback)]))
+
+  (define (buffer-text-property-ranges value key)
+    (require-open-buffer 'buffer-text-property-ranges value)
+    (text-property-store-ranges
+      (buffer-text-property-store value) key))
 
   (define (buffer-next-text-property-change value position limit)
     (require-open-buffer 'buffer-next-text-property-change value)

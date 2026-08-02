@@ -451,6 +451,9 @@
     (= (buffer-next-text-property-change highlight-cache-buffer 1 7) 4)
     (= (buffer-previous-text-property-change highlight-cache-buffer 7 0) 4)
     (equal?
+      (buffer-text-property-ranges highlight-cache-buffer 'location)
+      '((1 4 target)))
+    (equal?
       (map decoration-run-face
         (buffer-text-property-decoration-runs
           highlight-cache-buffer 0 7))

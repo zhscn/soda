@@ -6,6 +6,7 @@
           text-property-store-close!
           text-property-store-properties-at
           text-property-store-ref
+          text-property-store-ranges
           text-property-store-next-change
           text-property-store-previous-change
           text-property-store-decoration-runs)
@@ -128,6 +129,26 @@
                (assq key
                  (text-property-store-properties-at store position))])
          (if entry (cdr entry) fallback))]))
+
+  (define (text-property-store-ranges store key)
+    (require-open-store 'text-property-store-ranges store)
+    (unless (symbol? key)
+      (assertion-violation
+        'text-property-store-ranges "key must be a symbol" key))
+    (list-sort
+      (lambda (left right)
+        (or (< (car left) (car right))
+            (and (= (car left) (car right))
+                 (< (cadr left) (cadr right)))))
+      (fold-right
+        (lambda (span result)
+          (let* ([entry (assq key (text-property-span-properties span))]
+                 [range (and entry (span-range store span))])
+            (if (and entry (< (car range) (cdr range)))
+                (cons (list (car range) (cdr range) (cdr entry)) result)
+                result)))
+        '()
+        (text-property-store-spans store))))
 
   (define (property-boundaries store)
     (apply append
