@@ -1114,25 +1114,17 @@
               request))
           started))))
 
-  (define (queue-completion-cancellation! value completion)
-    (for-each
-      (lambda (request)
-        (enqueue-completion-effect!
-          value
-          'completion.cancel
-          request))
-      (completion-session-cancel-requests! completion)))
+  (define (queue-completion-cancellation! value request)
+    (enqueue-completion-effect!
+      value 'completion.cancel request))
 
-  (define (cancel-completion-requests-now! value completion)
-    (for-each
-      (lambda (request)
-        (guard (condition [else #f])
-          (completion-provider-cancel
-            (completion-provider-for-request
-              (editor-completion-provider-catalog value)
-              request)
-            request)))
-      (completion-session-cancel-requests! completion)))
+  (define (cancel-completion-request-now! value request)
+    (guard (condition [else #f])
+      (completion-provider-cancel
+        (completion-provider-for-request
+          (editor-completion-provider-catalog value)
+          request)
+        request)))
 
   (define (cancel-queued-completion-effects-now! value)
     (for-each
@@ -2821,28 +2813,21 @@
         (push-completion-input-state! view)
         (pop-completion-input-state! view)))
 
-  (define (close-completion-source-and-target! completion)
-    (choice-source-cancel!
-      (completion-session-source completion)
-      (completion-session-generation completion))
-    (let ([target (completion-session-target completion)])
-      (when (document-completion-target? target)
-        (document-completion-target-close! target)))
-    completion)
+  (define (release-completion! value completion release-requests!)
+    (prompt-completion-store-unregister-completion!
+      (editor-prompt-completion-store value)
+      completion)
+    (completion-session-close!
+      completion
+      (lambda (request) (release-requests! value request))))
 
   (define (retire-completion! value completion)
-    (prompt-completion-store-unregister-completion!
-      (editor-prompt-completion-store value)
-      completion)
-    (queue-completion-cancellation! value completion)
-    (close-completion-source-and-target! completion))
+    (release-completion!
+      value completion queue-completion-cancellation!))
 
   (define (dispose-completion-now! value completion)
-    (prompt-completion-store-unregister-completion!
-      (editor-prompt-completion-store value)
-      completion)
-    (cancel-completion-requests-now! value completion)
-    (close-completion-source-and-target! completion))
+    (release-completion!
+      value completion cancel-completion-request-now!))
 
   (define (cancel-view-completion! value view)
     (let ([completion (view-completion view)])

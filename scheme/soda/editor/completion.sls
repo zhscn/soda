@@ -112,6 +112,8 @@
           completion-request-context
           completion-session-schedule-requests!
           completion-session-cancel-requests!
+          completion-session-closed?
+          completion-session-close!
           completion-window-max-rows
           completion-session-selected-index
           completion-session-viewport-start
@@ -281,7 +283,8 @@
             selection-policy
             (mutable selected-index)
             (mutable viewport-start)
-            (mutable viewport-rows)))
+            (mutable viewport-rows)
+            (mutable closed?)))
 
   (define completion-window-max-rows 6)
 
@@ -1332,7 +1335,8 @@
          selection-policy
          #f
          0
-         completion-window-max-rows)]))
+         completion-window-max-rows
+         #f)]))
 
   (define (completion-session-selection-state session)
     (unless (completion-session? session)
@@ -1470,6 +1474,23 @@
     (let ([requests (completion-session-active-requests session)])
       (completion-session-active-requests-set! session '())
       requests))
+
+  (define (completion-session-close! session cancel-request!)
+    (unless (and (completion-session? session) (procedure? cancel-request!))
+      (assertion-violation
+        'completion-session-close! "invalid completion close" session))
+    (unless (completion-session-closed? session)
+      (for-each
+        cancel-request!
+        (completion-session-cancel-requests! session))
+      (choice-source-cancel!
+        (completion-session-source session)
+        (completion-session-generation session))
+      (let ([target (completion-session-target session)])
+        (when (document-completion-target? target)
+          (document-completion-target-close! target)))
+      (completion-session-closed?-set! session #t))
+    session)
 
   (define (completion-context=? left right)
     (cond
