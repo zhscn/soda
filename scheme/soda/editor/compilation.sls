@@ -7,6 +7,7 @@
           (soda editor effect)
           (soda editor event)
           (soda editor file)
+          (soda editor language)
           (soda editor line-stream)
           (soda editor location)
           (soda editor location-results)
@@ -252,7 +253,8 @@
            [old (active-compilation editor scope)]
            [buffer
              (editor-open-result-buffer!
-               editor "*compilation*" label locations origin-view-id
+               editor "*compilation*" 'compilation-mode
+               label locations origin-view-id
                'compilation 'compilation.cancel session)])
       (compilation-session-buffer-set! session buffer)
       (compilation-session-process-set! session process)
@@ -280,6 +282,12 @@
         (list (make-command-effect 'managed-process.start process)))))
 
   (define (install-compilation! editor)
+    (register-major-mode!
+      (editor-language-catalog editor)
+      (make-major-mode
+        'compilation-mode 'location-results-mode #f 'interface
+        #f
+        '((track-modified? . #f) (read-only? . #t))))
     (for-each
       (lambda (entry)
         (editor-register-internal-command!

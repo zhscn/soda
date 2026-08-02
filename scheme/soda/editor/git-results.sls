@@ -375,6 +375,25 @@
       (git-status-action-ready? buffer item)
       (not (untracked-status? (item-status item)))))
 
+  (define (git-staged-diffable-item? buffer item)
+    (and
+      (git-status-action-ready? buffer item)
+      (index-change? (item-status item))))
+
+  (define (start-git-diff context session item cached?)
+    (let ([arguments
+            (append
+              (list "git" "diff" "--no-ext-diff")
+              (if cached? (list "--cached") '())
+              (list "--" (location-item-excerpt item)))])
+      (start-compilation!
+        context
+        (string-append
+          (if cached? "Git staged diff: " "Git diff: ")
+          (location-item-excerpt item))
+        arguments
+        (git-status-session-root session))))
+
   (define (marked-git-paths entries)
     (map
       (lambda (entry) (location-item-excerpt (cdr entry)))
@@ -415,22 +434,18 @@
           'diff "Show diff"
           git-diffable-item?
           (lambda (context buffer item index)
-            (let* ([status (item-status item)]
-                   [cached?
-                     (and status
-                          (not (char=? (string-ref status 0) #\space))
-                          (char=? (string-ref status 1) #\space))]
-                   [arguments
-                     (append
-                       (list "git" "diff" "--no-ext-diff")
-                       (if cached? (list "--cached") '())
-                       (list "--" (location-item-excerpt item)))])
-              (start-compilation!
+            (let ([status (item-status item)])
+              (start-git-diff
                 context
-                (string-append
-                  "Git diff: " (location-item-excerpt item))
-                arguments
-                (git-status-session-root session)))))))
+                session
+                item
+                (and (index-change? status)
+                     (not (worktree-change? status)))))))
+        (make-result-action
+          'diff-staged "Show staged diff"
+          git-staged-diffable-item?
+          (lambda (context buffer item index)
+            (start-git-diff context session item #t)))))
     buffer)
 
   (define (stage-git-entry context)
@@ -441,6 +456,9 @@
 
   (define (diff-git-entry context)
     (invoke-buffer-item-action context 'diff))
+
+  (define (diff-staged-git-entry context)
+    (invoke-buffer-item-action context 'diff-staged))
 
   (define (bind-status-key! keymap character command)
     (keymap-bind!
@@ -460,6 +478,7 @@
       (bind-status-key! keymap #\s 'git.stage)
       (bind-status-key! keymap #\u 'git.unstage)
       (bind-status-key! keymap #\d 'git.diff)
+      (bind-status-key! keymap #\D 'git.diff-staged)
       (keymap-catalog-register!
         (editor-keymap-catalog editor) 'git-status-mode-map keymap))
     (for-each
@@ -471,7 +490,9 @@
       (list
         (list 'git.stage stage-git-entry "Stage the Git entry at point.")
         (list 'git.unstage unstage-git-entry "Unstage the Git entry at point.")
-        (list 'git.diff diff-git-entry "Show the diff for the Git entry at point.")))
+        (list 'git.diff diff-git-entry "Show the default diff for the Git entry at point.")
+        (list 'git.diff-staged diff-staged-git-entry
+              "Show the staged diff for the Git entry at point.")))
     (for-each
       (lambda (entry)
         (editor-register-internal-command!

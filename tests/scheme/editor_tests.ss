@@ -937,9 +937,56 @@
                    expected)))
         ranges
         '((stage diff)
-          (unstage diff)
-          (stage unstage diff)
+          (unstage diff diff-staged)
+          (stage unstage diff diff-staged)
           (stage))))
+    (let* ([both-range
+             (list-ref
+               (buffer-text-property-ranges panel 'result-index)
+               2)]
+           [view (editor-active-view editor)])
+      (view-set-caret! view (car both-range))
+      (let* ([effects
+               (execute-command!
+                 (editor-command-registry editor)
+                 'git.diff-staged
+                 (make-command-context editor view #f #f #f)
+                 '())]
+             [process
+               (and
+                 (= (length effects) 1)
+                 (eq? (command-effect-kind (car effects))
+                      'managed-process.start)
+                 (command-effect-payload (car effects)))])
+        (unless
+          (and
+            (managed-process? process)
+            (equal?
+              (managed-process-arguments process)
+              '("git" "diff" "--no-ext-diff" "--cached"
+                "--" "both.cpp"))
+            (eq?
+              (buffer-major-mode-name
+                (view-buffer (editor-active-view editor)))
+              'compilation-mode))
+          (error 'editor-tests
+                 "Git staged diff did not use the index or Result Buffer"
+                 effects))
+        (execute-command!
+          (editor-command-registry editor)
+          'buffer-item.quit
+          (make-command-context
+            editor (editor-active-view editor) #f #f #f)
+          '())
+        (let ([panel-view
+                (find
+                  (lambda (candidate)
+                    (eq? (view-buffer candidate) panel))
+                  (editor-views editor))])
+          (unless panel-view
+            (error 'editor-tests
+                   "Git status panel disappeared after closing its diff"))
+          (editor-select-view-window! editor (view-id panel-view)))))
     (buffer-set-result-producer-state! panel 'running)
     (when
       (exists
