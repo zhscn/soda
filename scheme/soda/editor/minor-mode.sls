@@ -21,7 +21,8 @@
           minor-mode-remove-hook!
           minor-mode-hooks)
   (import (rnrs)
-          (soda editor hashtable-state))
+          (soda editor hashtable-state)
+          (soda editor ordered-registry))
 
   (define-record-type
     (minor-mode-definition
@@ -43,7 +44,7 @@
     (minor-mode-catalog-state
       %make-minor-mode-catalog-state
       minor-mode-catalog-state?)
-    (fields definitions hooks))
+    (fields registry hooks))
 
   (define (make-minor-mode-definition
             name
@@ -113,15 +114,14 @@
 
   (define (make-minor-mode-catalog)
     (%make-minor-mode-catalog
-      (make-eq-hashtable)
+      (make-ordered-registry)
       (make-eq-hashtable)))
 
   (define (minor-mode-catalog-snapshot catalog)
     (require-catalog 'minor-mode-catalog-snapshot catalog)
     (%make-minor-mode-catalog-state
-      (hashtable-copy
-        (minor-mode-catalog-definitions catalog)
-        #t)
+      (ordered-registry-snapshot
+        (minor-mode-catalog-definitions catalog))
       (hashtable-copy (minor-mode-catalog-hooks catalog) #t)))
 
   (define (minor-mode-catalog-restore! catalog snapshot)
@@ -131,9 +131,9 @@
         'minor-mode-catalog-restore!
         "expected a minor mode catalog snapshot"
         snapshot))
-    (replace-hashtable!
+    (ordered-registry-restore!
       (minor-mode-catalog-definitions catalog)
-      (minor-mode-catalog-state-definitions snapshot))
+      (minor-mode-catalog-state-registry snapshot))
     (replace-hashtable!
       (minor-mode-catalog-hooks catalog)
       (minor-mode-catalog-state-hooks snapshot))
@@ -153,7 +153,7 @@
         'minor-mode-catalog-register!
         "expected a minor mode definition"
         definition))
-    (hashtable-set!
+    (ordered-registry-set!
       (minor-mode-catalog-definitions catalog)
       (minor-mode-definition-name definition)
       definition)
@@ -163,10 +163,8 @@
     (require-catalog 'minor-mode-catalog-find catalog)
     (and
       (symbol? name)
-      (hashtable-ref
-        (minor-mode-catalog-definitions catalog)
-        name
-        #f)))
+      (ordered-registry-ref
+        (minor-mode-catalog-definitions catalog) name)))
 
   (define (minor-mode-catalog-ref catalog name)
     (or
@@ -178,9 +176,8 @@
 
   (define (minor-mode-catalog-names catalog)
     (require-catalog 'minor-mode-catalog-names catalog)
-    (vector->list
-      (hashtable-keys
-        (minor-mode-catalog-definitions catalog))))
+    (ordered-registry-names
+      (minor-mode-catalog-definitions catalog)))
 
   (define (hook-key mode phase)
     (unless (symbol? mode)

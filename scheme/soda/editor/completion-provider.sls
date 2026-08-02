@@ -19,7 +19,7 @@
   (import (rnrs)
           (soda editor completion)
           (soda editor event)
-          (soda editor hashtable-state))
+          (soda editor ordered-registry))
 
   (define-record-type
     (completion-provider %make-completion-provider completion-provider?)
@@ -33,13 +33,7 @@
     (completion-provider-catalog
       %make-completion-provider-catalog
       completion-provider-catalog?)
-    (fields entries))
-
-  (define-record-type
-    (completion-provider-catalog-state
-      %make-completion-provider-catalog-state
-      completion-provider-catalog-state?)
-    (fields entries))
+    (fields registry))
 
   (define make-completion-provider
     (case-lambda
@@ -160,7 +154,7 @@
       resolved))
 
   (define (make-completion-provider-catalog)
-    (%make-completion-provider-catalog (make-eq-hashtable)))
+    (%make-completion-provider-catalog (make-ordered-registry)))
 
   (define (completion-provider-catalog-snapshot catalog)
     (unless (completion-provider-catalog? catalog)
@@ -168,10 +162,8 @@
         'completion-provider-catalog-snapshot
         "expected a completion provider catalog"
         catalog))
-    (%make-completion-provider-catalog-state
-      (hashtable-copy
-        (completion-provider-catalog-entries catalog)
-        #t)))
+    (ordered-registry-snapshot
+      (completion-provider-catalog-registry catalog)))
 
   (define (completion-provider-catalog-restore! catalog snapshot)
     (unless (completion-provider-catalog? catalog)
@@ -179,14 +171,9 @@
         'completion-provider-catalog-restore!
         "expected a completion provider catalog"
         catalog))
-    (unless (completion-provider-catalog-state? snapshot)
-      (assertion-violation
-        'completion-provider-catalog-restore!
-        "expected a completion provider catalog snapshot"
-        snapshot))
-    (replace-hashtable!
-      (completion-provider-catalog-entries catalog)
-      (completion-provider-catalog-state-entries snapshot))
+    (ordered-registry-restore!
+      (completion-provider-catalog-registry catalog)
+      snapshot)
     catalog)
 
   (define (completion-provider-catalog-register! catalog provider)
@@ -200,8 +187,8 @@
         'completion-provider-catalog-register!
         "expected a completion provider"
         provider))
-    (hashtable-set!
-      (completion-provider-catalog-entries catalog)
+    (ordered-registry-set!
+      (completion-provider-catalog-registry catalog)
       (completion-provider-name provider)
       provider)
     provider)
@@ -217,10 +204,9 @@
         'completion-provider-catalog-find
         "provider name must be a symbol"
         name))
-    (hashtable-ref
-      (completion-provider-catalog-entries catalog)
-      name
-      #f))
+    (ordered-registry-ref
+      (completion-provider-catalog-registry catalog)
+      name))
 
   (define (completion-provider-catalog-ref catalog name)
     (or
@@ -257,9 +243,8 @@
         'completion-provider-catalog-names
         "expected a completion provider catalog"
         catalog))
-    (vector->list
-      (hashtable-keys
-        (completion-provider-catalog-entries catalog))))
+    (ordered-registry-names
+      (completion-provider-catalog-registry catalog)))
 
   (define (make-completion-response-for-request
             request

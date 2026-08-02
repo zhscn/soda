@@ -198,7 +198,8 @@
           tui-runtime-result-flags
           tui-runtime-result-data)
   (import (rnrs)
-          (soda editor contract))
+          (soda editor contract)
+          (soda editor ordered-registry))
 
   (define (unique-symbol-list? values)
     (and
@@ -417,14 +418,14 @@
     (tui-application-catalog
       %make-tui-application-catalog
       tui-application-catalog?)
-    (fields (immutable table tui-application-catalog-table)
-            (mutable definition-names
-                     tui-application-catalog-definition-names
-                     tui-application-catalog-definition-names-set!)
-            (mutable generation)))
+    (fields registry))
 
   (define (make-tui-application-catalog)
-    (%make-tui-application-catalog (make-eq-hashtable) '() 0))
+    (%make-tui-application-catalog (make-ordered-registry)))
+
+  (define (tui-application-catalog-generation catalog)
+    (ordered-registry-generation
+      (tui-application-catalog-registry catalog)))
 
   (define (tui-application-catalog-ref catalog name)
     (unless (tui-application-catalog? catalog)
@@ -437,10 +438,9 @@
         'tui-application-catalog-ref
         "name must be a symbol"
         name))
-    (hashtable-ref
-      (tui-application-catalog-table catalog)
-      name
-      #f))
+    (ordered-registry-ref
+      (tui-application-catalog-registry catalog)
+      name))
 
   (define (tui-application-catalog-definitions catalog)
     (unless (tui-application-catalog? catalog)
@@ -448,13 +448,8 @@
         'tui-application-catalog-definitions
         "expected a TuiApplicationCatalog"
         catalog))
-    (map
-      (lambda (name)
-        (hashtable-ref
-          (tui-application-catalog-table catalog)
-          name
-          #f))
-      (tui-application-catalog-definition-names catalog)))
+    (ordered-registry-values
+      (tui-application-catalog-registry catalog)))
 
   (define (tui-application-catalog-register! catalog definition)
     (unless (tui-application-catalog? catalog)
@@ -467,39 +462,15 @@
         'tui-application-catalog-register!
         "expected a TuiApplicationDefinition"
         definition))
-    (let ([name (tui-application-definition-name definition)])
-      (unless (hashtable-contains?
-                (tui-application-catalog-table catalog)
-                name)
-        (tui-application-catalog-definition-names-set!
-          catalog
-          (append
-            (tui-application-catalog-definition-names catalog)
-            (list name))))
-      (hashtable-set!
-        (tui-application-catalog-table catalog)
-        name
-        definition)
-      (tui-application-catalog-generation-set!
-        catalog
-        (+ 1 (tui-application-catalog-generation catalog)))
+    (ordered-registry-set!
+      (tui-application-catalog-registry catalog)
+      (tui-application-definition-name definition)
       definition))
 
   (define (tui-application-catalog-remove! catalog name)
-    (let ([definition (tui-application-catalog-ref catalog name)])
-      (when definition
-        (hashtable-delete!
-          (tui-application-catalog-table catalog)
-          name)
-        (tui-application-catalog-definition-names-set!
-          catalog
-          (remq
-            name
-            (tui-application-catalog-definition-names catalog)))
-        (tui-application-catalog-generation-set!
-          catalog
-          (+ 1 (tui-application-catalog-generation catalog))))
-      definition))
+    (ordered-registry-remove!
+      (tui-application-catalog-registry catalog)
+      name))
 
   (define-record-type
     (tui-application-context

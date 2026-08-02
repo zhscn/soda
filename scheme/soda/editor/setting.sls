@@ -21,7 +21,8 @@
           setting-store-snapshot
           setting-store-restore!)
   (import (rnrs)
-          (soda editor hashtable-state))
+          (soda editor hashtable-state)
+          (soda editor ordered-registry))
 
   (define-record-type
     (setting-definition %make-setting-definition setting-definition?)
@@ -34,16 +35,13 @@
 
   (define-record-type (setting-store %make-setting-store setting-store?)
     (fields
-      (immutable definitions setting-store-definitions)
-      (mutable names setting-store-names setting-store-names-set!)
-      (immutable values setting-store-values)
-      (mutable generation
-               setting-store-generation
-               setting-store-generation-set!)))
+      definitions
+      values
+      (mutable generation)))
 
   (define-record-type
     (setting-snapshot %make-setting-snapshot setting-snapshot?)
-    (fields names definitions values generation))
+    (fields definitions values generation))
 
   (define (make-setting-definition
             name
@@ -86,10 +84,12 @@
 
   (define (make-setting-store)
     (%make-setting-store
-      (make-eq-hashtable)
-      '()
+      (make-ordered-registry)
       (make-eq-hashtable)
       0))
+
+  (define (setting-store-names store)
+    (ordered-registry-names (setting-store-definitions store)))
 
   (define (require-store who store)
     (unless (setting-store? store)
@@ -102,7 +102,7 @@
   (define (setting-store-find store name)
     (require-store 'setting-store-find store)
     (require-name 'setting-store-find name)
-    (hashtable-ref (setting-store-definitions store) name #f))
+    (ordered-registry-ref (setting-store-definitions store) name))
 
   (define (setting-store-ref store name)
     (require-store 'setting-store-ref store)
@@ -157,20 +157,12 @@
           "the existing value is invalid for the replacement definition"
           name
           explicit))
-      (unless
-        (hashtable-contains?
-          (setting-store-definitions store)
-          name)
-        (setting-store-names-set!
-          store
-          (append (setting-store-names store) (list name))))
-      (hashtable-set!
+      (ordered-registry-set!
         (setting-store-definitions store)
         name
         definition)
       (setting-store-generation-set!
-        store
-        (+ (setting-store-generation store) 1))
+        store (+ (setting-store-generation store) 1))
       definition))
 
   (define (setting-store-unregister! store name)
@@ -178,14 +170,10 @@
     (require-name 'setting-store-unregister! name)
     (let ([definition (setting-store-find store name)])
       (when definition
-        (hashtable-delete! (setting-store-definitions store) name)
+        (ordered-registry-remove! (setting-store-definitions store) name)
         (hashtable-delete! (setting-store-values store) name)
-        (setting-store-names-set!
-          store
-          (remq name (setting-store-names store)))
         (setting-store-generation-set!
-          store
-          (+ (setting-store-generation store) 1)))
+          store (+ (setting-store-generation store) 1)))
       definition))
 
   (define (setting-store-set! store name value)
@@ -232,8 +220,7 @@
   (define (setting-store-snapshot store)
     (require-store 'setting-store-snapshot store)
     (%make-setting-snapshot
-      (setting-store-names store)
-      (hashtable->alist (setting-store-definitions store))
+      (ordered-registry-snapshot (setting-store-definitions store))
       (hashtable->alist (setting-store-values store))
       (setting-store-generation store)))
 
@@ -244,13 +231,12 @@
         'setting-store-restore!
         "expected a setting snapshot"
         snapshot))
-    (restore-hashtable!
+    (ordered-registry-restore!
       (setting-store-definitions store)
       (setting-snapshot-definitions snapshot))
     (restore-hashtable!
       (setting-store-values store)
       (setting-snapshot-values snapshot))
-    (setting-store-names-set! store (setting-snapshot-names snapshot))
     (setting-store-generation-set!
       store
       (setting-snapshot-generation snapshot))

@@ -57,7 +57,7 @@
           major-mode-syntax-capabilities)
   (import (rnrs)
           (soda editor contract)
-          (soda editor hashtable-state)
+          (soda editor ordered-registry)
           (soda document)
           (soda editor decoration)
           (soda editor indentation-protocol)
@@ -378,8 +378,8 @@
         "expected a language catalog"
         catalog))
     (%make-language-catalog-state
-      (hashtable-copy (language-catalog-profiles catalog) #t)
-      (hashtable-copy (language-catalog-modes catalog) #t)))
+      (ordered-registry-snapshot (language-catalog-profiles catalog))
+      (ordered-registry-snapshot (language-catalog-modes catalog))))
 
   (define (language-catalog-restore! catalog snapshot)
     (unless (language-catalog? catalog)
@@ -392,10 +392,10 @@
         'language-catalog-restore!
         "expected a language catalog snapshot"
         snapshot))
-    (replace-hashtable!
+    (ordered-registry-restore!
       (language-catalog-profiles catalog)
       (language-catalog-state-profiles snapshot))
-    (replace-hashtable!
+    (ordered-registry-restore!
       (language-catalog-modes catalog)
       (language-catalog-state-modes snapshot))
     catalog)
@@ -403,9 +403,9 @@
   (define (make-language-catalog)
     (let ([catalog
             (%make-language-catalog
-              (make-eq-hashtable)
-              (make-eq-hashtable))])
-      (hashtable-set!
+              (make-ordered-registry)
+              (make-ordered-registry))])
+      (ordered-registry-set!
         (language-catalog-modes catalog)
         'fundamental-mode
         (%make-major-mode
@@ -505,7 +505,7 @@
            'register-language-profile!
            "expected a language profile"
            profile))
-       (hashtable-set!
+       (ordered-registry-set!
          (language-catalog-profiles catalog)
          (language-profile-name profile)
          profile)
@@ -526,7 +526,7 @@
            'find-language-profile
            "name must be a symbol"
            name))
-       (hashtable-ref (language-catalog-profiles catalog) name #f)]))
+       (ordered-registry-ref (language-catalog-profiles catalog) name)]))
 
   (define language-profile-ref
     (case-lambda
@@ -554,7 +554,7 @@
            'register-major-mode!
            "expected a major mode"
            mode))
-       (hashtable-set!
+       (ordered-registry-set!
          (language-catalog-modes catalog)
          (major-mode-name mode)
          mode)
@@ -574,7 +574,7 @@
            'find-major-mode
            "name must be a symbol"
            name))
-       (hashtable-ref (language-catalog-modes catalog) name #f)]))
+       (ordered-registry-ref (language-catalog-modes catalog) name)]))
 
   (define major-mode-ref
     (case-lambda

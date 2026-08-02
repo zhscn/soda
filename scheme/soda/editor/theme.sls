@@ -21,7 +21,7 @@
           theme-catalog-names
           theme-catalog-themes)
   (import (rnrs)
-          (soda editor hashtable-state))
+          (soda editor ordered-registry))
 
   (define-record-type
     (face-spec %make-face-spec face-spec?)
@@ -33,13 +33,7 @@
 
   (define-record-type
     (theme-catalog %make-theme-catalog theme-catalog?)
-    (fields
-      (immutable table theme-catalog-table)
-      (mutable names theme-catalog-names theme-catalog-names-set!)))
-
-  (define-record-type
-    (theme-catalog-state %make-theme-catalog-state theme-catalog-state?)
-    (fields table names))
+    (fields registry))
 
   (define valid-attributes
     '(bold dim italic underline blink reverse hidden strike))
@@ -220,7 +214,7 @@
   (define make-theme-catalog
     (case-lambda
       [()
-       (%make-theme-catalog (make-eq-hashtable) '())]
+       (%make-theme-catalog (make-ordered-registry))]
       [(themes)
        (unless (and (list? themes) (for-all theme? themes))
          (assertion-violation
@@ -240,9 +234,7 @@
         'theme-catalog-snapshot
         "expected a theme catalog"
         catalog))
-    (%make-theme-catalog-state
-      (hashtable-copy (theme-catalog-table catalog) #t)
-      (theme-catalog-names catalog)))
+    (ordered-registry-snapshot (theme-catalog-registry catalog)))
 
   (define (theme-catalog-restore! catalog snapshot)
     (unless (theme-catalog? catalog)
@@ -250,17 +242,9 @@
         'theme-catalog-restore!
         "expected a theme catalog"
         catalog))
-    (unless (theme-catalog-state? snapshot)
-      (assertion-violation
-        'theme-catalog-restore!
-        "expected a theme catalog snapshot"
-        snapshot))
-    (replace-hashtable!
-      (theme-catalog-table catalog)
-      (theme-catalog-state-table snapshot))
-    (theme-catalog-names-set!
-      catalog
-      (theme-catalog-state-names snapshot))
+    (ordered-registry-restore!
+      (theme-catalog-registry catalog)
+      snapshot)
     catalog)
 
   (define (theme-catalog-register! catalog value)
@@ -274,13 +258,13 @@
         'theme-catalog-register!
         "expected a theme"
         value))
-    (let ([name (theme-name value)])
-      (unless (hashtable-contains? (theme-catalog-table catalog) name)
-        (theme-catalog-names-set!
-          catalog
-          (append (theme-catalog-names catalog) (list name))))
-      (hashtable-set! (theme-catalog-table catalog) name value))
-    value)
+    (ordered-registry-set!
+      (theme-catalog-registry catalog)
+      (theme-name value)
+      value))
+
+  (define (theme-catalog-names catalog)
+    (ordered-registry-names (theme-catalog-registry catalog)))
 
   (define (theme-catalog-ref catalog name)
     (unless (theme-catalog? catalog)
@@ -293,7 +277,7 @@
         'theme-catalog-ref
         "theme name must be a symbol"
         name))
-    (hashtable-ref (theme-catalog-table catalog) name #f))
+    (ordered-registry-ref (theme-catalog-registry catalog) name))
 
   (define (theme-catalog-themes catalog)
     (unless (theme-catalog? catalog)
@@ -301,7 +285,4 @@
         'theme-catalog-themes
         "expected a theme catalog"
         catalog))
-    (map
-      (lambda (name)
-        (theme-catalog-ref catalog name))
-      (theme-catalog-names catalog))))
+    (ordered-registry-values (theme-catalog-registry catalog))))

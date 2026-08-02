@@ -36,7 +36,7 @@
           keymap-catalog-names)
   (import (rnrs)
           (soda editor event)
-          (soda editor hashtable-state))
+          (soda editor ordered-registry))
 
   (define-record-type key-stroke
     (fields key codepoint modifiers))
@@ -60,7 +60,7 @@
 
   (define-record-type
     (keymap-catalog %make-keymap-catalog keymap-catalog?)
-    (fields entries))
+    (fields registry))
 
   (define-record-type
     (keymap-state %make-keymap-state keymap-state?)
@@ -68,7 +68,7 @@
 
   (define-record-type
     (keymap-catalog-state %make-keymap-catalog-state keymap-catalog-state?)
-    (fields entries keymaps))
+    (fields registry keymaps))
 
   (define-record-type key-binding
     (fields sequence status command))
@@ -177,7 +177,7 @@
        (%make-keymap '() parent)]))
 
   (define (make-keymap-catalog)
-    (%make-keymap-catalog (make-eq-hashtable)))
+    (%make-keymap-catalog (make-ordered-registry)))
 
   (define (copy-keymap-entries entries)
     (map
@@ -220,13 +220,10 @@
         'keymap-catalog-snapshot
         "expected a keymap catalog"
         catalog))
-    (let ([entries
-            (hashtable-copy (keymap-catalog-entries catalog) #t)])
-      (let-values ([(names keymaps) (hashtable-entries entries)])
-        (%make-keymap-catalog-state
-          entries
-          (collect-keymap-states
-            (vector->list keymaps))))))
+    (%make-keymap-catalog-state
+      (ordered-registry-snapshot (keymap-catalog-registry catalog))
+      (collect-keymap-states
+        (ordered-registry-values (keymap-catalog-registry catalog)))))
 
   (define (keymap-catalog-restore! catalog snapshot)
     (unless (keymap-catalog? catalog)
@@ -248,9 +245,9 @@
           (keymap-state-keymap state)
           (keymap-state-parent state)))
       (keymap-catalog-state-keymaps snapshot))
-    (replace-hashtable!
-      (keymap-catalog-entries catalog)
-      (keymap-catalog-state-entries snapshot))
+    (ordered-registry-restore!
+      (keymap-catalog-registry catalog)
+      (keymap-catalog-state-registry snapshot))
     catalog)
 
   (define (keymap-catalog-register! catalog name keymap)
@@ -269,8 +266,8 @@
         'keymap-catalog-register!
         "expected a keymap"
         keymap))
-    (hashtable-set! (keymap-catalog-entries catalog) name keymap)
-    keymap)
+    (ordered-registry-set!
+      (keymap-catalog-registry catalog) name keymap))
 
   (define (keymap-catalog-find catalog name)
     (unless (keymap-catalog? catalog)
@@ -283,7 +280,7 @@
         'keymap-catalog-find
         "keymap name must be a symbol"
         name))
-    (hashtable-ref (keymap-catalog-entries catalog) name #f))
+    (ordered-registry-ref (keymap-catalog-registry catalog) name))
 
   (define (keymap-catalog-ref catalog name)
     (or (keymap-catalog-find catalog name)
@@ -298,8 +295,7 @@
         'keymap-catalog-names
         "expected a keymap catalog"
         catalog))
-    (vector->list
-      (hashtable-keys (keymap-catalog-entries catalog))))
+    (ordered-registry-names (keymap-catalog-registry catalog)))
 
   (define (find-entry keymap stroke)
     (let loop ([entries (keymap-entries keymap)])
