@@ -171,7 +171,7 @@
         items edits)
       (buffer-set-local! buffer 'workspace-edit-preview preview)
       (install-edit-guard! buffer preview)
-      (let ([ranges (buffer-text-property-ranges buffer 'location-index)])
+      (let ([ranges (buffer-text-property-ranges buffer 'result-index)])
         (when (pair? ranges)
           (view-set-caret! (editor-active-view editor) (caar ranges))))
       (editor-set-status-message!

@@ -218,7 +218,7 @@
            [session (buffer-local-ref buffer 'git-status-session #f)]
            [item
              (buffer-text-property-ref
-               buffer (view-caret view) 'location-item #f)])
+               buffer (view-caret view) 'result-item #f)])
       (unless (git-status-session? session)
         (editor-user-error who "Current Buffer is not a Git status Buffer"))
       (unless (location-item? item)
@@ -343,7 +343,7 @@
     (register-major-mode!
       (editor-language-catalog editor)
       (make-major-mode
-        'git-status-mode 'location-results-mode #f 'interface
+        'git-status-mode 'result-list-mode #f 'interface
         'git-status-mode-map
         '((track-modified? . #f) (read-only? . #t))))
     (let ([keymap (make-keymap)])

@@ -1,8 +1,6 @@
 (library (soda editor navigable-buffer)
   (export make-buffer-navigation-interface
           buffer-navigation-interface?
-          buffer-navigation-interface-item-property
-          buffer-navigation-interface-index-property
           buffer-navigation-interface-cyclic?
           buffer-set-navigation-interface!
           buffer-navigation-interface-ref
@@ -23,25 +21,19 @@
     (buffer-navigation-interface
       %make-buffer-navigation-interface
       buffer-navigation-interface?)
-    (fields item-property
-            index-property
-            cyclic?
+    (fields cyclic?
             activate
             quit))
 
-  (define (make-buffer-navigation-interface
-            item-property index-property cyclic? activate quit)
-    (unless (and (symbol? item-property)
-                 (symbol? index-property)
-                 (boolean? cyclic?)
+  (define (make-buffer-navigation-interface cyclic? activate quit)
+    (unless (and (boolean? cyclic?)
                  (procedure? activate)
                  (procedure? quit))
       (assertion-violation
         'make-buffer-navigation-interface
         "invalid Buffer navigation interface"
-        item-property index-property cyclic? activate quit))
-    (%make-buffer-navigation-interface
-      item-property index-property cyclic? activate quit))
+        cyclic? activate quit))
+    (%make-buffer-navigation-interface cyclic? activate quit))
 
   (define (buffer-set-navigation-interface! buffer interface)
     (unless (and (buffer? buffer)
@@ -80,23 +72,17 @@
   (define (property-positions buffer interface)
     (map
       (lambda (range) (cons (car range) (caddr range)))
-      (buffer-text-property-ranges
-        buffer
-        (buffer-navigation-interface-index-property interface))))
+      (buffer-text-property-ranges buffer 'result-index)))
 
   (define (selected-item context who)
     (let-values ([(buffer interface) (require-interface context who)])
       (let* ([position (view-caret (command-context-view context))]
              [item
                (buffer-text-property-ref
-                 buffer position
-                 (buffer-navigation-interface-item-property interface)
-                 #f)]
+                 buffer position 'result-item #f)]
              [index
                (buffer-text-property-ref
-                 buffer position
-                 (buffer-navigation-interface-index-property interface)
-                 #f)])
+                 buffer position 'result-index #f)])
         (unless (and item (integer? index) (exact? index))
           (editor-user-error who "Point is not on a navigable item"))
         (values interface item index))))
@@ -127,9 +113,7 @@
             (let* ([view (command-context-view context)]
                    [current
                      (buffer-text-property-ref
-                       buffer (view-caret view)
-                       (buffer-navigation-interface-index-property interface)
-                       #f)]
+                       buffer (view-caret view) 'result-index #f)]
                    [base
                      (if current
                          current
@@ -143,9 +127,7 @@
                    [index (cdr entry)]
                    [item
                      (buffer-text-property-ref
-                       buffer position
-                       (buffer-navigation-interface-item-property interface)
-                       #f)])
+                       buffer position 'result-item #f)])
               (view-set-caret! view position)
               (ensure-view-visible! view)
               ((buffer-navigation-interface-activate interface)

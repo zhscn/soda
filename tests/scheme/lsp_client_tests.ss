@@ -1855,7 +1855,7 @@
              (eq? (buffer-major-mode-name results-buffer) 'location-results-mode)
              (location-item?
                (buffer-text-property-ref
-                 results-buffer point 'location-item #f)))))
+                 results-buffer point 'result-item #f)))))
     "LSP references did not publish a navigable location list"))
 (define reference-next-effects
   (editor-execute-command! editor 'buffer-item.next))

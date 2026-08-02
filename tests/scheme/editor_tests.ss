@@ -4350,7 +4350,7 @@
           (eq? (buffer-major-mode-name results-buffer) 'location-results-mode)
           (location-item?
             (buffer-text-property-ref
-              results-buffer point 'location-item #f)))))
+              results-buffer point 'result-item #f)))))
     (error 'editor-tests "Scheme xref did not publish references")))
 (define xref-results-buffer
   (view-buffer (editor-active-view xref-editor)))
@@ -4378,7 +4378,7 @@
           (or
             (equal?
               (buffer-text-property-ref
-                xref-results-buffer position 'location-index #f)
+                xref-results-buffer position 'result-index #f)
               3)
             (let ([next
                     (buffer-next-text-property-change
@@ -5259,7 +5259,7 @@
            [ranges
              (and result-view
                   (buffer-text-property-ranges
-                    (view-buffer result-view) 'location-index))])
+                    (view-buffer result-view) 'result-index))])
       (and result-view
            (= (length ranges) 2)
            (= (view-caret result-view) (car (cadr ranges))))))

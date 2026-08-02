@@ -140,7 +140,7 @@
               (set! last-resource resource))
             (emit!
               (string-append (location-row editor item) "\n")
-              `((location-item . ,item) (location-index . ,index)))
+              `((result-item . ,item) (result-index . ,index)))
             (loop (cdr items) (+ index 1)))))
       (values
         (apply string-append (reverse chunks))
@@ -169,7 +169,7 @@
               (set! last-resource resource))
             (emit!
               (string-append (location-row editor item) "\n")
-              `((location-item . ,item) (location-index . ,index)))
+              `((result-item . ,item) (result-index . ,index)))
             (loop (cdr items) (+ index 1)))))
       (values
         (apply string-append (reverse chunks))
@@ -245,7 +245,7 @@
       (buffer-set-navigation-interface!
         buffer
         (make-buffer-navigation-interface
-          'location-item 'location-index #t
+          #t
           activate-location-result
           quit-location-results))
       (editor-note-navigation-buffer! editor buffer)
@@ -313,7 +313,7 @@
                 buffer
                 (+ base (car range))
                 (+ base (cadr range))
-                `((location-item . ,item) (location-index . ,index)))
+                `((result-item . ,item) (result-index . ,index)))
               (loop (cdr ranges) (+ index 1) (cons item items)))))
       (editor-invalidate! editor 'document)
       buffer))
@@ -329,7 +329,7 @@
   (define (location-property-positions buffer)
     (map
       (lambda (range) (cons (car range) (caddr range)))
-      (buffer-text-property-ranges buffer 'location-index)))
+      (buffer-text-property-ranges buffer 'result-index)))
 
   (define (visit-location-item! editor view item kind)
     (let ([buffer-id (location-item-buffer-id item)])
@@ -465,7 +465,7 @@
         (buffer-set-navigation-interface!
           buffer
           (make-buffer-navigation-interface
-            'location-item 'location-index #t
+            #t
             activate-location-result
             quit-location-results))
         (editor-note-navigation-buffer! editor buffer)
@@ -536,8 +536,14 @@
     (register-major-mode!
       (editor-language-catalog editor)
       (make-major-mode
-        'location-results-mode 'fundamental-mode #f 'interface
-        'location-results-mode-map
+        'result-list-mode 'fundamental-mode #f 'interface
+        'result-list-mode-map
+        '((track-modified? . #f) (read-only? . #t))))
+    (register-major-mode!
+      (editor-language-catalog editor)
+      (make-major-mode
+        'location-results-mode 'result-list-mode #f 'interface
+        #f
         '((track-modified? . #f) (read-only? . #t))))
     (let ([keymap (make-keymap)])
       (bind-result-key! keymap 'down #f 'buffer-item.next)
@@ -552,6 +558,6 @@
         (list (make-key-stroke 'character (char->integer #\o) 4))
         'buffer-item.preview)
       (keymap-catalog-register!
-        (editor-keymap-catalog editor) 'location-results-mode-map keymap))
+        (editor-keymap-catalog editor) 'result-list-mode-map keymap))
     (install-navigable-buffer-commands! editor)
     editor))
