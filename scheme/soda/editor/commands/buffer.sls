@@ -159,7 +159,9 @@
       (let ([buffer
               (editor-create-buffer!
                 editor
-                "*scratch*"
+                (if (editor-buffer-for-resource editor "*scratch*")
+                    #f
+                    "*scratch*")
                 'scheme-mode
                 ""
                 (editor-view-resource-context
@@ -211,6 +213,9 @@
                  (buffer-id replacement))))
            (editor-views editor))
          (editor-remove-buffer! editor (buffer-id target))
+         (when (not (buffer-resource replacement))
+           (editor-set-buffer-resource!
+             editor replacement "*scratch*"))
          (editor-set-status-message!
            editor
            (string-append "Killed " label)))])

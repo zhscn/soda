@@ -2414,6 +2414,26 @@
         '())
       '((soda editor core))))
   (error 'editor-tests "killing the last buffer did not create scratch"))
+(define first-scratch-buffer
+  (view-buffer (editor-active-view kill-editor)))
+(editor-update!
+  kill-editor
+  (make-command-message 'buffer.force-kill-current #f))
+(unless
+  (and
+    (buffer-closed? first-scratch-buffer)
+    (= (length (editor-buffers kill-editor)) 1)
+    (not
+      (eq?
+        first-scratch-buffer
+        (view-buffer (editor-active-view kill-editor))))
+    (string=?
+      (buffer-resource
+        (view-buffer (editor-active-view kill-editor)))
+      "*scratch*")
+    (not (editor-debugger kill-editor)))
+  (error 'editor-tests
+         "repeatedly killing the last scratch Buffer broke the editor"))
 (editor-update!
   kill-editor
   (make-input-message
