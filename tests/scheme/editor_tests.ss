@@ -733,6 +733,34 @@
     (make-command-context
       editor (editor-active-view editor) #f #f #f)
     '()))
+(let* ([context
+         (make-command-context
+           editor (editor-active-view editor) #f #f #f)]
+       [effects
+         (execute-command!
+           (editor-command-registry editor)
+           'project.git-status
+           context
+           '())]
+       [process
+         (and (= (length effects) 1)
+              (eq? (command-effect-kind (car effects)) 'managed-process.start)
+              (command-effect-payload (car effects)))])
+  (unless
+    (and (managed-process? process)
+         (equal?
+           (managed-process-arguments process)
+           '("git" "status" "--porcelain=v1" "-z" "--untracked-files=all"))
+         (eq?
+           (location-list-source (editor-current-location-list editor))
+           'git-status))
+    (error 'editor-tests "Project Git status command differs" effects))
+  (execute-command!
+    (editor-command-registry editor)
+    'buffer-item.quit
+    (make-command-context
+      editor (editor-active-view editor) #f #f #f)
+    '()))
 (let ([context
         (editor-view-resource-context
           editor

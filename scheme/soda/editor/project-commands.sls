@@ -8,6 +8,7 @@
           (soda editor completion)
           (soda editor event)
           (soda editor file)
+          (soda editor git-results)
           (soda editor process-comint)
           (soda editor project)
           (soda editor project-resource)
@@ -635,6 +636,16 @@
         [else
          (start-project-search! context project query)])))
 
+  (define (project-git-status-command context)
+    (let* ([editor (command-context-editor context)]
+           [project
+             (workspace-project editor (command-context-view context))])
+      (if project
+          (start-git-status! context project)
+          (begin
+            (editor-set-status-message! editor "No Project found")
+            '()))))
+
   (define (open-project-program-command context name arguments prompt)
     (let* ([editor (command-context-editor context)]
            [project
@@ -744,6 +755,7 @@
 
   (define (install-project-commands! editor)
     (install-compilation! editor)
+    (install-git-results! editor)
     (install-project-search! editor)
     (let ([state (make-project-command-state #f #f)])
       (editor-register-command!
@@ -824,6 +836,8 @@
               "Run an asynchronous shell command from the Project root.")
         (list 'project.search search-project-command
               "Search the current Project with ripgrep.")
+        (list 'project.git-status project-git-status-command
+              "Show Project Git status in a navigable Buffer.")
         (list 'project.shell open-project-shell-command
               "Open a shell in the current Project root.")
         (list 'project.terminal open-project-shell-command
