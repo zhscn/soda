@@ -15,7 +15,8 @@
 | navigation origin 与 LanguageAttachment provenance | 已实现 |
 | Workbench 级语义 `JumpGraph` 与持久化 | 已实现 |
 | WorkspaceEdit 可编辑投影视图 | 已实现 |
-| 任意 Result Buffer 的可编辑 projection capability | 未实现 |
+| 任意 Result Buffer 的可编辑 projection capability | 已实现 |
+| Project search 的 wgrep 式匹配编辑 | 已实现 |
 | 通用跨 Buffer 原子事务与 group undo | 未实现 |
 
 ## 导航的两个层次
@@ -171,6 +172,13 @@ LanguageAttachment 传播。
 
 LocationList 的 index 与 Result Buffer 当前 item 同步，用于语义 API 和 session 数据，
 但不承担 point、Window 或 preview 生命周期。
+
+Editable projection 使用 DocumentAnchor 标记 Result Buffer 中允许修改的区间，并把每个
+区间关联到领域 source。编辑 guard 只允许修改完整落在 projection 内的文本。接受操作
+读取 projection 的当前内容，由领域 mode 生成原子 workspace edits；放弃操作恢复或重新
+生成 producer 结果。Project search 把 `rg --json` 的绝对 range 和行内 match range
+投影到搜索结果，进入编辑模式前异步打开全部目标文件，并校验显示文本仍与源 Buffer
+一致。接受后源 Buffer 保持 modified 状态，结果 Buffer 关闭以避免继续使用旧位置。
 
 ## Excerpt 组合视图
 

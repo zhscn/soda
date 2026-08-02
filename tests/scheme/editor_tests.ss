@@ -700,7 +700,7 @@
       (eq?
         (buffer-major-mode-name
           (view-buffer (editor-active-view editor)))
-        'location-results-mode)
+        'project-search-mode)
       (eq?
         (location-list-source (editor-current-location-list editor))
         'project-search))
@@ -726,14 +726,76 @@
         (= (file-utf16-position-line
              (cdr (assq 'file-open-position
                     (location-item-metadata (car items)))))
-           3))
-      (error 'editor-tests "Project search JSON decoding differs" items)))
+           3)
+        (= (cdr (assq 'search-line-start
+                  (location-item-metadata (car items))))
+           20)
+        (= (cdr (assq 'search-match-start
+                  (location-item-metadata (car items))))
+           1)
+        (= (cdr (assq 'search-match-end
+                  (location-item-metadata (car items))))
+           17))
+      (error 'editor-tests "Project search JSON decoding differs" items))
+    (let* ([results-buffer (view-buffer (editor-active-view editor))]
+           [source-text
+             (string-append
+               "xxxxxxxxxxxxxxxxxxxx"
+               "(project-resource x)\n")]
+           [source-buffer
+             (editor-create-buffer!
+               editor
+               "/virtual/repository/src/main.sls"
+               'scheme-mode
+               source-text)])
+      (editor-append-location-results! editor results-buffer items)
+      (let ([edit-effects
+              (execute-command!
+                (editor-command-registry editor)
+                'project-search.edit
+                (make-command-context
+                  editor (editor-active-view editor) #f #f #f)
+                '())])
+        (unless
+          (and
+            (null? edit-effects)
+            (eq?
+              (buffer-major-mode-name results-buffer)
+              'project-search-edit-mode))
+          (error 'editor-tests
+                 "Project search did not enter editable projection mode")))
+      (let* ([result-view (editor-active-view editor)]
+             [start (view-caret result-view)])
+        (buffer-replace-range!
+          results-buffer start (+ start 16) (string->utf8 "renamed")))
+      (let ([accept-effects
+              (execute-command!
+                (editor-command-registry editor)
+                'project-search.accept
+                (make-command-context
+                  editor (editor-active-view editor) #f #f #f)
+                '())])
+        (unless
+          (and
+            (= (length accept-effects) 1)
+            (eq? (command-effect-kind (car accept-effects)) 'command.invoke)
+            (bytevector=?
+              (buffer-bytes source-buffer)
+              (string->utf8
+                (string-append
+                  "xxxxxxxxxxxxxxxxxxxx"
+                  "(renamed x)\n"))))
+          (error 'editor-tests
+                 "Project search edits did not update the source Buffer"
+                 accept-effects
+                 (utf8->string (buffer-bytes source-buffer)))))
+      (editor-remove-buffer! editor (buffer-id source-buffer)))
   (execute-command!
     (editor-command-registry editor)
     'buffer-item.quit
     (make-command-context
       editor (editor-active-view editor) #f #f #f)
-    '()))
+    '())))
 (let* ([context
          (make-command-context
            editor (editor-active-view editor) #f #f #f)]
