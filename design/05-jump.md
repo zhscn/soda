@@ -240,6 +240,10 @@ Editable projection 使用 DocumentAnchor 标记 Result Buffer 中允许修改�
 呈现为 `result-target`，进入编辑模式前异步打开全部目标文件，并校验该属性覆盖的文本仍
 与源 Buffer 一致。接受后源 Buffer 保持 modified 状态，结果 Buffer 关闭以避免继续使用
 旧位置。领域编辑逻辑只消费标准 target property，不依赖结果行的前缀或布局。
+Project search 的 heading 保存 regexp 与 Project root；`g` 使用相同参数刷新，`r` 从当前
+regexp 打开 minibuffer 并以新参数替换 producer。替换期间旧进程被取消，旧 generation
+的流式输出不会进入新 Result Buffer。editable projection 活跃或正在解析目标资源时，
+修改查询动作不可用。
 
 Workspace edit preview 将每项协议 edit 映射为一个可编辑 projection，并默认标记
 全部条目。用户可以在预览中取消任意条目；Apply 和 Edit 只消费仍被标记的 projection，

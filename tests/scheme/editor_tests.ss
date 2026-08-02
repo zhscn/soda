@@ -721,8 +721,61 @@
         (map
           result-panel-action-name
           (buffer-result-panel-actions
+            (view-buffer (editor-active-view editor)))))
+      (memq
+        'edit-query
+        (map
+          result-panel-action-name
+          (buffer-result-panel-actions
             (view-buffer (editor-active-view editor))))))
     (error 'editor-tests "Project search command differs" effects))
+  (let* ([view (editor-active-view editor)]
+         [panel (view-buffer view)])
+    (invoke-result-panel-action
+      (make-command-context editor view #f #f #f)
+      'edit-query)
+    (unless
+      (string=? (editor-active-prompt-input editor) "project-resource")
+      (error 'editor-tests
+             "Project search did not prefill its current query"))
+    (let* ([prompt (editor-active-prompt editor)]
+           [prompt-view
+             (editor-view-ref editor (prompt-session-view-id prompt))]
+           [prompt-buffer (view-buffer prompt-view)])
+      (buffer-replace-range!
+        prompt-buffer
+        0
+        (bytevector-length (buffer-bytes prompt-buffer))
+        (string->utf8 "project-definition"))
+      (view-set-caret! prompt-view 18)
+      (let* ([reply (editor-accept-prompt! editor)]
+             [restart-effects
+               (editor-update!
+                 editor
+                 (make-internal-command-message
+                   (prompt-reply-command reply)
+                   (prompt-reply-result reply)))]
+             [restart-process
+               (and
+                 (= (length restart-effects) 1)
+                 (eq? (command-effect-kind (car restart-effects))
+                      'managed-process.start)
+                 (command-effect-payload (car restart-effects)))])
+        (unless
+          (and
+            (managed-process? restart-process)
+            (equal?
+              (managed-process-arguments restart-process)
+              '("rg" "--json" "--smart-case" "--no-messages"
+                "--" "project-definition" "."))
+            (string-contains?
+              (utf8->string
+                (buffer-bytes
+                  (view-buffer (editor-active-view editor))))
+              "Root: /virtual/repository"))
+          (error 'editor-tests
+                 "Project search did not restart with the edited query"
+                 restart-effects)))))
   (let ([items
           (project-search-json-line->locations
             "/virtual/repository"

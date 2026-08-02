@@ -17,6 +17,7 @@
           (soda editor line-stream)
           (soda editor managed-process)
           (soda editor project)
+          (soda editor prompt)
           (soda editor result-buffer)
           (soda editor result-edit)
           (soda editor scoped-session-table)
@@ -41,6 +42,9 @@
 
   (define active-project-searches
     (make-scoped-session-table))
+
+  (define (non-empty-string? value)
+    (and (string? value) (positive? (string-length value))))
 
   (define (project-search-session-scope session)
     (project-search-session-workbench-id session))
@@ -273,6 +277,61 @@
                     (make-managed-process-signal-request process 15)))
                 '())))))
 
+  (define (project-search-session-live-buffer editor session)
+    (let ([buffer (project-search-session-buffer session)])
+      (and
+        buffer
+        (exists (lambda (candidate) (eq? candidate buffer))
+                (editor-buffers editor))
+        (eq?
+          (buffer-local-ref buffer 'project-search-session #f)
+          session)
+        buffer)))
+
+  (define (edit-project-search-query context buffer)
+    (let* ([editor (command-context-editor context)]
+           [session
+             (buffer-local-ref buffer 'project-search-session #f)])
+      (unless
+        (and (project-search-session? session)
+             (project-search-session-live-buffer editor session))
+        (editor-user-error
+          'project-search.edit-query
+          "Current search result is no longer live"))
+      (editor-open-prompt!
+        editor
+        (make-prompt-request
+          "Search Project regexp: "
+          (project-search-session-query session)
+          'project-search
+          #f
+          'free
+          non-empty-string?
+          'project.search-apply-query
+          #f
+          session))
+      '()))
+
+  (define (apply-project-search-query context)
+    (let* ([editor (command-context-editor context)]
+           [result (command-context-argument context)]
+           [session
+             (and (prompt-result? result) (prompt-result-data result))]
+           [query
+             (and (prompt-result? result) (prompt-result-value result))])
+      (if
+        (and
+          (project-search-session? session)
+          (eq? (prompt-result-status result) 'accepted)
+          (non-empty-string? query)
+          (project-search-session-live-buffer editor session))
+        (start-project-search!
+          context (project-search-session-project session) query)
+        (begin
+          (editor-set-status-message!
+            editor "Project search query was not changed")
+          '()))))
+
   (define (start-project-search! context project query)
     (let* ([editor (command-context-editor context)]
            [origin-view-id
@@ -302,7 +361,9 @@
                editor
                "*Project Search*"
                'project-search-mode
-               (string-append "Project search: " query)
+               (string-append
+                 "Project search: " query
+                 "\nRoot: " root)
                locations
                origin-view-id
                'project-search
@@ -330,6 +391,17 @@
         buffer
         (lambda (refresh-context refresh-buffer)
           (start-project-search! refresh-context project query)))
+      (buffer-register-result-panel-action!
+        buffer
+        (make-result-panel-action
+          'edit-query
+          "Edit search query"
+          (lambda (candidate)
+            (not
+              (or
+                (buffer-local-ref candidate 'result-edit-active? #f)
+                (buffer-local-ref candidate 'result-edit-pending #f))))
+          edit-project-search-query))
       (buffer-enable-result-edit-action! buffer "Edit matches")
       (scoped-session-table-set!
         active-project-searches editor scope session)
@@ -366,6 +438,7 @@
         '((track-modified? . #f) (read-only? . #t))))
     (let ([keymap (make-keymap)])
       (bind-search-key! keymap #\e 0 'result-edit.begin)
+      (bind-search-key! keymap #\r 0 'project-search.edit-query)
       (keymap-catalog-register!
         (editor-keymap-catalog editor) 'project-search-mode-map keymap))
     (for-each
@@ -383,6 +456,16 @@
               "Finalize a Project search process.")
         (list 'project.search-cancel
               cancel-project-search
-              "Cancel a running Project search.")))
+              "Cancel a running Project search.")
+        (list 'project.search-apply-query
+              apply-project-search-query
+              "Restart Project search with the edited query.")))
+    (editor-register-command!
+      editor
+      (make-interactive-context-command
+        'project-search.edit-query
+        (lambda (context)
+          (invoke-result-panel-action context 'edit-query))
+        "Edit and restart the current Project search query."))
     editor)
 )
