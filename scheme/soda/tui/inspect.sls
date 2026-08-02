@@ -25,6 +25,7 @@
           (soda document)
           (soda editor buffer)
           (soda editor core)
+          (soda editor string)
           (soda tui component)
           (soda tui frame)
           (soda tui renderer))
@@ -352,16 +353,6 @@
           width
           character)))
 
-  (define (join values separator)
-    (if (null? values)
-        ""
-        (let loop ([remaining (cdr values)] [result (car values)])
-          (if (null? remaining)
-              result
-              (loop
-                (cdr remaining)
-                (string-append result separator (car remaining)))))))
-
   (define (color->string color)
     (if (vector? color)
         (string-append
@@ -469,7 +460,7 @@
         (number->string
           (character-description-display-width value))
         "; faces "
-        (join
+        (string-join
           (map symbol->string
                (character-description-faces value))
           ",")
@@ -477,7 +468,7 @@
         (if (null?
               (character-description-component-path value))
             "none"
-            (join
+            (string-join
               (map
                 symbol->string
                 (character-description-component-path value))
@@ -491,4 +482,4 @@
         "; sources "
         (if (null? sources)
             "none"
-            (join (map source->string sources) ","))))))
+            (string-join (map source->string sources) ","))))))

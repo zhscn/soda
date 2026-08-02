@@ -2,6 +2,7 @@
   (export string-prefix?
           string-suffix?
           string-contains?
+          string-join
           string-single-line
           stable-resource?)
   (import (rnrs))
@@ -35,6 +36,16 @@
               needle
               (substring value index (+ index needle-length)))
             (loop (+ index 1)))))))
+
+  (define (string-join values separator)
+    (if (null? values)
+        ""
+        (let loop ([remaining (cdr values)] [result (car values)])
+          (if (null? remaining)
+              result
+              (loop
+                (cdr remaining)
+                (string-append result separator (car remaining)))))))
 
   (define (string-single-line value)
     (unless (string? value)

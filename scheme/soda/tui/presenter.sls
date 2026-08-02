@@ -1,6 +1,7 @@
 (library (soda tui presenter)
   (export frame->ansi frame-diff->ansi)
   (import (rnrs)
+          (soda editor string)
           (soda tui frame))
 
   (define escape (string (integer->char 27)))
@@ -41,23 +42,13 @@
          (number->string (vector-ref color 1))
          (number->string (vector-ref color 2)))]))
 
-  (define (join values separator)
-    (if (null? values)
-        ""
-        (let loop ([remaining (cdr values)] [result (car values)])
-          (if (null? remaining)
-              result
-              (loop
-                (cdr remaining)
-                (string-append result separator (car remaining)))))))
-
   (define (style-sequence value)
     (if (style=? value default-style)
         (ansi "[0m")
         (ansi
           (string-append
             "[0;"
-            (join
+            (string-join
               (append
                 (map attribute-code (style-attributes value))
                 (color-codes (style-foreground value) #t)
