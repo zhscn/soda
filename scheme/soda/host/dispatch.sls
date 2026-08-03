@@ -31,7 +31,7 @@
           (soda host internal buffer)
           (soda host internal view)
           (soda host context)
-          (soda host operation)
+          (soda host internal operation)
           (soda host surface)
           (soda host value)
           (soda view plugin))
