@@ -31,6 +31,7 @@
         (soda support vfs)
         (soda tui terminal-input)
         (soda tui terminal-session)
+        (soda tui presenter)
         (soda view display)
         (soda view frame)
         (soda view compositor)
@@ -1504,6 +1505,22 @@
                              (make-frame-cell "x" 1 #f 'emphasis 'source))
                (eq? (frame-cell-at base 0 0) default-frame-cell))
     (error 'kernel-tests "Frame diff differs" spans)))
+
+(define (contains-string? text needle)
+  (let ([size (string-length needle)])
+    (let loop ([position 0])
+      (and (<= (+ position size) (string-length text))
+           (or (string=? (substring text position (+ position size)) needle)
+               (loop (+ position 1)))))))
+
+(let* ([base (make-frame 2 1)]
+       [next (frame-with-cell base 0 0
+                              (make-frame-cell "x" 1 #f 'selection #f))]
+       [ansi (frame-diff->ansi base next)])
+  (unless (and (contains-string? ansi "[1;1H")
+               (contains-string? ansi "[7m")
+               (contains-string? ansi "x"))
+    (error 'kernel-tests "ANSI presenter encoding differs" ansi)))
 
 (let ([wide (make-frame-cell "界" 2 #f 'default 'wide)]
       [continuation (make-frame-cell "" 0 #t 'default 'wide)])
