@@ -30,7 +30,17 @@
           transaction-spec-annotations
           transaction-spec-scroll-request
           transaction-spec-filter
+          transaction-spec-sequential?
+          resolved-transaction?
+          resolved-transaction-changes
+          resolved-transaction-selection
+          resolved-transaction-effects
+          resolved-transaction-annotations
+          resolved-transaction-scroll-request
+          resolved-transaction-filter-disabled?
+          resolve-transaction-specs
           make-transaction
+          make-transaction-from-resolved
           transaction?
           transaction-start-buffer-state
           transaction-start-view-state
@@ -186,27 +196,46 @@
       (immutable effects transaction-spec-effects)
       (immutable annotations transaction-spec-annotations)
       (immutable scroll-request transaction-spec-scroll-request)
-      (immutable filter transaction-spec-filter)))
+      (immutable filter transaction-spec-filter)
+      (immutable sequential? transaction-spec-sequential?)))
 
   (define make-transaction-spec
     (case-lambda
       [(buffer-id changes)
-       (make-transaction-spec buffer-id #f #f changes #f '() '() #f #f)]
+       (make-transaction-spec buffer-id #f #f changes #f '() '() #f #f #f)]
       [(buffer-id origin-view-id start-generation changes selection effects annotations)
        (make-transaction-spec
-         buffer-id origin-view-id start-generation changes selection effects annotations #f #f)]
+         buffer-id origin-view-id start-generation changes selection effects annotations #f #f #f)]
       [(buffer-id origin-view-id start-generation changes selection effects annotations
                   scroll-request filter)
+       (make-transaction-spec
+         buffer-id origin-view-id start-generation changes selection effects annotations
+         scroll-request filter #f)]
+      [(buffer-id origin-view-id start-generation changes selection effects annotations
+                  scroll-request filter sequential?)
        (unless (change-set? changes)
          (assertion-violation 'make-transaction-spec "expected a change set" changes))
        (unless (or (not selection) (selection? selection))
          (assertion-violation
            'make-transaction-spec "selection must be a Selection or #f" selection))
+       (unless (and (boolean? filter) (boolean? sequential?))
+         (assertion-violation
+           'make-transaction-spec "filter and sequential flags must be boolean"))
        (%make-transaction-spec
          buffer-id origin-view-id start-generation changes selection
          (normalize-effects 'make-transaction-spec effects)
          (normalize-annotations 'make-transaction-spec annotations)
-         scroll-request filter)]))
+         scroll-request filter sequential?)]))
+
+  (define-record-type
+    (resolved-transaction %make-resolved-transaction resolved-transaction?)
+    (fields
+      (immutable changes resolved-transaction-changes)
+      (immutable selection resolved-transaction-selection)
+      (immutable effects resolved-transaction-effects)
+      (immutable annotations resolved-transaction-annotations)
+      (immutable scroll-request resolved-transaction-scroll-request)
+      (immutable filter-disabled? resolved-transaction-filter-disabled?)))
 
   (define-record-type
     (transaction %make-transaction transaction?)
@@ -245,6 +274,105 @@
         annotations)
       annotations))
 
+  (define (map-effect-list changes effects)
+    (let ([description (change-set-change-desc changes)])
+      (let loop ([items (normalize-effects 'resolve-transaction-specs effects)]
+                 [result '()])
+        (if (null? items)
+            (reverse result)
+            (let ([mapped
+                    (state-effect-map-value (car items) description)])
+              (loop
+                (cdr items)
+                (if mapped (cons mapped result) result)))))))
+
+  (define (require-spec-list specs original)
+    (unless (and (list? specs) (for-all transaction-spec? specs))
+      (assertion-violation
+        'resolve-transaction-specs "expected a list of transaction specs" specs))
+    (unless (bytevector? original)
+      (assertion-violation
+        'resolve-transaction-specs "expected the starting document bytes" original))
+    specs)
+
+  ;; Resolve multiple specs into one immutable transaction description. A
+  ;; non-sequential spec is authored against the initial document and must be
+  ;; disjoint from earlier edits. A sequential spec is authored against the
+  ;; document produced by the preceding specs.
+  (define (resolve-transaction-specs specs original)
+    (require-spec-list specs original)
+    (let ([old-length (bytevector-length original)])
+      (if (null? specs)
+          (%make-resolved-transaction
+            (make-change-set old-length '()) #f '() '() #f #f)
+          (let* ([first (car specs)]
+                 [first-changes (transaction-spec-changes first)])
+            (unless (= old-length (change-set-old-length first-changes))
+              (assertion-violation
+                'resolve-transaction-specs
+                "first spec does not match the starting document length"))
+            (let loop ([items (cdr specs)]
+                       [combined first-changes]
+                       [current (change-set-apply first-changes original)]
+                       [selection (transaction-spec-selection first)]
+                       [effects (map-effect-list
+                                  first-changes
+                                  (transaction-spec-effects first))]
+                       [annotations (transaction-spec-annotations first)]
+                       [scroll-request (transaction-spec-scroll-request first)]
+                       [filter-disabled?
+                        (transaction-spec-filter first)])
+              (if (null? items)
+                  (%make-resolved-transaction
+                    combined selection effects annotations
+                    scroll-request filter-disabled?)
+                  (let* ([spec (car items)]
+                         [sequential? (transaction-spec-sequential? spec)]
+                         [next (transaction-spec-changes spec)]
+                         [valid-old-length
+                          (if sequential?
+                              (change-set-new-length combined)
+                              old-length)])
+                    (unless (= (change-set-old-length next) valid-old-length)
+                      (assertion-violation
+                        'resolve-transaction-specs
+                        "transaction spec has the wrong starting document length"
+                        spec))
+                    (let* ([operation
+                             (if sequential?
+                                 next
+                                 (change-set-map next combined))]
+                           [new-combined
+                            (change-set-compose combined operation original)]
+                           [new-current (change-set-apply operation current)]
+                           [mapped-effects
+                            (map-effect-list operation effects)]
+                           [next-effects
+                            (map-effect-list
+                              (if sequential? next new-combined)
+                              (transaction-spec-effects spec))]
+                           [new-selection
+                            (cond
+                              [(transaction-spec-selection spec)
+                               (if sequential?
+                                   (transaction-spec-selection spec)
+                                   (selection-map-change
+                                     (transaction-spec-selection spec)
+                                     (change-set-map combined next)))]
+                              [selection
+                               (selection-map-change selection operation)]
+                              [else #f])])
+                      (loop
+                        (cdr items)
+                        new-combined
+                        new-current
+                        new-selection
+                        (append mapped-effects next-effects)
+                        (append annotations (transaction-spec-annotations spec))
+                        (or scroll-request (transaction-spec-scroll-request spec))
+                        (or filter-disabled? (transaction-spec-filter spec))))))))))
+    )
+
   (define (map-effects changes effects)
     (let ([description (change-set-change-desc changes)])
       (let loop ([items (normalize-effects 'make-transaction effects)]
@@ -258,7 +386,7 @@
                 (if mapped (cons mapped result) result)))))))
 
   (define (realize-transaction start-buffer-state start-view-state changes selection
-                               effects annotations document)
+                               effects annotations document . mapped-effects?)
     (unless (buffer-state? start-buffer-state)
       (assertion-violation
         'make-transaction "expected a start buffer state" start-buffer-state))
@@ -274,7 +402,10 @@
                   (or selection
                       (selection-map-change
                         (view-state-selection start-view-state) changes)))]
-           [mapped-effects (map-effects changes effects)]
+           [mapped-effects
+             (if (and (pair? mapped-effects?) (car mapped-effects?))
+                 (normalize-effects 'make-transaction effects)
+                 (map-effects changes effects))]
            [normalized-annotations
              (normalize-annotations 'make-transaction annotations)]
            [initial
@@ -301,4 +432,21 @@
        (realize-transaction
          start-buffer-state start-view-state changes selection effects annotations document)]
       ))
+
+  (define (make-transaction-from-resolved
+           start-buffer-state start-view-state resolved document)
+    (unless (resolved-transaction? resolved)
+      (assertion-violation
+        'make-transaction-from-resolved
+        "expected a resolved transaction"
+        resolved))
+    (realize-transaction
+      start-buffer-state
+      start-view-state
+      (resolved-transaction-changes resolved)
+      (resolved-transaction-selection resolved)
+      (resolved-transaction-effects resolved)
+      (resolved-transaction-annotations resolved)
+      document
+      #t))
 )

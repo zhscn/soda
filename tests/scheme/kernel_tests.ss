@@ -79,6 +79,46 @@
        [composed (change-set-compose first second base)])
   (unless (string=? (change-set-apply composed base #t) "aXYZcd!")
     (error 'kernel-tests "change set composition differs")))
+(let* ([base (string->utf8 "abcde")]
+       [first (make-change-set 5 (list (make-text-change 1 1 "X")))]
+       [second (make-change-set 5 (list (make-text-change 4 4 "Y")))]
+       [merged (change-set-merge first second)]
+       [mapped-second (change-set-map second first)]
+       [sequential (change-set-compose first mapped-second base)])
+  (unless (and (string=? (change-set-apply merged base #t) "aXbcdYe")
+               (string=? (change-set-apply sequential base #t) "aXbcdYe"))
+    (error 'kernel-tests "simultaneous change merge differs")))
+(let* ([base (string->utf8 "abcde")]
+       [first-spec
+        (make-transaction-spec
+          0 #f #f
+          (make-change-set 5 (list (make-text-change 1 1 "X")))
+          #f '() '() #f #f)]
+       [second-spec
+        (make-transaction-spec
+          0 #f #f
+          (make-change-set 5 (list (make-text-change 4 4 "Y")))
+          #f '() '() #f #f)]
+       [resolved
+        (resolve-transaction-specs (list first-spec second-spec) base)]
+       [sequential-spec
+        (make-transaction-spec
+          0 #f #f
+          (make-change-set 6 (list (make-text-change 2 2 "Y")))
+          #f '() '() #f #f #t)]
+       [sequential-resolved
+        (resolve-transaction-specs
+          (list first-spec sequential-spec)
+          base)])
+  (unless (and (string=?
+                 (change-set-apply
+                   (resolved-transaction-changes resolved) base #t)
+                 "aXbcdYe")
+               (string=?
+                 (change-set-apply
+                   (resolved-transaction-changes sequential-resolved) base #t)
+                 "aXYbcde"))
+    (error 'kernel-tests "transaction spec resolution differs")))
 
 (define first-range
   (make-range-value 1 3 'first 'before 'after))

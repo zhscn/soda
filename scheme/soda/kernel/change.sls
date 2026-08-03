@@ -14,6 +14,8 @@
           change-set-apply
           change-set-invert
           change-set-compose
+          change-set-merge
+          change-set-map
           make-change-desc
           change-desc?
           change-desc-old-length
@@ -225,6 +227,82 @@
                                   (bytevector-slice final index new-to))))))
                   (suffix (+ count 1))))
             (prefix (+ index 1))))))
+
+  ;; Merge two change sets authored against the same document.  Disjoint
+  ;; edits are combined in source order; adjacent insertions retain their
+  ;; argument order.  Overlapping edits must be expressed as a sequential
+  ;; composition, since there is no unambiguous simultaneous result.
+  (define (change-set-merge first second)
+    (unless (and (change-set? first) (change-set? second))
+      (assertion-violation 'change-set-merge "expected two change sets"))
+    (unless (= (change-set-old-length first)
+               (change-set-old-length second))
+      (assertion-violation
+        'change-set-merge "change sets must start at the same length"))
+    (let merge ([left (change-set-changes first)]
+                [right (change-set-changes second)]
+                [result '()])
+      (cond
+        [(null? left)
+         (make-change-set
+           (change-set-old-length first)
+           (append (reverse result) right))]
+        [(null? right)
+         (make-change-set
+           (change-set-old-length first)
+           (append (reverse result) left))]
+        [else
+         (let* ([a (car left)]
+                [b (car right)]
+                [af (text-change-from a)]
+                [bf (text-change-from b)])
+           (cond
+             [(< af bf)
+              (when (> (text-change-to a) bf)
+                (assertion-violation
+                  'change-set-merge "simultaneous changes overlap" a b))
+              (merge (cdr left) right (cons a result))]
+             [(> af bf)
+              (when (> (text-change-to b) af)
+                (assertion-violation
+                  'change-set-merge "simultaneous changes overlap" a b))
+              (merge left (cdr right) (cons b result))]
+             [else
+              (if (and (= (text-change-to a) af)
+                       (= (text-change-to b) bf))
+                  (merge
+                    (cdr left)
+                    (cdr right)
+                    (cons b (cons a result)))
+                  (assertion-violation
+                    'change-set-merge "simultaneous changes overlap" a b))]))]))
+    )
+
+  ;; Map a change set over another change description.  The returned set can
+  ;; be applied to the document produced by OVER.  This is the primitive used
+  ;; to combine non-sequential transaction specifications.
+  (define (change-set-map changes over . before)
+    (unless (and (change-set? changes) (change-set? over))
+      (assertion-violation 'change-set-map "expected two change sets"))
+    (unless (= (change-set-old-length changes)
+               (change-set-old-length over))
+      (assertion-violation
+        'change-set-map "change sets must start at the same length"))
+    (let ([side (if (null? before) 'after (if (car before) 'before 'after))])
+      (unless (memq side '(before after))
+        (assertion-violation 'change-set-map "invalid ordering" side))
+      (make-change-set
+        (change-set-new-length over)
+        (map
+          (lambda (change)
+            (let ([from
+                    (change-set-map-offset over (text-change-from change)
+                                           (if (eq? side 'before) 'before 'after))]
+                  [to
+                    (change-set-map-offset over (text-change-to change)
+                                           (if (eq? side 'before) 'before 'after))])
+              (make-text-change from to (text-change-insert change))))
+          (change-set-changes changes)))))
 
   (define (change-set-map-offset changes offset . affinity)
     (unless (change-set? changes)
