@@ -1683,6 +1683,17 @@
                (eq? (frame-cell-at base 0 0) default-frame-cell))
     (error 'kernel-tests "Frame diff differs" spans)))
 
+(let* ([old (frame-with-cell (make-frame 1 1) 0 0
+                             (make-frame-cell "x" 1 #f 'text 'first))]
+       [new (frame-with-cell (make-frame 1 1) 0 0
+                             (make-frame-cell "x" 1 #f 'text 'second))])
+  (unless (and (not (frame-cell=? (frame-cell-at old 0 0)
+                                  (frame-cell-at new 0 0)))
+               (frame-cell-paint=? (frame-cell-at old 0 0)
+                                    (frame-cell-at new 0 0))
+               (null? (frame-diff old new)))
+    (error 'kernel-tests "Frame diff repainted source-only change")))
+
 (define (contains-string? text needle)
   (let ([size (string-length needle)])
     (let loop ([position 0])

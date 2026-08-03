@@ -7,6 +7,7 @@
           frame-cell-face
           frame-cell-source
           frame-cell=?
+          frame-cell-paint=?
           default-frame-cell
           make-frame
           frame?
@@ -53,6 +54,17 @@
               (frame-cell-continuation? right))
          (equal? (frame-cell-face left) (frame-cell-face right))
          (equal? (frame-cell-source left) (frame-cell-source right))))
+
+  ;; Source is inspection and hit-test metadata.  Terminal presentation only
+  ;; depends on the cell geometry and semantic face.
+  (define (frame-cell-paint=? left right)
+    (unless (and (frame-cell? left) (frame-cell? right))
+      (assertion-violation 'frame-cell-paint=? "expected two FrameCell values" left right))
+    (and (string=? (frame-cell-grapheme left) (frame-cell-grapheme right))
+         (= (frame-cell-width left) (frame-cell-width right))
+         (eq? (frame-cell-continuation? left)
+              (frame-cell-continuation? right))
+         (equal? (frame-cell-face left) (frame-cell-face right))))
 
   (define-record-type
     (frame %make-frame frame?)
@@ -174,14 +186,14 @@
                 (cond
                   [(= column (frame-width new))
                    (loop-row (+ row 1) spans)]
-                  [(frame-cell=? (frame-cell-at old row column)
-                                 (frame-cell-at new row column))
+                  [(frame-cell-paint=? (frame-cell-at old row column)
+                                       (frame-cell-at new row column))
                    (loop-column (+ column 1) spans)]
                   [else
                    (let find-end ([end (+ column 1)])
                      (if (or (= end (frame-width new))
-                             (frame-cell=? (frame-cell-at old row end)
-                                           (frame-cell-at new row end)))
+                             (frame-cell-paint=? (frame-cell-at old row end)
+                                                 (frame-cell-at new row end)))
                          (loop-column
                            end
                            (cons (make-frame-row-span row column end) spans))
