@@ -28,8 +28,6 @@
           language-profile-lexical
           language-profile-word-motion
           language-profile-structure
-          language-profile-electric
-          language-profile-enter
           language-profile-bootstrap
           make-language-catalog
           language-catalog?
@@ -275,21 +273,13 @@
       (immutable lexical language-profile-lexical)
       (immutable word-motion language-profile-word-motion)
       (immutable structure language-profile-structure)
-      (immutable electric language-profile-electric)
-      (immutable enter language-profile-enter)
       (immutable bootstrap language-profile-bootstrap)))
 
   (define make-language-profile
     (case-lambda
       [(name syntax)
        (make-language-profile
-         name syntax #f '() #f #f #f '() #f #f)]
-      [(name syntax indent pairs lexical structure electric enter)
-       (make-language-profile
-         name syntax indent pairs lexical #f structure electric enter #f)]
-      [(name syntax indent pairs lexical word-motion structure electric enter)
-       (make-language-profile
-         name syntax indent pairs lexical word-motion structure electric enter #f)]
+         name syntax #f '() #f #f #f #f)]
       [(name
          syntax
          indent
@@ -297,8 +287,6 @@
          lexical
          word-motion
          structure
-         electric
-         enter
          bootstrap)
        (unless (symbol? name)
          (assertion-violation
@@ -334,16 +322,6 @@
            'make-language-profile
            "structure must be a structure provider or #f"
            structure))
-       (unless (and (list? electric) (for-all char? electric))
-         (assertion-violation
-           'make-language-profile
-           "electric must be a list of characters"
-           electric))
-       (unless (or (not enter) (procedure? enter))
-         (assertion-violation
-           'make-language-profile
-           "enter must be a procedure or #f"
-           enter))
        (unless (or (not bootstrap) (procedure? bootstrap))
          (assertion-violation
            'make-language-profile
@@ -357,8 +335,6 @@
          lexical
          word-motion
          structure
-         electric
-         enter
          bootstrap)]))
 
   (define-record-type (major-mode %make-major-mode major-mode?)
@@ -873,8 +849,8 @@
         (#\[ . #\])
         (#\{ . #\}))
       scheme-identifier-character?
+      #f
       scheme-structure-provider
-      '()
       #f))
 
   (register-major-mode!

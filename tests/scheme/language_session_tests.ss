@@ -157,8 +157,6 @@
     #f
     #f
     #f
-    '()
-    #f
     (lambda (owner buffer context) key)))
 (register-major-mode!
   (editor-language-catalog editor)

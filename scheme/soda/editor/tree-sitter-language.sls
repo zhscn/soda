@@ -940,8 +940,8 @@
         indentation
         (tree-sitter-language-spec-pairs spec)
         (tree-sitter-language-spec-identifier-character? spec)
+        #f
         structure
-        '()
         #f)))
 
   (define (association-name spec)

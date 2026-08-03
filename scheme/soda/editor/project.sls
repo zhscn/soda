@@ -26,10 +26,8 @@
           project-finder?
           project-finder-name
           project-finder-priority
-          project-finder-procedure
           project-discovery-unavailable
           make-project-catalog
-          project-catalog?
           project-catalog-generation
           project-catalog-project-generation
           project-catalog-finders
