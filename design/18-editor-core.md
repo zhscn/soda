@@ -8,7 +8,11 @@
 | 精简的 Scheme core 与分层 boot image | 部分实现 |
 | 统一的 Buffer、Extent、View 与 Window 模型 | 部分实现 |
 | owner-scoped package、service 与资源生命周期 | 部分实现 |
+| TUI Surface、selected Window 与 active context | 未实现 |
+| character/byte Position、restriction 与 Buffer change bus | 未实现 |
+| command loop、recursive invocation 与 command lifecycle | 未实现 |
 | canonical terminal/input decoder | 未实现 |
+| key translation/remap 与 declarative interactive spec | 未实现 |
 | command target、prefix 与 interactive invocation | 部分实现 |
 | request identity、取消和分步 task budget | 部分实现 |
 | committed/desired frame 与 presenter transaction | 部分实现 |
@@ -35,7 +39,9 @@ native mechanisms
                          │
                          ▼
 Soda core
-  runtime -> buffer -> view/window -> input/command -> display/frame
+  runtime -> buffer -> view/window -> surface/context
+                                  ├──> input/command loop
+                                  └──> display/frame/presenter
                          │
                          ▼
 owner-scoped services and packages
@@ -45,10 +51,11 @@ owner-scoped services and packages
 ## Core、功能包与构建层边界
 
 Core 拥有跨功能包共享的机制：terminal service 的输入读取与 Kitty/ANSI 解码、
-command loop、command target/prefix/interactive invocation、request identity 与
-取消、分步 task 调度、DisplayMap 到 Frame 的投影、frame diff、ANSI presenter
-transaction，以及 condition boundary 与 restart 生命周期。它们只处理稳定的记录值、
-identity、所有权和状态转换，不包含具体编辑策略或领域 UI。
+Surface 与 active context、command loop、command target/prefix/interactive invocation、
+Buffer Position/restriction/change bus、request identity 与取消、分步 task 调度、
+DisplayMap 到 Frame 的投影、frame diff、ANSI presenter transaction，以及 condition
+boundary 与 restart 生命周期。它们只处理稳定的记录值、identity、所有权和状态转换，
+不包含具体编辑策略或领域 UI。
 
 功能包拥有基于这些机制组合出来的行为：基础编辑命令、file buffer、minibuffer 与
 completion、major mode、Tree-sitter query、result buffer、xref、Project、LSP、
@@ -71,12 +78,14 @@ core 保持以下不变量：
 4. point、viewport、selection 和瞬时输入状态属于 View；同一 Buffer 的多个 View
    共享文本，但不共享光标。
 5. Window 只显示 View，不保存领域功能状态。
-6. 功能包通过 Buffer transaction、Extent、command、service 和 display request
+6. Surface 只保存 terminal surface、root Window、selected Window 和 active context；
+   它不保存 Project、mode 或其他领域状态。
+7. 功能包通过 Buffer transaction、Extent、command、service 和 display request
    组合，不直接修改终端、Window tree 或 Frame。
-7. Document mutation、状态更新和 Frame publication 只发生在 editor thread。
-8. 异步结果携带 owner、request identity 和 generation；过期结果在应用状态前退役。
-9. package unload 会撤销该 owner 的注册项、任务、Extent、Buffer-local state 和资源。
-10. renderer、input dispatcher 和 command loop 不按功能包名称分派。
+8. Document mutation、状态更新和 Frame publication 只发生在 editor thread。
+9. 异步结果携带 owner、request identity 和 generation；过期结果在应用状态前退役。
+10. package unload 会撤销该 owner 的注册项、任务、Extent、Buffer-local state 和资源。
+11. renderer、input dispatcher 和 command loop 不按功能包名称分派。
 
 这些规则使普通文件、xref 列表、诊断列表、debugger、REPL transcript、dashboard 和
 completion candidates 共享相同的 Buffer、View、搜索、导航、复制、帮助和窗口行为。
@@ -101,7 +110,11 @@ core 使用单向依赖的 Scheme library，不提供聚合全部 API 的大 fac
                      │
                      ▼
               (soda core view)
-               View, Window tree, focus and placement primitive
+               View, Window tree and placement primitive
+                     │
+                     ▼
+              (soda core surface)
+               terminal surface, selected context
                      │
               ┌──────┴──────┐
               ▼             ▼
@@ -129,8 +142,10 @@ Core {
   runtime: RuntimeService,
   buffers: BufferService,
   views: ViewService,
+  surface: SurfaceService,
   input: InputService,
   commands: CommandService,
+  command_loop: CommandLoop,
   display: DisplayService,
   packages: PackageService,
   conditions: ConditionService
@@ -170,6 +185,34 @@ resource、file path、major mode、language attachment、Project 和 process �
 的功能包，通过 Buffer-local cell 关联。core 不根据这些值决定 Buffer 生命周期或
 显示方式。
 
+Buffer-local cell 保留 `unbound` 与显式 `#f` 的区别，并由 owner 负责清理。settings 和
+mode package 可以在其上实现 default value、buffer-local override、mode-local keymap
+和 hook 变量；这些语义不通过向 Buffer record 添加固定字段实现。
+
+### Position 与 restriction
+
+编辑器 command、Marker、Extent 和 DisplayMap 使用字符位置；native Text、Tree-sitter
+和文件 I/O 可以使用 byte position。两种坐标通过 Document 提供的显式转换操作关联，
+任何跨层传递的 range 都声明其坐标系，不把 byte offset 当作通用 point。
+
+```text
+Position { document_id, character_offset, byte_offset? }
+Range    { start: Position, end: Position }
+
+Restriction {
+  buffer_id,
+  start: Marker,
+  end: Marker,
+  owner,
+  state: narrowed | widened
+}
+```
+
+Buffer 默认以完整 Document 作为 accessible range。restriction 改变搜索、point、region、
+显示和普通 edit command 的可见边界；owner-scoped widen 可以恢复完整范围。限制范围与
+Document 文本分离，因此 comint 的 editable boundary、read-only Extent 和普通 narrowing
+可以同时存在。
+
 Buffer transaction 是文本与公开区间元数据的原子发布边界：
 
 ```text
@@ -179,6 +222,16 @@ begin(buffer)
   -> commit
   -> BufferChange { old snapshot, new snapshot, changes, extent damage }
 ```
+
+commit 也是 Buffer change bus 的发布点。core 按固定顺序向订阅者发送
+`before-change`、Document mutation 和 `after-change`，事件携带 Buffer identity、旧/新
+revision、affected range、origin、transaction identity 和 undo group。before-change
+observer 可以拒绝违反 edit policy 的 mutation；after-change observer 只能通过新的
+message 或 effect 安排工作，不能从回调直接进入下一层 command。订阅随 owner 一起撤销。
+
+command loop 为每次 interactive invocation 建立 undo group；连续且声明兼容的命令可以
+合并到同一 group。Buffer 保存 modified generation、saved revision 和当前 undo group
+边界，undo/redo 同时恢复文本和 `content` Extent，不恢复 package-owned transient state。
 
 普通文件编辑、generated buffer 刷新和结果列表更新使用同一 transaction。read-only
 策略在 transaction 入口验证；拥有明确 capability 的内部刷新可以使用受 owner
@@ -199,6 +252,7 @@ Extent {
   start: Marker,
   end: Marker,
   lifetime: content | buffer | view | transient,
+  insertion_policy: front | rear | split,
   layer,
   priority,
   properties
@@ -217,6 +271,10 @@ action
 semantic-id
 source
 ```
+
+`insertion_policy` 定义文本插入恰好位于 extent 边界时的归属；`front`、`rear` 和
+`split` 分别对应向前扩展、向后扩展和在插入点分裂。它与 Marker affinity 分开：
+Marker 决定位置本身的移动，Extent policy 决定区间元数据是否覆盖新文本。
 
 功能包可以增加领域属性，例如 `result-item`、`location`、`diagnostic`、`frame` 或
 `completion-candidate`。core 保留这些值并提供 range query，不理解其领域语义。
@@ -306,13 +364,57 @@ DisplayRequest {
 placement service 按 role 和当前 Window tree 产生计划。调用方不直接选择或修改 leaf，
 异步结果也不抢占当前 focus，除非请求显式携带 focus policy。
 
+### Surface 与 active context
+
+TUI surface 是终端显示平面和编辑器活动上下文的拥有者，不等同于 GUI frame：
+
+```text
+Surface {
+  id,
+  terminal,
+  size,
+  capabilities,
+  root_window,
+  selected_window,
+  generation
+}
+
+ActiveContext {
+  surface_id,
+  window_id,
+  view_id,
+  buffer_id,
+  recursive_depth,
+  minibuffer_stack
+}
+```
+
+surface service 保证 selected Window 是 root tree 中的 live leaf，并根据它解析
+command 的默认 target、point、mark 和输入层。切换 Window、显示请求或进入 nested
+interactive reader 都是 active context 的原子更新；异步结果不能通过修改 context
+抢占焦点。headless host 可以创建没有 terminal writer 的 surface，以复用同一 command
+和 render contract。
+
 ## 输入与命令
 
 ### InputEvent
 
-terminal decoder 把 Kitty、legacy CSI、UTF-8 和 bracketed paste 归一为稳定的
-`InputEvent`。decoder 维护跨 read 的 escape/paste 状态，只在一个完整序列结束后发布
-事件；不把 Kitty、legacy CSI 或终端 capability 泄漏给 keymap。
+terminal service 按以下阶段处理输入：
+
+```text
+terminal bytes
+  -> Kitty/legacy/UTF-8 decoder
+  -> terminal input translation
+  -> canonical InputEvent
+  -> key sequence resolver
+  -> ordered InputLayer
+  -> CommandInvocation or text action
+```
+
+decoder 维护跨 read 的 escape/paste 状态，只在一个完整序列结束后发布事件；不把
+Kitty、legacy CSI 或终端 capability 泄漏给 keymap。translation layer 允许 terminal
+profile 和用户把不同物理序列映射到同一个 canonical key，但不能把 text input 伪装成
+command key。
 
 ```text
 InputEvent {
@@ -350,10 +452,16 @@ major/minor mode、minibuffer、completion、query replace 和应用对话框只
 注册的 layer。`C-g` 产生统一 cancel 操作：从顶层 transient layer 开始调用 cancel，
 再清除未完成 key sequence 和 prefix state。
 
-Keymap 是具名、可继承的稀疏映射，值为 command call、prefix map、text action 或
-tombstone。解析器返回完整 trace，供 dispatch、which-key、describe-key 和测试共享。
-未完成的 prefix sequence 是 View-scoped input state；View 销毁、`C-g` 或 timeout 会
-统一清除它。
+Keymap 是具名、可继承的稀疏映射，值为 command call、prefix map、text action、command
+remap 或 tombstone。resolver 按 terminal translation、global、major mode、minor
+mode、buffer/view local 和 transient layer 的固定顺序查询，并返回完整 trace，供
+dispatch、which-key、describe-key 和测试共享。command remap 改变 command identity 的
+解析结果，不复制原始 key binding。
+
+未完成的 prefix sequence 是 Surface-scoped input state，保存原始 key sequence、当前
+prefix map、source layer 和 deadline；View 销毁、`C-g` 或 timeout 会统一清除它。无法
+完成的 prefix 会把原始事件退回 unread queue 或产生明确的 undefined-key message，
+不会静默丢弃输入。
 
 ### Command
 
@@ -363,20 +471,38 @@ core command definition 保持最小：
 CommandDefinition {
   name,
   invoke,
-  interactive_invoke?,
+  interactive_spec?,
   documentation?,
   class?,
   owner
 }
 ```
 
-`invoke` 是接受明确 Scheme 参数的普通入口。`interactive_invoke` 是已经编译好的交互
-入口；core 不保存 minibuffer reader plan，也不持有递归 command loop。interactive
-功能包提供 `define-command` 和 typed reader 宏，把参数读取编译成显式 continuation，
-并由 minibuffer 包保存 suspension。
+`invoke` 是接受明确 Scheme 参数的普通入口。`interactive_spec` 是描述 target、prefix
+和参数 reader 的数据；Scheme command macro 在装载时把它编译成该记录，不把 reader
+逻辑隐藏在任意 command procedure 中。minibuffer package 提供具体 reader、completion
+和 prompt display，但 core 保存 invocation 的 suspension 和恢复状态。
 
-keymap 和 M-x 调用 `interactive_invoke`。普通 Scheme 代码直接调用 `invoke`。
-CommandContext 只包含 core identity 和输入事实：
+keymap 和 M-x 创建 `CommandInvocation`，普通 Scheme 代码直接调用 `invoke`。一次交互
+调用具有可观察的状态机：
+
+```text
+CommandInvocation {
+  id,
+  definition,
+  context,
+  phase: resolving | reading | executing | completed | cancelled,
+  reader_continuation?,
+  undo_group,
+  result?
+}
+```
+
+reader 可以在 `reading` 阶段挂起 command loop；输入返回后由同一 invocation 继续，
+而不是重新猜测 target 或重新解析 prefix。`C-g` 将 invocation 标记为 cancelled，
+清除其 transient InputLayer、reader continuation 和未完成 prefix。
+
+CommandContext 包含 core identity 和本次调用的输入事实：
 
 ```text
 CommandContext {
@@ -396,11 +522,33 @@ CommandContext {
 entity；命令只通过 resolver 重新取得当前对象。`prefix_argument` 同时保留语义化值和
 原始 key sequence，支持 universal argument、重复参数和 which-key trace。
 
-交互调用分成三个阶段：解析 command definition、解析 target/prefix、执行
-`interactive_invoke`。reader suspension 由 minibuffer package 保存为 continuation，
-command service 只保存 invocation identity、target 和取消状态。命令通过 service API
-修改状态并返回 effect。pre/post hook、advice、repeat、command history 和宏录制由
-command-extensibility 包围绕 command service 注册，不扩张 core invocation record。
+交互调用分成解析 command definition、解析 target/prefix、读取参数和执行四个阶段。
+command loop 在 invocation 开始和结束时发布 command lifecycle message，并以 invocation
+identity 关联 Buffer change、undo group、effects 和 condition。pre/post hook、advice、
+repeat、command history 和宏录制由 command-extensibility package 注册到这些生命周期
+事件；core 不把它们实现成按功能名称分派的分支。
+
+### Command loop
+
+command loop 是唯一推进 Editor state 的执行器。它维护当前 turn 的不可变
+`ActiveContext`、当前和上一条 command identity、prefix argument、unread event queue、
+pending invocation stack 和 quit state；package procedure 不能绕过 loop 直接提交
+Window、Frame 或 terminal mutation。
+
+```text
+poll terminal/native events
+  -> decode and enqueue messages
+  -> resolve one bounded key sequence
+  -> start or resume CommandInvocation
+  -> run update and publish BufferChange/effects
+  -> render dirty surfaces
+  -> presenter submits latest frame transaction
+```
+
+recursive interactive reader 使用同一个 loop 和 message queue，只增加
+`recursive_depth` 与 invocation frame。`C-g` 是高优先级 quit request：它可以取消当前
+reader、prefix、step task 或 command invocation，然后回到最近的可恢复 loop boundary。
+没有 pending work 时，quit request 只清除输入状态而不产生隐式编辑。
 
 ## Message、effect 与异步任务
 
@@ -766,10 +914,19 @@ core 提供 headless host，以 message、Buffer snapshot、View snapshot 和 Fr
 
 - transaction、Marker 和 Extent 在 undo/redo 与跨 revision 编辑后的正确性；
 - 同一 Buffer 多 View 的 point、viewport 和 terminal cursor 独立性；
+- Surface 的 root/selected Window、active context 和 nested invocation 不产生悬空或
+  重复 focus；
+- character/byte Position 的双向转换、restriction 边界和 owner-scoped widen；
+- before/after change 的顺序、Buffer change bus 的退订、modified/save revision 与 undo
+  group 的合并边界；
 - owner unload 后 registration、task、Extent、InputLayer 和 local cell 完整释放；
 - Kitty、legacy CSI、UTF-8、bracketed paste 以及跨 read 的 partial sequence 归一化为
   唯一 InputEvent；
-- command target、prefix sequence 和 interactive reader suspension 的生命周期；
+- terminal translation、keymap precedence、command remap、prefix sequence 和 unread
+  event 的生命周期；
+- declarative interactive spec 产生的 target/prefix/reader 参数顺序，以及 invocation
+  suspend/resume/cancel 状态；
+- command loop 的 pre/update/post/render 顺序、recursive reader 和高优先级 `C-g`；
 - request identity、scope、generation、cancellation 以及 stale result 退役，且不调用
   package procedure；
 - 分步 task 在每个 step budget 后 yield，并在取消或 owner unload 后停止；
@@ -790,10 +947,11 @@ focus 与 candidate Buffer 契约。
 
 实现按可独立运行的依赖层建立：
 
-1. headless runtime、owner token、message/effect 和 condition boundary；
-2. Document wrapper、Buffer transaction、Marker、Extent 和 undo；
-3. View、Window、DisplayElement、Frame 与 terminal presenter；
-4. InputLayer、keymap、command 和 package/service lifecycle；
+1. headless runtime、terminal service、owner token、message/effect 和 condition boundary；
+2. Document Position 转换、Buffer transaction、Marker、Extent、restriction、change bus
+   和 undo group；
+3. View、Window、Surface、active context、DisplayElement、Frame 与 terminal presenter；
+4. Input decoder/translation、InputLayer、keymap、command invocation 和 command loop；
 5. fundamental-editing、files、modeline 和 theme；
 6. generated/result Buffer、minibuffer 与 completion；
 7. language、Project、LSP、comint、REPL、debugger 和 dashboard。
