@@ -46,7 +46,8 @@
           configuration-facet
           configuration-reconfigure
           configuration-apply-effects)
-  (import (rnrs))
+  (import (rnrs)
+          (soda kernel change))
 
   (define (scope? value) (memq value '(buffer view host)))
   (define (precedence? value) (memq value '(highest high default low lowest)))
@@ -106,6 +107,12 @@
   (define (make-state-effect type value . mapper)
     (unless (symbol? type)
       (assertion-violation 'make-state-effect "type must be a symbol" type))
+    (unless (or (null? mapper)
+                (and (pair? mapper)
+                     (null? (cdr mapper))
+                     (procedure? (car mapper))))
+      (assertion-violation
+        'make-state-effect "mapper must be a single procedure" mapper))
     (%make-state-effect
       type value
       (if (null? mapper) (lambda (value change-desc) value) (car mapper))))
@@ -120,6 +127,9 @@
     (unless (procedure? (state-effect-map effect))
       (assertion-violation
         'state-effect-map-value "state effect mapper is not callable" effect))
+    (unless (change-desc? change-desc)
+      (assertion-violation
+        'state-effect-map-value "expected a ChangeDesc" change-desc))
     (%make-state-effect
       (state-effect-type effect)
       ((state-effect-map effect) (state-effect-value effect) change-desc)
@@ -214,20 +224,35 @@
   ;; Compartment entries remain in the raw extension list so they can be
   ;; replaced atomically. Queries see the extension contributed by each entry,
   ;; including nested extension lists.
-  (define (effective-extensions extensions)
-    (fold-right
-      (lambda (extension result)
-        (cond
-          [(compartment-entry? extension)
-           (append
-             (effective-extensions
-               (list (compartment-entry-extension extension)))
-             result)]
-          [(list? extension)
-           (append (effective-extensions extension) result)]
-          [else (cons extension result)]))
-      '()
-      extensions))
+  (define (effective-extensions extensions . seen)
+    (let ([seen (if (null? seen) '() (car seen))])
+      (fold-right
+        (lambda (extension result)
+          (append
+            (cond
+              [(compartment-entry? extension)
+               (effective-extensions
+                 (list (compartment-entry-extension extension)) seen)]
+              [(list? extension)
+               (effective-extensions extension seen)]
+              [(and (state-field? extension)
+                    (not (memq extension seen)))
+               (let ([provide (state-field-provide extension)])
+                 (if provide
+                     (let ([provided (provide extension)])
+                       (if provided
+                           (cons extension
+                                 (effective-extensions
+                                   (if (list? provided)
+                                       provided
+                                       (list provided))
+                                   (cons extension seen)))
+                           (list extension)))
+                     (list extension)))]
+              [else (list extension)])
+            result))
+        '()
+        extensions)))
 
   (define (configuration-fields configuration scope)
     (unless (configuration? configuration)
@@ -305,10 +330,14 @@
                  (eq? (state-effect-type effect) 'compartment-reconfigure)
                  (compartment-entry? (state-effect-value effect)))
             (let ([entry (state-effect-value effect)])
-              (configuration-reconfigure
-                current
-                (compartment-entry-compartment entry)
-                (compartment-entry-extension entry)))
+              (if (contains-compartment?
+                    (configuration-extensions current)
+                    (compartment-entry-compartment entry))
+                  (configuration-reconfigure
+                    current
+                    (compartment-entry-compartment entry)
+                    (compartment-entry-extension entry))
+                  current))
             current))
       configuration
       (if (list? effects) effects (list effects))))

@@ -83,6 +83,25 @@
     (let ([view (and origin-id (view-service-ref views origin-id #f))])
       (and view (= (buffer-id (view-buffer view)) target-buffer-id) view)))
 
+  (define (views-for-buffer views target-buffer-id)
+    (filter
+      (lambda (view)
+        (= (buffer-id (view-buffer view)) target-buffer-id))
+      (view-service-views views)))
+
+  (define (assert-view-generations! views buffer-id generation)
+    (for-each
+      (lambda (view)
+        (let ([state (view-state view)])
+          (unless (= (view-state-buffer-generation state) generation)
+            (assertion-violation
+              'dispatcher-dispatch!
+              "view observes a stale buffer generation"
+              (view-id view)
+              (view-state-buffer-generation state)
+              generation))))
+      (views-for-buffer views buffer-id)))
+
   (define (dispatcher-dispatch-internal! dispatcher spec)
     (unless (and (dispatcher? dispatcher) (transaction-spec? spec))
       (assertion-violation 'dispatcher-dispatch! "expected a dispatcher and transaction spec"))
@@ -99,20 +118,13 @@
           (assertion-violation
             'dispatcher-dispatch! "transaction starts from a stale buffer generation"
             expected (buffer-state-generation old-state)))
+        (assert-view-generations!
+          views (buffer-id buffer) (buffer-state-generation old-state))
         (let* ([changes (transaction-spec-changes spec)]
-             [origin (view-for-origin
-                       views (transaction-spec-origin-view-id spec) (buffer-id buffer))]
-             [old-view-state (and origin (view-state origin))]
-             [_ (when (and origin
-                            (not (= (view-state-buffer-generation old-view-state)
-                                    (buffer-state-generation old-state))))
-                 (assertion-violation
-                   'dispatcher-dispatch!
-                   "origin view observes a stale buffer generation"
-                   (view-id origin)
-                   (view-state-buffer-generation old-view-state)
-                   (buffer-state-generation old-state)))]
-             [prepared (prepare-native-change! (buffer-document buffer) changes)]
+               [origin (view-for-origin
+                         views (transaction-spec-origin-view-id spec) (buffer-id buffer))]
+               [old-view-state (and origin (view-state origin))]
+               [prepared (prepare-native-change! (buffer-document buffer) changes)]
                [native (car prepared)]
                [new-snapshot (cdr prepared)]
                [transaction
@@ -146,10 +158,7 @@
                                 (view-state-advance current selection transaction))])
                       (view-publish-state! view new-state)
                       (cons (view-id view) new-state)))
-                  (filter
-                    (lambda (view)
-                      (= (buffer-id (view-buffer view)) (buffer-id buffer)))
-                    (view-service-views views)))])
+                  (views-for-buffer views (buffer-id buffer)))])
           (when native (document-transaction-commit! native))
           (buffer-publish-state! buffer new-buffer-state)
           (let ([update

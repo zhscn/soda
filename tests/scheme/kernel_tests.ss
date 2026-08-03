@@ -121,6 +121,34 @@
   (transaction-new-buffer-state reconfigured-transaction))
 (unless (eq? (buffer-state-field reconfigured-state mode-field) 'mode)
   (error 'kernel-tests "compartment reconfiguration differs"))
+(define reconfigured-with-view
+  (make-transaction
+    configurable-state view-snapshot changes #f
+    (list (make-compartment-reconfigure-effect mode-compartment mode-field))
+    '()))
+(unless (not (pair?
+              (filter
+                compartment-entry?
+                (configuration-extensions
+                  (view-state-configuration
+                    (transaction-new-view-state reconfigured-with-view))))))
+  (error 'kernel-tests "compartment leaked into view configuration"))
+
+(define provided-facet (make-facet 'provided #f (lambda (values) (car values))))
+(define provider-field
+  (make-state-field
+    'provider 'buffer
+    (lambda (state) 'provider)
+    (lambda (value transaction) value)
+    eq?
+    (lambda (field)
+      (make-facet-provider provided-facet 'from-state-field))))
+(unless (eq?
+          (configuration-facet
+            (make-configuration (list provider-field))
+            provided-facet)
+          'from-state-field)
+  (error 'kernel-tests "state field provider differs"))
 
 (define host (make-host-state))
 (define owner (make-owner 'kernel-test))
@@ -197,4 +225,36 @@
                (snapshot-string (buffer-state-document (buffer-state buffer)))
                "hello world"))
   (error 'kernel-tests "dispatcher did not publish an atomic update"))
+
+(define second-view
+  (view-service-create!
+    (host-state-views host) owner buffer configuration))
+(define second-view-state (view-state second-view))
+(view-publish-state!
+  second-view
+  (make-view-state
+    (view-state-buffer-id second-view-state)
+    0
+    (view-state-selection second-view-state)
+    (view-state-viewport second-view-state)
+    (view-state-input-state second-view-state)
+    (view-state-configuration second-view-state)
+    (view-state-fields second-view-state)))
+(define stale-view-rejected?
+  (guard (condition [else #t])
+    (dispatcher-dispatch!
+      (host-state-dispatch host)
+      (make-transaction-spec
+        (buffer-id buffer) (view-id view)
+        (buffer-state-generation (buffer-state buffer))
+        (make-change-set
+          (snapshot-byte-size (buffer-state-document (buffer-state buffer)))
+          (list (make-text-change
+                  (snapshot-byte-size (buffer-state-document (buffer-state buffer)))
+                  (snapshot-byte-size (buffer-state-document (buffer-state buffer)))
+                  "!")))
+        #f '() '()))
+    #f))
+(unless stale-view-rejected?
+  (error 'kernel-tests "stale shared view was not rejected"))
 (host-state-close! host)
