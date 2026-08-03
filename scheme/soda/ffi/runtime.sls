@@ -1,4 +1,4 @@
-(library (soda runtime)
+(library (soda ffi runtime)
   (export make-runtime
           runtime?
           runtime-close!
@@ -43,7 +43,7 @@
           process-stderr
           process-terminal)
   (import (chezscheme)
-          (soda native))
+          (soda ffi helpers))
 
   (define %abi-version
     (foreign-procedure __atomic "soda_runtime_abi_version" () unsigned-32))

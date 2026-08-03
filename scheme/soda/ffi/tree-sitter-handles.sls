@@ -1,4 +1,4 @@
-(library (soda tree-sitter handles)
+(library (soda ffi tree-sitter-handles)
   (export tree-sitter-parser?
           %make-tree-sitter-parser
           tree-sitter-parser-pointer

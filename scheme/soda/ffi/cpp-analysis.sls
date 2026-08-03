@@ -1,4 +1,4 @@
-(library (soda cpp-analysis)
+(library (soda ffi cpp-analysis)
   (export make-cpp-analyzer
           cpp-analyzer?
           cpp-analyzer-close!
@@ -27,9 +27,9 @@
           cpp-analyzer-expand-selection
           cpp-analyzer-soft-kill-end)
   (import (chezscheme)
-          (soda native)
-          (soda cpp-analysis handles)
-          (soda ffi handles))
+          (soda ffi helpers)
+          (soda ffi cpp-analysis-handles)
+          (soda ffi document-handles))
 
   (define syntax-node-none #xffffffff)
   (define revision-none #xffffffffffffffff)

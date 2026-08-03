@@ -1,4 +1,4 @@
-(library (soda json)
+(library (soda support json)
   (export json-null
           json-null?
           make-json-object

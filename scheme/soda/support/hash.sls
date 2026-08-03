@@ -1,4 +1,4 @@
-(library (soda hash)
+(library (soda support hash)
   (export fnv1a64-offset-basis
           fnv1a64-byte
           fnv1a64-bytevector

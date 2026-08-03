@@ -75,7 +75,7 @@
           native-error
           check-status)
   (import (chezscheme)
-          (soda native))
+          (soda ffi helpers))
 
   (define text-npos #xffffffff)
   (define revision-none #xffffffffffffffff)

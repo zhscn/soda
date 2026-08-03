@@ -15,9 +15,9 @@
         (soda host view)
         (soda host window)
         (soda kernel document)
-        (soda cpp-analysis)
-        (soda indentation)
-        (soda tree-sitter))
+        (soda ffi cpp-analysis)
+        (soda ffi indentation)
+        (soda ffi tree-sitter))
 
 (define selection
   (make-selection

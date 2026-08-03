@@ -1,4 +1,4 @@
-(library (soda vfs)
+(library (soda support vfs)
   (export vfs-entry?
           vfs-entry-name
           vfs-entry-kind

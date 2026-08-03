@@ -1,4 +1,4 @@
-(library (soda tree-sitter)
+(library (soda ffi tree-sitter)
   (export make-tree-sitter-parser
           tree-sitter-language-available?
           tree-sitter-parser?
@@ -26,9 +26,9 @@
           tree-sitter-capture-pattern-index
           tree-sitter-capture-properties)
   (import (chezscheme)
-          (soda ffi handles)
-          (soda native)
-          (soda tree-sitter handles))
+          (soda ffi document-handles)
+          (soda ffi helpers)
+          (soda ffi tree-sitter-handles))
 
   (define-record-type tree-sitter-capture
     (fields name

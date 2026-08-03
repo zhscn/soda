@@ -1,4 +1,4 @@
-(library (soda indentation)
+(library (soda ffi indentation)
   (export make-cpp-indent-style
           cpp-indent-style?
           cpp-indent-style-close!
@@ -20,9 +20,9 @@
           indent-result-trace
           indent-result-take-change!)
   (import (chezscheme)
-          (soda native)
-          (soda cpp-analysis handles)
-          (soda ffi handles))
+          (soda ffi helpers)
+          (soda ffi cpp-analysis-handles)
+          (soda ffi document-handles))
 
   (define text-npos #xffffffff)
 

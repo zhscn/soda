@@ -1,4 +1,4 @@
-(library (soda cpp-analysis handles)
+(library (soda ffi cpp-analysis-handles)
   (export cpp-analyzer?
           %make-cpp-analyzer
           cpp-analyzer-pointer

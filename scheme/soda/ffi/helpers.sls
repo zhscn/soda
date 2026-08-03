@@ -1,4 +1,4 @@
-(library (soda native)
+(library (soda ffi helpers)
   (export native-null-pointer?
           make-native-error
           make-native-status-checker)
