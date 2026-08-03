@@ -583,6 +583,44 @@
                "Ahello worldB"))
   (error 'kernel-tests "dispatcher did not resolve a batch update"))
 
+(let* ([reject-filter
+        (lambda (spec) #f)]
+       [reject-configuration
+        (make-configuration
+          (list
+            (make-facet-provider
+              transaction-filters-facet
+              (list reject-filter))))]
+       [reject-document (make-document "hello")]
+       [reject-buffer
+        (buffer-service-create!
+          (host-state-buffers host) owner "*reject*" reject-document
+          reject-configuration)]
+       [reject-view
+        (view-service-create!
+          (host-state-views host) owner reject-buffer reject-configuration)]
+       [rejected
+        (dispatcher-dispatch!
+          (host-state-dispatch host)
+          (make-transaction-spec
+            (buffer-id reject-buffer) (view-id reject-view) 0
+            (make-change-set 5 (list (make-text-change 5 5 "!")))
+            #f '() '()))]
+       [allowed
+        (dispatcher-dispatch!
+          (host-state-dispatch host)
+          (make-transaction-spec
+            (buffer-id reject-buffer) (view-id reject-view) 0
+            (make-change-set 5 (list (make-text-change 5 5 "!")))
+            #f '() '() #f #t))])
+  (unless (and (not rejected)
+               allowed
+               (= (buffer-state-generation (buffer-state reject-buffer)) 1)
+               (string=? (snapshot-string
+                           (buffer-state-document (buffer-state reject-buffer)))
+                         "hello!"))
+    (error 'kernel-tests "transaction filter policy differs")))
+
 (define second-view
   (view-service-create!
     (host-state-views host) owner buffer configuration))
