@@ -9,6 +9,7 @@
           make-push-interaction-operation
           make-pop-interaction-operation
           make-display-request-operation
+          make-resize-surface-operation
           host-update?
           host-update-operation
           host-update-surface-id

@@ -137,6 +137,9 @@
                         (surface-route-display-request!
                           surface (dispatcher-views dispatcher)
                           (host-operation-value operation))]
+                       [(resize-surface)
+                        (and (surface-resize! surface (host-operation-value operation))
+                             (surface-active-context surface (dispatcher-views dispatcher)))]
                        [else
                         (assertion-violation 'dispatcher-dispatch-host!
                                              "unsupported HostOperation" operation)])]
@@ -147,7 +150,9 @@
                              operation (surface-id surface) old-context new-context resolution
                              (if (= start-generation (surface-generation surface))
                                  '()
-                                 '(chrome)))])
+                                 (if (eq? (host-operation-kind operation) 'resize-surface)
+                                     '(resize layout)
+                                     '(chrome))))])
                       (let ([listener (dispatcher-host-listener dispatcher)])
                         (when listener (listener update)))
                       update)))))))

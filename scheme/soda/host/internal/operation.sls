@@ -9,6 +9,7 @@
           make-push-interaction-operation
           make-pop-interaction-operation
           make-display-request-operation
+          make-resize-surface-operation
           make-host-update
           host-update?
           host-update-operation
@@ -70,6 +71,19 @@
                            "invalid Surface identity or DisplayRequest"
                            surface-id request))
     (%make-host-operation 'display-request surface-id request))
+
+  (define (surface-size? value)
+    (and (pair? value)
+         (integer? (car value)) (exact? (car value)) (>= (car value) 0)
+         (integer? (cdr value)) (exact? (cdr value)) (>= (cdr value) 0)))
+
+  (define (make-resize-surface-operation surface-id size)
+    (unless (and (identity? surface-id) (surface-size? size))
+      (assertion-violation 'make-resize-surface-operation
+                           "invalid Surface identity or size" surface-id size))
+    ;; Copy the pair so later caller mutation cannot alter an operation that
+    ;; has already entered the dispatcher queue.
+    (%make-host-operation 'resize-surface surface-id (cons (car size) (cdr size))))
 
   ;; HostUpdate preserves both the focused context and the resolved placement.
   ;; With preserve focus these can differ: resolution identifies where a

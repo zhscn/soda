@@ -956,6 +956,10 @@
         (dispatcher-dispatch-host!
           (host-state-dispatch host)
           (make-pop-interaction-operation (surface-id split-surface)))]
+       [resize-update
+        (dispatcher-dispatch-host!
+          (host-state-dispatch host)
+          (make-resize-surface-operation (surface-id split-surface) '(16 . 2)))]
        [remove-update
         (dispatcher-dispatch-host!
           (host-state-dispatch host)
@@ -997,7 +1001,10 @@
                (= (surface-render-cursor-column interaction-render) 2)
                (host-update? pop-update)
                (= (active-context-view-id (host-update-new-context pop-update)) (view-id view))
-               (= (length host-updates) 7)
+               (host-update? resize-update)
+               (equal? (host-update-damage resize-update) '(resize layout))
+               (equal? (surface-size split-surface) '(16 . 2))
+               (= (length host-updates) 8)
                (eq? (surface-selected-window split-surface) left)
                (eq? (surface-set-selected-window! split-surface left) left)
                (= (surface-generation split-surface) generation)
