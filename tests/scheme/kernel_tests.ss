@@ -116,6 +116,37 @@
                (eq? (car matches) outer)
                (eq? (cadr matches) point))
     (error 'kernel-tests "point range query differs")))
+(let* ([builder (make-range-set-builder)]
+       [_ (range-set-builder-add! builder first-range)]
+       [_ (range-set-builder-add! builder second-range)]
+       [built (range-set-builder-finish! builder)])
+  (unless (and (eq? (range-set-builder-finish! builder) built)
+               (equal? (range-set-ranges built) (range-set-ranges ranges)))
+    (error 'kernel-tests "range set builder differs")))
+(let* ([point (make-range-value 3 3 'point 'after 'after 'retain #t)]
+       [updated (range-set-update ranges (list point))]
+       [spans (range-set-spans updated 0 9)]
+       [point-span
+        (let loop ([items spans])
+          (cond
+            [(null? items) #f]
+            [(pair? (range-span-points (car items))) (car items)]
+            [else (loop (cdr items))]))])
+  (unless (and (range-value-point? point)
+               point-span
+               (= (range-span-from point-span) 3)
+               (eq? (range-value-value
+                      (car (range-span-points point-span)))
+                    'point))
+    (error 'kernel-tests "range set spans differs")))
+(let ([filtered (range-set-update ranges '()
+                                  (lambda (range)
+                                    (not (eq? (range-value-value range) 'first))))])
+  (unless (and (= (length (range-set-ranges filtered)) 1)
+               (eq? (range-value-value
+                      (car (range-set-ranges filtered)))
+                    'second))
+    (error 'kernel-tests "range set filter update differs")))
 (let ([mapped
         (range-set-map-change
           ranges

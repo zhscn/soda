@@ -7,12 +7,25 @@
           range-value-start-affinity
           range-value-end-affinity
           range-value-map-mode
+          range-value-point?
           make-range-set
           range-set?
           range-set-ranges
           range-set-empty?
           range-set-query
           range-set-query-point
+          range-set-update
+          make-range-set-builder
+          range-set-builder?
+          range-set-builder-add!
+          range-set-builder-finish!
+          make-range-span
+          range-span?
+          range-span-from
+          range-span-to
+          range-span-values
+          range-span-points
+          range-set-spans
           range-set-cursor
           range-set-sweep-cursor
           range-cursor?
@@ -33,7 +46,8 @@
       (immutable value range-value-value)
       (immutable start-affinity range-value-start-affinity)
       (immutable end-affinity range-value-end-affinity)
-      (immutable map-mode range-value-map-mode)))
+      (immutable map-mode range-value-map-mode)
+      (immutable point range-value-point?)))
 
   (define valid-affinities '(before after))
   (define valid-map-modes '(retain drop))
@@ -41,13 +55,16 @@
   (define make-range-value
     (case-lambda
       [(from to value)
-       (make-range-value from to value 'after 'after 'retain)]
+       (make-range-value from to value 'after 'after 'retain #f)]
       [(from to value affinity)
-       (make-range-value from to value affinity affinity 'retain)]
+       (make-range-value from to value affinity affinity 'retain #f)]
       [(from to value start-affinity end-affinity)
        (make-range-value
-         from to value start-affinity end-affinity 'retain)]
+         from to value start-affinity end-affinity 'retain #f)]
       [(from to value start-affinity end-affinity map-mode)
+       (make-range-value
+         from to value start-affinity end-affinity map-mode #f)]
+      [(from to value start-affinity end-affinity map-mode point?)
        (unless (and (exact-integer? from) (exact-integer? to)
                     (>= from 0) (>= to from))
          (assertion-violation 'make-range-value "invalid range" from to))
@@ -60,8 +77,11 @@
        (unless (memq map-mode valid-map-modes)
          (assertion-violation
            'make-range-value "invalid deletion map mode" map-mode))
+       (unless (boolean? point?)
+         (assertion-violation
+           'make-range-value "point flag must be boolean" point?))
        (%make-range-value
-         from to value start-affinity end-affinity map-mode)]))
+         from to value start-affinity end-affinity map-mode point?)]))
 
   (define-record-type
     (range-set %make-range-set range-set?)
@@ -69,6 +89,85 @@
       (immutable ranges range-set-ranges)
       (immutable index range-set-index)
       (immutable prefix-max-end range-set-prefix-max-end)))
+
+  (define-record-type
+    (range-set-builder %make-range-set-builder range-set-builder?)
+    (fields
+      (mutable ranges range-set-builder-ranges range-set-builder-ranges-set!)
+      (mutable last range-set-builder-last range-set-builder-last-set!)
+      (mutable finished? range-set-builder-finished? range-set-builder-finished?-set!)
+      (mutable result range-set-builder-result range-set-builder-result-set!)))
+
+  (define (make-range-set-builder)
+    (%make-range-set-builder '() #f #f #f))
+
+  (define (range-before? left right)
+    (or (< (range-value-from left) (range-value-from right))
+        (and (= (range-value-from left) (range-value-from right))
+             (<= (range-value-to left) (range-value-to right)))))
+
+  (define (range-set-builder-add! builder . arguments)
+    (unless (range-set-builder? builder)
+      (assertion-violation
+        'range-set-builder-add! "expected a range set builder" builder))
+    (when (range-set-builder-finished? builder)
+      (assertion-violation
+        'range-set-builder-add! "builder has already been finished" builder))
+    (let ([range
+            (cond
+              [(= (length arguments) 1) (car arguments)]
+              [(= (length arguments) 3)
+               (apply make-range-value arguments)]
+              [else
+               (assertion-violation
+                 'range-set-builder-add!
+                 "expected a range or from, to, value"
+                 arguments)])])
+      (unless (range-value? range)
+        (assertion-violation
+          'range-set-builder-add! "expected a range value" range))
+      (let ([last (range-set-builder-last builder)])
+        (when (and last (not (range-before? last range)))
+          (assertion-violation
+            'range-set-builder-add!
+            "ranges must be added in sorted order"
+            last range)))
+      (range-set-builder-last-set! builder range)
+      (range-set-builder-ranges-set!
+        builder
+        (cons range (range-set-builder-ranges builder)))
+      builder))
+
+  (define (range-set-builder-finish! builder)
+    (unless (range-set-builder? builder)
+      (assertion-violation
+        'range-set-builder-finish! "expected a range set builder" builder))
+    (if (range-set-builder-finished? builder)
+        (range-set-builder-result builder)
+        (let ([result
+                (make-range-set
+                  (reverse (range-set-builder-ranges builder)))])
+          (range-set-builder-result-set! builder result)
+          (range-set-builder-finished?-set! builder #t)
+          result)))
+
+  (define-record-type
+    (range-span %make-range-span range-span?)
+    (fields
+      (immutable from range-span-from)
+      (immutable to range-span-to)
+      (immutable values range-span-values)
+      (immutable points range-span-points)))
+
+  (define (make-range-span from to values points)
+    (unless (and (exact-integer? from) (exact-integer? to)
+                 (>= from 0) (>= to from)
+                 (list? values) (list? points)
+                 (for-all range-value? values)
+                 (for-all range-value? points))
+      (assertion-violation
+        'make-range-span "invalid range span" from to values points))
+    (%make-range-span from to (list-copy values) (list-copy points)))
 
   ;; A cursor is a short-lived query object.  The RangeSet remains immutable;
   ;; only the cursor position advances while a renderer sweeps a viewport.
@@ -188,6 +287,97 @@
                   (loop
                     (+ position 1)
                     (if matches (cons range result) result))))))))
+
+  (define (unique-sorted-integers values)
+    (let loop ([items (list-sort < values)] [result '()])
+      (if (null? items)
+          (reverse result)
+          (if (and (pair? result) (= (car result) (car items)))
+              (loop (cdr items) result)
+              (loop (cdr items) (cons (car items) result))))))
+
+  ;; Update a set by filtering existing values and merging sorted additions.
+  ;; The operation keeps the RangeSet immutable and returns the original
+  ;; object for the empty update path.
+  (define (range-set-update value additions . filter-procedure)
+    (unless (range-set? value)
+      (assertion-violation 'range-set-update "expected a range set" value))
+    (unless (and (list? additions) (for-all range-value? additions))
+      (assertion-violation
+        'range-set-update "additions must be a list of range values" additions))
+    (unless (or (null? filter-procedure)
+                (and (pair? filter-procedure)
+                     (null? (cdr filter-procedure))
+                     (procedure? (car filter-procedure))))
+      (assertion-violation
+        'range-set-update "filter must be a single procedure" filter-procedure))
+    (if (and (null? additions) (null? filter-procedure))
+        value
+        (let* ([predicate
+                 (if (null? filter-procedure)
+                     (lambda (range) #t)
+                     (car filter-procedure))]
+               [kept (filter predicate (range-set-ranges value))]
+               [merged
+                 (list-sort
+                   range-before?
+                   (append kept (list-copy additions)))])
+          (make-range-set merged))))
+
+  ;; Produce contiguous spans with the active non-point values and point
+  ;; values that begin at each span boundary.  This is the common input to a
+  ;; face/decorations merger; callers do not need to rescan every cell.
+  (define (range-set-spans value from to)
+    (unless (range-set? value)
+      (assertion-violation 'range-set-spans "expected a range set" value))
+    (unless (valid-query? from to)
+      (assertion-violation 'range-set-spans "invalid query range" from to))
+    (let* ([relevant
+             (filter
+               (lambda (range)
+                 (if (range-value-point? range)
+                     (and (<= from (range-value-from range))
+                          (<= (range-value-from range) to))
+                     (and (< (range-value-from range) to)
+                          (> (range-value-to range) from))))
+               (range-set-ranges value))]
+           [boundaries
+             (unique-sorted-integers
+               (cons from
+                 (cons to
+                   (fold-left
+                     (lambda (result range)
+                       (if (range-value-point? range)
+                           (cons (range-value-from range) result)
+                           (cons (range-value-to range)
+                             (cons (range-value-from range) result))))
+                     '()
+                     relevant))))])
+      (let loop ([positions boundaries] [result '()])
+        (if (null? positions)
+            (reverse result)
+            (let* ([start (car positions)]
+                   [rest (cdr positions)]
+                   [end (if (null? rest) start (car rest))]
+                   [points
+                     (filter
+                       (lambda (range)
+                         (and (range-value-point? range)
+                              (= (range-value-from range) start)))
+                       relevant)]
+                   [active
+                     (filter
+                       (lambda (range)
+                         (and (not (range-value-point? range))
+                              (<= (range-value-from range) start)
+                              (< start (range-value-to range))))
+                       relevant)]
+                   [span
+                     (and (or (< start end) (pair? points))
+                          (make-range-span start end active points))])
+              (loop
+                rest
+                (if span (cons span result) result)))))))
 
   (define (range-cursor-advance-to-match! cursor)
     (let ([index (range-cursor-index cursor)]
@@ -322,7 +512,8 @@
                          (range-value-value range)
                          (range-value-start-affinity range)
                          (range-value-end-affinity range)
-                         (range-value-map-mode range))))))])
+                         (range-value-map-mode range)
+                         (range-value-point? range))))))])
       (if empty?
           value
           (let loop ([items (range-set-ranges value)]
