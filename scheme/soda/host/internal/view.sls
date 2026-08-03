@@ -7,6 +7,7 @@
           view-plugin-instances
           view-decorations
           view-display-streams
+          view-display-transforms
           view-publish-state!
           view-update-plugins!
           view-close!
@@ -194,6 +195,15 @@
           (reverse result)
           (let ([stream (view-plugin-instance-display-stream (car instances))])
             (loop (cdr instances) (if stream (cons stream result) result))))))
+
+  (define (view-display-transforms view)
+    (unless (and (view? view) (not (view-closed? view)))
+      (assertion-violation 'view-display-transforms "expected a live View" view))
+    (let loop ([instances (view-plugin-instances view)] [result '()])
+      (if (null? instances)
+          (reverse result)
+          (let ([transform (view-plugin-instance-display-transform (car instances))])
+            (loop (cdr instances) (if transform (cons transform result) result))))))
 
   (define-record-type
     (view-service %make-view-service view-service?)

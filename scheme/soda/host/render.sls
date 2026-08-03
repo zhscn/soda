@@ -130,18 +130,19 @@
                                      (view-state-configuration state)
                                      text-layout-options-facet 'view)]
                                   [streams (view-display-streams view)])
-                              (if (null? streams)
-                                  (layout-display-stream
-                                    (snapshot-display-stream
-                                      snapshot first-line view-height
-                                      (merge-decoration-sets (view-decorations view)))
-                                    (view-state-selection state)
-                                    view-width view-height options)
-                                  (layout-display-stream
-                                    (make-display-stream
-                                      (apply append (map display-stream-fragments streams)))
-                                    (view-state-selection state)
-                                    view-width view-height options)))])
+                              (let ([stream
+                                     (if (null? streams)
+                                         (snapshot-display-stream
+                                           snapshot first-line view-height
+                                           (merge-decoration-sets (view-decorations view)))
+                                         (make-display-stream
+                                           (apply append (map display-stream-fragments streams))))])
+                                (layout-display-stream
+                                  (fold-left
+                                    (lambda (current transform) (transform current))
+                                    stream (view-display-transforms view))
+                                  (view-state-selection state)
+                                  view-width view-height options)))])
                       (loop
                         (cdr leaves)
                         (cons (make-frame-placement row column (text-layout-frame layout)) placements)

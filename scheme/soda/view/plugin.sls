@@ -15,6 +15,7 @@
           view-plugin-destroy
           view-plugin-decorations
           view-plugin-display
+          view-plugin-transform
           make-view-plugin-instance
           view-plugin-instance?
           view-plugin-instance-plugin
@@ -22,6 +23,7 @@
           view-plugin-instance-destroyed?
           view-plugin-instance-decorations
           view-plugin-instance-display-stream
+          view-plugin-instance-display-transform
           view-plugin-instance-update!
           view-plugin-instance-destroy!
           view-plugins-facet
@@ -51,7 +53,7 @@
 
   (define-record-type
     (view-plugin %make-view-plugin view-plugin?)
-    (fields key create update destroy decorations display))
+    (fields key create update destroy decorations display transform))
 
   (define (optional-procedure? value)
     (or (not value) (procedure? value)))
@@ -59,15 +61,18 @@
   (define make-view-plugin
     (case-lambda
       [(key create update destroy decorations)
-       (make-view-plugin key create update destroy decorations #f)]
+       (make-view-plugin key create update destroy decorations #f #f)]
       [(key create update destroy decorations display)
+       (make-view-plugin key create update destroy decorations display #f)]
+      [(key create update destroy decorations display transform)
        (unless (and (symbol? key) (procedure? create)
                     (optional-procedure? update)
                     (optional-procedure? destroy)
                     (optional-procedure? decorations)
-                    (optional-procedure? display))
+                    (optional-procedure? display)
+                    (optional-procedure? transform))
          (assertion-violation 'make-view-plugin "invalid ViewPlugin contract" key))
-       (%make-view-plugin key create update destroy decorations display)]))
+       (%make-view-plugin key create update destroy decorations display transform)]))
 
   ;; A view-scoped facet gives every View its own instance set, even when
   ;; several Views share a Buffer configuration.
@@ -106,6 +111,7 @@
     (fields plugin
             (mutable value view-plugin-instance-value view-plugin-instance-value-set!)
             (mutable display-stream instance-display-stream instance-display-stream-set!)
+            (mutable display-transform instance-display-transform instance-display-transform-set!)
             (mutable destroyed? view-plugin-instance-destroyed?
                      instance-destroyed?-set!)))
 
@@ -119,12 +125,23 @@
             stream)
           #f)))
 
+  (define (compute-display-transform plugin value)
+    (let ([procedure (view-plugin-transform plugin)])
+      (if procedure
+          (let ([transform (procedure value)])
+            (unless (or (not transform) (procedure? transform))
+              (assertion-violation 'view-plugin-instance-display-transform
+                                   "plugin transform must be a procedure or #f" transform))
+            transform)
+          #f)))
+
   (define (make-view-plugin-instance plugin view)
     (unless (view-plugin? plugin)
       (assertion-violation
         'make-view-plugin-instance "expected a ViewPlugin" plugin))
     (let ([value ((view-plugin-create plugin) view)])
-      (%make-view-plugin-instance plugin value (compute-display-stream plugin value) #f)))
+      (%make-view-plugin-instance plugin value (compute-display-stream plugin value)
+                                   (compute-display-transform plugin value) #f)))
 
   (define (view-plugin-instance-display-stream instance)
     (unless (view-plugin-instance? instance)
@@ -132,6 +149,13 @@
                            "expected a ViewPlugin instance" instance))
     (and (not (view-plugin-instance-destroyed? instance))
          (instance-display-stream instance)))
+
+  (define (view-plugin-instance-display-transform instance)
+    (unless (view-plugin-instance? instance)
+      (assertion-violation 'view-plugin-instance-display-transform
+                           "expected a ViewPlugin instance" instance))
+    (and (not (view-plugin-instance-destroyed? instance))
+         (instance-display-transform instance)))
 
   (define (view-plugin-instance-decorations instance)
     (unless (view-plugin-instance? instance)
@@ -164,6 +188,10 @@
         instance
         (compute-display-stream (view-plugin-instance-plugin instance)
                                 (view-plugin-instance-value instance)))
+      (instance-display-transform-set!
+        instance
+        (compute-display-transform (view-plugin-instance-plugin instance)
+                                   (view-plugin-instance-value instance)))
       (view-plugin-instance-value instance)))
 
   (define (view-plugin-instance-destroy! instance)
@@ -176,5 +204,6 @@
           (when procedure
             (procedure (view-plugin-instance-value instance)))
           (instance-display-stream-set! instance #f)
+          (instance-display-transform-set! instance #f)
           (instance-destroyed?-set! instance #t)
           #t))))

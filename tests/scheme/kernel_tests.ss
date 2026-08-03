@@ -964,6 +964,33 @@
                      (frame-cell-at (surface-render-frame render) 0 0)) 'virtual))
     (error 'kernel-tests "cached View display stream differs")))
 
+(let* ([plugin
+        (make-view-plugin
+          'display-transform
+          (lambda (view) 'ready)
+          #f #f #f #f
+          (lambda (value)
+            (lambda (stream)
+              (display-stream-insert
+                stream 1 (list (make-display-text ":" 1 1 'hint 'inlay))))))]
+       [configuration
+        (make-configuration
+          (list (make-facet-provider view-plugins-facet (list plugin))))]
+       [document (make-document "ab")]
+       [buffer
+        (buffer-service-create! (host-state-buffers host) owner "*transform*"
+                                document configuration)]
+       [view (view-service-create! (host-state-views host) owner buffer configuration)]
+       [leaf (make-leaf-window (view-id view) '(0 0 3 1))]
+       [surface (make-surface leaf '(3 . 1))]
+       [render (render-surface surface (host-state-views host))])
+  (unless (and (= (length (view-display-transforms view)) 1)
+               (string=? (frame-cell-grapheme
+                           (frame-cell-at (surface-render-frame render) 0 1)) ":")
+               (eq? (frame-cell-face
+                     (frame-cell-at (surface-render-frame render) 0 1)) 'hint))
+    (error 'kernel-tests "cached View display transform differs")))
+
 (define control-x
   (make-key-stroke 'character (char->integer #\x) 4))
 (define control-s
