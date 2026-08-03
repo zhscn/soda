@@ -22,6 +22,7 @@
           (soda kernel extension)
           (soda kernel value)
           (soda kernel view-state)
+          (soda kernel viewport)
           (soda host buffer)
           (soda host surface)
           (soda host view)
@@ -121,12 +122,8 @@
                            [state (view-state view)]
                            [snapshot (buffer-state-document (buffer-state (view-buffer view)))]
                            [viewport (view-state-viewport state)]
-                           [first-line (if (and (pair? viewport) (integer? (car viewport)))
-                                           (max 0 (car viewport))
-                                           0)]
-                           [visual-row (if (and (pair? viewport) (integer? (cdr viewport)))
-                                           (max 0 (cdr viewport))
-                                           0)]
+                           [first-line (viewport-first-line viewport)]
+                           [visual-row (viewport-visual-row viewport)]
                            [layout
                             (let ([options
                                    (configuration-facet

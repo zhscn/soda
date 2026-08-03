@@ -10,6 +10,7 @@
         (soda kernel range-set)
         (soda kernel selection)
         (soda kernel state)
+        (soda kernel viewport)
         (soda kernel view-state)
         (soda host command)
         (soda host dispatch)
@@ -63,6 +64,10 @@
   (error 'kernel-tests "selection primary differs"))
 (unless (equal? (selection-range-from (selection-primary-range selection)) 8)
   (error 'kernel-tests "selection range differs"))
+
+(unless (and (guard (condition [else #t]) (make-viewport -1 0) #f)
+             (guard (condition [else #t]) (make-viewport 0 -1) #f))
+  (error 'kernel-tests "Viewport rejects invalid coordinates"))
 
 (let ([normalized
        (make-selection
@@ -559,7 +564,7 @@
 (define buffer-snapshot
   (make-buffer-state 'document configuration))
 (define view-snapshot
-  (make-view-state 0 0 selection '(0 . 20) 'insert configuration))
+  (make-view-state 0 0 selection (make-viewport 0 20) 'insert configuration))
 (define spec (make-transaction-spec 0 0 changes))
 (unless
     (guard (condition [else #t])
@@ -579,7 +584,7 @@
     (lambda (value transaction) value)))
 (define initial-view-state
   (make-view-state
-    0 0 selection '(0 . 20) 'insert
+    0 0 selection (make-viewport 0 20) 'insert
     (make-configuration (list initial-view-field))))
 (unless (eq? (view-state-field initial-view-state initial-view-field) 'created)
   (error 'kernel-tests "view StateField was not initialized with its state"))
@@ -760,7 +765,7 @@
           (list (make-compartment-entry view-compartment '())))]
        [view-start
         (make-view-state
-          0 0 selection '(0 . 20) 'insert view-configuration)]
+          0 0 selection (make-viewport 0 20) 'insert view-configuration)]
        [view-transaction
         (make-transaction
           buffer-snapshot (make-change-set 12 '()) #f
@@ -950,7 +955,7 @@
           (host-state-dispatch host)
           (make-view-transaction-spec
             (view-id view) (view-state-generation state)
-            #f '(0 . 1) #f '() '() #f))]
+            #f (make-viewport 0 1) #f '() '() #f))]
        [render (render-surface surface (host-state-views host))])
   (unless (and (string=? (frame-cell-grapheme
                            (frame-cell-at (surface-render-frame render) 0 0)) "b")
@@ -1257,7 +1262,7 @@
           (host-state-dispatch host)
           (make-view-transaction-spec
             (view-id secondary) (view-state-generation old-state)
-            #f '(3 . 9) new-input-state '()
+            #f (make-viewport 3 9) new-input-state '()
             (list (make-annotation 'origin 'input))
             'nearest))]
        [new-state (view-state secondary)])
@@ -1270,7 +1275,8 @@
                   old-primary-generation)
                (= (view-state-generation new-state)
                   (+ 1 (view-state-generation old-state)))
-               (equal? (view-state-viewport new-state) '(3 . 9))
+               (= (viewport-first-line (view-state-viewport new-state)) 3)
+               (= (viewport-visual-row (view-state-viewport new-state)) 9)
                (eq? (view-state-input-state new-state) new-input-state)
                (not (input-stack-pending-sequence
                       (view-state-input-state old-state)))

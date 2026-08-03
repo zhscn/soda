@@ -37,6 +37,7 @@
           (soda kernel internal field-table)
           (soda kernel selection)
           (soda kernel state)
+          (soda kernel viewport)
           (soda kernel value))
 
   (define-record-type
@@ -59,6 +60,8 @@
         buffer-generation))
     (unless (selection? selection)
       (assertion-violation 'make-view-state "expected a selection" selection))
+    (unless (viewport? viewport)
+      (assertion-violation 'make-view-state "expected a Viewport" viewport))
     (unless (configuration? configuration)
       (assertion-violation 'make-view-state "expected a configuration" configuration))
     (let* ([fields (configuration-fields configuration 'view)]
@@ -118,6 +121,9 @@
     (unless (selection? selection)
       (assertion-violation
         'make-view-update-context "expected a Selection" selection))
+    (unless (viewport? viewport)
+      (assertion-violation
+        'make-view-update-context "expected a Viewport" viewport))
     (%make-view-update-context
       view-id origin? transaction start-state selection viewport input-state
       (normalize-state-effect-list 'make-view-update-context effects)
@@ -205,6 +211,10 @@
          (assertion-violation
            'make-view-transaction-spec "selection must be a Selection or #f"
            selection))
+       (unless (or (not viewport) (viewport? viewport))
+         (assertion-violation
+           'make-view-transaction-spec "viewport must be a Viewport or #f"
+           viewport))
        (%make-view-transaction-spec
          view-id start-generation selection viewport input-state
          (normalize-state-effect-list 'make-view-transaction-spec effects)

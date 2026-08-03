@@ -24,6 +24,7 @@
           (soda kernel selection)
           (soda kernel state)
           (soda kernel view-state)
+          (soda kernel viewport)
           (soda kernel value)
           (soda host internal buffer)
           (soda host input)
@@ -147,7 +148,7 @@
              (identity-source-next! identity-source) owner buffer plugin-error!
              (make-view-state (buffer-id buffer)
                               (buffer-state-generation (buffer-state buffer))
-                              (empty-selection) '(0 . 0)
+                              (empty-selection) default-viewport
                               (or input-state (default-input-stack)) configuration)
              '() (make-decoration-set '()) #f)])
       (view-plugin-instances-set!

@@ -225,6 +225,9 @@ ViewState {
 }
 ```
 
+`Viewport` 是不可变值。`first_line` 表示首个逻辑行，`visual_row` 表示该行内由软换行或
+DisplayStream 变换产生的跳过 visual row。布局、命中测试和垂直移动共享这组坐标。
+
 BufferState 不保存 file path、major mode、Project、process、modified flag 或 LSP session。
 这些值由功能包的 StateField 提供。ViewState 不保存 Window、terminal 或领域 UI model。
 
