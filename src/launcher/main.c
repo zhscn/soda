@@ -3,6 +3,7 @@
 #include "runtime/c_api.h"
 #include "syntax/c_api.h"
 #include "tree_sitter/c_api.h"
+#include "unicode/c_api.h"
 
 #define SCHEME_STATIC
 #include <scheme.h>

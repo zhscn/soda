@@ -32,6 +32,7 @@
         (soda tui terminal-session)
         (soda view display)
         (soda view frame)
+        (soda view text-layout)
         (soda view plugin))
 
 (define (library-binding-hidden? library-name identifier)
@@ -1495,6 +1496,18 @@
                (guard (condition [else #t])
                  (make-frame 2 1 (vector continuation default-frame-cell)) #f))
     (error 'kernel-tests "Frame grid validation differs")))
+
+(let* ([document (make-document "ab\ncd")]
+       [snapshot (document-snapshot document)]
+       [selection (make-selection (list (make-selection-range 1 3)))]
+       [layout (layout-text-snapshot snapshot selection 0 4 2)])
+  (unless (and (string=? (frame-cell-grapheme (frame-cell-at (text-layout-frame layout) 0 0)) "a")
+               (eq? (frame-cell-face (frame-cell-at (text-layout-frame layout) 0 1)) 'selection)
+               (eq? (frame-cell-face (frame-cell-at (text-layout-frame layout) 1 0)) 'text)
+               (= (display-map-cell->document (text-layout-display-map layout) 4) 3))
+    (error 'kernel-tests "text layout projection differs"))
+  (snapshot-close! snapshot)
+  (document-close! document))
 
 (let* ([destroyed #f]
        [plugin

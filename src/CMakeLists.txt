@@ -18,6 +18,15 @@ target_compile_features(soda_document PUBLIC cxx_std_23)
 set_target_properties(soda_document PROPERTIES POSITION_INDEPENDENT_CODE ON)
 soda_target_warnings(soda_document)
 
+add_library(soda_unicode STATIC
+  unicode/c_api.cpp
+)
+target_include_directories(soda_unicode PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(soda_unicode PUBLIC utf8proc)
+target_compile_features(soda_unicode PUBLIC cxx_std_23)
+set_target_properties(soda_unicode PROPERTIES POSITION_INDEPENDENT_CODE ON)
+soda_target_warnings(soda_unicode)
+
 add_library(soda_cpp_lexer STATIC
   cpp_lexer/lexer.cpp
   cpp_lexer/token_buffer.cpp
@@ -163,6 +172,7 @@ soda_target_warnings(soda_runtime)
 add_library(soda_native_substrate INTERFACE)
 target_link_libraries(soda_native_substrate INTERFACE
   soda_document
+  soda_unicode
   soda_cpp_analysis
   soda_indentation
   soda_tree_sitter
@@ -177,6 +187,7 @@ file(GLOB_RECURSE SODA_SCHEME_SOURCES
 
 set(SODA_ABI_HEADERS
   "${CMAKE_CURRENT_SOURCE_DIR}/document/c_api.h"
+  "${CMAKE_CURRENT_SOURCE_DIR}/unicode/c_api.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/syntax/c_api.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/indentation/c_api.h"
   "${CMAKE_CURRENT_SOURCE_DIR}/tree_sitter/c_api.h"

@@ -24,6 +24,15 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(libuv)
 
+FetchContent_Declare(
+  utf8proc
+  URL https://github.com/JuliaStrings/utf8proc/archive/refs/tags/v2.11.3.tar.gz
+  URL_HASH SHA256=abfed50b6d4da51345713661370290f4f4747263ee73dc90356299dfc7990c78
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+  EXCLUDE_FROM_ALL
+)
+FetchContent_MakeAvailable(utf8proc)
+
 set(TREE_SITTER_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(TREE_SITTER_BUILD_TOOLS OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(
