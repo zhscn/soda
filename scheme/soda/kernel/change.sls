@@ -184,49 +184,179 @@
               (cons (make-text-change new-from (+ new-from insert-length) deleted)
                     result))))))
 
-  (define (bytevector-equal-at? left right left-start right-start count)
-    (let loop ([index 0])
-      (or (= index count)
-          (and (= (bytevector-u8-ref left (+ left-start index))
-                  (bytevector-u8-ref right (+ right-start index)))
-               (loop (+ index 1))))))
+  (define-record-type
+    (compose-piece %make-compose-piece compose-piece?)
+    (fields
+      (immutable old-from compose-piece-old-from)
+      (immutable old-to compose-piece-old-to)
+      (immutable data compose-piece-data)))
 
-  ;; Sequential composition requires the first document so that a compact
-  ;; normalized replacement can be produced even when edits overlap inserted
-  ;; text from the first change set.
+  (define (compose-piece-original? piece)
+    (not (compose-piece-data piece)))
+
+  (define (compose-piece-length piece)
+    (if (compose-piece-original? piece)
+        (- (compose-piece-old-to piece) (compose-piece-old-from piece))
+        (bytevector-length (compose-piece-data piece))))
+
+  (define (make-original-piece from to)
+    (%make-compose-piece from to #f))
+
+  (define (make-inserted-piece data)
+    (%make-compose-piece #f #f data))
+
+  (define (compose-pieces-for-change-set changes)
+    (let loop ([items (change-set-changes changes)]
+               [cursor 0]
+               [result '()])
+      (if (null? items)
+          (reverse
+            (if (< cursor (change-set-old-length changes))
+                (cons
+                  (make-original-piece cursor (change-set-old-length changes))
+                  result)
+                result))
+          (let* ([change (car items)]
+                 [from (text-change-from change)]
+                 [to (text-change-to change)]
+                 [insert (insert-bytevector change)]
+                 [with-original
+                  (if (< cursor from)
+                      (cons (make-original-piece cursor from) result)
+                      result)]
+                 [with-insert
+                  (if (positive? (bytevector-length insert))
+                      (cons (make-inserted-piece insert) with-original)
+                      with-original)])
+            (loop (cdr items) to with-insert)))))
+
+  (define (compose-piece-slice piece offset length)
+      (if (compose-piece-original? piece)
+          (make-original-piece
+            (+ (compose-piece-old-from piece) offset)
+            (+ (compose-piece-old-from piece) offset length))
+          (make-inserted-piece
+            (bytevector-slice
+              (compose-piece-data piece) offset (+ offset length)))))
+
+  (define (compose-pieces-slice pieces from to)
+    (if (= from to)
+        '()
+        (let loop ([items pieces] [position 0] [result '()])
+          (if (or (null? items) (>= position to))
+              (reverse result)
+              (let* ([piece (car items)]
+                     [end (+ position (compose-piece-length piece))]
+                     [start (max position from)]
+                     [stop (min end to)]
+                     [result
+                      (if (< start stop)
+                          (cons
+                            (compose-piece-slice
+                              piece
+                              (- start position)
+                              (- stop start))
+                            result)
+                          result)])
+                (loop (cdr items) end result))))))
+
+  (define (compose-pieces-apply pieces changes middle-length)
+    (let loop ([items (change-set-changes changes)]
+               [cursor 0]
+               [result '()])
+      (if (null? items)
+          (append result (compose-pieces-slice pieces cursor middle-length))
+          (let* ([change (car items)]
+                 [from (text-change-from change)]
+                 [to (text-change-to change)]
+                 [insert (insert-bytevector change)]
+                 [result
+                  (append result (compose-pieces-slice pieces cursor from))]
+                 [result
+                  (if (positive? (bytevector-length insert))
+                      (append result (list (make-inserted-piece insert)))
+                      result)])
+            (loop (cdr items) to result)))))
+
+  (define (compose-piece-data-append pieces)
+    (let ([length
+            (fold-left
+              (lambda (total piece)
+                (+ total (bytevector-length (compose-piece-data piece))))
+              0
+              pieces)]
+          [output #f])
+      (set! output (make-bytevector length))
+      (let loop ([items pieces] [offset 0])
+        (unless (null? items)
+          (let ([data (compose-piece-data (car items))])
+            (bytevector-copy!
+              data 0 output offset (bytevector-length data))
+            (loop (cdr items) (+ offset (bytevector-length data))))))
+      output))
+
+  (define (compose-pieces->changes pieces old-length)
+    (let loop ([items pieces]
+               [cursor 0]
+               [pending-start #f]
+               [pending-data '()]
+               [result '()])
+      (cond
+        [(null? items)
+         (let* ([pending-start
+                 (or pending-start
+                     (and (< cursor old-length) cursor))]
+                [result
+                 (if pending-start
+                     (cons
+                       (make-text-change
+                         pending-start old-length
+                         (compose-piece-data-append (reverse pending-data)))
+                       result)
+                     result)])
+           (reverse result))]
+        [else
+         (let ([piece (car items)])
+           (if (compose-piece-original? piece)
+               (let* ([from (compose-piece-old-from piece)]
+                      [to (compose-piece-old-to piece)]
+                      [pending-start
+                       (or pending-start
+                           (and (> from cursor) cursor))]
+                      [result
+                       (if pending-start
+                           (cons
+                             (make-text-change
+                               pending-start from
+                               (compose-piece-data-append
+                                 (reverse pending-data)))
+                             result)
+                           result)])
+                 (loop (cdr items) to #f '() result))
+               (loop
+                 (cdr items)
+                 cursor
+                 (or pending-start cursor)
+                 (cons piece pending-data)
+                 result)))])))
+
+  ;; Sequential composition preserves unchanged gaps between edits.  This is
+  ;; important for mapping selections, ranges, and effects: a distant pair of
+  ;; edits must not look like one replacement covering the text between them.
   (define (change-set-compose first second original)
     (unless (and (change-set? first) (change-set? second) (bytevector? original))
       (assertion-violation 'change-set-compose "expected two change sets and a bytevector"))
     (unless (and (= (bytevector-length original) (change-set-old-length first))
                  (= (change-set-new-length first) (change-set-old-length second)))
       (assertion-violation 'change-set-compose "change sets are not sequential"))
-    (let* ([middle (change-set-apply first original)]
-           [final (change-set-apply second middle)]
-           [original-length (bytevector-length original)]
-           [final-length (bytevector-length final)])
-      (let prefix ([index 0])
-        (if (or (= index original-length) (= index final-length)
-                (not (= (bytevector-u8-ref original index)
-                        (bytevector-u8-ref final index))))
-            (let suffix ([count 0])
-              (if (or (= (+ index count) original-length)
-                      (= (+ index count) final-length)
-                      (not (bytevector-equal-at?
-                             original final
-                             (- original-length 1 count)
-                             (- final-length 1 count)
-                             1)))
-                  (let ([old-to (- original-length count)]
-                        [new-to (- final-length count)])
-                    (if (and (= index old-to) (= index new-to))
-                        (make-change-set original-length '())
-                        (make-change-set
-                          original-length
-                          (list (make-text-change
-                                  index old-to
-                                  (bytevector-slice final index new-to))))))
-                  (suffix (+ count 1))))
-            (prefix (+ index 1))))))
+    (let* ([pieces (compose-pieces-for-change-set first)]
+           [final-pieces
+            (compose-pieces-apply
+              pieces second (change-set-new-length first))])
+      (make-change-set
+        (change-set-old-length first)
+        (compose-pieces->changes
+          final-pieces (change-set-old-length first)))))
 
   ;; Merge two change sets authored against the same document.  Disjoint
   ;; edits are combined in source order; adjacent insertions retain their

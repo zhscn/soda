@@ -87,6 +87,14 @@
     (error 'kernel-tests "change set composition differs")))
 (let* ([base (string->utf8 "abcde")]
        [first (make-change-set 5 (list (make-text-change 1 1 "X")))]
+       [second (make-change-set 6 (list (make-text-change 5 5 "Y")))]
+       [composed (change-set-compose first second base)])
+  (unless (and (= (length (change-set-changes composed)) 2)
+               (string=? (change-set-apply composed base #t) "aXbcdYe")
+               (= (change-set-map-offset composed 2 'after) 3))
+    (error 'kernel-tests "distant change composition differs")))
+(let* ([base (string->utf8 "abcde")]
+       [first (make-change-set 5 (list (make-text-change 1 1 "X")))]
        [second (make-change-set 5 (list (make-text-change 4 4 "Y")))]
        [merged (change-set-merge first second)]
        [mapped-second (change-set-map second first)]
