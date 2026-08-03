@@ -13,6 +13,7 @@
           text-layout-options-wrap?
           default-text-layout-options
           text-layout-options-facet
+          snapshot-display-stream
           layout-display-stream
           layout-text-snapshot)
   (import (rnrs)
@@ -112,6 +113,56 @@
 
   (define (line-at text requested)
     (min (max 0 requested) (- (text-line-count text) 1)))
+
+  ;; Build atomic, visible document fragments.  Each text fragment is one
+  ;; grapheme with its exact source interval, which makes subsequent display
+  ;; transforms independent of the document implementation.
+  (define (text->display-stream text first-line line-count decorations)
+    (let* ([start (line-at text first-line)]
+           [last (min (- (text-line-count text) 1) (+ start (- line-count 1)))]
+           [spans (range-set-spans decorations
+                                   (text-line-start text start)
+                                   (text-line-content-end text last))])
+      (define (face-at offset)
+        (let find ([remaining spans])
+          (if (null? remaining)
+              'text
+              (let ([span (car remaining)])
+                (if (and (<= (range-span-from span) offset)
+                         (< offset (range-span-to span)))
+                    (decoration-face (range-span-values span) 'text)
+                    (find (cdr remaining)))))))
+      (let loop-line ([line start] [result '()])
+        (if (> line last)
+            (make-display-stream (reverse result))
+            (let loop-grapheme ([offset (text-line-start text line)] [result result])
+              (let ([end (text-line-content-end text line)])
+                (if (= offset end)
+                    (loop-line (+ line 1)
+                               (if (< line last) (cons (make-display-break end) result) result))
+                    (let ([next (text-next-grapheme-offset text offset)])
+                      (loop-grapheme
+                        next
+                        (cons (make-display-text
+                                (utf8->string (text-subbytevector text offset next))
+                                offset next (face-at offset) offset)
+                              result))))))))))
+
+  (define snapshot-display-stream
+    (case-lambda
+      [(snapshot first-line line-count)
+       (snapshot-display-stream snapshot first-line line-count (make-decoration-set '()))]
+      [(snapshot first-line line-count decorations)
+       (unless (and (snapshot? snapshot) (offset? first-line) (offset? line-count)
+                    (decoration-set? decorations))
+         (assertion-violation 'snapshot-display-stream "invalid document stream request"))
+       (if (= line-count 0)
+           (make-display-stream '())
+           (let ([text (snapshot-text snapshot)])
+             (dynamic-wind
+               (lambda () #f)
+               (lambda () (text->display-stream text first-line line-count decorations))
+               (lambda () (text-close! text)))))]))
 
   ;; Layout a pre-transformed DisplayStream.  This is the shared endpoint for
   ;; document text and View-local display providers: fragments retain their

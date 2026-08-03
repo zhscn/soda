@@ -1650,6 +1650,23 @@
   (snapshot-close! snapshot)
   (document-close! document))
 
+(let* ([document (make-document "a\nb")]
+       [snapshot (document-snapshot document)]
+       [decorations
+        (make-decoration-set
+          (list (make-range-value 2 3 (make-face-decoration 'keyword 1))))]
+       [stream (snapshot-display-stream snapshot 0 2 decorations)]
+       [layout (layout-display-stream stream
+                                      (make-selection (list (make-selection-range 0 0)))
+                                      2 2)])
+  (unless (and (= (length (display-stream-fragments stream)) 3)
+               (display-break? (cadr (display-stream-fragments stream)))
+               (eq? (frame-cell-face
+                     (frame-cell-at (text-layout-frame layout) 1 0)) 'keyword))
+    (error 'kernel-tests "document DisplayStream projection differs"))
+  (snapshot-close! snapshot)
+  (document-close! document))
+
 (let* ([document (make-document "ab\tcd")]
        [snapshot (document-snapshot document)]
        [selection (make-selection (list (make-selection-range 3 3)))]
