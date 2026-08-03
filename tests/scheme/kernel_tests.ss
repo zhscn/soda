@@ -37,6 +37,11 @@
           (make-text-change 8 8 "x"))))
 (unless (= (change-set-new-length changes) 14)
   (error 'kernel-tests "change set length differs"))
+(let ([empty-change-set
+       (make-change-set 5 (list (make-text-change 2 2 "")))])
+  (unless (and (change-set-empty? empty-change-set)
+               (= (change-set-new-length empty-change-set) 5))
+    (error 'kernel-tests "empty text change was not normalized")))
 (unless (= (change-set-map-offset changes 10 'after) 12)
   (error 'kernel-tests "change mapping differs"))
 (unless (equal? (change-set-map-range changes 2 8 'after) (cons 5 10))

@@ -74,27 +74,40 @@
   (define (make-change-set old-length changes)
     (unless (and (exact-integer? old-length) (>= old-length 0))
       (assertion-violation 'make-change-set "old length must be non-negative" old-length))
-    (unless (and (list? changes) (valid-change-order? changes))
+    (unless (list? changes)
       (assertion-violation
-        'make-change-set "changes must be ordered, non-overlapping text changes"
+        'make-change-set "changes must be a list"
         changes))
-    (for-each
-      (lambda (change)
-        (when (> (text-change-to change) old-length)
-          (assertion-violation
-            'make-change-set "change exceeds old document length" change)))
-      changes)
-    (%make-change-set
-      old-length
-      (+ old-length
-         (fold-left
-           (lambda (delta change)
-             (+ delta
-                (- (text-change-insert-length change)
-                   (- (text-change-to change) (text-change-from change)))))
-           0
-           changes))
-      (list-copy changes)))
+    (let ([changes
+            (filter
+              (lambda (change)
+                (unless (text-change? change)
+                  (assertion-violation
+                    'make-change-set "changes must contain text changes" change))
+                (not (and (= (text-change-from change) (text-change-to change))
+                          (zero? (text-change-insert-length change)))))
+              changes)])
+      (unless (valid-change-order? changes)
+        (assertion-violation
+          'make-change-set "changes must be ordered, non-overlapping text changes"
+          changes))
+      (for-each
+        (lambda (change)
+          (when (> (text-change-to change) old-length)
+            (assertion-violation
+              'make-change-set "change exceeds old document length" change)))
+        changes)
+      (%make-change-set
+        old-length
+        (+ old-length
+           (fold-left
+             (lambda (delta change)
+               (+ delta
+                  (- (text-change-insert-length change)
+                     (- (text-change-to change) (text-change-from change)))))
+             0
+             changes))
+        (list-copy changes))))
 
   (define (change-set-empty? changes)
     (unless (change-set? changes)
