@@ -124,16 +124,6 @@
   (define current-evaluation-control
     (make-thread-parameter #f))
 
-  (define (same-source-location? left right)
-    (and
-      (equal?
-        (source-location-resource left)
-        (source-location-resource right))
-      (= (source-location-start left)
-         (source-location-start right))
-      (= (source-location-end left)
-         (source-location-end right))))
-
   (define (continuation-depth continuation)
     (guard (condition [else 0])
       (let ([depth
@@ -150,7 +140,7 @@
     (and
       plan
       (not
-        (same-source-location?
+        (source-location=?
           location
           (source-debug-plan-location plan)))
       (case (source-debug-plan-kind plan)

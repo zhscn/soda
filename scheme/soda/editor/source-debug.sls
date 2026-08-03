@@ -4,6 +4,7 @@
           source-location-resource
           source-location-start
           source-location-end
+          source-location=?
           make-source-debug-controller
           source-debug-controller?
           source-debug-controller-breakpoints
@@ -113,7 +114,7 @@
   (define (make-source-debug-controller)
     (%make-source-debug-controller 0 '()))
 
-  (define (same-source-range? left right)
+  (define (source-location=? left right)
     (and
       (equal?
         (source-location-resource left)
@@ -137,7 +138,7 @@
     (or
       (find
         (lambda (breakpoint)
-          (same-source-range?
+          (source-location=?
             location
             (source-breakpoint-location breakpoint)))
         (source-debug-controller-breakpoints controller))
@@ -198,7 +199,7 @@
     (let ([existing
             (find
               (lambda (breakpoint)
-                (same-source-range?
+                (source-location=?
                   location
                   (source-breakpoint-location breakpoint)))
               (source-debug-controller-breakpoints controller))])
