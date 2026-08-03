@@ -40,9 +40,9 @@ terminal writes
 native document、C++ analysis、indentation 和 runtime 组件构建为 static
 libraries。libuv 由 CMake FetchContent 获取并链接其 static target。Chez 的
 `petite.boot`、`scheme.boot` 与 Soda core boot 分别嵌入
-`.petite.boot`、`.scheme.boot` 和 `.soda_core.boot` ELF section；core libraries 和
-`soda/core/main.ss` 经过 whole-program compilation 后生成直接声明 `scheme`/`petite`
-base boot 的 Soda core boot。boot 内容由 `xxd` 转换为 C arrays 并链接进 `soda`。
+`.petite.boot`、`.scheme.boot` 和 `.soda_core.boot` ELF section；kernel/host libraries 和
+`soda/host/main.ss` 经过 whole-program compilation 后生成直接声明 `scheme`/`petite`
+base boot 的 Soda host boot。boot 内容由 `xxd` 转换为 C arrays 并链接进 `soda`。
 
 进程启动顺序固定为：
 

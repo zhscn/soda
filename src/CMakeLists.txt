@@ -160,8 +160,8 @@ endif()
 set_target_properties(soda_runtime PROPERTIES POSITION_INDEPENDENT_CODE ON)
 soda_target_warnings(soda_runtime)
 
-add_library(soda_native_core INTERFACE)
-target_link_libraries(soda_native_core INTERFACE
+add_library(soda_native_substrate INTERFACE)
+target_link_libraries(soda_native_substrate INTERFACE
   soda_document
   soda_cpp_analysis
   soda_indentation
@@ -229,7 +229,7 @@ target_include_directories(soda PRIVATE
   "${SODA_CHEZ_INCLUDE_DIR}"
 )
 target_link_libraries(soda PRIVATE
-  soda_native_core
+  soda_native_substrate
   "${SODA_CHEZ_KERNEL_LIBRARY}"
   ZLIB::ZLIB
   "${SODA_LZ4_LIBRARY}"
@@ -242,7 +242,7 @@ set_target_properties(soda PROPERTIES LINKER_LANGUAGE CXX)
 soda_target_warnings(soda)
 soda_embed_chez_application(soda
   SOURCE_DIR "${PROJECT_SOURCE_DIR}/scheme"
-  PROGRAM "soda/core/main.ss"
+  PROGRAM "soda/host/main.ss"
   SOURCES ${SODA_SCHEME_SOURCES}
 )
 add_custom_target(soda_tree_sitter_runtime ALL

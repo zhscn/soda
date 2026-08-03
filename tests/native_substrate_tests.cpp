@@ -1,11 +1,11 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest/doctest.h>
 
-#include "soda/core.hpp"
+#include "soda/native.hpp"
 
 using namespace soda;
 
-TEST_CASE("aggregate native core advances analysis with an atomic editor command") {
+TEST_CASE("native substrate advances analysis with an atomic editor command") {
     Document document("int main() {^}\n");
     EditTransaction remove_marker = document.begin_transaction();
     remove_marker.erase(make_range(12, 13));

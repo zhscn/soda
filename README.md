@@ -47,8 +47,8 @@ cmk test -p default -c Debug
 cmk run -p default -c Debug soda
 ```
 
-C launcher 注册 native ABI，嵌入 Chez runtime boot 和 Soda core boot，然后进入
-`soda/core/main.ss`。构建只扫描 `scheme/` 活动源码；归档树不会进入 boot 或测试目标。
+C launcher 注册 native ABI，嵌入 Chez runtime boot 和 Soda kernel/host boot，然后进入
+`soda/host/main.ss`。构建只扫描 `scheme/` 活动源码；归档树不会进入 boot 或测试目标。
 
 ## Native mechanism
 

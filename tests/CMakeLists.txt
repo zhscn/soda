@@ -30,20 +30,20 @@ soda_core_test(clang_format_style_tests
 )
 soda_core_test(indentation_tests indentation/indentation_tests.cpp soda_indentation)
 soda_core_test(indentation_abi_tests indentation/c_api_tests.cpp soda_indentation)
-soda_core_test(native_core_tests native_core_tests.cpp soda_native_core)
+soda_core_test(native_substrate_tests native_substrate_tests.cpp soda_native_substrate)
 soda_core_test(runtime_tests runtime/runtime_tests.cpp soda_runtime)
 target_link_libraries(runtime_tests PRIVATE soda_document Threads::Threads)
 
 find_program(CHEZ_SCHEME_EXECUTABLE NAMES scheme chezscheme)
 if(CHEZ_SCHEME_EXECUTABLE)
   add_test(
-    NAME scheme_core_tests
+    NAME scheme_kernel_tests
     CONFIGURATIONS Debug Release
     COMMAND
       ${CMAKE_COMMAND} -E env
       SODA_DOCUMENT_LIBRARY=$<TARGET_FILE:soda_scheme_native_test>
       ${CHEZ_SCHEME_EXECUTABLE}
       --libdirs ${PROJECT_SOURCE_DIR}/scheme
-      --program ${CMAKE_CURRENT_SOURCE_DIR}/scheme/core_tests.ss
+      --program ${CMAKE_CURRENT_SOURCE_DIR}/scheme/kernel_tests.ss
   )
 endif()
