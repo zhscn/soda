@@ -305,6 +305,23 @@
     (< (precedence-rank (facet-provider-precedence left))
        (precedence-rank (facet-provider-precedence right))))
 
+  ;; Keep declaration order for providers with the same precedence.  The
+  ;; resulting facet value is therefore deterministic even on Scheme
+  ;; implementations whose generic list-sort is not stable.
+  (define (stable-provider-sort providers)
+    (define (insert-provider provider sorted)
+      (cond
+        [(null? sorted) (list provider)]
+        [(provider<? provider (car sorted))
+         (cons provider sorted)]
+        [else
+         (cons (car sorted)
+               (insert-provider provider (cdr sorted)))]))
+    (let loop ([items providers] [sorted '()])
+      (if (null? items)
+          sorted
+          (loop (cdr items) (insert-provider (car items) sorted)))))
+
   (define (configuration-facet configuration facet . requested-scope)
     (unless (and (configuration? configuration) (facet? facet))
       (assertion-violation
@@ -323,8 +340,7 @@
           (let ([values
                   (map
                     facet-provider-value
-                    (list-sort
-                      provider<?
+                    (stable-provider-sort
                       (filter
                         (lambda (extension)
                           (and (facet-provider? extension)

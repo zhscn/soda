@@ -368,6 +368,16 @@
             provided-facet)
           'from-state-field)
   (error 'kernel-tests "state field provider differs"))
+(let* ([ordered
+        (make-facet 'ordered '() (lambda (values) (apply append values)))]
+       [ordered-configuration
+        (make-configuration
+          (list
+            (make-facet-provider ordered (list 'first))
+            (make-facet-provider ordered (list 'second))))])
+  (unless (equal? (configuration-facet ordered-configuration ordered)
+                  '(first second))
+    (error 'kernel-tests "facet provider order differs")))
 
 (let ([drop-effect
         (make-state-effect

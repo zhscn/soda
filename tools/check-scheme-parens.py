@@ -16,14 +16,13 @@ Examples:
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
 
 OPENERS = "([{"
-CLOSERS = ")] }".replace(" ", "")
+CLOSERS = ")]}"
 PAIR = dict(zip(CLOSERS, OPENERS))
 SUFFIXES = {".sls", ".ss", ".scm"}
 
