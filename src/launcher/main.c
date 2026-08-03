@@ -10,8 +10,10 @@
 #include <stdio.h>
 #include <string.h>
 
-extern unsigned char soda_chez_boot[];
-extern unsigned int soda_chez_boot_len;
+extern unsigned char soda_petite_boot[];
+extern unsigned int soda_petite_boot_len;
+extern unsigned char soda_scheme_boot[];
+extern unsigned int soda_scheme_boot_len;
 extern unsigned char soda_core_boot[];
 extern unsigned int soda_core_boot_len;
 
@@ -37,7 +39,8 @@ int main(int argc, char* argv[]) {
     }
 
     Sscheme_init(NULL);
-    Sregister_boot_file_bytes("soda-chez.boot", soda_chez_boot, (iptr)soda_chez_boot_len);
+    Sregister_boot_file_bytes("petite.boot", soda_petite_boot, (iptr)soda_petite_boot_len);
+    Sregister_boot_file_bytes("scheme.boot", soda_scheme_boot, (iptr)soda_scheme_boot_len);
     Sregister_boot_file_bytes("soda-core.boot", soda_core_boot, (iptr)soda_core_boot_len);
     Sbuild_heap(NULL, register_soda_foreign_symbols);
     Scall1(Stop_level_value(Sstring_to_symbol("suppress-greeting")), Strue);

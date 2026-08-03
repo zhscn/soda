@@ -45,5 +45,5 @@
 
 (make-boot-file
   editor-boot-output
-  '("soda-chez")
+  '("scheme" "petite")
   whole-program-object)

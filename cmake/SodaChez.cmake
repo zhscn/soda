@@ -53,9 +53,11 @@ function(soda_embed_chez_application target)
 
   set(generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated/chez")
   set(staging_dir "${generated_dir}/scheme")
-  set(chez_boot "${generated_dir}/soda-chez.boot")
   set(core_boot "${generated_dir}/soda-core.boot")
-  set(chez_boot_c "${generated_dir}/soda_chez_boot.c")
+  set(petite_boot_raw_c "${generated_dir}/petite_boot.raw.c")
+  set(scheme_boot_raw_c "${generated_dir}/scheme_boot.raw.c")
+  set(petite_boot_c "${generated_dir}/petite_boot.c")
+  set(scheme_boot_c "${generated_dir}/scheme_boot.c")
   set(core_boot_c "${generated_dir}/soda_core_boot.c")
   set(core_boot_program_so "${core_boot}.program.so")
   set(core_boot_program_wpo "${core_boot}.program.wpo")
@@ -63,27 +65,40 @@ function(soda_embed_chez_application target)
 
   add_custom_command(
     OUTPUT
-      "${chez_boot}"
-      "${chez_boot_c}"
+      "${petite_boot_c}"
+      "${scheme_boot_c}"
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${generated_dir}"
-    COMMAND
-      "${SODA_CHEZ_SCHEME_EXECUTABLE}"
-      --script
-      "${PROJECT_SOURCE_DIR}/cmake/build-chez-runtime-boot.ss"
-      "${SODA_CHEZ_PETITE_BOOT}"
-      "${SODA_CHEZ_SCHEME_BOOT}"
-      "${chez_boot}"
     COMMAND
       "${SODA_XXD_EXECUTABLE}"
       -i
-      -n soda_chez_boot
-      "${chez_boot}"
-      "${chez_boot_c}"
+      -n soda_petite_boot
+      "${SODA_CHEZ_PETITE_BOOT}"
+      "${petite_boot_raw_c}"
+    COMMAND
+      "${CMAKE_COMMAND}"
+      "-DINPUT=${petite_boot_raw_c}"
+      "-DOUTPUT=${petite_boot_c}"
+      -DARRAY=soda_petite_boot
+      -DSECTION=.petite.boot
+      -P "${PROJECT_SOURCE_DIR}/cmake/annotate-boot-section.cmake"
+    COMMAND
+      "${SODA_XXD_EXECUTABLE}"
+      -i
+      -n soda_scheme_boot
+      "${SODA_CHEZ_SCHEME_BOOT}"
+      "${scheme_boot_raw_c}"
+    COMMAND
+      "${CMAKE_COMMAND}"
+      "-DINPUT=${scheme_boot_raw_c}"
+      "-DOUTPUT=${scheme_boot_c}"
+      -DARRAY=soda_scheme_boot
+      -DSECTION=.scheme.boot
+      -P "${PROJECT_SOURCE_DIR}/cmake/annotate-boot-section.cmake"
     DEPENDS
-      "${PROJECT_SOURCE_DIR}/cmake/build-chez-runtime-boot.ss"
       "${SODA_CHEZ_PETITE_BOOT}"
       "${SODA_CHEZ_SCHEME_BOOT}"
-    COMMENT "Embedding the Chez runtime boot image"
+      "${PROJECT_SOURCE_DIR}/cmake/annotate-boot-section.cmake"
+    COMMENT "Embedding Chez base boot files"
     VERBATIM
   )
 
@@ -111,6 +126,8 @@ function(soda_embed_chez_application target)
       "${core_boot_c}"
     DEPENDS
       "${PROJECT_SOURCE_DIR}/cmake/build-soda-boot.ss"
+      "${SODA_CHEZ_PETITE_BOOT}"
+      "${SODA_CHEZ_SCHEME_BOOT}"
       ${SODA_CHEZ_SOURCES}
     BYPRODUCTS
       "${core_boot_program_so}"
@@ -121,9 +138,14 @@ function(soda_embed_chez_application target)
   )
 
   set_source_files_properties(
-    "${chez_boot_c}"
+    "${petite_boot_c}"
+    "${scheme_boot_c}"
     "${core_boot_c}"
     PROPERTIES GENERATED TRUE
   )
-  target_sources(${target} PRIVATE "${chez_boot_c}" "${core_boot_c}")
+  target_sources(${target} PRIVATE
+    "${petite_boot_c}"
+    "${scheme_boot_c}"
+    "${core_boot_c}"
+  )
 endfunction()
