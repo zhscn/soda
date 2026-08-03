@@ -1093,6 +1093,42 @@
     (require-open-editor 'editor-find-view value)
     (and id (entity-registry-ref (editor-view-registry value) id)))
 
+  (define (make-default-editor-view id window-id buffer context)
+    (make-view-state
+      id
+      window-id
+      buffer
+      (document-create-anchor!
+        (buffer-document buffer)
+        0
+        anchor-after-insertion)
+      #f
+      #f
+      (make-anchored-location-ring 16)
+      #f
+      #f
+      0
+      0
+      0
+      1
+      1
+      #f
+      '()
+      (list
+        (make-input-state
+          'editing
+          '()
+          'accept))
+      #f
+      #f
+      '()
+      #f
+      '()
+      #f
+      context
+      #f
+      (make-navigation-walk)))
+
   (define editor-open-view!
     (case-lambda
       [(value buffer-id)
@@ -1119,40 +1155,7 @@
                     value source-context buffer)
                   id)]
            [view
-             (make-view-state
-               id
-               #f
-               buffer
-               (document-create-anchor!
-                 (buffer-document buffer)
-                 0
-                 anchor-after-insertion)
-               #f
-               #f
-               (make-anchored-location-ring 16)
-               #f
-               #f
-               0
-               0
-               0
-               1
-               1
-               #f
-               '()
-               (list
-                 (make-input-state
-                   'editing
-                   '()
-                   'accept))
-               #f
-               #f
-               '()
-               #f
-               '()
-               #f
-               context
-               #f
-               (make-navigation-walk))])
+             (make-default-editor-view id #f buffer context)])
       (entity-registry-register!
         (editor-view-registry value)
         id
@@ -3999,44 +4002,15 @@
            [completions (make-entity-registry 1)]
            [keymaps (make-keymap-catalog)]
            [view
-             (make-view-state
+             (make-default-editor-view
                1
                1
                buffer
-               (document-create-anchor!
-                 (buffer-document buffer)
-                 0
-                 anchor-after-insertion)
-               #f
-               #f
-               (make-anchored-location-ring 16)
-               #f
-               #f
-               0
-               0
-               0
-               1
-               1
-               #f
-               '()
-               (list
-                 (make-input-state
-                   'editing
-                   '()
-                   'accept))
-               #f
-               #f
-               '()
-               #f
-               '()
-               #f
                (make-resource-context
                  (vfs-directory-path (current-directory))
                  1
                  #f
-                 #f)
-               #f
-               (make-navigation-walk))]
+                 #f))]
            [value
              (make-editor-storage
                buffers
