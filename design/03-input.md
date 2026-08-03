@@ -4,7 +4,8 @@
 
 | 能力 | 状态 |
 |---|---|
-| raw terminal、Kitty keyboard 与 bracketed paste | 已实现 |
+| Kitty keyboard、legacy terminal 与 bracketed paste decoder | 已实现 |
+| raw terminal session 与 Surface message queue | 待实现 |
 | 增量 decoder 与规范 `InputEvent` | 已实现 |
 | 分层 keymap、prefix map、tombstone 与内省 | 已实现 |
 | per-View `InputState`、文本策略与单键捕获 | 已实现 |
@@ -46,6 +47,10 @@ terminal bytes
 decoder 只归一终端协议。keymap 只解析命令。command 通过显式 context 访问 Editor、
 View、Buffer、selection 和 prefix argument。异步完成事件也进入同一个 command loop，
 并在应用前校验 identity、generation 和 revision。
+
+规范事件与 keymap 之间存在单一的 KeyStroke 归一边界。Kitty 私有区功能键 codepoint
+不进入 KeyStroke；Shift 标点折叠为逻辑字符，字母 Shift 保持为 modifier。keymap 因此
+不依赖 Kitty 或 legacy 编码形式。
 
 ## 终端协议
 

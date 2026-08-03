@@ -1,10 +1,5 @@
 (library (soda host input)
-  (export make-input-event
-          input-event?
-          input-event-kind
-          input-event-value
-          input-event-text
-          make-keymap
+  (export make-keymap
           keymap?
           keymap-name
           keymap-bind!
@@ -61,17 +56,8 @@
           input-consume
           input-dispatch)
   (import (rnrs)
+          (soda host input-event)
           (soda host value))
-
-  (define-record-type
-    (input-event %make-input-event input-event?)
-    (fields
-      (immutable kind input-event-kind)
-      (immutable value input-event-value)
-      (immutable text input-event-text)))
-
-  (define (make-input-event kind value . text)
-    (%make-input-event kind value (if (null? text) #f (car text))))
 
   (define-record-type
     (keymap %make-keymap keymap?)
@@ -87,22 +73,39 @@
     (%make-keymap name (make-hashtable equal-hash equal?)
                   (make-eq-hashtable) (make-hashtable equal-hash equal?)))
 
+  (define (binding-key value)
+    (if (key-stroke? value) (key-stroke-binding-key value) value))
+
+  (define (valid-binding-key? value)
+    (or (symbol? value)
+        (string? value)
+        (and (vector? value)
+             (= (vector-length value) 4)
+             (eq? (vector-ref value 0) 'key-stroke))))
+
   (define (valid-sequence? value)
-    (and (pair? value) (for-all (lambda (key) (or (symbol? key) (string? key))) value)))
+    (and (pair? value)
+         (for-all
+           (lambda (key) (valid-binding-key? (binding-key key)))
+           value)))
+
+  (define (normalize-sequence sequence)
+    (map binding-key sequence))
 
   (define (keymap-bind! map sequence binding)
     (unless (and (keymap? map) (valid-sequence? sequence))
       (assertion-violation 'keymap-bind! "expected a keymap and non-empty sequence" map sequence))
-    (hashtable-set! (keymap-bindings map) (list-copy sequence) binding)
-    (let loop ([items sequence] [prefix '()])
+    (let ([normalized (normalize-sequence sequence)])
+      (hashtable-set! (keymap-bindings map) normalized binding)
+      (let loop ([items normalized] [prefix '()])
       (unless (null? items)
         (let ([next (append prefix (list (car items)))])
           (hashtable-set! (keymap-prefixes map) next #t)
-          (loop (cdr items) next))))
+            (loop (cdr items) next)))))
     binding)
 
   (define (keymap-unbind! map sequence)
-    (hashtable-delete! (keymap-bindings map) sequence)
+    (hashtable-delete! (keymap-bindings map) (normalize-sequence sequence))
     (let ([prefixes (keymap-prefixes map)])
       (call-with-values
         (lambda () (hashtable-entries prefixes))
@@ -123,11 +126,14 @@
     #t)
 
   (define (keymap-lookup map sequence . default)
-    (let ([value (hashtable-ref (keymap-bindings map) sequence #f)])
+    (let ([value
+            (hashtable-ref
+              (keymap-bindings map) (normalize-sequence sequence) #f)])
       (if value value (if (null? default) #f (car default)))))
 
   (define (keymap-prefix? map sequence)
-    (hashtable-contains? (keymap-prefixes map) sequence))
+    (hashtable-contains?
+      (keymap-prefixes map) (normalize-sequence sequence)))
 
   (define (keymap-remap! map command replacement)
     (unless (and (keymap? map) (symbol? command) (symbol? replacement))
@@ -370,33 +376,44 @@
         'input-service-dispatch "expected a service, context and event" service context event))
     (let* ([stack (input-context-stack context)]
            [pending (input-stack-pending-sequence stack)])
-      (if (not (eq? (input-event-kind event) 'key))
+      (if (not (key-event? event))
           (let* ([reset (input-service-reset-view service context)]
                  [result (input-dispatch context event)])
             (%make-input-disposition
               (input-disposition-kind result)
               (input-disposition-value result)
               reset))
-          (let* ([sequence (if pending
-                               (append pending (list (input-event-value event)))
-                               (list (input-event-value event)))]
-                 [result (resolve-command
-                           (input-context-layers context)
-                           sequence
-                           (resolve-key-sequence
-                             (input-context-layers context) sequence))])
-            (case (car result)
-              [(prefix)
-               (input-consume
-                 (input-stack-with-pending-sequence stack sequence))]
-              [(command)
-               (%make-input-disposition
-                 'command (cadr result)
-                 (input-service-reset-view service context))]
-              [else
-               (%make-input-disposition
-                 'undefined sequence
-                 (input-service-reset-view service context))])))))
+          (if (eq? (key-event-type event) 'release)
+              (input-pass stack)
+              (let* ([stroke (key-event->key-stroke event)]
+                     [sequence (if pending
+                                   (append pending (list stroke))
+                                   (list stroke))]
+                     [result (resolve-command
+                               (input-context-layers context)
+                               sequence
+                               (resolve-key-sequence
+                                 (input-context-layers context) sequence))])
+                (case (car result)
+                  [(prefix)
+                   (input-consume
+                     (input-stack-with-pending-sequence stack sequence))]
+                  [(command)
+                   (%make-input-disposition
+                     'command (cadr result)
+                     (input-service-reset-view service context))]
+                  [else
+                   (if (and
+                         (positive?
+                           (bytevector-length (key-event-text event)))
+                         (accepting-text-layer?
+                           (input-context-layers context)))
+                       (%make-input-disposition
+                         'text (key-event-text event)
+                         (input-service-reset-view service context))
+                       (%make-input-disposition
+                         'undefined sequence
+                         (input-service-reset-view service context)))]))))))
 
   (define (accepting-text-layer? layers)
     (and (pair? layers)
@@ -406,19 +423,23 @@
   (define (input-dispatch context event)
     (unless (and (input-context? context) (input-event? event))
       (assertion-violation 'input-dispatch "expected an input context and event" context event))
-      (if (eq? (input-event-kind event) 'text)
+      (if (text-input-event? event)
         (let ([layers (input-context-layers context)])
           (if (accepting-text-layer? layers)
               (%make-input-disposition
-                'text (input-event-text event) (input-context-stack context))
+                (text-input-event-kind event)
+                (text-input-event-text event)
+                (input-context-stack context))
               (input-pass (input-context-stack context))))
-        (let ([result (resolve-key-sequence
-                        (input-context-layers context)
-                        (list (input-event-value event)))])
-          (case (car result)
-            [(command)
-             (%make-input-disposition
-               'command (cadr result) (input-context-stack context))]
-            [(prefix) (input-consume (input-context-stack context))]
-            [else (input-pass (input-context-stack context))]))))
+        (if (key-event? event)
+            (let ([result (resolve-key-sequence
+                            (input-context-layers context)
+                            (list (key-event->key-stroke event)))])
+              (case (car result)
+                [(command)
+                 (%make-input-disposition
+                   'command (cadr result) (input-context-stack context))]
+                [(prefix) (input-consume (input-context-stack context))]
+                [else (input-pass (input-context-stack context))]))
+            (input-pass (input-context-stack context)))))
 )

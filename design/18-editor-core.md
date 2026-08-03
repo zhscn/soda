@@ -616,7 +616,7 @@ TUI frontend 把 terminal bytes 转换为规范输入：
 ```text
 terminal bytes
   -> Kitty / CSI / UTF-8 / bracketed-paste decoder
-  -> KeyInput | TextInput | PasteInput | ResizeInput | PointerInput
+  -> KeyEvent | TextInputEvent | PointerEvent | ResizeInput
   -> Surface message queue
 ```
 
@@ -627,19 +627,26 @@ decoder 维护跨 read 的 partial sequence，只在完整输入单元形成后�
 ```text
 KeyStroke {
   key,
+  codepoint?,
   modifiers,
-  physical_key?,
-  repeat?
 }
 
-KeyInput {
-  stroke,
-  committed_text?
+KeyEvent {
+  key,
+  codepoint?,
+  shifted_codepoint?,
+  base_layout_codepoint?,
+  modifiers,
+  type: press | repeat | release,
+  committed_text
 }
 ```
 
-core 接受 frontend 已提交的 text，不拥有平台 IME。TUI KeyInput 可以同时携带未消费时可
-插入的 committed text，从而遵循与独立 key/text event 相同的契约。
+decoder 保留协议报告的物理字段，host 在 keymap 查询前把 KeyEvent 规范化为
+KeyStroke。功能键的协议私有 codepoint 不进入 KeyStroke；Shift 标点使用其逻辑字符并
+移除冗余 Shift，字母的 Shift 保留。core 接受 frontend 已提交的 text，不拥有平台
+IME。KeyEvent 可以同时携带未消费时可插入的 committed text，从而遵循与独立
+text event 相同的契约。
 
 ### Keymap
 
@@ -774,7 +781,7 @@ dispatch、继续 pending 或透明 pass。这样 modal scheme 可以复用 mode
 
 ### Key 与 text 归一
 
-KeyInput 的处理规则固定为：
+KeyEvent 的处理规则固定为：
 
 1. KeyStroke 先经过 override、top handler 和 keymap resolver。
 2. command、prefix 或 consume 处理该键时，丢弃与它配对的 committed text。

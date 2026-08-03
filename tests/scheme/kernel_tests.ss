@@ -11,6 +11,7 @@
         (soda host dispatch)
         (soda host buffer)
         (soda host input)
+        (soda host input-event)
         (soda host runtime)
         (soda host state)
         (soda host surface)
@@ -20,7 +21,8 @@
         (soda kernel document)
         (soda ffi cpp-analysis)
         (soda ffi indentation)
-        (soda ffi tree-sitter))
+        (soda ffi tree-sitter)
+        (soda tui terminal-input))
 
 (define (library-binding-hidden? library-name identifier)
   (guard (condition [else #t])
@@ -861,13 +863,19 @@
              (= (buffer-id buffer) (view-state-buffer-id (view-state view))))
   (error 'kernel-tests "host state protocol differs"))
 
+(define control-x
+  (make-key-stroke 'character (char->integer #\x) 4))
+(define control-s
+  (make-key-stroke 'character (char->integer #\s) 4))
 (define test-keymap (make-keymap 'test))
-(keymap-bind! test-keymap '(control-x control-s) 'save-buffer)
-(unless (equal? (keymap-lookup test-keymap '(control-x control-s)) 'save-buffer)
+(keymap-bind! test-keymap (list control-x control-s) 'save-buffer)
+(unless (equal?
+          (keymap-lookup test-keymap (list control-x control-s))
+          'save-buffer)
   (error 'kernel-tests "keymap lookup differs"))
 (unless (eq? (car (resolve-key-sequence
                     (list (make-input-layer 'global test-keymap))
-                    '(control-x control-s)))
+                    (list control-x control-s)))
              'command)
   (error 'kernel-tests "keymap resolver differs"))
 (define input-service (make-input-service))
@@ -878,14 +886,21 @@
 (define prefix-result
   (input-service-dispatch
     input-service input-context
-    (make-input-event 'key 'control-x)))
+    (make-key-event
+      'character (char->integer #\x) #f #f 4 'press (make-bytevector 0))))
 (unless (eq? (input-disposition-kind prefix-result) 'consume)
   (error 'kernel-tests "pending prefix was not retained"))
 (unless (and (not (input-stack-pending-sequence
                     (input-context-stack input-context)))
-             (equal? (input-stack-pending-sequence
-                       (input-disposition-input-state prefix-result))
-                     '(control-x)))
+             (= (length
+                  (input-stack-pending-sequence
+                    (input-disposition-input-state prefix-result)))
+                1)
+             (key-stroke=?
+               (car
+                 (input-stack-pending-sequence
+                   (input-disposition-input-state prefix-result)))
+               control-x))
   (error 'kernel-tests "input dispatch mutated its starting InputState"))
 (define pending-result
   (input-service-dispatch
@@ -893,10 +908,136 @@
     (make-input-context
       0 0 (input-context-layers input-context)
       (input-disposition-input-state prefix-result))
-    (make-input-event 'key 'control-s)))
+    (make-key-event
+      'character (char->integer #\s) #f #f 4 'press (make-bytevector 0))))
 (unless (and (eq? (input-disposition-kind pending-result) 'command)
              (eq? (input-disposition-value pending-result) 'save-buffer))
   (error 'kernel-tests "pending command was not resolved"))
+
+(define (input-bytes . values)
+  (let ([result (make-bytevector (length values))])
+    (let loop ([index 0] [remaining values])
+      (if (null? remaining)
+          result
+          (begin
+            (bytevector-u8-set! result index (car remaining))
+            (loop (+ index 1) (cdr remaining)))))))
+
+(define terminal-decoder (make-terminal-input-decoder))
+(unless (null?
+          (terminal-input-decoder-feed!
+            terminal-decoder (string->utf8 "\x1b;[1")))
+  (error 'kernel-tests "partial Kitty sequence produced an event"))
+(let ([events
+        (terminal-input-decoder-feed!
+          terminal-decoder (string->utf8 "13;5u"))])
+  (unless (and (= (length events) 1)
+               (eq? (key-event-key (car events)) 'character)
+               (= (key-event-codepoint (car events)) (char->integer #\q))
+               (key-event-modifier? (car events) 'ctrl))
+    (error 'kernel-tests "Kitty control key decoding differs" events)))
+(let* ([events
+         (terminal-input-decoder-feed!
+           terminal-decoder
+           (string->utf8 "\x1b;[97:65:97;6:2;65u"))]
+       [event (car events)])
+  (unless (and (= (key-event-codepoint event) 97)
+               (= (key-event-shifted-codepoint event) 65)
+               (= (key-event-base-layout-codepoint event) 97)
+               (key-event-modifier? event 'shift)
+               (key-event-modifier? event 'ctrl)
+               (eq? (key-event-type event) 'repeat)
+               (bytevector=? (key-event-text event) (string->utf8 "A")))
+    (error 'kernel-tests "enhanced Kitty key decoding differs" event)))
+(let* ([events
+         (terminal-input-decoder-feed!
+           terminal-decoder (string->utf8 "\x1b;[44:60:44;4u"))]
+       [stroke (key-event->key-stroke (car events))])
+  (unless (and (= (key-stroke-codepoint stroke) (char->integer #\<))
+               (= (key-stroke-modifiers stroke) 2))
+    (error 'kernel-tests "Kitty shifted punctuation normalization differs" stroke)))
+(let* ([events
+         (terminal-input-decoder-feed!
+           terminal-decoder (string->utf8 "\x1b;[122:90:122;6u"))]
+       [stroke (key-event->key-stroke (car events))])
+  (unless (and (= (key-stroke-codepoint stroke) (char->integer #\z))
+               (= (key-stroke-modifiers stroke) 5))
+    (error 'kernel-tests "Kitty alphabetic Shift normalization differs" stroke)))
+(let ([events
+        (terminal-input-decoder-feed!
+          terminal-decoder (string->utf8 "\x1b;[57350;5u"))])
+  (unless (and (eq? (key-event-key (car events)) 'left)
+               (key-event-modifier? (car events) 'ctrl)
+               (not
+                 (key-stroke-codepoint
+                   (key-event->key-stroke (car events)))))
+    (error 'kernel-tests "Kitty functional key decoding differs" events)))
+(let ([events
+        (terminal-input-decoder-feed!
+          terminal-decoder (input-bytes 8 27 127))])
+  (unless (and (= (length events) 2)
+               (= (key-event-codepoint (car events)) (char->integer #\h))
+               (key-event-modifier? (car events) 'ctrl)
+               (eq? (key-event-key (cadr events)) 'backspace)
+               (key-event-modifier? (cadr events) 'alt))
+    (error 'kernel-tests "legacy control input decoding differs" events)))
+(let ([lambda-bytes (string->utf8 "λ")])
+  (unless (null?
+            (terminal-input-decoder-feed!
+              terminal-decoder
+              (input-bytes (bytevector-u8-ref lambda-bytes 0))))
+    (error 'kernel-tests "partial UTF-8 produced an event"))
+  (let ([events
+          (terminal-input-decoder-feed!
+            terminal-decoder
+            (input-bytes (bytevector-u8-ref lambda-bytes 1)))])
+    (unless (and (= (key-event-codepoint (car events)) (char->integer #\λ))
+                 (bytevector=? (key-event-text (car events)) lambda-bytes))
+      (error 'kernel-tests "split UTF-8 decoding differs" events))))
+(unless (null?
+          (terminal-input-decoder-feed!
+            terminal-decoder (string->utf8 "\x1b;[?5u")))
+  (error 'kernel-tests "Kitty capability response leaked into input"))
+(unless (null?
+          (terminal-input-decoder-feed!
+            terminal-decoder (string->utf8 "\x1b;[200~hello\x1b;[20")))
+  (error 'kernel-tests "partial bracketed paste produced an event"))
+(let ([events
+        (terminal-input-decoder-feed!
+          terminal-decoder (string->utf8 "1~"))])
+  (unless (and (= (length events) 1)
+               (text-input-event? (car events))
+               (eq? (text-input-event-kind (car events)) 'paste)
+               (bytevector=?
+                 (text-input-event-text (car events))
+                 (string->utf8 "hello")))
+    (error 'kernel-tests "bracketed paste decoding differs" events)))
+(unless (null?
+          (terminal-input-decoder-feed!
+            terminal-decoder (input-bytes #x1b)))
+  (error 'kernel-tests "pending Escape produced an event"))
+(let ([events (terminal-input-decoder-flush! terminal-decoder)])
+  (unless (and (= (length events) 1)
+               (eq? (key-event-key (car events)) 'escape))
+    (error 'kernel-tests "Escape flush differs" events)))
+(unless (and (string=? terminal-input-enable-sequence
+                       "\x1b;[>5u\x1b;[?2004h")
+             (string=? terminal-input-disable-sequence
+                       "\x1b;[<u\x1b;[?2004l"))
+  (error 'kernel-tests "terminal input protocol sequences differ"))
+
+(let* ([text-keymap (make-keymap 'text-test)]
+       [text-context
+         (make-input-context
+           0 0 (list (make-input-layer 'global text-keymap #f 'accept)))]
+       [event (make-key-event
+                'character (char->integer #\a) #f #f 0 'press
+                (string->utf8 "a"))]
+       [result (input-service-dispatch input-service text-context event)])
+  (unless (and (eq? (input-disposition-kind result) 'text)
+               (bytevector=?
+                 (input-disposition-value result) (string->utf8 "a")))
+    (error 'kernel-tests "unbound committed text was not dispatched" result)))
 
 (let* ([secondary
         (view-service-create!
