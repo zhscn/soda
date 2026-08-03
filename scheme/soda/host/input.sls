@@ -28,12 +28,12 @@
           input-stack-pending-sequence
           input-stack-pending-argument
           input-stack-feedback
-          input-stack-set-pending-sequence!
-          input-stack-set-pending-argument!
-          input-stack-set-feedback!
-          input-stack-push!
-          input-stack-pop!
-          input-stack-reset!
+          input-stack-with-pending-sequence
+          input-stack-with-pending-argument
+          input-stack-with-feedback
+          input-stack-push
+          input-stack-pop
+          input-stack-reset
           make-input-layer
           input-layer?
           input-layer-keymap
@@ -51,11 +51,12 @@
           make-input-service
           input-service?
           input-service-dispatch
-          input-service-reset-view!
-          input-service-cancel!
+          input-service-reset-view
+          input-service-cancel
           input-disposition?
           input-disposition-kind
           input-disposition-value
+          input-disposition-input-state
           input-pass
           input-consume
           input-dispatch)
@@ -165,54 +166,67 @@
   (define-record-type
     (input-stack %make-input-stack input-stack?)
     (fields
-      (mutable sessions input-stack-sessions input-stack-sessions-set!)
-      (mutable pending-sequence input-stack-pending-sequence input-stack-pending-sequence-set!)
-      (mutable pending-argument input-stack-pending-argument input-stack-pending-argument-set!)
-      (mutable feedback input-stack-feedback input-stack-feedback-set!)))
+      (immutable sessions input-stack-sessions)
+      (immutable pending-sequence input-stack-pending-sequence)
+      (immutable pending-argument input-stack-pending-argument)
+      (immutable feedback input-stack-feedback)))
 
   (define (make-input-stack durable)
     (unless (input-state? durable)
       (assertion-violation 'make-input-stack "durable state is required" durable))
     (%make-input-stack (list (%make-input-session durable #f)) #f #f #f))
 
-  (define (input-stack-set-pending-sequence! stack value)
-    (input-stack-pending-sequence-set! stack value)
-    value)
+  (define (input-stack-copy stack sessions pending-sequence pending-argument feedback)
+    (unless (input-stack? stack)
+      (assertion-violation 'input-stack "expected an input stack" stack))
+    (%make-input-stack sessions pending-sequence pending-argument feedback))
 
-  (define (input-stack-set-pending-argument! stack value)
-    (input-stack-pending-argument-set! stack value)
-    value)
+  (define (input-stack-with-pending-sequence stack value)
+    (input-stack-copy
+      stack (input-stack-sessions stack) value
+      (input-stack-pending-argument stack) (input-stack-feedback stack)))
 
-  (define (input-stack-set-feedback! stack value)
-    (input-stack-feedback-set! stack value)
-    value)
+  (define (input-stack-with-pending-argument stack value)
+    (input-stack-copy
+      stack (input-stack-sessions stack) (input-stack-pending-sequence stack)
+      value (input-stack-feedback stack)))
 
-  (define (input-stack-push! stack state)
+  (define (input-stack-with-feedback stack value)
+    (input-stack-copy
+      stack (input-stack-sessions stack) (input-stack-pending-sequence stack)
+      (input-stack-pending-argument stack) value))
+
+  (define (input-stack-push stack state)
+    (unless (input-stack? stack)
+      (assertion-violation 'input-stack-push "expected an input stack" stack))
     (unless (input-state? state)
-      (assertion-violation 'input-stack-push! "expected an input state" state))
-    (input-stack-sessions-set!
-      stack
-      (cons (%make-input-session state #t) (input-stack-sessions stack)))
-    state)
+      (assertion-violation 'input-stack-push "expected an input state" state))
+    (%make-input-stack
+      (cons (%make-input-session state #t) (input-stack-sessions stack))
+      (input-stack-pending-sequence stack)
+      (input-stack-pending-argument stack)
+      (input-stack-feedback stack)))
 
-  (define (input-stack-pop! stack)
+  (define (input-stack-pop stack)
+    (unless (input-stack? stack)
+      (assertion-violation 'input-stack-pop "expected an input stack" stack))
     (let ([sessions (input-stack-sessions stack)])
       (if (= (length sessions) 1)
-          #f
-          (begin
-            (input-stack-sessions-set! stack (cdr sessions))
-            (car sessions)))))
+          stack
+          (%make-input-stack
+            (cdr sessions)
+            (input-stack-pending-sequence stack)
+            (input-stack-pending-argument stack)
+            (input-stack-feedback stack)))))
 
-  (define (input-stack-reset! stack)
+  (define (input-stack-reset stack)
+    (unless (input-stack? stack)
+      (assertion-violation 'input-stack-reset "expected an input stack" stack))
     (let ([sessions (input-stack-sessions stack)])
-      (input-stack-sessions-set!
-        stack
+      (%make-input-stack
         (list (let loop ([items sessions])
-                (if (null? (cdr items)) (car items) (loop (cdr items))))))
-      (input-stack-pending-sequence-set! stack #f)
-      (input-stack-pending-argument-set! stack #f)
-      (input-stack-feedback-set! stack #f)
-      #t))
+                (if (null? (cdr items)) (car items) (loop (cdr items)))))
+        #f #f #f)))
 
   (define-record-type
     (input-layer %make-input-layer input-layer?)
@@ -300,10 +314,17 @@
   (define-record-type
     (input-disposition %make-input-disposition input-disposition?)
     (fields (immutable kind input-disposition-kind)
-            (immutable value input-disposition-value)))
+            (immutable value input-disposition-value)
+            (immutable input-state input-disposition-input-state)))
 
-  (define (input-pass) (%make-input-disposition 'pass #f))
-  (define (input-consume) (%make-input-disposition 'consume #f))
+  (define input-pass
+    (case-lambda
+      [() (%make-input-disposition 'pass #f #f)]
+      [(input-state) (%make-input-disposition 'pass #f input-state)]))
+  (define input-consume
+    (case-lambda
+      [() (%make-input-disposition 'consume #f #f)]
+      [(input-state) (%make-input-disposition 'consume #f input-state)]))
 
   (define-record-type
     (input-service %make-input-service input-service?)
@@ -312,21 +333,18 @@
   (define (make-input-service)
     (%make-input-service))
 
-  (define (input-service-reset-view! service context)
+  (define (input-service-reset-view service context)
     (unless (and (input-service? service) (input-context? context))
       (assertion-violation
-        'input-service-reset-view! "expected a service and input context" service context))
+        'input-service-reset-view "expected a service and input context" service context))
     (let ([stack (input-context-stack context)])
-      (input-stack-set-pending-sequence! stack #f)
-      (input-stack-set-pending-argument! stack #f)
-      (input-stack-set-feedback! stack #f))
-    #t)
+      (%make-input-stack (input-stack-sessions stack) #f #f #f)))
 
-  (define (input-service-cancel! service context)
+  (define (input-service-cancel service context)
     (unless (and (input-service? service) (input-context? context))
       (assertion-violation
-        'input-service-cancel! "expected a service and input context" service context))
-    (input-stack-reset! (input-context-stack context)))
+        'input-service-cancel "expected a service and input context" service context))
+    (input-stack-reset (input-context-stack context)))
 
   (define (resolve-command layers sequence result)
     (if (not (eq? (car result) 'command))
@@ -353,7 +371,12 @@
     (let* ([stack (input-context-stack context)]
            [pending (input-stack-pending-sequence stack)])
       (if (not (eq? (input-event-kind event) 'key))
-          (input-dispatch context event)
+          (let* ([reset (input-service-reset-view service context)]
+                 [result (input-dispatch context event)])
+            (%make-input-disposition
+              (input-disposition-kind result)
+              (input-disposition-value result)
+              reset))
           (let* ([sequence (if pending
                                (append pending (list (input-event-value event)))
                                (list (input-event-value event)))]
@@ -364,14 +387,16 @@
                              (input-context-layers context) sequence))])
             (case (car result)
               [(prefix)
-               (input-stack-set-pending-sequence! stack sequence)
-               (input-consume)]
+               (input-consume
+                 (input-stack-with-pending-sequence stack sequence))]
               [(command)
-               (input-service-reset-view! service context)
-               (%make-input-disposition 'command (cadr result))]
+               (%make-input-disposition
+                 'command (cadr result)
+                 (input-service-reset-view service context))]
               [else
-               (input-service-reset-view! service context)
-               (%make-input-disposition 'undefined sequence)])))))
+               (%make-input-disposition
+                 'undefined sequence
+                 (input-service-reset-view service context))])))))
 
   (define (accepting-text-layer? layers)
     (and (pair? layers)
@@ -384,13 +409,16 @@
       (if (eq? (input-event-kind event) 'text)
         (let ([layers (input-context-layers context)])
           (if (accepting-text-layer? layers)
-              (%make-input-disposition 'text (input-event-text event))
-              (input-pass)))
+              (%make-input-disposition
+                'text (input-event-text event) (input-context-stack context))
+              (input-pass (input-context-stack context))))
         (let ([result (resolve-key-sequence
                         (input-context-layers context)
                         (list (input-event-value event)))])
           (case (car result)
-            [(command) (%make-input-disposition 'command (cadr result))]
-            [(prefix) (input-consume)]
-            [else (input-pass)]))))
+            [(command)
+             (%make-input-disposition
+               'command (cadr result) (input-context-stack context))]
+            [(prefix) (input-consume (input-context-stack context))]
+            [else (input-pass (input-context-stack context))]))))
 )

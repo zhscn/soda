@@ -115,6 +115,10 @@ InputState {
 }
 ```
 
+InputStateStack 是不可变 ViewState 值。prefix、argument、feedback、push、pop 和 cancel
+产生新的 stack；input resolver 把 disposition 与新 stack 一起返回，由 ViewTransaction
+发布。旧 ViewState 和 EditorUpdate 中保存的 input state 不会被后续按键修改。
+
 只有栈顶 transient state 参与临时输入策略；被遮蔽的 transient state 不参与解析。
 durable state 描述该 View 的常态编辑姿态，major mode 描述 Buffer 内容的语言语义。
 同一 Buffer 的多个 View 因此可以拥有不同的 pending prefix、selection 和交互状态。

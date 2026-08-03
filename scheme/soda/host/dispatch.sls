@@ -17,6 +17,7 @@
           dispatcher?
           dispatcher-dispatch!
           dispatcher-dispatch-specs!
+          dispatcher-dispatch-view!
           dispatcher-set-listener!)
   (import (rnrs)
           (soda kernel change)
@@ -24,6 +25,7 @@
           (soda kernel selection)
           (soda kernel extension)
           (soda kernel state)
+          (soda kernel view-state)
           (soda host internal buffer)
           (soda host internal view)
           (soda host value))
@@ -104,6 +106,11 @@
         (= (buffer-id (view-buffer view)) target-buffer-id))
       (view-service-views views)))
 
+  (define (effects-for-view effects origin?)
+    (filter
+      (lambda (effect) (state-effect-for-view? effect origin?))
+      effects))
+
   (define (assert-view-generations! views buffer-id generation)
     (for-each
       (lambda (view)
@@ -161,7 +168,6 @@
                          views
                          (resolved-transaction-origin-view-id resolved)
                          (buffer-id buffer))]
-               [old-view-state (and origin (view-state origin))]
                [document-length
                 (snapshot-byte-size (buffer-state-document old-state))]
                [_validated-length
@@ -176,7 +182,7 @@
                [_snapshot (set! new-snapshot (cdr prepared))]
                [transaction
                 (make-transaction-from-resolved
-                  old-state old-view-state resolved new-snapshot)]
+                  old-state resolved new-snapshot)]
                [new-buffer-state (transaction-new-buffer-state transaction)]
                [pending-views
                 (map
@@ -184,14 +190,24 @@
                     (let* ([current (view-state view)]
                            [selection
                             (if (and origin (= (view-id view) (view-id origin))
-                                     (transaction-new-view-state transaction))
-                                (view-state-selection (transaction-new-view-state transaction))
+                                     (transaction-selection transaction))
+                                (transaction-selection transaction)
                                 (selection-map-change
                                   (view-state-selection current) changes))]
+                           [origin?
+                            (and origin (= (view-id view) (view-id origin)))]
                            [new-state
-                            (if (and origin (= (view-id view) (view-id origin)))
-                                (transaction-new-view-state transaction)
-                                (view-state-advance current selection transaction #f))])
+                            (view-state-advance
+                              current
+                              (make-view-update-context
+                                (view-id view) (and origin? #t)
+                                transaction current selection
+                                (view-state-viewport current)
+                                (view-state-input-state current)
+                                (effects-for-view
+                                  (transaction-effects transaction)
+                                  (and origin? #t))
+                                (transaction-annotations transaction)))])
                       (list view current new-state)))
                   (views-for-buffer views (buffer-id buffer)))])
           (when native
@@ -313,4 +329,97 @@
     (unless (and (dispatcher? dispatcher) (transaction-spec? spec))
       (assertion-violation 'dispatcher-dispatch! "expected a dispatcher and transaction spec"))
     (dispatcher-dispatch-specs! dispatcher (list spec)))
+
+  (define (selection-within-length? selection length)
+    (for-all
+      (lambda (range)
+        (and (<= (selection-range-anchor range) length)
+             (<= (selection-range-head range) length)))
+      (selection-ranges selection)))
+
+  (define (dispatcher-dispatch-view! dispatcher spec)
+    (unless (and (dispatcher? dispatcher) (view-transaction-spec? spec))
+      (assertion-violation
+        'dispatcher-dispatch-view!
+        "expected a dispatcher and ViewTransactionSpec"))
+    (let* ([view
+            (view-service-ref
+              (dispatcher-views dispatcher)
+              (view-transaction-spec-view-id spec)
+              #f)])
+      (unless view
+        (assertion-violation
+          'dispatcher-dispatch-view! "target view is not live"
+          (view-transaction-spec-view-id spec)))
+      (let* ([buffer (view-buffer view)]
+             [buffer-state (buffer-state buffer)]
+             [old-state (view-state view)]
+             [expected (view-transaction-spec-start-generation spec)])
+        (unless (= expected (view-state-generation old-state))
+          (assertion-violation
+            'dispatcher-dispatch-view!
+            "transaction starts from a stale view generation"
+            expected (view-state-generation old-state)))
+        (unless (= (view-state-buffer-generation old-state)
+                   (buffer-state-generation buffer-state))
+          (assertion-violation
+            'dispatcher-dispatch-view!
+            "view observes a stale buffer generation"
+            (view-id view)))
+        (let* ([selection
+                (or (view-transaction-spec-selection spec)
+                    (view-state-selection old-state))]
+               [document-length
+                (snapshot-byte-size (buffer-state-document buffer-state))]
+               [_selection-valid
+                (unless (selection-within-length? selection document-length)
+                  (assertion-violation
+                    'dispatcher-dispatch-view!
+                    "selection is outside the current document"
+                    selection document-length))]
+               [effects
+                (effects-for-view
+                  (view-transaction-spec-effects spec) #t)]
+               [_targets-valid
+                (unless (= (length effects)
+                           (length (view-transaction-spec-effects spec)))
+                  (assertion-violation
+                    'dispatcher-dispatch-view!
+                    "view transaction contains a buffer-targeted effect"
+                    (view-transaction-spec-effects spec)))]
+               [context
+                (make-view-update-context
+                  (view-id view) #t #f old-state selection
+                  (or (view-transaction-spec-viewport spec)
+                      (view-state-viewport old-state))
+                  (or (view-transaction-spec-input-state spec)
+                      (view-state-input-state old-state))
+                  effects
+                  (view-transaction-spec-annotations spec))]
+               [new-state (view-state-advance old-state context)]
+               [damage
+                (append
+                  (if (view-transaction-spec-selection spec) '(selection) '())
+                  (if (view-transaction-spec-viewport spec) '(viewport) '())
+                  (if (view-transaction-spec-input-state spec) '(input) '())
+                  (if (pair? effects) '(configuration) '()))]
+               [update
+                (make-editor-update
+                  (buffer-id buffer) buffer-state buffer-state
+                  (list (%make-view-state-update
+                          (view-id view) old-state new-state))
+                  (make-change-set document-length '())
+                  (view-transaction-spec-annotations spec)
+                  (view-transaction-spec-scroll-request spec)
+                  damage)])
+          (view-publish-state! view new-state)
+          (let ([listener (dispatcher-listener dispatcher)])
+            (when listener (listener update)))
+          (for-each
+            (lambda (listener) (listener update))
+            (configuration-facet
+              (buffer-state-configuration buffer-state)
+              update-listeners-facet
+              'buffer))
+          update))))
 )

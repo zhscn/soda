@@ -15,6 +15,7 @@
   (import (rnrs)
           (soda kernel selection)
           (soda kernel state)
+          (soda kernel view-state)
           (soda kernel value)
           (soda host internal buffer)
           (soda host input)

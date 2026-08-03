@@ -7,18 +7,6 @@
           buffer-state-generation
           buffer-state-field
           buffer-state-advance
-          make-view-state
-          view-state?
-          view-state-buffer-id
-          view-state-buffer-generation
-          view-state-selection
-          view-state-viewport
-          view-state-input-state
-          view-state-configuration
-          view-state-fields
-          view-state-generation
-          view-state-field
-          view-state-advance
           make-transaction-spec
           transaction-spec?
           transaction-spec-buffer-id
@@ -47,31 +35,24 @@
           make-transaction-from-resolved
           transaction?
           transaction-start-buffer-state
-          transaction-start-view-state
           transaction-changes
           transaction-selection
           transaction-effects
           transaction-annotations
-          transaction-new-buffer-state
-          transaction-new-view-state)
+          transaction-new-buffer-state)
   (import (rnrs)
           (soda kernel change)
           (soda kernel selection)
           (soda kernel extension)
+          (soda kernel internal field-table)
           (soda kernel value))
-
-  (define (field-entry fields field)
-    (cond
-      [(null? fields) #f]
-      [(eq? (caar fields) field) (car fields)]
-      [else (field-entry (cdr fields) field)]))
 
   (define-record-type
     (buffer-state %make-buffer-state buffer-state?)
     (fields
       (immutable document buffer-state-document)
       (immutable configuration buffer-state-configuration)
-      (immutable fields buffer-state-fields)
+      (immutable field-table buffer-state-field-table)
       (immutable generation buffer-state-generation)))
 
   (define (make-buffer-state document configuration . fields)
@@ -83,156 +64,73 @@
                    (for-all pair? field-values))
         (assertion-violation
           'make-buffer-state "fields must be an association list" field-values))
-      (let loop ([pending (configuration-fields configuration 'buffer)]
-                 [values (list-copy field-values)])
-        (if (null? pending)
-            (%make-buffer-state document configuration values 0)
-            (let ([field (car pending)])
-              (if (field-entry values field)
-                  (loop (cdr pending) values)
-                  (let* ([provisional
-                          (%make-buffer-state document configuration values 0)]
-                         [value ((state-field-create field) provisional)])
-                    (loop (cdr pending) (append values (list (cons field value)))))))))))
+      (let* ([fields (configuration-fields configuration 'buffer)]
+             [table (make-field-table fields field-values 'make-buffer-state)]
+             [field-vector (field-table-field-vector table)])
+        (let loop ([position 0])
+          (if (= position (vector-length field-vector))
+              (%make-buffer-state document configuration table 0)
+              (let* ([field (vector-ref field-vector position)]
+                     [value (field-table-ref table field)])
+                (when (eq? value uninitialized-field-value)
+                  (field-table-set!
+                    table position
+                    ((state-field-create field)
+                     (%make-buffer-state
+                       document configuration (field-table-snapshot table) 0))))
+                (loop (+ position 1))))))))
+
+  (define (buffer-state-fields state)
+    (field-table->alist (buffer-state-field-table state)))
 
   (define (buffer-state-field state field . default)
     (unless (buffer-state? state)
       (assertion-violation 'buffer-state-field "expected a buffer state" state))
-    (let ([entry (field-entry (buffer-state-fields state) field)])
-      (if entry
-          (cdr entry)
+    (let ([value (field-table-ref (buffer-state-field-table state) field)])
+      (if (not (eq? value uninitialized-field-value))
+          value
           (if (null? default) #f (car default)))))
 
-  (define (updated-field-value field entry transaction)
-    (let* ([old-value (cdr entry)]
-           [new-value ((state-field-update field) old-value transaction)])
+  (define (updated-field-value field old-value transaction)
+    (let ([new-value ((state-field-update field) old-value transaction)])
       (if ((state-field-compare field) old-value new-value)
           old-value
           new-value)))
 
-  (define-record-type
-    (view-state %make-view-state view-state?)
-    (fields
-      (immutable buffer-id view-state-buffer-id)
-      (immutable buffer-generation view-state-buffer-generation)
-      (immutable selection view-state-selection)
-      (immutable viewport view-state-viewport)
-      (immutable input-state view-state-input-state)
-      (immutable configuration view-state-configuration)
-      (immutable fields view-state-fields)
-      (immutable generation view-state-generation)))
-
-  (define (make-view-state buffer-id buffer-generation selection viewport input-state configuration
-                           . fields)
-    (unless (and (exact-integer? buffer-generation) (>= buffer-generation 0))
-      (assertion-violation
-        'make-view-state "buffer generation must be a non-negative integer"
-        buffer-generation))
-    (unless (selection? selection)
-      (assertion-violation 'make-view-state "expected a selection" selection))
-    (unless (configuration? configuration)
-      (assertion-violation 'make-view-state "expected a configuration" configuration))
-    (let loop ([pending (configuration-fields configuration 'view)]
-               [values (if (null? fields) '() (list-copy (car fields)))])
-      (if (null? pending)
-          (%make-view-state
-            buffer-id buffer-generation selection viewport input-state configuration
-            values 0)
-          (let ([field (car pending)])
-            (if (field-entry values field)
-                (loop (cdr pending) values)
-                (let* ([provisional
-                        (%make-view-state
-                          buffer-id buffer-generation selection viewport input-state
-                          configuration values 0)]
-                       [value ((state-field-create field) provisional)])
-                  (loop (cdr pending) (append values (list (cons field value))))))))))
-
-  (define (view-state-field state field . default)
-    (unless (view-state? state)
-      (assertion-violation 'view-state-field "expected a view state" state))
-    (let ([entry (field-entry (view-state-fields state) field)])
-      (if entry
-          (cdr entry)
-          (if (null? default) #f (car default)))))
-
   (define (advance-buffer-state state document transaction)
     (let* ([effective-transaction
-             (transaction-without-view-effects transaction)]
+             (transaction-with-buffer-effects transaction)]
            [configuration
             (configuration-apply-effects
               (buffer-state-configuration state)
               (transaction-effects effective-transaction)
               'buffer)])
       (let ([generation (+ 1 (buffer-state-generation state))])
-        (let loop ([pending (configuration-fields configuration 'buffer)]
-                   [values '()])
-          (if (null? pending)
-              (%make-buffer-state document configuration values generation)
-              (let* ([field (car pending)]
-                     [entry (field-entry (buffer-state-fields state) field)]
-                     [provisional
-                      (%make-buffer-state document configuration values generation)]
-                     [value
-                      (if entry
-                          (updated-field-value field entry effective-transaction)
-                          ((state-field-create field) provisional))])
-                (loop (cdr pending) (append values (list (cons field value))))))))))
-
-  (define (advance-view-state state selection transaction apply-view-effects?)
-    (let* ([effective-transaction
-             (if apply-view-effects?
-                 transaction
-                 (transaction-without-view-effects transaction))]
-           [configuration
-            (configuration-apply-effects
-              (view-state-configuration state)
-              (transaction-effects effective-transaction)
-              'view)])
-      (let* ([buffer-generation
-              (let ([new-buffer-state (transaction-new-buffer-state transaction)])
-                (if new-buffer-state
-                    (buffer-state-generation new-buffer-state)
-                    (+ 1
-                       (buffer-state-generation
-                         (transaction-start-buffer-state transaction)))))]
-             [generation (+ 1 (view-state-generation state))])
-        (let loop ([pending (configuration-fields configuration 'view)]
-                   [values '()])
-          (if (null? pending)
-              (%make-view-state
-                (view-state-buffer-id state) buffer-generation selection
-                (view-state-viewport state) (view-state-input-state state)
-                configuration values generation)
-              (let* ([field (car pending)]
-                     [entry (field-entry (view-state-fields state) field)]
-                     [provisional
-                      (%make-view-state
-                        (view-state-buffer-id state) buffer-generation selection
-                        (view-state-viewport state) (view-state-input-state state)
-                        configuration values generation)]
-                     [value
-                      (if entry
-                          (updated-field-value field entry effective-transaction)
-                          ((state-field-create field) provisional))])
-                (loop (cdr pending) (append values (list (cons field value))))))))))
+        (let* ([fields (configuration-fields configuration 'buffer)]
+               [table (make-field-table fields '() 'buffer-state-advance)]
+               [field-vector (field-table-field-vector table)])
+          (let loop ([position 0])
+            (if (= position (vector-length field-vector))
+                (%make-buffer-state document configuration table generation)
+                (let* ([field (vector-ref field-vector position)]
+                       [old-value
+                        (field-table-ref
+                          (buffer-state-field-table state) field)]
+                       [value
+                        (if (eq? old-value uninitialized-field-value)
+                            ((state-field-create field)
+                             (%make-buffer-state
+                               document configuration
+                               (field-table-snapshot table) generation))
+                            (updated-field-value
+                              field old-value effective-transaction))])
+                  (field-table-set! table position value)
+                  (loop (+ position 1)))))))))
 
   (define (buffer-state-advance state document transaction)
     (unless (and (buffer-state? state) transaction)
       (assertion-violation 'buffer-state-advance "invalid state or transaction" state transaction))
     (advance-buffer-state state document transaction))
-
-  (define (view-state-advance state selection transaction . options)
-    (unless (and (view-state? state) (selection? selection) transaction)
-      (assertion-violation 'view-state-advance "invalid state, selection, or transaction"
-                           state selection transaction))
-    (let ([apply-view-effects?
-            (if (null? options) #t (car options))])
-      (unless (boolean? apply-view-effects?)
-        (assertion-violation
-          'view-state-advance "apply-view-effects? must be boolean"
-          apply-view-effects?))
-      (advance-view-state state selection transaction apply-view-effects?)))
 
   (define-record-type
     (transaction-spec %make-transaction-spec transaction-spec?)
@@ -278,8 +176,8 @@
            'make-transaction-spec "filter and sequential flags must be boolean"))
        (%make-transaction-spec
          buffer-id origin-view-id start-generation changes selection
-         (normalize-effects 'make-transaction-spec effects)
-         (normalize-annotations 'make-transaction-spec annotations)
+         (normalize-state-effect-list 'make-transaction-spec effects)
+         (normalize-annotation-list 'make-transaction-spec annotations)
          scroll-request filter sequential?)]))
 
   (define-record-type
@@ -299,60 +197,23 @@
     (transaction %make-transaction transaction?)
     (fields
       (immutable start-buffer-state transaction-start-buffer-state)
-      (immutable start-view-state transaction-start-view-state)
       (immutable changes transaction-changes)
       (immutable selection transaction-selection)
       (immutable effects transaction-effects)
       (immutable annotations transaction-annotations)
-      (immutable new-buffer-state transaction-new-buffer-state)
-      (immutable new-view-state transaction-new-view-state)))
+      (immutable new-buffer-state transaction-new-buffer-state)))
 
-  (define (view-scoped-effect? effect)
-    (and (state-effect? effect)
-         (eq? (state-effect-type effect) 'compartment-reconfigure)
-         (compartment-entry? (state-effect-value effect))
-         (eq?
-           (compartment-scope
-             (compartment-entry-compartment (state-effect-value effect)))
-           'view)))
+  (define (effects-for-buffer effects)
+    (filter state-effect-for-buffer? effects))
 
-  (define (transaction-without-view-effects transaction)
+  (define (transaction-with-buffer-effects transaction)
     (%make-transaction
       (transaction-start-buffer-state transaction)
-      (transaction-start-view-state transaction)
       (transaction-changes transaction)
       (transaction-selection transaction)
-      (filter
-        (lambda (effect) (not (view-scoped-effect? effect)))
-        (transaction-effects transaction))
+      (effects-for-buffer (transaction-effects transaction))
       (transaction-annotations transaction)
-      (transaction-new-buffer-state transaction)
-      #f))
-
-  (define (list-value value)
-    (cond [(not value) '()]
-          [(list? value) (list-copy value)]
-          [else (list value)]))
-
-  (define (normalize-effects who value)
-    (let ([effects (list-value value)])
-      (for-each
-        (lambda (effect)
-          (unless (state-effect? effect)
-            (assertion-violation
-              who "effects must be StateEffect values" effect)))
-        effects)
-      effects))
-
-  (define (normalize-annotations who value)
-    (let ([annotations (list-value value)])
-      (for-each
-        (lambda (annotation)
-          (unless (annotation? annotation)
-            (assertion-violation
-              who "annotations must be Annotation values" annotation)))
-        annotations)
-      annotations))
+      (transaction-new-buffer-state transaction)))
 
   ;; Construct a resolved transaction for a filter/extender.  Its effects and
   ;; selection already use the coordinates of CHANGES' resulting document;
@@ -381,8 +242,8 @@
         filter-disabled?))
     (%make-resolved-transaction
       buffer-id origin-view-id start-generation changes selection
-      (normalize-effects 'make-resolved-transaction effects)
-      (normalize-annotations 'make-resolved-transaction annotations)
+      (normalize-state-effect-list 'make-resolved-transaction effects)
+      (normalize-annotation-list 'make-resolved-transaction annotations)
       scroll-request filter-disabled?))
 
   (define (selection-within-length? selection length)
@@ -404,7 +265,7 @@
 
   (define (map-effect-list changes effects)
     (let ([description (change-set-change-desc changes)])
-      (let loop ([items (normalize-effects 'resolve-transaction-specs effects)]
+      (let loop ([items (normalize-state-effect-list 'resolve-transaction-specs effects)]
                  [result '()])
         (if (null? items)
             (reverse result)
@@ -450,7 +311,19 @@
   ;; document produced by the preceding specs.
   (define (resolve-transaction-specs specs old-length)
     (require-spec-list specs old-length)
-    (let ([old-length old-length])
+    (let ([old-length old-length]
+          [origin-view-id
+           (let loop ([items specs] [origin #f])
+             (if (null? items)
+                 origin
+                 (let ([candidate
+                        (transaction-spec-origin-view-id (car items))])
+                   (when (and origin candidate (not (equal? origin candidate)))
+                     (assertion-violation
+                       'resolve-transaction-specs
+                       "transaction specs name different origin views"
+                       origin candidate))
+                   (loop (cdr items) (or origin candidate)))))])
       (if (null? specs)
           (%make-resolved-transaction
             #f #f #f
@@ -479,7 +352,7 @@
               (if (null? items)
                   (%make-resolved-transaction
                     (transaction-spec-buffer-id first)
-                    (transaction-spec-origin-view-id first)
+                    origin-view-id
                     (transaction-spec-start-generation first)
                     combined selection effects (reverse reversed-annotations)
                     scroll-request filter-disabled?)
@@ -540,7 +413,7 @@
 
   (define (map-effects changes effects)
     (let ([description (change-set-change-desc changes)])
-      (let loop ([items (normalize-effects 'make-transaction effects)]
+      (let loop ([items (normalize-state-effect-list 'make-transaction effects)]
                  [result '()])
         (if (null? items)
             (reverse result)
@@ -550,61 +423,49 @@
                 (cdr items)
                 (if mapped (cons mapped result) result)))))))
 
-  (define (realize-transaction start-buffer-state start-view-state changes selection
-                               effects annotations document . mapped-effects?)
+  (define (realize-transaction start-buffer-state changes selection effects annotations
+                               document mapped-effects?)
     (unless (buffer-state? start-buffer-state)
       (assertion-violation
         'make-transaction "expected a start buffer state" start-buffer-state))
     (unless (change-set? changes)
       (assertion-violation 'make-transaction "expected a change set" changes))
-    (when (and start-view-state (not (view-state? start-view-state)))
-      (assertion-violation
-        'make-transaction "expected a start view state or #f" start-view-state))
     (when (and selection (not (selection? selection)))
       (assertion-violation 'make-transaction "invalid transaction selection" selection))
-    (let* ([normalized-selection
-             (and start-view-state
-                  (or selection
-                      (selection-map-change
-                        (view-state-selection start-view-state) changes)))]
-           [_validated-selection
+    (let* ([_validated-selection
             (validate-selection-length
               'make-transaction
-              normalized-selection
+              selection
               (change-set-new-length changes))]
            [mapped-effects
-             (if (and (pair? mapped-effects?) (car mapped-effects?))
-                 (normalize-effects 'make-transaction effects)
+             (if mapped-effects?
+                 (normalize-state-effect-list 'make-transaction effects)
                  (map-effects changes effects))]
            [normalized-annotations
-             (normalize-annotations 'make-transaction annotations)]
+             (normalize-annotation-list 'make-transaction annotations)]
            [initial
              (%make-transaction
-               start-buffer-state start-view-state changes selection
-               mapped-effects normalized-annotations #f #f)]
+               start-buffer-state changes selection
+               mapped-effects normalized-annotations #f)]
            [new-buffer-state
-             (advance-buffer-state start-buffer-state document initial)]
-           [new-view-state
-             (and start-view-state
-                  (advance-view-state start-view-state normalized-selection initial #t))])
+             (advance-buffer-state start-buffer-state document initial)])
       (%make-transaction
-        start-buffer-state start-view-state changes selection
-        mapped-effects normalized-annotations
-        new-buffer-state new-view-state)))
+        start-buffer-state changes selection
+        mapped-effects normalized-annotations new-buffer-state)))
 
   (define make-transaction
     (case-lambda
-      [(start-buffer-state start-view-state changes selection effects annotations)
+      [(start-buffer-state changes selection effects annotations)
        (realize-transaction
-         start-buffer-state start-view-state changes selection effects annotations
-         (buffer-state-document start-buffer-state))]
-      [(start-buffer-state start-view-state changes selection effects annotations document)
+         start-buffer-state changes selection effects annotations
+         (buffer-state-document start-buffer-state) #f)]
+      [(start-buffer-state changes selection effects annotations document)
        (realize-transaction
-         start-buffer-state start-view-state changes selection effects annotations document)]
+         start-buffer-state changes selection effects annotations document #f)]
       ))
 
   (define (make-transaction-from-resolved
-           start-buffer-state start-view-state resolved document)
+           start-buffer-state resolved document)
     (unless (resolved-transaction? resolved)
       (assertion-violation
         'make-transaction-from-resolved
@@ -612,7 +473,6 @@
         resolved))
     (realize-transaction
       start-buffer-state
-      start-view-state
       (resolved-transaction-changes resolved)
       (resolved-transaction-selection resolved)
       (resolved-transaction-effects resolved)

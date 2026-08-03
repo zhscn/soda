@@ -75,7 +75,11 @@ Workbench host 增加多 Buffer、多 View、Window tree、Surface、Scheme comm
                             │
                             ▼
                      (soda kernel state)
-                      BufferState, ViewState, Transaction
+                      BufferState, Transaction
+                            │
+                            ▼
+                  (soda kernel view-state)
+                  ViewState, ViewUpdateContext
 
 (soda host value)
   owner, registration, capability
@@ -225,7 +229,7 @@ State 对外只暴露不可变查询。Buffer 和 View host object 只保存 ide
 
 ### Transaction
 
-一次用户动作、异步结果或内部刷新使用同一种 transaction：
+修改文档或 Buffer extension state 的动作使用 Buffer transaction：
 
 ```text
 TransactionSpec {
@@ -242,15 +246,44 @@ TransactionSpec {
 
 Transaction {
   start_buffer_state,
-  start_view_state?,
   changes: ChangeSet,
   explicit_selection?,
   effects,
   annotations,
-  new_buffer_state,
-  new_origin_view_state?
+  new_buffer_state
 }
 ```
+
+View-local state 使用独立的 transaction 形状，并复用同一个 publication boundary：
+
+```text
+ViewTransactionSpec {
+  target_view_id,
+  start_view_generation,
+  selection?,
+  viewport?,
+  input_state?,
+  effects,
+  annotations,
+  scroll_request?
+}
+
+ViewUpdateContext {
+  target_view_id,
+  origin?,
+  buffer_transaction?,
+  start_view_state,
+  selection,
+  viewport,
+  input_state,
+  effects,
+  annotations
+}
+```
+
+document transaction 更新来源 View，并映射同一 Buffer 的其他 View。view-local transaction
+保持 BufferState 和 sibling ViewState 不变。两种 transaction 都发布包含 old/new
+ViewState 的 EditorUpdate。
 
 多个 TransactionSpec 可以合并成一个 transaction；同时 spec 的位置以起始文档为准，
 sequential spec 的位置以前序 spec 产生的文档为准。
@@ -282,9 +315,11 @@ Annotation 描述整个 transaction 的事实，例如：
 - remote/internal 标记；
 - scroll intent。
 
-StateEffect 描述伴随文本和 Selection 一起发生的 extension state 变化。包含位置的 effect
-必须定义通过 ChangeDesc 的映射操作。mapper 返回 `state-effect-drop` 时丢弃 effect；`#f`
-是普通 effect value。
+StateEffect 描述伴随文本和 Selection 一起发生的 extension state 变化。每个 effect 的
+target 为 `buffer`、`origin-view` 或 `all-views`。Buffer StateField 只接收 buffer effect；
+来源 View 接收 origin-view 和 all-views effect；共享同一 Buffer 的其他 View 只接收
+all-views effect。包含位置的 effect 必须定义通过 ChangeDesc 的映射操作。mapper 返回
+`state-effect-drop` 时丢弃 effect；`#f` 是普通 effect value。
 
 ### StateField
 
@@ -294,7 +329,7 @@ StateField 保存必须与 editor state 同步的扩展状态：
 StateField<T> {
   scope: buffer | view,
   create(state) -> T,
-  update(T, Transaction | ViewUpdate) -> T,
+  update(T, Transaction | ViewUpdateContext) -> T,
   compare?(T, T),
   provide?(field) -> Extension
 }
@@ -302,6 +337,9 @@ StateField<T> {
 
 适合 StateField 的数据包括 syntax snapshot、history、mode state、diagnostics snapshot、
 completion session identity、generated-buffer model identity 和 display configuration。
+
+FieldTable 按 Configuration 的声明顺序保存字段，并用 StateField identity 建立索引。对外
+查询保持不可变；字段初始化和更新不扫描其他 package registry。
 
 外部 process handle、libuv request、file descriptor、LSP transport 和 continuation 由 package
 instance 与 owner 管理；StateField 只保存稳定 identity 或不可变快照。

@@ -22,16 +22,22 @@
           facet-provider-value
           facet-provider-precedence
           make-state-effect
+          make-targeted-state-effect
           state-effect?
           state-effect-type
           state-effect-value
           state-effect-map
+          state-effect-target
+          state-effect-for-buffer?
+          state-effect-for-view?
           state-effect-map-value
           state-effect-drop
           make-annotation
           annotation?
           annotation-key
           annotation-value
+          normalize-state-effect-list
+          normalize-annotation-list
           transaction-filters-facet
           transaction-extenders-facet
           update-listeners-facet
@@ -57,6 +63,7 @@
           (soda kernel change))
 
   (define (scope? value) (memq value '(buffer view host)))
+  (define (state-field-scope? value) (memq value '(buffer view)))
   (define (precedence? value) (memq value '(highest high default low lowest)))
 
   (define-record-type
@@ -78,7 +85,7 @@
       [(name scope create update compare provide)
        (unless (symbol? name)
          (assertion-violation 'make-state-field "name must be a symbol" name))
-       (unless (scope? scope)
+       (unless (state-field-scope? scope)
          (assertion-violation 'make-state-field "invalid state field scope" scope))
        (unless (and (procedure? create) (procedure? update) (procedure? compare))
          (assertion-violation 'make-state-field "field callbacks must be procedures" name))
@@ -125,22 +132,44 @@
     (fields
       (immutable type state-effect-type)
       (immutable value state-effect-value)
-      (immutable mapper state-effect-map)))
+      (immutable mapper state-effect-map)
+      (immutable target state-effect-target)))
 
   (define state-effect-drop (list 'state-effect-drop))
 
-  (define (make-state-effect type value . mapper)
+  (define (make-targeted-state-effect target type value . mapper)
+    (unless (memq target '(buffer origin-view all-views))
+      (assertion-violation
+        'make-targeted-state-effect "invalid effect target" target))
     (unless (symbol? type)
-      (assertion-violation 'make-state-effect "type must be a symbol" type))
+      (assertion-violation 'make-targeted-state-effect "type must be a symbol" type))
     (unless (or (null? mapper)
                 (and (pair? mapper)
                      (null? (cdr mapper))
                      (procedure? (car mapper))))
       (assertion-violation
-        'make-state-effect "mapper must be a single procedure" mapper))
+        'make-targeted-state-effect "mapper must be a single procedure" mapper))
     (%make-state-effect
       type value
-      (if (null? mapper) (lambda (value change-desc) value) (car mapper))))
+      (if (null? mapper) (lambda (value change-desc) value) (car mapper))
+      target))
+
+  (define (make-state-effect type value . mapper)
+    (apply make-targeted-state-effect 'buffer type value mapper))
+
+  (define (state-effect-for-buffer? effect)
+    (unless (state-effect? effect)
+      (assertion-violation
+        'state-effect-for-buffer? "expected a StateEffect" effect))
+    (eq? (state-effect-target effect) 'buffer))
+
+  (define (state-effect-for-view? effect origin?)
+    (unless (and (state-effect? effect) (boolean? origin?))
+      (assertion-violation
+        'state-effect-for-view? "expected a StateEffect and origin flag"
+        effect origin?))
+    (or (eq? (state-effect-target effect) 'all-views)
+        (and origin? (eq? (state-effect-target effect) 'origin-view))))
 
   ;; State effects are authored in the coordinates of the transaction's
   ;; starting document. Mapping creates a new immutable effect and retains
@@ -166,7 +195,8 @@
               (%make-state-effect
                 (state-effect-type effect)
                 mapped
-                (state-effect-map effect))))))
+                (state-effect-map effect)
+                (state-effect-target effect))))))
 
   (define-record-type
     (annotation %make-annotation annotation?)
@@ -177,6 +207,29 @@
     (unless (symbol? key)
       (assertion-violation 'make-annotation "key must be a symbol" key))
     (%make-annotation key value))
+
+  (define (normalize-list value)
+    (cond [(not value) '()]
+          [(list? value) (map (lambda (item) item) value)]
+          [else (list value)]))
+
+  (define (normalize-state-effect-list who value)
+    (let ([effects (normalize-list value)])
+      (for-each
+        (lambda (effect)
+          (unless (state-effect? effect)
+            (assertion-violation who "effects must be StateEffect values" effect)))
+        effects)
+      effects))
+
+  (define (normalize-annotation-list who value)
+    (let ([annotations (normalize-list value)])
+      (for-each
+        (lambda (annotation)
+          (unless (annotation? annotation)
+            (assertion-violation who "annotations must be Annotation values" annotation)))
+        annotations)
+      annotations))
 
   (define (append-values values)
     (fold-left append '() values))
@@ -245,9 +298,16 @@
         'make-compartment-reconfigure-effect
         "expected a compartment"
         compartment))
-    (make-state-effect
-      'compartment-reconfigure
-      (make-compartment-entry compartment extension)))
+    (let ([scope (compartment-scope compartment)])
+      (when (eq? scope 'host)
+        (assertion-violation
+          'make-compartment-reconfigure-effect
+          "host compartments are reconfigured by the host configuration owner"
+          compartment))
+      (make-targeted-state-effect
+        (if (eq? scope 'view) 'origin-view 'buffer)
+        'compartment-reconfigure
+        (make-compartment-entry compartment extension))))
 
   (define (compartment-reconfigure compartment extension)
     (make-compartment-reconfigure-effect compartment extension))

@@ -6,6 +6,7 @@
         (soda kernel range-set)
         (soda kernel selection)
         (soda kernel state)
+        (soda kernel view-state)
         (soda host command)
         (soda host dispatch)
         (soda host buffer)
@@ -282,6 +283,15 @@
         5)
       #f)
   (error 'kernel-tests "out-of-range transaction selection was accepted"))
+(unless
+    (guard (condition [else #t])
+      (resolve-transaction-specs
+        (list
+          (make-transaction-spec 0 1 0 (make-change-set 5 '()) #f '() '())
+          (make-transaction-spec 0 2 0 (make-change-set 5 '()) #f '() '()))
+        5)
+      #f)
+  (error 'kernel-tests "multiple origin Views were accepted in one batch"))
 (let* ([base (string->utf8 "abcde")]
        [first-spec
         (make-transaction-spec
@@ -465,6 +475,13 @@
     'history 'buffer
     (lambda (state) 'empty)
     (lambda (value transaction) value)))
+(unless
+    (guard (condition [else #t])
+      (make-state-field 'unsupported-host-field 'host
+                        (lambda (state) #f)
+                        (lambda (value update) value))
+      #f)
+  (error 'kernel-tests "host-scoped StateField was accepted"))
 (define read-only
   (make-facet 'read-only #f (lambda (values) (and (pair? values) (car values)))))
 (define configuration
@@ -546,6 +563,47 @@
 (unless (eq? (view-state-field initial-view-state initial-view-field) 'created)
   (error 'kernel-tests "view StateField was not initialized with its state"))
 
+(let* ([count 256]
+       [fields
+        (let loop ([index 0] [result '()])
+          (if (= index count)
+              (reverse result)
+              (loop
+                (+ index 1)
+                (cons
+                  (make-state-field
+                    (string->symbol (string-append "field-" (number->string index)))
+                    'buffer
+                    (lambda (state) index)
+                    (lambda (value transaction) value))
+                  result))))]
+       [state (make-buffer-state 'document (make-configuration fields))])
+  (unless (and (= (length (buffer-state-fields state)) count)
+               (= (buffer-state-field state (car fields)) 0)
+               (= (buffer-state-field state (car (reverse fields))) (- count 1)))
+    (error 'kernel-tests "large FieldTable differs")))
+
+(let* ([provisional #f]
+       [first-field
+        (make-state-field
+          'first-provisional 'buffer
+          (lambda (state)
+            (set! provisional state)
+            'first)
+          (lambda (value transaction) value))]
+       [second-field
+        (make-state-field
+          'second-provisional 'buffer
+          (lambda (state) 'second)
+          (lambda (value transaction) value))]
+       [state
+        (make-buffer-state
+          'document (make-configuration (list first-field second-field)))])
+  (unless (and (eq? (buffer-state-field state second-field) 'second)
+               (eq? (buffer-state-field provisional second-field 'missing)
+                    'missing))
+    (error 'kernel-tests "retained provisional StateField state was mutated")))
+
 ;; State effects are authored against the transaction's starting document and
 ;; are mapped before they reach the realized transaction.
 (define position-effect
@@ -555,7 +613,7 @@
     (lambda (offset description)
       (change-desc-map-offset description offset 'after))))
 (define mapped-transaction
-  (make-transaction buffer-snapshot #f changes #f (list position-effect) '()))
+  (make-transaction buffer-snapshot changes #f (list position-effect) '()))
 (unless (= (state-effect-value (car (transaction-effects mapped-transaction))) 10)
   (error 'kernel-tests "state effect mapping differs"))
 (let* ([false-effect
@@ -587,7 +645,7 @@
           (list (cons field old-value)))]
        [transaction
         (make-transaction
-          state #f (make-change-set 0 '()) #f '() '() 'document)])
+          state (make-change-set 0 '()) #f '() '() 'document)])
   (unless (eq? (buffer-state-field (transaction-new-buffer-state transaction) field)
                old-value)
     (error 'kernel-tests "StateField.compare did not preserve equal state")))
@@ -608,7 +666,7 @@
       (list (make-compartment-entry mode-compartment history-field)))))
 (define reconfigured-transaction
   (make-transaction
-    configurable-state #f changes #f
+    configurable-state changes #f
     (list (make-compartment-reconfigure-effect mode-compartment mode-field))
     '()))
 (define reconfigured-state
@@ -632,7 +690,7 @@
        [state (make-buffer-state 'document (make-configuration '()))]
        [transaction
         (make-transaction
-          state #f (make-change-set 0 '()) #f
+          state (make-change-set 0 '()) #f
           (list (compartment-reconfigure compartment entry)) '()
           'document)]
        [new-state (transaction-new-buffer-state transaction)])
@@ -651,7 +709,7 @@
     (error 'kernel-tests "absent compartment reconfiguration differs")))
 (define reconfigured-with-view
   (make-transaction
-    configurable-state view-snapshot changes #f
+    configurable-state changes #f
     (list (make-compartment-reconfigure-effect mode-compartment mode-field))
     '()))
 (unless (not (pair?
@@ -659,7 +717,16 @@
                 compartment-entry?
                 (configuration-extensions
                   (view-state-configuration
-                    (transaction-new-view-state reconfigured-with-view))))))
+                    (view-state-advance
+                      view-snapshot
+                      (make-view-update-context
+                        0 #t reconfigured-with-view view-snapshot
+                        (selection-map-change
+                          (view-state-selection view-snapshot) changes)
+                        (view-state-viewport view-snapshot)
+                        (view-state-input-state view-snapshot)
+                        '()
+                        (transaction-annotations reconfigured-with-view))))))))
   (error 'kernel-tests "compartment leaked into view configuration"))
 (let* ([view-field
         (make-state-field
@@ -675,16 +742,31 @@
           0 0 selection '(0 . 20) 'insert view-configuration)]
        [view-transaction
         (make-transaction
-          buffer-snapshot view-start
-          (make-change-set 12 '()) #f
+          buffer-snapshot (make-change-set 12 '()) #f
           (list
             (make-compartment-reconfigure-effect
               view-compartment view-field))
           '()
           'document)]
-       [origin-state (transaction-new-view-state view-transaction)]
+       [origin-state
+        (view-state-advance
+          view-start
+          (make-view-update-context
+            0 #t view-transaction view-start selection
+            (view-state-viewport view-start)
+            (view-state-input-state view-start)
+            (list (make-compartment-reconfigure-effect
+                    view-compartment view-field))
+            (transaction-annotations view-transaction)))]
        [shared-state
-        (view-state-advance view-start selection view-transaction #f)])
+        (view-state-advance
+          view-start
+          (make-view-update-context
+            1 #f view-transaction view-start selection
+            (view-state-viewport view-start)
+            (view-state-input-state view-start)
+            '()
+            (transaction-annotations view-transaction)))])
   (unless (and (= (length (configuration-fields
                             (view-state-configuration origin-state)
                             'view))
@@ -793,18 +875,68 @@
   (make-input-context
     0 0 (list (make-input-layer 'global test-keymap #f 'ignore))
     (view-state-input-state (view-state view))))
-(unless (eq? (input-disposition-kind
-               (input-service-dispatch
-                 input-service input-context
-                 (make-input-event 'key 'control-x)))
-             'consume)
+(define prefix-result
+  (input-service-dispatch
+    input-service input-context
+    (make-input-event 'key 'control-x)))
+(unless (eq? (input-disposition-kind prefix-result) 'consume)
   (error 'kernel-tests "pending prefix was not retained"))
+(unless (and (not (input-stack-pending-sequence
+                    (input-context-stack input-context)))
+             (equal? (input-stack-pending-sequence
+                       (input-disposition-input-state prefix-result))
+                     '(control-x)))
+  (error 'kernel-tests "input dispatch mutated its starting InputState"))
 (define pending-result
   (input-service-dispatch
-    input-service input-context (make-input-event 'key 'control-s)))
+    input-service
+    (make-input-context
+      0 0 (input-context-layers input-context)
+      (input-disposition-input-state prefix-result))
+    (make-input-event 'key 'control-s)))
 (unless (and (eq? (input-disposition-kind pending-result) 'command)
              (eq? (input-disposition-value pending-result) 'save-buffer))
   (error 'kernel-tests "pending command was not resolved"))
+
+(let* ([secondary
+        (view-service-create!
+          (host-state-views host) owner buffer configuration)]
+       [old-buffer-generation (buffer-state-generation (buffer-state buffer))]
+       [old-primary-generation (view-state-generation (view-state view))]
+       [old-state (view-state secondary)]
+       [new-input-state (input-disposition-input-state prefix-result)]
+       [update
+        (dispatcher-dispatch-view!
+          (host-state-dispatch host)
+          (make-view-transaction-spec
+            (view-id secondary) (view-state-generation old-state)
+            #f '(3 . 9) new-input-state '()
+            (list (make-annotation 'origin 'input))
+            'nearest))]
+       [new-state (view-state secondary)])
+  (unless (and (editor-update? update)
+               (eq? (editor-update-old-buffer-state update)
+                    (editor-update-new-buffer-state update))
+               (= (buffer-state-generation (buffer-state buffer))
+                  old-buffer-generation)
+               (= (view-state-generation (view-state view))
+                  old-primary-generation)
+               (= (view-state-generation new-state)
+                  (+ 1 (view-state-generation old-state)))
+               (equal? (view-state-viewport new-state) '(3 . 9))
+               (eq? (view-state-input-state new-state) new-input-state)
+               (not (input-stack-pending-sequence
+                      (view-state-input-state old-state)))
+               (equal? (editor-update-damage update) '(viewport input)))
+    (error 'kernel-tests "ViewTransaction did not publish isolated state"))
+  (unless
+      (guard (condition [else #t])
+        (dispatcher-dispatch-view!
+          (host-state-dispatch host)
+          (make-view-transaction-spec
+            (view-id secondary) (view-state-generation old-state)))
+        #f)
+    (error 'kernel-tests "stale ViewTransaction was accepted")))
 
 (define runtime (make-runtime))
 (define request (runtime-enqueue-request! runtime owner 'buffer 0 'payload))
@@ -1044,4 +1176,48 @@
                    (buffer-state-document (buffer-state failure-buffer)))
                  "hello!"))
     (error 'kernel-tests "dispatcher did not recover from ViewState failure")))
+
+(let* ([routing-field
+        (make-state-field
+          'view-routing 'view
+          (lambda (state) 'initial)
+          (lambda (value update)
+            (unless (view-update-context? update)
+              (error 'kernel-tests "View StateField did not receive its context"))
+            (list
+              (view-update-context-view-id update)
+              (view-update-context-origin? update)
+              (map state-effect-type (view-update-context-effects update)))))]
+       [routing-configuration (make-configuration (list routing-field))]
+       [routing-document (make-document "x")]
+       [routing-buffer
+        (buffer-service-create!
+          (host-state-buffers host) owner "*routing*" routing-document
+          routing-configuration)]
+       [origin-view
+        (view-service-create!
+          (host-state-views host) owner routing-buffer routing-configuration)]
+       [shared-view
+        (view-service-create!
+          (host-state-views host) owner routing-buffer routing-configuration)]
+       [origin-effect
+        (make-targeted-state-effect 'origin-view 'origin-effect #t)]
+       [shared-effect
+        (make-targeted-state-effect 'all-views 'shared-effect #t)])
+  (dispatcher-dispatch!
+    (host-state-dispatch host)
+    (make-transaction-spec
+      (buffer-id routing-buffer) (view-id origin-view) 0
+      (make-change-set 1 '()) #f
+      (list origin-effect shared-effect) '()))
+  (let ([origin-value
+         (view-state-field (view-state origin-view) routing-field)]
+        [shared-value
+         (view-state-field (view-state shared-view) routing-field)])
+    (unless (and (equal? origin-value
+                         (list (view-id origin-view) #t
+                               '(origin-effect shared-effect)))
+                 (equal? shared-value
+                         (list (view-id shared-view) #f '(shared-effect))))
+      (error 'kernel-tests "View StateEffect routing differs"))))
 (host-state-close! host)
