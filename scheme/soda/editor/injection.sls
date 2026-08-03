@@ -83,12 +83,6 @@
           (< start (injection-region-end region))))
       (injection-index-regions index)))
 
-  (define (property-ref capture name default)
-    (let ([entry
-            (assq name
-              (syntax-capture-properties capture))])
-      (if entry (cdr entry) default)))
-
   (define (trim-language value)
     (let ([length (string-length value)])
       (let find-start ([start 0])
@@ -141,7 +135,7 @@
       (for-each
         (lambda (capture)
           (let* ([match-id
-                   (property-ref
+                   (syntax-capture-property
                      capture 'query.match-id #f)]
                  [existing
                    (hashtable-ref groups match-id '())])
@@ -161,7 +155,7 @@
         (map
           (lambda (capture)
             (normalize-language
-              (property-ref
+                   (syntax-capture-property
                 capture
                 'injection.language
                 #f)))

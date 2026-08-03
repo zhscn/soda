@@ -15,6 +15,7 @@
           syntax-capture-start
           syntax-capture-end
           syntax-capture-span
+          syntax-capture-property
           syntax-capture-node-kind
           syntax-capture-properties
           syntax-capture-depth
@@ -86,6 +87,10 @@
   (define (syntax-capture-span capture)
     (- (syntax-capture-end capture)
        (syntax-capture-start capture)))
+
+  (define (syntax-capture-property capture name default)
+    (let ([entry (assq name (syntax-capture-properties capture))])
+      (if entry (cdr entry) default)))
 
   (define (make-syntax-capture
             name start end node-kind properties depth)

@@ -738,9 +738,10 @@
     (entity-registry-values (editor-buffer-registry value)))
 
   (define (editor-buffer-find value id)
-    (find
-      (lambda (buffer) (= (buffer-id buffer) id))
-      (editor-buffers value)))
+    (require-open-editor 'editor-buffer-find value)
+    (and
+      id
+      (entity-registry-ref (editor-buffer-registry value) id)))
 
   (define (editor-buffer-ref value id)
     (require-open-editor 'editor-buffer-ref value)
@@ -1092,11 +1093,8 @@
     (entity-registry-values (editor-view-registry value)))
 
   (define (editor-find-view value id)
-    (and
-      id
-      (find
-        (lambda (view) (= (view-id view) id))
-        (editor-views value))))
+    (require-open-editor 'editor-find-view value)
+    (and id (entity-registry-ref (editor-view-registry value) id)))
 
   (define editor-open-view!
     (case-lambda

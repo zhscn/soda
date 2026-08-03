@@ -300,16 +300,9 @@
       (<= (syntax-capture-start capture) offset)
       (< offset (syntax-capture-end capture))))
 
-  (define (capture-property capture name default)
-    (let ([entry
-            (assq
-              name
-              (syntax-capture-properties capture))])
-      (if entry (cdr entry) default)))
-
   (define (capture-property-true? capture name)
     (let ([value
-            (capture-property capture name #f)])
+            (syntax-capture-property capture name #f)])
       (or
         (eq? value #t)
         (equal? value "true")
