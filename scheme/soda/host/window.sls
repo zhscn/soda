@@ -80,7 +80,7 @@
 
   (define (weighted-extents extent weights)
     (let* ([total (apply + weights)]
-           [floors (map (lambda (weight) (div (* extent weight) total)) weights)]
+           [floors (map (lambda (weight) (floor (/ (* extent weight) total))) weights)]
            [remaining (- extent (apply + floors))])
       ;; Exact rational weights make the largest-remainder allocation stable.
       ;; Ties retain child order, so equal weights preserve the existing split

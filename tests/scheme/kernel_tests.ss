@@ -930,7 +930,7 @@
 
 (let* ([left (make-leaf-window 1 #f)]
        [right (make-leaf-window 2 #f)]
-       [root (make-split-window 'horizontal (list left right) '(1 2) #f)]
+       [root (make-split-window 'horizontal (list left right) '(1/3 2/3) #f)]
        [surface (make-surface root '(7 . 3))])
   (unless (and (equal? (window-rectangle left) '(0 0 2 3))
                (equal? (window-rectangle right) '(0 2 5 3))
