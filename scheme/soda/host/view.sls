@@ -4,7 +4,9 @@
           view-owner
           view-buffer
           view-state
+          view-plugin-instances
           view-close!
+          view-update-plugins!
           make-view-service
           view-service?
           view-service-create!

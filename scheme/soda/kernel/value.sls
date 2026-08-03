@@ -1,6 +1,7 @@
 (library (soda kernel value)
   (export exact-integer?
           list-copy
+          vector-copy
           make-identity-source
           identity-source?
           identity-source-next!)
@@ -11,6 +12,17 @@
 
   (define (list-copy value)
     (if (null? value) '() (cons (car value) (list-copy (cdr value)))))
+
+  (define (vector-copy value)
+    (unless (vector? value)
+      (assertion-violation 'vector-copy "expected a vector" value))
+    (let* ([length (vector-length value)]
+           [copy (make-vector length)])
+      (let loop ([index 0])
+        (when (< index length)
+          (vector-set! copy index (vector-ref value index))
+          (loop (+ index 1))))
+      copy))
 
   (define-record-type
     (identity-source %make-identity-source identity-source?)

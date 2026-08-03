@@ -29,7 +29,10 @@
         (prefix (soda ffi runtime) native:)
         (soda support vfs)
         (soda tui terminal-input)
-        (soda tui terminal-session))
+        (soda tui terminal-session)
+        (soda view display)
+        (soda view frame)
+        (soda view plugin))
 
 (define (library-binding-hidden? library-name identifier)
   (guard (condition [else #t])
@@ -1425,4 +1428,136 @@
                  (equal? shared-value
                          (list (view-id shared-view) #f '(shared-effect))))
       (error 'kernel-tests "View StateEffect routing differs"))))
+
+(let* ([stream
+         (make-display-stream
+           (list (make-display-text "a" 0 1 'default 'text)
+                 (make-display-break 'line-end)))]
+       [extended
+         (display-stream-append
+           stream
+           (list (make-display-widget 3 1 1 'hint 'inlay)))]
+       [entries
+         (list
+           (make-display-map-entry 0 1 0 1 'text 'a)
+           (make-display-map-entry 1 3 1 2 'text 'wide)
+           (make-display-map-entry 3 3 2 5 'virtual 'hint))]
+       [map (make-display-map entries)])
+  (unless (and (= (length (display-stream-fragments stream)) 2)
+               (= (length (display-stream-fragments extended)) 3)
+               (= (display-map-document->cell map 0) 0)
+               (= (display-map-document->cell map 1) 1)
+               (= (display-map-document->cell map 3) 2)
+               (= (display-map-cell->document map 0) 0)
+               (= (display-map-cell->document map 1) 1)
+               (= (display-map-cell->document map 3) 3)
+               (= (length (display-map-document-range map 1 3)) 1)
+               (= (length (display-map-cell-range map 2 5)) 1))
+    (error 'kernel-tests "DisplayStream or DisplayMap differs")))
+
+(let* ([base (make-frame 5 2)]
+       [emphasis (make-frame-cell "x" 1 #f 'emphasis 'source)]
+       [changed
+         (frame-with-cells
+           base
+           (list (list 0 1 emphasis) (list 0 2 emphasis) (list 1 4 emphasis)))]
+       [spans (frame-diff base changed)]
+       [initial (frame-diff #f base)])
+  (unless (and (= (length spans) 2)
+               (= (frame-row-span-row (car spans)) 0)
+               (= (frame-row-span-from (car spans)) 1)
+               (= (frame-row-span-to (car spans)) 3)
+               (= (frame-row-span-row (cadr spans)) 1)
+               (= (frame-row-span-from (cadr spans)) 4)
+               (= (frame-row-span-to (cadr spans)) 5)
+               (= (length initial) 2)
+               (frame-cell=? emphasis
+                             (make-frame-cell "x" 1 #f 'emphasis 'source))
+               (eq? (frame-cell-at base 0 0) default-frame-cell))
+    (error 'kernel-tests "Frame diff differs" spans)))
+
+(let* ([destroyed #f]
+       [plugin
+         (make-view-plugin
+           'counter
+           (lambda (view) 1)
+           (lambda (value update)
+             (if (view-update-damaged? update 'selection) (+ value 1) value))
+           (lambda (value) (set! destroyed value))
+           (lambda (value) (list value)))]
+       [instance (make-view-plugin-instance plugin 'view)]
+       [update (make-view-update 9 'old 'new #f '(selection))])
+  (unless (and (= (view-plugin-instance-update! instance update) 2)
+               (equal? (view-plugin-instance-decorations instance) '(2))
+               (view-plugin-instance-destroy! instance)
+               (= destroyed 2)
+               (null? (view-plugin-instance-decorations instance))
+               (not (view-plugin-instance-destroy! instance)))
+    (error 'kernel-tests "ViewPlugin lifecycle differs")))
+
+(let* ([created 0]
+       [updated 0]
+       [destroyed 0]
+       [plugin
+         (make-view-plugin
+           'host-counter
+           (lambda (view) (set! created (+ created 1)) 0)
+           (lambda (value update) (set! updated (+ updated 1)) (+ value 1))
+           (lambda (value) (set! destroyed (+ destroyed 1)))
+           #f)]
+       [view-configuration
+         (make-configuration
+           (list (make-facet-provider view-plugins-facet (list plugin))))]
+       [plugin-document (make-document "x")]
+       [plugin-buffer
+         (buffer-service-create!
+           (host-state-buffers host) owner "*plugin*" plugin-document
+           (make-configuration '()))]
+       [plugin-view
+         (view-service-create!
+           (host-state-views host) owner plugin-buffer view-configuration)])
+  (dispatcher-dispatch-view!
+    (host-state-dispatch host)
+    (make-view-transaction-spec
+      (view-id plugin-view) 0
+      (make-selection (list (make-selection-range 1 1)))
+      #f #f '() '() #f))
+  (view-service-close-view! (host-state-views host) (view-id plugin-view))
+  (unless (and (= created 1) (= updated 1) (= destroyed 1))
+    (error 'kernel-tests "host ViewPlugin integration differs"
+           created updated destroyed)))
+
+(let* ([updates 0]
+       [destroyed 0]
+       [plugin
+         (make-view-plugin
+           'failing-plugin
+           (lambda (view) 'value)
+           (lambda (value update)
+             (set! updates (+ updates 1))
+             (error 'kernel-tests "intentional ViewPlugin failure"))
+           (lambda (value) (set! destroyed (+ destroyed 1)))
+           #f)]
+       [view-configuration
+         (make-configuration
+           (list (make-facet-provider view-plugins-facet (list plugin))))]
+       [plugin-document (make-document "x")]
+       [plugin-buffer
+         (buffer-service-create!
+           (host-state-buffers host) owner "*failing-plugin*" plugin-document
+           (make-configuration '()))]
+       [plugin-view
+         (view-service-create!
+           (host-state-views host) owner plugin-buffer view-configuration)]
+       [selection (make-selection (list (make-selection-range 1 1)))])
+  (dispatcher-dispatch-view!
+    (host-state-dispatch host)
+    (make-view-transaction-spec
+      (view-id plugin-view) 0 selection #f #f '() '() #f))
+  (dispatcher-dispatch-view!
+    (host-state-dispatch host)
+    (make-view-transaction-spec
+      (view-id plugin-view) 1 selection #f #f '() '() #f))
+  (unless (and (= updates 1) (= destroyed 1))
+    (error 'kernel-tests "failing ViewPlugin was not retired" updates destroyed)))
 (host-state-close! host)

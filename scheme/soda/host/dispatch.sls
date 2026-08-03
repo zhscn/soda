@@ -28,7 +28,8 @@
           (soda kernel view-state)
           (soda host internal buffer)
           (soda host internal view)
-          (soda host value))
+          (soda host value)
+          (soda view plugin))
 
   (define-record-type
     (view-state-update %make-view-state-update view-state-update?)
@@ -73,6 +74,26 @@
       (assertion-violation 'dispatcher-set-listener! "listener must be a procedure" listener))
     (dispatcher-listener-set! dispatcher listener)
     listener)
+
+  (define (notify-view-plugins! dispatcher update)
+    (for-each
+      (lambda (state-update)
+        (let ([view
+                (view-service-ref
+                  (dispatcher-views dispatcher)
+                  (view-state-update-view-id state-update)
+                  #f)])
+          (when view
+            (view-update-plugins!
+              view
+              (make-view-update
+                (view-id view)
+                (view-state-update-old-state state-update)
+                (view-state-update-new-state state-update)
+                update
+                (editor-update-damage update))))))
+      (editor-update-views update))
+    update)
 
   (define (prepare-native-change! document changes)
     (if (change-set-empty? changes)
@@ -236,6 +257,7 @@
                     (transaction-annotations transaction)
                     (resolved-transaction-scroll-request resolved)
                     (if (change-set-empty? changes) '(selection) '(document selection)))])
+            (notify-view-plugins! dispatcher update)
             (let ([listener (dispatcher-listener dispatcher)])
               (when listener (listener update)))
             (for-each
@@ -413,6 +435,7 @@
                   (view-transaction-spec-scroll-request spec)
                   damage)])
           (view-publish-state! view new-state)
+          (notify-view-plugins! dispatcher update)
           (let ([listener (dispatcher-listener dispatcher)])
             (when listener (listener update)))
           (for-each

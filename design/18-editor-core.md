@@ -94,6 +94,10 @@ Workbench host 增加多 Buffer、多 View、Window tree、Surface、Scheme comm
   terminal input -> Surface input
   View update -> display stream -> Frame -> terminal presenter
 
+(soda view ...)
+  ViewPlugin lifecycle / DisplayStream / DisplayMap / Frame
+  depends on kernel extension and published host View state
+
 (soda packages ...)
   depend on kernel and declared host capabilities
 ```
@@ -469,6 +473,11 @@ ViewPlugin {
 ViewPlugin 可以维护 viewport analysis、layout cache、completion popup projection 和增量
 display cache。需要参与序列化、history 或 transaction 原子性的状态进入 StateField，
 不放入 ViewPlugin。
+
+`view-plugins` 是 View scope Facet。View 创建时从其 configuration 取得 plugin 定义并为
+每个 View 创建独立 instance；dispatch 发布新的 ViewState 后构造 `ViewUpdate` 并更新这些
+instance。plugin update 只维护 render-local value，不能修改 BufferState 或 ViewState。失败的
+instance 会销毁并退出后续 update；View close 销毁全部剩余 instance。
 
 ### Window、Surface 与 active context
 
@@ -954,6 +963,11 @@ DisplayMap 保存 document offset、display cell 和 virtual content 之间的�
 test、vertical motion、describe-char 和 source location 使用同一映射。renderer 按可见
 range 使用 RangeSet cursor/sweep，不为每个 cell 扫描全部 decoration。
 
+`DisplayStream` 只包含带 source range 的文本、line break 和 widget fragment。layout 将它们
+切分为 grapheme-sized display span，同时生成有序的 `DisplayMap`。map 的每个 entry 显式记录
+document half-open range、display cell half-open range、kind 和 source，因此虚拟文本与 widget
+可以映射回其 anchor，而 terminal frontend 无需解释 package payload。
+
 syntax highlighting、diagnostics、selection、completion preview、fold 和 inlay hint 都是
 typed provider，不由 renderer 主动调用语言分析。
 
@@ -974,6 +988,9 @@ width、tab policy、wrap policy、display facet generation 和 theme generation
 Frame 是终端尺寸的 immutable cell grid，包含 grapheme、cell width、resolved face 和 source
 mapping。frame diff 合并连续变化 cell 为 row span，再选择连续输出、相对移动、
 erase-to-end 或整行重绘。
+
+Frame 只由 layout/compositor 构造；任何 cell 更新返回新的 Frame。初始 frame 或尺寸变化产生
+整行 span，等尺寸 frame 只产生连续变化的 row span。presenter 以 span 为最小输出单位。
 
 presenter 维护：
 

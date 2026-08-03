@@ -4,7 +4,9 @@
           view-owner
           view-buffer
           view-state
+          view-plugin-instances
           view-publish-state!
+          view-update-plugins!
           view-close!
           make-view-service
           view-service?
@@ -14,12 +16,14 @@
           view-service-close-view!)
   (import (rnrs)
           (soda kernel selection)
+          (soda kernel extension)
           (soda kernel state)
           (soda kernel view-state)
           (soda kernel value)
           (soda host internal buffer)
           (soda host input)
-          (soda host value))
+          (soda host value)
+          (soda view plugin))
 
   (define-record-type
     (view %make-view view?)
@@ -28,6 +32,7 @@
       (immutable owner view-owner)
       (immutable buffer view-buffer)
       (mutable state view-state view-state-set!)
+      (mutable plugins view-plugin-instances view-plugin-instances-set!)
       (mutable closed? view-closed? view-closed?-set!)))
 
   (define (empty-selection)
@@ -50,7 +55,17 @@
                 (empty-selection) '(0 . 0)
                 (or input-state (default-input-stack))
                 configuration)
+              '()
               #f)])
+      (view-plugin-instances-set!
+        view
+        (map
+          (lambda (plugin)
+            (unless (view-plugin? plugin)
+              (assertion-violation
+                'view-service-create! "view plugin facet contains a non-plugin" plugin))
+            (make-view-plugin-instance plugin view))
+          (configuration-facet configuration view-plugins-facet 'view)))
       (owner-add-cleanup! owner (lambda () (view-close! view)))
       view))
 
@@ -67,7 +82,34 @@
       (assertion-violation 'view-close! "expected a view" view))
     (if (view-closed? view)
         #f
-        (begin (view-closed?-set! view #t) #t)))
+        (begin
+          (for-each
+            (lambda (instance)
+              (guard (condition [else #f])
+                (view-plugin-instance-destroy! instance)))
+            (view-plugin-instances view))
+          (view-closed?-set! view #t)
+          #t)))
+
+  (define (view-update-plugins! view update)
+    (unless (and (view? view) (not (view-closed? view)) (view-update? update))
+      (assertion-violation
+        'view-update-plugins! "expected a live View and ViewUpdate" view update))
+    ;; Plugin failures are isolated from the already-published editor update.
+    ;; A failing instance is destroyed once and cannot repeatedly fail on later
+    ;; render turns.
+    (for-each
+      (lambda (instance)
+        (unless (view-plugin-instance-destroyed? instance)
+          (guard
+            (condition
+              [else
+               (guard (ignored [else #f])
+                 (view-plugin-instance-destroy! instance))
+               #f])
+            (view-plugin-instance-update! instance update))))
+      (view-plugin-instances view))
+    view)
 
   (define-record-type
     (view-service %make-view-service view-service?)
