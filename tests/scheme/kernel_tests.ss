@@ -938,6 +938,27 @@
                            (frame-cell-at (surface-render-frame configured-render) 1 0)) " "))
     (error 'kernel-tests "View text layout configuration differs")))
 
+(let* ([document (make-document "a\nb")]
+       [buffer (buffer-service-create! (host-state-buffers host) owner "*viewport*"
+                                       document configuration)]
+       [view (view-service-create! (host-state-views host) owner buffer configuration)]
+       [leaf (make-leaf-window (view-id view) '(0 0 2 1))]
+       [surface (make-surface leaf '(2 . 1))]
+       [state (view-state view)]
+       [_update
+        (dispatcher-dispatch-view!
+          (host-state-dispatch host)
+          (make-view-transaction-spec
+            (view-id view) (view-state-generation state)
+            #f '(0 . 1) #f '() '() #f))]
+       [render (render-surface surface (host-state-views host))])
+  (unless (and (string=? (frame-cell-grapheme
+                           (frame-cell-at (surface-render-frame render) 0 0)) "b")
+               (= (surface-hit-document-offset
+                    (surface-render-hit-test render 0 0))
+                  2))
+    (error 'kernel-tests "View visual viewport rendering differs")))
+
 (let* ([plugin
         (make-view-plugin
           'display-stream
@@ -1759,6 +1780,22 @@
                            (frame-cell-at (text-layout-frame layout) 0 0)) "e\x301;")
                (equal? (text-layout-document->point layout 3) '(0 . 1)))
     (error 'kernel-tests "DisplayStream grapheme layout differs")))
+
+;; Viewport offsets are visual rows, not document lines.  Cropping a wrapped
+;; projection must retain both its display text and its DisplayMap mapping.
+(let* ([stream
+        (make-display-stream
+          (list (make-display-text "abcd" 0 4 'text 'document)))]
+       [layout (layout-display-stream
+                 stream (make-selection (list (make-selection-range 2 2)))
+                 2 1 default-text-layout-options 1)]
+       [frame (text-layout-frame layout)])
+  (unless (and (string=? (frame-cell-grapheme (frame-cell-at frame 0 0)) "c")
+               (string=? (frame-cell-grapheme (frame-cell-at frame 0 1)) "d")
+               (= (text-layout-point->document layout 0 0) 2)
+               (= (text-layout-cursor-row layout) 0)
+               (= (text-layout-cursor-column layout) 0))
+    (error 'kernel-tests "DisplayStream visual viewport differs")))
 
 (let* ([base
         (make-display-stream

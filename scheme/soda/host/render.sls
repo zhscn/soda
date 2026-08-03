@@ -124,6 +124,9 @@
                            [first-line (if (and (pair? viewport) (integer? (car viewport)))
                                            (max 0 (car viewport))
                                            0)]
+                           [visual-row (if (and (pair? viewport) (integer? (cdr viewport)))
+                                           (max 0 (cdr viewport))
+                                           0)]
                            [layout
                             (let ([options
                                    (configuration-facet
@@ -133,14 +136,14 @@
                               (let ([stream
                                      (if (null? streams)
                                          (snapshot-display-stream
-                                           snapshot first-line view-height
+                                           snapshot first-line (+ view-height visual-row)
                                            (merge-decoration-sets (view-decorations view)))
                                          (make-display-stream
                                            (apply append (map display-stream-fragments streams))))])
                                 (layout-display-stream
                                   (view-transform-display-stream view stream)
                                   (view-state-selection state)
-                                  view-width view-height options)))])
+                                  view-width view-height options visual-row)))])
                       (loop
                         (cdr leaves)
                         (cons (make-frame-placement row column (text-layout-frame layout)) placements)

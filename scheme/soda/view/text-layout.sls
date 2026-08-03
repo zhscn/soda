@@ -96,6 +96,58 @@
   (define (grapheme-width text)
     (unicode-grapheme-width (string->utf8 text)))
 
+  ;; Drop leading visual rows from a completed projection.  DisplayMap cell
+  ;; positions are absolute within its Frame, so clipping a viewport must
+  ;; rebuild the map rather than merely slice the cell grid.
+  (define (text-layout-drop-rows layout rows)
+    (unless (and (text-layout? layout) (offset? rows))
+      (assertion-violation 'text-layout-drop-rows "invalid TextLayout crop" layout rows))
+    (let* ([source-frame (text-layout-frame layout)]
+           [width (frame-width source-frame)]
+           [source-height (frame-height source-frame)]
+           [drop (min rows source-height)]
+           [height (- source-height drop)]
+           [cell-start (* drop width)]
+           [cell-end (* source-height width)]
+           [cells (make-vector (* width height) default-frame-cell)]
+           [source-map (text-layout-display-map layout)]
+           [entries
+            (let loop ([remaining (display-map-entries source-map)] [result '()])
+              (if (null? remaining)
+                  (reverse result)
+                  (let* ([entry (car remaining)]
+                         [from (display-map-entry-cell-from entry)]
+                         [to (display-map-entry-cell-to entry)])
+                    ;; Layout entries are atomic glyph or widget cells, so an
+                    ;; entry cannot span a visual-row crop boundary.
+                    (loop (cdr remaining)
+                          (if (and (<= cell-start from) (<= to cell-end))
+                              (cons (make-display-map-entry
+                                      (display-map-entry-document-from entry)
+                                      (display-map-entry-document-to entry)
+                                      (- from cell-start) (- to cell-start)
+                                      (display-map-entry-kind entry)
+                                      (display-map-entry-source entry))
+                                    result)
+                              result)))))])
+      (let copy-row ([row 0])
+        (when (< row height)
+          (let copy-column ([column 0])
+            (when (< column width)
+              (vector-set! cells (+ (* row width) column)
+                           (frame-cell-at source-frame (+ drop row) column))
+              (copy-column (+ column 1))))
+          (copy-row (+ row 1))))
+      (let ([cursor-row (text-layout-cursor-row layout)])
+        (make-text-layout
+          (make-frame width height cells)
+          (make-display-map entries)
+          (and cursor-row (>= cursor-row drop) (< cursor-row source-height)
+               (- cursor-row drop))
+          (let ([column (text-layout-cursor-column layout)])
+            (and cursor-row (>= cursor-row drop) (< cursor-row source-height)
+                 column))))))
+
   (define (bytevector-slice bytes from to)
     (let ([result (make-bytevector (- to from))])
       (let loop ([source from] [target 0])
@@ -173,10 +225,14 @@
       [(stream selection width height)
        (layout-display-stream stream selection width height default-text-layout-options)]
       [(stream selection width height options)
+       (layout-display-stream stream selection width height options 0)]
+      [(stream selection width height options visual-row)
        (unless (and (display-stream? stream) (selection? selection)
-                    (offset? width) (offset? height) (text-layout-options? options))
+                    (offset? width) (offset? height) (text-layout-options? options)
+                    (offset? visual-row))
          (assertion-violation 'layout-display-stream "invalid DisplayStream layout request"))
-       (let ([cells (make-vector (* width height) default-frame-cell)]
+       (let ([layout-height (+ height visual-row)]
+             [cells (make-vector (* width (+ height visual-row)) default-frame-cell)]
              [entries '()]
              [row 0]
              [column 0]
@@ -196,7 +252,7 @@
                    entries)))
          (define (emit! glyph glyph-width from to kind face source)
            (cond
-             [(or (>= row height) (= width 0) (> glyph-width width)) #f]
+             [(or (>= row layout-height) (= width 0) (> glyph-width width)) #f]
              [(> (+ column glyph-width) width)
               (if (and (text-layout-options-wrap? options) (> column 0))
                   (begin (advance-line!) (emit! glyph glyph-width from to kind face source))
@@ -242,7 +298,7 @@
                    (loop next))))))
          (define (emit-widget! fragment)
            (let loop-row ([remaining (display-widget-height fragment)])
-             (when (and (> remaining 0) (< row height))
+             (when (and (> remaining 0) (< row layout-height))
                (let loop-column ([remaining-width (display-widget-width fragment)])
                  (when (> remaining-width 0)
                    (emit! " " 1
@@ -258,19 +314,21 @@
                    [(display-break? fragment) (advance-line!)]
                    [else (emit-widget! fragment)]))
            (display-stream-fragments stream))
-         (let* ([frame (make-frame width height cells)]
+         (let* ([frame (make-frame width layout-height cells)]
                 [map (make-display-map (reverse entries))]
                 [cell (display-map-document->cell map caret 'after)]
-                [capacity (* width height)]
+                [capacity (* width layout-height)]
                 [cursor-row
-                 (and (> width 0) (> height 0)
+                 (and (> width 0) (> layout-height 0)
                       (cond [cell (div (min cell (- capacity 1)) width)]
                             [(= caret 0) 0]
                             [else #f]))]
                 [cursor-column
                  (and cursor-row
                       (if cell (mod (min cell (- capacity 1)) width) 0))])
-           (make-text-layout frame map cursor-row cursor-column)))]))
+           (text-layout-drop-rows
+             (make-text-layout frame map cursor-row cursor-column)
+             visual-row)))]))
 
   ;; `first-line` is a logical line index.  Layout clips at the requested
   ;; terminal rectangle and reports the primary caret in display coordinates.
