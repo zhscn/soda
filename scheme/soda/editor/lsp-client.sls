@@ -49,6 +49,7 @@
           (soda editor location-results)
           (soda editor location-visit)
           (soda editor lsp-json-rpc)
+          (soda editor lsp-client-state)
           (soda editor lsp-annotation-decoder)
           (soda editor lsp-completion-decoder)
           (soda editor lsp-location-decoder)
@@ -78,24 +79,6 @@
     (lsp-server-profile %make-lsp-server-profile lsp-server-profile?)
     (fields name languages command initialization-options settings))
 
-  (define-record-type lsp-client-document
-    (fields buffer-id uri
-            (mutable version lsp-client-document-version lsp-client-document-version-set!)
-            (mutable revision lsp-client-document-revision lsp-client-document-revision-set!)
-            (mutable diagnostic-result-id
-                     lsp-client-document-diagnostic-result-id
-                     lsp-client-document-diagnostic-result-id-set!)
-            (mutable opened? lsp-client-document-opened? lsp-client-document-opened?-set!)
-            (mutable text-map
-                     lsp-client-document-text-map
-                     lsp-client-document-text-map-set!)
-            (mutable observer-name
-                     lsp-client-document-observer-name
-                     lsp-client-document-observer-name-set!)))
-
-  (define-record-type lsp-client-pending-request
-    (fields id method result error cancel context))
-
   (define-record-type lsp-xref-query
     (fields buffer-id revision offset attachment-id))
 
@@ -107,36 +90,6 @@
     (fields query language-context))
 
   (define active-lsp-xrefs (make-result-producer-registry))
-
-  (define-record-type
-    (lsp-client-session %make-lsp-client-session lsp-client-session?)
-    (fields language-session
-            (mutable workspace
-                     lsp-client-session-workspace
-                     lsp-client-session-workspace-set!)
-            server
-            (mutable process
-                     lsp-client-session-process
-                     lsp-client-session-process-set!)
-            (mutable decoder
-                     lsp-client-session-decoder
-                     lsp-client-session-decoder-set!)
-            (mutable state lsp-client-session-state lsp-client-session-state-set!)
-            (mutable next-request-id
-                     lsp-client-session-next-request-id
-                     lsp-client-session-next-request-id-set!)
-            (mutable pending lsp-client-session-pending lsp-client-session-pending-set!)
-            (mutable documents lsp-client-session-documents lsp-client-session-documents-set!)
-            (mutable capabilities
-                     lsp-client-session-capabilities
-                     lsp-client-session-capabilities-set!)
-            (mutable diagnostic-generation
-                     lsp-client-session-diagnostic-generation
-                     lsp-client-session-diagnostic-generation-set!)))
-
-  (define-record-type
-    (lsp-client-registry %make-lsp-client-registry lsp-client-registry?)
-    (fields profiles sessions))
 
   (define-record-type lsp-workspace-edit-origin
     (fields preferred-view-id workbench-id))
