@@ -2067,4 +2067,36 @@
                (string=? (frame-cell-grapheme
                            (frame-cell-at (surface-render-frame after) 0 0)) "x"))
     (error 'kernel-tests "failed display plugin left a stale render")))
+
+;; A transform runs while rendering rather than while publishing a ViewUpdate.
+;; If it fails, its provider output must be discarded before this render request
+;; becomes the RenderService cache entry.
+(let* ([plugin
+        (make-view-plugin
+          'failing-transform
+          (lambda (view) 'ready)
+          #f #f #f
+          (lambda (value)
+            (make-display-stream
+              (list (make-display-text "v" 0 1 'virtual 'plugin))))
+          (lambda (value)
+            (lambda (stream)
+              (error 'kernel-tests "intentional display transform failure"))))]
+       [configuration
+        (make-configuration
+          (list (make-facet-provider view-plugins-facet (list plugin))))]
+       [document (make-document "x")]
+       [buffer
+        (buffer-service-create! (host-state-buffers host) owner "*failing-transform*"
+                                document configuration)]
+       [view (view-service-create! (host-state-views host) owner buffer configuration)]
+       [leaf (make-leaf-window (view-id view) '(0 0 2 1))]
+       [surface (make-surface leaf '(2 . 1))]
+       [service (make-render-service)]
+       [render (render-service-render! service surface (host-state-views host))])
+  (unless (and (string=? (frame-cell-grapheme
+                           (frame-cell-at (surface-render-frame render) 0 0)) "x")
+               (view-plugin-instance-destroyed?
+                 (car (view-plugin-instances view))))
+    (error 'kernel-tests "failed display transform left a stale render")))
 (host-state-close! host)

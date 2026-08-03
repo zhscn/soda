@@ -288,6 +288,10 @@
                     [else
                      (report-plugin-error! view 'plugin-display-transform condition)
                      (destroy-plugin-instance! view instance 'plugin-display-transform-cleanup)
+                     (refresh-view-decorations! view)
+                     (refresh-view-display-stream! view)
+                     (view-render-generation-set!
+                       view (+ 1 (view-render-generation view)))
                      (loop (cdr instances) current)])
                   (let ([next (transform current)])
                     (unless (display-stream? next)
