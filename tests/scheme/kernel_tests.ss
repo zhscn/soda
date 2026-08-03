@@ -41,6 +41,12 @@
   (error 'kernel-tests "change mapping differs"))
 (unless (equal? (change-set-map-range changes 2 8 'after) (cons 5 10))
   (error 'kernel-tests "range mapping differs"))
+(let* ([selection-before
+        (make-selection (list (make-selection-range 2 2 'after 'character '())))]
+       [selection-after
+        (selection-map-change selection-before (change-set-change-desc changes))])
+  (unless (= (selection-range-head (selection-primary-range selection-after)) 5)
+    (error 'kernel-tests "Selection ChangeDesc mapping differs")))
 (let ([replacement
         (make-change-set
           5

@@ -127,17 +127,23 @@
       (selection-primary selection)))
 
   (define (selection-map-change selection changes)
-    (unless (change-set? changes)
-      (assertion-violation 'selection-map-change "expected a change set" changes))
+    (unless (or (change-set? changes) (change-desc? changes))
+      (assertion-violation
+        'selection-map-change "expected a ChangeSet or ChangeDesc" changes))
+    (let ([map-offset
+            (lambda (offset affinity)
+              (if (change-set? changes)
+                  (change-set-map-offset changes offset affinity)
+                  (change-desc-map-offset changes offset affinity)))])
     (selection-map
       selection
       (lambda (range)
         (make-selection-range
-          (change-set-map-offset changes (selection-range-anchor range)
-                                  (selection-range-affinity range))
-          (change-set-map-offset changes (selection-range-head range)
-                                  (selection-range-affinity range))
+          (map-offset (selection-range-anchor range)
+                      (selection-range-affinity range))
+          (map-offset (selection-range-head range)
+                      (selection-range-affinity range))
           (selection-range-affinity range)
           (selection-range-granularity range)
-          (selection-range-metadata range)))))
+          (selection-range-metadata range))))))
 )
