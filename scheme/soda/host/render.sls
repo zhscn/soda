@@ -131,10 +131,12 @@
                                      text-layout-options-facet 'view)]
                                   [streams (view-display-streams view)])
                               (if (null? streams)
-                                  (layout-text-snapshot
-                                    snapshot (view-state-selection state)
-                                    first-line view-width view-height
-                                    (merge-decoration-sets (view-decorations view)) options)
+                                  (layout-display-stream
+                                    (snapshot-display-stream
+                                      snapshot first-line view-height
+                                      (merge-decoration-sets (view-decorations view)))
+                                    (view-state-selection state)
+                                    view-width view-height options)
                                   (layout-display-stream
                                     (make-display-stream
                                       (apply append (map display-stream-fragments streams)))
