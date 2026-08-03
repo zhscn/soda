@@ -7,6 +7,7 @@
           text-layout-cursor-column
           text-layout-document->point
           text-layout-point->document
+          text-layout-vertical-target
           make-text-layout-options
           text-layout-options?
           text-layout-options-tab-width
@@ -92,6 +93,49 @@
            (< column (frame-width frame))
            (display-map-cell->document (text-layout-display-map layout)
                                        (+ (* row (frame-width frame)) column)))))
+
+  ;; Return the document location on a visual row DELTA away from OFFSET.
+  ;; The caller owns its durable goal column; omitting it uses OFFSET's current
+  ;; display column.  Empty cells at the end of a short line fall back to the
+  ;; nearest mapped cell on that row, while wide and virtual cells retain the
+  ;; normal DisplayMap mapping semantics.
+  (define text-layout-vertical-target
+    (case-lambda
+      [(layout offset delta)
+       (text-layout-vertical-target layout offset delta #f)]
+      [(layout offset delta goal-column)
+       (unless (and (text-layout? layout) (offset? offset)
+                    (integer? delta) (exact? delta)
+                    (or (not goal-column) (offset? goal-column)))
+         (assertion-violation 'text-layout-vertical-target
+                              "invalid TextLayout vertical motion request"
+                              layout offset delta goal-column))
+       (let ([point (text-layout-document->point layout offset)])
+         (and point
+              (let* ([frame (text-layout-frame layout)]
+                     [width (frame-width frame)]
+                     [target-row (+ (car point) delta)]
+                     [column (or goal-column (cdr point))])
+                (and (> width 0)
+                     (>= target-row 0)
+                     (< target-row (frame-height frame))
+                     (let ([target-column (min column (- width 1))])
+                       (let loop ([distance 0])
+                         (if (>= distance width)
+                             #f
+                             (let* ([left (- target-column distance)]
+                                    [right (+ target-column distance)]
+                                    [left-value
+                                     (and (>= left 0)
+                                          (text-layout-point->document
+                                            layout target-row left))]
+                                    [right-value
+                                     (and (> distance 0) (< right width)
+                                          (text-layout-point->document
+                                            layout target-row right))])
+                               (cond [left-value left-value]
+                                     [right-value right-value]
+                                     [else (loop (+ distance 1))])))))))))]))
 
   (define (grapheme-width text)
     (unicode-grapheme-width (string->utf8 text)))

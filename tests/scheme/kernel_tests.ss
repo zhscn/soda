@@ -1862,6 +1862,18 @@
   (snapshot-close! snapshot)
   (document-close! document))
 
+(let* ([document (make-document "abcdef\nx")]
+       [snapshot (document-snapshot document)]
+       [selection (make-selection (list (make-selection-range 5 5)))]
+       [layout (layout-text-snapshot snapshot selection 0 6 2)])
+  (unless (and (= (text-layout-vertical-target layout 5 1) 7)
+               (= (text-layout-vertical-target layout 5 1 5) 7)
+               (= (text-layout-vertical-target layout 7 -1 5) 5)
+               (not (text-layout-vertical-target layout 5 2)))
+    (error 'kernel-tests "text layout vertical motion differs"))
+  (snapshot-close! snapshot)
+  (document-close! document))
+
 (let* ([document (make-document "abc")]
        [snapshot (document-snapshot document)]
        [selection (make-selection (list (make-selection-range 0 0)))]
