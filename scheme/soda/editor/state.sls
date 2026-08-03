@@ -279,6 +279,7 @@
           (soda editor language)
           (soda editor language-state)
           (soda editor language-session)
+          (soda editor line-range)
           (soda editor location)
           (soda editor minor-mode)
           (soda editor prefix)
@@ -3608,14 +3609,6 @@
         entries))
     (editor-kill-ring-set! value entries))
 
-  (define (display-line-leading-end text line)
-    (let ([end (text-line-content-end text line)])
-      (let loop ([offset (text-line-start text line)])
-        (if (and (< offset end)
-                 (memv (text-byte-at text offset) '(9 32)))
-            (loop (+ offset 1))
-            offset))))
-
   (define (fold-display-run fold text)
     (let* ([size (text-size text)]
            [start (min (fold-start fold) size)]
@@ -3626,7 +3619,7 @@
       (and
         (< start-line end-line)
         (let ([display-start (text-line-content-end text start-line)]
-              [display-end (display-line-leading-end text end-line)])
+              [display-end (text-line-leading-end text end-line)])
           (and
             (< display-start display-end)
             (make-replacement-display-run

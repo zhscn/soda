@@ -676,20 +676,9 @@
                   (cons key keys)
                   (cons (car remaining) result)))))))
 
-  (define (diagnostic-resource-key item)
-    (or
-      (location-item-resource item)
-      (and
-        (location-item-buffer-id item)
-        (string-append
-          "<buffer "
-          (number->string (location-item-buffer-id item))
-          ">"))
-      "<buffer>"))
-
   (define (workspace-diagnostic-item-before? left right)
-    (let ([left-resource (diagnostic-resource-key left)]
-          [right-resource (diagnostic-resource-key right)])
+    (let ([left-resource (location-item-resource-label left)]
+          [right-resource (location-item-resource-label right)])
       (cond
         [(string<? left-resource right-resource) #t]
         [(string<? right-resource left-resource) #f]

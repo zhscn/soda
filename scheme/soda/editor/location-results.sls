@@ -140,15 +140,6 @@
           (list (car base) (cadr base) presentation #f #f)
           base)))
 
-  (define (location-resource-label item)
-    (or (location-item-resource item)
-        (and (location-item-buffer-id item)
-             (string-append
-               "<buffer "
-               (number->string (location-item-buffer-id item))
-               ">"))
-        "<buffer>"))
-
   (define (location-row editor item)
     (let* ([presentation (location-presentation editor item)]
            [prefix
@@ -179,7 +170,7 @@
       (let loop ([items (location-list-items locations)] [index 0])
         (unless (null? items)
           (let* ([item (car items)]
-                 [resource (location-resource-label item)])
+                 [resource (location-item-resource-label item)])
             (unless (equal? resource last-resource)
               (emit!
                 (string-append resource "\n")
@@ -221,7 +212,7 @@
       (let loop ([items items] [index start-index])
         (unless (null? items)
           (let* ([item (car items)]
-                 [resource (location-resource-label item)])
+                 [resource (location-item-resource-label item)])
             (unless (equal? resource last-resource)
               (emit!
                 (string-append resource "\n")

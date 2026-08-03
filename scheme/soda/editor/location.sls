@@ -16,6 +16,7 @@
           location-item-start
           location-item-end
           location-item-excerpt
+          location-item-resource-label
           location-item-presentation
           location-item-metadata
           location-item-language-context
@@ -87,6 +88,17 @@
   (define-record-type
     (location-list %make-location-list location-list?)
     (fields source (mutable items) (mutable index)))
+
+  (define (location-item-resource-label item)
+    (or
+      (location-item-resource item)
+      (and
+        (location-item-buffer-id item)
+        (string-append
+          "<buffer "
+          (number->string (location-item-buffer-id item))
+          ">"))
+      "<buffer>"))
 
   (define (make-buffer-location buffer offset)
     (unless (buffer? buffer)
