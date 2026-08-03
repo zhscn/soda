@@ -872,7 +872,12 @@
               (begin
                 (when (lsp-client-document-observer-name document)
                   (buffer-remove-change-observer!
-                    buffer (lsp-client-document-observer-name document)))
+                    buffer (lsp-client-document-observer-name document))
+                  (editor-remove-buffer-hook!
+                    editor
+                    buffer
+                    'before-buffer-removed
+                    (lsp-client-document-observer-name document)))
                 (lsp-client-session-documents-set!
                   session
                   (filter
