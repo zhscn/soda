@@ -560,8 +560,7 @@
           (apply implementation context arguments))
         "Run a known Project task in a Compilation Buffer."
         #f
-        (make-interactive-plan (list known-project-task-reader))
-        '())))
+        (make-interactive-plan (list known-project-task-reader)))))
 
   (define (run-lifecycle-command state phase context)
     (let* ([editor (command-context-editor context)]

@@ -21,7 +21,6 @@
           command-definition-documentation
           command-definition-class
           command-definition-interactive-plan
-          command-definition-modes
           attach-command-definition!
           procedure-command-definition
           define-command
@@ -144,8 +143,7 @@
             invoker
             documentation
             class
-            interactive-plan
-            modes))
+            interactive-plan))
 
   (define-record-type
     (command-invocation %make-command-invocation command-invocation?)
@@ -254,8 +252,7 @@
             invoker
             documentation
             class
-            interactive-plan
-            modes)
+            interactive-plan)
     (unless (symbol? name)
       (assertion-violation
         'make-command-definition
@@ -287,19 +284,13 @@
         'make-command-definition
         "interactive plan must be an interactive plan or #f"
         interactive-plan))
-    (unless (and (list? modes) (for-all symbol? modes))
-      (assertion-violation
-        'make-command-definition
-        "command modes must be a list of symbols"
-        modes))
     (%make-command-definition
       name
       procedure
       invoker
       documentation
       class
-      interactive-plan
-      modes))
+      interactive-plan))
 
   (define (attach-command-definition! procedure definition)
     (unless (procedure? procedure)
@@ -347,8 +338,7 @@
                    documentation
                    #f
                    (make-interactive-plan
-                     (list reader ...))
-                   '()))
+                     (list reader ...))))
                implementation))]
         [(_ (name context argument ...)
             (interactive reader ...)
@@ -446,8 +436,7 @@
       (or documentation
           (command-definition-documentation definition))
       (or class (command-definition-class definition))
-      (command-definition-interactive-plan definition)
-      (command-definition-modes definition)))
+      (command-definition-interactive-plan definition)))
 
   (define (make-context-command
             name
@@ -479,8 +468,7 @@
                     (procedure context))
                   (command-definition-documentation definition)
                   (command-definition-class definition)
-                  #f
-                  (command-definition-modes definition))))
+                  #f)))
           (make-command-definition
             name
             procedure
@@ -493,8 +481,7 @@
               (procedure context))
             documentation
             class
-            (and interactive? (make-interactive-plan '()))
-            '()))))
+            (and interactive? (make-interactive-plan '()))))))
 
   (define make-interactive-context-command
     (case-lambda

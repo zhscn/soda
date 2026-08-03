@@ -261,8 +261,7 @@
           "Rename the Scheme binding at point across the workspace."
           #f
           (make-interactive-plan
-            (list (rename-reader environments)))
-          '())))
+            (list (rename-reader environments))))))
     (editor-bind-key!
       editor
       (list (make-character-key-stroke #\c 4) (make-character-key-stroke #\r 4))

@@ -863,8 +863,7 @@
                 (project-manifest-choice-source
                   state))
               'must-match
-              'scheme-project-manifest)))
-        '())))
+              'scheme-project-manifest))))))
 
   (define (cancel-project-build!
             state
@@ -908,8 +907,7 @@
                 (active-build-choice-source
                   state))
               'must-match
-              'scheme-project-build)))
-        '())))
+              'scheme-project-build))))))
 
   (define (unload-project!
             environments
@@ -960,8 +958,7 @@
                 (project-owner-choice-source
                   environments))
               'must-match
-              'scheme-project-owner)))
-        '())))
+              'scheme-project-owner))))))
 
   (define (install-scheme-project-session-commands!
             editor

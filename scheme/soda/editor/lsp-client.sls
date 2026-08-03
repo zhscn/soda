@@ -3848,8 +3848,7 @@
           (apply lsp-format-command context arguments))
         "Format the active region or the complete Buffer with the language server."
         #f
-        (make-interactive-plan (list lsp-format-target-reader))
-        '()))
+        (make-interactive-plan (list lsp-format-target-reader))))
     (editor-register-command!
       editor
       (make-interactive-context-command
@@ -3929,8 +3928,7 @@
           "Find symbols across the language-server workspace."
           #f
           (make-interactive-plan
-            (list (interactive-string "Workspace symbol: " 'lsp-workspace-symbol)))
-          '())))
+            (list (interactive-string "Workspace symbol: " 'lsp-workspace-symbol))))))
     (editor-register-command!
       editor
       (make-interactive-context-command
@@ -3955,8 +3953,7 @@
           (lambda (context arguments) (apply implementation context arguments))
           "Rename the language-server symbol at point."
           #f
-          (make-interactive-plan (list (lsp-rename-reader)))
-          '())))
+          (make-interactive-plan (list (lsp-rename-reader))))))
     (editor-register-command!
       editor
       (make-interactive-context-command

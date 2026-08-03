@@ -528,8 +528,7 @@
         #f
         (make-interactive-plan
           (list
-            (workspace-symbol-reader environments)))
-        '())))
+            (workspace-symbol-reader environments))))))
 
   (define (find-document-symbol-command
             environments
@@ -579,8 +578,7 @@
         #f
         (make-interactive-plan
           (list
-            (document-symbol-reader environments)))
-        '())))
+            (document-symbol-reader environments))))))
 
   (define (install-scheme-xref-commands! editor)
     (let ([environments (make-scheme-environment-registry)])
