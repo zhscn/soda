@@ -1,6 +1,5 @@
 (library (soda editor entity-registry)
   (export make-entity-registry
-          entity-registry?
           entity-registry-ids
           entity-registry-values
           entity-registry-ref

@@ -108,7 +108,6 @@
           completion-request-query
           completion-request-context
           completion-session-schedule-requests!
-          completion-session-closed?
           completion-session-close!
           completion-window-max-rows
           completion-session-selected-index

@@ -9,7 +9,6 @@
           completion-provider-catalog?
           completion-provider-catalog-snapshot
           completion-provider-catalog-restore!
-          completion-provider-catalog-register!
           completion-provider-catalog-find
           completion-provider-catalog-ref
           completion-provider-for-request

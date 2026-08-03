@@ -1,6 +1,5 @@
 (library (soda editor file-runtime)
   (export install-file-runtime!
-          file-runtime?
           file-runtime-handle-event)
   (import (chezscheme)
           (soda editor condition)

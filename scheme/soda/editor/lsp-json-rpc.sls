@@ -1,6 +1,5 @@
 (library (soda editor lsp-json-rpc)
   (export make-lsp-json-rpc-decoder
-          lsp-json-rpc-decoder?
           lsp-json-rpc-decoder-pending-bytes
           lsp-json-rpc-decode!
           lsp-json-rpc-frame)

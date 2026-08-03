@@ -1,8 +1,6 @@
 (library (soda editor cpp-language)
-  (export install-cpp-language!
-          cpp-language-session?
+  (export cpp-language-session?
           cpp-language-session-analyzer
-          cpp-syntax-view?
           cpp-syntax-view-analyzer
           cpp-language-compute-indent)
   (import (rnrs)

@@ -1,6 +1,5 @@
 (library (soda editor evaluation-runtime)
   (export install-evaluation-runtime!
-          evaluation-runtime?
           evaluation-runtime-event?
           evaluation-runtime-handle-event
           evaluation-runtime-busy?)
