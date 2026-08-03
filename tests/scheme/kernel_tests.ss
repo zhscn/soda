@@ -1006,6 +1006,17 @@
                (window-selected? left))
     (error 'kernel-tests "weighted Window layout or initial selection differs")))
 
+(let* ([left (make-leaf-window 1 #f)]
+       [middle (make-leaf-window 2 #f)]
+       [right (make-leaf-window 3 #f)]
+       [root (make-split-window 'horizontal (list left middle right) #f)]
+       [surface (make-surface root '(9 . 1))])
+  (surface-set-selected-window! surface right)
+  (surface-remove-window! surface (window-id left))
+  (unless (and (eq? (surface-selected-window surface) right)
+               (= (length (window-leaves (surface-root-window surface))) 2))
+    (error 'kernel-tests "Surface retained focus after non-active leaf removal differs")))
+
 (surface-resize! surface '(40 . 12))
 (unless (and (= (surface-generation surface) 1)
              (equal? (window-rectangle leaf) '(0 0 40 12)))

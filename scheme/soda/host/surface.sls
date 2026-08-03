@@ -164,19 +164,22 @@
       new-leaf))
 
   ;; Removing the final leaf has no meaning: a Surface always retains a live
-  ;; selected placement.  Removing a non-final leaf selects the first leaf in
-  ;; the rebuilt tree and returns it.
+  ;; selected placement.  A non-active removal preserves the selected leaf;
+  ;; removing that leaf selects the first leaf in the rebuilt tree.
   (define (surface-remove-window! surface window-id)
     (unless (and (surface? surface) (view-id? window-id))
       (assertion-violation 'surface-remove-window!
                            "invalid Surface or Window identity" surface window-id))
     (let* ([root (surface-root-window surface)]
-           [target (leaf-by-id root window-id)])
+           [target (leaf-by-id root window-id)]
+           [selected (surface-selected-window surface)])
       (and target
            (let ([next-root (remove-window root target)])
              (and next-root
                   (surface-rebuild-window! surface next-root
-                                           (car (window-leaves next-root))))))))
+                                           (if (eq? target selected)
+                                               (car (window-leaves next-root))
+                                               selected)))))))
 
   ;; A Surface registry owns identity lookup only.  Frontends keep their own
   ;; terminal resources, while dispatcher operations resolve a target Surface
