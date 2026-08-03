@@ -13,6 +13,7 @@
           text-layout-options-wrap?
           default-text-layout-options
           text-layout-options-facet
+          layout-display-stream
           layout-text-snapshot)
   (import (rnrs)
           (soda kernel document)
@@ -94,6 +95,14 @@
   (define (grapheme-width text)
     (unicode-grapheme-width (string->utf8 text)))
 
+  (define (bytevector-slice bytes from to)
+    (let ([result (make-bytevector (- to from))])
+      (let loop ([source from] [target 0])
+        (when (< source to)
+          (bytevector-u8-set! result target (bytevector-u8-ref bytes source))
+          (loop (+ source 1) (+ target 1))))
+      result))
+
   (define (selected? selection from to)
     (exists
       (lambda (range)
@@ -103,6 +112,111 @@
 
   (define (line-at text requested)
     (min (max 0 requested) (- (text-line-count text) 1)))
+
+  ;; Layout a pre-transformed DisplayStream.  This is the shared endpoint for
+  ;; document text and View-local display providers: fragments retain their
+  ;; document interval or virtual anchor, while this procedure owns only cell
+  ;; placement, wrapping, and Frame construction.
+  (define layout-display-stream
+    (case-lambda
+      [(stream selection width height)
+       (layout-display-stream stream selection width height default-text-layout-options)]
+      [(stream selection width height options)
+       (unless (and (display-stream? stream) (selection? selection)
+                    (offset? width) (offset? height) (text-layout-options? options))
+         (assertion-violation 'layout-display-stream "invalid DisplayStream layout request"))
+       (let ([cells (make-vector (* width height) default-frame-cell)]
+             [entries '()]
+             [row 0]
+             [column 0]
+             [caret (selection-range-head (selection-primary-range selection))])
+         (define (put! target-row target-column cell)
+           (vector-set! cells (+ (* target-row width) target-column) cell))
+         (define (advance-line!)
+           (set! row (+ row 1))
+           (set! column 0))
+         (define (record-entry! from to target-row target-column glyph-width kind source)
+           (set! entries
+             (cons (make-display-map-entry
+                     from to
+                     (+ (* target-row width) target-column)
+                     (+ (* target-row width) target-column glyph-width)
+                     kind source)
+                   entries)))
+         (define (emit! glyph glyph-width from to kind face source)
+           (cond
+             [(or (>= row height) (= width 0) (> glyph-width width)) #f]
+             [(> (+ column glyph-width) width)
+              (if (and (text-layout-options-wrap? options) (> column 0))
+                  (begin (advance-line!) (emit! glyph glyph-width from to kind face source))
+                  #f)]
+             [else
+              (put! row column (make-frame-cell glyph glyph-width #f face source))
+              (when (= glyph-width 2)
+                (put! row (+ column 1) (make-frame-cell "" 0 #t face source)))
+              (record-entry! from to row column glyph-width kind source)
+              (set! column (+ column glyph-width))
+              #t]))
+         (define (emit-text! fragment)
+           (let* ((string (display-text-text fragment))
+                  (bytes (string->utf8 string))
+                  (size (bytevector-length bytes))
+                  (from (display-text-from fragment))
+                  (to (display-text-to fragment))
+                  (source (display-text-source fragment))
+                  (face (display-text-face fragment))
+                  (identity? (= size (- to from))))
+             (let loop ((byte 0))
+               (when (< byte size)
+                 (let* ((next (unicode-next-grapheme-offset bytes byte))
+                        (glyph (utf8->string (bytevector-slice bytes byte next)))
+                        (document-from (if identity? (+ from byte)
+                                           (if (= byte 0) from to)))
+                        (document-to (if identity? (+ from next) to)))
+                   (if (string=? glyph "\n")
+                       (advance-line!)
+                       (let* ((tab? (string=? glyph "\t"))
+                              (glyph-width
+                               (if tab?
+                                   (- (text-layout-options-tab-width options)
+                                      (mod column (text-layout-options-tab-width options)))
+                                   (max 1 (grapheme-width glyph)))))
+                         (emit! (if tab? " " glyph) glyph-width
+                                document-from document-to
+                                (if identity? 'text 'virtual)
+                                (if (selected? selection document-from document-to)
+                                    'selection
+                                    face)
+                                source)))
+                   (loop next))))))
+         (define (emit-widget! fragment)
+           (let loop-row ([remaining (display-widget-height fragment)])
+             (when (and (> remaining 0) (< row height))
+               (let loop-column ([remaining-width (display-widget-width fragment)])
+                 (when (> remaining-width 0)
+                   (emit! " " 1
+                          (display-widget-anchor fragment) (display-widget-anchor fragment)
+                          'widget (display-widget-face fragment)
+                          (display-widget-source fragment))
+                   (loop-column (- remaining-width 1))))
+               (when (> remaining 1) (advance-line!))
+               (loop-row (- remaining 1)))))
+         (for-each
+           (lambda (fragment)
+             (cond [(display-text? fragment) (emit-text! fragment)]
+                   [(display-break? fragment) (advance-line!)]
+                   [else (emit-widget! fragment)]))
+           (display-stream-fragments stream))
+         (let* ([frame (make-frame width height cells)]
+                [map (make-display-map (reverse entries))]
+                [cell (display-map-document->cell map caret 'after)]
+                [capacity (* width height)]
+                [cursor-row
+                 (and (> width 0) (> height 0) cell
+                      (div (min cell (- capacity 1)) width))]
+                [cursor-column
+                 (and cursor-row (mod (min cell (- capacity 1)) width))])
+           (make-text-layout frame map cursor-row cursor-column)))]))
 
   ;; `first-line` is a logical line index.  Layout clips at the requested
   ;; terminal rectangle and reports the primary caret in display coordinates.

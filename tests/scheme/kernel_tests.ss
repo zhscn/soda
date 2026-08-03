@@ -1642,6 +1642,34 @@
   (snapshot-close! snapshot)
   (document-close! document))
 
+(let* ([stream
+        (make-display-stream
+          (list (make-display-text "ab" 0 2 'text 'document)
+                (make-display-widget 1 1 2 'hint 'inlay)
+                (make-display-text "c" 2 3 'text 'document)))]
+       [selection (make-selection (list (make-selection-range 0 0)))]
+       [layout (layout-display-stream stream selection 4 1)]
+       [frame (text-layout-frame layout)]
+       [map (text-layout-display-map layout)])
+  (unless (and (string=? (frame-cell-grapheme (frame-cell-at frame 0 0)) "a")
+               (string=? (frame-cell-grapheme (frame-cell-at frame 0 1)) "b")
+               (eq? (frame-cell-face (frame-cell-at frame 0 2)) 'hint)
+               (string=? (frame-cell-grapheme (frame-cell-at frame 0 3)) "c")
+               (= (display-map-cell->document map 2) 2)
+               (= (display-map-document->cell map 2 'before) 2)
+               (= (display-map-document->cell map 2 'after) 3))
+    (error 'kernel-tests "DisplayStream layout differs")))
+
+(let* ([stream
+        (make-display-stream
+          (list (make-display-text "e\x301;" 0 3 'text 'document)))]
+       [selection (make-selection (list (make-selection-range 0 0)))]
+       [layout (layout-display-stream stream selection 2 1)])
+  (unless (and (string=? (frame-cell-grapheme
+                           (frame-cell-at (text-layout-frame layout) 0 0)) "e\x301;")
+               (equal? (text-layout-document->point layout 3) '(0 . 1)))
+    (error 'kernel-tests "DisplayStream grapheme layout differs")))
+
 (let* ([base (make-frame 4 2)]
        [top (frame-with-cell (make-frame 2 1) 0 0
                              (make-frame-cell "x" 1 #f 'overlay #f))]
