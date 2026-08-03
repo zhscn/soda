@@ -42,7 +42,6 @@
       (unless (and (integer? width) (exact? width) (>= width 0)
                    (integer? height) (exact? height) (>= height 0))
         (assertion-violation 'render-surface "invalid Surface size" size))
-      (window-layout! (surface-root-window surface) 0 0 width height)
       (let loop ([leaves (window-leaves (surface-root-window surface))]
                  [placements '()] [cursor-row #f] [cursor-column #f])
           (if (null? leaves)

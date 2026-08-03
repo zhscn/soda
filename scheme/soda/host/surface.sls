@@ -6,6 +6,7 @@
           surface-root-window
           surface-selected-window
           surface-set-selected-window!
+          surface-resize!
           surface-generation
           make-surface-input-message
           surface-input-message?
@@ -42,12 +43,26 @@
 
   (define surface-identities (make-identity-source))
 
+  (define (surface-size? size)
+    (and (pair? size) (integer? (car size)) (exact? (car size)) (>= (car size) 0)
+         (integer? (cdr size)) (exact? (cdr size)) (>= (cdr size) 0)))
+
   (define (make-surface root-window size)
-    (unless (window? root-window)
-      (assertion-violation 'make-surface "expected a root window" root-window))
-    (%make-surface
-      (identity-source-next! surface-identities)
-      size root-window #f 0))
+    (unless (and (window? root-window) (surface-size? size))
+      (assertion-violation 'make-surface "invalid root window or surface size"))
+    (window-layout! root-window 0 0 (car size) (cdr size))
+    (%make-surface (identity-source-next! surface-identities) size root-window #f 0))
+
+  (define (surface-resize! surface size)
+    (unless (and (surface? surface) (surface-size? size))
+      (assertion-violation 'surface-resize! "invalid Surface resize" surface size))
+    (if (equal? size (surface-size surface))
+        #f
+        (begin
+          (surface-size-set! surface size)
+          (window-layout! (surface-root-window surface) 0 0 (car size) (cdr size))
+          (surface-generation-set! surface (+ 1 (surface-generation surface)))
+          size)))
 
   (define (surface-set-selected-window! surface window)
     (unless (and (surface? surface) (window? window))

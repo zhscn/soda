@@ -889,6 +889,12 @@
                (equal? (window-rectangle right) '(0 4 3 3)))
     (error 'kernel-tests "Window grid layout differs")))
 
+(surface-resize! surface '(40 . 12))
+(unless (and (= (surface-generation surface) 2)
+             (equal? (window-rectangle leaf) '(0 0 40 12)))
+  (error 'kernel-tests "Surface resize layout differs"))
+(surface-resize! surface '(80 . 24))
+
 (let ([rendered (render-surface surface (host-state-views host))])
   (unless (and (= (frame-width (surface-render-frame rendered)) 80)
                (= (frame-height (surface-render-frame rendered)) 24)
