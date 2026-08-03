@@ -26,8 +26,7 @@
           tree-sitter-capture-pattern-index
           tree-sitter-capture-properties)
   (import (chezscheme)
-          (soda document)
-          (soda document handles)
+          (soda ffi handles)
           (soda native)
           (soda tree-sitter handles))
 

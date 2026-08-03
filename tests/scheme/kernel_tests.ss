@@ -14,7 +14,10 @@
         (soda host value)
         (soda host view)
         (soda host window)
-        (soda kernel document))
+        (soda kernel document)
+        (soda cpp-analysis)
+        (soda indentation)
+        (soda tree-sitter))
 
 (define selection
   (make-selection

@@ -22,7 +22,7 @@
   (import (chezscheme)
           (soda native)
           (soda cpp-analysis handles)
-          (soda document handles))
+          (soda ffi handles))
 
   (define text-npos #xffffffff)
 

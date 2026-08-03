@@ -29,7 +29,7 @@
   (import (chezscheme)
           (soda native)
           (soda cpp-analysis handles)
-          (soda document handles))
+          (soda ffi handles))
 
   (define syntax-node-none #xffffffff)
   (define revision-none #xffffffffffffffff)

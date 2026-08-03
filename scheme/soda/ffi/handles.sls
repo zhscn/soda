@@ -1,4 +1,4 @@
-(library (soda document handles)
+(library (soda ffi handles)
   (export text?
           %make-text
           text-pointer
