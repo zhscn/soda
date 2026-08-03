@@ -263,10 +263,13 @@
                 [cell (display-map-document->cell map caret 'after)]
                 [capacity (* width height)]
                 [cursor-row
-                 (and (> width 0) (> height 0) cell
-                      (div (min cell (- capacity 1)) width))]
+                 (and (> width 0) (> height 0)
+                      (cond [cell (div (min cell (- capacity 1)) width)]
+                            [(= caret 0) 0]
+                            [else #f]))]
                 [cursor-column
-                 (and cursor-row (mod (min cell (- capacity 1)) width))])
+                 (and cursor-row
+                      (if cell (mod (min cell (- capacity 1)) width) 0))])
            (make-text-layout frame map cursor-row cursor-column)))]))
 
   ;; `first-line` is a logical line index.  Layout clips at the requested

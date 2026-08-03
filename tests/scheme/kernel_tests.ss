@@ -1758,6 +1758,14 @@
                (string=? (frame-cell-grapheme (frame-cell-at (text-layout-frame layout) 0 3)) "c"))
     (error 'kernel-tests "DisplayStream transform differs")))
 
+(let ([layout
+       (layout-display-stream (make-display-stream '())
+                              (make-selection (list (make-selection-range 0 0)))
+                              2 1)])
+  (unless (and (= (text-layout-cursor-row layout) 0)
+               (= (text-layout-cursor-column layout) 0))
+    (error 'kernel-tests "empty DisplayStream caret differs")))
+
 (let* ([base (make-frame 4 2)]
        [top (frame-with-cell (make-frame 2 1) 0 0
                              (make-frame-cell "x" 1 #f 'overlay #f))]
