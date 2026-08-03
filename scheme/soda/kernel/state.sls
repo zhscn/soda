@@ -135,7 +135,8 @@
     (let ([configuration
             (configuration-apply-effects
               (buffer-state-configuration state)
-              (transaction-effects transaction))])
+              (transaction-effects transaction)
+              'buffer)])
       (%make-buffer-state
         document
         configuration
@@ -146,7 +147,8 @@
     (let ([configuration
             (configuration-apply-effects
               (view-state-configuration state)
-              (transaction-effects transaction))])
+              (transaction-effects transaction)
+              'view)])
       (%make-view-state
         (view-state-buffer-id state)
         (let ([new-buffer-state (transaction-new-buffer-state transaction)])
@@ -245,10 +247,15 @@
 
   (define (map-effects changes effects)
     (let ([description (change-set-change-desc changes)])
-      (map
-        (lambda (effect)
-          (state-effect-map-value effect description))
-        (normalize-effects 'make-transaction effects))))
+      (let loop ([items (normalize-effects 'make-transaction effects)]
+                 [result '()])
+        (if (null? items)
+            (reverse result)
+            (let ([mapped
+                    (state-effect-map-value (car items) description)])
+              (loop
+                (cdr items)
+                (if mapped (cons mapped result) result)))))))
 
   (define (realize-transaction start-buffer-state start-view-state changes selection
                                effects annotations document)

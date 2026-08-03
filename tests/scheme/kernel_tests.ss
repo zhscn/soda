@@ -225,6 +225,17 @@
   (transaction-new-buffer-state reconfigured-transaction))
 (unless (eq? (buffer-state-field reconfigured-state mode-field) 'mode)
   (error 'kernel-tests "compartment reconfiguration differs"))
+(let* ([new-compartment (make-compartment 'new-mode)]
+       [new-configuration
+        (configuration-apply-effects
+          (make-configuration '())
+          (list (make-compartment-reconfigure-effect
+                  new-compartment mode-field)))])
+  (unless (and (= (length (configuration-fields new-configuration 'buffer)) 1)
+               (eq? (state-field-name
+                      (car (configuration-fields new-configuration 'buffer)))
+                    'mode))
+    (error 'kernel-tests "absent compartment reconfiguration differs")))
 (define reconfigured-with-view
   (make-transaction
     configurable-state view-snapshot changes #f
@@ -253,6 +264,16 @@
             provided-facet)
           'from-state-field)
   (error 'kernel-tests "state field provider differs"))
+
+(let ([drop-effect
+        (make-state-effect
+          'drop
+          'value
+          (lambda (value description) #f))])
+  (unless (not (state-effect-map-value
+                drop-effect
+                (change-set-change-desc changes)))
+    (error 'kernel-tests "deleted state effect was not retired")))
 
 (define host (make-host-state))
 (define owner (make-owner 'kernel-test))

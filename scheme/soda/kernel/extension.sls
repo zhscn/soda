@@ -34,6 +34,7 @@
           make-compartment
           compartment?
           compartment-name
+          compartment-scope
           make-compartment-entry
           compartment-entry?
           compartment-entry-compartment
@@ -130,10 +131,18 @@
     (unless (change-desc? change-desc)
       (assertion-violation
         'state-effect-map-value "expected a ChangeDesc" change-desc))
-    (%make-state-effect
-      (state-effect-type effect)
-      ((state-effect-map effect) (state-effect-value effect) change-desc)
-      (state-effect-map effect)))
+    (let ([mapped
+            ((state-effect-map effect) (state-effect-value effect) change-desc)])
+      ;; A mapper may return #f to retire an effect that was deleted by the
+      ;; document change.  Preserve the original immutable value when the
+      ;; mapper leaves it untouched.
+      (and mapped
+           (if (eq? mapped (state-effect-value effect))
+               effect
+               (%make-state-effect
+                 (state-effect-type effect)
+                 mapped
+                 (state-effect-map effect))))))
 
   (define-record-type
     (annotation %make-annotation annotation?)
@@ -174,12 +183,19 @@
 
   (define-record-type
     (compartment %make-compartment compartment?)
-    (fields (immutable name compartment-name)))
+    (fields
+      (immutable name compartment-name)
+      (immutable scope compartment-scope)))
 
-  (define (make-compartment name)
-    (unless (symbol? name)
-      (assertion-violation 'make-compartment "name must be a symbol" name))
-    (%make-compartment name))
+  (define make-compartment
+    (case-lambda
+      [(name) (make-compartment name 'buffer)]
+      [(name scope)
+       (unless (symbol? name)
+         (assertion-violation 'make-compartment "name must be a symbol" name))
+       (unless (memq scope '(buffer view host))
+         (assertion-violation 'make-compartment "invalid compartment scope" scope))
+       (%make-compartment name scope)]))
 
   (define-record-type
     (compartment-entry %make-compartment-entry compartment-entry?)
@@ -320,25 +336,30 @@
           (make-configuration
             (append extensions (list (make-compartment-entry compartment extension)))))))
 
-  (define (configuration-apply-effects configuration effects)
+  (define (configuration-apply-effects configuration effects . scope)
     (unless (configuration? configuration)
       (assertion-violation
         'configuration-apply-effects "expected a configuration" configuration))
-    (fold-left
-      (lambda (current effect)
-        (if (and (state-effect? effect)
-                 (eq? (state-effect-type effect) 'compartment-reconfigure)
-                 (compartment-entry? (state-effect-value effect)))
-            (let ([entry (state-effect-value effect)])
-              (if (contains-compartment?
-                    (configuration-extensions current)
-                    (compartment-entry-compartment entry))
-                  (configuration-reconfigure
-                    current
-                    (compartment-entry-compartment entry)
-                    (compartment-entry-extension entry))
-                  current))
-            current))
-      configuration
-      (if (list? effects) effects (list effects))))
+    (let ([scope (if (null? scope) #f (car scope))])
+      (unless (or (not scope) (memq scope '(buffer view host)))
+        (assertion-violation
+          'configuration-apply-effects "invalid configuration scope" scope))
+      (fold-left
+        (lambda (current effect)
+          (if (and (state-effect? effect)
+                   (eq? (state-effect-type effect) 'compartment-reconfigure)
+                   (compartment-entry? (state-effect-value effect)))
+              (let* ([entry (state-effect-value effect)]
+                     [compartment (compartment-entry-compartment entry)])
+                (if (or (not scope) (eq? scope (compartment-scope compartment)))
+                    ;; Reconfiguring a compartment that was not present
+                    ;; appends it to the configuration.
+                    (configuration-reconfigure
+                      current
+                      compartment
+                      (compartment-entry-extension entry))
+                    current))
+              current))
+        configuration
+        (if (list? effects) effects (list effects)))))
 )
