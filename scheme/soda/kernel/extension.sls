@@ -38,12 +38,14 @@
           compartment-entry?
           compartment-entry-compartment
           compartment-entry-extension
+          make-compartment-reconfigure-effect
           make-configuration
           configuration?
           configuration-extensions
           configuration-fields
           configuration-facet
-          configuration-reconfigure)
+          configuration-reconfigure
+          configuration-apply-effects)
   (import (rnrs))
 
   (define (scope? value) (memq value '(buffer view host)))
@@ -181,6 +183,16 @@
         'make-compartment-entry "expected a compartment" compartment))
     (%make-compartment-entry compartment extension))
 
+  (define (make-compartment-reconfigure-effect compartment extension)
+    (unless (compartment? compartment)
+      (assertion-violation
+        'make-compartment-reconfigure-effect
+        "expected a compartment"
+        compartment))
+    (make-state-effect
+      'compartment-reconfigure
+      (make-compartment-entry compartment extension)))
+
   (define-record-type
     (configuration %make-configuration configuration?)
     (fields (immutable extensions configuration-extensions)))
@@ -199,6 +211,24 @@
       (assertion-violation 'make-configuration "extensions must be a list" extensions))
     (%make-configuration (flatten extensions)))
 
+  ;; Compartment entries remain in the raw extension list so they can be
+  ;; replaced atomically. Queries see the extension contributed by each entry,
+  ;; including nested extension lists.
+  (define (effective-extensions extensions)
+    (fold-right
+      (lambda (extension result)
+        (cond
+          [(compartment-entry? extension)
+           (append
+             (effective-extensions
+               (list (compartment-entry-extension extension)))
+             result)]
+          [(list? extension)
+           (append (effective-extensions extension) result)]
+          [else (cons extension result)]))
+      '()
+      extensions))
+
   (define (configuration-fields configuration scope)
     (unless (configuration? configuration)
       (assertion-violation
@@ -206,7 +236,7 @@
     (filter
       (lambda (field)
         (and (state-field? field) (eq? scope (state-field-scope field))))
-      (configuration-extensions configuration)))
+      (effective-extensions (configuration-extensions configuration))))
 
   (define precedence-order
     '((highest . 0) (high . 1) (default . 2) (low . 3) (lowest . 4)))
@@ -232,7 +262,7 @@
                   (lambda (extension)
                     (and (facet-provider? extension)
                          (eq? facet (facet-provider-facet extension))))
-                  (configuration-extensions configuration))))])
+                  (effective-extensions (configuration-extensions configuration)))))])
       (if (null? values) (facet-default facet) ((facet-combine facet) values))))
 
   (define (replace-compartment extensions compartment replacement)
@@ -264,4 +294,22 @@
             (replace-compartment extensions compartment extension))
           (make-configuration
             (append extensions (list (make-compartment-entry compartment extension)))))))
+
+  (define (configuration-apply-effects configuration effects)
+    (unless (configuration? configuration)
+      (assertion-violation
+        'configuration-apply-effects "expected a configuration" configuration))
+    (fold-left
+      (lambda (current effect)
+        (if (and (state-effect? effect)
+                 (eq? (state-effect-type effect) 'compartment-reconfigure)
+                 (compartment-entry? (state-effect-value effect)))
+            (let ([entry (state-effect-value effect)])
+              (configuration-reconfigure
+                current
+                (compartment-entry-compartment entry)
+                (compartment-entry-extension entry)))
+            current))
+      configuration
+      (if (list? effects) effects (list effects))))
 )

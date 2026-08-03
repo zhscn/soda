@@ -101,6 +101,27 @@
 (unless (= (state-effect-value (car (transaction-effects mapped-transaction))) 10)
   (error 'kernel-tests "state effect mapping differs"))
 
+(define mode-field
+  (make-state-field
+    'mode 'buffer
+    (lambda (state) 'mode)
+    (lambda (value transaction) value)))
+(define mode-compartment (make-compartment 'mode))
+(define configurable-state
+  (make-buffer-state
+    'document
+    (make-configuration
+      (list (make-compartment-entry mode-compartment history-field)))))
+(define reconfigured-transaction
+  (make-transaction
+    configurable-state #f changes #f
+    (list (make-compartment-reconfigure-effect mode-compartment mode-field))
+    '()))
+(define reconfigured-state
+  (transaction-new-buffer-state reconfigured-transaction))
+(unless (eq? (buffer-state-field reconfigured-state mode-field) 'mode)
+  (error 'kernel-tests "compartment reconfiguration differs"))
+
 (define host (make-host-state))
 (define owner (make-owner 'kernel-test))
 (define document (make-document "hello"))

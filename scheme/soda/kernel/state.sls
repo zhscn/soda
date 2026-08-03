@@ -78,13 +78,13 @@
           (cdr entry)
           (if (null? default) #f (car default)))))
 
-  (define (field-values-for state scope transaction)
+  (define (field-values-for state configuration scope transaction)
     (map
       (lambda (field)
         (let ([entry (field-entry
                        (if (buffer-state? state)
-                           (buffer-state-fields state)
-                           (view-state-fields state))
+                       (buffer-state-fields state)
+                       (view-state-fields state))
                        field)])
           (cons
             field
@@ -92,9 +92,7 @@
                 ((state-field-update field) (cdr entry) transaction)
                 ((state-field-create field) state)))))
       (configuration-fields
-        (if (buffer-state? state)
-            (buffer-state-configuration state)
-            (view-state-configuration state))
+        configuration
         scope)))
 
   (define-record-type
@@ -127,21 +125,29 @@
           (if (null? default) #f (car default)))))
 
   (define (advance-buffer-state state document transaction)
-    (%make-buffer-state
-      document
-      (buffer-state-configuration state)
-      (field-values-for state 'buffer transaction)
-      (+ 1 (buffer-state-generation state))))
+    (let ([configuration
+            (configuration-apply-effects
+              (buffer-state-configuration state)
+              (transaction-effects transaction))])
+      (%make-buffer-state
+        document
+        configuration
+        (field-values-for state configuration 'buffer transaction)
+        (+ 1 (buffer-state-generation state)))))
 
   (define (advance-view-state state selection transaction)
-    (%make-view-state
-      (view-state-buffer-id state)
-      selection
-      (view-state-viewport state)
-      (view-state-input-state state)
-      (view-state-configuration state)
-      (field-values-for state 'view transaction)
-      (+ 1 (view-state-generation state))))
+    (let ([configuration
+            (configuration-apply-effects
+              (view-state-configuration state)
+              (transaction-effects transaction))])
+      (%make-view-state
+        (view-state-buffer-id state)
+        selection
+        (view-state-viewport state)
+        (view-state-input-state state)
+        configuration
+        (field-values-for state configuration 'view transaction)
+        (+ 1 (view-state-generation state)))))
 
   (define (buffer-state-advance state document transaction)
     (unless (and (buffer-state? state) transaction)
