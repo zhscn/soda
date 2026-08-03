@@ -6,12 +6,15 @@
           range-value-value
           range-value-start-affinity
           range-value-end-affinity
+          range-value-map-mode
           make-range-set
           range-set?
           range-set-ranges
           range-set-empty?
           range-set-query
+          range-set-query-point
           range-set-cursor
+          range-set-sweep-cursor
           range-cursor?
           range-cursor-done?
           range-cursor-current
@@ -29,17 +32,22 @@
       (immutable to range-value-to)
       (immutable value range-value-value)
       (immutable start-affinity range-value-start-affinity)
-      (immutable end-affinity range-value-end-affinity)))
+      (immutable end-affinity range-value-end-affinity)
+      (immutable map-mode range-value-map-mode)))
 
   (define valid-affinities '(before after))
+  (define valid-map-modes '(retain drop))
 
   (define make-range-value
     (case-lambda
       [(from to value)
-       (make-range-value from to value 'after 'after)]
+       (make-range-value from to value 'after 'after 'retain)]
       [(from to value affinity)
-       (make-range-value from to value affinity affinity)]
+       (make-range-value from to value affinity affinity 'retain)]
       [(from to value start-affinity end-affinity)
+       (make-range-value
+         from to value start-affinity end-affinity 'retain)]
+      [(from to value start-affinity end-affinity map-mode)
        (unless (and (exact-integer? from) (exact-integer? to)
                     (>= from 0) (>= to from))
          (assertion-violation 'make-range-value "invalid range" from to))
@@ -49,8 +57,11 @@
        (unless (memq end-affinity valid-affinities)
          (assertion-violation
            'make-range-value "invalid end affinity" end-affinity))
+       (unless (memq map-mode valid-map-modes)
+         (assertion-violation
+           'make-range-value "invalid deletion map mode" map-mode))
        (%make-range-value
-         from to value start-affinity end-affinity)]))
+         from to value start-affinity end-affinity map-mode)]))
 
   (define-record-type
     (range-set %make-range-set range-set?)
@@ -144,6 +155,40 @@
                         (cons range result)
                         result))))))))
 
+  ;; Point queries include a zero-width value anchored at POINT as well as
+  ;; ordinary half-open ranges containing POINT.  The interval query above
+  ;; intentionally keeps its half-open semantics for viewport spans.
+  (define (range-set-query-point value point)
+    (unless (range-set? value)
+      (assertion-violation
+        'range-set-query-point "expected a range set" value))
+    (unless (and (exact-integer? point) (>= point 0))
+      (assertion-violation
+        'range-set-query-point "point must be a non-negative integer" point))
+    (let* ([index (range-set-index value)]
+           [prefix (range-set-prefix-max-end value)]
+           [start
+             (let loop ([low 0] [high (vector-length prefix)])
+               (if (>= low high)
+                   low
+                   (let ([middle (div (+ low high) 2)])
+                     (if (>= (vector-ref prefix middle) point)
+                         (loop low middle)
+                         (loop (+ middle 1) high)))))])
+      (let loop ([position start] [result '()])
+        (if (>= position (vector-length index))
+            (reverse result)
+            (let* ([range (vector-ref index position)]
+                   [from (range-value-from range)]
+                   [to (range-value-to range)]
+                   [matches (or (and (= from to) (= from point))
+                                (and (<= from point) (< point to)))])
+              (if (> from point)
+                  (reverse result)
+                  (loop
+                    (+ position 1)
+                    (if matches (cons range result) result))))))))
+
   (define (range-cursor-advance-to-match! cursor)
     (let ([index (range-cursor-index cursor)]
           [from (range-cursor-from cursor)]
@@ -161,11 +206,13 @@
                     (range-cursor-position-set! cursor position)
                     range)))))))
 
-  (define (range-set-cursor value from to)
+  (define (range-set-sweep-cursor value from to)
     (unless (range-set? value)
-      (assertion-violation 'range-set-cursor "expected a range set" value))
+      (assertion-violation
+        'range-set-sweep-cursor "expected a range set" value))
     (unless (valid-query? from to)
-      (assertion-violation 'range-set-cursor "invalid query range" from to))
+      (assertion-violation
+        'range-set-sweep-cursor "invalid query range" from to))
     (let ([cursor
             (%make-range-cursor
               (range-set-index value)
@@ -173,6 +220,11 @@
               (range-set-first-index value from))])
       (range-cursor-advance-to-match! cursor)
       cursor))
+
+  ;; Compatibility query retained for callers that used the original API.
+  ;; New rendering code should use range-set-sweep-cursor.
+  (define (range-set-cursor value from to)
+    (range-set-query value from to))
 
   (define (range-cursor-current cursor)
     (unless (range-cursor? cursor)
@@ -197,46 +249,94 @@
       (assertion-violation 'range-set-map "expected a range set" value))
     (unless (procedure? mapper)
       (assertion-violation 'range-set-map "mapper must be a procedure" mapper))
-    (make-range-set
-      (map
-        (lambda (range)
-          (let ([mapped (mapper range)])
+    ;; Preserve the existing immutable set when the mapper leaves every
+    ;; value unchanged.  This is the common path for state effects that do
+    ;; not intersect a range and avoids rebuilding the index.
+    (let loop ([items (range-set-ranges value)]
+               [result '()]
+               [changed? #f])
+      (if (null? items)
+          (if changed? (make-range-set (reverse result)) value)
+          (let* ([range (car items)]
+                 [mapped (mapper range)])
             (unless (range-value? mapped)
               (assertion-violation
                 'range-set-map "mapper must return range values" mapped))
-            mapped))
-        (range-set-ranges value))))
+            (loop
+              (cdr items)
+              (cons mapped result)
+              (or changed? (not (eq? mapped range))))))))
 
   (define (range-set-map-change value changes)
-    (unless (or (change-set? changes) (change-desc? changes))
+    (unless (and (range-set? value)
+                 (or (change-set? changes) (change-desc? changes)))
       (assertion-violation
-        'range-set-map-change "expected a ChangeSet or ChangeDesc" changes))
-    (let ([map-offset
-            (lambda (offset affinity)
-              (if (change-set? changes)
-                  (change-set-map-offset changes offset affinity)
-                  (change-desc-map-offset changes offset affinity)))])
-      (range-set-map
-        value
-        (lambda (range)
-          (let* ([mapped-from
-                   (map-offset
-                     (range-value-from range)
-                     (range-value-start-affinity range))]
-                 [mapped-to
-                   (map-offset
-                     (range-value-to range)
-                     (range-value-end-affinity range))]
-                 ;; Opposite affinities can meet in the middle of a replaced
-                 ;; range.  A range remains non-inverted by collapsing to the
-                 ;; boundary that excludes the replaced text.
-                 [collapsed (if (> mapped-from mapped-to)
-                                mapped-to
-                                mapped-from)])
-            (make-range-value
-              (if (> mapped-from mapped-to) collapsed mapped-from)
-              (if (> mapped-from mapped-to) collapsed mapped-to)
-              (range-value-value range)
-              (range-value-start-affinity range)
-              (range-value-end-affinity range)))))))
-)
+        'range-set-map-change "expected a range set and ChangeSet or ChangeDesc"
+        value changes))
+    (let* ([change-list
+             (if (change-set? changes)
+                 (change-set-changes changes)
+                 (change-desc-changes changes))]
+           [empty? (null? change-list)]
+           [map-offset
+             (lambda (offset affinity)
+               (if (change-set? changes)
+                   (change-set-map-offset changes offset affinity)
+                   (change-desc-map-offset changes offset affinity)))]
+           [touches-deletion?
+             (lambda (range)
+               (let loop ([items change-list])
+                 (and (pair? items)
+                      (let ([change (car items)])
+                        (or (and (< (text-change-from change)
+                                    (text-change-to change))
+                                 (< (range-value-from range)
+                                    (text-change-to change))
+                                 (> (range-value-to range)
+                                    (text-change-from change)))
+                            (loop (cdr items)))))))]
+           [map-range
+             (lambda (range)
+               (let* ([mapped-from
+                        (map-offset
+                          (range-value-from range)
+                          (range-value-start-affinity range))]
+                      [mapped-to
+                        (map-offset
+                          (range-value-to range)
+                          (range-value-end-affinity range))]
+                      ;; Opposite affinities can meet in the middle of a
+                      ;; replaced range.  A range remains non-inverted by
+                      ;; collapsing to the boundary that excludes the
+                      ;; replaced text.
+                      [inverted? (> mapped-from mapped-to)]
+                      [collapsed (if inverted? mapped-to mapped-from)])
+                 (let ([new-from (if inverted? collapsed mapped-from)]
+                       [new-to (if inverted? collapsed mapped-to)])
+                   (if (and (= new-from (range-value-from range))
+                            (= new-to (range-value-to range)))
+                       range
+                       (make-range-value
+                         new-from
+                         new-to
+                         (range-value-value range)
+                         (range-value-start-affinity range)
+                         (range-value-end-affinity range)
+                         (range-value-map-mode range))))))])
+      (if empty?
+          value
+          (let loop ([items (range-set-ranges value)]
+                     [result '()]
+                     [changed? #f])
+            (if (null? items)
+                (if changed? (make-range-set (reverse result)) value)
+                (let ([range (car items)])
+                  (if (and (eq? (range-value-map-mode range) 'drop)
+                           (touches-deletion? range))
+                      (loop (cdr items) result #t)
+                      (let ([mapped (map-range range)])
+                        (loop
+                          (cdr items)
+                          (cons mapped result)
+                          (or changed? (not (eq? mapped range)))))))))))
+))

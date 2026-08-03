@@ -249,13 +249,22 @@
                  (loop
                    (cdr items)
                    (+ delta (- insert-length (- to from))))]
-                [(and (= offset from) (eq? side 'before))
+                ;; A before-affinity endpoint stops before the current
+                ;; replacement.  An after-affinity endpoint at a boundary
+                ;; continues through adjacent changes at that same old
+                ;; offset, so consecutive insertions behave as one mapping
+                ;; group rather than only consuming the first insertion.
+                [(and (eq? side 'before)
+                      (or (= offset from) (= offset to)))
                  (+ from delta)]
-                ;; An endpoint at the end of a replaced range with before
-                ;; affinity stays before the inserted text.  This is the
-                ;; boundary counterpart of the after-affinity case below.
-                [(and (= offset to) (eq? side 'before))
-                 (+ from delta)]
+                [(and (= from to) (= offset from))
+                 (loop
+                   (cdr items)
+                   (+ delta insert-length))]
+                [(= offset to)
+                 (loop
+                   (cdr items)
+                   (+ delta (- insert-length (- to from))))]
                 [else (+ from delta insert-length)]))))))
 
   (define (change-set-map-range changes from to . affinity)

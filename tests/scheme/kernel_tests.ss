@@ -50,6 +50,14 @@
                (= (change-set-map-offset replacement 1 'after) 3)
                (= (change-set-map-offset replacement 4 'after) 3))
     (error 'kernel-tests "replacement boundary affinity differs")))
+(let ([adjacent-insertions
+        (make-change-set
+          4
+          (list (make-text-change 1 1 "a")
+                (make-text-change 1 1 "b")))])
+  (unless (and (= (change-set-map-offset adjacent-insertions 1 'before) 1)
+               (= (change-set-map-offset adjacent-insertions 1 'after) 3))
+    (error 'kernel-tests "adjacent insertion mapping differs")))
 (let ([applied
         (change-set-apply
           (make-change-set
@@ -81,9 +89,12 @@
              (eq? (range-value-start-affinity first-range) 'before)
              (eq? (range-value-end-affinity first-range) 'after)
              (eq? (car (range-set-query ranges 2 7)) first-range)
-             (eq? (range-cursor-current (range-set-cursor ranges 6 9)) second-range))
+             (eq? (car (range-set-cursor ranges 6 9)) second-range)
+             (eq? (range-cursor-current
+                    (range-set-sweep-cursor ranges 6 9))
+                  second-range))
   (error 'kernel-tests "range set query differs"))
-(let ([cursor (range-set-cursor ranges 0 9)])
+(let ([cursor (range-set-sweep-cursor ranges 0 9)])
   (unless (and (eq? (range-cursor-current cursor) first-range)
                (eq? (range-cursor-next! cursor) second-range)
                (not (range-cursor-next! cursor))
@@ -97,6 +108,14 @@
                (eq? (car matches) outer)
                (eq? (cadr matches) inner))
     (error 'kernel-tests "overlapping range query differs")))
+(let* ([outer (make-range-value 1 6 'outer)]
+       [point (make-range-value 3 3 'point)]
+       [point-set (make-range-set (list outer point))]
+       [matches (range-set-query-point point-set 3)])
+  (unless (and (= (length matches) 2)
+               (eq? (car matches) outer)
+               (eq? (cadr matches) point))
+    (error 'kernel-tests "point range query differs")))
 (let ([mapped
         (range-set-map-change
           ranges
@@ -129,6 +148,23 @@
     (unless (and (= (range-value-from range) 1)
                  (= (range-value-to range) 1))
       (error 'kernel-tests "range deletion affinity differs"))))
+(let ([mapped
+        (range-set-map-change
+          (make-range-set
+            (list (make-range-value 1 4 'drop 'before 'after 'drop)
+                  (make-range-value 7 9 'retain 'before 'after 'retain)))
+          (make-change-set
+            10
+            (list (make-text-change 2 6 "x"))))])
+  (let ([mapped-ranges (range-set-ranges mapped)])
+    (unless (and (= (length mapped-ranges) 1)
+                 (eq? (range-value-value (car mapped-ranges)) 'retain)
+                 (eq? (range-value-map-mode (car mapped-ranges)) 'retain))
+      (error 'kernel-tests "range deletion policy differs"))))
+(let ([empty-changes (make-change-set 10 '())])
+  (unless (and (eq? (range-set-map-change ranges empty-changes) ranges)
+               (eq? (range-set-map ranges (lambda (range) range)) ranges))
+    (error 'kernel-tests "range set no-op mapping did not preserve identity")))
 
 (define history-field
   (make-state-field

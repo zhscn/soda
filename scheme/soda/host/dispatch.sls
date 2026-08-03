@@ -158,7 +158,17 @@
                                 (view-state-advance current selection transaction))])
                       (cons view new-state)))
                   (views-for-buffer views (buffer-id buffer)))])
-          (when native (document-transaction-commit! native))
+          (when native
+            (guard
+              (condition
+                [else
+                 ;; A failed native commit leaves the opaque transaction
+                 ;; handle active.  Abort it before propagating so the
+                 ;; document can accept a later dispatch.
+                 (guard (condition [else #f])
+                   (document-transaction-abort! native))
+                 (raise condition)])
+              (document-transaction-commit! native)))
           (buffer-publish-state! buffer new-buffer-state)
           ;; Compute all immutable view states before entering the publication
           ;; boundary.  A native commit failure therefore cannot leave one
