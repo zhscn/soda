@@ -12,6 +12,7 @@
           buffer-service-create!
           buffer-service-ref
           buffer-service-buffers
+          buffer-service-set-close-handler!
           buffer-service-close-buffer!)
   (import (rnrs)
           (only (chezscheme) weak-cons bwp-object?)
@@ -102,10 +103,19 @@
   (define-record-type
     (buffer-service %make-buffer-service buffer-service?)
     (fields (immutable identities buffer-service-identities)
-            (immutable table buffer-service-table)))
+            (immutable table buffer-service-table)
+            (mutable close! buffer-service-close-handler buffer-service-close-handler-set!)))
 
   (define (make-buffer-service)
-    (%make-buffer-service (make-identity-source) (make-eqv-hashtable)))
+    (%make-buffer-service (make-identity-source) (make-eqv-hashtable)
+                          (lambda (buffer) #f)))
+
+  (define (buffer-service-set-close-handler! service handler)
+    (unless (and (buffer-service? service) (procedure? handler))
+      (assertion-violation 'buffer-service-set-close-handler!
+                           "expected a BufferService and close handler" service handler))
+    (buffer-service-close-handler-set! service handler)
+    handler)
 
   (define (buffer-service-create! service owner name document configuration)
     (unless (buffer-service? service)
@@ -131,5 +141,8 @@
 
   (define (buffer-service-close-buffer! service id)
     (let ([buffer (buffer-service-ref service id #f)])
-      (and buffer (buffer-close! buffer))))
+      (and buffer
+           (begin
+             ((buffer-service-close-handler service) buffer)
+             (buffer-close! buffer)))))
 )

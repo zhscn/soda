@@ -550,6 +550,9 @@ View service close 会通知 Surface registry：关联 interaction leaf 被移�
 leaf 被移除并保持其余 selected leaf；没有 root leaf 的 Surface 从 registry 注销。由此 active
 context 只引用 live View。
 
+Buffer service close 先关闭所有关联 View，再释放 DocumentSnapshot；同一 View-close notification
+完成 Surface placement 清理。Host shutdown 复用此 service close path。
+
 ### Dispatch 与 EditorUpdate
 
 dispatch 是 editor state 的唯一 publication boundary：

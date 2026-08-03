@@ -1030,6 +1030,22 @@
       (error 'kernel-tests "View close did not prune Surface placement"))
     (surface-service-remove! (host-state-surfaces host) (surface-id prune-surface))))
 
+(let* ([closing-document (make-document "closing")]
+       [closing-buffer
+        (buffer-service-create! (host-state-buffers host) owner "*closing*"
+                                closing-document configuration)]
+       [closing-view
+        (view-service-create! (host-state-views host) owner closing-buffer configuration)]
+       [closing-surface
+        (make-surface (make-leaf-window (view-id closing-view) #f) '(8 . 1))])
+  (surface-service-register! (host-state-surfaces host) closing-surface)
+  (buffer-service-close-buffer! (host-state-buffers host) (buffer-id closing-buffer))
+  (unless (and (not (buffer-service-ref (host-state-buffers host) (buffer-id closing-buffer) #f))
+               (not (view-service-ref (host-state-views host) (view-id closing-view) #f))
+               (not (surface-service-ref (host-state-surfaces host)
+                                         (surface-id closing-surface) #f)))
+    (error 'kernel-tests "Buffer close did not retire View and Surface")))
+
 (let* ([left (make-leaf-window 1 #f)]
        [right (make-leaf-window 2 #f)]
        [root (make-split-window 'horizontal (list left right) #f)])

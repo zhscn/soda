@@ -18,6 +18,7 @@
           view-service-create!
           view-service-ref
           view-service-views
+          view-service-close-buffer-views!
           view-service-set-plugin-error-handler!
           view-service-set-close-handler!
           view-service-close-view!)

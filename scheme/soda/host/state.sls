@@ -61,6 +61,10 @@
         views
         (lambda (view)
           (surface-service-prune-view! surfaces (view-id view))))
+      (buffer-service-set-close-handler!
+        buffers
+        (lambda (buffer)
+          (view-service-close-buffer-views! views (buffer-id buffer))))
       (%make-host-state
         owner runtime buffers views surfaces commands conditions dispatch packages #f)))
 
@@ -72,8 +76,10 @@
         (begin
           (package-service-close! (host-state-packages state))
           (runtime-close! (host-state-runtime state))
-          (for-each buffer-close! (buffer-service-buffers (host-state-buffers state)))
-          (for-each view-close! (view-service-views (host-state-views state)))
+          (for-each
+            (lambda (buffer)
+              (buffer-service-close-buffer! (host-state-buffers state) (buffer-id buffer)))
+            (buffer-service-buffers (host-state-buffers state)))
           (owner-close! (host-state-owner state))
           (host-state-closed?-set! state #t)
           #t)))

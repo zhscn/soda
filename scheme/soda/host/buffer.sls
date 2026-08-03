@@ -10,5 +10,6 @@
           buffer-service-create!
           buffer-service-ref
           buffer-service-buffers
+          buffer-service-set-close-handler!
           buffer-service-close-buffer!)
   (import (soda host internal buffer)))

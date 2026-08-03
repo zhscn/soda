@@ -19,6 +19,7 @@
           view-service-create!
           view-service-ref
           view-service-views
+          view-service-close-buffer-views!
           view-service-set-plugin-error-handler!
           view-service-set-close-handler!
           view-service-close-view!)
@@ -349,6 +350,19 @@
       (lambda (ids values)
         (filter (lambda (view) (not (view-closed? view)))
                 (vector->list values)))))
+
+  (define (view-service-close-buffer-views! service target-buffer-id)
+    (unless (and (view-service? service) (integer? target-buffer-id)
+                 (exact? target-buffer-id) (>= target-buffer-id 0))
+      (assertion-violation 'view-service-close-buffer-views!
+                           "invalid ViewService or Buffer identity"
+                           service target-buffer-id))
+    (for-each
+      (lambda (view)
+        (when (= (buffer-id (view-buffer view)) target-buffer-id)
+          (view-service-close-view! service (view-id view))))
+      (view-service-views service))
+    #t)
 
   (define (view-service-close-view! service id)
     (let ([view (view-service-ref service id #f)])
