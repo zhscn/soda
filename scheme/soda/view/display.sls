@@ -5,6 +5,7 @@
           display-widget-width display-widget-height display-widget-anchor
           display-widget-face display-widget-source make-display-stream display-stream?
           display-stream-fragments display-stream-append make-display-map-entry
+          display-stream-insert display-stream-replace
           display-map-entry? display-map-entry-document-from display-map-entry-document-to
           display-map-entry-cell-from display-map-entry-cell-to display-map-entry-kind
           display-map-entry-source make-display-map display-map? display-map-entries
@@ -42,6 +43,44 @@
     (unless (and (list? fragments) (for-all display-fragment? fragments))
       (assertion-violation 'display-stream-append "expected a list of display fragments" fragments))
     (make-display-stream (append (display-stream-fragments stream) fragments)))
+
+  (define (display-stream-insert stream anchor fragments)
+    (unless (and (display-stream? stream) (offset? anchor)
+                 (list? fragments) (for-all display-fragment? fragments))
+      (assertion-violation 'display-stream-insert "invalid DisplayStream insertion"))
+    (let loop ([remaining (display-stream-fragments stream)] [result '()] [inserted? #f])
+      (cond
+        [(null? remaining)
+         (make-display-stream (reverse (if inserted? result
+                                            (append (reverse fragments) result))))]
+        [(and (not inserted?) (display-text? (car remaining))
+              (>= (display-text-from (car remaining)) anchor))
+         (loop remaining (append (reverse fragments) result) #t)]
+        [else (loop (cdr remaining) (cons (car remaining) result) inserted?)])))
+
+  (define (display-text-intersects? fragment from to)
+    (and (display-text? fragment)
+         (< (display-text-from fragment) to)
+         (> (display-text-to fragment) from)))
+
+  ;; Replacement consumes source fragments whose document intervals intersect
+  ;; FROM..TO and installs replacement fragments at the same stream position.
+  ;; Producers construct replacement text with the replaced source interval,
+  ;; so DisplayMap preserves source navigation through a fold placeholder.
+  (define (display-stream-replace stream from to fragments)
+    (unless (and (display-stream? stream) (offset? from) (offset? to) (<= from to)
+                 (list? fragments) (for-all display-fragment? fragments))
+      (assertion-violation 'display-stream-replace "invalid DisplayStream replacement"))
+    (let loop ([remaining (display-stream-fragments stream)] [result '()] [inserted? #f])
+      (cond
+        [(null? remaining)
+         (make-display-stream (reverse (if inserted? result
+                                            (append (reverse fragments) result))))]
+        [(display-text-intersects? (car remaining) from to)
+         (loop (cdr remaining)
+               (if inserted? result (append (reverse fragments) result))
+               #t)]
+        [else (loop (cdr remaining) (cons (car remaining) result) inserted?)])))
 
   ;; Entries are atomic grapheme or virtual spans.  Empty document intervals
   ;; represent virtual content, while every entry occupies display cells.

@@ -1696,6 +1696,24 @@
                (equal? (text-layout-document->point layout 3) '(0 . 1)))
     (error 'kernel-tests "DisplayStream grapheme layout differs")))
 
+(let* ([base
+        (make-display-stream
+          (list (make-display-text "a" 0 1 'text 'document)
+                (make-display-text "b" 1 2 'text 'document)
+                (make-display-text "c" 2 3 'text 'document)))]
+       [inlay (make-display-text ":" 1 1 'hint 'inlay)]
+       [replacement (make-display-text "X" 1 2 'fold 'fold)]
+       [stream (display-stream-replace
+                 (display-stream-insert base 1 (list inlay)) 1 2 (list replacement))]
+       [layout (layout-display-stream stream
+                                      (make-selection (list (make-selection-range 0 0)))
+                                      4 1)])
+  (unless (and (string=? (frame-cell-grapheme (frame-cell-at (text-layout-frame layout) 0 0)) "a")
+               (string=? (frame-cell-grapheme (frame-cell-at (text-layout-frame layout) 0 1)) ":")
+               (string=? (frame-cell-grapheme (frame-cell-at (text-layout-frame layout) 0 2)) "X")
+               (string=? (frame-cell-grapheme (frame-cell-at (text-layout-frame layout) 0 3)) "c"))
+    (error 'kernel-tests "DisplayStream transform differs")))
+
 (let* ([base (make-frame 4 2)]
        [top (frame-with-cell (make-frame 2 1) 0 0
                              (make-frame-cell "x" 1 #f 'overlay #f))]
