@@ -32,8 +32,7 @@
           (list (window-view-id leaf)
                 (list-copy (window-rectangle leaf))
                 (buffer-state-generation (buffer-state (view-buffer view)))
-                (view-state-generation (view-state view))
-                (view-state-configuration (view-state view)))
+                (view-render-generation view))
           (list (window-view-id leaf) (list-copy (window-rectangle leaf)) #f #f))))
 
   (define (render-signature service surface views)

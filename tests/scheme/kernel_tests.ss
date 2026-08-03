@@ -923,6 +923,36 @@
     (unless (not (eq? first (render-service-render! service surface (host-state-views host))))
       (error 'kernel-tests "RenderService invalidation differs"))))
 
+(let* ([document (make-document "cache")]
+       [buffer (buffer-service-create! (host-state-buffers host) owner "*cache*"
+                                       document configuration)]
+       [view (view-service-create! (host-state-views host) owner buffer configuration)]
+       [leaf (make-leaf-window (view-id view) '(0 0 8 1))]
+       [surface (make-surface leaf '(8 . 1))]
+       [service (make-render-service)]
+       [initial (render-service-render! service surface (host-state-views host))]
+       [state (view-state view)]
+       [_input-update
+        (dispatcher-dispatch-view!
+          (host-state-dispatch host)
+          (make-view-transaction-spec
+            (view-id view) (view-state-generation state)
+            #f #f
+            (make-input-stack (make-input-state 'transient '() 'accept))
+            '() '() #f))]
+       [after-input (render-service-render! service surface (host-state-views host))]
+       [state (view-state view)]
+       [_selection-update
+        (dispatcher-dispatch-view!
+          (host-state-dispatch host)
+          (make-view-transaction-spec
+            (view-id view) (view-state-generation state)
+            (make-selection (list (make-selection-range 1 1))) #f #f
+            '() '() #f))]
+       [after-selection (render-service-render! service surface (host-state-views host))])
+  (unless (and (eq? initial after-input) (not (eq? after-input after-selection)))
+    (error 'kernel-tests "RenderService damage invalidation differs")))
+
 (let* ([layout-configuration
         (make-configuration
           (list (make-facet-provider text-layout-options-facet

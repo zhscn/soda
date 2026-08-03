@@ -4,6 +4,7 @@
           view-owner
           view-buffer
           view-state
+          view-render-generation
           view-plugin-instances
           view-decorations
           view-merged-decorations

@@ -4,6 +4,7 @@
           view-owner
           view-buffer
           view-state
+          view-render-generation
           view-plugin-instances
           view-decorations
           view-merged-decorations
@@ -43,6 +44,8 @@
             (mutable plugins view-plugin-instances view-plugin-instances-set!)
             (mutable decoration-cache view-decoration-cache
                      view-decoration-cache-set!)
+            (mutable render-generation view-render-generation
+                     view-render-generation-set!)
             (mutable closed? view-closed? view-closed?-set!)))
 
   (define (empty-selection)
@@ -97,6 +100,24 @@
       view
       (merge-decoration-sets (collect-view-decorations view))))
 
+  (define (display-plugin? instance)
+    (let ([plugin (view-plugin-instance-plugin instance)])
+      (or (view-plugin-decorations plugin)
+          (view-plugin-display plugin)
+          (view-plugin-transform plugin))))
+
+  (define (view-display-plugin? view)
+    (exists display-plugin? (view-plugin-instances view)))
+
+  (define (render-damage? update view)
+    (or (exists (lambda (kind)
+                  (memq kind '(document selection viewport decoration chrome layout theme resize
+                                       configuration)))
+                (view-update-damage update))
+        ;; Input itself is not rendered by the core.  A display-producing
+        ;; plugin may however project its own InputState, e.g. a completion UI.
+        (and (view-update-damaged? update 'input) (view-display-plugin? view))))
+
   ;; Retain a destroyed instance until its definition leaves configuration.
   ;; Recreating it on every update would turn one plugin fault into a loop.
   (define (matching-plugin-instance instances plugin)
@@ -150,7 +171,7 @@
                               (buffer-state-generation (buffer-state buffer))
                               (empty-selection) default-viewport
                               (or input-state (default-input-stack)) configuration)
-             '() (make-decoration-set '()) #f)])
+             '() (make-decoration-set '()) 0 #f)])
       (view-plugin-instances-set!
         view
         (create-plugin-instances! view (configuration-view-plugins configuration)))
@@ -195,6 +216,8 @@
             (view-plugin-instance-update! instance update))))
       (view-plugin-instances view))
     (refresh-view-decorations! view)
+    (when (render-damage? update view)
+      (view-render-generation-set! view (+ 1 (view-render-generation view))))
     view)
 
   (define (view-decorations view)
