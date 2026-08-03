@@ -290,7 +290,7 @@
         (transaction-effects transaction))
       (transaction-annotations transaction)
       (transaction-new-buffer-state transaction)
-      (transaction-new-view-state transaction)))
+      #f))
 
   (define (list-value value)
     (cond [(not value) '()]
