@@ -4,10 +4,22 @@
           surface-render-frame
           surface-render-cursor-row
           surface-render-cursor-column
+          surface-render-rendered-views
+          make-rendered-view
+          rendered-view?
+          rendered-view-view-id
+          rendered-view-rectangle
+          rendered-view-layout
+          make-surface-hit
+          surface-hit?
+          surface-hit-view-id
+          surface-hit-document-offset
+          surface-render-hit-test
           render-surface
           render-surface-frame)
   (import (rnrs)
           (soda kernel state)
+          (soda kernel value)
           (soda kernel view-state)
           (soda host buffer)
           (soda host surface)
@@ -18,18 +30,65 @@
           (soda view frame)
           (soda view text-layout))
 
+  ;; RenderedView retains the pure layout projection needed for coordinate
+  ;; routing.  It is part of a rendered Surface, not mutable View state.
+  (define-record-type
+    (rendered-view %make-rendered-view rendered-view?)
+    (fields view-id rectangle layout))
+
+  (define (rectangle? value)
+    (and (list? value) (= (length value) 4)
+         (for-all (lambda (cell) (and (integer? cell) (exact? cell) (>= cell 0))) value)))
+
+  (define (make-rendered-view view-id rectangle layout)
+    (unless (and (rectangle? rectangle) (text-layout? layout))
+      (assertion-violation 'make-rendered-view "invalid rendered View" view-id rectangle layout))
+    (%make-rendered-view view-id (list-copy rectangle) layout))
+
+  (define-record-type
+    (surface-hit %make-surface-hit surface-hit?)
+    (fields view-id document-offset))
+
+  (define (make-surface-hit view-id document-offset)
+    (unless (or (not document-offset) (offset-or-false? document-offset))
+      (assertion-violation 'make-surface-hit "invalid document hit offset" document-offset))
+    (%make-surface-hit view-id document-offset))
+
   (define-record-type
     (surface-render %make-surface-render surface-render?)
-    (fields frame cursor-row cursor-column))
+    (fields frame cursor-row cursor-column rendered-views))
 
   (define (offset-or-false? value)
     (or (not value) (and (integer? value) (exact? value) (>= value 0))))
 
-  (define (make-surface-render frame cursor-row cursor-column)
-    (unless (and (frame? frame) (offset-or-false? cursor-row)
-                 (offset-or-false? cursor-column))
-      (assertion-violation 'make-surface-render "invalid surface render"))
-    (%make-surface-render frame cursor-row cursor-column))
+  (define make-surface-render
+    (case-lambda
+      [(frame cursor-row cursor-column)
+       (make-surface-render frame cursor-row cursor-column '())]
+      [(frame cursor-row cursor-column rendered-views)
+       (unless (and (frame? frame) (offset-or-false? cursor-row)
+                    (offset-or-false? cursor-column)
+                    (list? rendered-views) (for-all rendered-view? rendered-views))
+         (assertion-violation 'make-surface-render "invalid surface render"))
+       (%make-surface-render frame cursor-row cursor-column (list-copy rendered-views))]))
+
+  (define (surface-render-hit-test render row column)
+    (unless (and (surface-render? render) (offset-or-false? row)
+                 (offset-or-false? column))
+      (assertion-violation 'surface-render-hit-test "invalid Surface coordinate" render row column))
+    (let find ([views (reverse (surface-render-rendered-views render))])
+      (and (pair? views)
+           (let* ([rendered (car views)]
+                  [rectangle (rendered-view-rectangle rendered)]
+                  [top (car rectangle)] [left (cadr rectangle)]
+                  [width (caddr rectangle)] [height (cadddr rectangle)])
+             (if (and (<= top row) (< row (+ top height))
+                      (<= left column) (< column (+ left width)))
+                 (make-surface-hit
+                   (rendered-view-view-id rendered)
+                   (text-layout-point->document (rendered-view-layout rendered)
+                                                 (- row top) (- column left)))
+                 (find (cdr views)))))))
 
   ;; Rendering consumes only published BufferState and ViewState.  A frontend
   ;; may retain the result, but no render step mutates editor state.
@@ -43,14 +102,15 @@
                    (integer? height) (exact? height) (>= height 0))
         (assertion-violation 'render-surface "invalid Surface size" size))
       (let loop ([leaves (window-leaves (surface-root-window surface))]
-                 [placements '()] [cursor-row #f] [cursor-column #f])
+                 [placements '()] [rendered-views '()] [cursor-row #f] [cursor-column #f])
           (if (null? leaves)
               (make-surface-render
-                (compose-frame width height (reverse placements)) cursor-row cursor-column)
+                (compose-frame width height (reverse placements)) cursor-row cursor-column
+                (reverse rendered-views))
               (let* ([leaf (car leaves)]
                      [view (view-service-ref views (window-view-id leaf) #f)])
                 (if (not view)
-                    (loop (cdr leaves) placements cursor-row cursor-column)
+                    (loop (cdr leaves) placements rendered-views cursor-row cursor-column)
                     (let* ([rectangle (window-rectangle leaf)]
                            [row (car rectangle)]
                            [column (cadr rectangle)]
@@ -70,6 +130,7 @@
                       (loop
                         (cdr leaves)
                         (cons (make-frame-placement row column (text-layout-frame layout)) placements)
+                        (cons (make-rendered-view (view-id view) rectangle layout) rendered-views)
                         (if (and (eq? leaf (surface-selected-window surface))
                                  (text-layout-cursor-row layout))
                             (+ row (text-layout-cursor-row layout))

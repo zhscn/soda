@@ -896,12 +896,17 @@
 (surface-resize! surface '(80 . 24))
 
 (let ([rendered (render-surface surface (host-state-views host))])
-  (unless (and (= (frame-width (surface-render-frame rendered)) 80)
-               (= (frame-height (surface-render-frame rendered)) 24)
-               (= (surface-render-cursor-row rendered) 0)
-               (= (surface-render-cursor-column rendered) 0)
-               (string=? (frame-cell-grapheme (frame-cell-at (surface-render-frame rendered) 0 0)) "h"))
-    (error 'kernel-tests "Surface render composition differs")))
+  (let ([hit (surface-render-hit-test rendered 0 1)])
+    (unless (and (= (frame-width (surface-render-frame rendered)) 80)
+                 (= (frame-height (surface-render-frame rendered)) 24)
+                 (= (surface-render-cursor-row rendered) 0)
+                 (= (surface-render-cursor-column rendered) 0)
+                 (= (length (surface-render-rendered-views rendered)) 1)
+                 (surface-hit? hit)
+                 (eqv? (surface-hit-view-id hit) (view-id view))
+                 (= (surface-hit-document-offset hit) 1)
+                 (string=? (frame-cell-grapheme (frame-cell-at (surface-render-frame rendered) 0 0)) "h"))
+    (error 'kernel-tests "Surface render composition differs"))))
 
 (define control-x
   (make-key-stroke 'character (char->integer #\x) 4))
