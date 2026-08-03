@@ -21,7 +21,9 @@
           indent-result-take-change!)
   (import (chezscheme)
           (soda ffi helpers)
-          (soda ffi cpp-analysis-handles)
+          (only (soda ffi cpp-analysis)
+                cpp-analyzer?
+                cpp-analyzer-pointer)
           (only (soda ffi document)
                 text-npos
                 document?

@@ -1,6 +1,8 @@
 (library (soda ffi cpp-analysis)
   (export make-cpp-analyzer
           cpp-analyzer?
+          cpp-analyzer-pointer
+          cpp-analyzer-pointer-set!
           cpp-analyzer-close!
           cpp-analyzer-analyze!
           cpp-analyzer-apply!
@@ -28,13 +30,15 @@
           cpp-analyzer-soft-kill-end)
   (import (chezscheme)
           (soda ffi helpers)
-          (soda ffi cpp-analysis-handles)
           (only (soda ffi document)
                 revision-none
                 snapshot?
                 snapshot-pointer
                 change?
                 change-pointer))
+
+  (define-record-type (cpp-analyzer %make-cpp-analyzer cpp-analyzer?)
+    (fields (mutable pointer)))
 
   (define syntax-node-none #xffffffff)
 

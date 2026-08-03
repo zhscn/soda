@@ -31,8 +31,15 @@
                 snapshot-pointer
                 change?
                 change-pointer)
-          (soda ffi helpers)
-          (soda ffi tree-sitter-handles))
+          (soda ffi helpers))
+
+  (define-record-type
+    (tree-sitter-parser %make-tree-sitter-parser tree-sitter-parser?)
+    (fields (mutable pointer)))
+
+  (define-record-type
+    (tree-sitter-query %make-tree-sitter-query tree-sitter-query?)
+    (fields (mutable pointer)))
 
   (define-record-type tree-sitter-capture
     (fields name
