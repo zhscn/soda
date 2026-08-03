@@ -1522,6 +1522,22 @@
                (contains-string? ansi "x"))
     (error 'kernel-tests "ANSI presenter encoding differs" ansi)))
 
+(let* ([presenter (make-frame-presenter)]
+       [frame (frame-with-cell (make-frame 2 1) 0 0
+                               (make-frame-cell "x" 1 #f 'text #f))]
+       [writes '()]
+       [writer
+         (lambda (bytes offset)
+           (set! writes (cons (cons (bytevector-length bytes) offset) writes))
+           (if (zero? offset) 1 (- (bytevector-length bytes) offset)))])
+  (frame-presenter-present! presenter frame)
+  (unless (and (eq? (frame-presenter-drain! presenter writer) 'partial)
+               (frame-presenter-pending? presenter)
+               (eq? (frame-presenter-drain! presenter writer) 'committed)
+               (eq? (frame-presenter-committed-frame presenter) frame)
+               (= (length writes) 2))
+    (error 'kernel-tests "Frame presenter transaction differs" writes)))
+
 (let ([wide (make-frame-cell "界" 2 #f 'default 'wide)]
       [continuation (make-frame-cell "" 0 #t 'default 'wide)])
   (unless (and (frame? (make-frame 2 1 (vector wide continuation)))
