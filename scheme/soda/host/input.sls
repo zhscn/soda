@@ -25,6 +25,12 @@
           make-input-stack
           input-stack?
           input-stack-sessions
+          input-stack-pending-sequence
+          input-stack-pending-argument
+          input-stack-feedback
+          input-stack-set-pending-sequence!
+          input-stack-set-pending-argument!
+          input-stack-set-feedback!
           input-stack-push!
           input-stack-pop!
           input-stack-reset!
@@ -39,6 +45,7 @@
           input-context-view-id
           input-context-buffer-id
           input-context-layers
+          input-layer-compose
           resolve-key-sequence
           make-input-service
           input-service?
@@ -72,12 +79,14 @@
     (fields
       (immutable name keymap-name)
       (immutable bindings keymap-bindings)
-      (immutable remaps keymap-remaps)))
+      (immutable remaps keymap-remaps)
+      (immutable prefixes keymap-prefixes)))
 
   (define (make-keymap name)
     (unless (symbol? name)
       (assertion-violation 'make-keymap "name must be a symbol" name))
-    (%make-keymap name (make-hashtable equal-hash equal?) (make-eq-hashtable)))
+    (%make-keymap name (make-hashtable equal-hash equal?)
+                  (make-eq-hashtable) (make-hashtable equal-hash equal?)))
 
   (define (valid-sequence? value)
     (and (pair? value) (for-all (lambda (key) (or (symbol? key) (string? key))) value)))
@@ -86,10 +95,32 @@
     (unless (and (keymap? map) (valid-sequence? sequence))
       (assertion-violation 'keymap-bind! "expected a keymap and non-empty sequence" map sequence))
     (hashtable-set! (keymap-bindings map) (copy-list sequence) binding)
+    (let loop ([items sequence] [prefix '()])
+      (unless (null? items)
+        (let ([next (append prefix (list (car items)))])
+          (hashtable-set! (keymap-prefixes map) next #t)
+          (loop (cdr items) next))))
     binding)
 
   (define (keymap-unbind! map sequence)
     (hashtable-delete! (keymap-bindings map) sequence)
+    (let ([prefixes (keymap-prefixes map)])
+      (call-with-values
+        (lambda () (hashtable-entries prefixes))
+        (lambda (keys values)
+          (do ([index 0 (+ index 1)])
+              ((= index (vector-length keys)))
+            (hashtable-delete! prefixes (vector-ref keys index)))))
+      (call-with-values
+        (lambda () (hashtable-entries (keymap-bindings map)))
+        (lambda (keys values)
+          (do ([index 0 (+ index 1)])
+              ((= index (vector-length keys)))
+            (let loop ([items (vector-ref keys index)] [prefix '()])
+              (unless (null? items)
+                (let ([next (append prefix (list (car items)))])
+                  (hashtable-set! prefixes next #t)
+                  (loop (cdr items) next))))))))
     #t)
 
   (define (keymap-lookup map sequence . default)
@@ -97,23 +128,7 @@
       (if value value (if (null? default) #f (car default)))))
 
   (define (keymap-prefix? map sequence)
-    (define (prefix-of? prefix candidate)
-      (cond
-        [(null? prefix) #t]
-        [(null? candidate) #f]
-        [(equal? (car prefix) (car candidate))
-         (prefix-of? (cdr prefix) (cdr candidate))]
-        [else #f]))
-    (let ([prefix (copy-list sequence)])
-      (call-with-values
-        (lambda () (hashtable-entries (keymap-bindings map)))
-        (lambda (keys values)
-          (let loop ([index 0])
-            (and (< index (vector-length keys))
-                 (or (let ([candidate (vector-ref keys index)])
-                       (and (> (length candidate) (length prefix))
-                            (prefix-of? prefix candidate)))
-                     (loop (+ index 1)))))))))
+    (hashtable-contains? (keymap-prefixes map) sequence))
 
   (define (keymap-remap! map command replacement)
     (unless (and (keymap? map) (symbol? command) (symbol? replacement))
@@ -151,12 +166,28 @@
 
   (define-record-type
     (input-stack %make-input-stack input-stack?)
-    (fields (mutable sessions input-stack-sessions input-stack-sessions-set!)))
+    (fields
+      (mutable sessions input-stack-sessions input-stack-sessions-set!)
+      (mutable pending-sequence input-stack-pending-sequence input-stack-pending-sequence-set!)
+      (mutable pending-argument input-stack-pending-argument input-stack-pending-argument-set!)
+      (mutable feedback input-stack-feedback input-stack-feedback-set!)))
 
   (define (make-input-stack durable)
     (unless (input-state? durable)
       (assertion-violation 'make-input-stack "durable state is required" durable))
-    (%make-input-stack (list (%make-input-session durable #f))))
+    (%make-input-stack (list (%make-input-session durable #f)) #f #f #f))
+
+  (define (input-stack-set-pending-sequence! stack value)
+    (input-stack-pending-sequence-set! stack value)
+    value)
+
+  (define (input-stack-set-pending-argument! stack value)
+    (input-stack-pending-argument-set! stack value)
+    value)
+
+  (define (input-stack-set-feedback! stack value)
+    (input-stack-feedback-set! stack value)
+    value)
 
   (define (input-stack-push! stack state)
     (unless (input-state? state)
@@ -180,6 +211,9 @@
         stack
         (list (let loop ([items sessions])
                 (if (null? (cdr items)) (car items) (loop (cdr items))))))
+      (input-stack-pending-sequence-set! stack #f)
+      (input-stack-pending-argument-set! stack #f)
+      (input-stack-feedback-set! stack #f)
       #t))
 
   (define-record-type
@@ -208,6 +242,26 @@
 
   (define (make-input-context view-id buffer-id layers)
     (%make-input-context view-id buffer-id (copy-list layers)))
+
+  (define input-layer-order
+    '((override . 0) (transient . 1) (durable . 2) (window . 3)
+      (view . 4) (buffer . 5) (minor . 6) (major . 7)
+      (default . 8) (global . 9)))
+
+  (define (input-layer-rank kind)
+    (let ([entry (assq kind input-layer-order)])
+      (if entry (cdr entry) 100)))
+
+  ;; Build the canonical layer order once at the host boundary.  The resolver
+  ;; itself remains pure and receives the resulting immutable list.
+  (define (input-layer-compose layers)
+    (unless (list? layers)
+      (assertion-violation 'input-layer-compose "layers must be a list" layers))
+    (list-sort
+      (lambda (left right)
+        (< (input-layer-rank (input-layer-kind left))
+           (input-layer-rank (input-layer-kind right))))
+      (copy-list layers)))
 
   (define (lookup-layer map sequence)
     (cond

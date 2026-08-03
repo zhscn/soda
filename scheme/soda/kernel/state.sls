@@ -6,6 +6,7 @@
           buffer-state-fields
           buffer-state-generation
           buffer-state-field
+          buffer-state-advance
           make-view-state
           view-state?
           view-state-buffer-id
@@ -16,6 +17,7 @@
           view-state-fields
           view-state-generation
           view-state-field
+          view-state-advance
           make-transaction-spec
           transaction-spec?
           transaction-spec-buffer-id
@@ -25,6 +27,8 @@
           transaction-spec-selection
           transaction-spec-effects
           transaction-spec-annotations
+          transaction-spec-scroll-request
+          transaction-spec-filter
           make-transaction
           transaction?
           transaction-start-buffer-state
@@ -36,6 +40,7 @@
           transaction-new-buffer-state
           transaction-new-view-state)
   (import (rnrs)
+          (soda kernel change)
           (soda kernel selection)
           (soda kernel extension))
 
@@ -75,6 +80,25 @@
           (cdr entry)
           (if (null? default) #f (car default)))))
 
+  (define (field-values-for state scope transaction)
+    (map
+      (lambda (field)
+        (let ([entry (field-entry
+                       (if (buffer-state? state)
+                           (buffer-state-fields state)
+                           (view-state-fields state))
+                       field)])
+          (cons
+            field
+            (if entry
+                ((state-field-update field) (cdr entry) transaction)
+                ((state-field-create field) state)))))
+      (configuration-fields
+        (if (buffer-state? state)
+            (buffer-state-configuration state)
+            (view-state-configuration state))
+        scope)))
+
   (define-record-type
     (view-state %make-view-state view-state?)
     (fields
@@ -104,6 +128,34 @@
           (cdr entry)
           (if (null? default) #f (car default)))))
 
+  (define (advance-buffer-state state document transaction)
+    (%make-buffer-state
+      document
+      (buffer-state-configuration state)
+      (field-values-for state 'buffer transaction)
+      (+ 1 (buffer-state-generation state))))
+
+  (define (advance-view-state state selection transaction)
+    (%make-view-state
+      (view-state-buffer-id state)
+      selection
+      (view-state-viewport state)
+      (view-state-input-state state)
+      (view-state-configuration state)
+      (field-values-for state 'view transaction)
+      (+ 1 (view-state-generation state))))
+
+  (define (buffer-state-advance state document transaction)
+    (unless (and (buffer-state? state) transaction)
+      (assertion-violation 'buffer-state-advance "invalid state or transaction" state transaction))
+    (advance-buffer-state state document transaction))
+
+  (define (view-state-advance state selection transaction)
+    (unless (and (view-state? state) (selection? selection) transaction)
+      (assertion-violation 'view-state-advance "invalid state, selection, or transaction"
+                           state selection transaction))
+    (advance-view-state state selection transaction))
+
   (define-record-type
     (transaction-spec %make-transaction-spec transaction-spec?)
     (fields
@@ -113,20 +165,29 @@
       (immutable changes transaction-spec-changes)
       (immutable selection transaction-spec-selection)
       (immutable effects transaction-spec-effects)
-      (immutable annotations transaction-spec-annotations)))
+      (immutable annotations transaction-spec-annotations)
+      (immutable scroll-request transaction-spec-scroll-request)
+      (immutable filter transaction-spec-filter)))
 
   (define make-transaction-spec
     (case-lambda
       [(buffer-id changes)
-       (make-transaction-spec buffer-id #f #f changes #f '() '())]
+       (make-transaction-spec buffer-id #f #f changes #f '() '() #f #f)]
       [(buffer-id origin-view-id start-generation changes selection effects annotations)
+       (make-transaction-spec
+         buffer-id origin-view-id start-generation changes selection effects annotations #f #f)]
+      [(buffer-id origin-view-id start-generation changes selection effects annotations
+                  scroll-request filter)
+       (unless (change-set? changes)
+         (assertion-violation 'make-transaction-spec "expected a change set" changes))
        (unless (or (not selection) (selection? selection))
          (assertion-violation
            'make-transaction-spec "selection must be a Selection or #f" selection))
        (%make-transaction-spec
          buffer-id origin-view-id start-generation changes selection
          (if (list? effects) (copy-list effects) (list effects))
-         (if (list? annotations) (copy-list annotations) (list annotations)))]))
+         (if (list? annotations) (copy-list annotations) (list annotations))
+         scroll-request filter)]))
 
   (define-record-type
     (transaction %make-transaction transaction?)
@@ -140,24 +201,64 @@
       (immutable new-buffer-state transaction-new-buffer-state)
       (immutable new-view-state transaction-new-view-state)))
 
-  (define (make-transaction start-buffer-state start-view-state changes selection effects
-                             annotations new-buffer-state new-view-state)
+  (define (list-value value)
+    (cond [(not value) '()]
+          [(list? value) (copy-list value)]
+          [else (list value)]))
+
+  (define (realize-transaction start-buffer-state start-view-state changes selection
+                               effects annotations document)
     (unless (buffer-state? start-buffer-state)
       (assertion-violation
         'make-transaction "expected a start buffer state" start-buffer-state))
-    (unless (buffer-state? new-buffer-state)
-      (assertion-violation
-        'make-transaction "expected a new buffer state" new-buffer-state))
+    (unless (change-set? changes)
+      (assertion-violation 'make-transaction "expected a change set" changes))
     (when (and start-view-state (not (view-state? start-view-state)))
       (assertion-violation
         'make-transaction "expected a start view state or #f" start-view-state))
-    (when (and new-view-state (not (view-state? new-view-state)))
-      (assertion-violation
-        'make-transaction "expected a new view state or #f" new-view-state))
     (when (and selection (not (selection? selection)))
       (assertion-violation 'make-transaction "invalid transaction selection" selection))
-    (%make-transaction
-      start-buffer-state start-view-state changes selection
-      (copy-list effects) (copy-list annotations)
-      new-buffer-state new-view-state))
+    (let* ([normalized-selection
+             (and start-view-state
+                  (or selection
+                      (selection-map-change
+                        (view-state-selection start-view-state) changes)))]
+           [initial
+             (%make-transaction
+               start-buffer-state start-view-state changes selection
+               (list-value effects) (list-value annotations) #f #f)]
+           [new-buffer-state
+             (advance-buffer-state start-buffer-state document initial)]
+           [new-view-state
+             (and start-view-state
+                  (advance-view-state start-view-state normalized-selection initial))])
+      (%make-transaction
+        start-buffer-state start-view-state changes selection
+        (list-value effects) (list-value annotations)
+        new-buffer-state new-view-state)))
+
+  (define make-transaction
+    (case-lambda
+      [(start-buffer-state start-view-state changes selection effects annotations)
+       (realize-transaction
+         start-buffer-state start-view-state changes selection effects annotations
+         (buffer-state-document start-buffer-state))]
+      [(start-buffer-state start-view-state changes selection effects annotations document)
+       (realize-transaction
+         start-buffer-state start-view-state changes selection effects annotations document)]
+      ;; Compatibility constructor for callers that already realized states.
+      ;; New code should use the six-argument form above.
+      [(start-buffer-state start-view-state changes selection effects annotations
+                           new-buffer-state new-view-state)
+       (unless (and (buffer-state? start-buffer-state)
+                    (buffer-state? new-buffer-state))
+         (assertion-violation 'make-transaction "invalid buffer states"))
+       (when (and start-view-state (not (view-state? start-view-state)))
+         (assertion-violation 'make-transaction "invalid start view state" start-view-state))
+       (when (and new-view-state (not (view-state? new-view-state)))
+         (assertion-violation 'make-transaction "invalid new view state" new-view-state))
+       (%make-transaction
+         start-buffer-state start-view-state changes selection
+         (list-value effects) (list-value annotations)
+         new-buffer-state new-view-state)]))
 )

@@ -5,8 +5,10 @@
         (soda kernel selection)
         (soda kernel state)
         (soda host command)
+        (soda host dispatch)
         (soda host buffer)
         (soda host input)
+        (soda host runtime)
         (soda host state)
         (soda host surface)
         (soda host value)
@@ -35,6 +37,27 @@
   (error 'kernel-tests "change mapping differs"))
 (unless (equal? (change-set-map-range changes 2 8 'after) (cons 5 10))
   (error 'kernel-tests "range mapping differs"))
+(let ([applied
+        (change-set-apply
+          (make-change-set
+            5
+            (list (make-text-change 1 2 "XYZ")
+                  (make-text-change 4 5 "!")))
+          (string->utf8 "abcde")
+          #t)])
+  (unless (string=? applied "aXYZcd!")
+    (error 'kernel-tests "change set application differs")))
+(let* ([base (string->utf8 "abcde")]
+       [forward (make-change-set 5 (list (make-text-change 1 3 "XYZ")))]
+       [inverse (change-set-invert forward base)])
+  (unless (string=? (change-set-apply inverse (change-set-apply forward base) #t) "abcde")
+    (error 'kernel-tests "change set inversion differs")))
+(let* ([base (string->utf8 "abcde")]
+       [first (make-change-set 5 (list (make-text-change 1 2 "XYZ")))]
+       [second (make-change-set 7 (list (make-text-change 6 7 "!")))]
+       [composed (change-set-compose first second base)])
+  (unless (string=? (change-set-apply composed base #t) "aXYZcd!")
+    (error 'kernel-tests "change set composition differs")))
 
 (define history-field
   (make-state-field
@@ -103,4 +126,36 @@
 (unless (and (eq? (input-disposition-kind pending-result) 'command)
              (eq? (input-disposition-value pending-result) 'save-buffer))
   (error 'kernel-tests "pending command was not resolved"))
+
+(define runtime (make-runtime))
+(define request (runtime-enqueue-request! runtime owner 'buffer 0 'payload))
+(unless (and (runtime-request? request) (= (runtime-request-id request) 1))
+  (error 'kernel-tests "runtime request identity differs"))
+(define drained '())
+(runtime-drain! runtime (lambda (message) (set! drained (cons message drained))))
+(unless (and (= (length drained) 1)
+             (eq? (runtime-request-payload (car drained)) 'payload))
+  (error 'kernel-tests "runtime queue order differs"))
+
+;; Dispatch is the only host publication path.  It applies the kernel change
+;; set to the native document, maps the view selection, and advances both
+;; immutable state generations atomically.
+(define dispatch-spec
+  (make-transaction-spec
+    (buffer-id buffer) (view-id view) (buffer-generation buffer)
+    (make-change-set
+      (snapshot-byte-size (buffer-state-document (buffer-state buffer)))
+      (list (make-text-change 5 5 " world")))
+    #f '() '()))
+(define update
+  (dispatcher-dispatch!
+    (host-state-dispatch host)
+    dispatch-spec))
+(unless (and (editor-update? update)
+             (= (buffer-state-generation (buffer-state buffer)) 1)
+             (= (view-state-generation (view-state view)) 1)
+             (string=?
+               (snapshot-string (buffer-state-document (buffer-state buffer)))
+               "hello world"))
+  (error 'kernel-tests "dispatcher did not publish an atomic update"))
 (host-state-close! host)

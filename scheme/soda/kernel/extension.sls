@@ -6,16 +6,30 @@
           state-field-create
           state-field-update
           state-field-compare
+          state-field-provide
           make-facet
           facet?
           facet-name
           facet-default
           facet-combine
+          facet-compare
           make-facet-provider
           facet-provider?
           facet-provider-facet
           facet-provider-value
           facet-provider-precedence
+          make-state-effect
+          state-effect?
+          state-effect-type
+          state-effect-value
+          state-effect-map
+          make-annotation
+          annotation?
+          annotation-key
+          annotation-value
+          transaction-filters-facet
+          transaction-extenders-facet
+          update-listeners-facet
           make-compartment
           compartment?
           compartment-name
@@ -41,34 +55,79 @@
       (immutable scope state-field-scope)
       (immutable create state-field-create)
       (immutable update state-field-update)
-      (immutable compare state-field-compare)))
+      (immutable compare state-field-compare)
+      (immutable provide state-field-provide)))
 
   (define make-state-field
     (case-lambda
       [(name scope create update)
-       (make-state-field name scope create update eq?)]
+       (make-state-field name scope create update eq? #f)]
       [(name scope create update compare)
+       (make-state-field name scope create update compare #f)]
+      [(name scope create update compare provide)
        (unless (symbol? name)
          (assertion-violation 'make-state-field "name must be a symbol" name))
        (unless (scope? scope)
          (assertion-violation 'make-state-field "invalid state field scope" scope))
        (unless (and (procedure? create) (procedure? update) (procedure? compare))
          (assertion-violation 'make-state-field "field callbacks must be procedures" name))
-       (%make-state-field name scope create update compare)]))
+       (unless (or (not provide) (procedure? provide))
+         (assertion-violation 'make-state-field "provide must be a procedure" provide))
+       (%make-state-field name scope create update compare provide)]))
 
   (define-record-type
     (facet %make-facet facet?)
     (fields
       (immutable name facet-name)
       (immutable default facet-default)
-      (immutable combine facet-combine)))
+      (immutable combine facet-combine)
+      (immutable compare facet-compare)))
 
-  (define (make-facet name default combine)
+  (define make-facet
+    (case-lambda
+      [(name default combine) (make-facet name default combine eq?)]
+      [(name default combine compare)
     (unless (symbol? name)
       (assertion-violation 'make-facet "name must be a symbol" name))
-    (unless (procedure? combine)
+    (unless (and (procedure? combine) (procedure? compare))
       (assertion-violation 'make-facet "combine must be a procedure" combine))
-    (%make-facet name default combine))
+    (%make-facet name default combine compare)]))
+
+  (define-record-type
+    (state-effect %make-state-effect state-effect?)
+    (fields
+      (immutable type state-effect-type)
+      (immutable value state-effect-value)
+      (immutable mapper state-effect-map)))
+
+  (define (make-state-effect type value . mapper)
+    (unless (symbol? type)
+      (assertion-violation 'make-state-effect "type must be a symbol" type))
+    (%make-state-effect
+      type value
+      (if (null? mapper) (lambda (value change-desc) value) (car mapper))))
+
+  (define-record-type
+    (annotation %make-annotation annotation?)
+    (fields (immutable key annotation-key)
+            (immutable value annotation-value)))
+
+  (define (make-annotation key value)
+    (unless (symbol? key)
+      (assertion-violation 'make-annotation "key must be a symbol" key))
+    (%make-annotation key value))
+
+  (define (append-values values)
+    (fold-left append '() values))
+
+  (define transaction-filters-facet
+    (make-facet 'transaction-filters '() append-values))
+
+  (define transaction-extenders-facet
+    (make-facet 'transaction-extenders '() append-values))
+
+  (define update-listeners-facet
+    (make-facet 'update-listeners '() append-values))
 
   (define-record-type
     (facet-provider %make-facet-provider facet-provider?)
@@ -148,16 +207,17 @@
       (assertion-violation
         'configuration-facet "expected a configuration and facet"
         configuration facet))
-    ((facet-combine facet)
-      (map
-        facet-provider-value
-        (list-sort
-          provider<?
-          (filter
-            (lambda (extension)
-              (and (facet-provider? extension)
-                   (eq? facet (facet-provider-facet extension))))
-            (configuration-extensions configuration))))))
+    (let ([values
+            (map
+              facet-provider-value
+              (list-sort
+                provider<?
+                (filter
+                  (lambda (extension)
+                    (and (facet-provider? extension)
+                         (eq? facet (facet-provider-facet extension))))
+                  (configuration-extensions configuration))))])
+      (if (null? values) (facet-default facet) ((facet-combine facet) values))))
 
   (define (replace-compartment extensions compartment replacement)
     (if (null? extensions)
@@ -171,14 +231,21 @@
                     (replace-compartment
                       (cdr extensions) compartment replacement))))))
 
+  (define (contains-compartment? extensions compartment)
+    (and (pair? extensions)
+         (or (and (compartment-entry? (car extensions))
+                  (eq? compartment (compartment-entry-compartment (car extensions))))
+             (contains-compartment? (cdr extensions) compartment))))
+
   (define (configuration-reconfigure configuration compartment extension)
     (unless (and (configuration? configuration) (compartment? compartment))
       (assertion-violation
         'configuration-reconfigure "expected a configuration and compartment"
         configuration compartment))
-    (make-configuration
-      (replace-compartment
-        (configuration-extensions configuration)
-        compartment
-        extension)))
+    (let ([extensions (configuration-extensions configuration)])
+      (if (contains-compartment? extensions compartment)
+          (make-configuration
+            (replace-compartment extensions compartment extension))
+          (make-configuration
+            (append extensions (list (make-compartment-entry compartment extension)))))))
 )

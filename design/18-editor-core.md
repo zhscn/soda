@@ -61,7 +61,7 @@ Workbench host 增加多 Buffer、多 View、Window tree、Surface、Scheme comm
 (soda kernel value)
   identity, owner-neutral values, offset, range
           │
-          ├──> (soda kernel text)
+          ├──> (soda kernel document)
           │      DocumentSnapshot, ChangeSet, ChangeDesc
           │
           ├──> (soda kernel selection)
@@ -291,8 +291,7 @@ StateField<T> {
   create(state) -> T,
   update(T, Transaction | ViewUpdate) -> T,
   compare?(T, T),
-  provide?(field) -> Extension,
-  owner
+  provide?(field) -> Extension
 }
 ```
 

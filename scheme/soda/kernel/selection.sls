@@ -15,9 +15,11 @@
           selection-primary
           selection-range-at
           selection-map
+          selection-map-change
           selection-primary-range)
   (import (rnrs)
-          (soda kernel value))
+          (soda kernel value)
+          (soda kernel change))
 
   (define (copy-list value)
     (if (null? value) '() (cons (car value) (copy-list (cdr value)))))
@@ -126,4 +128,19 @@
             mapped))
         (selection-ranges selection))
       (selection-primary selection)))
+
+  (define (selection-map-change selection changes)
+    (unless (change-set? changes)
+      (assertion-violation 'selection-map-change "expected a change set" changes))
+    (selection-map
+      selection
+      (lambda (range)
+        (make-selection-range
+          (change-set-map-offset changes (selection-range-anchor range)
+                                  (selection-range-affinity range))
+          (change-set-map-offset changes (selection-range-head range)
+                                  (selection-range-affinity range))
+          (selection-range-affinity range)
+          (selection-range-granularity range)
+          (selection-range-metadata range)))))
 )

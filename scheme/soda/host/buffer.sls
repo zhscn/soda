@@ -7,7 +7,7 @@
           buffer-state
           buffer-document
           buffer-generation
-          buffer-set-state!
+          buffer-publish-state!
           buffer-close!
           make-buffer-service
           buffer-service?
@@ -50,13 +50,15 @@
 
   (define buffer-identities (make-identity-source))
 
-  (define (buffer-set-state! buffer state)
+  ;; State publication is intentionally only used by the host dispatcher.  A
+  ;; package never mutates a Buffer outside that boundary.
+  (define (buffer-publish-state! buffer state)
     (unless (and (buffer? buffer) (not (buffer-closed? buffer)))
-      (assertion-violation 'buffer-set-state! "buffer is closed" buffer))
+      (assertion-violation 'buffer-publish-state! "buffer is closed" buffer))
     (unless (buffer-state? state)
-      (assertion-violation 'buffer-set-state! "expected a buffer state" state))
+      (assertion-violation 'buffer-publish-state! "expected a buffer state" state))
     (buffer-state-set! buffer state)
-    (buffer-generation-set! buffer (+ 1 (buffer-generation buffer)))
+    (buffer-generation-set! buffer (buffer-state-generation state))
     state)
 
   (define (buffer-close! buffer)

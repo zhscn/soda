@@ -3,15 +3,29 @@
           condition-service?
           condition-service-capture
           condition-service-dismiss!
-          condition-service-resume!)
+          condition-service-resume!
+          editor-condition?
+          editor-condition-id
+          editor-condition-owner
+          editor-condition-value
+          editor-condition-continuation
+          editor-condition-restarts
+          editor-condition-status)
   (import (rnrs)
-          (soda host value))
+          (soda host value)
+          (soda kernel value))
 
-  (define (find-entry predicate items)
-    (cond
-      [(null? items) #f]
-      [(predicate (car items)) (car items)]
-      [else (find-entry predicate (cdr items))]))
+  (define-record-type
+    (editor-condition %make-editor-condition editor-condition?)
+    (fields
+      (immutable id editor-condition-id)
+      (immutable owner editor-condition-owner)
+      (immutable value editor-condition-value)
+      (immutable continuation editor-condition-continuation)
+      (immutable restarts editor-condition-restarts)
+      (mutable status editor-condition-status editor-condition-status-set!)))
+
+  (define condition-identities (make-identity-source))
 
   (define-record-type
     (condition-service %make-condition-service condition-service?)
@@ -21,29 +35,33 @@
     (%make-condition-service '()))
 
   (define (condition-service-capture service owner condition continuation restarts)
+    (unless (and (condition-service? service) (procedure? continuation))
+      (assertion-violation 'condition-service-capture "invalid condition capture"))
     (owner-assert-active 'condition-service-capture owner)
-    (let ([entry (vector condition continuation restarts 'pending)])
+    (let ([entry
+            (%make-editor-condition
+              (identity-source-next! condition-identities)
+              owner condition continuation
+              (if (list? restarts) restarts (list restarts))
+              'pending)])
       (condition-service-entries-set!
-        service
-        (cons (cons (length (condition-service-entries service)) entry)
-              (condition-service-entries service)))
+        service (cons entry (condition-service-entries service)))
       entry))
 
-  (define (condition-service-entry service entry)
-    (find-entry (lambda (item) (eq? (cdr item) entry))
-                (condition-service-entries service)))
-
   (define (condition-service-dismiss! service entry)
-    (let ([item (condition-service-entry service entry)])
-      (if (and item (eq? (vector-ref (cdr item) 3) 'pending))
-          (begin (vector-set! (cdr item) 3 'dismissed) #t)
-          #f)))
+    (unless (and (condition-service? service) (editor-condition? entry))
+      (assertion-violation 'condition-service-dismiss! "invalid condition entry" entry))
+    (if (eq? (editor-condition-status entry) 'pending)
+        (begin (editor-condition-status-set! entry 'dismissed) #t)
+        #f))
 
   (define (condition-service-resume! service entry action . arguments)
-    (let ([item (condition-service-entry service entry)])
-      (if (and item (eq? (vector-ref (cdr item) 3) 'pending))
-          (begin
-            (vector-set! (cdr item) 3 'resumed)
-            (apply action (vector-ref (cdr item) 1) arguments))
-          #f)))
+    (unless (and (condition-service? service) (editor-condition? entry)
+                 (procedure? action))
+      (assertion-violation 'condition-service-resume! "invalid condition action" entry))
+    (if (eq? (editor-condition-status entry) 'pending)
+        (begin
+          (editor-condition-status-set! entry 'resumed)
+          (apply action (editor-condition-continuation entry) arguments))
+        #f))
 )

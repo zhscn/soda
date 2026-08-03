@@ -9,9 +9,12 @@
           range-set-ranges
           range-set-empty?
           range-set-query
-          range-set-map)
+          range-set-cursor
+          range-set-map
+          range-set-map-change)
   (import (rnrs)
-          (soda kernel value))
+          (soda kernel value)
+          (soda kernel change))
 
   (define (copy-list value)
     (if (null? value) '() (cons (car value) (copy-list (cdr value)))))
@@ -60,6 +63,12 @@
              (> (range-value-to range) from)))
       (range-set-ranges value)))
 
+  ;; A cursor is represented as the ordered intersecting range sequence.  It
+  ;; keeps the renderer independent of the storage representation and can be
+  ;; replaced by a tree cursor without changing callers.
+  (define (range-set-cursor value from to)
+    (range-set-query value from to))
+
   (define (range-set-map value mapper)
     (unless (range-set? value)
       (assertion-violation 'range-set-map "expected a range set" value))
@@ -74,4 +83,16 @@
                 'range-set-map "mapper must return range values" mapped))
             mapped))
         (range-set-ranges value))))
+
+  (define (range-set-map-change value changes)
+    (unless (change-set? changes)
+      (assertion-violation 'range-set-map-change "expected a change set" changes))
+    (range-set-map
+      value
+      (lambda (range)
+        (let ([mapped (change-set-map-range
+                        changes (range-value-from range) (range-value-to range)
+                        'after)])
+          (make-range-value
+            (car mapped) (cdr mapped) (range-value-value range))))))
 )
