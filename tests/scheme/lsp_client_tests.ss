@@ -84,7 +84,7 @@
   (make-project
     'workspace
     '("/workspace")
-    'manual 'explicit #f
+    'manual 'explicit
     (make-project-settings-layer
       (list
         (cons 'language-servers '((cpp . clangd)))
@@ -2540,7 +2540,7 @@
   (make-project
     'workspace
     '("/workspace")
-    'manual 'updated #f
+    'manual 'updated
     (make-project-settings-layer
       '((language-server . clangd)
         (compile-commands . "/workspace/build")))
@@ -2634,7 +2634,7 @@
   (make-project
     'policy-project
     '("/policy-project")
-    'manual 'explicit #f
+    'manual 'explicit
     (make-project-settings-layer
       '((lsp-activation . on-first-file)
         (language-servers . ((cpp . policy-clangd)))))
@@ -2778,7 +2778,7 @@
   (make-project
     'eager-project
     '("/eager-project")
-    'manual 'explicit #f
+    'manual 'explicit
     (make-project-settings-layer
       '((lsp-activation . on-project-open)
         (language-servers . ((cpp . policy-clangd)))))

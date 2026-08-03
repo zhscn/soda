@@ -420,12 +420,12 @@
   (make-project
     'editor-lifecycle-project
     '("/virtual/lifecycle")
-    'manual 'explicit #f #f '()))
+    'manual 'explicit #f '()))
 (define lifecycle-project-update
   (make-project
     'editor-lifecycle-project
     '("/virtual/lifecycle" "/virtual/lifecycle-generated")
-    'manual 'updated #f #f '()))
+    'manual 'updated #f '()))
 (editor-remember-project! editor lifecycle-project)
 (editor-update-project! editor lifecycle-project-update)
 (editor-forget-project! editor (project-id lifecycle-project))
@@ -548,7 +548,7 @@
     '("/virtual/other-project")
     'manual
     'manual
-    #f #f '()))
+    #f '()))
 (editor-remember-project! editor editor-switch-project)
 (let* ([context
          (make-command-context

@@ -31,7 +31,6 @@
     'test
     'explicit
     #f
-    #f
     '()))
 (define runtime (make-runtime))
 (define executor (make-effect-executor))

@@ -46,7 +46,6 @@
     'test
     'explicit
     #f
-    #f
     '()))
 (editor-workbench-adopt-project!
   source

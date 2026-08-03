@@ -410,7 +410,6 @@
                  'manual
                  'manual
                  #f
-                 #f
                  '()))])
       (editor-remember-project! editor project)
       (editor-set-status-message!
@@ -426,7 +425,7 @@
            [project
              (or
                (editor-discover-project editor root)
-               (make-project root (list root) 'manual 'manual #f #f '()))])
+               (make-project root (list root) 'manual 'manual #f '()))])
       (editor-remember-project! editor project)
       (switch-project-command context project)))
 

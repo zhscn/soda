@@ -641,7 +641,6 @@
                       'session
                       'restored
                       #f
-                      #f
                       '())])
               (editor-remember-project! editor fallback)
               fallback)))))

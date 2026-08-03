@@ -27,7 +27,7 @@
   (make-project
     'outer
     '("/workspace")
-    'manual 'explicit #f
+    'manual 'explicit
     (make-project-settings-layer
       '((language-server . clangd)
         (clangd-arguments . ("--background-index"))))
@@ -36,7 +36,7 @@
   (make-project
     'inner
     '("/workspace/component" "/workspace/generated")
-    'manual 'explicit #f
+    'manual 'explicit
     (make-project-settings-layer
       '((language-server . clangd)
         (compile-commands . "/workspace/build")))
@@ -97,7 +97,7 @@
     (make-project
       'language-servers
       '("/language-servers")
-      'manual 'explicit #f
+      'manual 'explicit
       (make-project-settings-layer
         (list
           (cons 'language-server 'fallback-server)
@@ -135,7 +135,7 @@
     (make-project
       'automatic-language-servers
       '("/automatic-language-servers")
-      'manual 'explicit #f
+      'manual 'explicit
       (make-project-settings-layer
         '((lsp-activation . on-first-file)))
       '())))
@@ -166,7 +166,7 @@
   (make-project
     'mutable
     '("/mutable-workspace")
-    'manual 'explicit #f
+    'manual 'explicit
     (make-project-settings-layer mutable-configuration)
     '()))
 (editor-remember-project! editor mutable-project)
@@ -200,7 +200,7 @@
   (make-project
     'inner
     '("/workspace/component" "/workspace/generated")
-    'manual 'updated #f
+    'manual 'updated
     (make-project-settings-layer
       '((language-server . clangd)
         (compile-commands . "/workspace/out")))

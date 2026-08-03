@@ -37,7 +37,6 @@
     'test
     'explicit
     #f
-    #f
     '()))
 (define secondary
   (editor-create-workbench! editor "secondary" '()))
@@ -204,7 +203,6 @@
     '("/other")
     'test
     'explicit
-    #f
     #f
     '()))
 (editor-workbench-adopt-project!

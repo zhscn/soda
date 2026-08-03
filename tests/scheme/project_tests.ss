@@ -46,7 +46,6 @@
     '("/work/modeled")
     'test
     'explicit
-    #f
     settings-layer
     (list test-task)))
 (check
@@ -134,7 +133,6 @@
     (project-roots discovered)
     (project-kind discovered)
     'refreshed
-    #f
     (make-project-settings-layer '((language-server . clangd)))
     '()))
 (check

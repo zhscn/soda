@@ -6,7 +6,6 @@
           project-primary-root
           project-kind
           project-discovery-provenance
-          project-resource-enumerator
           project-settings-layer
           project-task-definitions
           make-project-settings-layer
@@ -60,7 +59,6 @@
             roots
             kind
             discovery-provenance
-            resource-enumerator
             settings-layer
             task-definitions))
 
@@ -206,7 +204,6 @@
             roots
             kind
             discovery-provenance
-            resource-enumerator
             settings-layer
             task-definitions)
     (unless (valid-id? id)
@@ -228,12 +225,6 @@
         'make-project
         "kind must be a symbol"
         kind))
-    (unless
-      (or (not resource-enumerator) (procedure? resource-enumerator))
-      (assertion-violation
-        'make-project
-        "resource enumerator must be a procedure or #f"
-        resource-enumerator))
     (unless
       (or
         (not settings-layer)
@@ -266,7 +257,6 @@
       (map vfs-normalize-path roots)
       kind
       discovery-provenance
-      resource-enumerator
       settings-layer
       task-definitions))
 
@@ -368,7 +358,6 @@
                    (list
                      (cons 'finder name)
                      (cons 'marker marker))
-                   #f
                    #f
                    '())]
                 [(absent) (loop (cdr remaining) unavailable?)]

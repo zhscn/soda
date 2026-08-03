@@ -685,7 +685,6 @@
           project-primary-root
           project-kind
           project-discovery-provenance
-          project-resource-enumerator
           project-settings-layer
           project-task-definitions
           make-project-settings-layer
