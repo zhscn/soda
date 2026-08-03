@@ -54,13 +54,12 @@ function(soda_embed_chez_application target)
   set(generated_dir "${CMAKE_CURRENT_BINARY_DIR}/generated/chez")
   set(staging_dir "${generated_dir}/scheme")
   set(chez_boot "${generated_dir}/soda-chez.boot")
-  set(editor_boot "${generated_dir}/soda-editor.boot")
-  set(api_index_cache "${generated_dir}/scheme-api-index.cache")
+  set(core_boot "${generated_dir}/soda-core.boot")
   set(chez_boot_c "${generated_dir}/soda_chez_boot.c")
-  set(editor_boot_c "${generated_dir}/soda_editor_boot.c")
-  set(editor_boot_program_so "${editor_boot}.program.so")
-  set(editor_boot_program_wpo "${editor_boot}.program.wpo")
-  set(editor_boot_whole_so "${editor_boot}.whole.so")
+  set(core_boot_c "${generated_dir}/soda_core_boot.c")
+  set(core_boot_program_so "${core_boot}.program.so")
+  set(core_boot_program_wpo "${core_boot}.program.wpo")
+  set(core_boot_whole_so "${core_boot}.whole.so")
 
   add_custom_command(
     OUTPUT
@@ -90,8 +89,8 @@ function(soda_embed_chez_application target)
 
   add_custom_command(
     OUTPUT
-      "${editor_boot}"
-      "${editor_boot_c}"
+      "${core_boot}"
+      "${core_boot_c}"
     COMMAND "${CMAKE_COMMAND}" -E rm -rf "${staging_dir}"
     COMMAND "${CMAKE_COMMAND}" -E make_directory "${generated_dir}"
     COMMAND "${CMAKE_COMMAND}" -E copy_directory
@@ -99,47 +98,32 @@ function(soda_embed_chez_application target)
       "${staging_dir}"
     COMMAND
       "${SODA_CHEZ_SCHEME_EXECUTABLE}"
-      --libdirs
-      "${staging_dir}"
-      --script
-      "${PROJECT_SOURCE_DIR}/cmake/generate-scheme-api-index.ss"
-      "${SODA_CHEZ_SOURCE_DIR}"
-      "${staging_dir}/soda/editor/builtin-api-index.sls"
-      "${api_index_cache}"
-      "${SODA_CHEZ_SOURCE_DIR}"
-    COMMAND
-      "${SODA_CHEZ_SCHEME_EXECUTABLE}"
       --script
       "${PROJECT_SOURCE_DIR}/cmake/build-soda-boot.ss"
       "${staging_dir}"
       "${SODA_CHEZ_PROGRAM}"
-      "${editor_boot}"
-    COMMAND "${CMAKE_COMMAND}" -E rm -f
-      "${staging_dir}/soda/editor/builtin-api-index.so"
-      "${staging_dir}/soda/editor/builtin-api-index.wpo"
+      "${core_boot}"
     COMMAND
       "${SODA_XXD_EXECUTABLE}"
       -i
-      -n soda_editor_boot
-      "${editor_boot}"
-      "${editor_boot_c}"
+      -n soda_core_boot
+      "${core_boot}"
+      "${core_boot_c}"
     DEPENDS
       "${PROJECT_SOURCE_DIR}/cmake/build-soda-boot.ss"
-      "${PROJECT_SOURCE_DIR}/cmake/generate-scheme-api-index.ss"
       ${SODA_CHEZ_SOURCES}
     BYPRODUCTS
-      "${editor_boot_program_so}"
-      "${editor_boot_program_wpo}"
-      "${editor_boot_whole_so}"
-      "${api_index_cache}"
-    COMMENT "Compiling and embedding the Soda editor boot image"
+      "${core_boot_program_so}"
+      "${core_boot_program_wpo}"
+      "${core_boot_whole_so}"
+    COMMENT "Compiling and embedding the Soda core boot image"
     VERBATIM
   )
 
   set_source_files_properties(
     "${chez_boot_c}"
-    "${editor_boot_c}"
+    "${core_boot_c}"
     PROPERTIES GENERATED TRUE
   )
-  target_sources(${target} PRIVATE "${chez_boot_c}" "${editor_boot_c}")
+  target_sources(${target} PRIVATE "${chez_boot_c}" "${core_boot_c}")
 endfunction()

@@ -4,19 +4,18 @@
 
 | 能力 | 状态 |
 |---|---|
-| C launcher、嵌入式 Chez runtime 与 editor boot | 已实现 |
-| Scheme command loop 与单线程状态所有权 | 已实现 |
+| C launcher、嵌入式 Chez runtime 与 Soda core boot | 部分实现 |
+| Scheme command loop 与单线程状态所有权 | 部分实现 |
 | native ABI 注册与不回调 Scheme 的 libuv 边界 | 已实现 |
 | native core 静态链接与运行时 grammar 动态加载 | 已实现 |
 
 ## 组合根
 
 ELF executable 是部署容器，Chez Scheme 是编辑器的组合根。C 入口嵌入 Chez
-runtime boot 和已编译的 editor boot，注册静态 native ABI，构建 Chez heap 后把
-控制权交给 Scheme startup procedure。Chez 持有 command loop、buffer registry、
-mode、language catalog、keymap catalog、window/workbench、导航、补全会话、用户
-配置和 REPL。native library 提供有界机制，不保存 Scheme 对象，也不反向调用
-Scheme。
+runtime boot 和已编译的 Soda core boot，注册静态 native ABI，构建 Chez heap 后把
+控制权交给 Scheme startup procedure。Core 持有可组合的状态、文档与视图原语；
+语言、命令、工作区和呈现功能作为独立 package 接入。native library 提供有界机制，
+不保存 Scheme 对象，也不反向调用 Scheme。
 
 ```text
 terminal / files / timers
@@ -40,14 +39,9 @@ terminal writes
 
 native document、C++ analysis、indentation 和 runtime 组件构建为 static
 libraries。libuv 由 CMake FetchContent 获取并链接其 static target。Chez 的
-`petite.boot` 与 `scheme.boot` 合成为自包含 runtime boot；editor libraries 和
-top-level program 经过 whole-program compilation 后生成以该 runtime 为基底的
-editor boot。两个 boot image 由 `xxd` 转换为 C arrays 并链接进 `soda`。
-
-editor boot 的 staging tree 包含由 Soda Scheme sources 生成的公共 API catalog。
-生成器读取每个 R6RS library 的 export surface，并记录 binding 名称、种类、library
-identity 与源码 byte range。catalog 作为普通 Scheme library 参与 whole-program
-编译，因此数据随 editor boot 静态嵌入，不需要启动时查找源码树或装载独立索引文件。
+`petite.boot` 与 `scheme.boot` 合成为自包含 runtime boot；core libraries 和
+`soda/core/main.ss` 经过 whole-program compilation 后生成以该 runtime 为基底的
+Soda core boot。两个 boot image 由 `xxd` 转换为 C arrays 并链接进 `soda`。
 
 进程启动顺序固定为：
 
@@ -55,11 +49,11 @@ identity 与源码 byte range。catalog 作为普通 Scheme library 参与 whole
 C main
   -> verify Chez kernel/header compatibility
   -> initialize Chez static runtime
-  -> register embedded runtime and editor boot images
+  -> register embedded runtime and Soda core boot images
   -> register every soda_* foreign symbol
   -> build Chez heap
   -> invoke scheme-start
-  -> run editor command loop
+  -> enter the Scheme startup procedure
   -> deinitialize Chez
 ```
 

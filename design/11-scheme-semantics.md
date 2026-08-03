@@ -286,7 +286,7 @@ R6RS `library` 与 `export` form，归一化直接导出和 rename，并把 re-e
 可用的源码定义。生成结果同时包含独立的 library catalog 和 export symbol
 catalog。library catalog 保存没有 export 的 library，因此 import 解析不需要从
 补全符号反推 library 是否存在。两个 catalog 都是只含不可变 datum 的 Scheme
-library，随 whole-program editor boot 一起编译和嵌入。
+library，随提供 Scheme 语义能力的 application boot 一起编译和嵌入。
 
 每个 `.sls` 文件独立投影为可序列化的 `SchemeApiSourceSummary`：
 
@@ -357,7 +357,7 @@ identity。重写后的候选保存显示名称和原始 DefinitionId；补全�
 definition 与 references 查询沿原始 identity 工作。
 
 Soda application build 从全部内置 Scheme library 生成 API 与 library catalog，
-随 editor boot image 静态嵌入。运行时把该 catalog 转换为共享的 library lookup
+随 application boot image 静态嵌入。运行时把该 catalog 转换为共享的 library lookup
 table；使用同一 environment catalog 的 semantic snapshot 复用对应 lookup table。
 单个文档分析只处理文档 token、scope、definition、use 和 diagnostics，不重复构造
 内置 API 索引。打开的 Buffer 始终由当前 Document revision 建立 semantic snapshot，

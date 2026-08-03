@@ -12,8 +12,8 @@
 
 extern unsigned char soda_chez_boot[];
 extern unsigned int soda_chez_boot_len;
-extern unsigned char soda_editor_boot[];
-extern unsigned int soda_editor_boot_len;
+extern unsigned char soda_core_boot[];
+extern unsigned int soda_core_boot_len;
 
 static int soda_embedded_native(void) {
     return 1;
@@ -38,7 +38,7 @@ int main(int argc, char* argv[]) {
 
     Sscheme_init(NULL);
     Sregister_boot_file_bytes("soda-chez.boot", soda_chez_boot, (iptr)soda_chez_boot_len);
-    Sregister_boot_file_bytes("soda-editor.boot", soda_editor_boot, (iptr)soda_editor_boot_len);
+    Sregister_boot_file_bytes("soda-core.boot", soda_core_boot, (iptr)soda_core_boot_len);
     Sbuild_heap(NULL, register_soda_foreign_symbols);
     Scall1(Stop_level_value(Sstring_to_symbol("suppress-greeting")), Strue);
 

@@ -21,7 +21,7 @@
 | [05-jump.md](05-jump.md) | 位置列表、跳转历史、组合视图与跨 Buffer 事务 | 部分实现 |
 | [06-completion.md](06-completion.md) | 补全 session、provider、过滤、取消与应用 | 已实现 |
 | [07-decoration.md](07-decoration.md) | annotation、decoration、DisplayMap 与 fold | 部分实现 |
-| [08-scheme-first.md](08-scheme-first.md) | Chez、native core、libuv 与线程所有权 | 已实现 |
+| [08-scheme-first.md](08-scheme-first.md) | Chez、native core、libuv 与线程所有权 | 部分实现 |
 | [09-language-modes.md](09-language-modes.md) | major mode、syntax provider 与 LanguageSession attachment | 部分实现 |
 | [10-interaction.md](10-interaction.md) | REPL、comint、求值、continuation 与 debugger | 已实现 |
 | [11-scheme-semantics.md](11-scheme-semantics.md) | SchemeEnvironment、索引、补全、xref 与 rename | 部分实现 |

@@ -242,7 +242,7 @@ set_target_properties(soda PROPERTIES LINKER_LANGUAGE CXX)
 soda_target_warnings(soda)
 soda_embed_chez_application(soda
   SOURCE_DIR "${PROJECT_SOURCE_DIR}/scheme"
-  PROGRAM "soda/editor/main.ss"
+  PROGRAM "soda/core/main.ss"
   SOURCES ${SODA_SCHEME_SOURCES}
 )
 add_custom_target(soda_tree_sitter_runtime ALL
@@ -257,21 +257,6 @@ add_dependencies(soda_tree_sitter_runtime
   ${SODA_TREE_SITTER_GRAMMAR_TARGETS}
 )
 add_dependencies(soda soda_tree_sitter_runtime)
-
-if(BUILD_TESTING)
-  add_test(
-    NAME scheme_embedded_api_index_tests
-    CONFIGURATIONS Debug Release
-    COMMAND
-      "${CMAKE_COMMAND}" -E env
-      SODA_DOCUMENT_LIBRARY=$<TARGET_FILE:soda_scheme_native_test>
-      "${SODA_CHEZ_SCHEME_EXECUTABLE}"
-        --libdirs
-        "${CMAKE_CURRENT_BINARY_DIR}/generated/chez/scheme"
-        --program
-        "${PROJECT_SOURCE_DIR}/tests/scheme/embedded_api_index_tests.ss"
-  )
-endif()
 
 if(BUILD_TESTING)
   add_library(soda_scheme_native_test SHARED
