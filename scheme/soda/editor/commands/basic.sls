@@ -40,15 +40,6 @@
   (define (context-document context)
     (buffer-document (context-buffer context)))
 
-  (define (require-non-negative-count who context)
-    (let ([count (command-context-count context)])
-      (when (negative? count)
-        (assertion-violation
-          who
-          "command requires a non-negative prefix argument"
-          count))
-      count))
-
   (define (repeat-bytes bytes count)
     (let* ([length (bytevector-length bytes)]
            [result (make-bytevector (* length count))])
@@ -378,7 +369,7 @@
            [inserted
              (repeat-bytes
                bytes
-               (require-non-negative-count
+               (command-context-non-negative-count
                  'self-insert-command
                  context))]
            [view (context-view context)]
@@ -432,7 +423,7 @@
                'edit.newline context target)]
            [start (command-target-start target)]
            [end (command-target-end target)]
-           [count (require-non-negative-count 'newline-command context)]
+           [count (command-context-non-negative-count 'newline-command context)]
            [replacement
              (newline-replacement
                buffer
@@ -459,7 +450,7 @@
                'edit.open-line context target)]
            [start (command-target-start target)]
            [end (command-target-end target)]
-           [count (require-non-negative-count 'open-line-command context)])
+           [count (command-context-non-negative-count 'open-line-command context)])
       (unless (zero? count)
         (buffer-replace-range!
           buffer
@@ -582,7 +573,7 @@
                  [width
                    (*
                      (indent-width buffer)
-                     (require-non-negative-count
+                     (command-context-non-negative-count
                        (if unindent?
                            'edit.unindent-region
                            'edit.shift-region-right)
@@ -663,7 +654,7 @@
                context
                target)]
            [count
-             (require-non-negative-count
+             (command-context-non-negative-count
                'edit.indent-or-insert-tab
                context)])
       (cond
@@ -704,7 +695,7 @@
              (require-command-target-current
                'edit.unindent context target)]
            [count
-             (require-non-negative-count
+             (command-context-non-negative-count
                'edit.unindent
                context)])
       (if (eq? (command-target-source target) 'region)

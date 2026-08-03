@@ -68,6 +68,7 @@
           command-context-argument
           command-context-prefix
           command-context-count
+          command-context-non-negative-count
           make-command-effect
           command-effect?
           command-effect-kind
@@ -108,6 +109,15 @@
         context))
     (let ([prefix (command-context-prefix context)])
       (if prefix (prefix-argument-value prefix) 1)))
+
+  (define (command-context-non-negative-count who context)
+    (let ([count (command-context-count context)])
+      (when (negative? count)
+        (assertion-violation
+          who
+          "command requires a non-negative prefix argument"
+          count))
+      count))
 
   (define-record-type command-effect
     (fields kind payload))

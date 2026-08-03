@@ -65,15 +65,6 @@
           (buffer-major-mode-name buffer)))
       session))
 
-  (define (require-non-negative-count who context)
-    (let ([count (command-context-count context)])
-      (when (negative? count)
-        (assertion-violation
-          who
-          "command requires a non-negative prefix argument"
-          count))
-      count))
-
   (define line-target-reader
     (make-command-target-reader
       'cpp-line-target
@@ -118,7 +109,7 @@
            [buffer (view-buffer view)]
            [session (require-cpp-session buffer)]
            [count
-             (require-non-negative-count
+             (command-context-non-negative-count
                'cpp.newline-and-indent
                context)]
            [style #f])
@@ -199,7 +190,7 @@
            [buffer (view-buffer view)]
            [session (require-cpp-session buffer)]
            [count
-             (require-non-negative-count
+             (command-context-non-negative-count
                'cpp.indent-line
                context)]
            [start-line
