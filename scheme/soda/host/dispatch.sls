@@ -142,7 +142,7 @@
                     (transaction-spec-annotations spec)
                     new-snapshot))]
                [new-buffer-state (transaction-new-buffer-state transaction)]
-               [affected
+               [pending-views
                 (map
                   (lambda (view)
                     (let* ([current (view-state view)]
@@ -156,14 +156,25 @@
                             (if (and origin (= (view-id view) (view-id origin)))
                                 (transaction-new-view-state transaction)
                                 (view-state-advance current selection transaction))])
-                      (view-publish-state! view new-state)
-                      (cons (view-id view) new-state)))
+                      (cons view new-state)))
                   (views-for-buffer views (buffer-id buffer)))])
           (when native (document-transaction-commit! native))
           (buffer-publish-state! buffer new-buffer-state)
+          ;; Compute all immutable view states before entering the publication
+          ;; boundary.  A native commit failure therefore cannot leave one
+          ;; shared view observing a state that the buffer did not publish.
+          (for-each
+            (lambda (entry)
+              (view-publish-state! (car entry) (cdr entry)))
+            pending-views)
           (let ([update
                   (make-editor-update
-                    (buffer-id buffer) old-state new-buffer-state affected changes
+                    (buffer-id buffer) old-state new-buffer-state
+                    (map
+                      (lambda (entry)
+                        (cons (view-id (car entry)) (cdr entry)))
+                      pending-views)
+                    changes
                     (transaction-annotations transaction)
                     (if (change-set-empty? changes) '(selection) '(document selection)))])
             (let ([listener (dispatcher-listener dispatcher)])

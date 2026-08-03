@@ -275,6 +275,15 @@
       (snapshot-byte-size (buffer-state-document (buffer-state buffer)))
       (list (make-text-change 5 5 " world")))
     #f '() '()))
+(define publication-consistent? #f)
+(dispatcher-set-listener!
+  (host-state-dispatch host)
+  (lambda (update)
+    (set!
+      publication-consistent?
+      (= (buffer-state-generation (editor-update-new-buffer-state update))
+         (view-state-buffer-generation
+           (cdr (car (editor-update-views update))))))))
 (define update
   (dispatcher-dispatch!
     (host-state-dispatch host)
@@ -283,6 +292,7 @@
              (= (buffer-state-generation (buffer-state buffer)) 1)
              (= (view-state-generation (view-state view)) 1)
              (= (view-state-buffer-generation (view-state view)) 1)
+             publication-consistent?
              (string=?
                (snapshot-string (buffer-state-document (buffer-state buffer)))
                "hello world"))
