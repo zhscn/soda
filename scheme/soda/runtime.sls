@@ -45,9 +45,6 @@
   (import (chezscheme)
           (soda native))
 
-  (define native-library-loaded
-    (load-soda-native-library! "SODA_RUNTIME_LIBRARY"))
-
   (define %abi-version
     (foreign-procedure __atomic "soda_runtime_abi_version" () unsigned-32))
 

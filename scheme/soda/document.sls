@@ -79,9 +79,6 @@
           (soda native)
           (soda document handles))
 
-  (define native-library-loaded
-    (load-soda-native-library! "SODA_DOCUMENT_LIBRARY"))
-
   (define text-npos #xffffffff)
   (define revision-none #xffffffffffffffff)
   (define undo-node-none #xffffffff)

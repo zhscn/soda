@@ -36,7 +36,7 @@ find_library(SODA_CHEZ_KERNEL_LIBRARY
 
 function(soda_embed_chez_application target)
   set(options)
-  set(one_value_args SOURCE_DIR PROGRAM)
+  set(one_value_args SOURCE_DIR PROGRAM PROGRAM_SOURCE)
   set(multi_value_args SOURCES)
   cmake_parse_arguments(SODA_CHEZ
     "${options}"
@@ -48,6 +48,13 @@ function(soda_embed_chez_application target)
   if(NOT SODA_CHEZ_SOURCE_DIR OR NOT SODA_CHEZ_PROGRAM)
     message(FATAL_ERROR
       "soda_embed_chez_application requires SOURCE_DIR and PROGRAM"
+    )
+  endif()
+
+  if(SODA_CHEZ_PROGRAM_SOURCE AND NOT EXISTS "${SODA_CHEZ_PROGRAM_SOURCE}")
+    message(FATAL_ERROR
+      "soda_embed_chez_application PROGRAM_SOURCE does not exist: "
+      "${SODA_CHEZ_PROGRAM_SOURCE}"
     )
   endif()
 
@@ -63,6 +70,22 @@ function(soda_embed_chez_application target)
   set(core_boot_program_so "${core_boot}.program.so")
   set(core_boot_program_wpo "${core_boot}.program.wpo")
   set(core_boot_whole_so "${core_boot}.whole.so")
+
+  set(program_stage_commands)
+  set(program_stage_depends)
+  if(SODA_CHEZ_PROGRAM_SOURCE)
+    get_filename_component(program_directory "${SODA_CHEZ_PROGRAM}" DIRECTORY)
+    if(NOT program_directory)
+      set(program_directory ".")
+    endif()
+    list(APPEND program_stage_commands
+      COMMAND "${CMAKE_COMMAND}" -E make_directory
+        "${staging_dir}/${program_directory}"
+      COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+        "${SODA_CHEZ_PROGRAM_SOURCE}"
+        "${staging_dir}/${SODA_CHEZ_PROGRAM}")
+    list(APPEND program_stage_depends "${SODA_CHEZ_PROGRAM_SOURCE}")
+  endif()
 
   add_custom_command(
     OUTPUT
@@ -112,6 +135,7 @@ function(soda_embed_chez_application target)
     COMMAND "${CMAKE_COMMAND}" -E copy_directory
       "${SODA_CHEZ_SOURCE_DIR}"
       "${staging_dir}"
+    ${program_stage_commands}
     COMMAND
       "${SODA_CHEZ_SCHEME_EXECUTABLE}"
       --script
@@ -138,6 +162,8 @@ function(soda_embed_chez_application target)
       "${SODA_CHEZ_PETITE_BOOT}"
       "${SODA_CHEZ_SCHEME_BOOT}"
       ${SODA_CHEZ_SOURCES}
+      ${program_stage_depends}
+      ${SODA_CHEZ_PROGRAM_SOURCE}
     BYPRODUCTS
       "${core_boot_program_so}"
       "${core_boot_program_wpo}"

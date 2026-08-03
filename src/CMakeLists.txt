@@ -258,47 +258,6 @@ add_dependencies(soda_tree_sitter_runtime
 )
 add_dependencies(soda soda_tree_sitter_runtime)
 
-if(BUILD_TESTING)
-  add_library(soda_scheme_native_test SHARED
-    document/c_api.cpp
-    document/document.cpp
-    document/line_index.cpp
-    document/text.cpp
-    cpp_lexer/lexer.cpp
-    cpp_lexer/token_buffer.cpp
-    syntax/c_api.cpp
-    syntax/analysis.cpp
-    syntax/green_node.cpp
-    syntax/highlighting.cpp
-    syntax/parser.cpp
-    syntax/structure.cpp
-    syntax/syntax_tree.cpp
-    commands/editor_commands.cpp
-    formatting/clang_format_style.cpp
-    indentation/c_api.cpp
-    indentation/expression_continuation.cpp
-    indentation/indentation_service.cpp
-    tree_sitter/c_api.cpp
-    runtime/c_api.cpp
-    runtime/runtime.cpp
-    runtime/terminal_c_api.cpp
-  )
-  target_include_directories(soda_scheme_native_test
-    PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}"
-  )
-  target_compile_features(soda_scheme_native_test PUBLIC cxx_std_23)
-  target_compile_definitions(soda_scheme_native_test PRIVATE
-    SODA_TREE_SITTER_INSTALL_DATADIR="${CMAKE_INSTALL_DATADIR}"
-  )
-  target_include_directories(soda_scheme_native_test PRIVATE
-    "${tree_sitter_SOURCE_DIR}/lib/include"
-  )
-  target_link_libraries(soda_scheme_native_test
-    PRIVATE uv_a tree-sitter "${CMAKE_DL_LIBS}"
-  )
-  soda_target_warnings(soda_scheme_native_test)
-endif()
-
 install(
   TARGETS ${SODA_TREE_SITTER_GRAMMAR_TARGETS}
   LIBRARY DESTINATION "${CMAKE_INSTALL_DATADIR}/soda/runtime/grammars"

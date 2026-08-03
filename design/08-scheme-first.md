@@ -58,10 +58,10 @@ C main
   -> deinitialize Chez
 ```
 
-Scheme wrapper 在嵌入式进程中直接解析 C 入口注册的 foreign symbols。独立 Scheme
-测试可以通过 `SODA_*_LIBRARY` 环境变量装载测试用的 monolithic native module；
-该 module 不属于安装产物。foreign symbol table 从公开 C ABI headers 生成，因此
-完整 ABI 在嵌入式 Chez 环境和 REPL 中均可解析。
+Scheme wrapper 在嵌入式进程中直接解析 C 入口注册的 foreign symbols。Scheme
+contract test 使用同一套 Soda launcher 和静态 native substrate 启动，因此测试与编辑器
+共享完全相同的 symbol visibility。foreign symbol table 从公开 C ABI headers 生成，
+因此完整 ABI 在嵌入式 Chez 环境和 REPL 中均可解析。
 
 ## 所有权
 

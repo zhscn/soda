@@ -34,16 +34,36 @@ soda_core_test(native_substrate_tests native_substrate_tests.cpp soda_native_sub
 soda_core_test(runtime_tests runtime/runtime_tests.cpp soda_runtime)
 target_link_libraries(runtime_tests PRIVATE soda_document Threads::Threads)
 
-find_program(CHEZ_SCHEME_EXECUTABLE NAMES scheme chezscheme)
-if(CHEZ_SCHEME_EXECUTABLE)
-  add_test(
-    NAME scheme_kernel_tests
-    CONFIGURATIONS Debug Release
-    COMMAND
-      ${CMAKE_COMMAND} -E env
-      SODA_DOCUMENT_LIBRARY=$<TARGET_FILE:soda_scheme_native_test>
-      ${CHEZ_SCHEME_EXECUTABLE}
-      --libdirs ${PROJECT_SOURCE_DIR}/scheme
-      --program ${CMAKE_CURRENT_SOURCE_DIR}/scheme/kernel_tests.ss
-  )
-endif()
+file(GLOB_RECURSE SODA_TEST_SCHEME_SOURCES
+  CONFIGURE_DEPENDS
+  "${PROJECT_SOURCE_DIR}/scheme/*.sls"
+  "${PROJECT_SOURCE_DIR}/scheme/*.ss"
+)
+
+add_executable(scheme_kernel_tests
+  "${PROJECT_SOURCE_DIR}/src/launcher/main.c"
+)
+target_include_directories(scheme_kernel_tests PRIVATE
+  "${PROJECT_SOURCE_DIR}/src"
+  "${PROJECT_BINARY_DIR}/src/generated"
+  "${SODA_CHEZ_INCLUDE_DIR}"
+)
+target_link_libraries(scheme_kernel_tests PRIVATE
+  soda_native_substrate
+  "${SODA_CHEZ_KERNEL_LIBRARY}"
+  ZLIB::ZLIB
+  "${SODA_LZ4_LIBRARY}"
+  "${SODA_TERMINFO_LIBRARY}"
+  Threads::Threads
+  "${CMAKE_DL_LIBS}"
+  m
+)
+set_target_properties(scheme_kernel_tests PROPERTIES LINKER_LANGUAGE CXX)
+soda_target_warnings(scheme_kernel_tests)
+soda_embed_chez_application(scheme_kernel_tests
+  SOURCE_DIR "${PROJECT_SOURCE_DIR}/scheme"
+  PROGRAM "soda/test/kernel-tests.ss"
+  PROGRAM_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/scheme/kernel_tests.ss"
+  SOURCES ${SODA_TEST_SCHEME_SOURCES}
+)
+add_test(NAME scheme_kernel_tests COMMAND scheme_kernel_tests)

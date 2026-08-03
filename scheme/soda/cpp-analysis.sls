@@ -31,9 +31,6 @@
           (soda cpp-analysis handles)
           (soda document handles))
 
-  (define native-library-loaded
-    (load-soda-native-library! "SODA_CPP_ANALYSIS_LIBRARY"))
-
   (define syntax-node-none #xffffffff)
   (define revision-none #xffffffffffffffff)
 

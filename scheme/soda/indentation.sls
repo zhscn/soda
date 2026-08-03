@@ -24,9 +24,6 @@
           (soda cpp-analysis handles)
           (soda document handles))
 
-  (define native-library-loaded
-    (load-soda-native-library! "SODA_INDENTATION_LIBRARY"))
-
   (define text-npos #xffffffff)
 
   (define format-roles

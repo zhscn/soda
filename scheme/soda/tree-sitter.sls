@@ -31,9 +31,6 @@
           (soda native)
           (soda tree-sitter handles))
 
-  (define native-library-loaded
-    (load-soda-native-library! "SODA_TREE_SITTER_LIBRARY"))
-
   (define-record-type tree-sitter-capture
     (fields name
             start

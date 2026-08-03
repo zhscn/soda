@@ -1,12 +1,12 @@
 (library (soda native)
-  (export load-soda-native-library!
-          native-null-pointer?
+  (export native-null-pointer?
           make-native-error
           make-native-status-checker)
   (import (chezscheme))
 
-  (define loaded-paths (make-hashtable string-hash string=?))
-
+  ;; Native entry points are registered by the C launcher before the Chez
+  ;; heap is built.  This library only contains common ABI helpers; it does
+  ;; not load shared objects or inspect environment variables.
   (define (native-null-pointer? pointer)
     (or (not pointer)
         (and (integer? pointer) (zero? pointer))))
@@ -19,16 +19,4 @@
     (lambda (who status)
       (when (negative? status)
         (native-error who))))
-
-  (define (load-soda-native-library! environment-variable)
-    (let ([path
-            (and
-              (not
-                (foreign-entry?
-                  "soda_embedded_native"))
-              (getenv environment-variable))])
-      (when
-        (and path
-             (not (hashtable-contains? loaded-paths path)))
-        (load-shared-object path)
-        (hashtable-set! loaded-paths path #t)))))
+)
