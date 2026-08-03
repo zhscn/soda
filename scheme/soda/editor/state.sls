@@ -264,6 +264,7 @@
           (soda editor debugger-action)
           (soda editor display)
           (soda editor display-map)
+          (soda editor edit)
           (soda editor editor-storage)
           (soda editor editor-settings)
           (soda editor editor-history)
@@ -1700,28 +1701,6 @@
             (prompt-session-origin-view-id
               (last-prompt sessions))))))
 
-  (define (replace-buffer-text! buffer value)
-    (let ([change #f])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (call-with-values
-            (lambda ()
-              (call-with-buffer-transaction
-                buffer
-                (lambda (transaction)
-                  (transaction-replace!
-                    transaction
-                    0
-                    (buffer-byte-size buffer)
-                    (string->utf8 value)))))
-            (lambda (result committed-change)
-              (set! change committed-change)
-              result)))
-        (lambda ()
-          (when change
-            (change-close! change))))))
-
   (define (active-prompt-session who value)
     (or (editor-active-prompt value)
         (assertion-violation who "there is no active prompt")))
@@ -2898,7 +2877,11 @@
     (let* ([view
              (editor-view-ref value (prompt-session-view-id session))]
            [buffer (view-buffer view)])
-      (replace-buffer-text! buffer input)
+      (buffer-replace-range-internal!
+        buffer
+        0
+        (buffer-byte-size buffer)
+        (string->utf8 input))
       (view-set-caret!
         view
         (buffer-byte-size buffer))
