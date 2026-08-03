@@ -31,8 +31,7 @@
           runtime-binding-detail
           runtime-binding-preview
           runtime-binding-signature-formals
-          runtime-binding-signatures
-          runtime-binding-generation)
+          runtime-binding-signatures)
   (import (chezscheme)
           (soda editor event)
           (soda editor interaction)
@@ -64,8 +63,7 @@
       kind
       detail
       preview
-      signature-formals
-      generation))
+      signature-formals))
 
   (define-record-type evaluation-control
     (fields
@@ -332,15 +330,13 @@
               (bounded-write value)
               (if (eq? kind 'procedure)
                   (procedure-signature-formals value)
-                  '())
-              (chez-evaluator-generation evaluator)))
+                  '())))
           (make-runtime-binding
             name
             'syntax
             "Runtime syntax"
             "#<syntax>"
-            '()
-            (chez-evaluator-generation evaluator)))))
+            '()))))
 
   (define (chez-evaluator-bindings evaluator)
     (unless (chez-evaluator? evaluator)

@@ -509,7 +509,6 @@
           runtime-binding-preview
           runtime-binding-signature-formals
           runtime-binding-signatures
-          runtime-binding-generation
           editor-command-registry
           editor-add-hook!
           editor-remove-hook!
