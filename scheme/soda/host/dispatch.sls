@@ -120,6 +120,13 @@
                        [(focus-view)
                         (surface-select-view! surface (dispatcher-views dispatcher)
                                               (host-operation-value operation))]
+                       [(split-view)
+                        (let ([value (host-operation-value operation)])
+                          (surface-split-view! surface (dispatcher-views dispatcher)
+                                               (car value) (cadr value) (caddr value)))]
+                       [(remove-window)
+                        (surface-remove-view-window! surface (dispatcher-views dispatcher)
+                                                     (host-operation-value operation))]
                        [(display-request)
                         (surface-route-display-request!
                           surface (dispatcher-views dispatcher)

@@ -8,6 +8,8 @@
           active-context-interaction-stack
           surface-active-context
           surface-select-view!
+          surface-split-view!
+          surface-remove-view-window!
           surface-route-display-request!
           make-display-request
           display-request?
@@ -72,6 +74,25 @@
                 (surface-set-selected-window! surface (car leaves))
                 (context-for-window surface views (car leaves))]
                [else (loop (cdr leaves))])))))
+
+  (define (surface-split-view! surface views axis target-view-id focus-policy)
+    (unless (and (surface? surface) (view-service? views) (identity? target-view-id)
+                 (memq axis '(horizontal vertical)) (memq focus-policy '(focus preserve)))
+      (assertion-violation 'surface-split-view!
+                           "invalid Surface split View request"
+                           surface views axis target-view-id focus-policy))
+    (and (view-service-ref views target-view-id #f)
+         (let ([window
+                (surface-split-selected-window! surface axis target-view-id focus-policy)])
+           (context-for-window surface views window))))
+
+  (define (surface-remove-view-window! surface views window-id)
+    (unless (and (surface? surface) (view-service? views) (identity? window-id))
+      (assertion-violation 'surface-remove-view-window!
+                           "invalid Surface, ViewService, or Window identity"
+                           surface views window-id))
+    (let ([selected (surface-remove-window! surface window-id)])
+      (and selected (context-for-window surface views selected))))
 
   (define (window-for-buffer surface views buffer-id)
     (let* ([selected (surface-selected-window surface)]

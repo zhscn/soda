@@ -913,12 +913,23 @@
        [right (make-leaf-window (view-id other-view) #f)]
        [split (make-split-window 'horizontal (list left right) #f)]
        [split-surface (make-surface split '(8 . 1))]
+       [single-leaf (make-leaf-window (view-id view) #f)]
+       [single-surface (make-surface single-leaf '(8 . 1))]
        [_registered
         (surface-service-register! (host-state-surfaces host) split-surface)]
+       [_single-registered
+        (surface-service-register! (host-state-surfaces host) single-surface)]
        [_listener
         (dispatcher-set-host-listener!
           (host-state-dispatch host)
           (lambda (update) (set! host-updates (cons update host-updates))))]
+       [split-update
+        (dispatcher-dispatch-host!
+          (host-state-dispatch host)
+          (make-split-view-operation
+            (surface-id single-surface) 'horizontal (view-id other-view) 'focus))]
+       [split-leaf-count (length (window-leaves (surface-root-window single-surface)))]
+       [split-rectangle (window-rectangle (surface-selected-window single-surface))]
        [focus-update
         (dispatcher-dispatch-host!
           (host-state-dispatch host)
@@ -935,8 +946,22 @@
           (make-display-request-operation
             (surface-id split-surface)
             (make-display-request (buffer-id buffer) #f 'result 'focus #f 'test)))]
+       [remove-update
+        (dispatcher-dispatch-host!
+          (host-state-dispatch host)
+          (make-remove-window-operation
+            (surface-id single-surface)
+            (active-context-window-id (host-update-resolution split-update))))]
        [generation (surface-generation split-surface)])
-  (unless (and (host-update? focus-update)
+  (unless (and (host-update? split-update)
+               (= (active-context-view-id (host-update-resolution split-update))
+                  (view-id other-view))
+               (= split-leaf-count 2)
+               (equal? split-rectangle '(0 4 4 1))
+               (= (length (window-leaves (surface-root-window single-surface))) 1)
+               (eq? (surface-selected-window single-surface) single-leaf)
+               (host-update? remove-update)
+               (host-update? focus-update)
                (= (active-context-view-id (host-update-new-context focus-update))
                   (view-id other-view))
                (= (active-context-buffer-id (host-update-resolution focus-update))
@@ -950,7 +975,7 @@
                (= (active-context-view-id (host-update-resolution focused)) (view-id view))
                (= (active-context-view-id (host-update-new-context focused)) (view-id view))
                (equal? (host-update-damage focused) '(chrome))
-               (= (length host-updates) 3)
+               (= (length host-updates) 5)
                (eq? (surface-selected-window split-surface) left)
                (eq? (surface-set-selected-window! split-surface left) left)
                (= (surface-generation split-surface) generation)
@@ -960,6 +985,7 @@
     (error 'kernel-tests "Surface View focus routing differs"))
   (dispatcher-set-host-listener! (host-state-dispatch host) #f)
   (surface-service-remove! (host-state-surfaces host) (surface-id split-surface))
+  (surface-service-remove! (host-state-surfaces host) (surface-id single-surface))
   (view-service-close-view! (host-state-views host) (view-id other-view)))
 
 (let* ([left (make-leaf-window 1 #f)]

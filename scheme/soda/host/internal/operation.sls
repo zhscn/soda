@@ -4,6 +4,8 @@
           host-operation-surface-id
           host-operation-value
           make-focus-view-operation
+          make-split-view-operation
+          make-remove-window-operation
           make-display-request-operation
           make-host-update
           host-update?
@@ -30,6 +32,20 @@
       (assertion-violation 'make-focus-view-operation "invalid target identity"
                            surface-id view-id))
     (%make-host-operation 'focus-view surface-id view-id))
+
+  (define (make-split-view-operation surface-id axis view-id focus-policy)
+    (unless (and (identity? surface-id) (identity? view-id)
+                 (memq axis '(horizontal vertical))
+                 (memq focus-policy '(focus preserve)))
+      (assertion-violation 'make-split-view-operation "invalid split View operation"
+                           surface-id axis view-id focus-policy))
+    (%make-host-operation 'split-view surface-id (list axis view-id focus-policy)))
+
+  (define (make-remove-window-operation surface-id window-id)
+    (unless (and (identity? surface-id) (identity? window-id))
+      (assertion-violation 'make-remove-window-operation "invalid remove Window operation"
+                           surface-id window-id))
+    (%make-host-operation 'remove-window surface-id window-id))
 
   (define (make-display-request-operation surface-id request)
     (unless (and (identity? surface-id) (display-request? request))

@@ -6,6 +6,8 @@
           surface-root-window
           surface-selected-window
           surface-set-selected-window!
+          surface-split-selected-window!
+          surface-remove-window!
           surface-resize!
           surface-generation
           make-surface-service
@@ -43,7 +45,7 @@
     (fields
       (immutable id surface-id)
       (mutable size surface-size surface-size-set!)
-      (immutable root-window surface-root-window)
+      (mutable root-window surface-root-window surface-root-window-set!)
       (mutable selected-window surface-selected-window surface-selected-window-set!)
       (mutable generation surface-generation surface-generation-set!)))
 
@@ -90,6 +92,91 @@
           (surface-selected-window-set! surface window)
           (surface-generation-set! surface (+ 1 (surface-generation surface)))
           window)))
+
+  (define (view-id? value)
+    (and (integer? value) (exact? value) (>= value 0)))
+
+  ;; Rebuild only the ancestor path.  Existing leaves retain their identity,
+  ;; which keeps an ActiveContext valid when a sibling is added or removed.
+  (define (replace-window root target replacement)
+    (cond
+      [(eq? root target) replacement]
+      [(eq? (window-kind root) 'leaf) root]
+      [else
+       (let ([children (map (lambda (child) (replace-window child target replacement))
+                            (window-children root))])
+         (if (for-all eq? children (window-children root))
+             root
+             (make-split-window (window-axis root) children (window-weights root)
+                                (window-rectangle root))))]))
+
+  (define (remove-window root target)
+    (cond
+      [(eq? root target) #f]
+      [(eq? (window-kind root) 'leaf) root]
+      [else
+       (let loop ([children (window-children root)]
+                  [weights (window-weights root)] [kept '()] [kept-weights '()])
+         (if (null? children)
+             (cond
+               [(null? kept) #f]
+               [(null? (cdr kept)) (car kept)]
+               [else
+                (make-split-window (window-axis root) (reverse kept)
+                                   (reverse kept-weights) (window-rectangle root))])
+             (let ([child (remove-window (car children) target)])
+               (if child
+                   (loop (cdr children) (cdr weights)
+                         (cons child kept) (cons (car weights) kept-weights))
+                   (loop (cdr children) (cdr weights) kept kept-weights)))))]))
+
+  (define (leaf-by-id root id)
+    (let loop ([leaves (window-leaves root)])
+      (and (pair? leaves)
+           (if (= (window-id (car leaves)) id)
+               (car leaves)
+               (loop (cdr leaves))))))
+
+  (define (surface-rebuild-window! surface root selected)
+    (let ([size (surface-size surface)])
+      (window-layout! root 0 0 (car size) (cdr size)))
+    (for-each (lambda (leaf) (window-set-selected! leaf #f)) (window-leaves root))
+    (window-set-selected! selected #t)
+    (surface-root-window-set! surface root)
+    (surface-selected-window-set! surface selected)
+    (surface-generation-set! surface (+ 1 (surface-generation surface)))
+    selected)
+
+  ;; Add a sibling beside the selected leaf.  The new leaf is returned even
+  ;; when focus remains on the old leaf, allowing HostUpdate to report the
+  ;; placement resolution independently from active context.
+  (define (surface-split-selected-window! surface axis view-id focus-policy)
+    (unless (and (surface? surface) (memq axis '(horizontal vertical))
+                 (view-id? view-id) (memq focus-policy '(focus preserve)))
+      (assertion-violation 'surface-split-selected-window!
+                           "invalid Surface split request" surface axis view-id focus-policy))
+    (let* ([selected (surface-selected-window surface)]
+           [new-leaf (make-leaf-window view-id #f)]
+           [split (make-split-window axis (list selected new-leaf) #f)]
+           [root (replace-window (surface-root-window surface) selected split)])
+      (surface-rebuild-window!
+        surface root (if (eq? focus-policy 'focus) new-leaf selected))
+      new-leaf))
+
+  ;; Removing the final leaf has no meaning: a Surface always retains a live
+  ;; selected placement.  Removing a non-final leaf selects the first leaf in
+  ;; the rebuilt tree and returns it.
+  (define (surface-remove-window! surface window-id)
+    (unless (and (surface? surface) (view-id? window-id))
+      (assertion-violation 'surface-remove-window!
+                           "invalid Surface or Window identity" surface window-id))
+    (let* ([root (surface-root-window surface)]
+           [target (leaf-by-id root window-id)])
+      (and target
+           (let ([next-root (remove-window root target)])
+             (and next-root
+                  (surface-rebuild-window! surface next-root
+                                           (car (window-leaves next-root))))))))
 
   ;; A Surface registry owns identity lookup only.  Frontends keep their own
   ;; terminal resources, while dispatcher operations resolve a target Surface

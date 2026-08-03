@@ -4,6 +4,8 @@
           host-operation-surface-id
           host-operation-value
           make-focus-view-operation
+          make-split-view-operation
+          make-remove-window-operation
           make-display-request-operation
           host-update?
           host-update-operation
