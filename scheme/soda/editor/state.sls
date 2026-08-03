@@ -1837,40 +1837,61 @@
           value
           (editor-active-view value))))
 
+  ;; Completion targets are tied to a particular view, buffer, and document.
+  ;; The three validation paths differ only in whether a revision must match
+  ;; and how the current caret is constrained, so keep those policy choices
+  ;; explicit while sharing the ownership checks.
+  (define (document-completion-target-view-valid?
+            target
+            view
+            allow-revision-change?
+            caret-policy)
+    (and
+      (document-completion-target? target)
+      (= (view-id view)
+         (document-completion-target-view-id target))
+      (= (buffer-id (view-buffer view))
+         (document-completion-target-buffer-id target))
+      (= (document-id
+           (buffer-document (view-buffer view)))
+         (document-completion-target-document-id target))
+      (or
+        allow-revision-change?
+        (= (buffer-revision (view-buffer view))
+           (document-completion-target-revision target)))
+      (case caret-policy
+        [(any) #t]
+        [(range)
+         (and
+           (<= (document-completion-target-start target)
+               (view-caret view))
+           (<= (view-caret view)
+               (document-completion-target-replacement-end target)))]
+        [(end)
+         (= (view-caret view)
+            (document-completion-target-end target))]
+        [else
+         (assertion-violation
+           'document-completion-target-view-valid?
+           "unknown caret policy"
+           caret-policy)])))
+
   (define (document-target-query
             value
             completion
             allow-revision-change?)
     (let* ([target (completion-session-target completion)]
-           [view (editor-active-view value)]
-           [start
-             (and
-               (document-completion-target? target)
-               (document-completion-target-start target))]
-           [replacement-end
-             (and
-               (document-completion-target? target)
-               (document-completion-target-replacement-end target))])
-      (if (or
-            (not (document-completion-target? target))
-            (not (= (view-id view)
-                    (document-completion-target-view-id target)))
-            (not (= (buffer-id (view-buffer view))
-                    (document-completion-target-buffer-id target)))
-            (not (= (document-id
-                      (buffer-document (view-buffer view)))
-                    (document-completion-target-document-id target)))
-            (and
-              (not allow-revision-change?)
-              (not
-                (=
-                  (buffer-revision (view-buffer view))
-                  (document-completion-target-revision target))))
-            (< (view-caret view) start)
-            (> (view-caret view) replacement-end))
+           [view (editor-active-view value)])
+      (if (not
+            (document-completion-target-view-valid?
+              target
+              view
+              allow-revision-change?
+              'range))
           #f
-          (let ([buffer (view-buffer view)]
-                [end (view-caret view)])
+          (let* ([buffer (view-buffer view)]
+                 [start (document-completion-target-start target)]
+                 [end (view-caret view)])
             (call-with-buffer-text
               buffer
               (lambda (text)
@@ -2233,32 +2254,14 @@
             #f)
            (else
             (let* ((target
-                     (completion-session-target completion))
-                   (buffer (view-buffer view))
-                   (document (buffer-document buffer)))
+                     (completion-session-target completion)))
               (if
-                (or
-                  (not (document-completion-target? target))
-                  (not
-                    (=
-                      (view-id view)
-                      (document-completion-target-view-id target)))
-                  (not
-                    (=
-                      (buffer-id buffer)
-                      (document-completion-target-buffer-id target)))
-                  (not
-                    (=
-                      (document-id document)
-                      (document-completion-target-document-id target)))
-                  (not
-                    (=
-                      (buffer-revision buffer)
-                      (document-completion-target-revision target)))
-                  (not
-                    (=
-                      (view-caret view)
-                      (document-completion-target-end target))))
+                (not
+                  (document-completion-target-view-valid?
+                    target
+                    view
+                    #f
+                    'end))
                 (begin
                   (cancel-view-completion! value view)
                   (editor-set-status-message!
@@ -2331,13 +2334,11 @@
                    (document-completion-target-view-id target))])
            (and
              view
-             (= (view-id view)
-                (document-completion-target-view-id target))
-             (= (buffer-id (view-buffer view))
-                (document-completion-target-buffer-id target))
-             (= (document-id
-                  (buffer-document (view-buffer view)))
-                (document-completion-target-document-id target))
+             (document-completion-target-view-valid?
+               target
+               view
+               #f
+               'any)
              (= (completion-response-message-target-id message)
                 (document-completion-target-document-id target))
              (equal?
@@ -3147,6 +3148,12 @@
               value
               depth))))))
 
+  (define (call-with-editor-configuration-update value procedure)
+    (if
+      (positive? (editor-configuration-transaction-depth value))
+      (procedure)
+      (call-with-editor-configuration-transaction value procedure)))
+
   (define (editor-extension-names value)
     (require-open-editor 'editor-extension-names value)
     (map editor-extension-name (editor-extensions value)))
@@ -3509,10 +3516,7 @@
                         profile)])
                 (refresh-buffers! value)
                 registered))])
-      (if
-        (positive? (editor-configuration-transaction-depth value))
-        (register!)
-        (call-with-editor-configuration-transaction value register!))))
+      (call-with-editor-configuration-update value register!)))
 
   (define (editor-register-major-mode! value mode)
     (require-open-editor 'editor-register-major-mode! value)
@@ -3524,10 +3528,7 @@
                         mode)])
                 (refresh-buffers! value)
                 registered))])
-      (if
-        (positive? (editor-configuration-transaction-depth value))
-        (register!)
-        (call-with-editor-configuration-transaction value register!))))
+      (call-with-editor-configuration-update value register!)))
 
   (define (editor-pending-keys value)
     (view-pending-keys (editor-active-view value)))
@@ -3556,10 +3557,7 @@
                     theme)
                   (editor-invalidate! value 'theme)))
               theme)])
-      (if
-        (positive? (editor-configuration-transaction-depth value))
-        (set-theme!)
-        (call-with-editor-configuration-transaction value set-theme!))))
+      (call-with-editor-configuration-update value set-theme!)))
 
   (define (editor-register-theme! value theme)
     (require-open-editor 'editor-register-theme! value)
@@ -3572,10 +3570,7 @@
                 (when (eq? active-name (theme-name theme))
                   (editor-set-theme! value theme))
                 theme))])
-      (if
-        (positive? (editor-configuration-transaction-depth value))
-        (register!)
-        (call-with-editor-configuration-transaction value register!))))
+      (call-with-editor-configuration-update value register!)))
 
   (define (editor-set-last-command-class! value class)
     (require-open-editor 'editor-set-last-command-class! value)

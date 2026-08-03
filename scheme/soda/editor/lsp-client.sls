@@ -646,6 +646,14 @@
         "diagnosticProvider"
         #f)))
 
+  (define (lsp-provider-capability-supported? session key)
+    (let ([capability
+            (json-object-ref
+              (lsp-client-session-capabilities session)
+              key
+              #f)])
+      (or (eq? capability #t) (json-object? capability))))
+
   (define (diagnostic-refresh-effect session buffer)
     (and
       (pull-diagnostics-supported? session)
@@ -2351,12 +2359,9 @@
           (language-session-id (lsp-client-session-language-session session))))))
 
   (define (document-highlights-supported? session)
-    (let ([capability
-            (json-object-ref
-              (lsp-client-session-capabilities session)
-              "documentHighlightProvider"
-              #f)])
-      (or (eq? capability #t) (json-object? capability))))
+    (lsp-provider-capability-supported?
+      session
+      "documentHighlightProvider"))
 
   (define (publish-document-highlights! editor session buffer revision result)
     (guard (condition [else #f])
@@ -2435,12 +2440,7 @@
         '())))
 
   (define (signature-help-supported? session)
-    (let ([capability
-            (json-object-ref
-              (lsp-client-session-capabilities session)
-              "signatureHelpProvider"
-              #f)])
-      (or (eq? capability #t) (json-object? capability))))
+    (lsp-provider-capability-supported? session "signatureHelpProvider"))
 
   (define (signature-label value)
     (let ([label
@@ -2835,10 +2835,7 @@
       "No type definition found"))
 
   (define (selection-ranges-supported? session)
-    (let ([capability
-            (json-object-ref (lsp-client-session-capabilities session)
-                             "selectionRangeProvider" #f)])
-      (or (eq? capability #t) (json-object? capability))))
+    (lsp-provider-capability-supported? session "selectionRangeProvider"))
 
   (define (lsp-expand-selection! editor)
     (let* ([view (editor-active-view editor)]
@@ -2884,12 +2881,7 @@
             '()))))
 
   (define (document-symbols-supported? session)
-    (let ([capability
-            (json-object-ref
-              (lsp-client-session-capabilities session)
-              "documentSymbolProvider"
-              #f)])
-      (or (eq? capability #t) (json-object? capability))))
+    (lsp-provider-capability-supported? session "documentSymbolProvider"))
 
   (define (lsp-document-symbol-items editor document result)
     (decode-lsp-document-symbol-items
@@ -3410,9 +3402,7 @@
         (lambda (generation) #f))))
 
   (define (code-lenses-supported? session)
-    (let ([value (json-object-ref (lsp-client-session-capabilities session)
-                                  "codeLensProvider" #f)])
-      (or (eq? value #t) (json-object? value))))
+    (lsp-provider-capability-supported? session "codeLensProvider"))
 
   (define (lsp-code-lens-actions result)
     (if (json-array? result)
