@@ -12,9 +12,11 @@
           text-layout-options-tab-width
           text-layout-options-wrap?
           default-text-layout-options
+          text-layout-options-facet
           layout-text-snapshot)
   (import (rnrs)
           (soda kernel document)
+          (soda kernel extension)
           (soda kernel range-set)
           (soda kernel selection)
           (soda ffi unicode)
@@ -51,6 +53,14 @@
     (%make-text-layout-options tab-width wrap?))
 
   (define default-text-layout-options (make-text-layout-options 8 #t))
+
+  ;; This View facet is the sole configuration path for terminal text layout.
+  ;; Higher-precedence providers are ordered first by Configuration.
+  (define text-layout-options-facet
+    (make-facet 'text-layout-options 'view default-text-layout-options
+                (lambda (values)
+                  (if (null? values) default-text-layout-options (car values)))
+                eq? eq?))
 
   ;; These queries are the layout-level coordinate contract.  Consumers never
   ;; infer document locations from terminal glyphs: virtual text, wide

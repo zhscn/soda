@@ -19,6 +19,7 @@
           render-surface-frame)
   (import (rnrs)
           (soda kernel state)
+          (soda kernel extension)
           (soda kernel value)
           (soda kernel view-state)
           (soda host buffer)
@@ -126,7 +127,10 @@
                             (layout-text-snapshot
                               snapshot (view-state-selection state)
                               first-line view-width view-height
-                              (merge-decoration-sets (view-decorations view)))])
+                              (merge-decoration-sets (view-decorations view))
+                              (configuration-facet
+                                (view-state-configuration state)
+                                text-layout-options-facet 'view))])
                       (loop
                         (cdr leaves)
                         (cons (make-frame-placement row column (text-layout-frame layout)) placements)

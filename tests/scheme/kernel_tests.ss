@@ -918,6 +918,26 @@
     (unless (not (eq? first (render-service-render! service surface (host-state-views host))))
       (error 'kernel-tests "RenderService invalidation differs"))))
 
+(let* ([layout-configuration
+        (make-configuration
+          (list (make-facet-provider text-layout-options-facet
+                                     (make-text-layout-options 2 #f))))]
+       [configured-document (make-document "abc")]
+       [configured-buffer
+        (buffer-service-create! (host-state-buffers host) owner "*layout*"
+                                configured-document layout-configuration)]
+       [configured-view
+        (view-service-create! (host-state-views host) owner configured-buffer
+                              layout-configuration)]
+       [configured-leaf (make-leaf-window (view-id configured-view) '(0 0 2 2))]
+       [configured-surface (make-surface configured-leaf '(2 . 2))]
+       [configured-render (render-surface configured-surface (host-state-views host))])
+  (unless (and (string=? (frame-cell-grapheme
+                           (frame-cell-at (surface-render-frame configured-render) 0 0)) "a")
+               (string=? (frame-cell-grapheme
+                           (frame-cell-at (surface-render-frame configured-render) 1 0)) " "))
+    (error 'kernel-tests "View text layout configuration differs")))
+
 (define control-x
   (make-key-stroke 'character (char->integer #\x) 4))
 (define control-s
