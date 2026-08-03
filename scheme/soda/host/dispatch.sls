@@ -236,12 +236,6 @@
                        'dispatcher-dispatch! "transaction extension returned an invalid value"
                        next)])))))))
 
-  (define (apply-transaction-filters dispatcher spec)
-    (apply-transaction-extension dispatcher spec transaction-filters-facet))
-
-  (define (apply-transaction-extenders dispatcher spec)
-    (apply-transaction-extension dispatcher spec transaction-extenders-facet))
-
   (define (any-transaction-spec-filter? specs)
     (cond
       [(null? specs) #f]
@@ -255,7 +249,10 @@
           (let ([next (apply-transaction-extension dispatcher (car items) facet)])
             (if next
                 (loop (cdr items) (cons next result))
-                (loop (cdr items) result))))))
+                ;; A filter/extender rejects the complete dispatch.  Keeping
+                ;; the batch atomic avoids silently committing only a prefix
+                ;; of a multi-spec transaction.
+                #f)))))
 
   (define (dispatcher-dispatch-specs! dispatcher specs)
     (unless (and (dispatcher? dispatcher)
@@ -274,9 +271,10 @@
                     (apply-transaction-extension-list
                       dispatcher specs transaction-filters-facet))]
                [extended
-                (apply-transaction-extension-list
-                  dispatcher filtered transaction-extenders-facet)])
-          (if (null? extended)
+                (and filtered
+                     (apply-transaction-extension-list
+                       dispatcher filtered transaction-extenders-facet))])
+          (if (not extended)
               #f
               (let* ([first (car extended)]
                      [buffer
