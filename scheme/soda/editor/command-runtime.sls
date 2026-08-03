@@ -559,7 +559,6 @@
             context)
     (let ([invocation
             (make-command-invocation
-              (editor-allocate-command-invocation-id! editor)
               definition
               context)])
       (advance-command-invocation! editor invocation)))

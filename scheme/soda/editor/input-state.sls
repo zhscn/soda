@@ -29,8 +29,6 @@
           input-disposition-command
           input-disposition-argument
           input-disposition-payload
-          input-disposition-sequence
-          input-disposition-hints
           input-disposition-continuation
           input-pass
           input-consume
@@ -69,13 +67,13 @@
 
   (define-record-type
     (input-disposition %make-input-disposition input-disposition?)
-    (fields kind command argument payload sequence hints continuation))
+    (fields kind command argument payload continuation))
 
   (define pass-disposition
-    (%make-input-disposition 'pass #f #f #f '() '() #f))
+    (%make-input-disposition 'pass #f #f #f #f))
 
   (define consume-disposition
-    (%make-input-disposition 'consume #f #f #f '() '() #f))
+    (%make-input-disposition 'consume #f #f #f #f))
 
   (define (input-pass) pass-disposition)
   (define (input-consume) consume-disposition)
@@ -88,24 +86,18 @@
          (assertion-violation
            'input-dispatch-command "command must be a symbol" command))
        (%make-input-disposition
-         'dispatch-command command argument #f '() '() #f)]))
+         'dispatch-command command argument #f #f)]))
 
   (define (input-dispatch-application payload)
     (%make-input-disposition
-      'dispatch-application #f #f payload '() '() #f))
+      'dispatch-application #f #f payload #f))
 
-  (define (input-pending sequence hints continuation)
-    (unless (list? sequence)
-      (assertion-violation
-        'input-pending "sequence must be a list" sequence))
-    (unless (list? hints)
-      (assertion-violation
-        'input-pending "hints must be a list" hints))
+  (define (input-pending continuation)
     (unless (procedure? continuation)
       (assertion-violation
         'input-pending "continuation must be a procedure" continuation))
     (%make-input-disposition
-      'pending #f #f #f sequence hints continuation))
+      'pending #f #f #f continuation))
 
   (define make-input-state
     (case-lambda

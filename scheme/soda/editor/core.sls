@@ -1243,8 +1243,6 @@
           input-disposition-command
           input-disposition-argument
           input-disposition-payload
-          input-disposition-sequence
-          input-disposition-hints
           input-disposition-continuation
           input-pass
           input-consume

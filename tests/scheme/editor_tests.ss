@@ -2122,8 +2122,6 @@
             [(100) (input-dispatch-command 'test.durable-input)]
             [(112)
              (input-pending
-               '(p)
-               '((x . "execute"))
                (lambda (next-event next-context)
                  (if (= (key-event-codepoint next-event) 120)
                      (input-dispatch-command 'test.durable-input)

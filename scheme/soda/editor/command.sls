@@ -41,7 +41,6 @@
           interactive-suspend-decoder
           make-command-invocation
           command-invocation?
-          command-invocation-id
           command-invocation-definition
           command-invocation-context
           command-invocation-remaining-readers
@@ -150,8 +149,7 @@
 
   (define-record-type
     (command-invocation %make-command-invocation command-invocation?)
-    (fields id
-            definition
+    (fields definition
             context
             (mutable remaining-readers)
             (mutable arguments)
@@ -362,14 +360,8 @@
              body ...)])))
 
   (define (make-command-invocation
-            id
             definition
             context)
-    (unless (exact-non-negative-integer? id)
-      (assertion-violation
-        'make-command-invocation
-        "invocation id must be a non-negative exact integer"
-        id))
     (unless (command-definition? definition)
       (assertion-violation
         'make-command-invocation
@@ -381,7 +373,6 @@
         "expected a command context"
         context))
     (%make-command-invocation
-      id
       definition
       context
       (interactive-plan-readers

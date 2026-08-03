@@ -56,8 +56,6 @@
           editor-last-command-class-set!
           editor-active-command-invocation
           editor-active-command-invocation-set!
-          editor-next-command-invocation-id
-          editor-next-command-invocation-id-set!
           editor-current-command
           editor-current-command-set!
           editor-last-command
@@ -153,9 +151,6 @@
       (mutable active-command-invocation
                editor-active-command-invocation
                editor-active-command-invocation-set!)
-      (mutable next-command-invocation-id
-               editor-next-command-invocation-id
-               editor-next-command-invocation-id-set!)
       (mutable current-command
                editor-current-command
                editor-current-command-set!)

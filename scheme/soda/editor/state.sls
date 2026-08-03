@@ -173,7 +173,6 @@
           editor-set-last-command-class!
           editor-active-command-invocation
           editor-set-active-command-invocation!
-          editor-allocate-command-invocation-id!
           editor-current-command
           editor-last-command
           editor-command-history
@@ -386,14 +385,6 @@
     (editor-debugger-set! editor debugger)
     (editor-invalidate! editor 'document)
     debugger)
-
-  (define (editor-allocate-command-invocation-id! editor)
-    (require-open-editor
-      'editor-allocate-command-invocation-id!
-      editor)
-    (let ([id (editor-next-command-invocation-id editor)])
-      (editor-next-command-invocation-id-set! editor (+ id 1))
-      id))
 
   (define (editor-record-command! editor name arguments)
     (require-open-editor 'editor-record-command! editor)
@@ -3952,7 +3943,6 @@
                #f
                #f
                #f
-               1
                #f
                #f
                '()
