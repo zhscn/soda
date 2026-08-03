@@ -1524,9 +1524,10 @@
 (let* ([base (make-frame 2 1)]
        [next (frame-with-cell base 0 0
                               (make-frame-cell "x" 1 #f 'selection #f))]
-       [ansi (frame-diff->ansi base next)])
+       [ansi (frame-diff->ansi base next default-theme 2 3)])
   (unless (and (contains-string? ansi "[1;1H")
                (contains-string? ansi "[0;7m")
+               (contains-string? ansi "[3;4H")
                (contains-string? ansi "x"))
     (error 'kernel-tests "ANSI presenter encoding differs" ansi)))
 

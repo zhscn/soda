@@ -56,6 +56,12 @@
          (for-each (lambda (span) (write-span port new span theme)) (frame-diff old new))
          (put-string port escape)
          (put-string port "[0m")
+         (get-output))]
+      [(old new theme cursor-row cursor-column)
+       (let-values ([(port get-output) (open-string-output-port)])
+         (put-string port (frame-diff->ansi old new theme))
+         (when (and cursor-row cursor-column)
+           (put-string port (cursor-address cursor-row cursor-column)))
          (get-output))]))
 
   ;; pending-target is the Frame described by pending-bytes.  It changes only
@@ -65,40 +71,76 @@
     (frame-presenter %make-frame-presenter frame-presenter?)
     (fields (mutable committed frame-presenter-committed-frame
                      frame-presenter-committed-frame-set!)
+            (mutable committed-cursor-row presenter-committed-cursor-row
+                     presenter-committed-cursor-row-set!)
+            (mutable committed-cursor-column presenter-committed-cursor-column
+                     presenter-committed-cursor-column-set!)
             (mutable desired frame-presenter-desired-frame
                      frame-presenter-desired-frame-set!)
+            (mutable desired-cursor-row presenter-desired-cursor-row
+                     presenter-desired-cursor-row-set!)
+            (mutable desired-cursor-column presenter-desired-cursor-column
+                     presenter-desired-cursor-column-set!)
             (mutable pending-bytes presenter-pending-bytes presenter-pending-bytes-set!)
             (mutable pending-target presenter-pending-target presenter-pending-target-set!)
+            (mutable pending-cursor-row presenter-pending-cursor-row
+                     presenter-pending-cursor-row-set!)
+            (mutable pending-cursor-column presenter-pending-cursor-column
+                     presenter-pending-cursor-column-set!)
             (mutable pending-offset presenter-pending-offset presenter-pending-offset-set!)))
 
   (define (make-frame-presenter)
-    (%make-frame-presenter #f #f #f #f 0))
+    (%make-frame-presenter #f #f #f #f #f #f #f #f #f #f 0))
 
   (define (frame-presenter-pending? presenter)
     (unless (frame-presenter? presenter)
       (assertion-violation 'frame-presenter-pending? "expected a FramePresenter" presenter))
     (and (presenter-pending-bytes presenter) #t))
 
-  (define (frame-presenter-present! presenter frame)
-    (unless (and (frame-presenter? presenter) (frame? frame))
-      (assertion-violation 'frame-presenter-present! "expected a FramePresenter and Frame"))
+  (define frame-presenter-present!
+    (case-lambda
+      [(presenter frame) (frame-presenter-present! presenter frame #f #f)]
+      [(presenter frame cursor-row cursor-column)
+    (unless (and (frame-presenter? presenter) (frame? frame)
+                 (or (not cursor-row) (and (integer? cursor-row) (exact? cursor-row)
+                                            (>= cursor-row 0)))
+                 (or (not cursor-column) (and (integer? cursor-column) (exact? cursor-column)
+                                               (>= cursor-column 0))))
+      (assertion-violation 'frame-presenter-present! "invalid frame presentation"))
     ;; A transaction which has not emitted any bytes is observationally absent
     ;; and can be replaced by the newest desired Frame.
     (when (and (presenter-pending-bytes presenter)
                (zero? (presenter-pending-offset presenter)))
       (presenter-pending-bytes-set! presenter #f)
-      (presenter-pending-target-set! presenter #f))
+      (presenter-pending-target-set! presenter #f)
+      (presenter-pending-cursor-row-set! presenter #f)
+      (presenter-pending-cursor-column-set! presenter #f))
     (frame-presenter-desired-frame-set! presenter frame)
-    frame)
+    (presenter-desired-cursor-row-set! presenter cursor-row)
+    (presenter-desired-cursor-column-set! presenter cursor-column)
+    frame]))
 
   (define (ensure-pending! presenter)
     (unless (presenter-pending-bytes presenter)
       (let ([committed (frame-presenter-committed-frame presenter)]
             [desired (frame-presenter-desired-frame presenter)])
-        (when (and desired (or (not committed) (pair? (frame-diff committed desired))))
+        (when (and desired
+                   (or (not committed)
+                       (pair? (frame-diff committed desired))
+                       (not (and (equal? (presenter-desired-cursor-row presenter)
+                                          (presenter-committed-cursor-row presenter))
+                                 (equal? (presenter-desired-cursor-column presenter)
+                                          (presenter-committed-cursor-column presenter))))))
           (presenter-pending-bytes-set! presenter
-            (string->utf8 (frame-diff->ansi committed desired)))
+            (string->utf8
+              (frame-diff->ansi committed desired default-theme
+                                (presenter-desired-cursor-row presenter)
+                                (presenter-desired-cursor-column presenter))))
           (presenter-pending-target-set! presenter desired)
+          (presenter-pending-cursor-row-set! presenter
+            (presenter-desired-cursor-row presenter))
+          (presenter-pending-cursor-column-set! presenter
+            (presenter-desired-cursor-column presenter))
           (presenter-pending-offset-set! presenter 0)))))
 
   ;; writer receives a bytevector and offset, and returns a positive byte count
@@ -125,8 +167,14 @@
                      (begin
                        (frame-presenter-committed-frame-set!
                          presenter (presenter-pending-target presenter))
+                       (presenter-committed-cursor-row-set!
+                         presenter (presenter-pending-cursor-row presenter))
+                       (presenter-committed-cursor-column-set!
+                         presenter (presenter-pending-cursor-column presenter))
                        (presenter-pending-bytes-set! presenter #f)
                        (presenter-pending-target-set! presenter #f)
+                       (presenter-pending-cursor-row-set! presenter #f)
+                       (presenter-pending-cursor-column-set! presenter #f)
                        (presenter-pending-offset-set! presenter 0)
                        'committed)))])))))
 )
