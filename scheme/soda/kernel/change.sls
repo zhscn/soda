@@ -249,7 +249,12 @@
                  (loop
                    (cdr items)
                    (+ delta (- insert-length (- to from))))]
-                [(and (= offset from) (= offset to) (eq? side 'before))
+                [(and (= offset from) (eq? side 'before))
+                 (+ from delta)]
+                ;; An endpoint at the end of a replaced range with before
+                ;; affinity stays before the inserted text.  This is the
+                ;; boundary counterpart of the after-affinity case below.
+                [(and (= offset to) (eq? side 'before))
                  (+ from delta)]
                 [else (+ from delta insert-length)]))))))
 

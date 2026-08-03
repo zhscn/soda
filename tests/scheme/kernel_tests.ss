@@ -2,6 +2,7 @@
 (import (rnrs)
         (soda kernel change)
         (soda kernel extension)
+        (soda kernel range-set)
         (soda kernel selection)
         (soda kernel state)
         (soda host command)
@@ -40,6 +41,15 @@
   (error 'kernel-tests "change mapping differs"))
 (unless (equal? (change-set-map-range changes 2 8 'after) (cons 5 10))
   (error 'kernel-tests "range mapping differs"))
+(let ([replacement
+        (make-change-set
+          5
+          (list (make-text-change 1 4 "xx")))])
+  (unless (and (= (change-set-map-offset replacement 1 'before) 1)
+               (= (change-set-map-offset replacement 4 'before) 1)
+               (= (change-set-map-offset replacement 1 'after) 3)
+               (= (change-set-map-offset replacement 4 'after) 3))
+    (error 'kernel-tests "replacement boundary affinity differs")))
 (let ([applied
         (change-set-apply
           (make-change-set
@@ -61,6 +71,58 @@
        [composed (change-set-compose first second base)])
   (unless (string=? (change-set-apply composed base #t) "aXYZcd!")
     (error 'kernel-tests "change set composition differs")))
+
+(define first-range
+  (make-range-value 1 3 'first 'before 'after))
+(define second-range
+  (make-range-value 6 8 'second 'after 'before))
+(define ranges (make-range-set (list first-range second-range)))
+(unless (and (eq? (range-value-value first-range) 'first)
+             (eq? (range-value-start-affinity first-range) 'before)
+             (eq? (range-value-end-affinity first-range) 'after)
+             (eq? (car (range-set-query ranges 2 7)) first-range)
+             (eq? (car (range-set-cursor ranges 6 9)) second-range))
+  (error 'kernel-tests "range set query differs"))
+(let* ([outer (make-range-value 1 6 'outer)]
+       [inner (make-range-value 3 4 'inner)]
+       [overlapping (make-range-set (list outer inner))]
+       [matches (range-set-query overlapping 3 4)])
+  (unless (and (= (length matches) 2)
+               (eq? (car matches) outer)
+               (eq? (cadr matches) inner))
+    (error 'kernel-tests "overlapping range query differs")))
+(let ([mapped
+        (range-set-map-change
+          ranges
+          (make-change-set
+            10
+            (list (make-text-change 1 1 "xx"))))])
+  (let ([mapped-ranges (range-set-ranges mapped)])
+    (unless (and (= (range-value-from (car mapped-ranges)) 1)
+                 (= (range-value-to (car mapped-ranges)) 5)
+                 (= (range-value-from (cadr mapped-ranges)) 8)
+                 (= (range-value-to (cadr mapped-ranges)) 10))
+      (error 'kernel-tests "range set mapping differs"))))
+(let ([mapped
+        (range-set-map-change
+          ranges
+          (change-set-change-desc
+            (make-change-set
+              10
+              (list (make-text-change 1 1 "xx")))))])
+  (unless (= (range-value-to (car (range-set-ranges mapped))) 5)
+    (error 'kernel-tests "range ChangeDesc mapping differs")))
+(let ([collapsed
+        (range-set-map-change
+          (make-range-set
+            (list (make-range-value 1 9 'deleted 'after 'before)))
+          (make-change-set
+            10
+            (list (make-text-change 1 9 "x"))))])
+  (let ([range (car (range-set-ranges collapsed))])
+    (unless (and (= (range-value-from range) 1)
+                 (= (range-value-to range) 1))
+      (error 'kernel-tests "range deletion affinity differs"))))
 
 (define history-field
   (make-state-field
