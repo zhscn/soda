@@ -110,11 +110,6 @@
               walk
               (replace-at entries cursor location))))))
 
-  (define (editor-buffer-find editor id)
-    (find
-      (lambda (buffer) (= (buffer-id buffer) id))
-      (editor-buffers editor)))
-
   (define (record-workbench-jump! editor view jump)
     (let ([workbench
             (editor-workbench-for-view editor (view-id view))])

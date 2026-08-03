@@ -70,11 +70,6 @@
             items))
         (lambda (generation) #f))))
 
-  (define (find-buffer-by-id editor id)
-    (find
-      (lambda (buffer) (= (buffer-id buffer) id))
-      (editor-buffers editor)))
-
   (define (prompt-result-buffer editor result)
     (let* ([candidate
              (and
@@ -88,7 +83,7 @@
                (completion-item-provider-data candidate))])
       (cond
         [candidate-id
-         (find-buffer-by-id editor candidate-id)]
+         (editor-buffer-find editor candidate-id)]
         [(and
            (prompt-result? result)
            (eq? (prompt-result-status result) 'accepted))

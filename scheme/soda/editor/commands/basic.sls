@@ -1644,11 +1644,6 @@
             "No redo information"
             "Redo"))))
 
-  (define (buffer-by-id editor id)
-    (find
-      (lambda (buffer) (= (buffer-id buffer) id))
-      (editor-buffers editor)))
-
   (define (quit-buffer-label buffer)
     (or
       (buffer-resource buffer)
@@ -1696,7 +1691,7 @@
     (let loop ([queue queue])
       (if (null? queue)
           (list (make-command-effect 'quit #f))
-          (let ([buffer (buffer-by-id editor (car queue))])
+          (let ([buffer (editor-buffer-find editor (car queue))])
             (cond
               [(not buffer) (loop (cdr queue))]
               [(buffer-save-pending? buffer)

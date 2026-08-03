@@ -5,6 +5,7 @@
           editor-close!
           editor-closed?
           editor-buffers
+          editor-buffer-find
           editor-buffer-ref
           editor-buffer-for-document
           editor-add-buffer!
@@ -735,6 +736,11 @@
   (define (editor-buffers value)
     (require-open-editor 'editor-buffers value)
     (entity-registry-values (editor-buffer-registry value)))
+
+  (define (editor-buffer-find value id)
+    (find
+      (lambda (buffer) (= (buffer-id buffer) id))
+      (editor-buffers value)))
 
   (define (editor-buffer-ref value id)
     (require-open-editor 'editor-buffer-ref value)
