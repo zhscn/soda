@@ -175,15 +175,20 @@
            [spans (range-set-spans decorations
                                    (text-line-start text start)
                                    (text-line-content-end text last))])
+      ;; Grapheme offsets are monotonically increasing, so the decoration
+      ;; cursor only moves forward across contiguous RangeSet spans.
+      (define remaining-spans spans)
       (define (face-at offset)
-        (let find ([remaining spans])
-          (if (null? remaining)
+        (let advance ()
+          (if (null? remaining-spans)
               'text
-              (let ([span (car remaining)])
-                (if (and (<= (range-span-from span) offset)
-                         (< offset (range-span-to span)))
-                    (decoration-face (range-span-values span) 'text)
-                    (find (cdr remaining)))))))
+              (let ([span (car remaining-spans)])
+                (cond
+                  [(>= offset (range-span-to span))
+                   (set! remaining-spans (cdr remaining-spans))
+                   (advance)]
+                  [(< offset (range-span-from span)) 'text]
+                  [else (decoration-face (range-span-values span) 'text)])))))
       (let loop-line ([line start] [result '()])
         (if (> line last)
             (make-display-stream (reverse result))
