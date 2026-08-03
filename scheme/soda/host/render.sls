@@ -28,6 +28,7 @@
           (soda host window)
           (soda view compositor)
           (soda view decoration)
+          (soda view display)
           (soda view frame)
           (soda view text-layout))
 
@@ -124,13 +125,21 @@
                                            (max 0 (car viewport))
                                            0)]
                            [layout
-                            (layout-text-snapshot
-                              snapshot (view-state-selection state)
-                              first-line view-width view-height
-                              (merge-decoration-sets (view-decorations view))
-                              (configuration-facet
-                                (view-state-configuration state)
-                                text-layout-options-facet 'view))])
+                            (let ([options
+                                   (configuration-facet
+                                     (view-state-configuration state)
+                                     text-layout-options-facet 'view)]
+                                  [streams (view-display-streams view)])
+                              (if (null? streams)
+                                  (layout-text-snapshot
+                                    snapshot (view-state-selection state)
+                                    first-line view-width view-height
+                                    (merge-decoration-sets (view-decorations view)) options)
+                                  (layout-display-stream
+                                    (make-display-stream
+                                      (apply append (map display-stream-fragments streams)))
+                                    (view-state-selection state)
+                                    view-width view-height options)))])
                       (loop
                         (cdr leaves)
                         (cons (make-frame-placement row column (text-layout-frame layout)) placements)

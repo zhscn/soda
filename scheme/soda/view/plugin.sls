@@ -14,12 +14,14 @@
           view-plugin-update
           view-plugin-destroy
           view-plugin-decorations
+          view-plugin-display
           make-view-plugin-instance
           view-plugin-instance?
           view-plugin-instance-plugin
           view-plugin-instance-value
           view-plugin-instance-destroyed?
           view-plugin-instance-decorations
+          view-plugin-instance-display-stream
           view-plugin-instance-update!
           view-plugin-instance-destroy!
           view-plugins-facet
@@ -27,7 +29,8 @@
   (import (rnrs)
           (soda kernel extension)
           (soda kernel value)
-          (soda view decoration))
+          (soda view decoration)
+          (soda view display))
 
   ;; ViewUpdate is the only value passed from the host publication boundary to
   ;; render-local plugins.  Plugins cannot mutate BufferState or ViewState.
@@ -48,18 +51,23 @@
 
   (define-record-type
     (view-plugin %make-view-plugin view-plugin?)
-    (fields key create update destroy decorations))
+    (fields key create update destroy decorations display))
 
   (define (optional-procedure? value)
     (or (not value) (procedure? value)))
 
-  (define (make-view-plugin key create update destroy decorations)
-    (unless (and (symbol? key) (procedure? create)
-                 (optional-procedure? update)
-                 (optional-procedure? destroy)
-                 (optional-procedure? decorations))
-      (assertion-violation 'make-view-plugin "invalid ViewPlugin contract" key))
-    (%make-view-plugin key create update destroy decorations))
+  (define make-view-plugin
+    (case-lambda
+      [(key create update destroy decorations)
+       (make-view-plugin key create update destroy decorations #f)]
+      [(key create update destroy decorations display)
+       (unless (and (symbol? key) (procedure? create)
+                    (optional-procedure? update)
+                    (optional-procedure? destroy)
+                    (optional-procedure? decorations)
+                    (optional-procedure? display))
+         (assertion-violation 'make-view-plugin "invalid ViewPlugin contract" key))
+       (%make-view-plugin key create update destroy decorations display)]))
 
   ;; A view-scoped facet gives every View its own instance set, even when
   ;; several Views share a Buffer configuration.
@@ -97,14 +105,33 @@
     (view-plugin-instance %make-view-plugin-instance view-plugin-instance?)
     (fields plugin
             (mutable value view-plugin-instance-value view-plugin-instance-value-set!)
+            (mutable display-stream instance-display-stream instance-display-stream-set!)
             (mutable destroyed? view-plugin-instance-destroyed?
                      instance-destroyed?-set!)))
+
+  (define (compute-display-stream plugin value)
+    (let ([procedure (view-plugin-display plugin)])
+      (if procedure
+          (let ([stream (procedure value)])
+            (unless (or (not stream) (display-stream? stream))
+              (assertion-violation 'view-plugin-instance-display-stream
+                                   "plugin display must be a DisplayStream or #f" stream))
+            stream)
+          #f)))
 
   (define (make-view-plugin-instance plugin view)
     (unless (view-plugin? plugin)
       (assertion-violation
         'make-view-plugin-instance "expected a ViewPlugin" plugin))
-    (%make-view-plugin-instance plugin ((view-plugin-create plugin) view) #f))
+    (let ([value ((view-plugin-create plugin) view)])
+      (%make-view-plugin-instance plugin value (compute-display-stream plugin value) #f)))
+
+  (define (view-plugin-instance-display-stream instance)
+    (unless (view-plugin-instance? instance)
+      (assertion-violation 'view-plugin-instance-display-stream
+                           "expected a ViewPlugin instance" instance))
+    (and (not (view-plugin-instance-destroyed? instance))
+         (instance-display-stream instance)))
 
   (define (view-plugin-instance-decorations instance)
     (unless (view-plugin-instance? instance)
@@ -133,6 +160,10 @@
     (let ([procedure (view-plugin-update (view-plugin-instance-plugin instance))])
       (when procedure
         (procedure (view-plugin-instance-value instance) update))
+      (instance-display-stream-set!
+        instance
+        (compute-display-stream (view-plugin-instance-plugin instance)
+                                (view-plugin-instance-value instance)))
       (view-plugin-instance-value instance)))
 
   (define (view-plugin-instance-destroy! instance)
@@ -144,5 +175,6 @@
         (let ([procedure (view-plugin-destroy (view-plugin-instance-plugin instance))])
           (when procedure
             (procedure (view-plugin-instance-value instance)))
+          (instance-display-stream-set! instance #f)
           (instance-destroyed?-set! instance #t)
           #t))))

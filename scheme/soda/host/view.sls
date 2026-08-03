@@ -6,6 +6,7 @@
           view-state
           view-plugin-instances
           view-decorations
+          view-display-streams
           view-close!
           view-update-plugins!
           make-view-service
