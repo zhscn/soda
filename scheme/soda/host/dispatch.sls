@@ -106,22 +106,24 @@
               generation))))
       (views-for-buffer views buffer-id)))
 
-  (define (dispatcher-dispatch-resolved-internal! dispatcher spec resolved)
+  (define (dispatcher-dispatch-resolved-internal! dispatcher resolved)
     (unless (and (dispatcher? dispatcher)
-                 (transaction-spec? spec)
                  (resolved-transaction? resolved))
       (assertion-violation
         'dispatcher-dispatch-specs!
-        "expected a dispatcher, transaction spec, and resolved transaction"))
+        "expected a dispatcher and resolved transaction"))
     (let* ([buffers (dispatcher-buffers dispatcher)]
            [views (dispatcher-views dispatcher)]
-           [buffer (buffer-service-ref buffers (transaction-spec-buffer-id spec) #f)])
+           [buffer (buffer-service-ref
+                     buffers
+                     (resolved-transaction-buffer-id resolved)
+                     #f)])
       (unless buffer
         (assertion-violation
           'dispatcher-dispatch-specs! "target buffer is not live"
-          (transaction-spec-buffer-id spec)))
+          (resolved-transaction-buffer-id resolved)))
       (let* ([old-state (buffer-state buffer)]
-             [expected (transaction-spec-start-generation spec)])
+             [expected (resolved-transaction-start-generation resolved)])
         (when (and expected (not (= expected (buffer-state-generation old-state))))
           (assertion-violation
             'dispatcher-dispatch-specs!
@@ -131,7 +133,9 @@
           views (buffer-id buffer) (buffer-state-generation old-state))
         (let* ([changes (resolved-transaction-changes resolved)]
                [origin (view-for-origin
-                         views (transaction-spec-origin-view-id spec) (buffer-id buffer))]
+                         views
+                         (resolved-transaction-origin-view-id resolved)
+                         (buffer-id buffer))]
                [old-view-state (and origin (view-state origin))]
                [document-length
                 (snapshot-byte-size (buffer-state-document old-state))]
@@ -212,47 +216,31 @@
                 'buffer))
             update)))))
 
-  (define (apply-transaction-extension dispatcher spec facet)
+  (define (apply-resolved-transaction-extension dispatcher resolved facet)
     (let ([buffer
             (buffer-service-ref
               (dispatcher-buffers dispatcher)
-              (transaction-spec-buffer-id spec) #f)])
+              (resolved-transaction-buffer-id resolved) #f)])
       (if (not buffer)
-          spec
+          resolved
           (let loop ([extensions
                        (configuration-facet
                          (buffer-state-configuration (buffer-state buffer))
                          facet
                          'buffer)]
-                     [current spec])
+                     [current resolved])
             (if (null? extensions)
                 current
                 (let ([next ((car extensions) current)])
                   (cond
                     [(not next) #f]
-                    [(transaction-spec? next) (loop (cdr extensions) next)]
+                    [(resolved-transaction? next)
+                     (loop (cdr extensions) next)]
                     [else
                      (assertion-violation
-                       'dispatcher-dispatch! "transaction extension returned an invalid value"
+                       'dispatcher-dispatch!
+                       "transaction extension returned an invalid value"
                        next)])))))))
-
-  (define (any-transaction-spec-filter? specs)
-    (cond
-      [(null? specs) #f]
-      [(transaction-spec-filter (car specs)) #t]
-      [else (any-transaction-spec-filter? (cdr specs))]))
-
-  (define (apply-transaction-extension-list dispatcher specs facet)
-    (let loop ([items specs] [result '()])
-      (if (null? items)
-          (reverse result)
-          (let ([next (apply-transaction-extension dispatcher (car items) facet)])
-            (if next
-                (loop (cdr items) (cons next result))
-                ;; A filter/extender rejects the complete dispatch.  Keeping
-                ;; the batch atomic avoids silently committing only a prefix
-                ;; of a multi-spec transaction.
-                #f)))))
 
   (define (dispatcher-dispatch-specs! dispatcher specs)
     (unless (and (dispatcher? dispatcher)
@@ -263,34 +251,33 @@
         "expected a dispatcher and a list of transaction specs"))
     (if (null? specs)
         #f
-        (let* ([filter-disabled?
-                (any-transaction-spec-filter? specs)]
-               [filtered
-                (if filter-disabled?
-                    specs
-                    (apply-transaction-extension-list
-                      dispatcher specs transaction-filters-facet))]
-               [extended
-                (and filtered
-                     (apply-transaction-extension-list
-                       dispatcher filtered transaction-extenders-facet))])
-          (if (not extended)
-              #f
-              (let* ([first (car extended)]
-                     [buffer
-                      (buffer-service-ref
-                        (dispatcher-buffers dispatcher)
-                        (transaction-spec-buffer-id first) #f)])
-                (unless buffer
-                  (assertion-violation
-                    'dispatcher-dispatch-specs!
-                    "target buffer is not live"
-                    (transaction-spec-buffer-id first)))
-                (let* ([original
-                        (snapshot-bytevector (buffer-state-document (buffer-state buffer)))]
-                       [resolved (resolve-transaction-specs extended original)])
-                  (dispatcher-dispatch-resolved-internal!
-                    dispatcher first resolved)))))))
+        (let* ([first (car specs)]
+               [buffer
+                (buffer-service-ref
+                  (dispatcher-buffers dispatcher)
+                  (transaction-spec-buffer-id first)
+                  #f)])
+          (unless buffer
+            (assertion-violation
+              'dispatcher-dispatch-specs!
+              "target buffer is not live"
+              (transaction-spec-buffer-id first)))
+          (let* ([original
+                  (snapshot-bytevector
+                    (buffer-state-document (buffer-state buffer)))]
+                 [resolved (resolve-transaction-specs specs original)]
+                 [filtered
+                  (if (resolved-transaction-filter-disabled? resolved)
+                      resolved
+                      (apply-resolved-transaction-extension
+                        dispatcher resolved transaction-filters-facet))]
+                 [extended
+                  (and filtered
+                       (apply-resolved-transaction-extension
+                         dispatcher filtered transaction-extenders-facet))])
+            (and extended
+                 (dispatcher-dispatch-resolved-internal!
+                   dispatcher extended))))))
 
   (define (dispatcher-dispatch! dispatcher spec)
     (unless (and (dispatcher? dispatcher) (transaction-spec? spec))

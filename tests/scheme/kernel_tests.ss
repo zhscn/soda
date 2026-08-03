@@ -601,7 +601,10 @@
   (error 'kernel-tests "dispatcher did not resolve a batch update"))
 
 (let* ([reject-filter
-        (lambda (spec) #f)]
+        (lambda (value)
+          (unless (resolved-transaction? value)
+            (error 'kernel-tests "transaction filter did not receive resolved state"))
+          #f)]
        [reject-configuration
         (make-configuration
           (list

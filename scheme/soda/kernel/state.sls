@@ -32,6 +32,9 @@
           transaction-spec-filter
           transaction-spec-sequential?
           resolved-transaction?
+          resolved-transaction-buffer-id
+          resolved-transaction-origin-view-id
+          resolved-transaction-start-generation
           resolved-transaction-changes
           resolved-transaction-selection
           resolved-transaction-effects
@@ -39,6 +42,7 @@
           resolved-transaction-scroll-request
           resolved-transaction-filter-disabled?
           resolve-transaction-specs
+          make-resolved-transaction
           make-transaction
           make-transaction-from-resolved
           transaction?
@@ -251,6 +255,9 @@
   (define-record-type
     (resolved-transaction %make-resolved-transaction resolved-transaction?)
     (fields
+      (immutable buffer-id resolved-transaction-buffer-id)
+      (immutable origin-view-id resolved-transaction-origin-view-id)
+      (immutable start-generation resolved-transaction-start-generation)
       (immutable changes resolved-transaction-changes)
       (immutable selection resolved-transaction-selection)
       (immutable effects resolved-transaction-effects)
@@ -316,6 +323,32 @@
               who "annotations must be Annotation values" annotation)))
         annotations)
       annotations))
+
+  ;; Construct a resolved transaction for a filter/extender.  Its effects and
+  ;; selection already use the coordinates of CHANGES' resulting document;
+  ;; make-transaction-from-resolved therefore does not map them a second time.
+  (define (make-resolved-transaction
+           buffer-id origin-view-id start-generation changes selection
+           effects annotations scroll-request filter-disabled?)
+    (unless (change-set? changes)
+      (assertion-violation
+        'make-resolved-transaction "expected a change set" changes))
+    (unless (or (not selection) (selection? selection))
+      (assertion-violation
+        'make-resolved-transaction "selection must be a Selection or #f"
+        selection))
+    (validate-selection-length
+      'make-resolved-transaction selection (change-set-new-length changes))
+    (unless (boolean? filter-disabled?)
+      (assertion-violation
+        'make-resolved-transaction
+        "filter-disabled? must be boolean"
+        filter-disabled?))
+    (%make-resolved-transaction
+      buffer-id origin-view-id start-generation changes selection
+      (normalize-effects 'make-resolved-transaction effects)
+      (normalize-annotations 'make-resolved-transaction annotations)
+      scroll-request filter-disabled?))
 
   (define (selection-within-length? selection length)
     (and (selection? selection)
@@ -383,6 +416,7 @@
     (let ([old-length (bytevector-length original)])
       (if (null? specs)
           (%make-resolved-transaction
+            #f #f #f
             (make-change-set old-length '()) #f '() '() #f #f)
           (let* ([first (car specs)]
                  [first-changes (transaction-spec-changes first)])
@@ -406,6 +440,9 @@
                         (transaction-spec-filter first)])
               (if (null? items)
                   (%make-resolved-transaction
+                    (transaction-spec-buffer-id first)
+                    (transaction-spec-origin-view-id first)
+                    (transaction-spec-start-generation first)
                     combined selection effects annotations
                     scroll-request filter-disabled?)
                   (let* ([spec (car items)]
