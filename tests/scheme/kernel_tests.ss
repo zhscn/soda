@@ -946,6 +946,16 @@
           (make-display-request-operation
             (surface-id split-surface)
             (make-display-request (buffer-id buffer) #f 'result 'focus #f 'test)))]
+       [interaction-update
+        (dispatcher-dispatch-host!
+          (host-state-dispatch host)
+          (make-push-interaction-operation
+            (surface-id split-surface) (view-id other-view) '(0 2 4 1)))]
+       [interaction-render (render-surface split-surface (host-state-views host))]
+       [pop-update
+        (dispatcher-dispatch-host!
+          (host-state-dispatch host)
+          (make-pop-interaction-operation (surface-id split-surface)))]
        [remove-update
         (dispatcher-dispatch-host!
           (host-state-dispatch host)
@@ -975,7 +985,19 @@
                (= (active-context-view-id (host-update-resolution focused)) (view-id view))
                (= (active-context-view-id (host-update-new-context focused)) (view-id view))
                (equal? (host-update-damage focused) '(chrome))
-               (= (length host-updates) 5)
+               (host-update? interaction-update)
+               (= (active-context-view-id (host-update-new-context interaction-update))
+                  (view-id other-view))
+               (= (length (active-context-interaction-stack
+                            (host-update-new-context interaction-update)))
+                  1)
+               (string=? (frame-cell-grapheme
+                           (frame-cell-at (surface-render-frame interaction-render) 0 2))
+                         "o")
+               (= (surface-render-cursor-column interaction-render) 2)
+               (host-update? pop-update)
+               (= (active-context-view-id (host-update-new-context pop-update)) (view-id view))
+               (= (length host-updates) 7)
                (eq? (surface-selected-window split-surface) left)
                (eq? (surface-set-selected-window! split-surface left) left)
                (= (surface-generation split-surface) generation)

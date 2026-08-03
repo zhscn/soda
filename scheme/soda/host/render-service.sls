@@ -41,7 +41,7 @@
           (surface-generation surface)
           (let ([size (surface-size surface)]) (cons (car size) (cdr size)))
           (map (lambda (leaf) (leaf-signature leaf views))
-               (window-leaves (surface-root-window surface)))))
+               (surface-windows surface))))
 
   (define (render-service-invalidate! service)
     (unless (render-service? service)

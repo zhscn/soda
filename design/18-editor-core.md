@@ -542,6 +542,10 @@ Split 的 `weights` 是与 child 一一对应的正精确有理数。layout 按�
 通过 largest-remainder 分配不能整除的 cell；相同余数按 child 顺序分配。省略权重时每个
 child 使用相同权重。
 
+interaction stack 保存 transient View 的 overlay leaf。root Window tree 先绘制，stack 按
+bottom-to-top 叠加；top interaction 是 active context 和 terminal cursor 的来源。push/pop
+只改变 Surface placement 与 focus，不改变 root tree、Buffer 或 View lifecycle。
+
 ### Dispatch 与 EditorUpdate
 
 dispatch 是 editor state 的唯一 publication boundary：

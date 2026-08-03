@@ -5,9 +5,14 @@
           surface-size
           surface-root-window
           surface-selected-window
+          surface-interaction-windows
+          surface-active-window
+          surface-windows
           surface-set-selected-window!
           surface-split-selected-window!
           surface-remove-window!
+          surface-push-interaction!
+          surface-pop-interaction!
           surface-resize!
           surface-generation
           make-surface-service
@@ -47,6 +52,7 @@
       (mutable size surface-size surface-size-set!)
       (mutable root-window surface-root-window surface-root-window-set!)
       (mutable selected-window surface-selected-window surface-selected-window-set!)
+      (mutable interactions surface-interaction-windows surface-interaction-windows-set!)
       (mutable generation surface-generation surface-generation-set!)))
 
   (define surface-identities (make-identity-source))
@@ -62,7 +68,22 @@
     (let ([selected (car (window-leaves root-window))])
       (window-set-selected! selected #t)
       (%make-surface (identity-source-next! surface-identities)
-                     size root-window selected 0)))
+                     size root-window selected '() 0)))
+
+  (define (surface-active-window surface)
+    (unless (surface? surface)
+      (assertion-violation 'surface-active-window "expected a Surface" surface))
+    (if (null? (surface-interaction-windows surface))
+        (surface-selected-window surface)
+        (car (surface-interaction-windows surface))))
+
+  ;; Root leaves are painted first.  Interaction windows are stored top-first
+  ;; for input routing, so reverse them for bottom-to-top compositor order.
+  (define (surface-windows surface)
+    (unless (surface? surface)
+      (assertion-violation 'surface-windows "expected a Surface" surface))
+    (append (window-leaves (surface-root-window surface))
+            (reverse (surface-interaction-windows surface))))
 
   (define (surface-resize! surface size)
     (unless (and (surface? surface) (surface-size? size))
@@ -95,6 +116,33 @@
 
   (define (view-id? value)
     (and (integer? value) (exact? value) (>= value 0)))
+
+  (define (rectangle? value)
+    (and (list? value) (= (length value) 4)
+         (for-all (lambda (cell) (and (integer? cell) (exact? cell) (>= cell 0)))
+                  value)))
+
+  (define (surface-push-interaction! surface view-id rectangle)
+    (unless (and (surface? surface) (view-id? view-id) (rectangle? rectangle))
+      (assertion-violation 'surface-push-interaction!
+                           "invalid Surface interaction request" surface view-id rectangle))
+    (let ([window (make-leaf-window view-id rectangle)])
+      (window-layout! window (car rectangle) (cadr rectangle)
+                      (caddr rectangle) (cadddr rectangle))
+      (surface-interaction-windows-set!
+        surface (cons window (surface-interaction-windows surface)))
+      (surface-generation-set! surface (+ 1 (surface-generation surface)))
+      window))
+
+  (define (surface-pop-interaction! surface)
+    (unless (surface? surface)
+      (assertion-violation 'surface-pop-interaction! "expected a Surface" surface))
+    (let ([interactions (surface-interaction-windows surface)])
+      (and (pair? interactions)
+           (begin
+             (surface-interaction-windows-set! surface (cdr interactions))
+             (surface-generation-set! surface (+ 1 (surface-generation surface)))
+             (car interactions)))))
 
   ;; Rebuild only the ancestor path.  Existing leaves retain their identity,
   ;; which keeps an ActiveContext valid when a sibling is added or removed.

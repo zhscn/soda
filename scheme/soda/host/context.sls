@@ -10,6 +10,8 @@
           surface-select-view!
           surface-split-view!
           surface-remove-view-window!
+          surface-push-interaction-view!
+          surface-pop-interaction-view!
           surface-route-display-request!
           make-display-request
           display-request?
@@ -57,8 +59,16 @@
     (unless (and (surface? surface) (view-service? views))
       (assertion-violation 'surface-active-context
                            "expected a Surface and ViewService" surface views))
-    (let ([window (surface-selected-window surface)])
-      (and window (context-for-window surface views window))))
+    (let ([window (surface-active-window surface)])
+      (and window
+           (let ([context (context-for-window surface views window)])
+             (and context
+                  (make-active-context
+                    (active-context-surface-id context)
+                    (active-context-window-id context)
+                    (active-context-view-id context)
+                    (active-context-buffer-id context)
+                    (map window-id (surface-interaction-windows surface))))))))
 
   (define (surface-select-view! surface views target-view-id)
     (unless (and (surface? surface) (view-service? views) (identity? target-view-id))
@@ -93,6 +103,21 @@
                            surface views window-id))
     (let ([selected (surface-remove-window! surface window-id)])
       (and selected (context-for-window surface views selected))))
+
+  (define (surface-push-interaction-view! surface views view-id rectangle)
+    (unless (and (surface? surface) (view-service? views) (identity? view-id))
+      (assertion-violation 'surface-push-interaction-view!
+                           "invalid Surface interaction View request" surface views view-id rectangle))
+    (and (view-service-ref views view-id #f)
+         (let ([window (surface-push-interaction! surface view-id rectangle)])
+           (surface-active-context surface views))))
+
+  (define (surface-pop-interaction-view! surface views)
+    (unless (and (surface? surface) (view-service? views))
+      (assertion-violation 'surface-pop-interaction-view!
+                           "expected a Surface and ViewService" surface views))
+    (and (surface-pop-interaction! surface)
+         (surface-active-context surface views)))
 
   (define (window-for-buffer surface views buffer-id)
     (let* ([selected (surface-selected-window surface)]

@@ -6,6 +6,8 @@
           make-focus-view-operation
           make-split-view-operation
           make-remove-window-operation
+          make-push-interaction-operation
+          make-pop-interaction-operation
           make-display-request-operation
           host-update?
           host-update-operation

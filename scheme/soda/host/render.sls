@@ -116,7 +116,7 @@
       (unless (and (integer? width) (exact? width) (>= width 0)
                    (integer? height) (exact? height) (>= height 0))
         (assertion-violation 'render-surface "invalid Surface size" size))
-      (let loop ([leaves (window-leaves (surface-root-window surface))]
+      (let loop ([leaves (surface-windows surface)]
                  [placements '()] [rendered-views '()] [cursor-row #f] [cursor-column #f])
           (if (null? leaves)
               (make-surface-render
@@ -156,11 +156,11 @@
                         (cdr leaves)
                         (cons (make-frame-placement row column (text-layout-frame layout)) placements)
                         (cons (make-rendered-view (view-id view) rectangle layout) rendered-views)
-                        (if (and (eq? leaf (surface-selected-window surface))
+                        (if (and (eq? leaf (surface-active-window surface))
                                  (text-layout-cursor-row layout))
                             (+ row (text-layout-cursor-row layout))
                             cursor-row)
-                        (if (and (eq? leaf (surface-selected-window surface))
+                        (if (and (eq? leaf (surface-active-window surface))
                                  (text-layout-cursor-column layout))
                             (+ column (text-layout-cursor-column layout))
                             cursor-column)))))))))

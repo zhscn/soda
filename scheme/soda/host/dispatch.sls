@@ -127,6 +127,12 @@
                        [(remove-window)
                         (surface-remove-view-window! surface (dispatcher-views dispatcher)
                                                      (host-operation-value operation))]
+                       [(push-interaction)
+                        (let ([value (host-operation-value operation)])
+                          (surface-push-interaction-view!
+                            surface (dispatcher-views dispatcher) (car value) (cadr value)))]
+                       [(pop-interaction)
+                        (surface-pop-interaction-view! surface (dispatcher-views dispatcher))]
                        [(display-request)
                         (surface-route-display-request!
                           surface (dispatcher-views dispatcher)

@@ -6,6 +6,8 @@
           make-focus-view-operation
           make-split-view-operation
           make-remove-window-operation
+          make-push-interaction-operation
+          make-pop-interaction-operation
           make-display-request-operation
           make-host-update
           host-update?
@@ -46,6 +48,21 @@
       (assertion-violation 'make-remove-window-operation "invalid remove Window operation"
                            surface-id window-id))
     (%make-host-operation 'remove-window surface-id window-id))
+
+  (define (rectangle? value)
+    (and (list? value) (= (length value) 4)
+         (for-all (lambda (cell) (identity? cell)) value)))
+
+  (define (make-push-interaction-operation surface-id view-id rectangle)
+    (unless (and (identity? surface-id) (identity? view-id) (rectangle? rectangle))
+      (assertion-violation 'make-push-interaction-operation
+                           "invalid interaction operation" surface-id view-id rectangle))
+    (%make-host-operation 'push-interaction surface-id (list view-id rectangle)))
+
+  (define (make-pop-interaction-operation surface-id)
+    (unless (identity? surface-id)
+      (assertion-violation 'make-pop-interaction-operation "invalid Surface identity" surface-id))
+    (%make-host-operation 'pop-interaction surface-id #f))
 
   (define (make-display-request-operation surface-id request)
     (unless (and (identity? surface-id) (display-request? request))
