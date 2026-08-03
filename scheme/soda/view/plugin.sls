@@ -26,7 +26,8 @@
           configuration-view-plugins)
   (import (rnrs)
           (soda kernel extension)
-          (soda kernel value))
+          (soda kernel value)
+          (soda view decoration))
 
   ;; ViewUpdate is the only value passed from the host publication boundary to
   ;; render-local plugins.  Plugins cannot mutate BufferState or ViewState.
@@ -114,8 +115,14 @@
         (let ([procedure
                 (view-plugin-decorations (view-plugin-instance-plugin instance))])
           (if procedure
-              (procedure (view-plugin-instance-value instance))
-              '()))))
+              (let ([decorations (procedure (view-plugin-instance-value instance))])
+                (unless (decoration-set? decorations)
+                  (assertion-violation
+                    'view-plugin-instance-decorations
+                    "plugin decorations must be a DecorationSet"
+                    decorations))
+                decorations)
+              (make-decoration-set '())))))
 
   (define (view-plugin-instance-update! instance update)
     (unless (and (view-plugin-instance? instance)

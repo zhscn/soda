@@ -5,6 +5,7 @@
           face-decoration-priority
           make-decoration-set
           decoration-set?
+          merge-decoration-sets
           decoration-face)
   (import (rnrs)
           (soda kernel range-set))
@@ -29,6 +30,13 @@
                           ranges))
       (assertion-violation 'make-decoration-set "invalid decoration ranges" ranges))
     (make-range-set ranges))
+
+  (define (merge-decoration-sets sets)
+    (unless (and (list? sets) (for-all decoration-set? sets))
+      (assertion-violation 'merge-decoration-sets "expected DecorationSets" sets))
+    (range-set-update
+      (make-range-set '())
+      (apply append (map range-set-ranges sets))))
 
   (define (decoration-face ranges fallback)
     (let loop ([remaining ranges] [winner #f])

@@ -8,6 +8,7 @@
           (soda host view)
           (soda host window)
           (soda view compositor)
+          (soda view decoration)
           (soda view text-layout))
 
   ;; Rendering consumes only published BufferState and ViewState.  A frontend
@@ -43,8 +44,10 @@
                                            (max 0 (car viewport))
                                            0)]
                            [layout
-                            (layout-text-snapshot snapshot (view-state-selection state)
-                                                  first-line view-width view-height)])
+                            (layout-text-snapshot
+                              snapshot (view-state-selection state)
+                              first-line view-width view-height
+                              (merge-decoration-sets (view-decorations view)))])
                       (loop (cdr leaves)
                             (cons (make-frame-placement row column
                                                         (text-layout-frame layout))

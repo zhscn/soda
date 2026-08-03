@@ -5,6 +5,7 @@
           view-buffer
           view-state
           view-plugin-instances
+          view-decorations
           view-publish-state!
           view-update-plugins!
           view-close!
@@ -163,6 +164,24 @@
             (view-plugin-instance-update! instance update))))
       (view-plugin-instances view))
     view)
+
+  (define (view-decorations view)
+    (unless (and (view? view) (not (view-closed? view)))
+      (assertion-violation 'view-decorations "expected a live View" view))
+    (let loop ([instances (view-plugin-instances view)] [result '()])
+      (if (null? instances)
+          (reverse result)
+          (let ([instance (car instances)])
+            (if (view-plugin-instance-destroyed? instance)
+                (loop (cdr instances) result)
+                (guard
+                  (condition
+                    [else
+                     (report-plugin-error! view 'plugin-decorations condition)
+                     (destroy-plugin-instance! view instance 'plugin-decoration-cleanup)
+                     (loop (cdr instances) result)])
+                  (loop (cdr instances)
+                        (cons (view-plugin-instance-decorations instance) result))))))))
 
   (define-record-type
     (view-service %make-view-service view-service?)

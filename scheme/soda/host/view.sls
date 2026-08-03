@@ -5,6 +5,7 @@
           view-buffer
           view-state
           view-plugin-instances
+          view-decorations
           view-close!
           view-update-plugins!
           make-view-service
