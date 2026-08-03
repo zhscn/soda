@@ -7,6 +7,7 @@
           text-layout-cursor-column
           text-layout-document->point
           text-layout-point->document
+          text-layout-point->display-entry
           text-layout-vertical-target
           make-text-layout-options
           text-layout-options?
@@ -93,6 +94,19 @@
            (< column (frame-width frame))
            (display-map-cell->document (text-layout-display-map layout)
                                        (+ (* row (frame-width frame)) column)))))
+
+  (define (text-layout-point->display-entry layout row column)
+    (unless (and (text-layout? layout) (offset? row) (offset? column))
+      (assertion-violation 'text-layout-point->display-entry
+                           "invalid TextLayout display position" layout row column))
+    (let ([frame (text-layout-frame layout)])
+      (and (< row (frame-height frame))
+           (< column (frame-width frame))
+           (let ([entries
+                  (display-map-cell-range (text-layout-display-map layout)
+                                          (+ (* row (frame-width frame)) column)
+                                          (+ (* row (frame-width frame)) column 1))])
+             (and (pair? entries) (car entries))))))
 
   ;; Return the document location on a visual row DELTA away from OFFSET.
   ;; The caller owns its durable goal column; omitting it uses OFFSET's current

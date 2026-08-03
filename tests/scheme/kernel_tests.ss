@@ -1149,7 +1149,9 @@
                (string=? (frame-cell-grapheme
                            (frame-cell-at (surface-render-frame render) 0 1)) ":")
                (eq? (frame-cell-face
-                     (frame-cell-at (surface-render-frame render) 0 1)) 'hint))
+                     (frame-cell-at (surface-render-frame render) 0 1)) 'hint)
+               (eq? (surface-hit-kind (surface-render-hit-test render 0 1)) 'virtual)
+               (eq? (surface-hit-source (surface-render-hit-test render 0 1)) 'inlay))
     (error 'kernel-tests "cached View display transform differs")))
 
 (define control-x
@@ -1857,6 +1859,9 @@
                (= (display-map-cell->document (text-layout-display-map layout) 4) 3)
                (equal? (text-layout-document->point layout 3) '(1 . 0))
                (= (text-layout-point->document layout 1 0) 3)
+               (eq? (display-map-entry-kind
+                      (text-layout-point->display-entry layout 0 0))
+                     'text)
                (not (text-layout-point->document layout 2 0)))
     (error 'kernel-tests "text layout projection differs"))
   (snapshot-close! snapshot)

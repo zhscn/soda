@@ -14,6 +14,8 @@
           surface-hit?
           surface-hit-view-id
           surface-hit-document-offset
+          surface-hit-kind
+          surface-hit-source
           surface-render-hit-test
           render-surface
           render-surface-frame)
@@ -50,12 +52,17 @@
 
   (define-record-type
     (surface-hit %make-surface-hit surface-hit?)
-    (fields view-id document-offset))
+    (fields view-id document-offset kind source))
 
-  (define (make-surface-hit view-id document-offset)
-    (unless (or (not document-offset) (offset-or-false? document-offset))
-      (assertion-violation 'make-surface-hit "invalid document hit offset" document-offset))
-    (%make-surface-hit view-id document-offset))
+  (define make-surface-hit
+    (case-lambda
+      [(view-id document-offset)
+       (make-surface-hit view-id document-offset #f #f)]
+      [(view-id document-offset kind source)
+       (unless (and (offset-or-false? document-offset)
+                    (or (not kind) (memq kind '(text virtual widget line-break))))
+         (assertion-violation 'make-surface-hit "invalid Surface hit" view-id document-offset kind))
+       (%make-surface-hit view-id document-offset kind source)]))
 
   (define-record-type
     (surface-render %make-surface-render surface-render?)
@@ -87,10 +94,15 @@
                   [width (caddr rectangle)] [height (cadddr rectangle)])
              (if (and (<= top row) (< row (+ top height))
                       (<= left column) (< column (+ left width)))
-                 (make-surface-hit
-                   (rendered-view-view-id rendered)
-                   (text-layout-point->document (rendered-view-layout rendered)
-                                                 (- row top) (- column left)))
+                 (let* ([layout (rendered-view-layout rendered)]
+                        [local-row (- row top)]
+                        [local-column (- column left)]
+                        [entry (text-layout-point->display-entry layout local-row local-column)])
+                   (make-surface-hit
+                     (rendered-view-view-id rendered)
+                     (text-layout-point->document layout local-row local-column)
+                     (and entry (display-map-entry-kind entry))
+                     (and entry (display-map-entry-source entry))))
                  (find (cdr views)))))))
 
   ;; Rendering consumes only published BufferState and ViewState.  A frontend
