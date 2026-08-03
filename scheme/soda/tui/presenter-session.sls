@@ -2,12 +2,16 @@
   (export make-terminal-presenter-session
           terminal-presenter-session?
           terminal-presenter-session-present!
+          terminal-presenter-session-render!
           terminal-presenter-session-event?
           terminal-presenter-session-handle-event!
           terminal-presenter-session-close!)
   (import (rnrs)
           (prefix (soda ffi runtime) native:)
           (soda host render)
+          (soda host render-service)
+          (soda host surface)
+          (soda host view)
           (soda tui presenter))
 
   (define-record-type
@@ -71,6 +75,12 @@
                               (surface-render-cursor-row render)
                               (surface-render-cursor-column render))
     (drain! session))
+
+  ;; This bridge keeps terminal output independent from the editor update
+  ;; loop while still allowing the frontend to reuse an unchanged Frame.
+  (define (terminal-presenter-session-render! session service surface views)
+    (terminal-presenter-session-present!
+      session (render-service-render! service surface views)))
 
   (define (terminal-presenter-session-event? session event)
     (and (terminal-presenter-session? session) (native:event? event)
