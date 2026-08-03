@@ -75,8 +75,7 @@
           anchor-after-insertion)
   (import (chezscheme)
           (soda ffi helpers)
-          (soda ffi document)
-          (soda ffi document-handles))
+          (soda ffi document))
 
   (define (check-pointer who pointer)
     (when (native-null-pointer? pointer)

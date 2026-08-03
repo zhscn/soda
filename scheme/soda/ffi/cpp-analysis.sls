@@ -29,10 +29,14 @@
   (import (chezscheme)
           (soda ffi helpers)
           (soda ffi cpp-analysis-handles)
-          (soda ffi document-handles))
+          (only (soda ffi document)
+                revision-none
+                snapshot?
+                snapshot-pointer
+                change?
+                change-pointer))
 
   (define syntax-node-none #xffffffff)
-  (define revision-none #xffffffffffffffff)
 
   (define syntax-kinds
     '#(translation-unit

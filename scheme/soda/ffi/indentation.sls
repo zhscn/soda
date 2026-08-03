@@ -22,9 +22,13 @@
   (import (chezscheme)
           (soda ffi helpers)
           (soda ffi cpp-analysis-handles)
-          (soda ffi document-handles))
-
-  (define text-npos #xffffffff)
+          (only (soda ffi document)
+                text-npos
+                document?
+                document-pointer
+                snapshot?
+                snapshot-pointer
+                %make-change))
 
   (define format-roles
     '#(file
