@@ -163,25 +163,14 @@
         (+ 1 (buffer-state-generation state)))))
 
   (define (advance-view-state state selection transaction apply-view-effects?)
-    (let ([configuration
+    (let* ([effective-transaction
+             (if apply-view-effects?
+                 transaction
+                 (transaction-without-view-effects transaction))]
+           [configuration
             (configuration-apply-effects
               (view-state-configuration state)
-              (if apply-view-effects?
-                  (transaction-effects transaction)
-                  (filter
-                    (lambda (effect)
-                      (not
-                        (and (state-effect? effect)
-                             (eq? (state-effect-type effect)
-                                  'compartment-reconfigure)
-                             (compartment-entry?
-                               (state-effect-value effect))
-                             (eq?
-                               (compartment-scope
-                                 (compartment-entry-compartment
-                                   (state-effect-value effect)))
-                               'view))))
-                    (transaction-effects transaction)))
+              (transaction-effects effective-transaction)
               'view)])
       (%make-view-state
         (view-state-buffer-id state)
@@ -195,7 +184,7 @@
         (view-state-viewport state)
         (view-state-input-state state)
         configuration
-        (field-values-for state configuration 'view transaction)
+        (field-values-for state configuration 'view effective-transaction)
         (+ 1 (view-state-generation state)))))
 
   (define (buffer-state-advance state document transaction)
@@ -278,6 +267,28 @@
       (immutable annotations transaction-annotations)
       (immutable new-buffer-state transaction-new-buffer-state)
       (immutable new-view-state transaction-new-view-state)))
+
+  (define (view-scoped-effect? effect)
+    (and (state-effect? effect)
+         (eq? (state-effect-type effect) 'compartment-reconfigure)
+         (compartment-entry? (state-effect-value effect))
+         (eq?
+           (compartment-scope
+             (compartment-entry-compartment (state-effect-value effect)))
+           'view)))
+
+  (define (transaction-without-view-effects transaction)
+    (%make-transaction
+      (transaction-start-buffer-state transaction)
+      (transaction-start-view-state transaction)
+      (transaction-changes transaction)
+      (transaction-selection transaction)
+      (filter
+        (lambda (effect) (not (view-scoped-effect? effect)))
+        (transaction-effects transaction))
+      (transaction-annotations transaction)
+      (transaction-new-buffer-state transaction)
+      (transaction-new-view-state transaction)))
 
   (define (list-value value)
     (cond [(not value) '()]
