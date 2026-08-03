@@ -8,6 +8,7 @@
           view-decorations
           view-display-streams
           view-display-transforms
+          view-transform-display-stream
           view-close!
           view-update-plugins!
           make-view-service

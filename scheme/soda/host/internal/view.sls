@@ -8,6 +8,7 @@
           view-decorations
           view-display-streams
           view-display-transforms
+          view-transform-display-stream
           view-publish-state!
           view-update-plugins!
           view-close!
@@ -26,7 +27,8 @@
           (soda host internal buffer)
           (soda host input)
           (soda host value)
-          (soda view plugin))
+          (soda view plugin)
+          (soda view display))
 
   (define-record-type
     (view %make-view view?)
@@ -204,6 +206,32 @@
           (reverse result)
           (let ([transform (view-plugin-instance-display-transform (car instances))])
             (loop (cdr instances) (if transform (cons transform result) result))))))
+
+  ;; A transform is prepared by a plugin update but executed against the
+  ;; current visible base stream.  Failure is contained at the View boundary,
+  ;; matching decoration and update failures.
+  (define (view-transform-display-stream view stream)
+    (unless (and (view? view) (not (view-closed? view)) (display-stream? stream))
+      (assertion-violation 'view-transform-display-stream
+                           "expected a live View and DisplayStream" view stream))
+    (let loop ([instances (view-plugin-instances view)] [current stream])
+      (if (null? instances)
+          current
+          (let* ([instance (car instances)]
+                 [transform (view-plugin-instance-display-transform instance)])
+            (if (not transform)
+                (loop (cdr instances) current)
+                (guard
+                  (condition
+                    [else
+                     (report-plugin-error! view 'plugin-display-transform condition)
+                     (destroy-plugin-instance! view instance 'plugin-display-transform-cleanup)
+                     (loop (cdr instances) current)])
+                  (let ([next (transform current)])
+                    (unless (display-stream? next)
+                      (assertion-violation 'view-transform-display-stream
+                                           "plugin transform returned a non-DisplayStream" next))
+                    (loop (cdr instances) next))))))))
 
   (define-record-type
     (view-service %make-view-service view-service?)

@@ -138,9 +138,7 @@
                                          (make-display-stream
                                            (apply append (map display-stream-fragments streams))))])
                                 (layout-display-stream
-                                  (fold-left
-                                    (lambda (current transform) (transform current))
-                                    stream (view-display-transforms view))
+                                  (view-transform-display-stream view stream)
                                   (view-state-selection state)
                                   view-width view-height options)))])
                       (loop
