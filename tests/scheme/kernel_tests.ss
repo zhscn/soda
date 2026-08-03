@@ -18,6 +18,7 @@
         (soda host input-event)
         (soda host runtime)
         (soda host render)
+        (soda host render-service)
         (soda host state)
         (soda host surface)
         (soda host value)
@@ -907,6 +908,15 @@
                  (= (surface-hit-document-offset hit) 1)
                  (string=? (frame-cell-grapheme (frame-cell-at (surface-render-frame rendered) 0 0)) "h"))
     (error 'kernel-tests "Surface render composition differs"))))
+
+(let ([service (make-render-service)])
+  (let ([first (render-service-render! service surface (host-state-views host))]
+        [second (render-service-render! service surface (host-state-views host))])
+    (unless (eq? first second)
+      (error 'kernel-tests "RenderService did not reuse an unchanged render"))
+    (render-service-invalidate! service)
+    (unless (not (eq? first (render-service-render! service surface (host-state-views host))))
+      (error 'kernel-tests "RenderService invalidation differs"))))
 
 (define control-x
   (make-key-stroke 'character (char->integer #\x) 4))
