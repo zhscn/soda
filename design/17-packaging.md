@@ -9,6 +9,7 @@
 | 单一编辑器可执行文件与 runtime grammar/query 安装 | 已实现 |
 | 进程内 Scheme program 编译接口 | 未实现 |
 | trailer 容器与 application launcher 分派 | 未实现 |
+| Soda launcher runtime library visibility contract test | 未实现 |
 | 纯 Chez / Soda application 两层打包 | 未实现 |
 
 ## 编辑器构建
@@ -94,6 +95,14 @@ TOC 顺序注册 boot，最后建立 heap 并进入 program。boot 与 Chez kern
 
 Soda runtime application 只能使用 launcher 已注册的 foreign symbol。新增 native
 能力需要进入 Soda ABI 和 launcher，不能由打包后的 Scheme program 动态扩展。
+
+### Runtime library visibility contract
+
+Soda launcher 的 contract test 在嵌入式启动后验证三件事：Soda core library 可以被
+`import`，由 core boot 显式保留的 runtime library 仍可见，未随 boot 注册的 library
+不会被误认为可见。测试通过 launcher 启动一个最小 Scheme program，检查
+`library-list`、成功的 `import` 以及预期的 invisible-library condition；它不依赖
+编辑器 UI 或当前工作目录。
 
 ## 编译请求
 
