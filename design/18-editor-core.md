@@ -562,6 +562,12 @@ Window、focus、Buffer lifecycle 和 Surface mutation 使用 HostOperation，�
 dispatcher 串行执行并产生 HostUpdate。command、runtime message、internal refresh 和测试
 都只能调用 dispatcher，不持有 registry 内部可变表。
 
+HostOperation 使用 target identity，不携带 Surface、View 或 registry 对象。基础 operation 包括
+按 Surface/View identity 聚焦和携带 `DisplayRequest` 的 placement 路由。HostUpdate 保存 operation、
+Surface identity、old/new active context、resolved placement context 与 damage；`preserve` policy
+可以解析另一 leaf 而不改变 active context。Surface generation 不变时 HostUpdate 不产生 chrome
+damage。
+
 ### Owner、package 与 service
 
 Owner 管理可撤销资源：

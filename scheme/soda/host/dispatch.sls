@@ -18,7 +18,9 @@
           dispatcher-dispatch!
           dispatcher-dispatch-specs!
           dispatcher-dispatch-view!
-          dispatcher-set-listener!)
+          dispatcher-dispatch-host!
+          dispatcher-set-listener!
+          dispatcher-set-host-listener!)
   (import (rnrs)
           (soda kernel change)
           (soda kernel document)
@@ -28,6 +30,9 @@
           (soda kernel view-state)
           (soda host internal buffer)
           (soda host internal view)
+          (soda host context)
+          (soda host operation)
+          (soda host surface)
           (soda host value)
           (soda view plugin))
 
@@ -61,19 +66,78 @@
     (fields
       (immutable buffers dispatcher-buffers)
       (immutable views dispatcher-views)
-      (mutable listener dispatcher-listener dispatcher-listener-set!)))
+      (immutable surfaces dispatcher-surfaces)
+      (mutable listener dispatcher-listener dispatcher-listener-set!)
+      (mutable host-listener dispatcher-host-listener dispatcher-host-listener-set!)))
 
-  (define (make-dispatcher buffers views . listener)
+  (define make-dispatcher
+    (case-lambda
+      [(buffers views)
+       (make-dispatcher buffers views #f #f)]
+      [(buffers views third)
+       (if (surface-service? third)
+           (make-dispatcher buffers views third #f)
+           (make-dispatcher buffers views #f third))]
+      [(buffers views surfaces listener)
     (unless (and (buffer-service? buffers) (view-service? views))
       (assertion-violation 'make-dispatcher "expected buffer and view services"))
+    (unless (or (not surfaces) (surface-service? surfaces))
+      (assertion-violation 'make-dispatcher "expected a SurfaceService or #f" surfaces))
+    (unless (or (not listener) (procedure? listener))
+      (assertion-violation 'make-dispatcher "expected a listener or #f" listener))
     (%make-dispatcher
-      buffers views (if (null? listener) #f (car listener))))
+      buffers views surfaces listener #f)]))
 
   (define (dispatcher-set-listener! dispatcher listener)
     (unless (or (not listener) (procedure? listener))
       (assertion-violation 'dispatcher-set-listener! "listener must be a procedure" listener))
     (dispatcher-listener-set! dispatcher listener)
     listener)
+
+  (define (dispatcher-set-host-listener! dispatcher listener)
+    (unless (or (not listener) (procedure? listener))
+      (assertion-violation 'dispatcher-set-host-listener!
+                           "expected a listener or #f" listener))
+    (dispatcher-host-listener-set! dispatcher listener)
+    listener)
+
+  (define (dispatcher-dispatch-host! dispatcher operation)
+    (unless (and (dispatcher? dispatcher) (host-operation? operation))
+      (assertion-violation 'dispatcher-dispatch-host!
+                           "expected a Dispatcher and HostOperation"
+                           dispatcher operation))
+    (let ([surfaces (dispatcher-surfaces dispatcher)])
+      (unless surfaces
+        (assertion-violation 'dispatcher-dispatch-host!
+                             "Dispatcher has no SurfaceService" dispatcher))
+      (let ([surface
+             (surface-service-ref surfaces (host-operation-surface-id operation) #f)])
+        (and surface
+             (let* ([start-generation (surface-generation surface)]
+                    [old-context (surface-active-context surface (dispatcher-views dispatcher))]
+                    [resolution
+                     (case (host-operation-kind operation)
+                       [(focus-view)
+                        (surface-select-view! surface (dispatcher-views dispatcher)
+                                              (host-operation-value operation))]
+                       [(display-request)
+                        (surface-route-display-request!
+                          surface (dispatcher-views dispatcher)
+                          (host-operation-value operation))]
+                       [else
+                        (assertion-violation 'dispatcher-dispatch-host!
+                                             "unsupported HostOperation" operation)])]
+                    [new-context (surface-active-context surface (dispatcher-views dispatcher))])
+               (and resolution
+                    (let ([update
+                           (make-host-update
+                             operation (surface-id surface) old-context new-context resolution
+                             (if (= start-generation (surface-generation surface))
+                                 '()
+                                 '(chrome)))])
+                      (let ([listener (dispatcher-host-listener dispatcher)])
+                        (when listener (listener update)))
+                      update)))))))
 
   (define (notify-view-plugins! dispatcher update)
     (for-each

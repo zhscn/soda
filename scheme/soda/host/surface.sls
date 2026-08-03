@@ -8,6 +8,12 @@
           surface-set-selected-window!
           surface-resize!
           surface-generation
+          make-surface-service
+          surface-service?
+          surface-service-register!
+          surface-service-ref
+          surface-service-surfaces
+          surface-service-remove!
           make-surface-input-message
           surface-input-message?
           surface-input-message-surface-id
@@ -84,4 +90,56 @@
           (surface-selected-window-set! surface window)
           (surface-generation-set! surface (+ 1 (surface-generation surface)))
           window)))
+
+  ;; A Surface registry owns identity lookup only.  Frontends keep their own
+  ;; terminal resources, while dispatcher operations resolve a target Surface
+  ;; through this service instead of receiving a mutable Surface from a
+  ;; package or command.
+  (define-record-type
+    (surface-service %make-surface-service surface-service?)
+    (fields table))
+
+  (define (make-surface-service)
+    (%make-surface-service (make-eqv-hashtable)))
+
+  (define (surface-service-register! service surface)
+    (unless (and (surface-service? service) (surface? surface))
+      (assertion-violation 'surface-service-register!
+                           "expected a SurfaceService and Surface" service surface))
+    (let ([existing (hashtable-ref (surface-service-table service) (surface-id surface) #f)])
+      (cond
+        [(not existing)
+         (hashtable-set! (surface-service-table service) (surface-id surface) surface)
+         surface]
+        [(eq? existing surface) surface]
+        [else
+         (assertion-violation 'surface-service-register!
+                              "Surface identity is already registered"
+                              (surface-id surface))])))
+
+  (define (surface-service-ref service id . default)
+    (unless (and (surface-service? service)
+                 (integer? id) (exact? id) (>= id 0))
+      (assertion-violation 'surface-service-ref "invalid SurfaceService or identity"
+                           service id))
+    (let ([surface (hashtable-ref (surface-service-table service) id #f)])
+      (if surface surface (if (null? default) #f (car default)))))
+
+  (define (surface-service-surfaces service)
+    (unless (surface-service? service)
+      (assertion-violation 'surface-service-surfaces "expected a SurfaceService" service))
+    (call-with-values
+      (lambda () (hashtable-entries (surface-service-table service)))
+      (lambda (ids values) (vector->list values))))
+
+  (define (surface-service-remove! service id)
+    (unless (and (surface-service? service)
+                 (integer? id) (exact? id) (>= id 0))
+      (assertion-violation 'surface-service-remove! "invalid SurfaceService or identity"
+                           service id))
+    (let ([surface (hashtable-ref (surface-service-table service) id #f)])
+      (and surface
+           (begin
+             (hashtable-delete! (surface-service-table service) id)
+             surface))))
 )

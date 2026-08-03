@@ -18,6 +18,7 @@
         (soda host buffer)
         (soda host input)
         (soda host input-event)
+        (soda host operation)
         (soda host runtime)
         (soda host render)
         (soda host render-service)
@@ -883,6 +884,7 @@
     (host-state-views host) owner buffer configuration))
 (define leaf (make-leaf-window (view-id view) '(0 0 80 24)))
 (define surface (make-surface leaf '(80 . 24)))
+(surface-service-register! (host-state-surfaces host) surface)
 (surface-set-selected-window! surface leaf)
 (unless (and (eq? (surface-selected-window surface) leaf)
              (= (buffer-id buffer) (view-state-buffer-id (view-state view))))
@@ -906,31 +908,58 @@
                                 other-document configuration)]
        [other-view
         (view-service-create! (host-state-views host) owner other-buffer configuration)]
+       [host-updates '()]
        [left (make-leaf-window (view-id view) #f)]
        [right (make-leaf-window (view-id other-view) #f)]
        [split (make-split-window 'horizontal (list left right) #f)]
        [split-surface (make-surface split '(8 . 1))]
-       [context (surface-select-view! split-surface (host-state-views host)
-                                      (view-id other-view))]
+       [_registered
+        (surface-service-register! (host-state-surfaces host) split-surface)]
+       [_listener
+        (dispatcher-set-host-listener!
+          (host-state-dispatch host)
+          (lambda (update) (set! host-updates (cons update host-updates))))]
+       [focus-update
+        (dispatcher-dispatch-host!
+          (host-state-dispatch host)
+          (make-focus-view-operation (surface-id split-surface) (view-id other-view)))]
        [preserved
-        (surface-route-display-request!
-          split-surface (host-state-views host)
-          (make-display-request (buffer-id buffer) #f 'result 'preserve #f 'test))]
+        (dispatcher-dispatch-host!
+          (host-state-dispatch host)
+          (make-display-request-operation
+            (surface-id split-surface)
+            (make-display-request (buffer-id buffer) #f 'result 'preserve #f 'test)))]
        [focused
-        (surface-route-display-request!
-          split-surface (host-state-views host)
-          (make-display-request (buffer-id buffer) #f 'result 'focus #f 'test))]
+        (dispatcher-dispatch-host!
+          (host-state-dispatch host)
+          (make-display-request-operation
+            (surface-id split-surface)
+            (make-display-request (buffer-id buffer) #f 'result 'focus #f 'test)))]
        [generation (surface-generation split-surface)])
-  (unless (and (active-context? context)
-               (= (active-context-view-id context) (view-id other-view))
-               (= (active-context-buffer-id context) (buffer-id other-buffer))
-               (= (active-context-view-id preserved) (view-id view))
-               (= (active-context-view-id focused) (view-id view))
+  (unless (and (host-update? focus-update)
+               (= (active-context-view-id (host-update-new-context focus-update))
+                  (view-id other-view))
+               (= (active-context-buffer-id (host-update-resolution focus-update))
+                  (buffer-id other-buffer))
+               (host-update? preserved)
+               (= (active-context-view-id (host-update-resolution preserved)) (view-id view))
+               (= (active-context-view-id (host-update-new-context preserved))
+                  (view-id other-view))
+               (null? (host-update-damage preserved))
+               (host-update? focused)
+               (= (active-context-view-id (host-update-resolution focused)) (view-id view))
+               (= (active-context-view-id (host-update-new-context focused)) (view-id view))
+               (equal? (host-update-damage focused) '(chrome))
+               (= (length host-updates) 3)
                (eq? (surface-selected-window split-surface) left)
                (eq? (surface-set-selected-window! split-surface left) left)
                (= (surface-generation split-surface) generation)
-               (not (surface-select-view! split-surface (host-state-views host) 999999)))
+               (not (dispatcher-dispatch-host!
+                      (host-state-dispatch host)
+                      (make-focus-view-operation (surface-id split-surface) 999999))))
     (error 'kernel-tests "Surface View focus routing differs"))
+  (dispatcher-set-host-listener! (host-state-dispatch host) #f)
+  (surface-service-remove! (host-state-surfaces host) (surface-id split-surface))
   (view-service-close-view! (host-state-views host) (view-id other-view)))
 
 (let* ([left (make-leaf-window 1 #f)]

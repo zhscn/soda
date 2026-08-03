@@ -5,6 +5,7 @@
           host-state-runtime
           host-state-buffers
           host-state-views
+          host-state-surfaces
           host-state-commands
           host-state-conditions
           host-state-dispatch
@@ -19,6 +20,7 @@
           (soda host dispatch)
           (soda host runtime)
           (soda host package)
+          (soda host surface)
           (soda host value)
           (soda host view))
 
@@ -29,6 +31,7 @@
       (immutable runtime host-state-runtime)
       (immutable buffers host-state-buffers)
       (immutable views host-state-views)
+      (immutable surfaces host-state-surfaces)
       (immutable commands host-state-commands)
       (immutable conditions host-state-conditions)
       (immutable dispatch host-state-dispatch)
@@ -40,9 +43,10 @@
            [runtime (make-runtime)]
            [buffers (make-buffer-service)]
            [views (make-view-service)]
+           [surfaces (make-surface-service)]
            [commands (make-command-registry)]
            [conditions (make-condition-service)]
-           [dispatch (make-dispatcher buffers views)]
+           [dispatch (make-dispatcher buffers views surfaces)]
            [packages (make-package-service)])
       (view-service-set-plugin-error-handler!
         views
@@ -54,7 +58,7 @@
             (lambda arguments #f)
             '(dismiss))))
       (%make-host-state
-        owner runtime buffers views commands conditions dispatch packages #f)))
+        owner runtime buffers views surfaces commands conditions dispatch packages #f)))
 
   (define (host-state-close! state)
     (unless (host-state? state)
