@@ -24,6 +24,7 @@
         (soda host view)
         (soda host window)
         (soda kernel document)
+        (soda kernel range-set)
         (soda ffi cpp-analysis)
         (soda ffi indentation)
         (soda ffi tree-sitter)
@@ -35,6 +36,7 @@
         (soda view display)
         (soda view frame)
         (soda view compositor)
+        (soda view decoration)
         (soda view text-layout)
         (soda view theme)
         (soda view plugin))
@@ -1559,6 +1561,18 @@
                (eq? (frame-cell-face (frame-cell-at (text-layout-frame layout) 1 0)) 'text)
                (= (display-map-cell->document (text-layout-display-map layout) 4) 3))
     (error 'kernel-tests "text layout projection differs"))
+  (snapshot-close! snapshot)
+  (document-close! document))
+
+(let* ([document (make-document "abc")]
+       [snapshot (document-snapshot document)]
+       [selection (make-selection (list (make-selection-range 0 0)))]
+       [decorations
+         (make-decoration-set
+           (list (make-range-value 1 2 (make-face-decoration 'keyword 10))))]
+       [layout (layout-text-snapshot snapshot selection 0 3 1 decorations)])
+  (unless (eq? (frame-cell-face (frame-cell-at (text-layout-frame layout) 0 1)) 'keyword)
+    (error 'kernel-tests "RangeSet decoration layout differs"))
   (snapshot-close! snapshot)
   (document-close! document))
 

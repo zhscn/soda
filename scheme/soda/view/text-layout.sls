@@ -8,8 +8,10 @@
           layout-text-snapshot)
   (import (rnrs)
           (soda kernel document)
+          (soda kernel range-set)
           (soda kernel selection)
           (soda ffi unicode)
+          (soda view decoration)
           (soda view display)
           (soda view frame))
 
@@ -44,9 +46,15 @@
 
   ;; `first-line` is a logical line index.  Layout clips at the requested
   ;; terminal rectangle and reports the primary caret in display coordinates.
-  (define (layout-text-snapshot snapshot selection first-line width height)
+  (define layout-text-snapshot
+    (case-lambda
+      [(snapshot selection first-line width height)
+       (layout-text-snapshot snapshot selection first-line width height
+                             (make-decoration-set '()))]
+      [(snapshot selection first-line width height decorations)
     (unless (and (snapshot? snapshot) (selection? selection)
-                 (offset? first-line) (offset? width) (offset? height))
+                 (offset? first-line) (offset? width) (offset? height)
+                 (decoration-set? decorations))
       (assertion-violation 'layout-text-snapshot "invalid text layout request"))
     (let* ([text (snapshot-text snapshot)]
            [cells (make-vector (* width height) default-frame-cell)]
@@ -55,7 +63,22 @@
            [caret (selection-range-head primary)]
            [cursor-row #f]
            [cursor-column #f]
-           [start-line (line-at text first-line)])
+           [start-line (line-at text first-line)]
+           [last-line
+            (min (- (text-line-count text) 1)
+                 (+ start-line (max 0 (- height 1))))]
+           [visible-from (text-line-start text start-line)]
+           [visible-to (text-line-content-end text last-line)]
+           [spans (range-set-spans decorations visible-from visible-to)])
+      (define (face-at offset)
+        (let find ([remaining spans])
+          (if (null? remaining)
+              'text
+              (let ([span (car remaining)])
+                (if (and (<= (range-span-from span) offset)
+                         (< offset (range-span-to span)))
+                    (decoration-face (range-span-values span) 'text)
+                    (find (cdr remaining)))))))
       (define (put! row column cell)
         (vector-set! cells (+ (* row width) column) cell))
       (let loop-line ([line start-line] [row 0])
@@ -72,7 +95,7 @@
                        [glyph (utf8->string (text-subbytevector text offset next))]
                        [glyph-width (max 1 (grapheme-width glyph))]
                        [available? (<= (+ column glyph-width) width)]
-                       [face (if (selected? selection offset next) 'selection 'text)])
+                       [face (if (selected? selection offset next) 'selection (face-at offset))])
                   (when available?
                     (put! row column (make-frame-cell glyph glyph-width #f face offset))
                     (when (= glyph-width 2)
@@ -91,5 +114,5 @@
         (set! cursor-column 0))
       (make-text-layout (make-frame width height cells)
                         (make-display-map (reverse entries))
-                        cursor-row cursor-column)))
+                        cursor-row cursor-column))]))
 )
