@@ -2032,4 +2032,39 @@
       (view-id plugin-view) 1 selection #f #f '() '() #f))
   (unless (and (= updates 1) (= destroyed 1))
     (error 'kernel-tests "failing ViewPlugin was not retired" updates destroyed)))
+
+(let* ([plugin
+        (make-view-plugin
+          'failing-display
+          (lambda (view) 'ready)
+          (lambda (value update) (error 'kernel-tests "intentional display failure"))
+          #f
+          #f
+          (lambda (value)
+            (make-display-stream
+              (list (make-display-text "v" 0 1 'virtual 'plugin)))))]
+       [configuration
+        (make-configuration
+          (list (make-facet-provider view-plugins-facet (list plugin))))]
+       [document (make-document "x")]
+       [buffer (buffer-service-create! (host-state-buffers host) owner "*failing-display*"
+                                       document configuration)]
+       [view (view-service-create! (host-state-views host) owner buffer configuration)]
+       [leaf (make-leaf-window (view-id view) '(0 0 2 1))]
+       [surface (make-surface leaf '(2 . 1))]
+       [service (make-render-service)]
+       [before (render-service-render! service surface (host-state-views host))]
+       [state (view-state view)]
+       [_update
+        (dispatcher-dispatch-view!
+          (host-state-dispatch host)
+          (make-view-transaction-spec
+            (view-id view) (view-state-generation state)
+            #f #f (make-input-stack (make-input-state 'transient '() 'accept))
+            '() '() #f))]
+       [after (render-service-render! service surface (host-state-views host))])
+  (unless (and (not (eq? before after))
+               (string=? (frame-cell-grapheme
+                           (frame-cell-at (surface-render-frame after) 0 0)) "x"))
+    (error 'kernel-tests "failed display plugin left a stale render")))
 (host-state-close! host)

@@ -231,22 +231,24 @@
     (unless (and (view? view) (not (view-closed? view)) (view-update? update))
       (assertion-violation
         'view-update-plugins! "expected a live View and ViewUpdate" view update))
-    (for-each
-      (lambda (instance)
-        (unless (view-plugin-instance-destroyed? instance)
-          (guard
-            (condition
-              [else
-               (report-plugin-error! view 'plugin-update condition)
-               (destroy-plugin-instance! view instance 'plugin-update-cleanup)
-               #f])
-            (view-plugin-instance-update! instance update))))
-      (view-plugin-instances view))
-    (refresh-view-decorations! view)
-    (refresh-view-display-stream! view)
-    (when (render-damage? update view)
-      (view-render-generation-set! view (+ 1 (view-render-generation view))))
-    view)
+    (let ([output-changed? #f])
+      (for-each
+        (lambda (instance)
+          (unless (view-plugin-instance-destroyed? instance)
+            (guard
+              (condition
+                [else
+                 (report-plugin-error! view 'plugin-update condition)
+                 (destroy-plugin-instance! view instance 'plugin-update-cleanup)
+                 (set! output-changed? #t)
+                 #f])
+              (view-plugin-instance-update! instance update))))
+        (view-plugin-instances view))
+      (refresh-view-decorations! view)
+      (refresh-view-display-stream! view)
+      (when (or output-changed? (render-damage? update view))
+        (view-render-generation-set! view (+ 1 (view-render-generation view))))
+      view))
 
   (define (view-decorations view)
     (unless (and (view? view) (not (view-closed? view)))
