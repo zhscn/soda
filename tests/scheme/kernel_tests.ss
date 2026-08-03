@@ -17,6 +17,7 @@
         (soda host input)
         (soda host input-event)
         (soda host runtime)
+        (soda host render)
         (soda host state)
         (soda host surface)
         (soda host value)
@@ -882,6 +883,12 @@
   (unless (and (equal? (window-rectangle left) '(0 0 4 3))
                (equal? (window-rectangle right) '(0 4 3 3)))
     (error 'kernel-tests "Window grid layout differs")))
+
+(let ([rendered (render-surface-frame surface (host-state-views host))])
+  (unless (and (= (frame-width rendered) 80)
+               (= (frame-height rendered) 24)
+               (string=? (frame-cell-grapheme (frame-cell-at rendered 0 0)) "h"))
+    (error 'kernel-tests "Surface render composition differs")))
 
 (define control-x
   (make-key-stroke 'character (char->integer #\x) 4))
