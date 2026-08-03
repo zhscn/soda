@@ -119,8 +119,11 @@
                  (offset? first-line) (offset? width) (offset? height)
                  (decoration-set? decorations) (text-layout-options? options))
       (assertion-violation 'layout-text-snapshot "invalid text layout request"))
-    (let* ([text (snapshot-text snapshot)]
-           [cells (make-vector (* width height) default-frame-cell)]
+    (let ([text (snapshot-text snapshot)])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (let* ([cells (make-vector (* width height) default-frame-cell)]
            [entries '()]
            [primary (selection-primary-range selection)]
            [caret (selection-range-head primary)]
@@ -213,5 +216,6 @@
         (set! cursor-column 0))
       (make-text-layout (make-frame width height cells)
                         (make-display-map (reverse entries))
-                        cursor-row cursor-column))]))
+                        cursor-row cursor-column)))
+        (lambda () (text-close! text))))]))
 )
