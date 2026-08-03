@@ -155,60 +155,49 @@
           (set! cursor-column (min column (max 0 (- width 1))))))
       (let loop-line ([line start-line] [row 0])
         (when (and (< row height) (< line (text-line-count text)))
-          (let loop-grapheme ([offset (text-line-start text line)] [column 0] [visual-row row])
-            (let ([end (text-line-content-end text line)])
-              (set-cursor! offset visual-row column)
-              (when (and (< offset end) (< visual-row height) (> width 0))
-                (let* ([next (text-next-grapheme-offset text offset)]
-                       [glyph (utf8->string (text-subbytevector text offset next))]
-                       [tab? (string=? glyph "\t")]
-                       [glyph-width
-                        (if tab?
-                            (- (text-layout-options-tab-width options)
-                               (mod column (text-layout-options-tab-width options)))
-                            (max 1 (grapheme-width glyph)))]
-                       [wrap? (text-layout-options-wrap? options)]
-                       [face (if (selected? selection offset next) 'selection (face-at offset))])
-                  (cond
-                    ;; A glyph wider than the viewport cannot be represented
-                    ;; as a terminal Frame cell.  Advancing it still preserves
-                    ;; progress and lets a wider Surface render it normally.
-                    [(> glyph-width width)
-                     (loop-grapheme next column visual-row)]
-                    [(<= (+ column glyph-width) width)
-                     (if tab?
-                         (put-space-span! visual-row column glyph-width face offset)
-                         (begin
-                           (put! visual-row column
-                                 (make-frame-cell glyph glyph-width #f face offset))
-                           (when (= glyph-width 2)
-                             (put! visual-row (+ column 1)
-                                   (make-frame-cell "" 0 #t face offset)))))
-                     (record-entry! offset next visual-row column glyph-width offset)
-                     (loop-grapheme next (+ column glyph-width) visual-row)]
-                    [(and wrap? (> column 0) (< (+ visual-row 1) height))
-                     (loop-grapheme offset 0 (+ visual-row 1))]
-                    [else #f])))))
-          ;; A wrapped line occupies all rows reached by loop-grapheme.  The
-          ;; following logical line begins after the last occupied visual row.
-          (let line-end ([offset (text-line-start text line)] [column 0] [visual-row row])
-            (let ([end (text-line-content-end text line)])
-              (if (or (= offset end) (>= visual-row height) (= width 0))
-                  (loop-line (+ line 1) (+ visual-row 1))
-                  (let* ([next (text-next-grapheme-offset text offset)]
-                         [glyph (utf8->string (text-subbytevector text offset next))]
-                         [glyph-width
-                          (if (string=? glyph "\t")
-                              (- (text-layout-options-tab-width options)
-                                 (mod column (text-layout-options-tab-width options)))
-                              (max 1 (grapheme-width glyph)))])
-                    (cond
-                      [(> glyph-width width) (line-end next column visual-row)]
-                      [(<= (+ column glyph-width) width)
-                       (line-end next (+ column glyph-width) visual-row)]
-                      [(and (text-layout-options-wrap? options) (> column 0))
-                       (line-end offset 0 (+ visual-row 1))]
-                      [else (loop-line (+ line 1) (+ visual-row 1))])))))))
+          (let ((final-row
+                 (let loop-grapheme
+                   ((offset (text-line-start text line)) (column 0) (visual-row row))
+                   (let ((end (text-line-content-end text line)))
+                     (set-cursor! offset visual-row column)
+                     (if (or (= offset end) (>= visual-row height) (= width 0))
+                         visual-row
+                         (let* ((next (text-next-grapheme-offset text offset))
+                                (glyph (utf8->string (text-subbytevector text offset next)))
+                                (tab? (string=? glyph "\t"))
+                                (glyph-width
+                                 (if tab?
+                                     (- (text-layout-options-tab-width options)
+                                        (mod column (text-layout-options-tab-width options)))
+                                     (max 1 (grapheme-width glyph))))
+                                (face
+                                 (if (selected? selection offset next)
+                                     'selection
+                                     (face-at offset))))
+                           (cond
+                             ;; A glyph wider than the viewport cannot be
+                             ;; represented as a terminal Frame cell.  Advancing
+                             ;; it still preserves progress for a wider Surface.
+                             ((> glyph-width width)
+                              (loop-grapheme next column visual-row))
+                             ((<= (+ column glyph-width) width)
+                              (if tab?
+                                  (put-space-span! visual-row column glyph-width face offset)
+                                  (begin
+                                    (put! visual-row column
+                                          (make-frame-cell glyph glyph-width #f face offset))
+                                    (when (= glyph-width 2)
+                                      (put! visual-row (+ column 1)
+                                            (make-frame-cell "" 0 #t face offset)))))
+                              (record-entry! offset next visual-row column glyph-width offset)
+                              (loop-grapheme next (+ column glyph-width) visual-row))
+                             ((and (text-layout-options-wrap? options) (> column 0)
+                                   (< (+ visual-row 1) height))
+                              (loop-grapheme offset 0 (+ visual-row 1)))
+                             (else visual-row))))))))
+            ;; A wrapped line occupies all rows reached by loop-grapheme.  The
+            ;; following logical line begins after its last visual row.
+            (loop-line (+ line 1) (+ final-row 1)))))
       (when (and (not cursor-row) (= caret (snapshot-byte-size snapshot)) (> height 0))
         (set! cursor-row (min (- height 1) (max 0 (- (text-line-count text) start-line 1))))
         (set! cursor-column 0))
