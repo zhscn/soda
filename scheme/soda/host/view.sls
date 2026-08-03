@@ -8,7 +8,7 @@
           view-plugin-instances
           view-decorations
           view-merged-decorations
-          view-display-streams
+          view-display-stream
           view-display-transforms
           view-transform-display-stream
           view-close!

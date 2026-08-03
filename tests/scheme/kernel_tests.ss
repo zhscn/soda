@@ -1013,12 +1013,32 @@
        [leaf (make-leaf-window (view-id view) '(0 0 8 1))]
        [surface (make-surface leaf '(8 . 1))]
        [render (render-surface surface (host-state-views host))])
-  (unless (and (= (length (view-display-streams view)) 1)
+  (unless (and (display-stream? (view-display-stream view))
                (string=? (frame-cell-grapheme
                            (frame-cell-at (surface-render-frame render) 0 0)) "v")
                (eq? (frame-cell-face
                      (frame-cell-at (surface-render-frame render) 0 0)) 'virtual))
     (error 'kernel-tests "cached View display stream differs")))
+
+(let* ([first
+        (make-view-plugin
+          'first-display (lambda (view) 'ready) #f #f #f
+          (lambda (value) (make-display-stream '())))]
+       [second
+        (make-view-plugin
+          'second-display (lambda (view) 'ready) #f #f #f
+          (lambda (value) (make-display-stream '())))]
+       [configuration
+        (make-configuration
+          (list (make-facet-provider view-plugins-facet (list first second))))]
+       [document (make-document "hidden")]
+       [buffer (buffer-service-create! (host-state-buffers host) owner "*ambiguous-display*"
+                                       document configuration)])
+  (unless
+      (guard (condition [else #t])
+        (view-service-create! (host-state-views host) owner buffer configuration)
+        #f)
+    (error 'kernel-tests "View accepted multiple full DisplayStream providers")))
 
 (let* ([plugin
         (make-view-plugin

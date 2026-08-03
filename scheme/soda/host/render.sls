@@ -126,17 +126,16 @@
                            [visual-row (viewport-visual-row viewport)]
                            [layout
                             (let ([options
-                                   (configuration-facet
+                                  (configuration-facet
                                      (view-state-configuration state)
                                      text-layout-options-facet 'view)]
-                                  [streams (view-display-streams view)])
+                                  [provided-stream (view-display-stream view)])
                               (let ([stream
-                                     (if (null? streams)
+                                     (if (not provided-stream)
                                          (snapshot-display-stream
                                            snapshot first-line (+ view-height visual-row)
                                            (view-merged-decorations view))
-                                         (make-display-stream
-                                           (apply append (map display-stream-fragments streams))))])
+                                         provided-stream)])
                                 (layout-display-stream
                                   (view-transform-display-stream view stream)
                                   (view-state-selection state)

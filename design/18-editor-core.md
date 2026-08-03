@@ -970,6 +970,10 @@ range 使用 RangeSet cursor/sweep，不为每个 cell 扫描全部 decoration�
 document half-open range、display cell half-open range、kind 和 source，因此虚拟文本与 widget
 可以映射回其 anchor，而 terminal frontend 无需解释 package payload。
 
+每个 View 至多选择一个完整 DisplayStream provider，作为 document projection 的 base stream。
+多个功能通过有序 transform 修改该 base stream；transform 可以插入 virtual text、替换 source
+range 或加入 widget，但不直接拼接多个完整 document stream。
+
 syntax highlighting、diagnostics、selection、completion preview、fold 和 inlay hint 都是
 typed provider，不由 renderer 主动调用语言分析。
 
