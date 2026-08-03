@@ -777,23 +777,27 @@
         (= (document-id (buffer-document buffer)) target-document-id))
       (editor-buffers value)))
 
+  (define (require-resource-available! value buffer resource who)
+    (let ([existing
+            (hashtable-ref
+              (editor-resource-table value)
+              resource
+              #f)])
+      (when (and existing (not (eq? existing buffer)))
+        (assertion-violation
+          who
+          "resource is already visited"
+          resource))))
+
   (define (register-buffer-resource! value buffer)
     (let ([resource (buffer-resource buffer)])
       (when resource
-        (let ([existing
-                (hashtable-ref
-                  (editor-resource-table value)
-                  resource
-                  #f)])
-          (when (and existing (not (eq? existing buffer)))
-            (assertion-violation
-              'editor-add-buffer!
-              "resource is already visited"
-              resource))
-          (hashtable-set!
-            (editor-resource-table value)
-            resource
-            buffer)))))
+        (require-resource-available!
+          value buffer resource 'editor-add-buffer!)
+        (hashtable-set!
+          (editor-resource-table value)
+          resource
+          buffer))))
 
   (define (require-buffer-topology-mutable who value)
     (when
@@ -854,16 +858,8 @@
     (let ([old-resource (buffer-resource buffer)])
       (unless (equal? old-resource resource)
         (when resource
-          (let ([existing
-                  (hashtable-ref
-                    (editor-resource-table value)
-                    resource
-                    #f)])
-            (when (and existing (not (eq? existing buffer)))
-              (assertion-violation
-                'editor-set-buffer-resource!
-                "resource is already visited"
-                resource))))
+          (require-resource-available!
+            value buffer resource 'editor-set-buffer-resource!))
         (when
           (and
             old-resource
