@@ -338,13 +338,6 @@
             editor frame view buffer presentation)
           (describe-document-caret editor frame view buffer))))
 
-  (define (value->string value)
-    (call-with-values
-      open-string-output-port
-      (lambda (port extract)
-        (write value port)
-        (extract))))
-
   (define (color->string color)
     (if (vector? color)
         (string-append
@@ -355,15 +348,15 @@
           ","
           (number->string (vector-ref color 2))
           ")")
-        (value->string color)))
+        (write-to-string color)))
 
   (define (source->string source)
     (string-append
       (symbol->string (cell-source-layer source))
       "/"
-      (value->string (cell-source-owner source))
+      (write-to-string (cell-source-owner source))
       (if (cell-source-detail source)
-          (string-append "/" (value->string (cell-source-detail source)))
+          (string-append "/" (write-to-string (cell-source-detail source)))
           "")))
 
   (define (accessibility->string metadata)
@@ -371,15 +364,15 @@
         ""
         (string-append
           "; accessibility role="
-          (value->string (tui-accessibility-role metadata))
+          (write-to-string (tui-accessibility-role metadata))
           " label="
-          (value->string (tui-accessibility-label metadata))
+          (write-to-string (tui-accessibility-label metadata))
           " value="
-          (value->string (tui-accessibility-value metadata))
+          (write-to-string (tui-accessibility-value metadata))
           " selection="
-          (value->string (tui-accessibility-selection metadata))
+          (write-to-string (tui-accessibility-selection metadata))
           " commands="
-          (value->string (tui-accessibility-commands metadata)))))
+          (write-to-string (tui-accessibility-commands metadata)))))
 
   (define (character-description->string value)
     (unless (character-description? value)
@@ -393,7 +386,7 @@
       (string-append
         (if character
             (string-append
-              (value->string character)
+              (write-to-string character)
               " U+"
               (string-upcase
                 (string-pad-left
@@ -410,7 +403,7 @@
               "; application "
               (number->string (character-description-session-id value))
               "; node "
-              (value->string (character-description-node-key value))
+              (write-to-string (character-description-node-key value))
               "; local "
               (if (character-description-local-row value)
                   (string-append
@@ -470,7 +463,7 @@
         " bg="
         (color->string (style-background style))
         " attrs="
-        (value->string (style-attributes style))
+        (write-to-string (style-attributes style))
         "; sources "
         (if (null? sources)
             "none"

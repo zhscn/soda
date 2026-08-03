@@ -97,6 +97,7 @@
           resolve-faces)
   (import (rnrs)
           (soda editor display)
+          (soda editor string)
           (soda editor theme)
           (soda tui component)
           (soda tui frame))
@@ -854,20 +855,13 @@
   (define-record-type tui-surface
     (fields rows columns frame component-tree arranged-tree focus-ring cursor))
 
-  (define (datum->string value)
-    (call-with-values
-      open-string-output-port
-      (lambda (port extract)
-        (write value port)
-        (extract))))
-
   (define (application-component-id session-id path)
     (string->symbol
       (string-append
         "application."
         (number->string session-id)
         "."
-        (datum->string path))))
+        (write-to-string path))))
 
   (define (arranged->component-tree arranged session-id path)
     (let* ([node (tui-arranged-node-node arranged)]

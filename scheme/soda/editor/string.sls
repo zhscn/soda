@@ -5,6 +5,7 @@
           string-join
           string-pad-left
           character-byte-length
+          write-to-string
           string-single-line
           stable-resource?)
   (import (rnrs))
@@ -58,6 +59,13 @@
 
   (define (character-byte-length character)
     (bytevector-length (string->utf8 (string character))))
+
+  (define (write-to-string value)
+    (call-with-values
+      open-string-output-port
+      (lambda (port extract)
+        (write value port)
+        (extract))))
 
   (define (string-single-line value)
     (unless (string? value)

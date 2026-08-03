@@ -2470,13 +2470,6 @@
                   'variable
                   "local values binding"))
               (formal-nodes (car children))))))
-      (define (analyze-value-initializers bindings scope)
-        (for-each
-          (lambda (binding)
-            (analyze-sequence
-              (cdr (syntax-form-children binding))
-              scope))
-          bindings))
       (define (analyze-let-values form scope sequential?)
         (let* ([children (syntax-form-children form)]
                [bindings-node
@@ -2518,7 +2511,7 @@
                         (cdr remaining)
                         next-scope)))))
               (begin
-                (analyze-value-initializers bindings scope)
+                (analyze-binding-initializers bindings scope)
                 (let ([body-scope
                         (new-scope
                           scope
