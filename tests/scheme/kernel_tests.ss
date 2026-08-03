@@ -1589,6 +1589,24 @@
   (snapshot-close! snapshot)
   (document-close! document))
 
+(let* ([document (make-document "ab\tcd")]
+       [snapshot (document-snapshot document)]
+       [selection (make-selection (list (make-selection-range 3 3)))]
+       [options (make-text-layout-options 4 #t)]
+       [layout (layout-text-snapshot snapshot selection 0 4 2
+                                     (make-decoration-set '()) options)]
+       [frame (text-layout-frame layout)])
+  (unless (and (string=? (frame-cell-grapheme (frame-cell-at frame 0 0)) "a")
+               (string=? (frame-cell-grapheme (frame-cell-at frame 0 3)) " ")
+               (string=? (frame-cell-grapheme (frame-cell-at frame 1 0)) "c")
+               (equal? (text-layout-document->point layout 3) '(1 . 0))
+               (= (text-layout-point->document layout 0 3) 2)
+               (= (text-layout-cursor-row layout) 1)
+               (= (text-layout-cursor-column layout) 0))
+    (error 'kernel-tests "soft-wrap or tab layout differs"))
+  (snapshot-close! snapshot)
+  (document-close! document))
+
 (let* ([base (make-frame 4 2)]
        [top (frame-with-cell (make-frame 2 1) 0 0
                              (make-frame-cell "x" 1 #f 'overlay #f))]

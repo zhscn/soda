@@ -7,6 +7,11 @@
           text-layout-cursor-column
           text-layout-document->point
           text-layout-point->document
+          make-text-layout-options
+          text-layout-options?
+          text-layout-options-tab-width
+          text-layout-options-wrap?
+          default-text-layout-options
           layout-text-snapshot)
   (import (rnrs)
           (soda kernel document)
@@ -32,6 +37,20 @@
 
   (define (offset? value)
     (and (integer? value) (exact? value) (>= value 0)))
+
+  ;; Layout policy is explicit rather than inherited from a terminal frontend.
+  ;; A View later supplies this from its configuration facets.
+  (define-record-type
+    (text-layout-options %make-text-layout-options text-layout-options?)
+    (fields tab-width wrap?))
+
+  (define (make-text-layout-options tab-width wrap?)
+    (unless (and (integer? tab-width) (exact? tab-width) (> tab-width 0) (boolean? wrap?))
+      (assertion-violation 'make-text-layout-options
+                           "invalid text layout options" tab-width wrap?))
+    (%make-text-layout-options tab-width wrap?))
+
+  (define default-text-layout-options (make-text-layout-options 8 #t))
 
   ;; These queries are the layout-level coordinate contract.  Consumers never
   ;; infer document locations from terminal glyphs: virtual text, wide
@@ -81,11 +100,14 @@
     (case-lambda
       [(snapshot selection first-line width height)
        (layout-text-snapshot snapshot selection first-line width height
-                             (make-decoration-set '()))]
+                             (make-decoration-set '()) default-text-layout-options)]
       [(snapshot selection first-line width height decorations)
+       (layout-text-snapshot snapshot selection first-line width height decorations
+                             default-text-layout-options)]
+      [(snapshot selection first-line width height decorations options)
     (unless (and (snapshot? snapshot) (selection? selection)
                  (offset? first-line) (offset? width) (offset? height)
-                 (decoration-set? decorations))
+                 (decoration-set? decorations) (text-layout-options? options))
       (assertion-violation 'layout-text-snapshot "invalid text layout request"))
     (let* ([text (snapshot-text snapshot)]
            [cells (make-vector (* width height) default-frame-cell)]
@@ -112,34 +134,81 @@
                     (find (cdr remaining)))))))
       (define (put! row column cell)
         (vector-set! cells (+ (* row width) column) cell))
+      (define (put-space-span! row column count face source)
+        (let loop ([position 0])
+          (when (< position count)
+            (put! row (+ column position)
+                  (make-frame-cell " " 1 #f face source))
+            (loop (+ position 1)))))
+      (define (record-entry! from to row column count source)
+        (set! entries
+          (cons (make-display-map-entry from to
+                                        (+ (* row width) column)
+                                        (+ (* row width) column count)
+                                        'text source)
+                entries)))
+      (define (set-cursor! offset row column)
+        (when (and (> width 0) (= caret offset))
+          (set! cursor-row row)
+          ;; The terminal caret is always placed on a valid grid cell.  A
+          ;; logical end-of-row therefore displays at its final cell.
+          (set! cursor-column (min column (max 0 (- width 1))))))
       (let loop-line ([line start-line] [row 0])
         (when (and (< row height) (< line (text-line-count text)))
-          (let loop-grapheme ([offset (text-line-start text line)] [column 0])
+          (let loop-grapheme ([offset (text-line-start text line)] [column 0] [visual-row row])
             (let ([end (text-line-content-end text line)])
-              (cond
-                [(= offset caret)
-                 (set! cursor-row row)
-                 (set! cursor-column (min column (max 0 (- width 1))))]
-                [else #f])
-              (when (and (< offset end) (< column width))
+              (set-cursor! offset visual-row column)
+              (when (and (< offset end) (< visual-row height) (> width 0))
                 (let* ([next (text-next-grapheme-offset text offset)]
                        [glyph (utf8->string (text-subbytevector text offset next))]
-                       [glyph-width (max 1 (grapheme-width glyph))]
-                       [available? (<= (+ column glyph-width) width)]
+                       [tab? (string=? glyph "\t")]
+                       [glyph-width
+                        (if tab?
+                            (- (text-layout-options-tab-width options)
+                               (mod column (text-layout-options-tab-width options)))
+                            (max 1 (grapheme-width glyph)))]
+                       [wrap? (text-layout-options-wrap? options)]
                        [face (if (selected? selection offset next) 'selection (face-at offset))])
-                  (when available?
-                    (put! row column (make-frame-cell glyph glyph-width #f face offset))
-                    (when (= glyph-width 2)
-                      (put! row (+ column 1)
-                            (make-frame-cell "" 0 #t face offset)))
-                    (set! entries
-                      (cons (make-display-map-entry offset next
-                                                    (+ (* row width) column)
-                                                    (+ (* row width) column glyph-width)
-                                                    'text offset)
-                            entries)))
-                  (loop-grapheme next (+ column glyph-width))))))
-          (loop-line (+ line 1) (+ row 1))))
+                  (cond
+                    ;; A glyph wider than the viewport cannot be represented
+                    ;; as a terminal Frame cell.  Advancing it still preserves
+                    ;; progress and lets a wider Surface render it normally.
+                    [(> glyph-width width)
+                     (loop-grapheme next column visual-row)]
+                    [(<= (+ column glyph-width) width)
+                     (if tab?
+                         (put-space-span! visual-row column glyph-width face offset)
+                         (begin
+                           (put! visual-row column
+                                 (make-frame-cell glyph glyph-width #f face offset))
+                           (when (= glyph-width 2)
+                             (put! visual-row (+ column 1)
+                                   (make-frame-cell "" 0 #t face offset)))))
+                     (record-entry! offset next visual-row column glyph-width offset)
+                     (loop-grapheme next (+ column glyph-width) visual-row)]
+                    [(and wrap? (> column 0) (< (+ visual-row 1) height))
+                     (loop-grapheme offset 0 (+ visual-row 1))]
+                    [else #f])))))
+          ;; A wrapped line occupies all rows reached by loop-grapheme.  The
+          ;; following logical line begins after the last occupied visual row.
+          (let line-end ([offset (text-line-start text line)] [column 0] [visual-row row])
+            (let ([end (text-line-content-end text line)])
+              (if (or (= offset end) (>= visual-row height) (= width 0))
+                  (loop-line (+ line 1) (+ visual-row 1))
+                  (let* ([next (text-next-grapheme-offset text offset)]
+                         [glyph (utf8->string (text-subbytevector text offset next))]
+                         [glyph-width
+                          (if (string=? glyph "\t")
+                              (- (text-layout-options-tab-width options)
+                                 (mod column (text-layout-options-tab-width options)))
+                              (max 1 (grapheme-width glyph)))])
+                    (cond
+                      [(> glyph-width width) (line-end next column visual-row)]
+                      [(<= (+ column glyph-width) width)
+                       (line-end next (+ column glyph-width) visual-row)]
+                      [(and (text-layout-options-wrap? options) (> column 0))
+                       (line-end offset 0 (+ visual-row 1))]
+                      [else (loop-line (+ line 1) (+ visual-row 1))])))))))
       (when (and (not cursor-row) (= caret (snapshot-byte-size snapshot)) (> height 0))
         (set! cursor-row (min (- height 1) (max 0 (- (text-line-count text) start-line 1))))
         (set! cursor-column 0))
