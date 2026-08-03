@@ -952,7 +952,6 @@ BufferState
   + ContentPropertySet
   + DecorationSet facets
   + ViewPlugin decorations
-  + theme facets
       -> DisplayStream
       -> layout
       -> Frame
@@ -982,15 +981,16 @@ EditorUpdate 和 HostUpdate 产生 typed damage：
 document | selection | viewport | decoration | chrome | layout | theme | resize
 ```
 
-ViewPlugin 只在依赖的 state、facet 或 viewport 变化时更新。没有 display damage 时不创建
-新 Frame。layout cache 的 key 至少包含 Buffer generation、View generation、viewport、
-width、tab policy、wrap policy、display facet generation 和 theme generation。
+ViewPlugin 在 View publication boundary 更新。没有 display damage 时不创建新 Frame。layout
+cache 的 key 至少包含 Buffer generation、View render generation、viewport、width、tab policy、
+wrap policy 和 display facet generation。
 
 ### Frame 与 presenter
 
-Frame 是终端尺寸的 immutable cell grid，包含 grapheme、cell width、resolved face 和 source
+Frame 是终端尺寸的 immutable cell grid，包含 grapheme、cell width、语义 face 和 source
 mapping。frame diff 合并连续变化 cell 为 row span，再选择连续输出、相对移动、
-erase-to-end 或整行重绘。
+erase-to-end 或整行重绘。Theme 在 terminal presenter 将语义 face 解析为 ANSI style；切换
+Theme 时 presenter 重放完整 Frame，DisplayMap 和文本布局保持不变。
 
 Frame 只由 layout/compositor 构造；任何 cell 更新返回新的 Frame。初始 frame 或尺寸变化产生
 整行 span，等尺寸 frame 只产生连续变化的 row span。presenter 以 span 为最小输出单位。
