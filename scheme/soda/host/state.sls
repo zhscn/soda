@@ -57,6 +57,10 @@
             (list 'view-plugin phase condition)
             (lambda arguments #f)
             '(dismiss))))
+      (view-service-set-close-handler!
+        views
+        (lambda (view)
+          (surface-service-prune-view! surfaces (view-id view))))
       (%make-host-state
         owner runtime buffers views surfaces commands conditions dispatch packages #f)))
 

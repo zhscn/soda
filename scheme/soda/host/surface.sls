@@ -21,6 +21,7 @@
           surface-service-ref
           surface-service-surfaces
           surface-service-remove!
+          surface-service-prune-view!
           make-surface-input-message
           surface-input-message?
           surface-input-message-surface-id
@@ -229,6 +230,35 @@
                                                (car (window-leaves next-root))
                                                selected)))))))
 
+  (define (surface-first-view-leaf surface view-id)
+    (let loop ([leaves (window-leaves (surface-root-window surface))])
+      (and (pair? leaves)
+           (if (= (window-view-id (car leaves)) view-id)
+               (car leaves)
+               (loop (cdr leaves))))))
+
+  ;; Return #t when the root tree retains a live placement shape, or #f when
+  ;; the last root leaf belonged to the closed View.  Interaction leaves are
+  ;; independent overlays and are removed first.
+  (define (surface-prune-view! surface view-id)
+    (unless (and (surface? surface) (view-id? view-id))
+      (assertion-violation 'surface-prune-view! "invalid Surface or View identity"
+                           surface view-id))
+    (let ([interactions (surface-interaction-windows surface)])
+      (let ([retained (filter (lambda (window) (not (= (window-view-id window) view-id)))
+                              interactions)])
+        (unless (= (length retained) (length interactions))
+          (surface-interaction-windows-set! surface retained)
+          (surface-generation-set! surface (+ 1 (surface-generation surface))))))
+    (let loop ()
+      (let ([target (surface-first-view-leaf surface view-id)])
+        (cond
+          [(not target) #t]
+          [(null? (cdr (window-leaves (surface-root-window surface)))) #f]
+          [else
+           (surface-remove-window! surface (window-id target))
+           (loop)]))))
+
   ;; A Surface registry owns identity lookup only.  Frontends keep their own
   ;; terminal resources, while dispatcher operations resolve a target Surface
   ;; through this service instead of receiving a mutable Surface from a
@@ -280,4 +310,15 @@
            (begin
              (hashtable-delete! (surface-service-table service) id)
              surface))))
+
+  (define (surface-service-prune-view! service view-id)
+    (unless (and (surface-service? service) (view-id? view-id))
+      (assertion-violation 'surface-service-prune-view!
+                           "invalid SurfaceService or View identity" service view-id))
+    (for-each
+      (lambda (surface)
+        (unless (surface-prune-view! surface view-id)
+          (surface-service-remove! service (surface-id surface))))
+      (surface-service-surfaces service))
+    #t)
 )

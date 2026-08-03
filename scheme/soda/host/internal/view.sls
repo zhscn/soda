@@ -20,6 +20,7 @@
           view-service-ref
           view-service-views
           view-service-set-plugin-error-handler!
+          view-service-set-close-handler!
           view-service-close-view!)
   (import (rnrs)
           (soda kernel selection)
@@ -304,11 +305,13 @@
     (fields (immutable identities view-service-identities)
             (immutable table view-service-table)
             (mutable plugin-error! view-service-plugin-error!
-                     view-service-plugin-error!-set!)))
+                     view-service-plugin-error!-set!)
+            (mutable close! view-service-close-handler view-service-close-handler-set!)))
 
   (define (make-view-service)
     (%make-view-service (make-identity-source) (make-eqv-hashtable)
-                        (lambda (view phase condition) #f)))
+                        (lambda (view phase condition) #f)
+                        (lambda (view) #f)))
 
   (define (view-service-set-plugin-error-handler! service handler)
     (unless (and (view-service? service) (procedure? handler))
@@ -316,6 +319,13 @@
         'view-service-set-plugin-error-handler!
         "expected a ViewService and condition handler" service handler))
     (view-service-plugin-error!-set! service handler)
+    handler)
+
+  (define (view-service-set-close-handler! service handler)
+    (unless (and (view-service? service) (procedure? handler))
+      (assertion-violation 'view-service-set-close-handler!
+                           "expected a ViewService and close handler" service handler))
+    (view-service-close-handler-set! service handler)
     handler)
 
   (define (view-service-create! service owner buffer configuration . input-state)
@@ -342,5 +352,8 @@
 
   (define (view-service-close-view! service id)
     (let ([view (view-service-ref service id #f)])
-      (and view (view-close! view))))
+      (and view
+           (let ([closed? (view-close! view)])
+             (when closed? ((view-service-close-handler service) view))
+             closed?))))
 )

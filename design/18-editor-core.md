@@ -546,6 +546,10 @@ interaction stack 保存 transient View 的 overlay leaf。root Window tree 先�
 bottom-to-top 叠加；top interaction 是 active context 和 terminal cursor 的来源。push/pop
 只改变 Surface placement 与 focus，不改变 root tree、Buffer 或 View lifecycle。
 
+View service close 会通知 Surface registry：关联 interaction leaf 被移除，root tree 中的关联
+leaf 被移除并保持其余 selected leaf；没有 root leaf 的 Surface 从 registry 注销。由此 active
+context 只引用 live View。
+
 ### Dispatch 与 EditorUpdate
 
 dispatch 是 editor state 的唯一 publication boundary：

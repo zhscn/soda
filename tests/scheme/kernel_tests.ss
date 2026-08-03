@@ -1008,7 +1008,27 @@
   (dispatcher-set-host-listener! (host-state-dispatch host) #f)
   (surface-service-remove! (host-state-surfaces host) (surface-id split-surface))
   (surface-service-remove! (host-state-surfaces host) (surface-id single-surface))
-  (view-service-close-view! (host-state-views host) (view-id other-view)))
+  (let* ([prune-left (make-leaf-window (view-id view) #f)]
+         [prune-right (make-leaf-window (view-id other-view) #f)]
+         [prune-root (make-split-window 'horizontal (list prune-left prune-right) #f)]
+         [prune-surface (make-surface prune-root '(8 . 1))]
+         [lone-surface (make-surface (make-leaf-window (view-id other-view) #f) '(4 . 1))])
+    (surface-service-register! (host-state-surfaces host) prune-surface)
+    (surface-service-register! (host-state-surfaces host) lone-surface)
+    (surface-push-interaction! prune-surface (view-id other-view) '(0 2 4 1))
+    (view-service-close-view! (host-state-views host) (view-id other-view))
+    (unless (and (surface-service-ref (host-state-surfaces host)
+                                     (surface-id prune-surface) #f)
+                 (= (length (window-leaves (surface-root-window prune-surface))) 1)
+                 (eq? (surface-selected-window prune-surface) prune-left)
+                 (null? (surface-interaction-windows prune-surface))
+                 (not (surface-service-ref (host-state-surfaces host)
+                                           (surface-id lone-surface) #f))
+                 (= (active-context-view-id
+                     (surface-active-context prune-surface (host-state-views host)))
+                    (view-id view)))
+      (error 'kernel-tests "View close did not prune Surface placement"))
+    (surface-service-remove! (host-state-surfaces host) (surface-id prune-surface))))
 
 (let* ([left (make-leaf-window 1 #f)]
        [right (make-leaf-window 2 #f)]

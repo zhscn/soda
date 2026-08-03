@@ -19,5 +19,6 @@
           view-service-ref
           view-service-views
           view-service-set-plugin-error-handler!
+          view-service-set-close-handler!
           view-service-close-view!)
   (import (soda host internal view)))
