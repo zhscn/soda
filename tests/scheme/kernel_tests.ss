@@ -138,6 +138,18 @@
                    (resolved-transaction-changes sequential-resolved) base #t)
                  "aXYbcde"))
     (error 'kernel-tests "transaction spec resolution differs")))
+(unless
+    (guard (condition [else #t])
+      (resolve-transaction-specs
+        (list
+          (make-transaction-spec
+            0 #f #f
+            (make-change-set 5 '())
+            (make-selection (list (make-selection-range 6 6)))
+            '() '()))
+        (string->utf8 "abcde"))
+      #f)
+  (error 'kernel-tests "out-of-range transaction selection was accepted"))
 (let* ([base (string->utf8 "abcde")]
        [first-spec
         (make-transaction-spec

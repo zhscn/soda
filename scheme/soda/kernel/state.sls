@@ -317,6 +317,23 @@
         annotations)
       annotations))
 
+  (define (selection-within-length? selection length)
+    (and (selection? selection)
+         (for-all
+           (lambda (range)
+             (and (<= (selection-range-anchor range) length)
+                  (<= (selection-range-head range) length)))
+           (selection-ranges selection))))
+
+  (define (validate-selection-length who selection length)
+    (when (and selection
+               (not (selection-within-length? selection length)))
+      (assertion-violation
+        who
+        "selection is outside the resulting document"
+        selection
+        length)))
+
   (define (map-effect-list changes effects)
     (let ([description (change-set-change-desc changes)])
       (let loop ([items (normalize-effects 'resolve-transaction-specs effects)]
@@ -373,6 +390,10 @@
               (assertion-violation
                 'resolve-transaction-specs
                 "first spec does not match the starting document length"))
+            (validate-selection-length
+              'resolve-transaction-specs
+              (transaction-spec-selection first)
+              (change-set-new-length first-changes))
             (let loop ([items (cdr specs)]
                        [combined first-changes]
                        [selection (transaction-spec-selection first)]
@@ -399,6 +420,10 @@
                         'resolve-transaction-specs
                         "transaction spec has the wrong starting document length"
                         spec))
+                    (validate-selection-length
+                      'resolve-transaction-specs
+                      (transaction-spec-selection spec)
+                      (change-set-new-length next))
                     (let* ([operation
                              (if sequential?
                                  next
@@ -476,6 +501,10 @@
            [new-view-state
              (and start-view-state
                   (advance-view-state start-view-state normalized-selection initial #t))])
+      (validate-selection-length
+        'make-transaction
+        normalized-selection
+        (change-set-new-length changes))
       (%make-transaction
         start-buffer-state start-view-state changes selection
         mapped-effects normalized-annotations
