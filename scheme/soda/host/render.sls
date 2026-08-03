@@ -137,7 +137,7 @@
                                      (if (null? streams)
                                          (snapshot-display-stream
                                            snapshot first-line (+ view-height visual-row)
-                                           (merge-decoration-sets (view-decorations view)))
+                                           (view-merged-decorations view))
                                          (make-display-stream
                                            (apply append (map display-stream-fragments streams))))])
                                 (layout-display-stream

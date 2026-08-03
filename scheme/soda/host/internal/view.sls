@@ -6,6 +6,7 @@
           view-state
           view-plugin-instances
           view-decorations
+          view-merged-decorations
           view-display-streams
           view-display-transforms
           view-transform-display-stream
@@ -28,7 +29,8 @@
           (soda host input)
           (soda host value)
           (soda view plugin)
-          (soda view display))
+          (soda view display)
+          (soda view decoration))
 
   (define-record-type
     (view %make-view view?)
@@ -38,6 +40,8 @@
             (immutable plugin-error! view-plugin-error!)
             (mutable state view-state view-state-set!)
             (mutable plugins view-plugin-instances view-plugin-instances-set!)
+            (mutable decoration-cache view-decoration-cache
+                     view-decoration-cache-set!)
             (mutable closed? view-closed? view-closed?-set!)))
 
   (define (empty-selection)
@@ -70,6 +74,27 @@
             (loop (cdr remaining)
                   (cons (make-view-plugin-instance (car remaining) view)
                         created))))))
+
+  (define (collect-view-decorations view)
+    (let loop ([instances (view-plugin-instances view)] [result '()])
+      (if (null? instances)
+          (reverse result)
+          (let ([instance (car instances)])
+            (if (view-plugin-instance-destroyed? instance)
+                (loop (cdr instances) result)
+                (guard
+                  (condition
+                    [else
+                     (report-plugin-error! view 'plugin-decorations condition)
+                     (destroy-plugin-instance! view instance 'plugin-decoration-cleanup)
+                     (loop (cdr instances) result)])
+                  (loop (cdr instances)
+                        (cons (view-plugin-instance-decorations instance) result))))))))
+
+  (define (refresh-view-decorations! view)
+    (view-decoration-cache-set!
+      view
+      (merge-decoration-sets (collect-view-decorations view))))
 
   ;; Retain a destroyed instance until its definition leaves configuration.
   ;; Recreating it on every update would turn one plugin fault into a loop.
@@ -124,10 +149,11 @@
                               (buffer-state-generation (buffer-state buffer))
                               (empty-selection) '(0 . 0)
                               (or input-state (default-input-stack)) configuration)
-             '() #f)])
+             '() (make-decoration-set '()) #f)])
       (view-plugin-instances-set!
         view
         (create-plugin-instances! view (configuration-view-plugins configuration)))
+      (refresh-view-decorations! view)
       (owner-add-cleanup! owner (lambda () (view-close! view)))
       view))
 
@@ -167,25 +193,18 @@
                #f])
             (view-plugin-instance-update! instance update))))
       (view-plugin-instances view))
+    (refresh-view-decorations! view)
     view)
 
   (define (view-decorations view)
     (unless (and (view? view) (not (view-closed? view)))
       (assertion-violation 'view-decorations "expected a live View" view))
-    (let loop ([instances (view-plugin-instances view)] [result '()])
-      (if (null? instances)
-          (reverse result)
-          (let ([instance (car instances)])
-            (if (view-plugin-instance-destroyed? instance)
-                (loop (cdr instances) result)
-                (guard
-                  (condition
-                    [else
-                     (report-plugin-error! view 'plugin-decorations condition)
-                     (destroy-plugin-instance! view instance 'plugin-decoration-cleanup)
-                     (loop (cdr instances) result)])
-                  (loop (cdr instances)
-                        (cons (view-plugin-instance-decorations instance) result))))))))
+    (collect-view-decorations view))
+
+  (define (view-merged-decorations view)
+    (unless (and (view? view) (not (view-closed? view)))
+      (assertion-violation 'view-merged-decorations "expected a live View" view))
+    (view-decoration-cache view))
 
   ;; A display stream is cached by its plugin instance and updated at the View
   ;; publication boundary.  Rendering only reads the cached projection.

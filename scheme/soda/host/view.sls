@@ -6,6 +6,7 @@
           view-state
           view-plugin-instances
           view-decorations
+          view-merged-decorations
           view-display-streams
           view-display-transforms
           view-transform-display-stream
