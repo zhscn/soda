@@ -12,6 +12,10 @@
           range-set-empty?
           range-set-query
           range-set-cursor
+          range-cursor?
+          range-cursor-done?
+          range-cursor-current
+          range-cursor-next!
           range-set-map
           range-set-map-change)
   (import (rnrs)
@@ -54,6 +58,16 @@
       (immutable ranges range-set-ranges)
       (immutable index range-set-index)
       (immutable prefix-max-end range-set-prefix-max-end)))
+
+  ;; A cursor is a short-lived query object.  The RangeSet remains immutable;
+  ;; only the cursor position advances while a renderer sweeps a viewport.
+  (define-record-type
+    (range-cursor %make-range-cursor range-cursor?)
+    (fields
+      (immutable index range-cursor-index)
+      (immutable from range-cursor-from)
+      (immutable to range-cursor-to)
+      (mutable position range-cursor-position range-cursor-position-set!)))
 
   (define (range-order? ranges)
     (let loop ([items ranges] [previous-from 0] [previous-to 0])
@@ -130,11 +144,53 @@
                         (cons range result)
                         result))))))))
 
-  ;; A cursor is represented as the ordered intersecting range sequence.  It
-  ;; keeps the renderer independent of the storage representation and can be
-  ;; replaced by a tree cursor without changing callers.
+  (define (range-cursor-advance-to-match! cursor)
+    (let ([index (range-cursor-index cursor)]
+          [from (range-cursor-from cursor)]
+          [to (range-cursor-to cursor)])
+      (let loop ([position (range-cursor-position cursor)])
+        (if (>= position (vector-length index))
+            (begin
+              (range-cursor-position-set! cursor position)
+              #f)
+            (let ([range (vector-ref index position)])
+              (if (or (>= (range-value-from range) to)
+                      (<= (range-value-to range) from))
+                  (loop (+ position 1))
+                  (begin
+                    (range-cursor-position-set! cursor position)
+                    range)))))))
+
   (define (range-set-cursor value from to)
-    (range-set-query value from to))
+    (unless (range-set? value)
+      (assertion-violation 'range-set-cursor "expected a range set" value))
+    (unless (valid-query? from to)
+      (assertion-violation 'range-set-cursor "invalid query range" from to))
+    (let ([cursor
+            (%make-range-cursor
+              (range-set-index value)
+              from to
+              (range-set-first-index value from))])
+      (range-cursor-advance-to-match! cursor)
+      cursor))
+
+  (define (range-cursor-current cursor)
+    (unless (range-cursor? cursor)
+      (assertion-violation 'range-cursor-current "expected a range cursor" cursor))
+    (range-cursor-advance-to-match! cursor))
+
+  (define (range-cursor-done? cursor)
+    (not (range-cursor-current cursor)))
+
+  (define (range-cursor-next! cursor)
+    (unless (range-cursor? cursor)
+      (assertion-violation 'range-cursor-next! "expected a range cursor" cursor))
+    (let ([current (range-cursor-current cursor)])
+      (when current
+        (range-cursor-position-set!
+          cursor
+          (+ 1 (range-cursor-position cursor))))
+      (range-cursor-current cursor)))
 
   (define (range-set-map value mapper)
     (unless (range-set? value)

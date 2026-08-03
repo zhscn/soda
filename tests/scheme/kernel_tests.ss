@@ -81,8 +81,14 @@
              (eq? (range-value-start-affinity first-range) 'before)
              (eq? (range-value-end-affinity first-range) 'after)
              (eq? (car (range-set-query ranges 2 7)) first-range)
-             (eq? (car (range-set-cursor ranges 6 9)) second-range))
+             (eq? (range-cursor-current (range-set-cursor ranges 6 9)) second-range))
   (error 'kernel-tests "range set query differs"))
+(let ([cursor (range-set-cursor ranges 0 9)])
+  (unless (and (eq? (range-cursor-current cursor) first-range)
+               (eq? (range-cursor-next! cursor) second-range)
+               (not (range-cursor-next! cursor))
+               (range-cursor-done? cursor))
+    (error 'kernel-tests "range cursor traversal differs")))
 (let* ([outer (make-range-value 1 6 'outer)]
        [inner (make-range-value 3 4 'inner)]
        [overlapping (make-range-set (list outer inner))]
