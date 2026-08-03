@@ -1,6 +1,6 @@
 #!r6rs
 (import (rnrs)
-        (soda kernel transaction)
+        (soda kernel change)
         (soda kernel extension)
         (soda kernel selection)
         (soda kernel state)
@@ -113,7 +113,8 @@
 (define input-service (make-input-service))
 (define input-context
   (make-input-context
-    0 0 (list (make-input-layer 'global test-keymap #f 'ignore))))
+    0 0 (list (make-input-layer 'global test-keymap #f 'ignore))
+    (view-state-input-state (view-state view))))
 (unless (eq? (input-disposition-kind
                (input-service-dispatch
                  input-service input-context
@@ -142,7 +143,7 @@
 ;; immutable state generations atomically.
 (define dispatch-spec
   (make-transaction-spec
-    (buffer-id buffer) (view-id view) (buffer-generation buffer)
+    (buffer-id buffer) (view-id view) (buffer-state-generation (buffer-state buffer))
     (make-change-set
       (snapshot-byte-size (buffer-state-document (buffer-state buffer)))
       (list (make-text-change 5 5 " world")))

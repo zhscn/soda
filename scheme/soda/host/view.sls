@@ -1,11 +1,9 @@
 (library (soda host view)
-  (export make-view
-          view?
+  (export view?
           view-id
           view-owner
           view-buffer
           view-state
-          view-generation
           view-publish-state!
           view-close!
           make-view-service
@@ -29,7 +27,6 @@
       (immutable owner view-owner)
       (immutable buffer view-buffer)
       (mutable state view-state view-state-set!)
-      (mutable generation view-generation view-generation-set!)
       (mutable closed? view-closed? view-closed?-set!)))
 
   (define (empty-selection)
@@ -38,23 +35,21 @@
   (define (default-input-stack)
     (make-input-stack (make-input-state 'default '() 'accept)))
 
-  (define (make-view owner buffer configuration . input-state)
-    (owner-assert-active 'make-view owner)
+  (define (make-view-record identity-source owner buffer configuration input-state)
+    (owner-assert-active 'view-service-create! owner)
     (unless (buffer? buffer)
-      (assertion-violation 'make-view "expected a buffer" buffer))
+      (assertion-violation 'view-service-create! "expected a buffer" buffer))
     (let ([view
             (%make-view
-              (identity-source-next! view-identities)
+              (identity-source-next! identity-source)
               owner buffer
               (make-view-state
                 (buffer-id buffer) (empty-selection) '(0 . 0)
-                (if (null? input-state) (default-input-stack) (car input-state))
+                (or input-state (default-input-stack))
                 configuration)
-              0 #f)])
+              #f)])
       (owner-add-cleanup! owner (lambda () (view-close! view)))
       view))
-
-  (define view-identities (make-identity-source))
 
   ;; State publication is intentionally only used by the host dispatcher.
   (define (view-publish-state! view state)
@@ -63,7 +58,6 @@
     (unless (view-state? state)
       (assertion-violation 'view-publish-state! "expected a view state" state))
     (view-state-set! view state)
-    (view-generation-set! view (view-state-generation state))
     state)
 
   (define (view-close! view)
@@ -82,19 +76,13 @@
     (%make-view-service (make-identity-source) (make-eqv-hashtable)))
 
   (define (view-service-create! service owner buffer configuration . input-state)
-    (let ([view
-            (let ([view-identities (view-service-identities service)])
-              (owner-assert-active 'view-service-create! owner)
-              (%make-view
-                (identity-source-next! view-identities)
-                owner buffer
-                (make-view-state
-                  (buffer-id buffer) (empty-selection) '(0 . 0)
-                  (if (null? input-state) (default-input-stack) (car input-state))
-                  configuration)
-                0 #f))])
+    (unless (view-service? service)
+      (assertion-violation 'view-service-create! "expected a view service" service))
+    (let ([view (make-view-record
+                  (view-service-identities service)
+                  owner buffer configuration
+                  (if (null? input-state) #f (car input-state)))])
       (hashtable-set! (view-service-table service) (view-id view) view)
-      (owner-add-cleanup! owner (lambda () (view-close! view)))
       view))
 
   (define (view-service-ref service id . default)

@@ -22,9 +22,6 @@
           (soda host value)
           (soda host view))
 
-  (define (copy-list value)
-    (if (null? value) '() (cons (car value) (copy-list (cdr value)))))
-
   (define-record-type
     (editor-update %make-editor-update editor-update?)
     (fields
@@ -38,8 +35,8 @@
 
   (define (make-editor-update buffer-id old-state new-state views changes annotations damage)
     (%make-editor-update
-      buffer-id old-state new-state (copy-list views) changes
-      (copy-list annotations) (copy-list damage)))
+      buffer-id old-state new-state (list-copy views) changes
+      (list-copy annotations) (list-copy damage)))
 
   (define-record-type
     (dispatcher %make-dispatcher dispatcher?)
@@ -153,34 +150,46 @@
                     (if (change-set-empty? changes) '(selection) '(document selection)))])
             (let ([listener (dispatcher-listener dispatcher)])
               (when listener (listener update)))
+            (for-each
+              (lambda (listener) (listener update))
+              (configuration-facet
+                (buffer-state-configuration new-buffer-state)
+                update-listeners-facet))
             update)))))
 
-  (define (apply-transaction-filters dispatcher spec)
+  (define (apply-transaction-extension dispatcher spec facet)
     (let ([buffer
             (buffer-service-ref
               (dispatcher-buffers dispatcher)
               (transaction-spec-buffer-id spec) #f)])
       (if (not buffer)
           spec
-          (let loop ([filters
+          (let loop ([extensions
                        (configuration-facet
                          (buffer-state-configuration (buffer-state buffer))
-                         transaction-filters-facet)]
+                         facet)]
                      [current spec])
-            (if (null? filters)
+            (if (null? extensions)
                 current
-                (let ([next ((car filters) current)])
+                (let ([next ((car extensions) current)])
                   (cond
                     [(not next) #f]
-                    [(transaction-spec? next) (loop (cdr filters) next)]
+                    [(transaction-spec? next) (loop (cdr extensions) next)]
                     [else
                      (assertion-violation
-                       'dispatcher-dispatch! "transaction filter returned an invalid value"
+                       'dispatcher-dispatch! "transaction extension returned an invalid value"
                        next)])))))))
+
+  (define (apply-transaction-filters dispatcher spec)
+    (apply-transaction-extension dispatcher spec transaction-filters-facet))
+
+  (define (apply-transaction-extenders dispatcher spec)
+    (apply-transaction-extension dispatcher spec transaction-extenders-facet))
 
   (define (dispatcher-dispatch! dispatcher spec)
     (unless (and (dispatcher? dispatcher) (transaction-spec? spec))
       (assertion-violation 'dispatcher-dispatch! "expected a dispatcher and transaction spec"))
-    (let ([filtered (apply-transaction-filters dispatcher spec)])
-      (and filtered (dispatcher-dispatch-internal! dispatcher filtered))))
+    (let* ([filtered (apply-transaction-filters dispatcher spec)]
+           [extended (and filtered (apply-transaction-extenders dispatcher filtered))])
+      (and extended (dispatcher-dispatch-internal! dispatcher extended))))
 )

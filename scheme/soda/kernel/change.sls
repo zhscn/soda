@@ -27,9 +27,6 @@
   (import (rnrs)
           (soda kernel value))
 
-  (define (copy-list value)
-    (if (null? value) '() (cons (car value) (copy-list (cdr value)))))
-
   (define (text-length value)
     (cond
       [(string? value) (bytevector-length (string->utf8 value))]
@@ -95,7 +92,7 @@
                    (- (text-change-to change) (text-change-from change)))))
            0
            changes))
-      (copy-list changes)))
+      (list-copy changes)))
 
   (define (change-set-empty? changes)
     (unless (change-set? changes)
@@ -114,7 +111,7 @@
                  (exact-integer? new-length) (>= new-length 0)
                  (list? changes))
       (assertion-violation 'make-change-desc "invalid change description"))
-    (%make-change-desc old-length new-length (copy-list changes)))
+    (%make-change-desc old-length new-length (list-copy changes)))
 
   (define (change-set-change-desc changes)
     (unless (change-set? changes)

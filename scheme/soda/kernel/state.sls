@@ -42,10 +42,8 @@
   (import (rnrs)
           (soda kernel change)
           (soda kernel selection)
-          (soda kernel extension))
-
-  (define (copy-list value)
-    (if (null? value) '() (cons (car value) (copy-list (cdr value)))))
+          (soda kernel extension)
+          (soda kernel value))
 
   (define (field-entry fields field)
     (cond
@@ -70,7 +68,7 @@
                    (for-all pair? field-values))
         (assertion-violation
           'make-buffer-state "fields must be an association list" field-values))
-      (%make-buffer-state document configuration (copy-list field-values) 0)))
+      (%make-buffer-state document configuration (list-copy field-values) 0)))
 
   (define (buffer-state-field state field . default)
     (unless (buffer-state? state)
@@ -117,7 +115,7 @@
       (assertion-violation 'make-view-state "expected a configuration" configuration))
     (%make-view-state
       buffer-id selection viewport input-state configuration
-      (if (null? fields) '() (copy-list (car fields)))
+      (if (null? fields) '() (list-copy (car fields)))
       0))
 
   (define (view-state-field state field . default)
@@ -185,8 +183,8 @@
            'make-transaction-spec "selection must be a Selection or #f" selection))
        (%make-transaction-spec
          buffer-id origin-view-id start-generation changes selection
-         (if (list? effects) (copy-list effects) (list effects))
-         (if (list? annotations) (copy-list annotations) (list annotations))
+         (if (list? effects) (list-copy effects) (list effects))
+         (if (list? annotations) (list-copy annotations) (list annotations))
          scroll-request filter)]))
 
   (define-record-type
@@ -203,7 +201,7 @@
 
   (define (list-value value)
     (cond [(not value) '()]
-          [(list? value) (copy-list value)]
+          [(list? value) (list-copy value)]
           [else (list value)]))
 
   (define (realize-transaction start-buffer-state start-view-state changes selection
@@ -246,19 +244,5 @@
       [(start-buffer-state start-view-state changes selection effects annotations document)
        (realize-transaction
          start-buffer-state start-view-state changes selection effects annotations document)]
-      ;; Compatibility constructor for callers that already realized states.
-      ;; New code should use the six-argument form above.
-      [(start-buffer-state start-view-state changes selection effects annotations
-                           new-buffer-state new-view-state)
-       (unless (and (buffer-state? start-buffer-state)
-                    (buffer-state? new-buffer-state))
-         (assertion-violation 'make-transaction "invalid buffer states"))
-       (when (and start-view-state (not (view-state? start-view-state)))
-         (assertion-violation 'make-transaction "invalid start view state" start-view-state))
-       (when (and new-view-state (not (view-state? new-view-state)))
-         (assertion-violation 'make-transaction "invalid new view state" new-view-state))
-       (%make-transaction
-         start-buffer-state start-view-state changes selection
-         (list-value effects) (list-value annotations)
-         new-buffer-state new-view-state)]))
+      ))
 )

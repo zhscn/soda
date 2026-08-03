@@ -21,9 +21,6 @@
           (soda kernel value)
           (soda kernel change))
 
-  (define (copy-list value)
-    (if (null? value) '() (cons (car value) (copy-list (cdr value)))))
-
   (define valid-affinities '(before after))
   (define valid-granularities '(character line block node))
 
@@ -99,7 +96,7 @@
                     (< primary (length ranges)))
          (assertion-violation
            'make-selection "primary index is outside ranges" primary))
-       (%make-selection (copy-list ranges) primary)]))
+       (%make-selection (list-copy ranges) primary)]))
 
   (define (selection-range-at selection index)
     (unless (selection? selection)

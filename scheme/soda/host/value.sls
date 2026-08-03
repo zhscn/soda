@@ -1,5 +1,6 @@
 (library (soda host value)
   (export make-owner
+          list-copy
           owner?
           owner-id
           owner-name

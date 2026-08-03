@@ -34,6 +34,12 @@
   (define (make-condition-service)
     (%make-condition-service '()))
 
+  (define (condition-service-remove! service entry)
+    (condition-service-entries-set!
+      service
+      (filter (lambda (candidate) (not (eq? candidate entry)))
+              (condition-service-entries service))))
+
   (define (condition-service-capture service owner condition continuation restarts)
     (unless (and (condition-service? service) (procedure? continuation))
       (assertion-violation 'condition-service-capture "invalid condition capture"))
@@ -52,7 +58,10 @@
     (unless (and (condition-service? service) (editor-condition? entry))
       (assertion-violation 'condition-service-dismiss! "invalid condition entry" entry))
     (if (eq? (editor-condition-status entry) 'pending)
-        (begin (editor-condition-status-set! entry 'dismissed) #t)
+        (begin
+          (editor-condition-status-set! entry 'dismissed)
+          (condition-service-remove! service entry)
+          #t)
         #f))
 
   (define (condition-service-resume! service entry action . arguments)
@@ -62,6 +71,7 @@
     (if (eq? (editor-condition-status entry) 'pending)
         (begin
           (editor-condition-status-set! entry 'resumed)
+          (condition-service-remove! service entry)
           (apply action (editor-condition-continuation entry) arguments))
         #f))
 )

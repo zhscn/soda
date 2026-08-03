@@ -1,5 +1,6 @@
 (library (soda kernel value)
   (export exact-integer?
+          list-copy
           make-identity-source
           identity-source?
           identity-source-next!)
@@ -7,6 +8,9 @@
 
   (define (exact-integer? value)
     (and (integer? value) (exact? value)))
+
+  (define (list-copy value)
+    (if (null? value) '() (cons (car value) (list-copy (cdr value)))))
 
   (define-record-type
     (identity-source %make-identity-source identity-source?)

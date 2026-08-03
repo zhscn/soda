@@ -45,6 +45,7 @@
           input-context-view-id
           input-context-buffer-id
           input-context-layers
+          input-context-stack
           input-layer-compose
           resolve-key-sequence
           make-input-service
@@ -60,9 +61,6 @@
           input-dispatch)
   (import (rnrs)
           (soda host value))
-
-  (define (copy-list value)
-    (if (null? value) '() (cons (car value) (copy-list (cdr value)))))
 
   (define-record-type
     (input-event %make-input-event input-event?)
@@ -94,7 +92,7 @@
   (define (keymap-bind! map sequence binding)
     (unless (and (keymap? map) (valid-sequence? sequence))
       (assertion-violation 'keymap-bind! "expected a keymap and non-empty sequence" map sequence))
-    (hashtable-set! (keymap-bindings map) (copy-list sequence) binding)
+    (hashtable-set! (keymap-bindings map) (list-copy sequence) binding)
     (let loop ([items sequence] [prefix '()])
       (unless (null? items)
         (let ([next (append prefix (list (car items)))])
@@ -151,7 +149,7 @@
   (define (make-input-state name keymaps text-policy)
     (unless (and (symbol? name) (list? keymaps) (memq text-policy '(accept ignore)))
       (assertion-violation 'make-input-state "invalid input state" name keymaps text-policy))
-    (%make-input-state name (copy-list keymaps) text-policy))
+    (%make-input-state name (list-copy keymaps) text-policy))
 
   (define-record-type
     (input-session %make-input-session input-session?)
@@ -238,10 +236,18 @@
     (fields
       (immutable view-id input-context-view-id)
       (immutable buffer-id input-context-buffer-id)
-      (immutable layers input-context-layers)))
+      (immutable layers input-context-layers)
+      (immutable stack input-context-stack)))
 
-  (define (make-input-context view-id buffer-id layers)
-    (%make-input-context view-id buffer-id (copy-list layers)))
+  (define (make-input-context view-id buffer-id layers . stack)
+    (%make-input-context
+      view-id buffer-id (list-copy layers)
+      (if (null? stack)
+          (make-input-stack (make-input-state 'default '() 'accept))
+          (let ([value (car stack)])
+            (unless (input-stack? value)
+              (assertion-violation 'make-input-context "expected an input stack" value))
+            value))))
 
   (define input-layer-order
     '((override . 0) (transient . 1) (durable . 2) (window . 3)
@@ -261,7 +267,7 @@
       (lambda (left right)
         (< (input-layer-rank (input-layer-kind left))
            (input-layer-rank (input-layer-kind right))))
-      (copy-list layers)))
+      (list-copy layers)))
 
   (define (lookup-layer map sequence)
     (cond
@@ -301,17 +307,26 @@
 
   (define-record-type
     (input-service %make-input-service input-service?)
-    (fields (immutable pending input-service-pending)))
+    (fields))
 
   (define (make-input-service)
-    (%make-input-service (make-eqv-hashtable)))
+    (%make-input-service))
 
-  (define (input-service-reset-view! service view-id)
-    (hashtable-delete! (input-service-pending service) view-id)
+  (define (input-service-reset-view! service context)
+    (unless (and (input-service? service) (input-context? context))
+      (assertion-violation
+        'input-service-reset-view! "expected a service and input context" service context))
+    (let ([stack (input-context-stack context)])
+      (input-stack-set-pending-sequence! stack #f)
+      (input-stack-set-pending-argument! stack #f)
+      (input-stack-set-feedback! stack #f))
     #t)
 
-  (define (input-service-cancel! service view-id)
-    (input-service-reset-view! service view-id))
+  (define (input-service-cancel! service context)
+    (unless (and (input-service? service) (input-context? context))
+      (assertion-violation
+        'input-service-cancel! "expected a service and input context" service context))
+    (input-stack-reset! (input-context-stack context)))
 
   (define (resolve-command layers sequence result)
     (if (not (eq? (car result) 'command))
@@ -335,12 +350,12 @@
                  (input-event? event))
       (assertion-violation
         'input-service-dispatch "expected a service, context and event" service context event))
-    (let* ([view-id (input-context-view-id context)]
-           [pending (hashtable-ref (input-service-pending service) view-id #f)])
+    (let* ([stack (input-context-stack context)]
+           [pending (input-stack-pending-sequence stack)])
       (if (not (eq? (input-event-kind event) 'key))
           (input-dispatch context event)
           (let* ([sequence (if pending
-                               (append (car pending) (list (input-event-value event)))
+                               (append pending (list (input-event-value event)))
                                (list (input-event-value event)))]
                  [result (resolve-command
                            (input-context-layers context)
@@ -349,22 +364,26 @@
                              (input-context-layers context) sequence))])
             (case (car result)
               [(prefix)
-               (hashtable-set! (input-service-pending service) view-id (cons sequence result))
+               (input-stack-set-pending-sequence! stack sequence)
                (input-consume)]
               [(command)
-               (input-service-reset-view! service view-id)
+               (input-service-reset-view! service context)
                (%make-input-disposition 'command (cadr result))]
               [else
-               (input-service-reset-view! service view-id)
+               (input-service-reset-view! service context)
                (%make-input-disposition 'undefined sequence)])))))
+
+  (define (accepting-text-layer? layers)
+    (and (pair? layers)
+         (or (eq? (input-layer-text-policy (car layers)) 'accept)
+             (accepting-text-layer? (cdr layers)))))
 
   (define (input-dispatch context event)
     (unless (and (input-context? context) (input-event? event))
       (assertion-violation 'input-dispatch "expected an input context and event" context event))
-    (if (eq? (input-event-kind event) 'text)
+      (if (eq? (input-event-kind event) 'text)
         (let ([layers (input-context-layers context)])
-          (if (and (pair? layers)
-                   (eq? (input-layer-text-policy (car layers)) 'accept))
+          (if (accepting-text-layer? layers)
               (%make-input-disposition 'text (input-event-text event))
               (input-pass)))
         (let ([result (resolve-key-sequence

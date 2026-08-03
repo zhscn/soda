@@ -1,11 +1,5 @@
 (library (soda host display)
-  (export make-display-update
-          display-update?
-          display-update-kinds
-          display-update-add!
-          display-update-dirty?
-          display-update-clear!
-          make-display-stream
+  (export make-display-stream
           display-stream?
           display-stream-fragments
           display-stream-append!
@@ -24,33 +18,8 @@
   (import (rnrs)
           (soda kernel value))
 
-  (define (copy-list value)
-    (if (null? value) '() (cons (car value) (copy-list (cdr value)))))
-
   (define (make-list* count value)
     (if (zero? count) '() (cons value (make-list* (- count 1) value))))
-
-  (define-record-type
-    (display-update %make-display-update display-update?)
-    (fields (mutable kinds display-update-kinds display-update-kinds-set!)))
-
-  (define (make-display-update)
-    (%make-display-update '()))
-
-  (define (display-update-add! update kind)
-    (unless (memq kind '(document selection viewport decoration chrome layout theme resize))
-      (assertion-violation 'display-update-add! "invalid display damage" kind))
-    (unless (memq kind (display-update-kinds update))
-      (display-update-kinds-set!
-        update (cons kind (display-update-kinds update))))
-    update)
-
-  (define (display-update-dirty? update)
-    (pair? (display-update-kinds update)))
-
-  (define (display-update-clear! update)
-    (display-update-kinds-set! update '())
-    #t)
 
   (define-record-type
     (display-stream %make-display-stream display-stream?)
@@ -73,7 +42,7 @@
     (fields (immutable entries display-map-entries)))
 
   (define (make-display-map entries)
-    (%make-display-map (if (list? entries) (copy-list entries) '())))
+    (%make-display-map (if (list? entries) (list-copy entries) '())))
 
   (define (display-map-query map from to)
     (unless (display-map? map)
@@ -104,7 +73,7 @@
       (%make-frame
         width height
         (if (and initial (list? initial) (= (length initial) size))
-            (copy-list initial)
+            (list-copy initial)
             (make-list* size #f)))))
 
   (define (frame-cell frame row column)

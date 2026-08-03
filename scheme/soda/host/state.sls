@@ -7,10 +7,8 @@
           host-state-views
           host-state-commands
           host-state-conditions
-          host-state-display
           host-state-dispatch
           host-state-packages
-          host-state-configuration
           host-state-closed?
           host-state-run!
           host-state-close!)
@@ -19,13 +17,10 @@
           (soda host command)
           (soda host condition)
           (soda host dispatch)
-          (soda host display)
           (soda host runtime)
           (soda host package)
           (soda host value)
-          (soda host view)
-          (soda kernel extension)
-          (soda kernel value))
+          (soda host view))
 
   (define-record-type
     (host-state %make-host-state host-state?)
@@ -36,10 +31,8 @@
       (immutable views host-state-views)
       (immutable commands host-state-commands)
       (immutable conditions host-state-conditions)
-      (immutable display host-state-display)
       (immutable dispatch host-state-dispatch)
       (immutable packages host-state-packages)
-      (immutable configuration host-state-configuration)
       (mutable closed? host-state-closed? host-state-closed?-set!)))
 
   (define (make-host-state)
@@ -49,12 +42,10 @@
            [views (make-view-service)]
            [commands (make-command-registry)]
            [conditions (make-condition-service)]
-           [display (make-display-update)]
-           [configuration (make-configuration '())]
            [dispatch (make-dispatcher buffers views)]
            [packages (make-package-service)])
       (%make-host-state
-        owner runtime buffers views commands conditions display dispatch packages configuration #f)))
+        owner runtime buffers views commands conditions dispatch packages #f)))
 
   (define (host-state-close! state)
     (unless (host-state? state)

@@ -16,9 +16,6 @@
   (import (rnrs)
           (soda host value))
 
-  (define (copy-list value)
-    (if (null? value) '() (cons (car value) (copy-list (cdr value)))))
-
   (define-record-type
     (package-manifest %make-package-manifest package-manifest?)
     (fields
@@ -34,7 +31,7 @@
                  (procedure? activate))
       (assertion-violation 'make-package-manifest "invalid package manifest" name))
     (%make-package-manifest
-      name owner (copy-list capabilities) activate
+      name owner (list-copy capabilities) activate
       (if (null? deactivate) (lambda arguments #t) (car deactivate))
       #f))
 

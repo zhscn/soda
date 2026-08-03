@@ -16,9 +16,6 @@
           (soda kernel value)
           (soda kernel change))
 
-  (define (copy-list value)
-    (if (null? value) '() (cons (car value) (copy-list (cdr value)))))
-
   (define-record-type
     (range-value %make-range-value range-value?)
     (fields
@@ -47,7 +44,7 @@
     (unless (and (list? ranges) (range-order? ranges))
       (assertion-violation
         'make-range-set "ranges must be ordered and non-overlapping" ranges))
-    (%make-range-set (copy-list ranges)))
+    (%make-range-set (list-copy ranges)))
 
   (define (range-set-empty? value)
     (unless (range-set? value)
