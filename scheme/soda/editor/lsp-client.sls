@@ -1256,22 +1256,25 @@
                 (make-managed-process-signal-request process 15)))
             '()))))
 
+  (define (session-for-process editor process)
+    (let-values ([(ids sessions)
+                  (hashtable-entries
+                    (lsp-client-registry-sessions
+                      (editor-lsp-registry editor)))])
+      (let loop ([index 0])
+        (and
+          (< index (vector-length sessions))
+          (let ([session (vector-ref sessions index)])
+            (if (eq? process (lsp-client-session-process session))
+                session
+                (loop (+ index 1))))))))
+
   (define (lsp-client-handle-process-output! editor event)
     (unless (managed-process-event? event)
       (assertion-violation
         'lsp-client-handle-process-output! "expected a managed process event" event))
     (let* ([process (managed-process-event-process event)]
-           [registry (editor-lsp-registry editor)]
-           [session
-             (let-values ([(ids sessions)
-                           (hashtable-entries (lsp-client-registry-sessions registry))])
-               (let loop ([index 0])
-                 (and
-                   (< index (vector-length sessions))
-                   (let ([candidate (vector-ref sessions index)])
-                     (if (eq? process (lsp-client-session-process candidate))
-                         candidate
-                         (loop (+ index 1)))))))])
+           [session (session-for-process editor process)])
       (if
         (or (not session)
             (not (= (managed-process-event-generation event)
@@ -1305,68 +1308,57 @@
     (unless (managed-process-event? event)
       (assertion-violation
         'lsp-client-handle-process-exit! "expected a managed process event" event))
-    (let ([process (managed-process-event-process event)])
-      (let-values ([(ids sessions)
-                    (hashtable-entries
-                      (lsp-client-registry-sessions (editor-lsp-registry editor)))])
-        (let loop ([index 0] [effects '()])
-          (if (= index (vector-length sessions))
-              (reverse effects)
-              (let ([session (vector-ref sessions index)])
-                (if (not (eq? process (lsp-client-session-process session)))
-                    (loop (+ index 1) effects)
-                    (if (managed-process-event-restarted? event)
-                        (let ([cancel-effects
-                                (terminate-all-pending-requests!
-                                  editor session 'process-restarted)])
-                          (lsp-client-session-state-set! session 'starting)
-                          (lsp-client-session-decoder-set!
-                            session (make-lsp-json-rpc-decoder))
-                          (lsp-client-session-capabilities-set!
-                            session (make-json-object '()))
-                          (lsp-client-session-diagnostic-generation-set!
-                            session 0)
-                          (hashtable-delete! lsp-semantic-generations session)
-                          (hashtable-delete!
-                            lsp-document-highlight-generations session)
-                          (for-each
-                            (lambda (document)
-                              (lsp-client-document-opened?-set! document #f)
-                              (lsp-client-document-diagnostic-result-id-set!
-                                document #f))
-                            (lsp-client-session-documents session))
-                          (loop
-                            (+ index 1)
-                            (append
-                              (reverse cancel-effects)
-                              (cons
-                                (session-request!
-                                  session
-                                  "initialize"
-                                  (initialize-params session)
-                                  initialize-response!
-                                  initialize-error!
-                                  default-request-cancel
-                                  #f)
-                                effects))))
-                        (let ([cancel-effects
-                                (terminate-all-pending-requests!
-                                  editor session 'process-exited)])
-                          (for-each
-                            (lambda (document)
-                              (lsp-client-document-opened?-set! document #f))
-                            (lsp-client-session-documents session))
-                          (unless (eq? (lsp-client-session-state session) 'failed)
-                            (let ([stopping?
-                                    (eq? (lsp-client-session-state session)
-                                         'stopping)])
-                              (lsp-client-session-state-set! session 'exited)
-                              (unless stopping?
-                                (editor-set-status-message!
-                                  editor "Language server exited"))))
-                          (loop
-                            (+ index 1)
-                            (append (reverse cancel-effects) effects)))))))))))
+    (let* ([process (managed-process-event-process event)]
+           [session (session-for-process editor process)])
+      (if (not session)
+          '()
+          (if (managed-process-event-restarted? event)
+              (let ([cancel-effects
+                      (terminate-all-pending-requests!
+                        editor session 'process-restarted)])
+                (lsp-client-session-state-set! session 'starting)
+                (lsp-client-session-decoder-set!
+                  session (make-lsp-json-rpc-decoder))
+                (lsp-client-session-capabilities-set!
+                  session (make-json-object '()))
+                (lsp-client-session-diagnostic-generation-set!
+                  session 0)
+                (hashtable-delete! lsp-semantic-generations session)
+                (hashtable-delete!
+                  lsp-document-highlight-generations session)
+                (for-each
+                  (lambda (document)
+                    (lsp-client-document-opened?-set! document #f)
+                    (lsp-client-document-diagnostic-result-id-set!
+                      document #f))
+                  (lsp-client-session-documents session))
+                (append
+                  (list
+                    (session-request!
+                      session
+                      "initialize"
+                      (initialize-params session)
+                      initialize-response!
+                      initialize-error!
+                      default-request-cancel
+                      #f))
+                  cancel-effects))
+              (let ([cancel-effects
+                      (terminate-all-pending-requests!
+                        editor session 'process-exited)])
+                (for-each
+                  (lambda (document)
+                    (lsp-client-document-opened?-set! document #f))
+                  (lsp-client-session-documents session))
+                (unless (eq? (lsp-client-session-state session) 'failed)
+                  (let ([stopping?
+                          (eq? (lsp-client-session-state session)
+                               'stopping)])
+                    (lsp-client-session-state-set! session 'exited)
+                    (unless stopping?
+                      (editor-set-status-message!
+                        editor "Language server exited"))))
+                cancel-effects)))))
 
   (define (lsp-session-key workspace language profile)
     (project-workspace-language-session-key

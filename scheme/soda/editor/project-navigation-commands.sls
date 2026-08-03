@@ -32,9 +32,6 @@
     (let ([target (context-project-target context policy)])
       (and target (project-target-project target))))
 
-  (define (project-origin-view editor id)
-    (find (lambda (view) (= (view-id view) id)) (editor-views editor)))
-
   (define (project-context editor view project base)
     (let ([current
             (editor-view-resource-context editor (view-id view))])
@@ -250,7 +247,7 @@
       (let* ([editor (command-context-editor context)]
              [target (vector-ref selection 0)]
              [view
-               (project-origin-view
+               (editor-find-view
                  editor (project-target-origin-view-id target))]
              [project (project-target-project target)]
              [resource (vector-ref selection 1)]
@@ -329,7 +326,7 @@
       (let* ([editor (command-context-editor context)]
              [target (vector-ref selection 0)]
              [view
-               (project-origin-view
+               (editor-find-view
                  editor (project-target-origin-view-id target))]
              [project (project-target-project target)]
              [directory (vector-ref selection 1)])
@@ -357,7 +354,7 @@
              [target (vector-ref selection 0)]
              [buffer (vector-ref selection 1)]
              [view
-               (project-origin-view
+               (editor-find-view
                  editor (project-target-origin-view-id target))])
         (when view
         (editor-display-buffer!

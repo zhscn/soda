@@ -951,13 +951,6 @@
       editor
       (vfs-normalize-path path)))
 
-  (define (find-view-by-id editor id)
-    (and
-      id
-      (find
-        (lambda (view) (= (view-id view) id))
-        (editor-views editor))))
-
   (define (source-position-offset buffer position)
     (call-with-buffer-text
       buffer
@@ -1026,7 +1019,7 @@
                 (file-navigation-target-kind target))))))))
 
   (define (activate-buffer! editor view-id buffer)
-    (if (find-view-by-id editor view-id)
+    (if (editor-find-view editor view-id)
         (begin
           (editor-set-view-buffer!
             editor
@@ -1037,7 +1030,7 @@
 
   (define (activate-open-request! editor result buffer request)
     (let* ([origin-view-id (open-request-view-id request)]
-           [view (find-view-by-id editor origin-view-id)]
+           [view (editor-find-view editor origin-view-id)]
            [offset
              (open-target-offset
                buffer
@@ -1154,7 +1147,7 @@
     (for-each
       (lambda (request)
         (let ([view
-                (find-view-by-id
+                (editor-find-view
                   editor
                   (open-request-view-id request))])
           (when view
@@ -1171,7 +1164,7 @@
         (let ([view
                 (and
                   (prompt-result? result)
-                  (find-view-by-id
+                  (editor-find-view
                     editor
                     (prompt-result-origin-view-id result)))])
           (if view
@@ -1254,7 +1247,7 @@
            [view
              (and
                (prompt-result? result)
-               (find-view-by-id
+               (editor-find-view
                  editor
                  (prompt-result-origin-view-id result)))]
            [buffer (and view (view-buffer view))]
@@ -1319,7 +1312,7 @@
                  (insert-file-result-buffer-id result))]
              [document (buffer-document buffer)]
              [view
-               (find-view-by-id
+               (editor-find-view
                  editor
                  (insert-file-result-view-id result))])
         (buffer-clear-local-setting!
@@ -1527,7 +1520,7 @@
                    (and
                      (pair? view-ids)
                      (or
-                       (find-view-by-id editor (car view-ids))
+                       (editor-find-view editor (car view-ids))
                        (loop (cdr view-ids)))))])
            (if view
                (open-find-file-prompt!
@@ -1912,7 +1905,7 @@
            [view
              (and
                (prompt-result? result)
-               (find-view-by-id
+               (editor-find-view
                  editor
                  (prompt-result-origin-view-id result)))]
            [buffer (and view (view-buffer view))]

@@ -40,11 +40,7 @@
 
   (define (debugger-buffer editor debugger)
     (let ([id (debugger-session-buffer-id debugger)])
-      (and
-        id
-        (find
-          (lambda (buffer) (= (buffer-id buffer) id))
-          (editor-buffers editor)))))
+      (editor-buffer-find editor id)))
 
   (define (visible-view-for-buffer editor target-buffer-id)
     (find

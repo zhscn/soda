@@ -1064,11 +1064,6 @@
             (view-set-first-line! view target)))))
     '())
 
-  (define (find-view-by-id editor id)
-    (find
-      (lambda (view) (= (view-id view) id))
-      (editor-views editor)))
-
   (define (parse-positive-integer value)
     (let ([number (string->number value)])
       (and
@@ -1130,7 +1125,7 @@
            [view
              (and
                target
-               (find-view-by-id
+               (editor-find-view
                  editor
                  (prompt-result-origin-view-id result)))])
       (cond
