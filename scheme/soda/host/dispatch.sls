@@ -208,7 +208,8 @@
               (lambda (listener) (listener update))
               (configuration-facet
                 (buffer-state-configuration new-buffer-state)
-                update-listeners-facet))
+                update-listeners-facet
+                'buffer))
             update)))))
 
   (define (apply-transaction-extension dispatcher spec facet)
@@ -221,7 +222,8 @@
           (let loop ([extensions
                        (configuration-facet
                          (buffer-state-configuration (buffer-state buffer))
-                         facet)]
+                         facet
+                         'buffer)]
                      [current spec])
             (if (null? extensions)
                 current

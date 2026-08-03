@@ -252,6 +252,17 @@
   (error 'kernel-tests "state field configuration differs"))
 (unless (configuration-facet configuration read-only)
   (error 'kernel-tests "facet configuration differs"))
+(define view-only-facet
+  (make-facet
+    'view-only 'view #f
+    (lambda (values) (car values))
+    eq?))
+(define view-only-configuration
+  (make-configuration
+    (list (make-facet-provider view-only-facet #t))))
+(unless (and (not (configuration-facet view-only-configuration view-only-facet 'buffer))
+             (configuration-facet view-only-configuration view-only-facet 'view))
+  (error 'kernel-tests "facet scope differs"))
 
 (define buffer-snapshot
   (make-buffer-state 'document configuration (list (cons history-field 'empty))))
@@ -282,6 +293,9 @@
     (lambda (state) 'mode)
     (lambda (value transaction) value)))
 (define mode-compartment (make-compartment 'mode))
+(unless (and (compartment-entry? (compartment-of mode-compartment mode-field))
+             (state-effect? (compartment-reconfigure mode-compartment mode-field)))
+  (error 'kernel-tests "compartment convenience protocol differs"))
 (define configurable-state
   (make-buffer-state
     'document

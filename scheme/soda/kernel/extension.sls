@@ -10,6 +10,7 @@
           make-facet
           facet?
           facet-name
+          facet-scope
           facet-default
           facet-combine
           facet-compare
@@ -39,6 +40,8 @@
           compartment-entry?
           compartment-entry-compartment
           compartment-entry-extension
+          compartment-of
+          compartment-reconfigure
           make-compartment-reconfigure-effect
           make-configuration
           configuration?
@@ -84,19 +87,26 @@
     (facet %make-facet facet?)
     (fields
       (immutable name facet-name)
+      (immutable scope facet-scope)
       (immutable default facet-default)
       (immutable combine facet-combine)
       (immutable compare facet-compare)))
 
   (define make-facet
     (case-lambda
-      [(name default combine) (make-facet name default combine eq?)]
+      [(name default combine)
+       (make-facet name 'buffer default combine eq?)]
       [(name default combine compare)
-    (unless (symbol? name)
-      (assertion-violation 'make-facet "name must be a symbol" name))
-    (unless (and (procedure? combine) (procedure? compare))
-      (assertion-violation 'make-facet "combine must be a procedure" combine))
-    (%make-facet name default combine compare)]))
+       (make-facet name 'buffer default combine compare)]
+      [(name scope default combine compare)
+       (unless (symbol? name)
+         (assertion-violation 'make-facet "name must be a symbol" name))
+       (unless (scope? scope)
+         (assertion-violation 'make-facet "invalid facet scope" scope))
+       (unless (and (procedure? combine) (procedure? compare))
+         (assertion-violation
+           'make-facet "combine and compare must be procedures"))
+       (%make-facet name scope default combine compare)]))
 
   (define-record-type
     (state-effect %make-state-effect state-effect?)
@@ -209,6 +219,9 @@
         'make-compartment-entry "expected a compartment" compartment))
     (%make-compartment-entry compartment extension))
 
+  (define (compartment-of compartment extension)
+    (make-compartment-entry compartment extension))
+
   (define (make-compartment-reconfigure-effect compartment extension)
     (unless (compartment? compartment)
       (assertion-violation
@@ -218,6 +231,9 @@
     (make-state-effect
       'compartment-reconfigure
       (make-compartment-entry compartment extension)))
+
+  (define (compartment-reconfigure compartment extension)
+    (make-compartment-reconfigure-effect compartment extension))
 
   (define-record-type
     (configuration %make-configuration configuration?)
@@ -289,22 +305,35 @@
     (< (precedence-rank (facet-provider-precedence left))
        (precedence-rank (facet-provider-precedence right))))
 
-  (define (configuration-facet configuration facet)
+  (define (configuration-facet configuration facet . requested-scope)
     (unless (and (configuration? configuration) (facet? facet))
       (assertion-violation
         'configuration-facet "expected a configuration and facet"
         configuration facet))
-    (let ([values
-            (map
-              facet-provider-value
-              (list-sort
-                provider<?
-                (filter
-                  (lambda (extension)
-                    (and (facet-provider? extension)
-                         (eq? facet (facet-provider-facet extension))))
-                  (effective-extensions (configuration-extensions configuration)))))])
-      (if (null? values) (facet-default facet) ((facet-combine facet) values))))
+    (unless (or (null? requested-scope)
+                (and (pair? requested-scope)
+                     (null? (cdr requested-scope))
+                     (scope? (car requested-scope))))
+      (assertion-violation
+        'configuration-facet "scope must be buffer, view, host, or omitted"
+        requested-scope))
+    (let ([scope (if (null? requested-scope) #f (car requested-scope))])
+      (if (and scope (not (eq? scope (facet-scope facet))))
+          (facet-default facet)
+          (let ([values
+                  (map
+                    facet-provider-value
+                    (list-sort
+                      provider<?
+                      (filter
+                        (lambda (extension)
+                          (and (facet-provider? extension)
+                               (eq? facet (facet-provider-facet extension))))
+                        (effective-extensions
+                          (configuration-extensions configuration)))))])
+            (if (null? values)
+                (facet-default facet)
+                ((facet-combine facet) values))))))
 
   (define (replace-compartment extensions compartment replacement)
     (if (null? extensions)
