@@ -9,7 +9,8 @@
   (import (rnrs)
           (only (chezscheme) make-weak-eq-hashtable)
           (soda editor buffer)
-          (soda editor lsp-protocol))
+          (soda editor lsp-protocol)
+          (only (soda editor string) character-byte-length))
 
   (define-record-type lsp-text-map
     (fields buffer-id
@@ -20,9 +21,6 @@
             byte-size))
 
   (define text-map-cache (make-weak-eq-hashtable))
-
-  (define (utf8-length character)
-    (bytevector-length (string->utf8 (string character))))
 
   (define (utf16-width character)
     (if (> (char->integer character) #xffff) 2 1))
@@ -66,7 +64,7 @@
           [else
            (let* ([character (string-ref source index)]
                   [next-index (+ index 1)]
-                  [next-byte (+ byte (utf8-length character))])
+                  [next-byte (+ byte (character-byte-length character))])
              (if (char=? character #\newline)
                  (loop
                    next-index
@@ -133,7 +131,7 @@
               [(crlf? source index) #f]
               [else
                (let* ([current (string-ref source index)]
-                      [next-byte (+ byte (utf8-length current))])
+                      [next-byte (+ byte (character-byte-length current))])
                  (cond
                    [(char=? current #\newline) #f]
                    [(< offset next-byte) #f]
@@ -173,7 +171,7 @@
                        (let* ((next-character
                                 (+ character (utf16-width current)))
                               (next-byte
-                                (+ byte (utf8-length current))))
+                                (+ byte (character-byte-length current))))
                          (cond
                            ((= target-character next-character) next-byte)
                            ((< target-character next-character) #f)

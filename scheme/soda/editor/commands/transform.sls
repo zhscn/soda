@@ -279,11 +279,6 @@
             (loop (+ candidate 1))
             candidate))))
 
-  (define (line-range-end text line)
-    (if (< line (- (text-line-count text) 1))
-        (text-line-start text (+ line 1))
-        (text-size text)))
-
   (define (delete-blank-lines-command context)
     (let* ([view (command-context-view context)]
            [buffer (view-buffer view)])
@@ -315,7 +310,7 @@
                            (+ first 1)
                            first)]
                      [start (text-line-start text delete-first)]
-                     [end (line-range-end text last)]
+                     [end (text-line-end text last)]
                      [caret
                        (if (and current-blank? (< first last))
                            (text-line-start text first)

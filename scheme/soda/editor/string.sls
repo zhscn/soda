@@ -4,6 +4,7 @@
           string-contains?
           string-join
           string-pad-left
+          character-byte-length
           string-single-line
           stable-resource?)
   (import (rnrs))
@@ -54,6 +55,9 @@
         (string-append
           (make-string (- width (string-length value)) character)
           value)))
+
+  (define (character-byte-length character)
+    (bytevector-length (string->utf8 (string character))))
 
   (define (string-single-line value)
     (unless (string? value)

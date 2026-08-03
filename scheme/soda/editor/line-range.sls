@@ -6,6 +6,7 @@
           text-line-fragment-content
           text-line-fragment-reaches-content-end?
           text-line-fragment-terminator-selected?
+          text-line-end
           text-line-leading-end
           text-range-line-fragments
           text-range-lines
@@ -35,7 +36,7 @@
         (<= 0 start end (text-size text)))
       (assertion-violation who "invalid Text range" text start end)))
 
-  (define (line-end text line)
+  (define (text-line-end text line)
     (if (< line (- (text-line-count text) 1))
         (text-line-start text (+ line 1))
         (text-size text)))
@@ -61,7 +62,7 @@
                    [result '()])
           (let* ([physical-start (text-line-start text line)]
                  [content-end (text-line-content-end text line)]
-                 [physical-end (line-end text line)]
+                 [physical-end (text-line-end text line)]
                  [fragment-start (max start physical-start)]
                  [fragment-end (min end physical-end)]
                  [selected-content-end (min fragment-end content-end)]

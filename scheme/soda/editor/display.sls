@@ -7,7 +7,8 @@
           text-offset-at-cell-column
           line-number-gutter-width)
   (import (rnrs)
-          (soda document))
+          (soda document)
+          (only (soda editor string) character-byte-length))
 
   (define (wide-codepoint? value)
     (or (<= #x1100 value #x115f)
@@ -58,9 +59,6 @@
               column
               (string-ref value index)
               tab-width)))))
-
-  (define (character-byte-length character)
-    (bytevector-length (string->utf8 (string character))))
 
   (define (text-cell-column text offset tab-width)
     (let* ([position (text-position text offset)]
