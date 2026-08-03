@@ -92,11 +92,19 @@
   (define-record-type
     (runtime-state %make-runtime-state runtime-state?)
     (fields
-      (mutable queue runtime-queue runtime-queue-set!)
+      (mutable front runtime-front runtime-front-set!)
+      (mutable back runtime-back runtime-back-set!)
+      (mutable length runtime-length runtime-length-set!)
       (mutable tasks runtime-tasks runtime-tasks-set!)))
 
   (define (make-runtime-state)
-    (%make-runtime-state '() '()))
+    (%make-runtime-state '() '() 0 '()))
+
+  (define (runtime-normalize! runtime)
+    (when (and (null? (runtime-front runtime))
+               (pair? (runtime-back runtime)))
+      (runtime-front-set! runtime (reverse (runtime-back runtime)))
+      (runtime-back-set! runtime '())))
 
   (define (runtime-enqueue! runtime message)
     (unless (runtime-state? runtime)
@@ -109,9 +117,8 @@
         'runtime-enqueue!
         "expected a message"
         message))
-    (runtime-queue-set!
-      runtime
-      (append (runtime-queue runtime) (list message)))
+    (runtime-back-set! runtime (cons message (runtime-back runtime)))
+    (runtime-length-set! runtime (+ (runtime-length runtime) 1))
     message)
 
   (define (runtime-queue-length runtime)
@@ -120,7 +127,7 @@
         'runtime-queue-length
         "expected a runtime state"
         runtime))
-    (length (runtime-queue runtime)))
+    (runtime-length runtime))
 
   (define (runtime-drain! runtime handler . limit)
     (unless (runtime-state? runtime)
@@ -130,14 +137,17 @@
     (let ([limit (if (null? limit) #f (car limit))])
       (unless (or (not limit) (and (exact-integer? limit) (>= limit 0)))
         (assertion-violation 'runtime-drain! "limit must be a non-negative integer" limit))
-      (let loop ([messages (runtime-queue runtime)] [count 0] [results '()])
-        (if (or (null? messages) (and limit (>= count limit)))
-            (begin
-              (runtime-queue-set! runtime messages)
-              (reverse results))
-            (let ([message (car messages)])
+      (let loop ([count 0] [results '()])
+        (runtime-normalize! runtime)
+        (if (or (zero? (runtime-length runtime))
+                (and limit (>= count limit)))
+            (reverse results)
+            (let ([message (car (runtime-front runtime))])
+              ;; Remove before dispatch so a failing handler cannot cause an
+              ;; already-dispatched message to be delivered again.
+              (runtime-front-set! runtime (cdr (runtime-front runtime)))
+              (runtime-length-set! runtime (- (runtime-length runtime) 1))
               (loop
-                (cdr messages)
                 (+ count 1)
                 (if (message-valid? message)
                     (cons (handler message) results)
@@ -149,16 +159,27 @@
         'runtime-clear-owner!
         "expected a runtime state"
         runtime))
-    (runtime-queue-set!
-      runtime
-      (filter
-        (lambda (message) (not (eq? owner (message-owner message))))
-        (runtime-queue runtime)))
+    (unless (owner? owner)
+      (assertion-violation
+        'runtime-clear-owner! "expected an owner" owner))
+    (let ([messages
+            (filter
+              (lambda (message) (not (eq? owner (message-owner message))))
+              (append (runtime-front runtime)
+                      (reverse (runtime-back runtime))))])
+      (runtime-front-set! runtime messages)
+      (runtime-back-set! runtime '())
+      (runtime-length-set! runtime (length messages)))
     (for-each
       (lambda (task)
         (when (eq? owner (task-owner task))
           (task-cancel! task)))
       (runtime-tasks runtime))
+    (runtime-tasks-set!
+      runtime
+      (filter
+        (lambda (task) (not (eq? owner (task-owner task))))
+        (runtime-tasks runtime)))
     #t)
 
   (define (runtime-start-task! runtime task)
@@ -172,9 +193,33 @@
         'runtime-start-task!
         "expected a task"
         task))
-    (runtime-tasks-set!
-      runtime
-      (cons task (runtime-tasks runtime)))
+    (owner-assert-active 'runtime-start-task! (task-owner task))
+    (unless (task-active? task)
+      (assertion-violation
+        'runtime-start-task! "cannot start a cancelled task" task))
+    (when (memq task (runtime-tasks runtime))
+      (assertion-violation
+        'runtime-start-task! "task is already running" task))
+    (let ([key (task-cancellation-key task)])
+      (when key
+        (for-each
+          (lambda (candidate)
+            (when (and (eq? (task-owner candidate) (task-owner task))
+                       (equal? (task-scope candidate) (task-scope task))
+                       (equal? key (task-cancellation-key candidate)))
+              (task-cancel! candidate)))
+          (runtime-tasks runtime))
+        (runtime-tasks-set!
+          runtime
+          (filter task-active? (runtime-tasks runtime))))
+      (runtime-tasks-set!
+        runtime
+        (cons task (runtime-tasks runtime))))
+    (owner-add-cleanup!
+      (task-owner task)
+      (lambda ()
+        (when (task-active? task)
+          (runtime-cancel-task! runtime task))))
     task)
 
   (define (runtime-cancel-task! runtime task)

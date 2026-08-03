@@ -17,12 +17,14 @@
           command-invoke-interactive
           make-command-context
           command-context?
-          command-context-view
-          command-context-buffer
+          command-context-core
+          command-context-view-id
+          command-context-buffer-id
           command-context-event
           command-context-prefix
           command-context-source)
   (import (rnrs)
+          (soda core buffer)
           (soda core value)
           (soda core view))
 
@@ -100,13 +102,14 @@
       (command-registry-registrations-set!
         registry
         (cons definition (command-registry-registrations registry)))
-      (owner-add-cleanup!
+      (make-registration
         (command-definition-owner definition)
         (lambda ()
-          (unregister-command!
-            registry
-            (command-definition-name definition))))
-      definition))
+          (when (and
+                  (hashtable-contains? (command-registry-table registry) name)
+                  (eq? definition
+                       (hashtable-ref (command-registry-table registry) name #f)))
+            (unregister-command! registry name))))))
 
   (define (unregister-command! registry name)
     (unless (command-registry? registry)
@@ -143,20 +146,23 @@
 
   (define-record-type
     (command-context %make-command-context command-context?)
-    (fields view buffer event prefix source))
+    (fields core view-id buffer-id event prefix source))
 
-  (define (make-command-context view event prefix source)
-    (unless (view? view)
-      (assertion-violation
-        'make-command-context
-        "expected a view"
-        view))
-    (%make-command-context
-      view
-      (view-buffer view)
-      event
-      prefix
-      source))
+  (define make-command-context
+    (case-lambda
+      [(view event prefix source)
+       (make-command-context #f view event prefix source)]
+      [(core view event prefix source)
+       (unless (view? view)
+         (assertion-violation
+           'make-command-context "expected a view" view))
+       (%make-command-context
+         core
+         (view-id view)
+         (buffer-id (view-buffer view))
+         event
+         prefix
+         source)]))
 
   (define (command-invoke definition context arguments)
     (unless (command-definition? definition)

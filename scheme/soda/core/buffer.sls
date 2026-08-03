@@ -1,5 +1,11 @@
 (library (soda core buffer)
   (export make-buffer
+          make-buffer-service
+          buffer-service?
+          buffer-service-create!
+          buffer-service-ref
+          buffer-service-buffers
+          buffer-service-close-buffer!
           buffer?
           buffer-id
           buffer-owner
@@ -9,6 +15,9 @@
           buffer-generation
           buffer-revision
           buffer-byte-size
+          buffer-snapshot
+          buffer-string
+          buffer-string-range
           buffer-closed?
           buffer-close!
           buffer-local-ref
@@ -23,6 +32,7 @@
           marker-close!
           buffer-add-extent!
           extent?
+          extent-id
           extent-buffer
           extent-owner
           extent-start
@@ -30,20 +40,30 @@
           extent-lifetime
           extent-layer
           extent-priority
+          extent-scope
           extent-property
           extent-properties
           extent-close!
           extent-active?
+          buffer-extent-ref
           buffer-extents-in-range
           call-with-buffer-transaction
+          buffer-transaction?
           buffer-transaction-insert!
           buffer-transaction-replace!
           buffer-transaction-erase!
+          buffer-transaction-add-extent!
+          buffer-transaction-remove-extent!
           buffer-transaction-base-revision
           buffer-transaction-snapshot
           buffer-change?
           buffer-change-old-revision
           buffer-change-new-revision
+          buffer-change-edit-count
+          buffer-change-edit-range
+          buffer-change-edit-text
+          buffer-change-affected-old-range
+          buffer-change-affected-new-range
           buffer-change-close!
           buffer-undo!
           buffer-redo!)
@@ -52,6 +72,7 @@
           (soda core value))
 
   (define buffer-source (make-identity-source))
+  (define extent-source (make-identity-source))
 
   (define (copy-list value)
     (if (null? value)
@@ -69,15 +90,34 @@
   (define-record-type
     (extent %make-extent extent?)
     (fields
+      (immutable id extent-id)
       (immutable buffer extent-buffer)
       (immutable owner extent-owner)
-      (immutable start extent-start)
-      (immutable end extent-end)
+      (mutable start extent-start extent-start-set!)
+      (mutable end extent-end extent-end-set!)
       (immutable lifetime extent-lifetime)
       (immutable layer extent-layer)
       (immutable priority extent-priority)
+      (immutable scope extent-scope)
       (immutable properties extent-properties*)
+      (mutable cached-start extent-cached-start extent-cached-start-set!)
+      (mutable cached-end extent-cached-end extent-cached-end-set!)
       (mutable active? extent-active? extent-active?-set!)))
+
+  (define (extent-current-start extent)
+    (if (extent-active? extent)
+        (marker-offset (extent-start extent))
+        (extent-cached-start extent)))
+
+  (define-record-type
+    (buffer-transaction %make-buffer-transaction buffer-transaction?)
+    (fields
+      (immutable buffer buffer-transaction-buffer)
+      (immutable native buffer-transaction-native)
+      (mutable extent-additions buffer-transaction-extent-additions
+               buffer-transaction-extent-additions-set!)
+      (mutable extent-removals buffer-transaction-extent-removals
+               buffer-transaction-extent-removals-set!)))
 
   (define-record-type
     (buffer %make-buffer buffer?)
@@ -90,7 +130,8 @@
       (mutable generation buffer-generation buffer-generation-set!)
       (mutable locals buffer-locals buffer-locals-set!)
       (mutable markers buffer-markers buffer-markers-set!)
-      (mutable extents buffer-extents buffer-extents-set!)))
+      (mutable extents buffer-extents buffer-extents-set!)
+      (immutable content-history buffer-content-history)))
 
   (define (require-open-buffer who value)
     (unless (buffer? value)
@@ -102,15 +143,7 @@
   (define (require-owner who owner)
     (owner-assert-active who owner))
 
-  (define make-buffer
-    (case-lambda
-      [(owner name document)
-       (make-buffer
-         (identity-source-next! buffer-source)
-         owner
-         name
-         document)]
-      [(id owner name document)
+  (define (make-buffer/internal id owner name document)
        (unless (owner? owner)
          (assertion-violation 'make-buffer "expected an owner" owner))
        (owner-assert-active 'make-buffer owner)
@@ -121,10 +154,72 @@
            'make-buffer
            "expected a core document"
            document))
-       (let ([buffer
-               (%make-buffer id owner name document 'live 0 '() '() '())])
+       (let* ([history (make-eqv-hashtable)]
+              [buffer
+                (%make-buffer
+                  id owner name document 'live 0 '() '() '() history)])
+         (hashtable-set! history (core-document-undo-position document) '())
          (owner-add-cleanup! owner (lambda () (buffer-close! buffer)))
-         buffer)]))
+         buffer))
+
+  (define (make-buffer owner name document)
+    (make-buffer/internal
+      (identity-source-next! buffer-source) owner name document))
+
+  (define-record-type
+    (buffer-service %make-buffer-service buffer-service?)
+    (fields
+      (immutable identities buffer-service-identities)
+      (immutable buffers buffer-service-table)))
+
+  (define (make-buffer-service)
+    (%make-buffer-service (make-identity-source) (make-eqv-hashtable)))
+
+  (define (buffer-service-create! service owner name document)
+    (unless (buffer-service? service)
+      (assertion-violation
+        'buffer-service-create! "expected a buffer service" service))
+    (let* ([id (identity-source-next! (buffer-service-identities service))]
+           [buffer (make-buffer/internal id owner name document)])
+      (hashtable-set! (buffer-service-table service) id buffer)
+      (owner-add-cleanup!
+        owner
+        (lambda ()
+          (when (eq? buffer
+                     (hashtable-ref (buffer-service-table service) id #f))
+            (hashtable-delete! (buffer-service-table service) id))))
+      buffer))
+
+  (define (buffer-service-ref service id . default)
+    (unless (buffer-service? service)
+      (assertion-violation
+        'buffer-service-ref "expected a buffer service" service))
+    (let ([buffer (hashtable-ref (buffer-service-table service) id #f)])
+      (cond
+        [(and buffer (not (buffer-closed? buffer))) buffer]
+        [buffer
+         (hashtable-delete! (buffer-service-table service) id)
+         (if (null? default) #f (car default))]
+        [else (if (null? default) #f (car default))])))
+
+  (define (buffer-service-buffers service)
+    (unless (buffer-service? service)
+      (assertion-violation
+        'buffer-service-buffers "expected a buffer service" service))
+    (call-with-values
+      (lambda () (hashtable-entries (buffer-service-table service)))
+      (lambda (ids buffers)
+        (filter
+          (lambda (buffer) (not (buffer-closed? buffer)))
+          (vector->list buffers)))))
+
+  (define (buffer-service-close-buffer! service id)
+    (let ([buffer (buffer-service-ref service id #f)])
+      (if buffer
+          (begin
+            (hashtable-delete! (buffer-service-table service) id)
+            (buffer-close! buffer))
+          #f)))
 
   (define (buffer-closed? value)
     (and (buffer? value) (eq? (buffer-state value) 'closed)))
@@ -136,6 +231,22 @@
   (define (buffer-byte-size value)
     (core-document-byte-size
       (buffer-document (require-open-buffer 'buffer-byte-size value))))
+
+  (define (buffer-snapshot value)
+    (core-document-snapshot
+      (buffer-document (require-open-buffer 'buffer-snapshot value))))
+
+  (define (buffer-string value)
+    (call-with-core-document-snapshot
+      (buffer-document (require-open-buffer 'buffer-string value))
+      core-snapshot-string))
+
+  (define (buffer-string-range value start end)
+    (utf8->string
+      (call-with-core-document-snapshot
+        (buffer-document (require-open-buffer 'buffer-string-range value))
+        (lambda (snapshot)
+          (core-snapshot-subbytevector snapshot start end)))))
 
   (define (buffer-local-entry owner key entries)
     (cond
@@ -179,11 +290,6 @@
                    (reverse
                      (append result
                              (cons (list owner key item) (cdr entries)))))
-                 (owner-add-cleanup!
-                   owner
-                   (lambda ()
-                     (when (and (buffer? value) (not (buffer-closed? value)))
-                       (buffer-clear-local! value owner key))))
                  item)
                (loop (cdr entries) (cons entry result))))])))
 
@@ -233,7 +339,12 @@
       (core-document-remove-anchor!
         (buffer-document (marker-buffer value))
         (marker-anchor value))
-      (marker-active?-set! value #f))
+      (marker-active?-set! value #f)
+      (buffer-markers-set!
+        (marker-buffer value)
+        (filter
+          (lambda (candidate) (not (eq? candidate value)))
+          (buffer-markers (marker-buffer value)))))
     #t)
 
   (define (buffer-marker value offset . affinity)
@@ -274,7 +385,55 @@
       (assertion-violation 'extent-properties "expected an extent" value))
     (copy-list (extent-properties* value)))
 
-  (define (buffer-add-extent! value owner start end properties . options)
+  (define (validate-extent-options who properties options)
+    (unless (and (list? properties)
+                 (for-all (lambda (entry)
+                            (and (pair? entry) (symbol? (car entry))))
+                          properties))
+      (assertion-violation who "properties must be an alist" properties))
+    (when (> (length options) 4)
+      (assertion-violation who "too many extent options" options))
+    (let ([lifetime (if (null? options) 'buffer (car options))]
+          [layer (if (or (null? options) (null? (cdr options)))
+                     'content
+                     (cadr options))]
+          [priority (if (or (null? options) (null? (cddr options)))
+                        0
+                        (caddr options))]
+          [scope (if (or (null? options) (null? (cdddr options)))
+                     #f
+                     (cadddr options))])
+      (unless (memq lifetime '(content buffer view transient))
+        (assertion-violation who "invalid extent lifetime" lifetime))
+      (unless (symbol? layer)
+        (assertion-violation who "layer must be a symbol" layer))
+      (unless (exact-integer? priority)
+        (assertion-violation who "priority must be an integer" priority))
+      (when (and (eq? lifetime 'view) (not scope))
+        (assertion-violation who "view extent requires a view scope" lifetime))))
+
+  (define (validate-transaction-extents! transaction)
+    (let ([snapshot (buffer-transaction-snapshot transaction)])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (let ([size (core-snapshot-byte-size snapshot)])
+            (for-each
+              (lambda (addition)
+                (let ([owner (list-ref addition 1)]
+                      [start (list-ref addition 2)]
+                      [end (list-ref addition 3)])
+                  (owner-assert-active
+                    'call-with-buffer-transaction owner)
+                  (unless (<= 0 start end size)
+                    (assertion-violation
+                      'call-with-buffer-transaction
+                      "transactional extent is outside the final snapshot"
+                      start end size))))
+              (buffer-transaction-extent-additions transaction))))
+        (lambda () (core-snapshot-close! snapshot)))))
+
+  (define (buffer-add-extent/internal value id owner start end properties options)
     (require-open-buffer 'buffer-add-extent! value)
     (require-owner 'buffer-add-extent! owner)
     (unless (and (exact-integer? start)
@@ -287,14 +446,7 @@
         "extent range is outside the buffer"
         start
         end))
-    (unless (and (list? properties)
-                 (for-all (lambda (entry)
-                            (and (pair? entry) (symbol? (car entry))))
-                          properties))
-      (assertion-violation
-        'buffer-add-extent!
-        "properties must be an alist"
-        properties))
+    (validate-extent-options 'buffer-add-extent! properties options)
     (let* ([lifetime (if (null? options) 'buffer (car options))]
            [layer (if (or (null? options) (null? (cdr options)))
                       'content
@@ -302,11 +454,13 @@
            [priority (if (or (null? options) (null? (cddr options)))
                          0
                          (caddr options))]
+           [scope (if (or (null? options) (null? (cdddr options)))
+                      #f
+                      (cadddr options))]
            [extent #f])
-      (unless (memq lifetime '(content buffer view transient))
-        (assertion-violation 'buffer-add-extent! "invalid extent lifetime" lifetime))
       (set! extent
         (%make-extent
+          id
           value
           owner
           (buffer-marker value start 'before)
@@ -314,55 +468,196 @@
           lifetime
           layer
           priority
+          scope
           properties
+          start
+          end
           #t))
       (buffer-extents-set!
         value
-        (cons extent (buffer-extents value)))
+        (let insert ([remaining (buffer-extents value)])
+          (cond
+            [(null? remaining) (list extent)]
+            [(or (< start (extent-current-start (car remaining)))
+                 (and (= start (extent-current-start (car remaining)))
+                      (< priority (extent-priority (car remaining)))))
+             (cons extent remaining)]
+            [else (cons (car remaining) (insert (cdr remaining)))])))
       (owner-add-cleanup!
         owner
         (lambda () (extent-close! extent)))
+      (when (eq? lifetime 'content)
+        (buffer-save-content-extents! value))
       extent))
 
-  (define (extent-close! value)
+  (define (extent-descriptor extent)
+    (list
+      (extent-id extent)
+      (extent-owner extent)
+      (marker-offset (extent-start extent))
+      (marker-offset (extent-end extent))
+      (extent-properties extent)
+      (extent-lifetime extent)
+      (extent-layer extent)
+      (extent-priority extent)
+      (extent-scope extent)))
+
+  (define (buffer-save-content-extents! value)
+    (hashtable-set!
+      (buffer-content-history value)
+      (core-document-undo-position (buffer-document value))
+      (map extent-descriptor
+        (filter
+          (lambda (extent)
+            (and (extent-active? extent)
+                 (eq? (extent-lifetime extent) 'content)))
+          (buffer-extents value)))))
+
+  (define (buffer-restore-content-extents! value)
+    (let* ([node
+             (core-document-undo-position (buffer-document value))]
+           [descriptors
+             (hashtable-ref (buffer-content-history value) node '())])
+      (for-each
+        (lambda (extent)
+          (when (and (extent-active? extent)
+                     (eq? (extent-lifetime extent) 'content))
+            (extent-cached-start-set!
+              extent (marker-offset (extent-start extent)))
+            (extent-cached-end-set!
+              extent (marker-offset (extent-end extent)))
+            (marker-close! (extent-start extent))
+            (marker-close! (extent-end extent))
+            (extent-active?-set! extent #f)))
+        (buffer-extents value))
+      (for-each
+        (lambda (descriptor)
+          (let* ([id (car descriptor)]
+                 [extent
+                   (find
+                     (lambda (candidate) (= id (extent-id candidate)))
+                     (buffer-extents value))])
+            (when (and extent (owner-active? (extent-owner extent)))
+              (extent-start-set!
+                extent
+                (buffer-marker value (list-ref descriptor 2) 'before))
+              (extent-end-set!
+                extent
+                (buffer-marker value (list-ref descriptor 3) 'after))
+              (extent-cached-start-set! extent (list-ref descriptor 2))
+              (extent-cached-end-set! extent (list-ref descriptor 3))
+              (extent-active?-set! extent #t))))
+        descriptors)))
+
+  (define (buffer-add-extent! value owner start end properties . options)
+    (buffer-add-extent/internal
+      value
+      (identity-source-next! extent-source)
+      owner start end properties options))
+
+  (define (extent-deactivate! value retain-for-history?)
     (when (and (extent? value) (extent-active? value))
+      (extent-cached-start-set! value (marker-offset (extent-start value)))
+      (extent-cached-end-set! value (marker-offset (extent-end value)))
       (marker-close! (extent-start value))
       (marker-close! (extent-end value))
-      (extent-active?-set! value #f))
+      (extent-active?-set! value #f)
+      (unless retain-for-history?
+        (buffer-extents-set!
+          (extent-buffer value)
+          (filter
+            (lambda (candidate) (not (eq? candidate value)))
+            (buffer-extents (extent-buffer value)))))
+      (when (and (eq? (extent-lifetime value) 'content)
+                 (eq? (buffer-state (extent-buffer value)) 'live))
+        (buffer-save-content-extents! (extent-buffer value))))
     #t)
+
+  (define (extent-close! value)
+    (unless (extent? value)
+      (assertion-violation 'extent-close! "expected an extent" value))
+    (extent-deactivate! value #f))
+
+  (define (buffer-extent-ref value id . default)
+    (require-open-buffer 'buffer-extent-ref value)
+    (let ([extent
+            (find
+              (lambda (candidate)
+                (and (extent-active? candidate)
+                     (= id (extent-id candidate))))
+              (buffer-extents value))])
+      (if extent extent (if (null? default) #f (car default)))))
 
   (define (buffer-extents-in-range value start end)
     (require-open-buffer 'buffer-extents-in-range value)
-    (let ([result
-            (filter
-              (lambda (extent)
-                (and (extent-active? extent)
-                     (< (marker-offset (extent-start extent)) end)
-                     (> (marker-offset (extent-end extent)) start)))
-              (buffer-extents value))])
-      (list-sort
-        (lambda (left right)
-          (let ([left-start (marker-offset (extent-start left))]
-                [right-start (marker-offset (extent-start right))])
-            (or (< left-start right-start)
-                (and (= left-start right-start)
-                     (< (extent-priority left) (extent-priority right))))))
-        result)))
+    (let loop ([remaining (buffer-extents value)] [result '()])
+      (cond
+        [(null? remaining) (reverse result)]
+        [(not (extent-active? (car remaining)))
+         (loop (cdr remaining) result)]
+        [(>= (marker-offset (extent-start (car remaining))) end)
+         (reverse result)]
+        [(> (marker-offset (extent-end (car remaining))) start)
+         (loop (cdr remaining) (cons (car remaining) result))]
+        [else (loop (cdr remaining) result)])))
 
   (define (buffer-transaction-insert! transaction offset inserted)
-    (core-transaction-insert! transaction offset inserted))
+    (core-transaction-insert! (buffer-transaction-native transaction) offset inserted))
 
   (define (buffer-transaction-replace! transaction start end replacement)
-    (core-transaction-replace! transaction start end replacement))
+    (core-transaction-replace!
+      (buffer-transaction-native transaction) start end replacement))
 
   (define (buffer-transaction-erase! transaction start end)
-    (core-transaction-erase! transaction start end))
+    (core-transaction-erase! (buffer-transaction-native transaction) start end))
 
   (define (buffer-transaction-base-revision transaction)
-    (core-transaction-base-revision transaction))
+    (core-transaction-base-revision (buffer-transaction-native transaction)))
 
   (define (buffer-transaction-snapshot transaction)
-    (core-transaction-snapshot transaction))
+    (core-transaction-snapshot (buffer-transaction-native transaction)))
+
+  (define (buffer-transaction-add-extent!
+            transaction owner start end properties . options)
+    (unless (buffer-transaction? transaction)
+      (assertion-violation
+        'buffer-transaction-add-extent! "expected a buffer transaction" transaction))
+    (owner-assert-active 'buffer-transaction-add-extent! owner)
+    (validate-extent-options
+      'buffer-transaction-add-extent! properties options)
+    (let ([snapshot (buffer-transaction-snapshot transaction)])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (unless (and (exact-integer? start)
+                       (exact-integer? end)
+                       (<= 0 start end (core-snapshot-byte-size snapshot)))
+            (assertion-violation
+              'buffer-transaction-add-extent!
+              "extent range is outside the pending snapshot"
+              start end)))
+        (lambda () (core-snapshot-close! snapshot))))
+    (let ([id (identity-source-next! extent-source)])
+      (buffer-transaction-extent-additions-set!
+        transaction
+        (cons (list id owner start end properties options)
+              (buffer-transaction-extent-additions transaction)))
+      id))
+
+  (define (buffer-transaction-remove-extent! transaction extent)
+    (unless (and (buffer-transaction? transaction)
+                 (extent? extent)
+                 (eq? (extent-buffer extent)
+                      (buffer-transaction-buffer transaction))
+                 (extent-active? extent))
+      (assertion-violation
+        'buffer-transaction-remove-extent!
+        "expected an active extent in the transaction buffer"
+        extent))
+    (buffer-transaction-extent-removals-set!
+      transaction
+      (cons extent (buffer-transaction-extent-removals transaction)))
+    #t)
 
   (define (call-with-buffer-transaction value procedure)
     (require-open-buffer 'call-with-buffer-transaction value)
@@ -371,13 +666,30 @@
         'call-with-buffer-transaction
         "expected a procedure"
         procedure))
-    (let ([transaction
-            (core-document-begin-transaction (buffer-document value))])
+    (let* ([native
+             (core-document-begin-transaction (buffer-document value))]
+           [transaction (%make-buffer-transaction value native '() '())]
+           [committed? #f])
       (guard (condition [else
-                         (core-transaction-abort! transaction)
+                         (unless committed? (core-transaction-abort! native))
                          (raise condition)])
         (let ([result (procedure transaction)])
-          (let ([change (core-transaction-commit! transaction)])
+          ;; Validate all deferred metadata against the final pending text.
+          ;; No fallible extent validation may occur after the native commit.
+          (validate-transaction-extents! transaction)
+          (let ([change (core-transaction-commit! native)])
+            (set! committed? #t)
+            (for-each
+              (lambda (extent) (extent-deactivate! extent #t))
+              (buffer-transaction-extent-removals transaction))
+            (for-each
+              (lambda (addition)
+                (apply
+                  (lambda (id owner start end properties options)
+                    (buffer-add-extent/internal
+                      value id owner start end properties options))
+                  addition))
+              (reverse (buffer-transaction-extent-additions transaction)))
             (buffer-generation-set!
               value
               (+ (buffer-generation value) 1))
@@ -386,6 +698,11 @@
   (define buffer-change? core-change?)
   (define buffer-change-old-revision core-change-old-revision)
   (define buffer-change-new-revision core-change-new-revision)
+  (define buffer-change-edit-count core-change-edit-count)
+  (define buffer-change-edit-range core-change-edit-range)
+  (define buffer-change-edit-text core-change-edit-text)
+  (define buffer-change-affected-old-range core-change-affected-old-range)
+  (define buffer-change-affected-new-range core-change-affected-new-range)
   (define buffer-change-close! core-change-close!)
 
   (define (buffer-undo! value)
@@ -394,6 +711,7 @@
         (begin
           (let ([change (core-document-undo! (buffer-document value))])
             (core-change-close! change))
+          (buffer-restore-content-extents! value)
           (buffer-generation-set! value (+ (buffer-generation value) 1))
           #t)
         #f))
@@ -404,17 +722,22 @@
         (begin
           (let ([change (core-document-redo! (buffer-document value))])
             (core-change-close! change))
+          (buffer-restore-content-extents! value)
           (buffer-generation-set! value (+ (buffer-generation value) 1))
           #t)
         #f))
 
   (define (buffer-close! value)
-    (require-open-buffer 'buffer-close! value)
-    (buffer-state-set! value 'closing)
-    (for-each marker-close! (buffer-markers value))
-    (for-each extent-close! (buffer-extents value))
-    (core-document-close! (buffer-document value))
-    (buffer-state-set! value 'closed)
-    (buffer-generation-set! value (+ (buffer-generation value) 1))
-    #t)
+    (unless (buffer? value)
+      (assertion-violation 'buffer-close! "expected a buffer" value))
+    (if (buffer-closed? value)
+        #f
+        (begin
+          (buffer-state-set! value 'closing)
+          (for-each extent-close! (buffer-extents value))
+          (for-each marker-close! (buffer-markers value))
+          (core-document-close! (buffer-document value))
+          (buffer-state-set! value 'closed)
+          (buffer-generation-set! value (+ (buffer-generation value) 1))
+          #t)))
 )

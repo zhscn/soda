@@ -1,5 +1,11 @@
 (library (soda core view)
   (export make-view
+          make-view-service
+          view-service?
+          view-service-create!
+          view-service-ref
+          view-service-views
+          view-service-close-view!
           view?
           view-id
           view-owner
@@ -27,6 +33,7 @@
           window-rectangle
           window-set-rectangle!
           window-focused?
+          window-closed?
           window-focus!
           window-split!
           window-leaves
@@ -58,13 +65,13 @@
       (assertion-violation who "view is closed" value))
     value)
 
-  (define (make-view owner buffer)
+  (define (make-view/internal id owner buffer)
     (owner-assert-active 'make-view owner)
     (unless (buffer? buffer)
       (assertion-violation 'make-view "expected a buffer" buffer))
     (let ([view
             (%make-view
-              (identity-source-next! view-source)
+              id
               owner
               buffer
               (buffer-marker buffer 0 'before)
@@ -75,6 +82,63 @@
               #f)])
       (owner-add-cleanup! owner (lambda () (view-close! view)))
       view))
+
+  (define (make-view owner buffer)
+    (make-view/internal (identity-source-next! view-source) owner buffer))
+
+  (define-record-type
+    (view-service %make-view-service view-service?)
+    (fields
+      (immutable identities view-service-identities)
+      (immutable views view-service-table)))
+
+  (define (make-view-service)
+    (%make-view-service (make-identity-source) (make-eqv-hashtable)))
+
+  (define (view-service-create! service owner buffer)
+    (unless (view-service? service)
+      (assertion-violation
+        'view-service-create! "expected a view service" service))
+    (let* ([id (identity-source-next! (view-service-identities service))]
+           [view (make-view/internal id owner buffer)])
+      (hashtable-set! (view-service-table service) id view)
+      (owner-add-cleanup!
+        owner
+        (lambda ()
+          (when (eq? view (hashtable-ref (view-service-table service) id #f))
+            (hashtable-delete! (view-service-table service) id))))
+      view))
+
+  (define (view-service-ref service id . default)
+    (unless (view-service? service)
+      (assertion-violation
+        'view-service-ref "expected a view service" service))
+    (let ([view (hashtable-ref (view-service-table service) id #f)])
+      (cond
+        [(and view (not (view-closed? view))) view]
+        [view
+         (hashtable-delete! (view-service-table service) id)
+         (if (null? default) #f (car default))]
+        [else (if (null? default) #f (car default))])))
+
+  (define (view-service-views service)
+    (unless (view-service? service)
+      (assertion-violation
+        'view-service-views "expected a view service" service))
+    (call-with-values
+      (lambda () (hashtable-entries (view-service-table service)))
+      (lambda (ids views)
+        (filter
+          (lambda (view) (not (view-closed? view)))
+          (vector->list views)))))
+
+  (define (view-service-close-view! service id)
+    (let ([view (view-service-ref service id #f)])
+      (if view
+          (begin
+            (hashtable-delete! (view-service-table service) id)
+            (view-close! view))
+          #f)))
 
   (define (view-set-point! value offset)
     (require-open-view 'view-set-point! value)
@@ -98,10 +162,16 @@
           'view-set-mark!
           "mark must be a marker in the view buffer"
           mark)))
+    (let ([replacement
+            (and mark
+                 (buffer-marker
+                   (view-buffer value)
+                   (marker-offset mark)
+                   (marker-affinity mark)))])
     (when (view-mark value) (marker-close! (view-mark value)))
-    (view-mark-set! value mark)
+    (view-mark-set! value replacement)
     (view-generation-set! value (+ (view-generation value) 1))
-    mark)
+    replacement))
 
   (define (view-selection-range value)
     (require-open-view 'view-selection-range value)
@@ -164,11 +234,6 @@
                    (reverse
                      (append result
                              (cons (list owner key item) (cdr entries)))))
-                 (owner-add-cleanup!
-                   owner
-                   (lambda ()
-                     (when (and (view? value) (not (view-closed? value)))
-                       (view-clear-local! value owner key))))
                  item)
                (loop (cdr entries) (cons entry result))))])))
 
@@ -187,12 +252,16 @@
                 (loop (cdr entries) (cons entry result) removed?))))))
 
   (define (view-close! value)
-    (require-open-view 'view-close! value)
-    (marker-close! (view-point value))
-    (when (view-mark value) (marker-close! (view-mark value)))
-    (view-closed?-set! value #t)
-    (view-generation-set! value (+ (view-generation value) 1))
-    #t)
+    (unless (view? value)
+      (assertion-violation 'view-close! "expected a view" value))
+    (if (view-closed? value)
+        #f
+        (begin
+          (marker-close! (view-point value))
+          (when (view-mark value) (marker-close! (view-mark value)))
+          (view-closed?-set! value #t)
+          (view-generation-set! value (+ (view-generation value) 1))
+          #t)))
 
   (define-record-type
     (window %make-window window?)
@@ -204,46 +273,77 @@
       (mutable parent window-parent window-parent-set!)
       (mutable children window-children window-children-set!)
       (mutable rectangle window-rectangle window-rectangle-set!)
-      (mutable focused? window-focused? window-focused?-set!)))
+      (mutable focused? window-focused? window-focused?-set!)
+      (mutable closed? window-closed? window-closed?-set!)))
+
+  (define (require-open-window who value)
+    (unless (window? value)
+      (assertion-violation who "expected a window" value))
+    (when (window-closed? value)
+      (assertion-violation who "window is closed" value))
+    value)
+
+  (define (valid-window-rectangle? rectangle)
+    (and (vector? rectangle)
+         (= (vector-length rectangle) 4)
+         (for-all
+           (lambda (component)
+             (and (exact-integer? component) (>= component 0)))
+           (vector->list rectangle))))
 
   (define (make-window owner view . rectangle)
     (owner-assert-active 'make-window owner)
-    (unless (view? view)
-      (assertion-violation 'make-window "expected a view" view))
-    (%make-window
-      (identity-source-next! window-source)
-      owner
-      'leaf
-      view
-      #f
-      '()
-      (if (null? rectangle) (vector 0 0 0 0) (car rectangle))
-      #f))
+    (require-open-view 'make-window view)
+    (let* ([rectangle
+             (if (null? rectangle) (vector 0 0 0 0) (car rectangle))]
+           [window
+            (%make-window
+              (identity-source-next! window-source)
+              owner
+              'leaf
+              view
+              #f
+              '()
+              rectangle
+              #f
+              #f)])
+      (unless (valid-window-rectangle? rectangle)
+        (assertion-violation
+          'make-window "rectangle must contain four non-negative integers"
+          rectangle))
+      (owner-add-cleanup! owner (lambda () (window-close! window)))
+      window))
 
   (define (window-set-rectangle! value rectangle)
-    (unless (window? value)
-      (assertion-violation 'window-set-rectangle! "expected a window" value))
-    (unless (and (vector? rectangle) (= (vector-length rectangle) 4))
+    (require-open-window 'window-set-rectangle! value)
+    (unless (valid-window-rectangle? rectangle)
       (assertion-violation
         'window-set-rectangle!
-        "rectangle must be a four-element vector"
+        "rectangle must contain four non-negative integers"
         rectangle))
     (window-rectangle-set! value rectangle)
     rectangle)
 
   (define (window-focus! value focused?)
-    (unless (window? value)
-      (assertion-violation 'window-focus! "expected a window" value))
+    (require-open-window 'window-focus! value)
+    (when (and focused? (not (eq? (window-kind value) 'leaf)))
+      (assertion-violation
+        'window-focus! "only a leaf window can receive focus" value))
+    (let root-loop ([root value])
+      (if (window-parent root)
+          (root-loop (window-parent root))
+          (when focused?
+            (for-each
+              (lambda (leaf) (window-focused?-set! leaf #f))
+              (window-leaves root)))))
     (window-focused?-set! value (and focused? #t))
     (window-focused? value))
 
   (define (window-split! value direction new-view)
-    (unless (window? value)
-      (assertion-violation 'window-split! "expected a window" value))
+    (require-open-window 'window-split! value)
     (unless (memq direction '(horizontal vertical))
       (assertion-violation 'window-split! "invalid split direction" direction))
-    (unless (view? new-view)
-      (assertion-violation 'window-split! "expected a view" new-view))
+    (require-open-view 'window-split! new-view)
     (unless (eq? (window-kind value) 'leaf)
       (assertion-violation 'window-split! "window is already split" value))
     (let* ([old-view (window-view value)]
@@ -255,7 +355,8 @@
                    value
                    '()
                    (window-rectangle value)
-                   (window-focused? value))]
+                   (window-focused? value)
+                   #f)]
            [right (%make-window
                     (identity-source-next! window-source)
                     (window-owner value)
@@ -264,6 +365,7 @@
                     value
                     '()
                     (window-rectangle value)
+                    #f
                     #f)])
       (window-kind-set! value direction)
       (window-view-set! value #f)
@@ -272,20 +374,55 @@
       (values left right)))
 
   (define (window-leaves value)
-    (unless (window? value)
-      (assertion-violation 'window-leaves "expected a window" value))
+    (require-open-window 'window-leaves value)
     (if (eq? (window-kind value) 'leaf)
         (list value)
         (apply append (map window-leaves (window-children value)))))
 
+  (define (window-destroy-subtree! value)
+    (for-each window-destroy-subtree! (window-children value))
+    (window-children-set! value '())
+    (window-view-set! value #f)
+    (window-parent-set! value #f)
+    (window-focused?-set! value #f)
+    (window-closed?-set! value #t))
+
+  (define (window-promote-child! parent child)
+    (window-kind-set! parent (window-kind child))
+    (window-view-set! parent (window-view child))
+    (window-children-set! parent (window-children child))
+    (for-each
+      (lambda (grandchild) (window-parent-set! grandchild parent))
+      (window-children parent))
+    (window-focused?-set! parent (window-focused? child))
+    ;; The promoted node is only a tree shell.  Its View and descendants are
+    ;; transferred to the parent and remain live.
+    (window-view-set! child #f)
+    (window-children-set! child '())
+    (window-parent-set! child #f)
+    (window-focused?-set! child #f)
+    (window-closed?-set! child #t))
+
   (define (window-close! value)
     (unless (window? value)
       (assertion-violation 'window-close! "expected a window" value))
-    (for-each window-close! (window-children value))
-    (when (and (eq? (window-kind value) 'leaf)
-               (view? (window-view value)))
-      (view-close! (window-view value)))
-    (window-children-set! value '())
-    (window-view-set! value #f)
-    #t)
+    (if (window-closed? value)
+        #f
+        (let ([parent (window-parent value)])
+          (if (not parent)
+              (window-destroy-subtree! value)
+              (let* ([siblings
+                       (filter
+                         (lambda (candidate) (not (eq? candidate value)))
+                         (window-children parent))]
+                     [sibling (and (pair? siblings) (car siblings))])
+                (window-destroy-subtree! value)
+                (if sibling
+                    (window-promote-child! parent sibling)
+                    (begin
+                      (window-kind-set! parent 'leaf)
+                      (window-view-set! parent #f)
+                      (window-children-set! parent '())
+                      (window-focused?-set! parent #f)))))
+          #t)))
 )

@@ -7,9 +7,15 @@
           owner-generation
           owner-active?
           owner-add-cleanup!
+          owner-remove-cleanup!
           owner-next-generation!
           owner-close!
           owner-assert-active
+          make-registration
+          registration?
+          registration-owner
+          registration-active?
+          registration-close!
           make-identity-source
           identity-source?
           identity-source-next!)
@@ -86,15 +92,74 @@
       (cons cleanup (owner-cleanups owner)))
     cleanup)
 
+  (define (owner-remove-cleanup! owner cleanup)
+    (unless (owner? owner)
+      (assertion-violation
+        'owner-remove-cleanup! "expected an owner" owner))
+    (let ([before (owner-cleanups owner)])
+      (owner-cleanups-set!
+        owner
+        (filter (lambda (candidate) (not (eq? candidate cleanup))) before))
+      (not (= (length before) (length (owner-cleanups owner))))))
+
   (define (owner-close! owner)
-    (owner-assert-active 'owner-close! owner)
-    (for-each
-      (lambda (cleanup)
-        (guard (condition [else #f])
-          (cleanup)))
-      (owner-cleanups owner))
-    (owner-cleanups-set! owner '())
-    (owner-active?-set! owner #f)
-    (owner-generation-set! owner (+ (owner-generation owner) 1))
-    #t)
+    (unless (owner? owner)
+      (assertion-violation 'owner-close! "expected an owner" owner))
+    (if (not (owner-active? owner))
+        #f
+        (let ([failures '()])
+          ;; Detach each cleanup batch before invoking it.  A cleanup may
+          ;; register another owner-scoped resource; that resource is then
+          ;; collected by the next batch instead of being silently lost.
+          (let loop ()
+            (let ([cleanups (owner-cleanups owner)])
+              (owner-cleanups-set! owner '())
+              (unless (null? cleanups)
+                (for-each
+                  (lambda (cleanup)
+                    (guard
+                      (condition
+                        [else (set! failures (cons condition failures))])
+                      (cleanup)))
+                  cleanups)
+                (loop))))
+          (owner-active?-set! owner #f)
+          (owner-generation-set! owner (+ (owner-generation owner) 1))
+          (if (null? failures)
+              #t
+              (raise (car failures))))))
+
+  (define-record-type
+    (registration %make-registration registration?)
+    (fields
+      (immutable owner registration-owner)
+      (immutable close registration-close-procedure)
+      (mutable active? registration-active? registration-active?-set!)))
+
+  (define (make-registration owner close)
+    (owner-assert-active 'make-registration owner)
+    (unless (procedure? close)
+      (assertion-violation 'make-registration "close must be a procedure" close))
+    (letrec ([registration
+               (%make-registration
+                 owner
+                 (lambda ()
+                   (owner-remove-cleanup! owner owner-cleanup)
+                   (close))
+                 #t)]
+             [owner-cleanup
+               (lambda () (registration-close! registration))])
+      (owner-add-cleanup! owner owner-cleanup)
+      registration))
+
+  (define (registration-close! value)
+    (unless (registration? value)
+      (assertion-violation
+        'registration-close! "expected a registration" value))
+    (if (not (registration-active? value))
+        #f
+        (begin
+          (registration-active?-set! value #f)
+          ((registration-close-procedure value))
+          #t)))
 )
