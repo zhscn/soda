@@ -895,6 +895,16 @@
                (equal? (window-rectangle right) '(0 4 3 3)))
     (error 'kernel-tests "Window grid layout differs")))
 
+(let* ([left (make-leaf-window 1 #f)]
+       [right (make-leaf-window 2 #f)]
+       [root (make-split-window 'horizontal (list left right) '(1 2) #f)]
+       [surface (make-surface root '(7 . 3))])
+  (unless (and (equal? (window-rectangle left) '(0 0 2 3))
+               (equal? (window-rectangle right) '(0 2 5 3))
+               (eq? (surface-selected-window surface) left)
+               (window-selected? left))
+    (error 'kernel-tests "weighted Window layout or initial selection differs")))
+
 (surface-resize! surface '(40 . 12))
 (unless (and (= (surface-generation surface) 2)
              (equal? (window-rectangle leaf) '(0 0 40 12)))

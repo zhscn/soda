@@ -51,7 +51,10 @@
     (unless (and (window? root-window) (surface-size? size))
       (assertion-violation 'make-surface "invalid root window or surface size"))
     (window-layout! root-window 0 0 (car size) (cdr size))
-    (%make-surface (identity-source-next! surface-identities) size root-window #f 0))
+    (let ([selected (car (window-leaves root-window))])
+      (window-set-selected! selected #t)
+      (%make-surface (identity-source-next! surface-identities)
+                     size root-window selected 0)))
 
   (define (surface-resize! surface size)
     (unless (and (surface? surface) (surface-size? size))

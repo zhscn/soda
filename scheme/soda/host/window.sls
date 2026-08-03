@@ -6,6 +6,7 @@
           window-view-id
           window-axis
           window-children
+          window-weights
           window-rectangle
           window-layout!
           window-selected?
@@ -20,16 +21,39 @@
       (immutable view-id window-view-id)
       (immutable axis window-axis)
       (immutable children window-children)
+      (immutable weights window-weights)
       (mutable rectangle window-rectangle window-rectangle-set!)
       (mutable selected? window-selected? window-selected?-set!)))
 
   (define (make-leaf-window view-id rectangle)
-    (%make-window 'leaf view-id #f '() rectangle #f))
+    (%make-window 'leaf view-id #f '() '() rectangle #f))
 
-  (define (make-split-window axis children rectangle)
-    (unless (and (memq axis '(horizontal vertical)) (pair? children))
-      (assertion-violation 'make-split-window "invalid split window" axis children))
-    (%make-window 'split #f axis children rectangle #f))
+  (define (split-weights? children weights)
+    (and (= (length children) (length weights))
+         (for-all (lambda (weight)
+                    (and (rational? weight) (exact? weight) (> weight 0)))
+                  weights)))
+
+  (define (equal-weights count)
+    (let loop ([remaining count] [result '()])
+      (if (= remaining 0)
+          (reverse result)
+          (loop (- remaining 1) (cons 1 result)))))
+
+  (define make-split-window
+    (case-lambda
+      [(axis children rectangle)
+       (make-split-window axis children (equal-weights (length children)) rectangle)]
+      [(axis children weights rectangle)
+       (unless (and (memq axis '(horizontal vertical))
+                    (pair? children)
+                    (list? children)
+                    (list? weights)
+                    (split-weights? children weights))
+         (assertion-violation 'make-split-window
+                              "invalid split window, children, or weights"
+                              axis children weights))
+       (%make-window 'split #f axis (append children '()) (append weights '()) rectangle #f)]))
 
   (define (window-set-selected! window value)
     (unless (window? window)
@@ -47,6 +71,33 @@
   (define (cell-count? value)
     (and (integer? value) (exact? value) (>= value 0)))
 
+  (define (weighted-extents extent weights)
+    (let* ([total (apply + weights)]
+           [floors (map (lambda (weight) (div (* extent weight) total)) weights)]
+           [remaining (- extent (apply + floors))])
+      ;; Exact rational weights make the largest-remainder allocation stable.
+      ;; Ties retain child order, so equal weights preserve the existing split
+      ;; behavior where leading children receive the extra terminal cells.
+      (let loop ([count remaining] [sizes floors])
+        (if (= count 0)
+            sizes
+            (let choose ([index 0] [best-index 0] [best-remainder -1]
+                         [remaining-weights weights])
+              (if (null? remaining-weights)
+                  (loop (- count 1)
+                        (let increment ([items sizes] [position 0])
+                          (if (= position best-index)
+                              (cons (+ 1 (car items)) (cdr items))
+                              (cons (car items)
+                                    (increment (cdr items) (+ position 1))))))
+                  (let ([remainder
+                         (- (* extent (car remaining-weights))
+                            (* (list-ref floors index) total))])
+                    (if (> remainder best-remainder)
+                        (choose (+ index 1) index remainder (cdr remaining-weights))
+                        (choose (+ index 1) best-index best-remainder
+                                (cdr remaining-weights))))))))))
+
   ;; Rectangles are (row column width height).  Integer partitioning keeps
   ;; every child inside its parent and gives the leading children a remainder.
   (define (window-layout! window row column width height)
@@ -56,19 +107,17 @@
     (window-rectangle-set! window (list row column width height))
     (unless (eq? (window-kind window) 'leaf)
       (let* ([children (window-children window)]
-             [count (length children)]
              [horizontal? (eq? (window-axis window) 'horizontal)]
              [extent (if horizontal? width height)]
-             [base (div extent count)]
-             [remainder (mod extent count)])
-        (let loop ([remaining children] [index 0] [offset 0])
+             [extents (weighted-extents extent (window-weights window))])
+        (let loop ([remaining children] [remaining-extents extents] [offset 0])
           (unless (null? remaining)
-            (let ([size (+ base (if (< index remainder) 1 0))])
+            (let ([size (car remaining-extents)])
               (window-layout! (car remaining)
                               (if horizontal? row (+ row offset))
                               (if horizontal? (+ column offset) column)
                               (if horizontal? size width)
                               (if horizontal? height size))
-              (loop (cdr remaining) (+ index 1) (+ offset size)))))))
+              (loop (cdr remaining) (cdr remaining-extents) (+ offset size)))))))
     window)
 )
