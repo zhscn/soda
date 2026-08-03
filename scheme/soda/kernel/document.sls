@@ -11,6 +11,9 @@
           text-byte-at
           text-previous-character-offset
           text-next-character-offset
+          text-previous-grapheme-offset
+          text-next-grapheme-offset
+          text-grapheme-boundary?
           text-line-start
           text-line-content-end
           text-position
@@ -46,6 +49,7 @@
           document-set-editable-start!
           snapshot?
           snapshot-close!
+          snapshot-reap-unreachable!
           snapshot-document-id
           snapshot-revision
           snapshot-text
@@ -98,6 +102,19 @@
       (assertion-violation who "unexpected handle type" value))
     (when (native-null-pointer? (pointer value))
       (assertion-violation who "handle is closed" value)))
+
+  (define snapshot-guardian (make-guardian))
+
+  (define (snapshot-reap-unreachable!)
+    (let loop ([snapshot (snapshot-guardian)])
+      (when snapshot
+        (snapshot-close! snapshot)
+        (loop (snapshot-guardian)))))
+
+  (define (adopt-snapshot snapshot)
+    (snapshot-reap-unreachable!)
+    (snapshot-guardian snapshot)
+    snapshot)
 
   (define (bytevector->text data)
     (let ([data (as-bytevector 'bytevector->text data)])
@@ -175,6 +192,112 @@
                        #x80)))
                 candidate
                 (loop (+ candidate 1)))))))
+
+  (define (text-codepoint-at value offset)
+    (let* ([first (text-byte-at value offset)]
+           [width
+            (cond
+              [(< first #x80) 1]
+              [(= (bitwise-and first #xe0) #xc0) 2]
+              [(= (bitwise-and first #xf0) #xe0) 3]
+              [else 4])]
+           [initial
+            (case width
+              [(1) first]
+              [(2) (bitwise-and first #x1f)]
+              [(3) (bitwise-and first #x0f)]
+              [else (bitwise-and first #x07)])])
+      (let loop ([index 1] [codepoint initial])
+        (if (= index width)
+            (values codepoint (+ offset width))
+            (loop
+              (+ index 1)
+              (+ (bitwise-arithmetic-shift-left codepoint 6)
+                 (bitwise-and (text-byte-at value (+ offset index)) #x3f)))))))
+
+  (define (grapheme-extend? codepoint)
+    (let ([category (char-general-category (integer->char codepoint))])
+      (or (memq category '(Mn Me Mc))
+          (and (<= #xfe00 codepoint) (<= codepoint #xfe0f))
+          (and (<= #xe0100 codepoint) (<= codepoint #xe01ef))
+          (and (<= #x1f3fb codepoint) (<= codepoint #x1f3ff)))))
+
+  (define (regional-indicator? codepoint)
+    (and (<= #x1f1e6 codepoint) (<= codepoint #x1f1ff)))
+
+  (define (grapheme-control? codepoint)
+    (and (not (= codepoint #x200d))
+         (memq
+           (char-general-category (integer->char codepoint))
+           '(Cc Cf Zl Zp))))
+
+  ;; Extended grapheme navigation covers combining marks, spacing marks,
+  ;; variation selectors, emoji modifiers, ZWJ sequences, CRLF, and regional
+  ;; indicator pairs. It operates directly on UTF-8 bytes and never copies the
+  ;; document merely to move a caret.
+  (define (text-next-grapheme-offset value offset)
+    (let ([size (text-size value)])
+      (if (>= offset size)
+          size
+          (call-with-values
+            (lambda () (text-codepoint-at value offset))
+            (lambda (first next)
+              (let loop ([previous first]
+                         [position next]
+                         [regional-count (if (regional-indicator? first) 1 0)])
+                (if (>= position size)
+                    size
+                    (call-with-values
+                      (lambda () (text-codepoint-at value position))
+                      (lambda (current following)
+                        (if (and
+                              (not
+                                (and
+                                  (not (and (= previous #x0d) (= current #x0a)))
+                                  (or (grapheme-control? previous)
+                                      (grapheme-control? current))))
+                              (or
+                                (and (= previous #x0d) (= current #x0a))
+                                (grapheme-extend? current)
+                                (= current #x200d)
+                                (= previous #x200d)
+                                (and (regional-indicator? previous)
+                                     (regional-indicator? current)
+                                     (odd? regional-count))))
+                            (loop
+                              current following
+                              (if (regional-indicator? current)
+                                  (+ regional-count 1)
+                                  0))
+                            position))))))))))
+
+  (define (text-previous-grapheme-offset value offset)
+    (if (zero? offset)
+        0
+        (let* ([position (text-position value offset)]
+               [line (car position)]
+               [start
+                (if (and (> line 0)
+                         (= offset (text-line-start value line)))
+                    (text-line-start value (- line 1))
+                    (text-line-start value line))])
+          (let loop ([current start] [previous start])
+            (let ([next (text-next-grapheme-offset value current)])
+              (if (>= next offset)
+                  current
+                  (loop next current)))))))
+
+  (define (text-grapheme-boundary? value offset)
+    (unless (and (integer? offset) (exact? offset)
+                 (>= offset 0)
+                 (<= offset (text-size value)))
+      (assertion-violation
+        'text-grapheme-boundary? "offset is outside text" offset))
+    (or (zero? offset)
+        (= offset (text-size value))
+        (= offset
+           (text-next-grapheme-offset
+             value (text-previous-grapheme-offset value offset)))))
 
   (define (checked-text-offset who operation)
     (let ([offset (operation)])
@@ -267,9 +390,10 @@
 
   (define (document-snapshot value)
     (require-open 'document-snapshot document? document-pointer value)
-    (%make-snapshot
-      (check-pointer 'document-snapshot
-                     (%document-snapshot (document-pointer value)))))
+    (adopt-snapshot
+      (%make-snapshot
+        (check-pointer 'document-snapshot
+                       (%document-snapshot (document-pointer value))))))
 
   (define (document-begin-transaction value)
     (require-open 'document-begin-transaction document? document-pointer value)
@@ -581,9 +705,10 @@
 
   (define (transaction-snapshot value)
     (require-open 'transaction-snapshot transaction? transaction-pointer value)
-    (%make-snapshot
-      (check-pointer 'transaction-snapshot
-                     (%transaction-snapshot (transaction-pointer value)))))
+    (adopt-snapshot
+      (%make-snapshot
+        (check-pointer 'transaction-snapshot
+                       (%transaction-snapshot (transaction-pointer value))))))
 
   (define (transaction-commit! value)
     (require-open 'transaction-commit! transaction? transaction-pointer value)

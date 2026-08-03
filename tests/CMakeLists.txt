@@ -67,3 +67,6 @@ soda_embed_chez_application(scheme_kernel_tests
   SOURCES ${SODA_TEST_SCHEME_SOURCES}
 )
 add_test(NAME scheme_kernel_tests COMMAND scheme_kernel_tests)
+set_tests_properties(scheme_kernel_tests PROPERTIES
+  ENVIRONMENT "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/lsan.supp"
+)

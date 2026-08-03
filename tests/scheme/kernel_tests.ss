@@ -1,5 +1,6 @@
 #!r6rs
 (import (rnrs)
+        (rnrs eval)
         (soda kernel change)
         (soda kernel extension)
         (soda kernel range-set)
@@ -20,6 +21,17 @@
         (soda ffi indentation)
         (soda ffi tree-sitter))
 
+(define (library-binding-hidden? library-name identifier)
+  (guard (condition [else #t])
+    (eval identifier (apply environment (list library-name)))
+    #f))
+
+(unless (and
+          (library-binding-hidden? '(soda host buffer) 'buffer-document)
+          (library-binding-hidden? '(soda host buffer) 'buffer-publish-state!)
+          (library-binding-hidden? '(soda host view) 'view-publish-state!))
+  (error 'kernel-tests "public host facade exposes dispatcher mutation"))
+
 (define selection
   (make-selection
     (list (make-selection-range 1 4 'after 'character '(primary . #t))
@@ -29,6 +41,47 @@
   (error 'kernel-tests "selection primary differs"))
 (unless (equal? (selection-range-from (selection-primary-range selection)) 8)
   (error 'kernel-tests "selection range differs"))
+
+(let ([normalized
+       (make-selection
+         (list (make-selection-range 7 3)
+               (make-selection-range 1 4))
+         0
+         'merge)])
+  (unless (and (= (length (selection-ranges normalized)) 1)
+               (= (selection-range-anchor (selection-primary-range normalized)) 7)
+               (= (selection-range-head (selection-primary-range normalized)) 1))
+    (error 'kernel-tests "overlapping selection ranges were not normalized")))
+(unless
+    (guard (condition [else #t])
+      (make-selection
+        (list (make-selection-range 1 4)
+              (make-selection-range 3 5))
+        0
+        'reject)
+      #f)
+  (error 'kernel-tests "selection overlap rejection policy differs"))
+
+(call-with-values
+  (lambda ()
+    (change-by-range
+      (make-selection
+        (list (make-selection-range 1 1)
+              (make-selection-range 3 3)))
+      4
+      (lambda (range)
+        (let ([position (selection-range-head range)])
+          (values
+            (make-change-set 4 (list (make-text-change position position "X")))
+            (make-selection-range (+ position 1) (+ position 1)))))))
+  (lambda (range-changes range-selection)
+    (unless (and (string=?
+                   (change-set-apply range-changes (string->utf8 "abcd") #t)
+                   "aXbcXd")
+                 (equal? (map selection-range-head
+                              (selection-ranges range-selection))
+                         '(2 5)))
+      (error 'kernel-tests "change-by-range composition differs"))))
 
 (define changes
   (make-change-set
@@ -87,13 +140,13 @@
 (let* ([base (string->utf8 "abcde")]
        [first (make-change-set 5 (list (make-text-change 1 2 "XYZ")))]
        [second (make-change-set 7 (list (make-text-change 6 7 "!")))]
-       [composed (change-set-compose first second base)])
+       [composed (change-set-compose first second)])
   (unless (string=? (change-set-apply composed base #t) "aXYZcd!")
     (error 'kernel-tests "change set composition differs")))
 (let* ([base (string->utf8 "abcde")]
        [first (make-change-set 5 (list (make-text-change 1 1 "X")))]
        [second (make-change-set 6 (list (make-text-change 5 5 "Y")))]
-       [composed (change-set-compose first second base)])
+       [composed (change-set-compose first second)])
   (unless (and (= (length (change-set-changes composed)) 2)
                (string=? (change-set-apply composed base #t) "aXbcdYe")
                (= (change-set-map-offset composed 2 'after) 3))
@@ -103,32 +156,80 @@
        [second (make-change-set 5 (list (make-text-change 4 4 "Y")))]
        [merged (change-set-merge first second)]
        [mapped-second (change-set-map second first)]
-       [sequential (change-set-compose first mapped-second base)])
+       [sequential (change-set-compose first mapped-second)])
   (unless (and (string=? (change-set-apply merged base #t) "aXbcdYe")
                (string=? (change-set-apply sequential base #t) "aXbcdYe"))
     (error 'kernel-tests "simultaneous change merge differs")))
+
+;; Mapping concurrent replacements must satisfy the convergence law used by
+;; transaction batching, including edits that overlap at the end boundary.
+(let* ([base (string->utf8 "abcd")]
+       [a (make-change-set 4 (list (make-text-change 4 4 "YZ")))]
+       [b (make-change-set 4 (list (make-text-change 3 4 "YZ")))]
+       [left
+        (change-set-compose a (change-set-map b a))]
+       [right
+        (change-set-compose b (change-set-map a b #t))])
+  (unless (bytevector=?
+            (change-set-apply left base)
+            (change-set-apply right base))
+    (error 'kernel-tests "concurrent ChangeSet mapping did not converge")))
+
+(let* ([base (string->utf8 "abcd")]
+       [sets
+        (map
+          (lambda (spec)
+            (make-change-set
+              4
+              (list (make-text-change (car spec) (cadr spec) (caddr spec)))))
+          '((0 0 "X") (2 2 "YZ") (4 4 "X")
+            (0 1 "") (1 3 "Q") (3 4 "YZ")
+            (0 4 "") (0 4 "replacement")))])
+  (for-each
+    (lambda (a)
+      (for-each
+        (lambda (b)
+          (let ([left
+                 (change-set-compose a (change-set-map b a))]
+                [right
+                 (change-set-compose b (change-set-map a b #t))])
+            (unless (bytevector=?
+                      (change-set-apply left base)
+                      (change-set-apply right base))
+              (error 'kernel-tests "ChangeSet convergence matrix differs"))))
+        sets))
+    sets))
+
+(let* ([description (change-set-change-desc changes)]
+       [span (car (change-desc-changes description))])
+  (unless (and (change-span? span)
+               (= (change-span-from span) 2)
+               (= (change-span-to span) 4)
+               (= (change-span-insert-length span) 3)
+               (not (text-change? span)))
+    (error 'kernel-tests "ChangeDesc retained ChangeSet payload data")))
 (let* ([base (string->utf8 "abcde")]
        [first-spec
         (make-transaction-spec
-          0 #f #f
+          0 #f 0
           (make-change-set 5 (list (make-text-change 1 1 "X")))
           #f '() '() 'first #f)]
        [second-spec
         (make-transaction-spec
-          0 #f #f
+          0 #f 0
           (make-change-set 5 (list (make-text-change 4 4 "Y")))
           #f '() '() 'second #f)]
        [resolved
-        (resolve-transaction-specs (list first-spec second-spec) base)]
+        (resolve-transaction-specs (list first-spec second-spec) 5)]
        [sequential-spec
         (make-transaction-spec
-          0 #f #f
+          0 #f 0
           (make-change-set 6 (list (make-text-change 2 2 "Y")))
           #f '() '() #f #f #t)]
        [sequential-resolved
         (resolve-transaction-specs
           (list first-spec sequential-spec)
-          base)])
+          5)])
 (unless (and (string=?
                  (change-set-apply
                    (resolved-transaction-changes resolved) base #t)
@@ -144,22 +245,22 @@
       (resolve-transaction-specs
         (list
           (make-transaction-spec
-            0 #f #f
+            0 #f 0
             (make-change-set 5 '())
             (make-selection (list (make-selection-range 6 6)))
             '() '()))
-        (string->utf8 "abcde"))
+        5)
       #f)
   (error 'kernel-tests "out-of-range transaction selection was accepted"))
 (let* ([base (string->utf8 "abcde")]
        [first-spec
         (make-transaction-spec
-          0 #f #f
+          0 #f 0
           (make-change-set 5 (list (make-text-change 1 1 "X")))
           #f '() '() #f #f)]
        [second-spec
         (make-transaction-spec
-          0 #f #f
+          0 #f 0
           (make-change-set 5 (list (make-text-change 4 4 "Y")))
           (make-selection (list (make-selection-range 5 5 'after 'character '())))
           (list
@@ -168,7 +269,7 @@
               (lambda (offset description)
                 (change-desc-map-offset description offset 'after))))
           '() #f #f)]
-       [resolved (resolve-transaction-specs (list first-spec second-spec) base)])
+       [resolved (resolve-transaction-specs (list first-spec second-spec) 5)])
   (unless (and (= (selection-range-head
                     (selection-primary-range
                       (resolved-transaction-selection resolved)))
@@ -315,6 +416,32 @@
   (error 'kernel-tests "duplicate state field was not normalized"))
 (unless (configuration-facet configuration read-only)
   (error 'kernel-tests "facet configuration differs"))
+(let* ([combine-count 0]
+       [cached-facet
+        (make-facet
+          'cached 'buffer '()
+          (lambda (values)
+            (set! combine-count (+ combine-count 1))
+            (list->vector values))
+          equal?
+          equal?)]
+       [compartment (make-compartment 'cached)]
+       [configuration
+        (make-configuration
+          (list (compartment-of
+                  compartment
+                  (make-facet-provider cached-facet 'same))))]
+       [first (configuration-facet configuration cached-facet)]
+       [again (configuration-facet configuration cached-facet)]
+       [reconfigured
+        (configuration-reconfigure
+          configuration compartment
+          (make-facet-provider cached-facet 'same))]
+       [after (configuration-facet reconfigured cached-facet)])
+  (unless (and (= combine-count 1)
+               (eq? first again)
+               (eq? first after))
+    (error 'kernel-tests "Facet comparison/cache identity differs")))
 (define view-only-facet
   (make-facet
     'view-only 'view #f
@@ -328,14 +455,32 @@
   (error 'kernel-tests "facet scope differs"))
 
 (define buffer-snapshot
-  (make-buffer-state 'document configuration (list (cons history-field 'empty))))
+  (make-buffer-state 'document configuration))
 (define view-snapshot
   (make-view-state 0 0 selection '(0 . 20) 'insert configuration))
-(define spec (make-transaction-spec 0 changes))
+(define spec (make-transaction-spec 0 0 changes))
+(unless
+    (guard (condition [else #t])
+      (make-transaction-spec 0 #f changes)
+      #f)
+  (error 'kernel-tests "transaction spec accepted a missing generation"))
 (unless (and (= (transaction-spec-buffer-id spec) 0)
              (eq? (buffer-state-field buffer-snapshot history-field) 'empty)
              (= (view-state-buffer-id view-snapshot) 0))
   (error 'kernel-tests "state protocol differs"))
+
+(define initial-view-field
+  (make-state-field
+    'initial-view 'view
+    (lambda (state)
+      (if (selection? (view-state-selection state)) 'created 'invalid))
+    (lambda (value transaction) value)))
+(define initial-view-state
+  (make-view-state
+    0 0 selection '(0 . 20) 'insert
+    (make-configuration (list initial-view-field))))
+(unless (eq? (view-state-field initial-view-state initial-view-field) 'created)
+  (error 'kernel-tests "view StateField was not initialized with its state"))
 
 ;; State effects are authored against the transaction's starting document and
 ;; are mapped before they reach the realized transaction.
@@ -349,6 +494,20 @@
   (make-transaction buffer-snapshot #f changes #f (list position-effect) '()))
 (unless (= (state-effect-value (car (transaction-effects mapped-transaction))) 10)
   (error 'kernel-tests "state effect mapping differs"))
+(let* ([false-effect
+        (make-state-effect 'false-value #t (lambda (value description) #f))]
+       [mapped
+        (state-effect-map-value
+          false-effect (change-set-change-desc (make-change-set 0 '())))]
+       [dropped
+        (state-effect-map-value
+          (make-state-effect
+            'drop #t (lambda (value description) state-effect-drop))
+          (change-set-change-desc (make-change-set 0 '())))])
+  (unless (and (state-effect? mapped)
+               (not (state-effect-value mapped))
+               (not dropped))
+    (error 'kernel-tests "StateEffect false/drop mapping differs")))
 
 (let* ([field
         (make-state-field
@@ -392,6 +551,29 @@
   (transaction-new-buffer-state reconfigured-transaction))
 (unless (eq? (buffer-state-field reconfigured-state mode-field) 'mode)
   (error 'kernel-tests "compartment reconfiguration differs"))
+
+(let* ([mode-facet
+        (make-facet 'mode-name #f (lambda (values) (car values)))]
+       [observing-field
+        (make-state-field
+          'observing 'buffer
+          (lambda (state)
+            (configuration-facet
+              (buffer-state-configuration state) mode-facet 'buffer))
+          (lambda (value transaction) value))]
+       [entry
+        (list (make-facet-provider mode-facet 'scheme-mode)
+              observing-field)]
+       [compartment (make-compartment 'observed-mode)]
+       [state (make-buffer-state 'document (make-configuration '()))]
+       [transaction
+        (make-transaction
+          state #f (make-change-set 0 '()) #f
+          (list (compartment-reconfigure compartment entry)) '()
+          'document)]
+       [new-state (transaction-new-buffer-state transaction)])
+  (unless (eq? (buffer-state-field new-state observing-field) 'scheme-mode)
+    (error 'kernel-tests "StateField.create did not observe new configuration")))
 (let* ([new-compartment (make-compartment 'new-mode)]
        [new-configuration
         (configuration-apply-effects
@@ -478,7 +660,7 @@
         (make-state-effect
           'drop
           'value
-          (lambda (value description) #f))])
+          (lambda (value description) state-effect-drop))])
   (unless (not (state-effect-map-value
                 drop-effect
                 (change-set-change-desc changes)))
@@ -486,6 +668,24 @@
 
 (define host (make-host-state))
 (define owner (make-owner 'kernel-test))
+(let ([text (string->text "e\x301;\x1f469;\x200d;\x1f4bb;")])
+  (let ([first (text-next-grapheme-offset text 0)]
+        [second (text-next-grapheme-offset text 3)]
+        [previous (text-previous-grapheme-offset text 14)]
+        [boundary (text-grapheme-boundary? text 3)]
+        [inside (text-grapheme-boundary? text 1)])
+    (unless (and (= first 3) (= second 14) (= previous 3)
+                 boundary (not inside))
+      (error
+        'kernel-tests "grapheme boundary navigation differs"
+        first second previous boundary inside)))
+  (text-close! text))
+(let ([text (string->text "\n\x301;")])
+  (unless (and (= (text-next-grapheme-offset text 0) 1)
+               (= (text-next-grapheme-offset text 1) 3))
+    (error 'kernel-tests "control grapheme boundaries differ"))
+  (text-close! text))
+
 (define document (make-document "hello"))
 (define buffer
   (buffer-service-create!
@@ -555,7 +755,8 @@
       publication-consistent?
       (= (buffer-state-generation (editor-update-new-buffer-state update))
          (view-state-buffer-generation
-           (cdr (car (editor-update-views update))))))))
+           (view-state-update-new-state
+             (car (editor-update-views update))))))))
 (define update
   (dispatcher-dispatch!
     (host-state-dispatch host)
@@ -569,6 +770,14 @@
                (snapshot-string (buffer-state-document (buffer-state buffer)))
                "hello world"))
   (error 'kernel-tests "dispatcher did not publish an atomic update"))
+(let ([view-update (car (editor-update-views update))])
+  (unless (and (= (view-state-generation
+                    (view-state-update-old-state view-update))
+                  0)
+               (= (view-state-generation
+                    (view-state-update-new-state view-update))
+                  1))
+    (error 'kernel-tests "EditorUpdate omitted old/new ViewState")))
 
 ;; A batch dispatch resolves simultaneous specs against one starting snapshot
 ;; and publishes one buffer generation/update.
@@ -642,27 +851,63 @@
                          "hello!"))
     (error 'kernel-tests "transaction filter policy differs")))
 
-(define second-view
-  (view-service-create!
-    (host-state-views host) owner buffer configuration))
-(define second-view-state (view-state second-view))
-(view-publish-state!
-  second-view
-  (make-view-state
-    (view-state-buffer-id second-view-state)
-    0
-    (view-state-selection second-view-state)
-    (view-state-viewport second-view-state)
-    (view-state-input-state second-view-state)
-    (view-state-configuration second-view-state)
-    (view-state-fields second-view-state)))
-(define stale-view-rejected?
+(let* ([target-document (make-document "other")]
+       [target-buffer
+        (buffer-service-create!
+          (host-state-buffers host) owner "*target*" target-document
+          (make-configuration '()))]
+       [retarget-filter
+        (lambda (resolved)
+          (make-resolved-transaction
+            (buffer-id target-buffer)
+            (resolved-transaction-origin-view-id resolved)
+            (resolved-transaction-start-generation resolved)
+            (resolved-transaction-changes resolved)
+            (resolved-transaction-selection resolved)
+            (resolved-transaction-effects resolved)
+            (resolved-transaction-annotations resolved)
+            (resolved-transaction-scroll-request resolved)
+            (resolved-transaction-filter-disabled? resolved)))]
+       [source-configuration
+        (make-configuration
+          (list
+            (make-facet-provider
+              transaction-filters-facet (list retarget-filter))))]
+       [source-document (make-document "hello")]
+       [source-buffer
+        (buffer-service-create!
+          (host-state-buffers host) owner "*source*" source-document
+          source-configuration)]
+       [source-view
+        (view-service-create!
+          (host-state-views host) owner source-buffer source-configuration)]
+       [rejected?
+        (guard (condition [else #t])
+          (dispatcher-dispatch!
+            (host-state-dispatch host)
+            (make-transaction-spec
+              (buffer-id source-buffer) (view-id source-view) 0
+              (make-change-set 5 (list (make-text-change 5 5 "!")))
+              #f '() '()))
+          #f)])
+  (unless (and rejected?
+               (string=?
+                 (snapshot-string
+                   (buffer-state-document (buffer-state source-buffer)))
+                 "hello")
+               (string=?
+                 (snapshot-string
+                   (buffer-state-document (buffer-state target-buffer)))
+                 "other"))
+    (error 'kernel-tests "transaction filter retargeted its baseline")))
+
+(define stale-transaction-rejected?
   (guard (condition [else #t])
     (dispatcher-dispatch!
       (host-state-dispatch host)
       (make-transaction-spec
         (buffer-id buffer) (view-id view)
-        (buffer-state-generation (buffer-state buffer))
+        (- (buffer-state-generation (buffer-state buffer)) 1)
         (make-change-set
           (snapshot-byte-size (buffer-state-document (buffer-state buffer)))
           (list (make-text-change
@@ -671,6 +916,53 @@
                   "!")))
         #f '() '()))
     #f))
-(unless stale-view-rejected?
-  (error 'kernel-tests "stale shared view was not rejected"))
+(unless stale-transaction-rejected?
+  (error 'kernel-tests "stale transaction was not rejected"))
+
+;; A View StateField failure occurs after the native transaction and snapshot
+;; have been prepared. The dispatcher must abort that native transaction so a
+;; later edit can still commit.
+(let* ([fail-next? #t]
+       [failing-field
+        (make-state-field
+          'failing-view 'view
+          (lambda (state) 'ready)
+          (lambda (value transaction)
+            (if fail-next?
+                (begin
+                  (set! fail-next? #f)
+                  (error 'kernel-tests "intentional view update failure"))
+                value)))]
+       [plain-configuration (make-configuration '())]
+       [failing-configuration (make-configuration (list failing-field))]
+       [failure-document (make-document "hello")]
+       [failure-buffer
+        (buffer-service-create!
+          (host-state-buffers host) owner "*failure*" failure-document
+          plain-configuration)]
+       [origin-view
+        (view-service-create!
+          (host-state-views host) owner failure-buffer plain-configuration)]
+       [failing-view
+        (view-service-create!
+          (host-state-views host) owner failure-buffer failing-configuration)]
+       [failure-spec
+        (make-transaction-spec
+          (buffer-id failure-buffer) (view-id origin-view) 0
+          (make-change-set 5 (list (make-text-change 5 5 "!")))
+          #f '() '())]
+       [failed?
+        (guard (condition [else #t])
+          (dispatcher-dispatch! (host-state-dispatch host) failure-spec)
+          #f)]
+       [recovered
+        (dispatcher-dispatch! (host-state-dispatch host) failure-spec)])
+  (unless (and failed?
+               recovered
+               (= (buffer-state-generation (buffer-state failure-buffer)) 1)
+               (string=?
+                 (snapshot-string
+                   (buffer-state-document (buffer-state failure-buffer)))
+                 "hello!"))
+    (error 'kernel-tests "dispatcher did not recover from ViewState failure")))
 (host-state-close! host)

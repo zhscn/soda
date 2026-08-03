@@ -1,0 +1,2 @@
+# Chez allocates this process-lifetime runtime mutex during Scheme_init.
+leak:S_make_mutex

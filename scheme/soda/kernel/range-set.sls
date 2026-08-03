@@ -88,7 +88,8 @@
     (fields
       (immutable ranges range-set-ranges)
       (immutable index range-set-index)
-      (immutable prefix-max-end range-set-prefix-max-end)))
+      (immutable prefix-max-end range-set-prefix-max-end)
+      (immutable points range-set-points)))
 
   (define-record-type
     (range-set-builder %make-range-set-builder range-set-builder?)
@@ -104,7 +105,17 @@
   (define (range-before? left right)
     (or (< (range-value-from left) (range-value-from right))
         (and (= (range-value-from left) (range-value-from right))
-             (<= (range-value-to left) (range-value-to right)))))
+             (< (range-value-to left) (range-value-to right)))))
+
+  (define (merge-range-lists left right)
+    (cond
+      [(null? left) right]
+      [(null? right) left]
+      [(range-before? (car right) (car left))
+       (cons (car right) (merge-range-lists left (cdr right)))]
+      [else
+       ;; Existing values retain precedence when positions are identical.
+       (cons (car left) (merge-range-lists (cdr left) right))]))
 
   (define (range-set-builder-add! builder . arguments)
     (unless (range-set-builder? builder)
@@ -209,7 +220,8 @@
       (%make-range-set
         copy
         (list->vector copy)
-        (prefix-max-ends copy))))
+        (prefix-max-ends copy)
+        (list->vector (filter range-value-point? copy)))))
 
   (define (range-set-empty? value)
     (unless (range-set? value)
@@ -250,7 +262,8 @@
                   (reverse result)
                   (loop
                     (+ position 1)
-                    (if (> (range-value-to range) from)
+                    (if (and (not (range-value-point? range))
+                             (> (range-value-to range) from))
                         (cons range result)
                         result))))))))
 
@@ -288,13 +301,34 @@
                     (+ position 1)
                     (if matches (cons range result) result))))))))
 
-  (define (unique-sorted-integers values)
-    (let loop ([items (list-sort < values)] [result '()])
+  (define (range-set-points-between value from to)
+    (let* ([points (range-set-points value)]
+           [start
+            (let loop ([low 0] [high (vector-length points)])
+              (if (>= low high)
+                  low
+                  (let ([middle (div (+ low high) 2)])
+                    (if (< (range-value-from (vector-ref points middle)) from)
+                        (loop (+ middle 1) high)
+                        (loop low middle)))))])
+      (let loop ([index start] [result '()])
+        (if (>= index (vector-length points))
+            (reverse result)
+            (let ([point (vector-ref points index)])
+              (if (> (range-value-from point) to)
+                  (reverse result)
+                  (loop (+ index 1) (cons point result))))))))
+
+  (define (stable-event-sort events)
+    (define (insert event sorted)
+      (cond
+        [(null? sorted) (list event)]
+        [(< (car event) (caar sorted)) (cons event sorted)]
+        [else (cons (car sorted) (insert event (cdr sorted)))]))
+    (let loop ([items events] [result '()])
       (if (null? items)
-          (reverse result)
-          (if (and (pair? result) (= (car result) (car items)))
-              (loop (cdr items) result)
-              (loop (cdr items) (cons (car items) result))))))
+          result
+          (loop (cdr items) (insert (car items) result)))))
 
   ;; Update a set by filtering existing values and merging sorted additions.
   ;; The operation keeps the RangeSet immutable and returns the original
@@ -319,9 +353,9 @@
                      (car filter-procedure))]
                [kept (filter predicate (range-set-ranges value))]
                [merged
-                 (list-sort
-                   range-before?
-                   (append kept (list-copy additions)))])
+                (merge-range-lists
+                  kept
+                  (list-sort range-before? (list-copy additions)))])
           (make-range-set merged))))
 
   ;; Produce contiguous spans with the active non-point values and point
@@ -332,52 +366,53 @@
       (assertion-violation 'range-set-spans "expected a range set" value))
     (unless (valid-query? from to)
       (assertion-violation 'range-set-spans "invalid query range" from to))
-    (let* ([relevant
-             (filter
-               (lambda (range)
-                 (if (range-value-point? range)
-                     (and (<= from (range-value-from range))
-                          (<= (range-value-from range) to))
-                     (and (< (range-value-from range) to)
-                          (> (range-value-to range) from))))
-               (range-set-ranges value))]
-           [boundaries
-             (unique-sorted-integers
-               (cons from
-                 (cons to
-                   (fold-left
-                     (lambda (result range)
-                       (if (range-value-point? range)
-                           (cons (range-value-from range) result)
-                           (cons (range-value-to range)
-                             (cons (range-value-from range) result))))
-                     '()
-                     relevant))))])
-      (let loop ([positions boundaries] [result '()])
-        (if (null? positions)
+    (let* ([ranges
+            (filter
+              (lambda (range) (not (range-value-point? range)))
+              (range-set-query value from to))]
+           [points (range-set-points-between value from to)]
+           [events
+            (append
+              (fold-right
+                (lambda (range result)
+                  (cons
+                    (list (max from (range-value-from range)) 'start range)
+                    (cons
+                      (list (min to (range-value-to range)) 'end range)
+                      result)))
+                '()
+                ranges)
+              (map
+                (lambda (point)
+                  (list (range-value-from point) 'point point))
+                points)
+              (list (list from 'boundary #f) (list to 'boundary #f)))]
+           [events
+            (stable-event-sort events)])
+      (define (remove-active active ending)
+        (filter
+          (lambda (range) (not (exists (lambda (item) (eq? item range)) ending)))
+          active))
+      (let loop ([items events] [active '()] [result '()])
+        (if (null? items)
             (reverse result)
-            (let* ([start (car positions)]
-                   [rest (cdr positions)]
-                   [end (if (null? rest) start (car rest))]
-                   [points
-                     (filter
-                       (lambda (range)
-                         (and (range-value-point? range)
-                              (= (range-value-from range) start)))
-                       relevant)]
-                   [active
-                     (filter
-                       (lambda (range)
-                         (and (not (range-value-point? range))
-                              (<= (range-value-from range) start)
-                              (< start (range-value-to range))))
-                       relevant)]
-                   [span
-                     (and (or (< start end) (pair? points))
-                          (make-range-span start end active points))])
-              (loop
-                rest
-                (if span (cons span result) result)))))))
+            (let* ([position (caar items)])
+              (let group ([rest items] [ending '()] [starting '()] [at-point '()])
+                (if (and (pair? rest) (= (caar rest) position))
+                    (let* ([event (car rest)]
+                           [kind (cadr event)]
+                           [range (caddr event)])
+                      (case kind
+                        [(end) (group (cdr rest) (cons range ending) starting at-point)]
+                        [(start) (group (cdr rest) ending (append starting (list range)) at-point)]
+                        [(point) (group (cdr rest) ending starting (append at-point (list range)))]
+                        [else (group (cdr rest) ending starting at-point)]))
+                    (let* ([active (append (remove-active active ending) starting)]
+                           [next (if (null? rest) position (caar rest))]
+                           [span
+                            (and (or (< position next) (pair? at-point))
+                                 (make-range-span position next active at-point))])
+                      (loop rest active (if span (cons span result) result))))))))))
 
   (define (range-cursor-advance-to-match! cursor)
     (let ([index (range-cursor-index cursor)]
@@ -465,8 +500,14 @@
         value changes))
     (let* ([change-list
              (if (change-set? changes)
-                 (change-set-changes changes)
-                 (change-desc-changes changes))]
+                 (map
+                   (lambda (change)
+                     (cons (text-change-from change) (text-change-to change)))
+                   (change-set-changes changes))
+                 (map
+                   (lambda (change)
+                     (cons (change-span-from change) (change-span-to change)))
+                   (change-desc-changes changes)))]
            [empty? (null? change-list)]
            [map-offset
              (lambda (offset affinity)
@@ -477,13 +518,14 @@
              (lambda (range)
                (let loop ([items change-list])
                  (and (pair? items)
-                      (let ([change (car items)])
-                        (or (and (< (text-change-from change)
-                                    (text-change-to change))
+                      (let* ([change (car items)]
+                             [change-from (car change)]
+                             [change-to (cdr change)])
+                        (or (and (< change-from change-to)
                                  (< (range-value-from range)
-                                    (text-change-to change))
+                                    change-to)
                                  (> (range-value-to range)
-                                    (text-change-from change)))
+                                    change-from))
                             (loop (cdr items)))))))]
            [map-range
              (lambda (range)

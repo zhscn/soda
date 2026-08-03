@@ -16,7 +16,8 @@
           selection-range-at
           selection-map
           selection-map-change
-          selection-primary-range)
+          selection-primary-range
+          change-by-range)
   (import (rnrs)
           (soda kernel value)
           (soda kernel change))
@@ -84,8 +85,10 @@
 
   (define make-selection
     (case-lambda
-      [(ranges) (make-selection ranges 0)]
+      [(ranges) (make-selection ranges 0 'merge)]
       [(ranges primary)
+       (make-selection ranges primary 'merge)]
+      [(ranges primary overlap-policy)
        (unless (proper-range-list? ranges)
          (assertion-violation
            'make-selection
@@ -96,7 +99,80 @@
                     (< primary (length ranges)))
          (assertion-violation
            'make-selection "primary index is outside ranges" primary))
-       (%make-selection (list-copy ranges) primary)]))
+       (unless (memq overlap-policy '(merge reject))
+         (assertion-violation
+           'make-selection "overlap policy must be merge or reject"
+           overlap-policy))
+       (let* ([indexed
+               (let loop ([items ranges] [index 0] [result '()])
+                 (if (null? items)
+                     (reverse result)
+                     (loop
+                       (cdr items) (+ index 1)
+                       (cons (cons index (car items)) result))))]
+              [ordered
+               (list-sort
+                 (lambda (left right)
+                   (let ([left-range (cdr left)] [right-range (cdr right)])
+                     (or (< (selection-range-from left-range)
+                            (selection-range-from right-range))
+                         (and
+                           (= (selection-range-from left-range)
+                              (selection-range-from right-range))
+                           (< (selection-range-to left-range)
+                              (selection-range-to right-range))))))
+                 indexed)])
+         (define (merged-range entries from to)
+           (let* ([primary-entry
+                   (let find ([items entries])
+                     (cond
+                       [(null? items) #f]
+                       [(= (caar items) primary) (car items)]
+                       [else (find (cdr items))]))]
+                  [representative (cdr (or primary-entry (car entries)))]
+                  [forward?
+                   (<= (selection-range-anchor representative)
+                       (selection-range-head representative))])
+             (make-selection-range
+               (if forward? from to)
+               (if forward? to from)
+               (selection-range-affinity representative)
+               (selection-range-granularity representative)
+               (selection-range-metadata representative))))
+         (let loop ([items (cdr ordered)]
+                    [group (list (car ordered))]
+                    [from (selection-range-from (cdar ordered))]
+                    [to (selection-range-to (cdar ordered))]
+                    [result '()]
+                    [result-primary #f])
+           (if (null? items)
+               (let* ([contains-primary? (exists (lambda (entry) (= (car entry) primary)) group)]
+                      [result-primary
+                       (if contains-primary? (length result) result-primary)]
+                      [result (cons (merged-range group from to) result)])
+                 (%make-selection
+                   (reverse result)
+                   (or result-primary 0)))
+               (let* ([entry (car items)]
+                      [range (cdr entry)]
+                      [next-from (selection-range-from range)]
+                      [next-to (selection-range-to range)])
+                 (if (<= next-from to)
+                     (if (eq? overlap-policy 'reject)
+                         (assertion-violation
+                           'make-selection "selection ranges overlap"
+                           (map cdr (reverse (cons entry group))))
+                         (loop
+                           (cdr items) (append group (list entry))
+                           from (max to next-to) result result-primary))
+                     (let* ([contains-primary?
+                             (exists (lambda (item) (= (car item) primary)) group)]
+                            [result-primary
+                             (if contains-primary? (length result) result-primary)])
+                       (loop
+                         (cdr items) (list entry) next-from next-to
+                         (cons (merged-range group from to) result)
+                         result-primary)))))))]))
 
   (define (selection-range-at selection index)
     (unless (selection? selection)
@@ -146,4 +222,54 @@
           (selection-range-affinity range)
           (selection-range-granularity range)
           (selection-range-metadata range))))))
+
+  ;; Run one edit producer per selection range and merge the independently
+  ;; authored change sets with the same mapping algebra used for transaction
+  ;; specs. The producer returns two values: a ChangeSet in the starting
+  ;; document and a SelectionRange in the document produced by that set.
+  (define (change-by-range selection old-length procedure)
+    (unless (and (selection? selection)
+                 (exact-integer? old-length) (>= old-length 0)
+                 (procedure? procedure))
+      (assertion-violation
+        'change-by-range "expected a selection, document length, and procedure"))
+    (let loop ([items (selection-ranges selection)]
+               [total (make-change-set old-length '())]
+               [ranges '()])
+      (if (null? items)
+          (values
+            total
+            (make-selection
+              (reverse ranges)
+              (selection-primary selection)
+              'merge))
+          (call-with-values
+            (lambda () (procedure (car items)))
+            (lambda (changes range)
+              (unless (and (change-set? changes)
+                           (= (change-set-old-length changes) old-length)
+                           (selection-range? range))
+                (assertion-violation
+                  'change-by-range
+                  "producer must return a compatible ChangeSet and SelectionRange"
+                  changes range))
+              (let* ([mapped (change-set-map changes total)]
+                     [mapped-existing
+                      (map
+                        (lambda (existing)
+                          (car
+                            (selection-ranges
+                              (selection-map-change
+                                (make-selection (list existing)) mapped))))
+                        ranges)]
+                     [map-by (change-set-map total changes #t)]
+                     [mapped-range
+                      (car
+                        (selection-ranges
+                          (selection-map-change
+                            (make-selection (list range)) map-by)))])
+                (loop
+                  (cdr items)
+                  (change-set-compose total mapped)
+                  (cons mapped-range mapped-existing))))))))
 )

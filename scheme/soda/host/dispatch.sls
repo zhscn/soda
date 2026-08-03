@@ -9,6 +9,10 @@
           editor-update-annotations
           editor-update-scroll-request
           editor-update-damage
+          view-state-update?
+          view-state-update-view-id
+          view-state-update-old-state
+          view-state-update-new-state
           make-dispatcher
           dispatcher?
           dispatcher-dispatch!
@@ -20,9 +24,16 @@
           (soda kernel selection)
           (soda kernel extension)
           (soda kernel state)
-          (soda host buffer)
-          (soda host value)
-          (soda host view))
+          (soda host internal buffer)
+          (soda host internal view)
+          (soda host value))
+
+  (define-record-type
+    (view-state-update %make-view-state-update view-state-update?)
+    (fields
+      (immutable view-id view-state-update-view-id)
+      (immutable old-state view-state-update-old-state)
+      (immutable new-state view-state-update-new-state)))
 
   (define-record-type
     (editor-update %make-editor-update editor-update?)
@@ -124,14 +135,28 @@
           (resolved-transaction-buffer-id resolved)))
       (let* ([old-state (buffer-state buffer)]
              [expected (resolved-transaction-start-generation resolved)])
-        (when (and expected (not (= expected (buffer-state-generation old-state))))
+        (unless (= expected (buffer-state-generation old-state))
           (assertion-violation
             'dispatcher-dispatch-specs!
             "transaction starts from a stale buffer generation"
             expected (buffer-state-generation old-state)))
         (assert-view-generations!
           views (buffer-id buffer) (buffer-state-generation old-state))
-        (let* ([changes (resolved-transaction-changes resolved)]
+        (let ([native #f]
+              [new-snapshot #f]
+              [published? #f])
+          (guard
+            (condition
+              [else
+               (unless published?
+                 (when new-snapshot
+                   (guard (ignored [else #f])
+                     (snapshot-close! new-snapshot)))
+                 (when native
+                   (guard (ignored [else #f])
+                     (document-transaction-abort! native))))
+               (raise condition)])
+          (let* ([changes (resolved-transaction-changes resolved)]
                [origin (view-for-origin
                          views
                          (resolved-transaction-origin-view-id resolved)
@@ -147,18 +172,11 @@
                     (change-set-old-length changes)
                     document-length))]
                [prepared (prepare-native-change! (buffer-document buffer) changes)]
-               [native (car prepared)]
-               [new-snapshot (cdr prepared)]
+               [_native (set! native (car prepared))]
+               [_snapshot (set! new-snapshot (cdr prepared))]
                [transaction
-                (guard
-                  (condition
-                    [else
-                     (when native
-                       (guard (condition [else #f])
-                         (document-transaction-abort! native)))
-                     (raise condition)])
-                  (make-transaction-from-resolved
-                    old-state old-view-state resolved new-snapshot))]
+                (make-transaction-from-resolved
+                  old-state old-view-state resolved new-snapshot)]
                [new-buffer-state (transaction-new-buffer-state transaction)]
                [pending-views
                 (map
@@ -174,33 +192,29 @@
                             (if (and origin (= (view-id view) (view-id origin)))
                                 (transaction-new-view-state transaction)
                                 (view-state-advance current selection transaction #f))])
-                      (cons view new-state)))
+                      (list view current new-state)))
                   (views-for-buffer views (buffer-id buffer)))])
           (when native
-            (guard
-              (condition
-                [else
-                 ;; A failed native commit leaves the opaque transaction
-                 ;; handle active.  Abort it before propagating so the
-                 ;; document can accept a later dispatch.
-                 (guard (condition [else #f])
-                   (document-transaction-abort! native))
-                 (raise condition)])
-              (document-transaction-commit! native)))
+            (let ([change (document-transaction-commit! native)])
+              (change-close! change)))
           (buffer-publish-state! buffer new-buffer-state)
           ;; Compute all immutable view states before entering the publication
           ;; boundary.  A native commit failure therefore cannot leave one
           ;; shared view observing a state that the buffer did not publish.
           (for-each
             (lambda (entry)
-              (view-publish-state! (car entry) (cdr entry)))
+              (view-publish-state! (car entry) (caddr entry)))
             pending-views)
+          (set! published? #t)
           (let ([update
                   (make-editor-update
                     (buffer-id buffer) old-state new-buffer-state
                     (map
                       (lambda (entry)
-                        (cons (view-id (car entry)) (cdr entry)))
+                        (%make-view-state-update
+                          (view-id (car entry))
+                          (cadr entry)
+                          (caddr entry)))
                       pending-views)
                     changes
                     (transaction-annotations transaction)
@@ -214,7 +228,7 @@
                 (buffer-state-configuration new-buffer-state)
                 update-listeners-facet
                 'buffer))
-            update)))))
+            update)))))))
 
   (define (apply-resolved-transaction-extension dispatcher resolved facet)
     (let ([buffer
@@ -235,6 +249,22 @@
                   (cond
                     [(not next) #f]
                     [(resolved-transaction? next)
+                     (unless
+                       (and
+                         (equal? (resolved-transaction-buffer-id next)
+                                 (resolved-transaction-buffer-id current))
+                         (equal? (resolved-transaction-origin-view-id next)
+                                 (resolved-transaction-origin-view-id current))
+                         (= (resolved-transaction-start-generation next)
+                            (resolved-transaction-start-generation current))
+                         (= (change-set-old-length
+                              (resolved-transaction-changes next))
+                            (change-set-old-length
+                              (resolved-transaction-changes current))))
+                       (assertion-violation
+                         'dispatcher-dispatch!
+                         "transaction extensions cannot retarget their baseline"
+                         current next))
                      (loop (cdr extensions) next)]
                     [else
                      (assertion-violation
@@ -262,10 +292,10 @@
               'dispatcher-dispatch-specs!
               "target buffer is not live"
               (transaction-spec-buffer-id first)))
-          (let* ([original
-                  (snapshot-bytevector
+          (let* ([old-length
+                  (snapshot-byte-size
                     (buffer-state-document (buffer-state buffer)))]
-                 [resolved (resolve-transaction-specs specs original)]
+                 [resolved (resolve-transaction-specs specs old-length)]
                  [filtered
                   (if (resolved-transaction-filter-disabled? resolved)
                       resolved

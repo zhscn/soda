@@ -121,6 +121,10 @@ DocumentSnapshot 提供：
 - line、slice 和 iterator；
 - snapshot identity、revision 和 byte length。
 
+Buffer 以弱引用跟踪其发布过的 DocumentSnapshot，并在 Buffer 生命周期结束时关闭仍存活的
+snapshot。失去 Scheme 引用的 snapshot 由 native handle guardian 回收。临时 transaction 和
+change handle 由创建它们的动态作用域确定性关闭。
+
 command 使用 grapheme、word、line、syntax node 等语义查询移动位置，不直接对 UTF-8 byte
 offset 做字符级加减。LSP UTF-16、terminal cell column 和 Tree-sitter point 由各自 adapter
 转换，不进入通用 Position 值。跨 revision 保存的位置使用 Anchor；transaction 内的位置
@@ -279,7 +283,8 @@ Annotation 描述整个 transaction 的事实，例如：
 - scroll intent。
 
 StateEffect 描述伴随文本和 Selection 一起发生的 extension state 变化。包含位置的 effect
-必须定义通过 ChangeDesc 的映射操作。
+必须定义通过 ChangeDesc 的映射操作。mapper 返回 `state-effect-drop` 时丢弃 effect；`#f`
+是普通 effect value。
 
 ### StateField
 

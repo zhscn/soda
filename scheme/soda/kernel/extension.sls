@@ -14,6 +14,8 @@
           facet-default
           facet-combine
           facet-compare
+          facet-compare-input
+          facet-compare-output
           make-facet-provider
           facet-provider?
           facet-provider-facet
@@ -25,6 +27,7 @@
           state-effect-value
           state-effect-map
           state-effect-map-value
+          state-effect-drop
           make-annotation
           annotation?
           annotation-key
@@ -90,23 +93,32 @@
       (immutable scope facet-scope)
       (immutable default facet-default)
       (immutable combine facet-combine)
-      (immutable compare facet-compare)))
+      (immutable compare-input facet-compare-input)
+      (immutable compare-output facet-compare-output)))
+
+  (define (facet-compare facet)
+    (facet-compare-output facet))
 
   (define make-facet
     (case-lambda
       [(name default combine)
-       (make-facet name 'buffer default combine eq?)]
+       (make-facet name 'buffer default combine eq? eq?)]
       [(name default combine compare)
-       (make-facet name 'buffer default combine compare)]
+       (make-facet name 'buffer default combine compare compare)]
       [(name scope default combine compare)
+       (make-facet name scope default combine compare compare)]
+      [(name scope default combine compare-input compare-output)
        (unless (symbol? name)
          (assertion-violation 'make-facet "name must be a symbol" name))
        (unless (scope? scope)
          (assertion-violation 'make-facet "invalid facet scope" scope))
-       (unless (and (procedure? combine) (procedure? compare))
+       (unless (and (procedure? combine)
+                    (procedure? compare-input)
+                    (procedure? compare-output))
          (assertion-violation
-           'make-facet "combine and compare must be procedures"))
-       (%make-facet name scope default combine compare)]))
+           'make-facet "combine and comparison callbacks must be procedures"))
+       (%make-facet
+         name scope default combine compare-input compare-output)]))
 
   (define-record-type
     (state-effect %make-state-effect state-effect?)
@@ -114,6 +126,8 @@
       (immutable type state-effect-type)
       (immutable value state-effect-value)
       (immutable mapper state-effect-map)))
+
+  (define state-effect-drop (list 'state-effect-drop))
 
   (define (make-state-effect type value . mapper)
     (unless (symbol? type)
@@ -143,16 +157,16 @@
         'state-effect-map-value "expected a ChangeDesc" change-desc))
     (let ([mapped
             ((state-effect-map effect) (state-effect-value effect) change-desc)])
-      ;; A mapper may return #f to retire an effect that was deleted by the
-      ;; document change.  Preserve the original immutable value when the
-      ;; mapper leaves it untouched.
-      (and mapped
-           (if (eq? mapped (state-effect-value effect))
-               effect
-               (%make-state-effect
-                 (state-effect-type effect)
-                 mapped
-                 (state-effect-map effect))))))
+      ;; The distinct drop token leaves #f available as an ordinary effect
+      ;; value. Preserve identity when a mapper leaves the value untouched.
+      (if (eq? mapped state-effect-drop)
+          #f
+          (if (eq? mapped (state-effect-value effect))
+              effect
+              (%make-state-effect
+                (state-effect-type effect)
+                mapped
+                (state-effect-map effect))))))
 
   (define-record-type
     (annotation %make-annotation annotation?)
@@ -240,7 +254,10 @@
 
   (define-record-type
     (configuration %make-configuration configuration?)
-    (fields (immutable extensions configuration-extensions)))
+    (fields
+      (immutable extensions configuration-extensions)
+      (immutable cache configuration-cache)
+      (immutable previous configuration-previous)))
 
   (define (flatten extensions)
     (fold-right
@@ -254,7 +271,11 @@
   (define (make-configuration extensions)
     (unless (list? extensions)
       (assertion-violation 'make-configuration "extensions must be a list" extensions))
-    (%make-configuration (flatten extensions)))
+    (%make-configuration (flatten extensions) (make-eq-hashtable) #f))
+
+  (define (make-derived-configuration extensions previous)
+    (%make-configuration
+      (flatten extensions) (make-eq-hashtable) previous))
 
   ;; Compartment entries remain in the raw extension list so they can be
   ;; replaced atomically. Queries see the extension contributed by each entry,
@@ -351,19 +372,50 @@
     (let ([scope (if (null? requested-scope) #f (car requested-scope))])
       (if (and scope (not (eq? scope (facet-scope facet))))
           (facet-default facet)
-          (let ([values
-                  (map
-                    facet-provider-value
-                    (stable-provider-sort
-                      (filter
-                        (lambda (extension)
-                          (and (facet-provider? extension)
-                               (eq? facet (facet-provider-facet extension))))
-                        (effective-extensions
-                          (configuration-extensions configuration)))))])
-            (if (null? values)
-                (facet-default facet)
-                ((facet-combine facet) values))))))
+          (let ([cached (hashtable-ref (configuration-cache configuration) facet #f)])
+            (if cached
+                (cdr cached)
+                (let* ([values
+                        (map
+                          facet-provider-value
+                          (stable-provider-sort
+                            (filter
+                              (lambda (extension)
+                                (and (facet-provider? extension)
+                                     (eq? facet (facet-provider-facet extension))))
+                              (effective-extensions
+                                (configuration-extensions configuration)))))]
+                       [previous (configuration-previous configuration)]
+                       [previous-entry
+                        (and previous
+                             (begin
+                               (configuration-facet previous facet (facet-scope facet))
+                               (hashtable-ref
+                                 (configuration-cache previous) facet #f)))]
+                       [same-inputs?
+                        (and previous-entry
+                             (= (length values) (length (car previous-entry)))
+                             (for-all
+                               (facet-compare-input facet)
+                               values
+                               (car previous-entry)))]
+                       [combined
+                        (if same-inputs?
+                            (cdr previous-entry)
+                            (if (null? values)
+                                (facet-default facet)
+                                ((facet-combine facet) values)))]
+                       [output
+                        (if (and previous-entry
+                                 ((facet-compare-output facet)
+                                  (cdr previous-entry) combined))
+                            (cdr previous-entry)
+                            combined)])
+                  (hashtable-set!
+                    (configuration-cache configuration)
+                    facet
+                    (cons values output))
+                  output))))))
 
   (define (replace-compartment extensions compartment replacement)
     (if (null? extensions)
@@ -390,10 +442,12 @@
         configuration compartment))
     (let ([extensions (configuration-extensions configuration)])
       (if (contains-compartment? extensions compartment)
-          (make-configuration
-            (replace-compartment extensions compartment extension))
-          (make-configuration
-            (append extensions (list (make-compartment-entry compartment extension)))))))
+          (make-derived-configuration
+            (replace-compartment extensions compartment extension)
+            configuration)
+          (make-derived-configuration
+            (append extensions (list (make-compartment-entry compartment extension)))
+            configuration))))
 
   (define (configuration-apply-effects configuration effects . scope)
     (unless (configuration? configuration)
