@@ -287,6 +287,25 @@
 (unless (= (state-effect-value (car (transaction-effects mapped-transaction))) 10)
   (error 'kernel-tests "state effect mapping differs"))
 
+(let* ([field
+        (make-state-field
+          'stable 'buffer
+          (lambda (state) (vector 1))
+          (lambda (value transaction) (vector (vector-ref value 0)))
+          equal?)]
+       [old-value (vector 1)]
+       [state
+        (make-buffer-state
+          'document
+          (make-configuration (list field))
+          (list (cons field old-value)))]
+       [transaction
+        (make-transaction
+          state #f (make-change-set 0 '()) #f '() '() 'document)])
+  (unless (eq? (buffer-state-field (transaction-new-buffer-state transaction) field)
+               old-value)
+    (error 'kernel-tests "StateField.compare did not preserve equal state")))
+
 (define mode-field
   (make-state-field
     'mode 'buffer

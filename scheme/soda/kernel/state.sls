@@ -92,16 +92,25 @@
   (define (field-values-for state configuration scope transaction)
     (map
       (lambda (field)
-        (let ([entry (field-entry
-                       (if (buffer-state? state)
-                       (buffer-state-fields state)
-                       (view-state-fields state))
-                       field)])
+        (let* ([entry (field-entry
+                        (if (buffer-state? state)
+                            (buffer-state-fields state)
+                            (view-state-fields state))
+                        field)]
+               [old-value (and entry (cdr entry))]
+               [new-value
+                (if entry
+                    ((state-field-update field) old-value transaction)
+                    ((state-field-create field) state))])
+          ;; StateField.compare is the identity boundary for extension state.
+          ;; Retaining the old value when it compares equal makes no-op updates
+          ;; cheap and lets host/render layers detect meaningful field changes.
           (cons
             field
-            (if entry
-                ((state-field-update field) (cdr entry) transaction)
-                ((state-field-create field) state)))))
+            (if (and entry
+                     ((state-field-compare field) old-value new-value))
+                old-value
+                new-value))))
       (configuration-fields
         configuration
         scope)))
