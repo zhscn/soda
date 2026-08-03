@@ -4,7 +4,6 @@
           buffer-owner
           buffer-name
           buffer-state
-          buffer-close!
           make-buffer-service
           buffer-service?
           buffer-service-create!

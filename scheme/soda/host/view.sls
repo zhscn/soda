@@ -11,7 +11,6 @@
           view-display-stream
           view-display-transforms
           view-transform-display-stream
-          view-close!
           view-update-plugins!
           make-view-service
           view-service?

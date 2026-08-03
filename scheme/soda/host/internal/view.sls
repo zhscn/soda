@@ -186,7 +186,7 @@
                                 (cons (make-view-plugin-instance (car remaining) view)
                                       result))))))))))))
 
-  (define (make-view-record identity-source owner buffer configuration input-state plugin-error!)
+  (define (make-view-record identity-source owner buffer configuration input-state plugin-error! on-close)
     (owner-assert-active 'view-service-create! owner)
     (unless (buffer? buffer)
       (assertion-violation 'view-service-create! "expected a buffer" buffer))
@@ -204,7 +204,7 @@
         (create-plugin-instances! view (configuration-view-plugins configuration)))
       (refresh-view-decorations! view)
       (refresh-view-display-stream! view)
-      (owner-add-cleanup! owner (lambda () (view-close! view)))
+      (owner-add-cleanup! owner (lambda () (on-close view)))
       view))
 
   (define (view-publish-state! view state)
@@ -332,9 +332,12 @@
   (define (view-service-create! service owner buffer configuration . input-state)
     (unless (view-service? service)
       (assertion-violation 'view-service-create! "expected a view service" service))
-    (let ([view (make-view-record (view-service-identities service) owner buffer configuration
-                                  (if (null? input-state) #f (car input-state))
-                                  (view-service-plugin-error! service))])
+    (let ([view (make-view-record
+                  (view-service-identities service) owner buffer configuration
+                  (if (null? input-state) #f (car input-state))
+                  (view-service-plugin-error! service)
+                  (lambda (view)
+                    (view-service-close-view! service (view-id view))))])
       (hashtable-set! (view-service-table service) (view-id view) view)
       view))
 

@@ -36,7 +36,7 @@
 
   (define snapshot-sweep-minimum 64)
 
-  (define (make-buffer-record identity-source owner name document configuration)
+  (define (make-buffer-record identity-source owner name document configuration on-close)
     (owner-assert-active 'buffer-service-create! owner)
     (unless (string? name)
       (assertion-violation 'buffer-service-create! "name must be a string" name))
@@ -52,7 +52,7 @@
               1
               snapshot-sweep-minimum
               #f)])
-      (owner-add-cleanup! owner (lambda () (buffer-close! buffer)))
+      (owner-add-cleanup! owner (lambda () (on-close buffer)))
       buffer))
 
   (define (buffer-publish-state! buffer state)
@@ -122,7 +122,9 @@
       (assertion-violation 'buffer-service-create! "expected a buffer service" service))
     (let ([buffer (make-buffer-record
                     (buffer-service-identities service)
-                    owner name document configuration)])
+                    owner name document configuration
+                    (lambda (buffer)
+                      (buffer-service-close-buffer! service (buffer-id buffer))))])
       (hashtable-set! (buffer-service-table service) (buffer-id buffer) buffer)
       buffer))
 
