@@ -100,10 +100,19 @@
             'dispatcher-dispatch! "transaction starts from a stale buffer generation"
             expected (buffer-state-generation old-state)))
         (let* ([changes (transaction-spec-changes spec)]
-               [origin (view-for-origin
-                         views (transaction-spec-origin-view-id spec) (buffer-id buffer))]
-               [old-view-state (and origin (view-state origin))]
-               [prepared (prepare-native-change! (buffer-document buffer) changes)]
+             [origin (view-for-origin
+                       views (transaction-spec-origin-view-id spec) (buffer-id buffer))]
+             [old-view-state (and origin (view-state origin))]
+             [_ (when (and origin
+                            (not (= (view-state-buffer-generation old-view-state)
+                                    (buffer-state-generation old-state))))
+                 (assertion-violation
+                   'dispatcher-dispatch!
+                   "origin view observes a stale buffer generation"
+                   (view-id origin)
+                   (view-state-buffer-generation old-view-state)
+                   (buffer-state-generation old-state)))]
+             [prepared (prepare-native-change! (buffer-document buffer) changes)]
                [native (car prepared)]
                [new-snapshot (cdr prepared)]
                [transaction

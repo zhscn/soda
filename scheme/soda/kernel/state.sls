@@ -10,6 +10,7 @@
           make-view-state
           view-state?
           view-state-buffer-id
+          view-state-buffer-generation
           view-state-selection
           view-state-viewport
           view-state-input-state
@@ -99,6 +100,7 @@
     (view-state %make-view-state view-state?)
     (fields
       (immutable buffer-id view-state-buffer-id)
+      (immutable buffer-generation view-state-buffer-generation)
       (immutable selection view-state-selection)
       (immutable viewport view-state-viewport)
       (immutable input-state view-state-input-state)
@@ -106,13 +108,18 @@
       (immutable fields view-state-fields)
       (immutable generation view-state-generation)))
 
-  (define (make-view-state buffer-id selection viewport input-state configuration . fields)
+  (define (make-view-state buffer-id buffer-generation selection viewport input-state configuration
+                           . fields)
+    (unless (and (exact-integer? buffer-generation) (>= buffer-generation 0))
+      (assertion-violation
+        'make-view-state "buffer generation must be a non-negative integer"
+        buffer-generation))
     (unless (selection? selection)
       (assertion-violation 'make-view-state "expected a selection" selection))
     (unless (configuration? configuration)
       (assertion-violation 'make-view-state "expected a configuration" configuration))
     (%make-view-state
-      buffer-id selection viewport input-state configuration
+      buffer-id buffer-generation selection viewport input-state configuration
       (if (null? fields) '() (list-copy (car fields)))
       0))
 
@@ -142,6 +149,12 @@
               (transaction-effects transaction))])
       (%make-view-state
         (view-state-buffer-id state)
+        (let ([new-buffer-state (transaction-new-buffer-state transaction)])
+          (if new-buffer-state
+              (buffer-state-generation new-buffer-state)
+              (+ 1
+                 (buffer-state-generation
+                   (transaction-start-buffer-state transaction)))))
         selection
         (view-state-viewport state)
         (view-state-input-state state)

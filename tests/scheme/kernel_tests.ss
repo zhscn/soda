@@ -81,7 +81,7 @@
 (define buffer-snapshot
   (make-buffer-state 'document configuration (list (cons history-field 'empty))))
 (define view-snapshot
-  (make-view-state 0 selection '(0 . 20) 'insert configuration))
+  (make-view-state 0 0 selection '(0 . 20) 'insert configuration))
 (define spec (make-transaction-spec 0 changes))
 (unless (and (= (transaction-spec-buffer-id spec) 0)
              (eq? (buffer-state-field buffer-snapshot history-field) 'empty)
@@ -192,6 +192,7 @@
 (unless (and (editor-update? update)
              (= (buffer-state-generation (buffer-state buffer)) 1)
              (= (view-state-generation (view-state view)) 1)
+             (= (view-state-buffer-generation (view-state view)) 1)
              (string=?
                (snapshot-string (buffer-state-document (buffer-state buffer)))
                "hello world"))

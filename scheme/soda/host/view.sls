@@ -44,7 +44,9 @@
               (identity-source-next! identity-source)
               owner buffer
               (make-view-state
-                (buffer-id buffer) (empty-selection) '(0 . 0)
+                (buffer-id buffer)
+                (buffer-state-generation (buffer-state buffer))
+                (empty-selection) '(0 . 0)
                 (or input-state (default-input-stack))
                 configuration)
               #f)])
