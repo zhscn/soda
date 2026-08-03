@@ -888,10 +888,12 @@
                (equal? (window-rectangle right) '(0 4 3 3)))
     (error 'kernel-tests "Window grid layout differs")))
 
-(let ([rendered (render-surface-frame surface (host-state-views host))])
-  (unless (and (= (frame-width rendered) 80)
-               (= (frame-height rendered) 24)
-               (string=? (frame-cell-grapheme (frame-cell-at rendered 0 0)) "h"))
+(let ([rendered (render-surface surface (host-state-views host))])
+  (unless (and (= (frame-width (surface-render-frame rendered)) 80)
+               (= (frame-height (surface-render-frame rendered)) 24)
+               (= (surface-render-cursor-row rendered) 0)
+               (= (surface-render-cursor-column rendered) 0)
+               (string=? (frame-cell-grapheme (frame-cell-at (surface-render-frame rendered) 0 0)) "h"))
     (error 'kernel-tests "Surface render composition differs")))
 
 (define control-x
