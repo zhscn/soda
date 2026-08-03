@@ -32,6 +32,7 @@
         (soda tui terminal-session)
         (soda view display)
         (soda view frame)
+        (soda view compositor)
         (soda view text-layout)
         (soda view plugin))
 
@@ -1508,6 +1509,19 @@
     (error 'kernel-tests "text layout projection differs"))
   (snapshot-close! snapshot)
   (document-close! document))
+
+(let* ([base (make-frame 4 2)]
+       [top (frame-with-cell (make-frame 2 1) 0 0
+                             (make-frame-cell "x" 1 #f 'overlay #f))]
+       [composed
+         (compose-frame
+           4 2
+           (list (make-frame-placement 0 0 base)
+                 (make-frame-placement 1 2 top)))])
+  (unless (and (string=? (frame-cell-grapheme (frame-cell-at composed 1 2)) "x")
+               (eq? (frame-cell-face (frame-cell-at composed 1 2)) 'overlay)
+               (string=? (frame-cell-grapheme (frame-cell-at composed 0 0)) " "))
+    (error 'kernel-tests "Frame composition differs")))
 
 (let* ([destroyed #f]
        [plugin
