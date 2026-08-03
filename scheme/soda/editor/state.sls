@@ -2254,7 +2254,8 @@
             #f)
            (else
             (let* ((target
-                     (completion-session-target completion)))
+                     (completion-session-target completion))
+                   (buffer (view-buffer view)))
               (if
                 (not
                   (document-completion-target-view-valid?
