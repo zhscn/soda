@@ -169,7 +169,7 @@
                            [new-state
                             (if (and origin (= (view-id view) (view-id origin)))
                                 (transaction-new-view-state transaction)
-                                (view-state-advance current selection transaction))])
+                                (view-state-advance current selection transaction #f))])
                       (cons view new-state)))
                   (views-for-buffer views (buffer-id buffer)))])
           (when native

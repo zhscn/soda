@@ -162,11 +162,26 @@
         (field-values-for state configuration 'buffer transaction)
         (+ 1 (buffer-state-generation state)))))
 
-  (define (advance-view-state state selection transaction)
+  (define (advance-view-state state selection transaction apply-view-effects?)
     (let ([configuration
             (configuration-apply-effects
               (view-state-configuration state)
-              (transaction-effects transaction)
+              (if apply-view-effects?
+                  (transaction-effects transaction)
+                  (filter
+                    (lambda (effect)
+                      (not
+                        (and (state-effect? effect)
+                             (eq? (state-effect-type effect)
+                                  'compartment-reconfigure)
+                             (compartment-entry?
+                               (state-effect-value effect))
+                             (eq?
+                               (compartment-scope
+                                 (compartment-entry-compartment
+                                   (state-effect-value effect)))
+                               'view))))
+                    (transaction-effects transaction)))
               'view)])
       (%make-view-state
         (view-state-buffer-id state)
@@ -188,11 +203,17 @@
       (assertion-violation 'buffer-state-advance "invalid state or transaction" state transaction))
     (advance-buffer-state state document transaction))
 
-  (define (view-state-advance state selection transaction)
+  (define (view-state-advance state selection transaction . options)
     (unless (and (view-state? state) (selection? selection) transaction)
       (assertion-violation 'view-state-advance "invalid state, selection, or transaction"
                            state selection transaction))
-    (advance-view-state state selection transaction))
+    (let ([apply-view-effects?
+            (if (null? options) #t (car options))])
+      (unless (boolean? apply-view-effects?)
+        (assertion-violation
+          'view-state-advance "apply-view-effects? must be boolean"
+          apply-view-effects?))
+      (advance-view-state state selection transaction apply-view-effects?)))
 
   (define-record-type
     (transaction-spec %make-transaction-spec transaction-spec?)
@@ -441,7 +462,7 @@
              (advance-buffer-state start-buffer-state document initial)]
            [new-view-state
              (and start-view-state
-                  (advance-view-state start-view-state normalized-selection initial))])
+                  (advance-view-state start-view-state normalized-selection initial #t))])
       (%make-transaction
         start-buffer-state start-view-state changes selection
         mapped-effects normalized-annotations

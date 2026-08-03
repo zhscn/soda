@@ -397,6 +397,38 @@
                   (view-state-configuration
                     (transaction-new-view-state reconfigured-with-view))))))
   (error 'kernel-tests "compartment leaked into view configuration"))
+(let* ([view-field
+        (make-state-field
+          'view-mode 'view
+          (lambda (state) 'view-mode)
+          (lambda (value transaction) value))]
+       [view-compartment (make-compartment 'view-mode 'view)]
+       [view-configuration
+        (make-configuration
+          (list (make-compartment-entry view-compartment '())))]
+       [view-start
+        (make-view-state
+          0 0 selection '(0 . 20) 'insert view-configuration)]
+       [view-transaction
+        (make-transaction
+          buffer-snapshot view-start
+          (make-change-set 12 '()) #f
+          (list
+            (make-compartment-reconfigure-effect
+              view-compartment view-field))
+          '()
+          'document)]
+       [origin-state (transaction-new-view-state view-transaction)]
+       [shared-state
+        (view-state-advance view-start selection view-transaction #f)])
+  (unless (and (= (length (configuration-fields
+                            (view-state-configuration origin-state)
+                            'view))
+                  1)
+               (null? (configuration-fields
+                        (view-state-configuration shared-state)
+                        'view)))
+    (error 'kernel-tests "view-scoped effect leaked to shared view")))
 
 (define provided-facet (make-facet 'provided #f (lambda (values) (car values))))
 (define provider-field
