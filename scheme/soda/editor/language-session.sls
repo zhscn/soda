@@ -34,7 +34,8 @@
           language-session-registry-remove-session!
           language-session-registry-detach-buffer!)
   (import (rnrs)
-          (soda editor contract))
+          (soda editor contract)
+          (soda editor value))
 
   (define-record-type
     (language-session-key %make-language-session-key language-session-key?)
@@ -88,17 +89,6 @@
       (mutable next-attachment-id
                language-session-registry-next-attachment-id
                language-session-registry-next-attachment-id-set!)))
-
-  (define (snapshot-value value)
-    (cond
-      [(pair? value)
-       (cons (snapshot-value (car value))
-             (snapshot-value (cdr value)))]
-      [(vector? value)
-       (list->vector (map snapshot-value (vector->list value)))]
-      [(bytevector? value) (bytevector-copy value)]
-      [(string? value) (string-copy value)]
-      [else value]))
 
   (define (language-session-key-workspace-folders key)
     (snapshot-value

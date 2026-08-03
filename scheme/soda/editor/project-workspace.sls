@@ -28,6 +28,7 @@
           (soda editor resource-context)
           (soda editor state)
           (soda editor project-state)
+          (soda editor value)
           (soda json)
           (soda vfs))
 
@@ -90,17 +91,6 @@
             (lambda (entry) (cons (car entry) (cdr entry)))
             (project-settings-layer-entries layer))
           '())))
-
-  (define (snapshot-value value)
-    (cond
-      [(pair? value)
-       (cons (snapshot-value (car value))
-             (snapshot-value (cdr value)))]
-      [(vector? value)
-       (list->vector (map snapshot-value (vector->list value)))]
-      [(bytevector? value) (bytevector-copy value)]
-      [(string? value) (string-copy value)]
-      [else value]))
 
   (define (project-workspace-configuration workspace)
     (unless (project-workspace? workspace)
