@@ -2,6 +2,7 @@
   (export make-leaf-window
           make-split-window
           window?
+          window-id
           window-kind
           window-view-id
           window-axis
@@ -12,11 +13,13 @@
           window-selected?
           window-set-selected!
           window-leaves)
-  (import (rnrs))
+  (import (rnrs)
+          (soda kernel value))
 
   (define-record-type
     (window %make-window window?)
     (fields
+      (immutable id window-id)
       (immutable kind window-kind)
       (immutable view-id window-view-id)
       (immutable axis window-axis)
@@ -25,8 +28,11 @@
       (mutable rectangle window-rectangle window-rectangle-set!)
       (mutable selected? window-selected? window-selected?-set!)))
 
+  (define window-identities (make-identity-source))
+
   (define (make-leaf-window view-id rectangle)
-    (%make-window 'leaf view-id #f '() '() rectangle #f))
+    (%make-window (identity-source-next! window-identities)
+                  'leaf view-id #f '() '() rectangle #f))
 
   (define (split-weights? children weights)
     (and (= (length children) (length weights))
@@ -53,7 +59,8 @@
          (assertion-violation 'make-split-window
                               "invalid split window, children, or weights"
                               axis children weights))
-       (%make-window 'split #f axis (append children '()) (append weights '()) rectangle #f)]))
+       (%make-window (identity-source-next! window-identities)
+                     'split #f axis (append children '()) (append weights '()) rectangle #f)]))
 
   (define (window-set-selected! window value)
     (unless (window? window)

@@ -531,6 +531,11 @@ selected Window 始终是 root tree 中的 live leaf。切换 focus、进入 int
 DisplayRequest 产生 HostOperation 和 HostUpdate；异步结果不能隐式改变 active context。
 headless frontend 可以创建没有 terminal writer 的 Surface。
 
+`ActiveContext` 是从 Surface selected leaf 与 live View 导出的不可变快照。它保存
+surface、window、view、buffer identity 和 interaction stack；异步请求保留它作为 origin，
+由 host 在应用结果前验证目标仍然 live。Surface 的 view focus 路由以 View identity 查找
+root tree leaf，只修改 selected Window。
+
 Split 的 `weights` 是与 child 一一对应的正精确有理数。layout 按权重切分 terminal cell，
 通过 largest-remainder 分配不能整除的 cell；相同余数按 child 顺序分配。省略权重时每个
 child 使用相同权重。

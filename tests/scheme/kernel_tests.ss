@@ -13,6 +13,7 @@
         (soda kernel viewport)
         (soda kernel view-state)
         (soda host command)
+        (soda host context)
         (soda host dispatch)
         (soda host buffer)
         (soda host input)
@@ -887,6 +888,38 @@
              (= (buffer-id buffer) (view-state-buffer-id (view-state view))))
   (error 'kernel-tests "host state protocol differs"))
 
+(let ([context (surface-active-context surface (host-state-views host))]
+      [request (make-display-request (buffer-id buffer) (view-id view)
+                                     'result 'focus 'same-window 'test)])
+  (unless (and (active-context? context)
+               (= (active-context-surface-id context) (surface-id surface))
+               (= (active-context-window-id context) (window-id leaf))
+               (= (active-context-view-id context) (view-id view))
+               (= (active-context-buffer-id context) (buffer-id buffer))
+               (display-request? request)
+               (eq? (display-request-focus-policy request) 'focus))
+    (error 'kernel-tests "active context or DisplayRequest differs")))
+
+(let* ([other-document (make-document "other")]
+       [other-buffer
+        (buffer-service-create! (host-state-buffers host) owner "*other*"
+                                other-document configuration)]
+       [other-view
+        (view-service-create! (host-state-views host) owner other-buffer configuration)]
+       [left (make-leaf-window (view-id view) #f)]
+       [right (make-leaf-window (view-id other-view) #f)]
+       [split (make-split-window 'horizontal (list left right) #f)]
+       [split-surface (make-surface split '(8 . 1))]
+       [context (surface-select-view! split-surface (host-state-views host)
+                                      (view-id other-view))])
+  (unless (and (active-context? context)
+               (= (active-context-view-id context) (view-id other-view))
+               (= (active-context-buffer-id context) (buffer-id other-buffer))
+               (eq? (surface-selected-window split-surface) right)
+               (not (surface-select-view! split-surface (host-state-views host) 999999)))
+    (error 'kernel-tests "Surface View focus routing differs"))
+  (view-service-close-view! (host-state-views host) (view-id other-view)))
+
 (let* ([left (make-leaf-window 1 #f)]
        [right (make-leaf-window 2 #f)]
        [root (make-split-window 'horizontal (list left right) #f)])
@@ -1394,8 +1427,12 @@
                (snapshot-string (buffer-state-document (buffer-state buffer)))
                "hello world"))
   (error 'kernel-tests "dispatcher did not publish an atomic update"))
-(let ([view-update (car (editor-update-views update))])
-  (unless (and (= (view-state-generation
+(let ([view-update
+       (find (lambda (candidate)
+               (= (view-state-update-view-id candidate) (view-id view)))
+             (editor-update-views update))])
+  (unless (and view-update
+               (= (view-state-generation
                     (view-state-update-old-state view-update))
                   0)
                (= (view-state-generation
