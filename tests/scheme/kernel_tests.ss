@@ -88,6 +88,19 @@
              (= (view-state-buffer-id view-snapshot) 0))
   (error 'kernel-tests "state protocol differs"))
 
+;; State effects are authored against the transaction's starting document and
+;; are mapped before they reach the realized transaction.
+(define position-effect
+  (make-state-effect
+    'position
+    8
+    (lambda (offset description)
+      (change-desc-map-offset description offset 'after))))
+(define mapped-transaction
+  (make-transaction buffer-snapshot #f changes #f (list position-effect) '()))
+(unless (= (state-effect-value (car (transaction-effects mapped-transaction))) 10)
+  (error 'kernel-tests "state effect mapping differs"))
+
 (define host (make-host-state))
 (define owner (make-owner 'kernel-test))
 (define document (make-document "hello"))

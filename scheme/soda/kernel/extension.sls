@@ -23,6 +23,7 @@
           state-effect-type
           state-effect-value
           state-effect-map
+          state-effect-map-value
           make-annotation
           annotation?
           annotation-key
@@ -106,6 +107,21 @@
     (%make-state-effect
       type value
       (if (null? mapper) (lambda (value change-desc) value) (car mapper))))
+
+  ;; State effects are authored in the coordinates of the transaction's
+  ;; starting document. Mapping creates a new immutable effect and retains
+  ;; the original mapper for a later transaction mapping.
+  (define (state-effect-map-value effect change-desc)
+    (unless (state-effect? effect)
+      (assertion-violation
+        'state-effect-map-value "expected a state effect" effect))
+    (unless (procedure? (state-effect-map effect))
+      (assertion-violation
+        'state-effect-map-value "state effect mapper is not callable" effect))
+    (%make-state-effect
+      (state-effect-type effect)
+      ((state-effect-map effect) (state-effect-value effect) change-desc)
+      (state-effect-map effect)))
 
   (define-record-type
     (annotation %make-annotation annotation?)

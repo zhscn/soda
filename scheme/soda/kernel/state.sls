@@ -183,8 +183,8 @@
            'make-transaction-spec "selection must be a Selection or #f" selection))
        (%make-transaction-spec
          buffer-id origin-view-id start-generation changes selection
-         (if (list? effects) (list-copy effects) (list effects))
-         (if (list? annotations) (list-copy annotations) (list annotations))
+         (normalize-effects 'make-transaction-spec effects)
+         (normalize-annotations 'make-transaction-spec annotations)
          scroll-request filter)]))
 
   (define-record-type
@@ -204,6 +204,33 @@
           [(list? value) (list-copy value)]
           [else (list value)]))
 
+  (define (normalize-effects who value)
+    (let ([effects (list-value value)])
+      (for-each
+        (lambda (effect)
+          (unless (state-effect? effect)
+            (assertion-violation
+              who "effects must be StateEffect values" effect)))
+        effects)
+      effects))
+
+  (define (normalize-annotations who value)
+    (let ([annotations (list-value value)])
+      (for-each
+        (lambda (annotation)
+          (unless (annotation? annotation)
+            (assertion-violation
+              who "annotations must be Annotation values" annotation)))
+        annotations)
+      annotations))
+
+  (define (map-effects changes effects)
+    (let ([description (change-set-change-desc changes)])
+      (map
+        (lambda (effect)
+          (state-effect-map-value effect description))
+        (normalize-effects 'make-transaction effects))))
+
   (define (realize-transaction start-buffer-state start-view-state changes selection
                                effects annotations document)
     (unless (buffer-state? start-buffer-state)
@@ -221,10 +248,13 @@
                   (or selection
                       (selection-map-change
                         (view-state-selection start-view-state) changes)))]
+           [mapped-effects (map-effects changes effects)]
+           [normalized-annotations
+             (normalize-annotations 'make-transaction annotations)]
            [initial
              (%make-transaction
                start-buffer-state start-view-state changes selection
-               (list-value effects) (list-value annotations) #f #f)]
+               mapped-effects normalized-annotations #f #f)]
            [new-buffer-state
              (advance-buffer-state start-buffer-state document initial)]
            [new-view-state
@@ -232,7 +262,7 @@
                   (advance-view-state start-view-state normalized-selection initial))])
       (%make-transaction
         start-buffer-state start-view-state changes selection
-        (list-value effects) (list-value annotations)
+        mapped-effects normalized-annotations
         new-buffer-state new-view-state)))
 
   (define make-transaction
