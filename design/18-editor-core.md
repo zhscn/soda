@@ -5,9 +5,9 @@
 | 能力 | 状态 |
 |---|---|
 | native `Text`、`Document`、terminal 与 libuv runtime | 已实现 |
-| 精简的 Scheme core 与分层 boot image | 未实现 |
-| 统一的 Buffer、Extent、View 与 Window 模型 | 未实现 |
-| owner-scoped package、service 与资源生命周期 | 未实现 |
+| 精简的 Scheme core 与分层 boot image | 部分实现 |
+| 统一的 Buffer、Extent、View 与 Window 模型 | 部分实现 |
+| owner-scoped package、service 与资源生命周期 | 部分实现 |
 | 基于普通 Buffer 的标准功能包 | 未实现 |
 
 ## 定位

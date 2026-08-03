@@ -31,7 +31,7 @@
 | [15-configuration.md](15-configuration.md) | setting、配置快照、用户 init 与热替换 | 已实现 |
 | [16-tui-applications.md](16-tui-applications.md) | Buffer 承载的声明式 TUI application framework | 已实现 |
 | [17-packaging.md](17-packaging.md) | 单文件编辑器发行与 Scheme application 打包 | 部分实现 |
-| [18-editor-core.md](18-editor-core.md) | 精简 editor core、统一 Buffer UI 与功能包边界 | 未实现 |
+| [18-editor-core.md](18-editor-core.md) | 精简 editor core、统一 Buffer UI 与功能包边界 | 部分实现 |
 
 ## 规范边界
 
