@@ -5,6 +5,8 @@
           text-layout-display-map
           text-layout-cursor-row
           text-layout-cursor-column
+          text-layout-document->point
+          text-layout-point->document
           layout-text-snapshot)
   (import (rnrs)
           (soda kernel document)
@@ -30,6 +32,35 @@
 
   (define (offset? value)
     (and (integer? value) (exact? value) (>= value 0)))
+
+  ;; These queries are the layout-level coordinate contract.  Consumers never
+  ;; infer document locations from terminal glyphs: virtual text, wide
+  ;; graphemes, and future wrapping all remain represented by DisplayMap.
+  (define text-layout-document->point
+    (case-lambda
+      [(layout offset) (text-layout-document->point layout offset 'after)]
+      [(layout offset association)
+       (unless (and (text-layout? layout) (offset? offset)
+                    (memq association '(before after)))
+         (assertion-violation 'text-layout-document->point
+                              "invalid TextLayout document position" layout offset association))
+       (let ([cell (display-map-document->cell (text-layout-display-map layout)
+                                                offset association)]
+             [frame (text-layout-frame layout)])
+         (and cell
+              (< cell (* (frame-width frame) (frame-height frame)))
+              (cons (div cell (frame-width frame))
+                    (mod cell (frame-width frame)))))]))
+
+  (define (text-layout-point->document layout row column)
+    (unless (and (text-layout? layout) (offset? row) (offset? column))
+      (assertion-violation 'text-layout-point->document
+                           "invalid TextLayout display position" layout row column))
+    (let ([frame (text-layout-frame layout)])
+      (and (< row (frame-height frame))
+           (< column (frame-width frame))
+           (display-map-cell->document (text-layout-display-map layout)
+                                       (+ (* row (frame-width frame)) column)))))
 
   (define (grapheme-width text)
     (unicode-grapheme-width (string->utf8 text)))
