@@ -260,13 +260,16 @@
       (immutable previous configuration-previous)))
 
   (define (flatten extensions)
-    (fold-right
-      (lambda (extension result)
-        (if (list? extension)
-            (append (flatten extension) result)
-            (cons extension result)))
-      '()
-      extensions))
+    (let loop ([items extensions] [pending '()] [result '()])
+      (cond
+        [(null? items)
+         (if (null? pending)
+             (reverse result)
+             (loop (car pending) (cdr pending) result))]
+        [(list? (car items))
+         (loop (car items) (cons (cdr items) pending) result)]
+        [else
+         (loop (cdr items) pending (cons (car items) result))])))
 
   (define (make-configuration extensions)
     (unless (list? extensions)
@@ -320,15 +323,16 @@
                 (and (state-field? field)
                      (eq? scope (state-field-scope field))))
               (effective-extensions (configuration-extensions configuration)))])
-      (let loop ([items fields] [seen '()] [result '()])
-        (if (null? items)
-            (reverse result)
-            (if (memq (car items) seen)
-                (loop (cdr items) seen result)
-                (loop
-                  (cdr items)
-                  (cons (car items) seen)
-                  (cons (car items) result)))))))
+      (let ([seen (make-eq-hashtable)])
+        (let loop ([items fields] [result '()])
+          (if (null? items)
+              (reverse result)
+              (let ([field (car items)])
+                (if (hashtable-contains? seen field)
+                    (loop (cdr items) result)
+                    (begin
+                      (hashtable-set! seen field #t)
+                      (loop (cdr items) (cons field result))))))))))
 
   (define precedence-order
     '((highest . 0) (high . 1) (default . 2) (low . 3) (lowest . 4)))
@@ -344,18 +348,22 @@
   ;; resulting facet value is therefore deterministic even on Scheme
   ;; implementations whose generic list-sort is not stable.
   (define (stable-provider-sort providers)
-    (define (insert-provider provider sorted)
-      (cond
-        [(null? sorted) (list provider)]
-        [(provider<? provider (car sorted))
-         (cons provider sorted)]
-        [else
-         (cons (car sorted)
-               (insert-provider provider (cdr sorted)))]))
-    (let loop ([items providers] [sorted '()])
-      (if (null? items)
-          sorted
-          (loop (cdr items) (insert-provider (car items) sorted)))))
+    (let ([indexed
+           (let loop ([items providers] [ordinal 0] [result '()])
+             (if (null? items)
+                 (reverse result)
+                 (loop
+                   (cdr items)
+                   (+ ordinal 1)
+                   (cons (cons ordinal (car items)) result))))])
+      (map
+        cdr
+        (list-sort
+          (lambda (left right)
+            (or (provider<? (cdr left) (cdr right))
+                (and (not (provider<? (cdr right) (cdr left)))
+                     (< (car left) (car right)))))
+          indexed))))
 
   (define (configuration-facet configuration facet . requested-scope)
     (unless (and (configuration? configuration) (facet? facet))

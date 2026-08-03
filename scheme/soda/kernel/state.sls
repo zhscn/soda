@@ -471,7 +471,8 @@
                        [effects (map-effect-list
                                   first-changes
                                   (transaction-spec-effects first))]
-                       [annotations (transaction-spec-annotations first)]
+                       [reversed-annotations
+                        (reverse (transaction-spec-annotations first))]
                        [scroll-request (transaction-spec-scroll-request first)]
                        [filter-disabled?
                         (transaction-spec-filter first)])
@@ -480,7 +481,7 @@
                     (transaction-spec-buffer-id first)
                     (transaction-spec-origin-view-id first)
                     (transaction-spec-start-generation first)
-                    combined selection effects annotations
+                    combined selection effects (reverse reversed-annotations)
                     scroll-request filter-disabled?)
                   (let* ([spec (car items)]
                          [sequential? (transaction-spec-sequential? spec)]
@@ -526,7 +527,11 @@
                         new-combined
                         new-selection
                         (append mapped-effects next-effects)
-                        (append annotations (transaction-spec-annotations spec))
+                        (fold-left
+                          (lambda (result annotation)
+                            (cons annotation result))
+                          reversed-annotations
+                          (transaction-spec-annotations spec))
                         (if (transaction-spec-scroll-request spec)
                             (transaction-spec-scroll-request spec)
                             scroll-request)

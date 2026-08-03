@@ -61,6 +61,20 @@
         'reject)
       #f)
   (error 'kernel-tests "selection overlap rejection policy differs"))
+(let* ([count 1024]
+       [overlapping
+        (let loop ([index 1] [result '()])
+          (if (> index count)
+              (reverse result)
+              (loop
+                (+ index 1)
+                (cons (make-selection-range 0 index) result))))]
+       [normalized (make-selection overlapping 0 'merge)]
+       [range (selection-primary-range normalized)])
+  (unless (and (= (length (selection-ranges normalized)) 1)
+               (= (selection-range-anchor range) 0)
+               (= (selection-range-head range) count))
+    (error 'kernel-tests "large selection normalization differs")))
 
 (call-with-values
   (lambda ()
@@ -151,6 +165,22 @@
                (string=? (change-set-apply composed base #t) "aXbcdYe")
                (= (change-set-map-offset composed 2 'after) 3))
     (error 'kernel-tests "distant change composition differs")))
+(let* ([size 2048]
+       [base (string->utf8 (make-string size #\a))]
+       [insertions
+        (let loop ([position 0] [result '()])
+          (if (= position size)
+              (reverse result)
+              (loop
+                (+ position 1)
+                (cons (make-text-change position position "x") result))))]
+       [first (make-change-set size '())]
+       [second (make-change-set size insertions)]
+       [composed (change-set-compose first second)])
+  (unless (bytevector=?
+            (change-set-apply composed base)
+            (change-set-apply second base))
+    (error 'kernel-tests "large ChangeSet composition differs")))
 (let* ([base (string->utf8 "abcde")]
        [first (make-change-set 5 (list (make-text-change 1 1 "X")))]
        [second (make-change-set 5 (list (make-text-change 4 4 "Y")))]
@@ -315,6 +345,40 @@
                (eq? (car matches) outer)
                (eq? (cadr matches) point))
     (error 'kernel-tests "point range query differs")))
+(let* ([count 1024]
+       [large-ranges
+        (let loop ([index 0] [result '()])
+          (if (= index count)
+              (reverse result)
+              (loop
+                (+ index 1)
+                (cons
+                  (make-range-value (* 2 index) (+ (* 2 index) 1) index)
+                  result))))]
+       [large-set (make-range-set large-ranges)]
+       [spans (range-set-spans large-set 0 (* 2 count))])
+  (unless (and (= (length spans) (* 2 count))
+               (= (range-span-from (car spans)) 0)
+               (= (range-span-to (car spans)) 1)
+               (= (range-value-value
+                    (car (range-span-values (car spans))))
+                  0))
+    (error 'kernel-tests "large RangeSet sweep differs")))
+(let* ([count 1024]
+       [coincident-ranges
+        (let loop ([index 0] [result '()])
+          (if (= index count)
+              (reverse result)
+              (loop
+                (+ index 1)
+                (cons (make-range-value 0 1 index) result))))]
+       [spans (range-set-spans (make-range-set coincident-ranges) 0 1)])
+  (unless (and (= (length spans) 1)
+               (= (length (range-span-values (car spans))) count)
+               (= (range-value-value
+                    (car (range-span-values (car spans))))
+                  0))
+    (error 'kernel-tests "coincident RangeSet sweep differs")))
 (let* ([builder (make-range-set-builder)]
        [_ (range-set-builder-add! builder first-range)]
        [_ (range-set-builder-add! builder second-range)]
@@ -655,6 +719,21 @@
   (unless (equal? (configuration-facet ordered-configuration ordered)
                   '(first second))
     (error 'kernel-tests "facet provider order differs")))
+(let* ([count 1024]
+       [ordered (make-facet 'large-ordered '() (lambda (values) values))]
+       [providers
+        (let loop ([index 0] [result '()])
+          (if (= index count)
+              (reverse result)
+              (loop
+                (+ index 1)
+                (cons (make-facet-provider ordered index) result))))]
+       [values
+        (configuration-facet (make-configuration providers) ordered)])
+  (unless (and (= (length values) count)
+               (= (car values) 0)
+               (= (car (reverse values)) (- count 1)))
+    (error 'kernel-tests "large facet provider order differs")))
 
 (let ([drop-effect
         (make-state-effect

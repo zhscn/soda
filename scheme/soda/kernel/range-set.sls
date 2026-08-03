@@ -320,15 +320,24 @@
                   (loop (+ index 1) (cons point result))))))))
 
   (define (stable-event-sort events)
-    (define (insert event sorted)
-      (cond
-        [(null? sorted) (list event)]
-        [(< (car event) (caar sorted)) (cons event sorted)]
-        [else (cons (car sorted) (insert event (cdr sorted)))]))
-    (let loop ([items events] [result '()])
-      (if (null? items)
-          result
-          (loop (cdr items) (insert (car items) result)))))
+    (let ([indexed
+           (let loop ([items events] [ordinal 0] [result '()])
+             (if (null? items)
+                 (reverse result)
+                 (loop
+                   (cdr items)
+                   (+ ordinal 1)
+                   (cons (cons ordinal (car items)) result))))])
+      (map
+        cdr
+        (list-sort
+          (lambda (left right)
+            (let ([left-position (cadr left)]
+                  [right-position (cadr right)])
+              (or (< left-position right-position)
+                  (and (= left-position right-position)
+                       (< (car left) (car right))))))
+          indexed))))
 
   ;; Update a set by filtering existing values and merging sorted additions.
   ;; The operation keeps the RangeSet immutable and returns the original
@@ -390,9 +399,15 @@
            [events
             (stable-event-sort events)])
       (define (remove-active active ending)
-        (filter
-          (lambda (range) (not (exists (lambda (item) (eq? item range)) ending)))
-          active))
+        (if (null? ending)
+            active
+            (let ([ending-set (make-eq-hashtable)])
+              (for-each
+                (lambda (range) (hashtable-set! ending-set range #t))
+                ending)
+              (filter
+                (lambda (range) (not (hashtable-contains? ending-set range)))
+                active))))
       (let loop ([items events] [active '()] [result '()])
         (if (null? items)
             (reverse result)
@@ -404,14 +419,18 @@
                            [range (caddr event)])
                       (case kind
                         [(end) (group (cdr rest) (cons range ending) starting at-point)]
-                        [(start) (group (cdr rest) ending (append starting (list range)) at-point)]
-                        [(point) (group (cdr rest) ending starting (append at-point (list range)))]
+                        [(start) (group (cdr rest) ending (cons range starting) at-point)]
+                        [(point) (group (cdr rest) ending starting (cons range at-point))]
                         [else (group (cdr rest) ending starting at-point)]))
-                    (let* ([active (append (remove-active active ending) starting)]
+                    (let* ([active
+                            (append
+                              (remove-active active ending)
+                              (reverse starting))]
                            [next (if (null? rest) position (caar rest))]
                            [span
                             (and (or (< position next) (pair? at-point))
-                                 (make-range-span position next active at-point))])
+                                 (make-range-span
+                                   position next active (reverse at-point)))])
                       (loop rest active (if span (cons span result) result))))))))))
 
   (define (range-cursor-advance-to-match! cursor)

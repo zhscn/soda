@@ -270,44 +270,72 @@
             (bytevector-slice
               (compose-piece-data piece) offset (+ offset length)))))
 
-  (define (compose-pieces-slice pieces from to)
-    (if (= from to)
-        '()
-        (let loop ([items pieces] [position 0] [result '()])
-          (if (or (null? items) (>= position to))
-              (reverse result)
-              (let* ([piece (car items)]
-                     [end (+ position (compose-piece-length piece))]
-                     [start (max position from)]
-                     [stop (min end to)]
-                     [result
-                      (if (< start stop)
-                          (cons
-                            (compose-piece-slice
-                              piece
-                              (- start position)
-                              (- stop start))
-                            result)
-                          result)])
-                (loop (cdr items) end result))))))
+  (define (compose-pieces-consume
+            pieces piece-offset position target emit? reversed-result)
+    (cond
+      [(= position target)
+       (values pieces piece-offset position reversed-result)]
+      [(null? pieces)
+       (assertion-violation
+         'change-set-compose "piece stream ended before its declared length")]
+      [else
+       (let* ([piece (car pieces)]
+              [available (- (compose-piece-length piece) piece-offset)]
+              [length (min available (- target position))]
+              [reversed-result
+               (if emit?
+                   (cons
+                     (compose-piece-slice piece piece-offset length)
+                     reversed-result)
+                   reversed-result)])
+         (if (= length available)
+             (compose-pieces-consume
+               (cdr pieces) 0 (+ position length) target
+               emit? reversed-result)
+             (compose-pieces-consume
+               pieces (+ piece-offset length) (+ position length) target
+               emit? reversed-result)))]))
 
   (define (compose-pieces-apply pieces changes middle-length)
     (let loop ([items (change-set-changes changes)]
-               [cursor 0]
-               [result '()])
+               [pieces pieces]
+               [piece-offset 0]
+               [position 0]
+               [reversed-result '()])
       (if (null? items)
-          (append result (compose-pieces-slice pieces cursor middle-length))
+          (call-with-values
+            (lambda ()
+              (compose-pieces-consume
+                pieces piece-offset position middle-length
+                #t reversed-result))
+            (lambda (pieces piece-offset position reversed-result)
+              (reverse reversed-result)))
           (let* ([change (car items)]
                  [from (text-change-from change)]
                  [to (text-change-to change)]
-                 [insert (insert-bytevector change)]
-                 [result
-                  (append result (compose-pieces-slice pieces cursor from))]
-                 [result
-                  (if (positive? (bytevector-length insert))
-                      (append result (list (make-inserted-piece insert)))
-                      result)])
-            (loop (cdr items) to result)))))
+                 [insert (insert-bytevector change)])
+            (call-with-values
+              (lambda ()
+                (compose-pieces-consume
+                  pieces piece-offset position from
+                  #t reversed-result))
+              (lambda (pieces piece-offset position reversed-result)
+                (call-with-values
+                  (lambda ()
+                    (compose-pieces-consume
+                      pieces piece-offset position to
+                      #f reversed-result))
+                  (lambda (pieces piece-offset position reversed-result)
+                    (loop
+                      (cdr items)
+                      pieces
+                      piece-offset
+                      position
+                      (if (positive? (bytevector-length insert))
+                          (cons
+                            (make-inserted-piece insert)
+                            reversed-result)
+                          reversed-result))))))))))
 
   (define (compose-piece-data-append pieces)
     (let ([length

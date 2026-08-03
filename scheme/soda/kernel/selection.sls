@@ -123,7 +123,8 @@
                               (selection-range-to right-range))))))
                  indexed)])
          (define (merged-range entries from to)
-           (let* ([primary-entry
+           (let* ([entries (reverse entries)]
+                  [primary-entry
                    (let find ([items entries])
                      (cond
                        [(null? items) #f]
@@ -163,7 +164,7 @@
                            'make-selection "selection ranges overlap"
                            (map cdr (reverse (cons entry group))))
                          (loop
-                           (cdr items) (append group (list entry))
+                           (cdr items) (cons entry group)
                            from (max to next-to) result result-primary))
                      (let* ([contains-primary?
                              (exists (lambda (item) (= (car item) primary)) group)]
