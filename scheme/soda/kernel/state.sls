@@ -490,7 +490,9 @@
                         new-selection
                         (append mapped-effects next-effects)
                         (append annotations (transaction-spec-annotations spec))
-                        (or scroll-request (transaction-spec-scroll-request spec))
+                        (if (transaction-spec-scroll-request spec)
+                            (transaction-spec-scroll-request spec)
+                            scroll-request)
                         (or filter-disabled? (transaction-spec-filter spec))))))))))
     )
 

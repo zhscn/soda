@@ -112,12 +112,12 @@
         (make-transaction-spec
           0 #f #f
           (make-change-set 5 (list (make-text-change 1 1 "X")))
-          #f '() '() #f #f)]
+          #f '() '() 'first #f)]
        [second-spec
         (make-transaction-spec
           0 #f #f
           (make-change-set 5 (list (make-text-change 4 4 "Y")))
-          #f '() '() #f #f)]
+          #f '() '() 'second #f)]
        [resolved
         (resolve-transaction-specs (list first-spec second-spec) base)]
        [sequential-spec
@@ -136,7 +136,8 @@
                (string=?
                  (change-set-apply
                    (resolved-transaction-changes sequential-resolved) base #t)
-                 "aXYbcde"))
+                 "aXYbcde")
+               (eq? (resolved-transaction-scroll-request resolved) 'second))
     (error 'kernel-tests "transaction spec resolution differs")))
 (unless
     (guard (condition [else #t])
