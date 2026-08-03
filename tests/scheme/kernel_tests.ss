@@ -1855,6 +1855,7 @@
     (error 'kernel-tests "Frame composition differs")))
 
 (let* ([destroyed #f]
+       [decoration-reads 0]
        [plugin
          (make-view-plugin
            'counter
@@ -1864,6 +1865,7 @@
                (vector-set! value 0 (+ (vector-ref value 0) 1))))
            (lambda (value) (set! destroyed (vector-ref value 0)))
            (lambda (value)
+             (set! decoration-reads (+ decoration-reads 1))
              (make-decoration-set
                (list (make-range-value 0 1
                                        (make-face-decoration 'counter
@@ -1873,6 +1875,7 @@
   (view-plugin-instance-update! instance update)
   (unless (and (= (vector-ref (view-plugin-instance-value instance) 0) 2)
                (= (length (range-set-ranges (view-plugin-instance-decorations instance))) 1)
+               (= decoration-reads 2)
                (view-plugin-instance-destroy! instance)
                (= destroyed 2)
                (null? (view-plugin-instance-decorations instance))

@@ -110,10 +110,23 @@
     (view-plugin-instance %make-view-plugin-instance view-plugin-instance?)
     (fields plugin
             (mutable value view-plugin-instance-value view-plugin-instance-value-set!)
+            (mutable decorations instance-decorations instance-decorations-set!)
             (mutable display-stream instance-display-stream instance-display-stream-set!)
             (mutable display-transform instance-display-transform instance-display-transform-set!)
             (mutable destroyed? view-plugin-instance-destroyed?
                      instance-destroyed?-set!)))
+
+  (define (compute-decorations plugin value)
+    (let ([procedure (view-plugin-decorations plugin)])
+      (if procedure
+          (let ([decorations (procedure value)])
+            (unless (decoration-set? decorations)
+              (assertion-violation
+                'view-plugin-instance-decorations
+                "plugin decorations must be a DecorationSet"
+                decorations))
+            decorations)
+          (make-decoration-set '()))))
 
   (define (compute-display-stream plugin value)
     (let ([procedure (view-plugin-display plugin)])
@@ -140,7 +153,8 @@
       (assertion-violation
         'make-view-plugin-instance "expected a ViewPlugin" plugin))
     (let ([value ((view-plugin-create plugin) view)])
-      (%make-view-plugin-instance plugin value (compute-display-stream plugin value)
+      (%make-view-plugin-instance plugin value (compute-decorations plugin value)
+                                   (compute-display-stream plugin value)
                                    (compute-display-transform plugin value) #f)))
 
   (define (view-plugin-instance-display-stream instance)
@@ -163,17 +177,7 @@
         'view-plugin-instance-decorations "expected a ViewPlugin instance" instance))
     (if (view-plugin-instance-destroyed? instance)
         '()
-        (let ([procedure
-                (view-plugin-decorations (view-plugin-instance-plugin instance))])
-          (if procedure
-              (let ([decorations (procedure (view-plugin-instance-value instance))])
-                (unless (decoration-set? decorations)
-                  (assertion-violation
-                    'view-plugin-instance-decorations
-                    "plugin decorations must be a DecorationSet"
-                    decorations))
-                decorations)
-              (make-decoration-set '())))))
+        (instance-decorations instance)))
 
   (define (view-plugin-instance-update! instance update)
     (unless (and (view-plugin-instance? instance)
@@ -184,6 +188,10 @@
     (let ([procedure (view-plugin-update (view-plugin-instance-plugin instance))])
       (when procedure
         (procedure (view-plugin-instance-value instance) update))
+      (instance-decorations-set!
+        instance
+        (compute-decorations (view-plugin-instance-plugin instance)
+                             (view-plugin-instance-value instance)))
       (instance-display-stream-set!
         instance
         (compute-display-stream (view-plugin-instance-plugin instance)
@@ -203,6 +211,7 @@
         (let ([procedure (view-plugin-destroy (view-plugin-instance-plugin instance))])
           (when procedure
             (procedure (view-plugin-instance-value instance)))
+          (instance-decorations-set! instance (make-decoration-set '()))
           (instance-display-stream-set! instance #f)
           (instance-display-transform-set! instance #f)
           (instance-destroyed?-set! instance #t)
