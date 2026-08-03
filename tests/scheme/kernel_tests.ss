@@ -116,7 +116,7 @@
         (resolve-transaction-specs
           (list first-spec sequential-spec)
           base)])
-  (unless (and (string=?
+(unless (and (string=?
                  (change-set-apply
                    (resolved-transaction-changes resolved) base #t)
                  "aXbcdYe")
@@ -125,6 +125,32 @@
                    (resolved-transaction-changes sequential-resolved) base #t)
                  "aXYbcde"))
     (error 'kernel-tests "transaction spec resolution differs")))
+(let* ([base (string->utf8 "abcde")]
+       [first-spec
+        (make-transaction-spec
+          0 #f #f
+          (make-change-set 5 (list (make-text-change 1 1 "X")))
+          #f '() '() #f #f)]
+       [second-spec
+        (make-transaction-spec
+          0 #f #f
+          (make-change-set 5 (list (make-text-change 4 4 "Y")))
+          (make-selection (list (make-selection-range 5 5 'after 'character '())))
+          (list
+            (make-state-effect
+              'position 5
+              (lambda (offset description)
+                (change-desc-map-offset description offset 'after))))
+          '() #f #f)]
+       [resolved (resolve-transaction-specs (list first-spec second-spec) base)])
+  (unless (and (= (selection-range-head
+                    (selection-primary-range
+                      (resolved-transaction-selection resolved)))
+                  6)
+               (= (state-effect-value
+                    (car (resolved-transaction-effects resolved)))
+                  6))
+    (error 'kernel-tests "non-sequential selection/effect mapping differs")))
 
 (define first-range
   (make-range-value 1 3 'first 'before 'after))

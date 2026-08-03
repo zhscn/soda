@@ -375,7 +375,7 @@
                             (map-effect-list operation effects)]
                            [next-effects
                             (map-effect-list
-                              (if sequential? next new-combined)
+                              (if sequential? next operation)
                               (transaction-spec-effects spec))]
                            [new-selection
                             (cond
@@ -384,7 +384,7 @@
                                    (transaction-spec-selection spec)
                                    (selection-map-change
                                      (transaction-spec-selection spec)
-                                     (change-set-map combined next)))]
+                                     operation))]
                               [selection
                                (selection-map-change selection operation)]
                               [else #f])])
