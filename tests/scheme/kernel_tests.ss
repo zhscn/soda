@@ -295,6 +295,11 @@
           (make-facet-provider read-only #t 'high))))
 (unless (eq? (car (configuration-fields configuration 'buffer)) history-field)
   (error 'kernel-tests "state field configuration differs"))
+(unless (= (length (configuration-fields
+                    (make-configuration (list history-field history-field))
+                    'buffer))
+           1)
+  (error 'kernel-tests "duplicate state field was not normalized"))
 (unless (configuration-facet configuration read-only)
   (error 'kernel-tests "facet configuration differs"))
 (define view-only-facet

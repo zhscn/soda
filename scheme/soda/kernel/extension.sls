@@ -290,10 +290,21 @@
     (unless (configuration? configuration)
       (assertion-violation
         'configuration-fields "expected a configuration" configuration))
-    (filter
-      (lambda (field)
-        (and (state-field? field) (eq? scope (state-field-scope field))))
-      (effective-extensions (configuration-extensions configuration))))
+    (let ([fields
+            (filter
+              (lambda (field)
+                (and (state-field? field)
+                     (eq? scope (state-field-scope field))))
+              (effective-extensions (configuration-extensions configuration)))])
+      (let loop ([items fields] [seen '()] [result '()])
+        (if (null? items)
+            (reverse result)
+            (if (memq (car items) seen)
+                (loop (cdr items) seen result)
+                (loop
+                  (cdr items)
+                  (cons (car items) seen)
+                  (cons (car items) result)))))))
 
   (define precedence-order
     '((highest . 0) (high . 1) (default . 2) (low . 3) (lowest . 4)))
