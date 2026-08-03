@@ -7,11 +7,10 @@
   (import (rnrs)
           (soda editor contract)
           (only (chezscheme)
-                file-directory?
                 getenv
-                mkdir
                 path-parent)
-          (soda editor save-place))
+          (soda editor save-place)
+          (soda editor filesystem))
 
   (define schema-name 'soda-save-place)
   (define schema-version 1)
@@ -104,17 +103,6 @@
               (save-place-state-decode
                 (get-bytevector-all port)))))
         '()))
-
-  (define (ensure-directory! directory)
-    (unless
-      (or (string=? directory "")
-          (string=? directory ".")
-          (string=? directory "/")
-          (file-directory? directory))
-      (let ([parent (path-parent directory)])
-        (unless (string=? parent directory)
-          (ensure-directory! parent)))
-      (mkdir directory)))
 
   (define (ensure-save-place-directory! path)
     (unless (non-empty-string? path)

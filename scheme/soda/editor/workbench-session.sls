@@ -9,10 +9,9 @@
   (import (rnrs)
           (soda editor contract)
           (only (chezscheme)
-                file-directory?
                 getenv
-                mkdir
                 path-parent)
+          (soda editor filesystem)
           (soda document)
           (soda editor buffer)
           (soda editor jump-graph)
@@ -1041,18 +1040,6 @@
           (lambda (port)
             (workbench-session-decode
               (get-bytevector-all port)))))))
-
-  (define (ensure-directory! directory)
-    (unless
-      (or
-        (string=? directory "")
-        (string=? directory ".")
-        (string=? directory "/")
-        (file-directory? directory))
-      (let ([parent (path-parent directory)])
-        (unless (string=? parent directory)
-          (ensure-directory! parent)))
-      (mkdir directory)))
 
   (define (ensure-workbench-session-directory! path)
     (unless (non-empty-string? path)
