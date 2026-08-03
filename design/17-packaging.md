@@ -21,7 +21,7 @@ native core + libuv + Tree-sitter core
   -> soda launcher
 
 petite.boot + scheme.boot
-  -> independent ELF sections (.petite.boot, .scheme.boot)
+  -> independent ELF sections (.petite.boot, .scheme.boot, .soda_core.boot)
 
 Soda core Scheme program
   -> whole-program object

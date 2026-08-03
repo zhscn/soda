@@ -58,6 +58,7 @@ function(soda_embed_chez_application target)
   set(scheme_boot_raw_c "${generated_dir}/scheme_boot.raw.c")
   set(petite_boot_c "${generated_dir}/petite_boot.c")
   set(scheme_boot_c "${generated_dir}/scheme_boot.c")
+  set(core_boot_raw_c "${generated_dir}/soda_core_boot.raw.c")
   set(core_boot_c "${generated_dir}/soda_core_boot.c")
   set(core_boot_program_so "${core_boot}.program.so")
   set(core_boot_program_wpo "${core_boot}.program.wpo")
@@ -123,9 +124,17 @@ function(soda_embed_chez_application target)
       -i
       -n soda_core_boot
       "${core_boot}"
-      "${core_boot_c}"
+      "${core_boot_raw_c}"
+    COMMAND
+      "${CMAKE_COMMAND}"
+      "-DINPUT=${core_boot_raw_c}"
+      "-DOUTPUT=${core_boot_c}"
+      -DARRAY=soda_core_boot
+      -DSECTION=.soda_core.boot
+      -P "${PROJECT_SOURCE_DIR}/cmake/annotate-boot-section.cmake"
     DEPENDS
       "${PROJECT_SOURCE_DIR}/cmake/build-soda-boot.ss"
+      "${PROJECT_SOURCE_DIR}/cmake/annotate-boot-section.cmake"
       "${SODA_CHEZ_PETITE_BOOT}"
       "${SODA_CHEZ_SCHEME_BOOT}"
       ${SODA_CHEZ_SOURCES}
