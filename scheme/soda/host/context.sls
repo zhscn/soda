@@ -8,6 +8,7 @@
           active-context-interaction-stack
           surface-active-context
           surface-select-view!
+          surface-route-display-request!
           make-display-request
           display-request?
           display-request-buffer-id
@@ -72,6 +73,22 @@
                 (context-for-window surface views (car leaves))]
                [else (loop (cdr leaves))])))))
 
+  (define (window-for-buffer surface views buffer-id)
+    (let* ([selected (surface-selected-window surface)]
+           [selected-context
+            (and selected (context-for-window surface views selected))])
+      (if (and selected-context
+               (= (active-context-buffer-id selected-context) buffer-id))
+          selected
+          (let loop ([leaves (window-leaves (surface-root-window surface))])
+            (cond
+              [(null? leaves) #f]
+              [else
+               (let ([context (context-for-window surface views (car leaves))])
+                 (if (and context (= (active-context-buffer-id context) buffer-id))
+                     (car leaves)
+                     (loop (cdr leaves))))])))))
+
   ;; DisplayRequest carries package policy to the placement service without
   ;; embedding a package object in Surface, Window, or View state.  The host
   ;; accepts arbitrary role/hint/provenance payloads as opaque package values.
@@ -89,4 +106,19 @@
                            buffer-id origin-view-id role focus-policy))
     (%make-display-request buffer-id origin-view-id role focus-policy
                            placement-hint provenance))
+
+  ;; Packages use this resolver only for an existing projection.  A request
+  ;; without a matching leaf remains unresolved, leaving Buffer/View creation
+  ;; and split policy to the package-level placement implementation.
+  (define (surface-route-display-request! surface views request)
+    (unless (and (surface? surface) (view-service? views) (display-request? request))
+      (assertion-violation 'surface-route-display-request!
+                           "expected a Surface, ViewService, and DisplayRequest"
+                           surface views request))
+    (let ([window (window-for-buffer surface views (display-request-buffer-id request))])
+      (and window
+           (begin
+             (when (eq? (display-request-focus-policy request) 'focus)
+               (surface-set-selected-window! surface window))
+             (context-for-window surface views window)))))
 )

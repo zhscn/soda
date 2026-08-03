@@ -75,10 +75,13 @@
     (unless (memq window (window-leaves (surface-root-window surface)))
       (assertion-violation
         'surface-set-selected-window! "window is not a root leaf" window))
-    (for-each (lambda (leaf) (window-set-selected! leaf #f))
-              (window-leaves (surface-root-window surface)))
-    (window-set-selected! window #t)
-    (surface-selected-window-set! surface window)
-    (surface-generation-set! surface (+ 1 (surface-generation surface)))
-    window)
+    (if (eq? window (surface-selected-window surface))
+        window
+        (begin
+          (for-each (lambda (leaf) (window-set-selected! leaf #f))
+                    (window-leaves (surface-root-window surface)))
+          (window-set-selected! window #t)
+          (surface-selected-window-set! surface window)
+          (surface-generation-set! surface (+ 1 (surface-generation surface)))
+          window)))
 )

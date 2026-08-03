@@ -911,11 +911,24 @@
        [split (make-split-window 'horizontal (list left right) #f)]
        [split-surface (make-surface split '(8 . 1))]
        [context (surface-select-view! split-surface (host-state-views host)
-                                      (view-id other-view))])
+                                      (view-id other-view))]
+       [preserved
+        (surface-route-display-request!
+          split-surface (host-state-views host)
+          (make-display-request (buffer-id buffer) #f 'result 'preserve #f 'test))]
+       [focused
+        (surface-route-display-request!
+          split-surface (host-state-views host)
+          (make-display-request (buffer-id buffer) #f 'result 'focus #f 'test))]
+       [generation (surface-generation split-surface)])
   (unless (and (active-context? context)
                (= (active-context-view-id context) (view-id other-view))
                (= (active-context-buffer-id context) (buffer-id other-buffer))
-               (eq? (surface-selected-window split-surface) right)
+               (= (active-context-view-id preserved) (view-id view))
+               (= (active-context-view-id focused) (view-id view))
+               (eq? (surface-selected-window split-surface) left)
+               (eq? (surface-set-selected-window! split-surface left) left)
+               (= (surface-generation split-surface) generation)
                (not (surface-select-view! split-surface (host-state-views host) 999999)))
     (error 'kernel-tests "Surface View focus routing differs"))
   (view-service-close-view! (host-state-views host) (view-id other-view)))
@@ -939,7 +952,7 @@
     (error 'kernel-tests "weighted Window layout or initial selection differs")))
 
 (surface-resize! surface '(40 . 12))
-(unless (and (= (surface-generation surface) 2)
+(unless (and (= (surface-generation surface) 1)
              (equal? (window-rectangle leaf) '(0 0 40 12)))
   (error 'kernel-tests "Surface resize layout differs"))
 (surface-resize! surface '(80 . 24))

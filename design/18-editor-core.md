@@ -534,7 +534,9 @@ headless frontend 可以创建没有 terminal writer 的 Surface。
 `ActiveContext` 是从 Surface selected leaf 与 live View 导出的不可变快照。它保存
 surface、window、view、buffer identity 和 interaction stack；异步请求保留它作为 origin，
 由 host 在应用结果前验证目标仍然 live。Surface 的 view focus 路由以 View identity 查找
-root tree leaf，只修改 selected Window。
+root tree leaf，只修改 selected Window。placement service 先将 `DisplayRequest` 路由到
+Surface tree 中已有的 target Buffer projection；未命中的 request 保留给功能包决定创建
+View、复用 leaf 或改变 split tree 的策略。
 
 Split 的 `weights` 是与 child 一一对应的正精确有理数。layout 按权重切分 terminal cell，
 通过 largest-remainder 分配不能整除的 cell；相同余数按 child 顺序分配。省略权重时每个
