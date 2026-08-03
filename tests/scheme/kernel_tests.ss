@@ -432,6 +432,37 @@
                "hello world"))
   (error 'kernel-tests "dispatcher did not publish an atomic update"))
 
+;; A batch dispatch resolves simultaneous specs against one starting snapshot
+;; and publishes one buffer generation/update.
+(define batch-generation (buffer-state-generation (buffer-state buffer)))
+(define batch-length (snapshot-byte-size (buffer-state-document (buffer-state buffer))))
+(define batch-update
+  (dispatcher-dispatch-specs!
+    (host-state-dispatch host)
+    (list
+      (make-transaction-spec
+        (buffer-id buffer) (view-id view) batch-generation
+        (make-change-set
+          batch-length
+          (list (make-text-change 0 0 "A")))
+        #f '() '())
+      (make-transaction-spec
+        (buffer-id buffer) #f batch-generation
+        (make-change-set
+          batch-length
+          (list (make-text-change batch-length batch-length "B")))
+        #f '() '()))))
+(unless (and (editor-update? batch-update)
+             (= (buffer-state-generation (buffer-state buffer)) 2)
+             (= (change-set-old-length (editor-update-changes batch-update))
+                batch-length)
+             (= (change-set-new-length (editor-update-changes batch-update))
+                (+ batch-length 2))
+             (string=?
+               (snapshot-string (buffer-state-document (buffer-state buffer)))
+               "Ahello worldB"))
+  (error 'kernel-tests "dispatcher did not resolve a batch update"))
+
 (define second-view
   (view-service-create!
     (host-state-views host) owner buffer configuration))

@@ -293,6 +293,25 @@
     (unless (bytevector? original)
       (assertion-violation
         'resolve-transaction-specs "expected the starting document bytes" original))
+    (when (pair? specs)
+      (let ([first (car specs)])
+        (for-each
+          (lambda (spec)
+            (unless (equal? (transaction-spec-buffer-id spec)
+                            (transaction-spec-buffer-id first))
+              (assertion-violation
+                'resolve-transaction-specs
+                "transaction specs must target the same buffer"
+                (transaction-spec-buffer-id first)
+                (transaction-spec-buffer-id spec)))
+            (unless (equal? (transaction-spec-start-generation spec)
+                            (transaction-spec-start-generation first))
+              (assertion-violation
+                'resolve-transaction-specs
+                "transaction specs must share a start generation"
+                (transaction-spec-start-generation first)
+                (transaction-spec-start-generation spec))))
+          (cdr specs))))
     specs)
 
   ;; Resolve multiple specs into one immutable transaction description. A
@@ -313,7 +332,6 @@
                 "first spec does not match the starting document length"))
             (let loop ([items (cdr specs)]
                        [combined first-changes]
-                       [current (change-set-apply first-changes original)]
                        [selection (transaction-spec-selection first)]
                        [effects (map-effect-list
                                   first-changes
@@ -344,7 +362,6 @@
                                  (change-set-map next combined))]
                            [new-combined
                             (change-set-compose combined operation original)]
-                           [new-current (change-set-apply operation current)]
                            [mapped-effects
                             (map-effect-list operation effects)]
                            [next-effects
@@ -365,7 +382,6 @@
                       (loop
                         (cdr items)
                         new-combined
-                        new-current
                         new-selection
                         (append mapped-effects next-effects)
                         (append annotations (transaction-spec-annotations spec))

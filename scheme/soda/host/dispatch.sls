@@ -7,10 +7,12 @@
           editor-update-views
           editor-update-changes
           editor-update-annotations
+          editor-update-scroll-request
           editor-update-damage
           make-dispatcher
           dispatcher?
           dispatcher-dispatch!
+          dispatcher-dispatch-specs!
           dispatcher-set-listener!)
   (import (rnrs)
           (soda kernel change)
@@ -31,12 +33,14 @@
       (immutable views editor-update-views)
       (immutable changes editor-update-changes)
       (immutable annotations editor-update-annotations)
+      (immutable scroll-request editor-update-scroll-request)
       (immutable damage editor-update-damage)))
 
-  (define (make-editor-update buffer-id old-state new-state views changes annotations damage)
+  (define (make-editor-update buffer-id old-state new-state views changes annotations
+                              scroll-request damage)
     (%make-editor-update
       buffer-id old-state new-state (list-copy views) changes
-      (list-copy annotations) (list-copy damage)))
+      (list-copy annotations) scroll-request (list-copy damage)))
 
   (define-record-type
     (dispatcher %make-dispatcher dispatcher?)
@@ -102,28 +106,42 @@
               generation))))
       (views-for-buffer views buffer-id)))
 
-  (define (dispatcher-dispatch-internal! dispatcher spec)
-    (unless (and (dispatcher? dispatcher) (transaction-spec? spec))
-      (assertion-violation 'dispatcher-dispatch! "expected a dispatcher and transaction spec"))
+  (define (dispatcher-dispatch-resolved-internal! dispatcher spec resolved)
+    (unless (and (dispatcher? dispatcher)
+                 (transaction-spec? spec)
+                 (resolved-transaction? resolved))
+      (assertion-violation
+        'dispatcher-dispatch-specs!
+        "expected a dispatcher, transaction spec, and resolved transaction"))
     (let* ([buffers (dispatcher-buffers dispatcher)]
            [views (dispatcher-views dispatcher)]
            [buffer (buffer-service-ref buffers (transaction-spec-buffer-id spec) #f)])
       (unless buffer
         (assertion-violation
-          'dispatcher-dispatch! "target buffer is not live"
+          'dispatcher-dispatch-specs! "target buffer is not live"
           (transaction-spec-buffer-id spec)))
       (let* ([old-state (buffer-state buffer)]
              [expected (transaction-spec-start-generation spec)])
         (when (and expected (not (= expected (buffer-state-generation old-state))))
           (assertion-violation
-            'dispatcher-dispatch! "transaction starts from a stale buffer generation"
+            'dispatcher-dispatch-specs!
+            "transaction starts from a stale buffer generation"
             expected (buffer-state-generation old-state)))
         (assert-view-generations!
           views (buffer-id buffer) (buffer-state-generation old-state))
-        (let* ([changes (transaction-spec-changes spec)]
+        (let* ([changes (resolved-transaction-changes resolved)]
                [origin (view-for-origin
                          views (transaction-spec-origin-view-id spec) (buffer-id buffer))]
                [old-view-state (and origin (view-state origin))]
+               [document-length
+                (snapshot-byte-size (buffer-state-document old-state))]
+               [_validated-length
+                (unless (= document-length (change-set-old-length changes))
+                  (assertion-violation
+                    'dispatcher-dispatch-specs!
+                    "change set does not match the current document length"
+                    (change-set-old-length changes)
+                    document-length))]
                [prepared (prepare-native-change! (buffer-document buffer) changes)]
                [native (car prepared)]
                [new-snapshot (cdr prepared)]
@@ -135,12 +153,8 @@
                        (guard (condition [else #f])
                          (document-transaction-abort! native)))
                      (raise condition)])
-                  (make-transaction
-                    old-state old-view-state changes
-                    (transaction-spec-selection spec)
-                    (transaction-spec-effects spec)
-                    (transaction-spec-annotations spec)
-                    new-snapshot))]
+                  (make-transaction-from-resolved
+                    old-state old-view-state resolved new-snapshot))]
                [new-buffer-state (transaction-new-buffer-state transaction)]
                [pending-views
                 (map
@@ -186,6 +200,7 @@
                       pending-views)
                     changes
                     (transaction-annotations transaction)
+                    (resolved-transaction-scroll-request resolved)
                     (if (change-set-empty? changes) '(selection) '(document selection)))])
             (let ([listener (dispatcher-listener dispatcher)])
               (when listener (listener update)))
@@ -225,10 +240,60 @@
   (define (apply-transaction-extenders dispatcher spec)
     (apply-transaction-extension dispatcher spec transaction-extenders-facet))
 
+  (define (any-transaction-spec-filter? specs)
+    (cond
+      [(null? specs) #f]
+      [(transaction-spec-filter (car specs)) #t]
+      [else (any-transaction-spec-filter? (cdr specs))]))
+
+  (define (apply-transaction-extension-list dispatcher specs facet)
+    (let loop ([items specs] [result '()])
+      (if (null? items)
+          (reverse result)
+          (let ([next (apply-transaction-extension dispatcher (car items) facet)])
+            (if next
+                (loop (cdr items) (cons next result))
+                (loop (cdr items) result))))))
+
+  (define (dispatcher-dispatch-specs! dispatcher specs)
+    (unless (and (dispatcher? dispatcher)
+                 (list? specs)
+                 (for-all transaction-spec? specs))
+      (assertion-violation
+        'dispatcher-dispatch-specs!
+        "expected a dispatcher and a list of transaction specs"))
+    (if (null? specs)
+        #f
+        (let* ([filter-disabled?
+                (any-transaction-spec-filter? specs)]
+               [filtered
+                (if filter-disabled?
+                    specs
+                    (apply-transaction-extension-list
+                      dispatcher specs transaction-filters-facet))]
+               [extended
+                (apply-transaction-extension-list
+                  dispatcher filtered transaction-extenders-facet)])
+          (if (null? extended)
+              #f
+              (let* ([first (car extended)]
+                     [buffer
+                      (buffer-service-ref
+                        (dispatcher-buffers dispatcher)
+                        (transaction-spec-buffer-id first) #f)])
+                (unless buffer
+                  (assertion-violation
+                    'dispatcher-dispatch-specs!
+                    "target buffer is not live"
+                    (transaction-spec-buffer-id first)))
+                (let* ([original
+                        (snapshot-bytevector (buffer-state-document (buffer-state buffer)))]
+                       [resolved (resolve-transaction-specs extended original)])
+                  (dispatcher-dispatch-resolved-internal!
+                    dispatcher first resolved)))))))
+
   (define (dispatcher-dispatch! dispatcher spec)
     (unless (and (dispatcher? dispatcher) (transaction-spec? spec))
       (assertion-violation 'dispatcher-dispatch! "expected a dispatcher and transaction spec"))
-    (let* ([filtered (apply-transaction-filters dispatcher spec)]
-           [extended (and filtered (apply-transaction-extenders dispatcher filtered))])
-      (and extended (dispatcher-dispatch-internal! dispatcher extended))))
+    (dispatcher-dispatch-specs! dispatcher (list spec)))
 )
