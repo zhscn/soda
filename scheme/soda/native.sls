@@ -1,10 +1,15 @@
 (library (soda native)
   (export load-soda-native-library!
+          native-null-pointer?
           make-native-error
           make-native-status-checker)
   (import (chezscheme))
 
   (define loaded-paths (make-hashtable string-hash string=?))
+
+  (define (native-null-pointer? pointer)
+    (or (not pointer)
+        (and (integer? pointer) (zero? pointer))))
 
   (define (make-native-error last-error)
     (lambda (who)

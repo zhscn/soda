@@ -304,14 +304,10 @@
 
   (define native-error (make-native-error %last-error))
 
-  (define (null-pointer? pointer)
-    (or (not pointer)
-        (and (integer? pointer) (zero? pointer))))
-
   (define check-status (make-native-status-checker native-error))
 
   (define (check-pointer who pointer)
-    (when (null-pointer? pointer)
+    (when (native-null-pointer? pointer)
       (native-error who))
     pointer)
 
@@ -329,7 +325,7 @@
   (define (require-open who predicate pointer value)
     (unless (predicate value)
       (assertion-violation who "unexpected handle type" value))
-    (when (null-pointer? (pointer value))
+    (when (native-null-pointer? (pointer value))
       (assertion-violation who "handle is closed" value)))
 
   (define (bytevector->text data)
@@ -343,7 +339,7 @@
 
   (define (text-close! value)
     (when (and (text? value)
-               (not (null-pointer? (text-pointer value))))
+               (not (native-null-pointer? (text-pointer value))))
       (%text-destroy (text-pointer value))
       (text-pointer-set! value #f)))
 
@@ -484,7 +480,7 @@
 
   (define (document-close! value)
     (when (and (document? value)
-               (not (null-pointer? (document-pointer value))))
+               (not (native-null-pointer? (document-pointer value))))
       (%document-destroy (document-pointer value))
       (document-pointer-set! value #f)))
 
@@ -524,7 +520,7 @@
                     (%document-can-redo (document-pointer value))))
 
   (define (optional-change who pointer)
-    (if (null-pointer? pointer)
+    (if (native-null-pointer? pointer)
         (let ([message (%last-error)])
           (if (string=? message "") #f (error who message)))
         (%make-change pointer)))
@@ -621,7 +617,7 @@
 
   (define (snapshot-close! value)
     (when (and (snapshot? value)
-               (not (null-pointer? (snapshot-pointer value))))
+               (not (native-null-pointer? (snapshot-pointer value))))
       (%snapshot-destroy (snapshot-pointer value))
       (snapshot-pointer-set! value #f)))
 
@@ -677,7 +673,7 @@
 
   (define (transaction-close! value)
     (when (and (transaction? value)
-               (not (null-pointer? (transaction-pointer value))))
+               (not (native-null-pointer? (transaction-pointer value))))
       (%transaction-destroy (transaction-pointer value))
       (transaction-pointer-set! value #f)))
 
@@ -804,7 +800,7 @@
   (define (transaction-commit! value)
     (require-open 'transaction-commit! transaction? transaction-pointer value)
     (let ([pointer (%transaction-commit (transaction-pointer value))])
-      (when (null-pointer? pointer)
+      (when (native-null-pointer? pointer)
         (native-error 'transaction-commit!))
       (%transaction-destroy (transaction-pointer value))
       (transaction-pointer-set! value #f)
@@ -819,7 +815,7 @@
 
   (define (change-close! value)
     (when (and (change? value)
-               (not (null-pointer? (change-pointer value))))
+               (not (native-null-pointer? (change-pointer value))))
       (%change-destroy (change-pointer value))
       (change-pointer-set! value #f)))
 

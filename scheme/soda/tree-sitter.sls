@@ -163,11 +163,6 @@
 
   (define native-error (make-native-error %last-error))
 
-  (define (null-pointer? pointer)
-    (or
-      (not pointer)
-      (and (integer? pointer) (zero? pointer))))
-
   (define check-status (make-native-status-checker native-error))
 
   (define (require-open who value)
@@ -209,7 +204,7 @@
     (let ([pointer
             (%parser-create
               (symbol->string language))])
-      (when (null-pointer? pointer)
+      (when (native-null-pointer? pointer)
         (native-error 'make-tree-sitter-parser))
       (%make-tree-sitter-parser pointer)))
 
@@ -315,7 +310,7 @@
             (%query-compile
               (tree-sitter-parser-pointer parser)
               source)])
-      (when (null-pointer? pointer)
+      (when (native-null-pointer? pointer)
         (native-error 'make-tree-sitter-query))
       (%make-tree-sitter-query pointer)))
 
@@ -331,7 +326,7 @@
         (tree-sitter-query-pointer-set! query #f))))
 
   (define (query-result->captures who result)
-    (when (null-pointer? result)
+    (when (native-null-pointer? result)
       (native-error who))
     (dynamic-wind
       (lambda () (void))

@@ -4417,14 +4417,6 @@
               (member library library-catalog))))
         import-locations)))
 
-  (define (definition-with-id definitions id)
-    (find
-      (lambda (definition)
-        (scheme-definition-id=?
-          (scheme-definition-id definition)
-          id))
-      definitions))
-
   (define (use-at-form uses form)
     (find
       (lambda (use)
@@ -4455,7 +4447,7 @@
         (for-all
           (lambda (id)
             (let ([definition
-                    (definition-with-id
+                    (definition-by-id
                       definitions id)])
               (and
                 definition
