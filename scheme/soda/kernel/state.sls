@@ -151,15 +151,17 @@
           (if (null? default) #f (car default)))))
 
   (define (advance-buffer-state state document transaction)
-    (let ([configuration
+    (let* ([effective-transaction
+             (transaction-without-view-effects transaction)]
+           [configuration
             (configuration-apply-effects
               (buffer-state-configuration state)
-              (transaction-effects transaction)
+              (transaction-effects effective-transaction)
               'buffer)])
       (%make-buffer-state
         document
         configuration
-        (field-values-for state configuration 'buffer transaction)
+        (field-values-for state configuration 'buffer effective-transaction)
         (+ 1 (buffer-state-generation state)))))
 
   (define (advance-view-state state selection transaction apply-view-effects?)
