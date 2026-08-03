@@ -1,6 +1,7 @@
 (library (soda host condition)
   (export make-condition-service
           condition-service?
+          condition-service-entries
           condition-service-capture
           condition-service-dismiss!
           condition-service-resume!

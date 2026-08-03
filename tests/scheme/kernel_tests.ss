@@ -1447,13 +1447,25 @@
                (= (length (display-stream-fragments extended)) 3)
                (= (display-map-document->cell map 0) 0)
                (= (display-map-document->cell map 1) 1)
-               (= (display-map-document->cell map 3) 2)
+               (= (display-map-document->cell map 3) 5)
+               (= (display-map-document->cell map 3 'before) 2)
                (= (display-map-cell->document map 0) 0)
                (= (display-map-cell->document map 1) 1)
                (= (display-map-cell->document map 3) 3)
                (= (length (display-map-document-range map 1 3)) 1)
                (= (length (display-map-cell-range map 2 5)) 1))
     (error 'kernel-tests "DisplayStream or DisplayMap differs")))
+
+(let* ([map
+         (make-display-map
+           (list (make-display-map-entry 0 1 0 1 'text 'left)
+                 (make-display-map-entry 1 1 1 4 'virtual 'hint)
+                 (make-display-map-entry 1 2 4 5 'text 'right)))])
+  (unless (and (= (display-map-document->cell map 1 'before) 1)
+               (= (display-map-document->cell map 1 'after) 4)
+               (= (display-map-cell->document map 2) 1)
+               (= (length (display-map-document-range map 1 2)) 2))
+    (error 'kernel-tests "DisplayMap affinity differs")))
 
 (let* ([base (make-frame 5 2)]
        [emphasis (make-frame-cell "x" 1 #f 'emphasis 'source)]
@@ -1476,18 +1488,28 @@
                (eq? (frame-cell-at base 0 0) default-frame-cell))
     (error 'kernel-tests "Frame diff differs" spans)))
 
+(let ([wide (make-frame-cell "界" 2 #f 'default 'wide)]
+      [continuation (make-frame-cell "" 0 #t 'default 'wide)])
+  (unless (and (frame? (make-frame 2 1 (vector wide continuation)))
+               (guard (condition [else #t]) (make-frame 1 1 (vector wide)) #f)
+               (guard (condition [else #t])
+                 (make-frame 2 1 (vector continuation default-frame-cell)) #f))
+    (error 'kernel-tests "Frame grid validation differs")))
+
 (let* ([destroyed #f]
        [plugin
          (make-view-plugin
            'counter
-           (lambda (view) 1)
+           (lambda (view) (vector 1))
            (lambda (value update)
-             (if (view-update-damaged? update 'selection) (+ value 1) value))
-           (lambda (value) (set! destroyed value))
-           (lambda (value) (list value)))]
+             (when (view-update-damaged? update 'selection)
+               (vector-set! value 0 (+ (vector-ref value 0) 1))))
+           (lambda (value) (set! destroyed (vector-ref value 0)))
+           (lambda (value) (list (vector-ref value 0))))]
        [instance (make-view-plugin-instance plugin 'view)]
        [update (make-view-update 9 'old 'new #f '(selection))])
-  (unless (and (= (view-plugin-instance-update! instance update) 2)
+  (view-plugin-instance-update! instance update)
+  (unless (and (= (vector-ref (view-plugin-instance-value instance) 0) 2)
                (equal? (view-plugin-instance-decorations instance) '(2))
                (view-plugin-instance-destroy! instance)
                (= destroyed 2)
@@ -1502,7 +1524,7 @@
          (make-view-plugin
            'host-counter
            (lambda (view) (set! created (+ created 1)) 0)
-           (lambda (value update) (set! updated (+ updated 1)) (+ value 1))
+           (lambda (value update) (set! updated (+ updated 1)))
            (lambda (value) (set! destroyed (+ destroyed 1)))
            #f)]
        [view-configuration

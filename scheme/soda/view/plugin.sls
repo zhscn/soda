@@ -22,7 +22,8 @@
           view-plugin-instance-decorations
           view-plugin-instance-update!
           view-plugin-instance-destroy!
-          view-plugins-facet)
+          view-plugins-facet
+          configuration-view-plugins)
   (import (rnrs)
           (soda kernel extension)
           (soda kernel value))
@@ -67,6 +68,30 @@
   (define view-plugins-facet
     (make-facet 'view-plugins 'view '() append-plugin-lists eq?))
 
+  (define (configuration-view-plugins configuration)
+    (let loop ([plugins
+                (configuration-facet configuration view-plugins-facet 'view)]
+               [keys (make-eq-hashtable)]
+               [result '()])
+      (if (null? plugins)
+          (reverse result)
+          (let ([plugin (car plugins)])
+            (unless (view-plugin? plugin)
+              (assertion-violation
+                'configuration-view-plugins
+                "view plugin facet contains a non-plugin" plugin))
+            (let ([previous (hashtable-ref keys (view-plugin-key plugin) #f)])
+              (cond
+                [(not previous)
+                 (hashtable-set! keys (view-plugin-key plugin) plugin)
+                 (loop (cdr plugins) keys (cons plugin result))]
+                [(eq? previous plugin) (loop (cdr plugins) keys result)]
+                [else
+                 (assertion-violation
+                   'configuration-view-plugins
+                   "view plugin keys must identify one plugin definition"
+                   (view-plugin-key plugin) previous plugin)]))))))
+
   (define-record-type
     (view-plugin-instance %make-view-plugin-instance view-plugin-instance?)
     (fields plugin
@@ -100,9 +125,7 @@
         'view-plugin-instance-update! "invalid plugin update" instance update))
     (let ([procedure (view-plugin-update (view-plugin-instance-plugin instance))])
       (when procedure
-        (view-plugin-instance-value-set!
-          instance
-          (procedure (view-plugin-instance-value instance) update)))
+        (procedure (view-plugin-instance-value instance) update))
       (view-plugin-instance-value instance)))
 
   (define (view-plugin-instance-destroy! instance)

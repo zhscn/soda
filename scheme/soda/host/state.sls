@@ -44,6 +44,15 @@
            [conditions (make-condition-service)]
            [dispatch (make-dispatcher buffers views)]
            [packages (make-package-service)])
+      (view-service-set-plugin-error-handler!
+        views
+        (lambda (view phase condition)
+          (condition-service-capture
+            conditions
+            (view-owner view)
+            (list 'view-plugin phase condition)
+            (lambda arguments #f)
+            '(dismiss))))
       (%make-host-state
         owner runtime buffers views commands conditions dispatch packages #f)))
 

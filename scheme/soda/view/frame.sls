@@ -64,6 +64,30 @@
       (assertion-violation 'make-frame "invalid frame dimensions" width height))
     (* width height))
 
+  (define (frame-grid-valid? width height cells)
+    (let loop-row ([row 0])
+      (if (= row height)
+          #t
+          (and
+            (let loop-column ([column 0])
+              (if (= column width)
+                  #t
+                  (let ([cell (vector-ref cells (+ (* row width) column))])
+                    (and
+                      (if (frame-cell-continuation? cell)
+                          (and (> column 0)
+                               (let ([previous (vector-ref cells
+                                                           (+ (* row width) (- column 1)))])
+                                 (and (not (frame-cell-continuation? previous))
+                                      (= (frame-cell-width previous) 2))))
+                          (if (= (frame-cell-width cell) 2)
+                              (and (< (+ column 1) width)
+                                   (frame-cell-continuation?
+                                     (vector-ref cells (+ (* row width) (+ column 1)))))
+                              #t))
+                      (loop-column (+ column 1))))))
+            (loop-row (+ row 1))))))
+
   (define make-frame
     (case-lambda
       [(width height)
@@ -71,7 +95,8 @@
       [(width height cells)
        (let ([size (frame-size width height)])
          (unless (and (vector? cells) (= (vector-length cells) size)
-                      (for-all frame-cell? (vector->list cells)))
+                      (for-all frame-cell? (vector->list cells))
+                      (frame-grid-valid? width height cells))
            (assertion-violation 'make-frame "invalid frame cell vector" cells))
          (%make-frame width height (vector-copy cells)))]))
 

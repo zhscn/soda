@@ -463,7 +463,7 @@ ViewPlugin 保存只与一个 View 实例和渲染生命周期相关的缓存：
 ```text
 ViewPlugin {
   create(view) -> value,
-  update(value, ViewUpdate),
+  update(value, ViewUpdate) -> void,
   destroy(value),
   decorations?(value) -> DecorationSet,
   provide? -> Extension

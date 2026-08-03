@@ -13,10 +13,10 @@
           view-service-create!
           view-service-ref
           view-service-views
+          view-service-set-plugin-error-handler!
           view-service-close-view!)
   (import (rnrs)
           (soda kernel selection)
-          (soda kernel extension)
           (soda kernel state)
           (soda kernel view-state)
           (soda kernel value)
@@ -27,13 +27,13 @@
 
   (define-record-type
     (view %make-view view?)
-    (fields
-      (immutable id view-id)
-      (immutable owner view-owner)
-      (immutable buffer view-buffer)
-      (mutable state view-state view-state-set!)
-      (mutable plugins view-plugin-instances view-plugin-instances-set!)
-      (mutable closed? view-closed? view-closed?-set!)))
+    (fields (immutable id view-id)
+            (immutable owner view-owner)
+            (immutable buffer view-buffer)
+            (immutable plugin-error! view-plugin-error!)
+            (mutable state view-state view-state-set!)
+            (mutable plugins view-plugin-instances view-plugin-instances-set!)
+            (mutable closed? view-closed? view-closed?-set!)))
 
   (define (empty-selection)
     (make-selection (list (make-selection-range 0 0))))
@@ -41,31 +41,88 @@
   (define (default-input-stack)
     (make-input-stack (make-input-state 'default '() 'accept)))
 
-  (define (make-view-record identity-source owner buffer configuration input-state)
+  (define (report-plugin-error! view phase condition)
+    (guard (ignored [else #f])
+      ((view-plugin-error! view) view phase condition)))
+
+  (define (destroy-plugin-instance! view instance phase)
+    (guard (condition [else (report-plugin-error! view phase condition) #f])
+      (view-plugin-instance-destroy! instance)))
+
+  (define (create-plugin-instances! view plugins)
+    (let loop ([remaining plugins] [created '()])
+      (if (null? remaining)
+          (reverse created)
+          (guard
+            (condition
+              [else
+               (report-plugin-error! view 'plugin-create condition)
+               (for-each
+                 (lambda (instance)
+                   (destroy-plugin-instance! view instance 'plugin-create-cleanup))
+                 created)
+               (raise condition)])
+            (loop (cdr remaining)
+                  (cons (make-view-plugin-instance (car remaining) view)
+                        created))))))
+
+  ;; Retain a destroyed instance until its definition leaves configuration.
+  ;; Recreating it on every update would turn one plugin fault into a loop.
+  (define (matching-plugin-instance instances plugin)
+    (let loop ([remaining instances])
+      (cond [(null? remaining) #f]
+            [(eq? plugin (view-plugin-instance-plugin (car remaining)))
+             (car remaining)]
+            [else (loop (cdr remaining))])))
+
+  (define (reconcile-view-plugins! view configuration)
+    (let ([plugins
+            (guard
+              (condition
+                [else (report-plugin-error! view 'plugin-configuration condition) #f])
+              (configuration-view-plugins configuration))])
+      (when plugins
+        (let ([old (view-plugin-instances view)])
+          (for-each
+            (lambda (instance)
+              (unless (exists (lambda (plugin)
+                                (eq? plugin (view-plugin-instance-plugin instance)))
+                              plugins)
+                (destroy-plugin-instance! view instance 'plugin-destroy)))
+            old)
+          (view-plugin-instances-set!
+            view
+            (let loop ([remaining plugins] [result '()])
+              (if (null? remaining)
+                  (reverse result)
+                  (let ([existing
+                         (matching-plugin-instance old (car remaining))])
+                    (if existing
+                        (loop (cdr remaining) (cons existing result))
+                        (guard
+                          (condition
+                            [else
+                             (report-plugin-error! view 'plugin-create condition)
+                             (loop (cdr remaining) result)])
+                          (loop (cdr remaining)
+                                (cons (make-view-plugin-instance (car remaining) view)
+                                      result))))))))))))
+
+  (define (make-view-record identity-source owner buffer configuration input-state plugin-error!)
     (owner-assert-active 'view-service-create! owner)
     (unless (buffer? buffer)
       (assertion-violation 'view-service-create! "expected a buffer" buffer))
     (let ([view
-            (%make-view
-              (identity-source-next! identity-source)
-              owner buffer
-              (make-view-state
-                (buffer-id buffer)
-                (buffer-state-generation (buffer-state buffer))
-                (empty-selection) '(0 . 0)
-                (or input-state (default-input-stack))
-                configuration)
-              '()
-              #f)])
+           (%make-view
+             (identity-source-next! identity-source) owner buffer plugin-error!
+             (make-view-state (buffer-id buffer)
+                              (buffer-state-generation (buffer-state buffer))
+                              (empty-selection) '(0 . 0)
+                              (or input-state (default-input-stack)) configuration)
+             '() #f)])
       (view-plugin-instances-set!
         view
-        (map
-          (lambda (plugin)
-            (unless (view-plugin? plugin)
-              (assertion-violation
-                'view-service-create! "view plugin facet contains a non-plugin" plugin))
-            (make-view-plugin-instance plugin view))
-          (configuration-facet configuration view-plugins-facet 'view)))
+        (create-plugin-instances! view (configuration-view-plugins configuration)))
       (owner-add-cleanup! owner (lambda () (view-close! view)))
       view))
 
@@ -75,6 +132,7 @@
     (unless (view-state? state)
       (assertion-violation 'view-publish-state! "expected a view state" state))
     (view-state-set! view state)
+    (reconcile-view-plugins! view (view-state-configuration state))
     state)
 
   (define (view-close! view)
@@ -83,11 +141,9 @@
     (if (view-closed? view)
         #f
         (begin
-          (for-each
-            (lambda (instance)
-              (guard (condition [else #f])
-                (view-plugin-instance-destroy! instance)))
-            (view-plugin-instances view))
+          (for-each (lambda (instance)
+                      (destroy-plugin-instance! view instance 'plugin-destroy))
+                    (view-plugin-instances view))
           (view-closed?-set! view #t)
           #t)))
 
@@ -95,17 +151,14 @@
     (unless (and (view? view) (not (view-closed? view)) (view-update? update))
       (assertion-violation
         'view-update-plugins! "expected a live View and ViewUpdate" view update))
-    ;; Plugin failures are isolated from the already-published editor update.
-    ;; A failing instance is destroyed once and cannot repeatedly fail on later
-    ;; render turns.
     (for-each
       (lambda (instance)
         (unless (view-plugin-instance-destroyed? instance)
           (guard
             (condition
               [else
-               (guard (ignored [else #f])
-                 (view-plugin-instance-destroy! instance))
+               (report-plugin-error! view 'plugin-update condition)
+               (destroy-plugin-instance! view instance 'plugin-update-cleanup)
                #f])
             (view-plugin-instance-update! instance update))))
       (view-plugin-instances view))
@@ -114,18 +167,28 @@
   (define-record-type
     (view-service %make-view-service view-service?)
     (fields (immutable identities view-service-identities)
-            (immutable table view-service-table)))
+            (immutable table view-service-table)
+            (mutable plugin-error! view-service-plugin-error!
+                     view-service-plugin-error!-set!)))
 
   (define (make-view-service)
-    (%make-view-service (make-identity-source) (make-eqv-hashtable)))
+    (%make-view-service (make-identity-source) (make-eqv-hashtable)
+                        (lambda (view phase condition) #f)))
+
+  (define (view-service-set-plugin-error-handler! service handler)
+    (unless (and (view-service? service) (procedure? handler))
+      (assertion-violation
+        'view-service-set-plugin-error-handler!
+        "expected a ViewService and condition handler" service handler))
+    (view-service-plugin-error!-set! service handler)
+    handler)
 
   (define (view-service-create! service owner buffer configuration . input-state)
     (unless (view-service? service)
       (assertion-violation 'view-service-create! "expected a view service" service))
-    (let ([view (make-view-record
-                  (view-service-identities service)
-                  owner buffer configuration
-                  (if (null? input-state) #f (car input-state)))])
+    (let ([view (make-view-record (view-service-identities service) owner buffer configuration
+                                  (if (null? input-state) #f (car input-state))
+                                  (view-service-plugin-error! service))])
       (hashtable-set! (view-service-table service) (view-id view) view)
       view))
 
