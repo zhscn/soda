@@ -1821,6 +1821,24 @@
                (string=? (frame-cell-grapheme (frame-cell-at (text-layout-frame layout) 0 3)) "c"))
     (error 'kernel-tests "DisplayStream transform differs")))
 
+;; A virtual insertion at a newline offset remains on the preceding visual
+;; line.  DisplayBreak participates in stream ordering even though it has no
+;; text interval.
+(let* ([base
+        (make-display-stream
+          (list (make-display-text "a" 0 1 'text 'document)
+                (make-display-break 1)
+                (make-display-text "b" 2 3 'text 'document)))]
+       [stream (display-stream-insert
+                 base 1 (list (make-display-text ":" 1 1 'hint 'inlay)))]
+       [layout (layout-display-stream
+                 stream (make-selection (list (make-selection-range 0 0))) 3 2)]
+       [frame (text-layout-frame layout)])
+  (unless (and (string=? (frame-cell-grapheme (frame-cell-at frame 0 0)) "a")
+               (string=? (frame-cell-grapheme (frame-cell-at frame 0 1)) ":")
+               (string=? (frame-cell-grapheme (frame-cell-at frame 1 0)) "b"))
+    (error 'kernel-tests "DisplayStream newline insertion differs")))
+
 ;; A replacement that owns a physical newline must collapse the corresponding
 ;; DisplayBreak as well.  Otherwise a folded multi-line range leaves an empty
 ;; visual line after its placeholder.

@@ -44,6 +44,18 @@
       (assertion-violation 'display-stream-append "expected a list of display fragments" fragments))
     (make-display-stream (append (display-stream-fragments stream) fragments)))
 
+  ;; Fragment order is document order even where no DisplayText occupies an
+  ;; offset.  In particular, a DisplayBreak owns its newline position, so a
+  ;; virtual insertion at that position belongs before the break, not at the
+  ;; beginning of the next logical line.
+  (define (display-fragment-anchor fragment)
+    (cond [(display-text? fragment) (display-text-from fragment)]
+          [(display-break? fragment)
+           (let ([source (display-break-source fragment)])
+             (and (offset? source) source))]
+          [(display-widget? fragment) (display-widget-anchor fragment)]
+          [else #f]))
+
   (define (display-stream-insert stream anchor fragments)
     (unless (and (display-stream? stream) (offset? anchor)
                  (list? fragments) (for-all display-fragment? fragments))
@@ -53,8 +65,8 @@
         [(null? remaining)
          (make-display-stream (reverse (if inserted? result
                                             (append (reverse fragments) result))))]
-        [(and (not inserted?) (display-text? (car remaining))
-              (>= (display-text-from (car remaining)) anchor))
+        [(let ([fragment-anchor (display-fragment-anchor (car remaining))])
+           (and (not inserted?) fragment-anchor (>= fragment-anchor anchor)))
          (loop remaining (append (reverse fragments) result) #t)]
         [else (loop (cdr remaining) (cons (car remaining) result) inserted?)])))
 
