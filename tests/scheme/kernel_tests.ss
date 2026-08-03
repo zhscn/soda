@@ -1642,6 +1642,26 @@
                (= (length writes) 2))
     (error 'kernel-tests "Frame presenter transaction differs" writes)))
 
+;; Themes resolve semantic faces only at the terminal boundary.  Reusing an
+;; unchanged Frame with a different Theme still needs a full presentation.
+(let* ([presenter (make-frame-presenter)]
+       [frame (frame-with-cell (make-frame 1 1) 0 0
+                               (make-frame-cell "x" 1 #f 'text #f))]
+       [theme (make-theme (list (cons 'text (make-face-style 6 #f '())))
+                          (make-face-style #f #f '()))]
+       [writes '()]
+       [writer (lambda (bytes offset)
+                 (set! writes (cons (utf8->string bytes) writes))
+                 (- (bytevector-length bytes) offset))])
+  (frame-presenter-present! presenter frame)
+  (frame-presenter-drain! presenter writer)
+  (set! writes '())
+  (frame-presenter-present! presenter frame theme #f #f)
+  (unless (and (eq? (frame-presenter-drain! presenter writer) 'committed)
+               (= (length writes) 1)
+               (contains-string? (car writes) "[0;38;5;6m"))
+    (error 'kernel-tests "Frame presenter theme invalidation differs" writes)))
+
 (let ([wide (make-frame-cell "界" 2 #f 'default 'wide)]
       [continuation (make-frame-cell "" 0 #t 'default 'wide)])
   (unless (and (frame? (make-frame 2 1 (vector wide continuation)))

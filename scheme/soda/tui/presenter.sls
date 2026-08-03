@@ -71,18 +71,24 @@
     (frame-presenter %make-frame-presenter frame-presenter?)
     (fields (mutable committed frame-presenter-committed-frame
                      frame-presenter-committed-frame-set!)
+            (mutable committed-theme presenter-committed-theme
+                     presenter-committed-theme-set!)
             (mutable committed-cursor-row presenter-committed-cursor-row
                      presenter-committed-cursor-row-set!)
             (mutable committed-cursor-column presenter-committed-cursor-column
                      presenter-committed-cursor-column-set!)
             (mutable desired frame-presenter-desired-frame
                      frame-presenter-desired-frame-set!)
+            (mutable desired-theme presenter-desired-theme
+                     presenter-desired-theme-set!)
             (mutable desired-cursor-row presenter-desired-cursor-row
                      presenter-desired-cursor-row-set!)
             (mutable desired-cursor-column presenter-desired-cursor-column
                      presenter-desired-cursor-column-set!)
             (mutable pending-bytes presenter-pending-bytes presenter-pending-bytes-set!)
             (mutable pending-target presenter-pending-target presenter-pending-target-set!)
+            (mutable pending-theme presenter-pending-theme
+                     presenter-pending-theme-set!)
             (mutable pending-cursor-row presenter-pending-cursor-row
                      presenter-pending-cursor-row-set!)
             (mutable pending-cursor-column presenter-pending-cursor-column
@@ -90,7 +96,7 @@
             (mutable pending-offset presenter-pending-offset presenter-pending-offset-set!)))
 
   (define (make-frame-presenter)
-    (%make-frame-presenter #f #f #f #f #f #f #f #f #f #f 0))
+    (%make-frame-presenter #f #f #f #f #f #f #f #f #f #f #f #f #f 0))
 
   (define (frame-presenter-pending? presenter)
     (unless (frame-presenter? presenter)
@@ -99,9 +105,12 @@
 
   (define frame-presenter-present!
     (case-lambda
-      [(presenter frame) (frame-presenter-present! presenter frame #f #f)]
+      [(presenter frame) (frame-presenter-present! presenter frame default-theme #f #f)]
       [(presenter frame cursor-row cursor-column)
+       (frame-presenter-present! presenter frame default-theme cursor-row cursor-column)]
+      [(presenter frame theme cursor-row cursor-column)
     (unless (and (frame-presenter? presenter) (frame? frame)
+                 (theme? theme)
                  (or (not cursor-row) (and (integer? cursor-row) (exact? cursor-row)
                                             (>= cursor-row 0)))
                  (or (not cursor-column) (and (integer? cursor-column) (exact? cursor-column)
@@ -113,9 +122,11 @@
                (zero? (presenter-pending-offset presenter)))
       (presenter-pending-bytes-set! presenter #f)
       (presenter-pending-target-set! presenter #f)
+      (presenter-pending-theme-set! presenter #f)
       (presenter-pending-cursor-row-set! presenter #f)
       (presenter-pending-cursor-column-set! presenter #f))
     (frame-presenter-desired-frame-set! presenter frame)
+    (presenter-desired-theme-set! presenter theme)
     (presenter-desired-cursor-row-set! presenter cursor-row)
     (presenter-desired-cursor-column-set! presenter cursor-column)
     frame]))
@@ -123,9 +134,12 @@
   (define (ensure-pending! presenter)
     (unless (presenter-pending-bytes presenter)
       (let ([committed (frame-presenter-committed-frame presenter)]
-            [desired (frame-presenter-desired-frame presenter)])
+            [desired (frame-presenter-desired-frame presenter)]
+            [committed-theme (presenter-committed-theme presenter)]
+            [desired-theme (presenter-desired-theme presenter)])
         (when (and desired
                    (or (not committed)
+                       (not (eq? committed-theme desired-theme))
                        (pair? (frame-diff committed desired))
                        (not (and (equal? (presenter-desired-cursor-row presenter)
                                           (presenter-committed-cursor-row presenter))
@@ -133,10 +147,17 @@
                                           (presenter-committed-cursor-column presenter))))))
           (presenter-pending-bytes-set! presenter
             (string->utf8
-              (frame-diff->ansi committed desired default-theme
+              ;; A terminal only stores resolved ANSI state.  Reusing a
+              ;; semantic Frame after a theme switch therefore requires a
+              ;; complete repaint, even when its cells are unchanged.
+              (frame-diff->ansi (if (eq? committed-theme desired-theme)
+                                    committed
+                                    #f)
+                                desired desired-theme
                                 (presenter-desired-cursor-row presenter)
                                 (presenter-desired-cursor-column presenter))))
           (presenter-pending-target-set! presenter desired)
+          (presenter-pending-theme-set! presenter desired-theme)
           (presenter-pending-cursor-row-set! presenter
             (presenter-desired-cursor-row presenter))
           (presenter-pending-cursor-column-set! presenter
@@ -167,12 +188,15 @@
                      (begin
                        (frame-presenter-committed-frame-set!
                          presenter (presenter-pending-target presenter))
+                       (presenter-committed-theme-set!
+                         presenter (presenter-pending-theme presenter))
                        (presenter-committed-cursor-row-set!
                          presenter (presenter-pending-cursor-row presenter))
                        (presenter-committed-cursor-column-set!
                          presenter (presenter-pending-cursor-column presenter))
                        (presenter-pending-bytes-set! presenter #f)
                        (presenter-pending-target-set! presenter #f)
+                       (presenter-pending-theme-set! presenter #f)
                        (presenter-pending-cursor-row-set! presenter #f)
                        (presenter-pending-cursor-column-set! presenter #f)
                        (presenter-pending-offset-set! presenter 0)

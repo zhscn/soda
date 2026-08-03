@@ -12,7 +12,8 @@
           (soda host render-service)
           (soda host surface)
           (soda host view)
-          (soda tui presenter))
+          (soda tui presenter)
+          (soda view theme))
 
   (define-record-type
     (terminal-presenter-session %make-terminal-presenter-session
@@ -65,22 +66,31 @@
         [else #f])
       result))
 
-  (define (terminal-presenter-session-present! session render)
+  (define terminal-presenter-session-present!
+    (case-lambda
+      [(session render)
+       (terminal-presenter-session-present! session render default-theme)]
+      [(session render theme)
     (require-open 'terminal-presenter-session-present! session)
-    (unless (surface-render? render)
+    (unless (and (surface-render? render) (theme? theme))
       (assertion-violation 'terminal-presenter-session-present!
-                           "expected a SurfaceRender" render))
+                           "expected a SurfaceRender and Theme" render theme))
     (frame-presenter-present! (session-presenter session)
                               (surface-render-frame render)
+                              theme
                               (surface-render-cursor-row render)
                               (surface-render-cursor-column render))
-    (drain! session))
+    (drain! session)]))
 
   ;; This bridge keeps terminal output independent from the editor update
   ;; loop while still allowing the frontend to reuse an unchanged Frame.
-  (define (terminal-presenter-session-render! session service surface views)
-    (terminal-presenter-session-present!
-      session (render-service-render! service surface views)))
+  (define terminal-presenter-session-render!
+    (case-lambda
+      [(session service surface views)
+       (terminal-presenter-session-render! session service surface views default-theme)]
+      [(session service surface views theme)
+       (terminal-presenter-session-present!
+         session (render-service-render! service surface views) theme)]))
 
   (define (terminal-presenter-session-event? session event)
     (and (terminal-presenter-session? session) (native:event? event)
