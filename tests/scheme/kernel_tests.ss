@@ -875,6 +875,14 @@
              (= (buffer-id buffer) (view-state-buffer-id (view-state view))))
   (error 'kernel-tests "host state protocol differs"))
 
+(let* ([left (make-leaf-window 1 #f)]
+       [right (make-leaf-window 2 #f)]
+       [root (make-split-window 'horizontal (list left right) #f)])
+  (window-layout! root 0 0 7 3)
+  (unless (and (equal? (window-rectangle left) '(0 0 4 3))
+               (equal? (window-rectangle right) '(0 4 3 3)))
+    (error 'kernel-tests "Window grid layout differs")))
+
 (define control-x
   (make-key-stroke 'character (char->integer #\x) 4))
 (define control-s
