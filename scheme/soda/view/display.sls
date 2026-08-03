@@ -63,6 +63,15 @@
          (< (display-text-from fragment) to)
          (> (display-text-to fragment) from)))
 
+  ;; A DisplayBreak marks the document offset of a physical newline.  It has
+  ;; no text interval of its own, but it is still source-owned: replacing the
+  ;; newline must remove the break or a multi-line fold would retain a
+  ;; spurious visual line.
+  (define (display-break-intersects? fragment from to)
+    (and (display-break? fragment)
+         (let ([source (display-break-source fragment)])
+           (and (offset? source) (<= from source) (< source to)))))
+
   ;; Replacement consumes source fragments whose document intervals intersect
   ;; FROM..TO and installs replacement fragments at the same stream position.
   ;; Producers construct replacement text with the replaced source interval,
@@ -76,7 +85,8 @@
         [(null? remaining)
          (make-display-stream (reverse (if inserted? result
                                             (append (reverse fragments) result))))]
-        [(display-text-intersects? (car remaining) from to)
+        [(or (display-text-intersects? (car remaining) from to)
+             (display-break-intersects? (car remaining) from to))
          (loop (cdr remaining)
                (if inserted? result (append (reverse fragments) result))
                #t)]

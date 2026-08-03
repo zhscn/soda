@@ -1758,6 +1758,24 @@
                (string=? (frame-cell-grapheme (frame-cell-at (text-layout-frame layout) 0 3)) "c"))
     (error 'kernel-tests "DisplayStream transform differs")))
 
+;; A replacement that owns a physical newline must collapse the corresponding
+;; DisplayBreak as well.  Otherwise a folded multi-line range leaves an empty
+;; visual line after its placeholder.
+(let* ([base
+        (make-display-stream
+          (list (make-display-text "a" 0 1 'text 'document)
+                (make-display-break 1)
+                (make-display-text "b" 2 3 'text 'document)))]
+       [stream (display-stream-replace
+                 base 0 3 (list (make-display-text "X" 0 3 'fold 'fold)))]
+       [layout (layout-display-stream stream
+                                      (make-selection (list (make-selection-range 0 0)))
+                                      2 2)]
+       [frame (text-layout-frame layout)])
+  (unless (and (string=? (frame-cell-grapheme (frame-cell-at frame 0 0)) "X")
+               (string=? (frame-cell-grapheme (frame-cell-at frame 1 0)) " "))
+    (error 'kernel-tests "DisplayStream multi-line replacement differs")))
+
 (let ([layout
        (layout-display-stream (make-display-stream '())
                               (make-selection (list (make-selection-range 0 0)))
