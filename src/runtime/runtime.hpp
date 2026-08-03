@@ -28,16 +28,11 @@ public:
 
     [[nodiscard]] SourceId start_timer(std::uint64_t timeout_ms, std::uint64_t repeat_ms = 0);
     [[nodiscard]] SourceId watch_fd(int fd, FdEvent events);
-    [[nodiscard]] SourceId read_file(std::string path);
-    [[nodiscard]] SourceId write_file(std::string path, std::vector<std::byte> data);
-    [[nodiscard]] SourceId scan_directory(std::string path);
-    [[nodiscard]] SourceId stat_path(std::string path, bool follow_symlinks);
     [[nodiscard]] SourceId watch_path(std::string path);
     [[nodiscard]] SourceId spawn_process(std::vector<std::string> arguments,
                                          std::string working_directory = {});
     [[nodiscard]] SourceId spawn_terminal_process(std::vector<std::string> arguments,
-                                                  std::string working_directory,
-                                                  std::uint32_t rows,
+                                                  std::string working_directory, std::uint32_t rows,
                                                   std::uint32_t columns);
     void write_process(SourceId source, std::vector<std::byte> data);
     void close_process_input(SourceId source);

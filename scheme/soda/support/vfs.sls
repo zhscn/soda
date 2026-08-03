@@ -2,7 +2,9 @@
   (export vfs-entry?
           vfs-entry-name
           vfs-entry-kind
-          decode-vfs-directory-entries
+          vfs-read-file
+          vfs-write-file
+          vfs-list-directory
           vfs-path-separator?
           vfs-directory-path
           vfs-normalize-path
@@ -16,35 +18,72 @@
           vfs-stat-size
           vfs-stat-mtime-seconds
           vfs-stat-mtime-nanoseconds
-          vfs-stat-device
-          vfs-stat-inode
           vfs-stat-same-version?
-          decode-vfs-stat)
+          vfs-stat-path)
   (import (rnrs)
           (only (chezscheme)
                 current-directory
+                directory-list
                 directory-separator
+                file-directory?
+                file-length
+                file-modification-time
+                file-regular?
+                file-symbolic-link?
                 getenv
+                open-file-input-port
+                open-file-output-port
                 path-absolute?
                 path-build
-                path-parent))
+                path-parent
+                time-nanosecond
+                time-second))
 
   (define-record-type vfs-entry
     (fields name kind))
 
   (define-record-type vfs-stat
-    (fields kind size mtime-seconds mtime-nanoseconds device inode))
+    (fields kind size mtime-seconds mtime-nanoseconds))
 
-  (define (vfs-entry-kind-code value)
-    (case value
-      [(1) 'file]
-      [(2) 'directory]
-      [(3) 'link]
-      [(4) 'fifo]
-      [(5) 'socket]
-      [(6) 'character-device]
-      [(7) 'block-device]
+  (define (require-path who path)
+    (unless (and (string? path) (positive? (string-length path)))
+      (assertion-violation who "path must be a non-empty string" path)))
+
+  (define (vfs-read-file path)
+    (require-path 'vfs-read-file path)
+    (call-with-port
+      (open-file-input-port path (file-options) (buffer-mode block) #f)
+      get-bytevector-all))
+
+  (define (vfs-write-file path data)
+    (require-path 'vfs-write-file path)
+    (unless (bytevector? data)
+      (assertion-violation
+        'vfs-write-file "data must be a bytevector" data))
+    (call-with-port
+      (open-file-output-port
+        path (file-options no-fail) (buffer-mode block) #f)
+      (lambda (port)
+        (put-bytevector port data)
+        (flush-output-port port)))
+    (bytevector-length data))
+
+  (define (vfs-path-kind path follow?)
+    (cond
+      [(and (not follow?) (file-symbolic-link? path)) 'link]
+      [(file-directory? path follow?) 'directory]
+      [(file-regular? path follow?) 'file]
+      [(file-symbolic-link? path) 'link]
       [else 'unknown]))
+
+  (define (vfs-list-directory path)
+    (require-path 'vfs-list-directory path)
+    (map
+      (lambda (name)
+        (make-vfs-entry
+          name
+          (vfs-path-kind (path-build path name) #f)))
+      (list-sort string<? (directory-list path))))
 
   (define (vfs-path-separator? character)
     (or
@@ -176,99 +215,22 @@
   (define (vfs-path-join directory name)
     (vfs-resolve-path directory name))
 
-  (define (bytevector-u32-little-endian bytes offset)
-    (+
-      (bytevector-u8-ref bytes offset)
-      (bitwise-arithmetic-shift-left
-        (bytevector-u8-ref bytes (+ offset 1))
-        8)
-      (bitwise-arithmetic-shift-left
-        (bytevector-u8-ref bytes (+ offset 2))
-        16)
-      (bitwise-arithmetic-shift-left
-        (bytevector-u8-ref bytes (+ offset 3))
-        24)))
-
-  (define (decode-vfs-directory-entries bytes)
-    (unless (bytevector? bytes)
-      (assertion-violation
-        'decode-vfs-directory-entries
-        "expected a bytevector"
-        bytes))
-    (let ([size (bytevector-length bytes)])
-      (let loop ([offset 0] [entries '()])
-        (cond
-          [(= offset size) (reverse entries)]
-          [(> (+ offset 5) size)
-           (assertion-violation
-             'decode-vfs-directory-entries
-             "truncated directory entry header"
-             offset
-             size)]
-          [else
-           (let* ([kind
-                    (vfs-entry-kind-code
-                      (bytevector-u8-ref bytes offset))]
-                  [name-size
-                    (bytevector-u32-little-endian
-                      bytes
-                      (+ offset 1))]
-                  [name-start (+ offset 5)]
-                  [name-end (+ name-start name-size)])
-             (when (> name-end size)
-               (assertion-violation
-                 'decode-vfs-directory-entries
-                 "truncated directory entry name"
-                 offset
-                 name-size
-                 size))
-             (let ([name-bytes (make-bytevector name-size)])
-               (bytevector-copy!
-                 bytes
-                 name-start
-                 name-bytes
-                 0
-                 name-size)
-               (loop
-                 name-end
-                 (cons
-                   (make-vfs-entry
-                     (utf8->string name-bytes)
-                     kind)
-                   entries))))]))))
-
-  (define (bytevector-u64-little-endian bytes offset)
-    (let loop ([index 7] [value 0])
-      (if
-        (negative? index)
-        value
-        (loop
-          (- index 1)
-          (+
-            (bitwise-arithmetic-shift-left value 8)
-            (bytevector-u8-ref bytes (+ offset index)))))))
-
-  (define (unsigned-u64->signed value)
-    (if
-      (>= value (expt 2 63))
-      (- value (expt 2 64))
-      value))
-
-  (define (decode-vfs-stat kind data)
-    (unless (= (bytevector-length data) 40)
-      (assertion-violation
-        'decode-vfs-stat
-        "stat payload must contain five 64-bit fields"
-        (bytevector-length data)))
-    (make-vfs-stat
-      (vfs-entry-kind-code kind)
-      (bytevector-u64-little-endian data 0)
-      (unsigned-u64->signed
-        (bytevector-u64-little-endian data 8))
-      (unsigned-u64->signed
-        (bytevector-u64-little-endian data 16))
-      (bytevector-u64-little-endian data 24)
-      (bytevector-u64-little-endian data 32)))
+  (define vfs-stat-path
+    (case-lambda
+      [(path) (vfs-stat-path path #t)]
+      [(path follow?)
+       (require-path 'vfs-stat-path path)
+       (let* ([kind (vfs-path-kind path follow?)]
+              [modified (file-modification-time path follow?)]
+              [size
+                (if (eq? kind 'file)
+                    (call-with-port
+                      (open-file-input-port
+                        path (file-options) (buffer-mode block) #f)
+                      file-length)
+                    0)])
+         (make-vfs-stat
+           kind size (time-second modified) (time-nanosecond modified)))]))
 
   (define (vfs-stat-same-version? left right)
     (unless (and (vfs-stat? left) (vfs-stat? right))
@@ -283,6 +245,4 @@
       (= (vfs-stat-mtime-seconds left)
          (vfs-stat-mtime-seconds right))
       (= (vfs-stat-mtime-nanoseconds left)
-         (vfs-stat-mtime-nanoseconds right))
-      (= (vfs-stat-device left) (vfs-stat-device right))
-      (= (vfs-stat-inode left) (vfs-stat-inode right)))))
+         (vfs-stat-mtime-nanoseconds right)))))

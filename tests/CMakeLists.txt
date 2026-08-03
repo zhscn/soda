@@ -32,7 +32,7 @@ soda_core_test(indentation_tests indentation/indentation_tests.cpp soda_indentat
 soda_core_test(indentation_abi_tests indentation/c_api_tests.cpp soda_indentation)
 soda_core_test(native_substrate_tests native_substrate_tests.cpp soda_native_substrate)
 soda_core_test(runtime_tests runtime/runtime_tests.cpp soda_runtime)
-target_link_libraries(runtime_tests PRIVATE soda_document Threads::Threads)
+target_link_libraries(runtime_tests PRIVATE Threads::Threads)
 
 file(GLOB_RECURSE SODA_TEST_SCHEME_SOURCES
   CONFIGURE_DEPENDS

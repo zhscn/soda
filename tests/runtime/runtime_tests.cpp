@@ -1,7 +1,6 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest/doctest.h>
 
-#include "document/c_api.h"
 #include "runtime/c_api.h"
 #include "runtime/runtime.hpp"
 
@@ -15,7 +14,6 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
-#include <iterator>
 #include <span>
 #include <string>
 #include <thread>
@@ -29,6 +27,12 @@
 #endif
 
 using namespace soda::runtime;
+
+static_assert(static_cast<std::uint8_t>(EventKind::Timer) == SODA_EVENT_TIMER);
+static_assert(static_cast<std::uint8_t>(EventKind::FdReady) == SODA_EVENT_FD_READY);
+static_assert(static_cast<std::uint8_t>(EventKind::PathChange) == SODA_EVENT_PATH_CHANGE);
+static_assert(static_cast<std::uint8_t>(EventKind::ProcessOutput) == SODA_EVENT_PROCESS_OUTPUT);
+static_assert(static_cast<std::uint8_t>(EventKind::ProcessExit) == SODA_EVENT_PROCESS_EXIT);
 
 TEST_CASE("one-shot timer is delivered as a pulled event") {
     Runtime runtime;
@@ -57,46 +61,6 @@ TEST_CASE("repeating timer remains active until cancellation") {
     CHECK_FALSE(runtime.cancel(timer));
     (void)runtime.poll(PollMode::NoWait);
     CHECK_FALSE(runtime.alive());
-}
-
-TEST_CASE("asynchronous file read returns owned bytes") {
-    namespace fs = std::filesystem;
-    const fs::path path =
-        fs::temp_directory_path() /
-        ("soda-runtime-" +
-         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    {
-        std::ofstream output(path, std::ios::binary);
-        output.write("alpha\0beta", 10);
-    }
-
-    Runtime runtime;
-    const SourceId read = runtime.read_file(path.string());
-    while (runtime.pending_events() == 0) {
-        (void)runtime.poll(PollMode::Once);
-    }
-    const auto event = runtime.next_event();
-    REQUIRE(event.has_value());
-    CHECK(event->kind == EventKind::FileRead);
-    CHECK(event->source == read);
-    CHECK(event->status == 0);
-    const std::string content(reinterpret_cast<const char*>(event->data.data()),
-                              event->data.size());
-    CHECK(content == std::string("alpha\0beta", 10));
-    fs::remove(path);
-}
-
-TEST_CASE("file read failures are completion events") {
-    Runtime runtime;
-    const SourceId read = runtime.read_file("/soda/path/that/does/not/exist");
-
-    CHECK(runtime.poll(PollMode::Once) == 1);
-    const auto event = runtime.next_event();
-    REQUIRE(event.has_value());
-    CHECK(event->kind == EventKind::FileRead);
-    CHECK(event->source == read);
-    CHECK(event->status < 0);
-    CHECK(event->data.empty());
 }
 
 #if !defined(_WIN32)
@@ -275,54 +239,6 @@ TEST_CASE("processes accept an explicit signal") {
 }
 #endif
 
-TEST_CASE("asynchronous directory scan returns typed entries") {
-    namespace fs = std::filesystem;
-    const fs::path directory =
-        fs::temp_directory_path() /
-        ("soda-runtime-scan-" +
-         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    REQUIRE(fs::create_directory(directory));
-    {
-        std::ofstream output(directory / "source.scm", std::ios::binary);
-        output << "value";
-    }
-    REQUIRE(fs::create_directory(directory / "nested"));
-
-    Runtime runtime;
-    const SourceId scan = runtime.scan_directory(directory.string());
-    while (runtime.pending_events() == 0) {
-        (void)runtime.poll(PollMode::Once);
-    }
-    const auto event = runtime.next_event();
-    REQUIRE(event.has_value());
-    CHECK(event->kind == EventKind::DirectoryScan);
-    CHECK(event->source == scan);
-    CHECK(event->status == 0);
-
-    bool saw_file = false;
-    bool saw_directory = false;
-    std::size_t offset = 0;
-    while (offset < event->data.size()) {
-        REQUIRE(offset + 5 <= event->data.size());
-        const auto type = std::to_integer<std::uint8_t>(event->data[offset]);
-        std::uint32_t size = 0;
-        for (unsigned int index = 0; index < 4; ++index) {
-            size |= static_cast<std::uint32_t>(
-                        std::to_integer<std::uint8_t>(event->data[offset + 1 + index]))
-                    << (index * 8U);
-        }
-        offset += 5;
-        REQUIRE(offset + size <= event->data.size());
-        const std::string name(reinterpret_cast<const char*>(event->data.data() + offset), size);
-        saw_file = saw_file || (name == "source.scm" && type == UV_DIRENT_FILE);
-        saw_directory = saw_directory || (name == "nested" && type == UV_DIRENT_DIR);
-        offset += size;
-    }
-    CHECK(saw_file);
-    CHECK(saw_directory);
-    fs::remove_all(directory);
-}
-
 TEST_CASE("path watch reports directory entry changes until cancellation") {
     namespace fs = std::filesystem;
     const fs::path directory =
@@ -354,147 +270,6 @@ TEST_CASE("path watch reports directory entry changes until cancellation") {
     CHECK_FALSE(runtime.cancel(watch));
     (void)runtime.poll(PollMode::NoWait);
     fs::remove_all(directory);
-}
-
-TEST_CASE("asynchronous stat and lstat report resource metadata") {
-    namespace fs = std::filesystem;
-    const fs::path directory =
-        fs::temp_directory_path() /
-        ("soda-runtime-stat-" +
-         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    REQUIRE(fs::create_directory(directory));
-    const fs::path file = directory / "source.scm";
-    {
-        std::ofstream output(file, std::ios::binary);
-        output << "value";
-    }
-    const fs::path link = directory / "source-link";
-    REQUIRE_NOTHROW(fs::create_symlink(file.filename(), link));
-
-    Runtime runtime;
-    const auto await = [&](SourceId source) {
-        while (runtime.pending_events() == 0) {
-            (void)runtime.poll(PollMode::Once);
-        }
-        auto event = runtime.next_event();
-        REQUIRE(event.has_value());
-        CHECK(event->kind == EventKind::PathStat);
-        CHECK(event->source == source);
-        CHECK(event->status == 0);
-        CHECK(event->data.size() == 40);
-        return *event;
-    };
-
-    CHECK(await(runtime.stat_path(file.string(), true)).flags == 1);
-    CHECK(await(runtime.stat_path(directory.string(), true)).flags == 2);
-    CHECK(await(runtime.stat_path(link.string(), true)).flags == 1);
-    CHECK(await(runtime.stat_path(link.string(), false)).flags == 3);
-    fs::remove_all(directory);
-}
-
-TEST_CASE("asynchronous file write owns bytes and reports completion") {
-    namespace fs = std::filesystem;
-    const fs::path path =
-        fs::temp_directory_path() /
-        ("soda-runtime-write-" +
-         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    const std::string expected{"new\0content", 11};
-    std::vector<std::byte> data(expected.size());
-    std::ranges::copy(std::as_bytes(std::span(expected.data(), expected.size())), data.begin());
-
-    Runtime runtime;
-    const SourceId write = runtime.write_file(path.string(), std::move(data));
-    while (runtime.pending_events() == 0) {
-        (void)runtime.poll(PollMode::Once);
-    }
-    const auto event = runtime.next_event();
-    REQUIRE(event.has_value());
-    CHECK(event->kind == EventKind::FileWrite);
-    CHECK(event->source == write);
-    CHECK(event->status == 0);
-    CHECK(event->data.empty());
-
-    std::ifstream input(path, std::ios::binary);
-    const std::string actual((std::istreambuf_iterator<char>(input)),
-                             std::istreambuf_iterator<char>());
-    CHECK(actual == expected);
-    fs::remove(path);
-}
-
-TEST_CASE("empty file write truncates existing content") {
-    namespace fs = std::filesystem;
-    const fs::path path =
-        fs::temp_directory_path() /
-        ("soda-runtime-empty-write-" +
-         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    {
-        std::ofstream output(path, std::ios::binary);
-        output << "existing content";
-    }
-
-    Runtime runtime;
-    const SourceId write = runtime.write_file(path.string(), {});
-    while (runtime.pending_events() == 0) {
-        (void)runtime.poll(PollMode::Once);
-    }
-    const auto event = runtime.next_event();
-    REQUIRE(event.has_value());
-    CHECK(event->kind == EventKind::FileWrite);
-    CHECK(event->source == write);
-    CHECK(event->status == 0);
-    CHECK(fs::file_size(path) == 0);
-    fs::remove(path);
-}
-
-TEST_CASE("file write failures are completion events") {
-    Runtime runtime;
-    const SourceId write = runtime.write_file("/soda/path/that/does/not/exist/file", {});
-
-    CHECK(runtime.poll(PollMode::Once) == 1);
-    const auto event = runtime.next_event();
-    REQUIRE(event.has_value());
-    CHECK(event->kind == EventKind::FileWrite);
-    CHECK(event->source == write);
-    CHECK(event->status < 0);
-    CHECK(event->data.empty());
-}
-
-TEST_CASE("failed file replacement leaves the target intact and removes temporary files") {
-    namespace fs = std::filesystem;
-    const fs::path parent =
-        fs::temp_directory_path() /
-        ("soda-runtime-replace-failure-" +
-         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    const fs::path target = parent / "target";
-    fs::create_directories(target);
-    {
-        std::ofstream marker(target / "marker", std::ios::binary);
-        marker << "original";
-    }
-
-    Runtime runtime;
-    const SourceId write = runtime.write_file(target.string(), {std::byte{'x'}});
-    while (runtime.pending_events() == 0) {
-        (void)runtime.poll(PollMode::Once);
-    }
-    const auto event = runtime.next_event();
-    REQUIRE(event.has_value());
-    CHECK(event->kind == EventKind::FileWrite);
-    CHECK(event->source == write);
-    CHECK(event->status < 0);
-    CHECK(fs::is_directory(target));
-    CHECK(fs::exists(target / "marker"));
-    CHECK(
-        std::ranges::none_of(fs::directory_iterator(parent), [&](const fs::directory_entry& item) {
-            return item.path().filename().string().starts_with("target.soda-save-");
-        }));
-    fs::remove_all(parent);
-}
-
-TEST_CASE("runtime destruction drains an active file request") {
-    Runtime runtime;
-    CHECK(runtime.read_file("/soda/path/that/does/not/exist").valid());
-    CHECK(runtime.write_file("/soda/path/that/does/not/exist/file", {}).valid());
 }
 
 #if !defined(_WIN32)
@@ -634,6 +409,23 @@ TEST_CASE("terminal writes resume after a nonblocking descriptor would block") {
     CHECK(::close(pipe_fds[0]) == 0);
     CHECK(::close(pipe_fds[1]) == 0);
 }
+
+TEST_CASE("terminal read reports a nonblocking descriptor would block") {
+    std::array<int, 2> pipe_fds{};
+    REQUIRE(::pipe(pipe_fds.data()) == 0);
+    const int original_flags = ::fcntl(pipe_fds[0], F_GETFL, 0);
+    REQUIRE(original_flags >= 0);
+    REQUIRE(::fcntl(pipe_fds[0], F_SETFL, original_flags | O_NONBLOCK) == 0);
+
+    soda_terminal* terminal = soda_terminal_create(pipe_fds[0], pipe_fds[1]);
+    REQUIRE(terminal != nullptr);
+    std::uint8_t byte = 0;
+    CHECK(soda_terminal_read(terminal, &byte, 1) == SODA_TERMINAL_WOULD_BLOCK);
+
+    soda_terminal_destroy(terminal);
+    CHECK(::close(pipe_fds[0]) == 0);
+    CHECK(::close(pipe_fds[1]) == 0);
+}
 #endif
 
 TEST_CASE("C ABI exposes an event without native callbacks into its caller") {
@@ -653,114 +445,4 @@ TEST_CASE("C ABI exposes an event without native callbacks into its caller") {
     CHECK(soda_runtime_next_event(runtime) == 0);
 
     soda_runtime_destroy(runtime);
-}
-
-TEST_CASE("C ABI classifies asynchronous filesystem failures") {
-    soda_runtime* runtime = soda_runtime_create();
-    REQUIRE(runtime != nullptr);
-    REQUIRE(soda_runtime_read_file(runtime, "/soda/path/that/does/not/exist") != 0);
-
-    REQUIRE(soda_runtime_poll(runtime, SODA_POLL_ONCE) == 0);
-    REQUIRE(soda_runtime_next_event(runtime) == 1);
-    REQUIRE(soda_runtime_event_kind(runtime) == SODA_EVENT_FILE_READ);
-    const int status = soda_runtime_event_status(runtime);
-    REQUIRE(status < 0);
-    CHECK(std::string(soda_runtime_status_name(status)) == "ENOENT");
-    CHECK_FALSE(std::string(soda_runtime_status_message(status)).empty());
-
-    soda_runtime_destroy(runtime);
-}
-
-TEST_CASE("C ABI exposes directory scan events") {
-    namespace fs = std::filesystem;
-    const fs::path directory =
-        fs::temp_directory_path() /
-        ("soda-runtime-c-abi-scan-" +
-         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    REQUIRE(fs::create_directory(directory));
-    {
-        std::ofstream output(directory / "entry", std::ios::binary);
-        output << "value";
-    }
-    soda_runtime* runtime = soda_runtime_create();
-    REQUIRE(runtime != nullptr);
-    const std::string path = directory.string();
-    const std::uint64_t source = soda_runtime_scan_directory(runtime, path.c_str());
-    REQUIRE(source != 0);
-
-    REQUIRE(soda_runtime_poll(runtime, SODA_POLL_ONCE) == 0);
-    REQUIRE(soda_runtime_next_event(runtime) == 1);
-    CHECK(soda_runtime_event_kind(runtime) == SODA_EVENT_DIRECTORY_SCAN);
-    CHECK(soda_runtime_event_source(runtime) == source);
-    CHECK(soda_runtime_event_status(runtime) == 0);
-    CHECK(soda_runtime_event_data_size(runtime) > 0);
-
-    soda_runtime_destroy(runtime);
-    fs::remove_all(directory);
-}
-
-TEST_CASE("file event data constructs native Text without a Scheme copy") {
-    namespace fs = std::filesystem;
-    const fs::path path =
-        fs::temp_directory_path() /
-        ("soda-runtime-abi-" +
-         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    {
-        std::ofstream output(path, std::ios::binary);
-        output << "native text";
-    }
-
-    soda_runtime* runtime = soda_runtime_create();
-    REQUIRE(runtime != nullptr);
-    const std::string path_string = path.string();
-    REQUIRE(soda_runtime_read_file(runtime, path_string.c_str()) != 0);
-    REQUIRE(soda_runtime_poll(runtime, SODA_POLL_ONCE) == 0);
-    REQUIRE(soda_runtime_next_event(runtime) == 1);
-    REQUIRE(soda_runtime_event_kind(runtime) == SODA_EVENT_FILE_READ);
-    REQUIRE(soda_runtime_event_status(runtime) == 0);
-
-    const std::size_t size = soda_runtime_event_data_size(runtime);
-    const std::uint8_t* data = soda_runtime_event_data(runtime);
-    REQUIRE(data != nullptr);
-    soda_text* text = soda_text_create(data, size);
-    REQUIRE(text != nullptr);
-    CHECK(soda_text_size(text) == size);
-    std::string content(size, '\0');
-    REQUIRE(soda_text_copy(text, 0, static_cast<std::uint32_t>(size),
-                           reinterpret_cast<std::uint8_t*>(content.data()), content.size()) == 0);
-    CHECK(content == "native text");
-
-    soda_text_destroy(text);
-    soda_runtime_destroy(runtime);
-    fs::remove(path);
-}
-
-TEST_CASE("C ABI writes caller bytes asynchronously") {
-    namespace fs = std::filesystem;
-    const fs::path path =
-        fs::temp_directory_path() /
-        ("soda-runtime-write-abi-" +
-         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
-    const std::array<std::uint8_t, 5> data{'a', 'b', 0, 'c', 'd'};
-
-    soda_runtime* runtime = soda_runtime_create();
-    REQUIRE(runtime != nullptr);
-    const std::string path_string = path.string();
-    const std::uint64_t source =
-        soda_runtime_write_file(runtime, path_string.c_str(), data.data(), data.size());
-    REQUIRE(source != 0);
-    REQUIRE(soda_runtime_poll(runtime, SODA_POLL_ONCE) == 0);
-    REQUIRE(soda_runtime_next_event(runtime) == 1);
-    CHECK(soda_runtime_event_kind(runtime) == SODA_EVENT_FILE_WRITE);
-    CHECK(soda_runtime_event_source(runtime) == source);
-    CHECK(soda_runtime_event_status(runtime) == 0);
-    CHECK(soda_runtime_event_data_size(runtime) == 0);
-
-    std::ifstream input(path, std::ios::binary);
-    const std::string actual((std::istreambuf_iterator<char>(input)),
-                             std::istreambuf_iterator<char>());
-    CHECK(actual == std::string("ab\0cd", 5));
-
-    soda_runtime_destroy(runtime);
-    fs::remove(path);
 }

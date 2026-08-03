@@ -177,10 +177,14 @@ int64_t soda_terminal_read(soda_terminal* terminal, uint8_t* destination, size_t
         if (result >= 0) {
             return result;
         }
-        if (errno != EINTR) {
-            set_errno_error(*terminal, "cannot read terminal input");
-            return -1;
+        if (errno == EINTR) {
+            continue;
         }
+        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+            return SODA_TERMINAL_WOULD_BLOCK;
+        }
+        set_errno_error(*terminal, "cannot read terminal input");
+        return -1;
     }
 #endif
 }

@@ -69,7 +69,8 @@ contract test 使用同一套 Soda launcher 和静态 native substrate 启动，
 |---|---|---|
 | 文本值与事务 | native `soda_document` | snapshot、revision、anchor、undo |
 | C++ 分析 | native language libraries | token、CST、结构查询、缩进 |
-| I/O 与终端 | native `soda_runtime` | libuv handle、raw mode、readiness、异步完成 |
+| 终端、进程与流式 I/O | native `soda_runtime` | libuv handle、raw mode、readiness、异步完成 |
+| 普通文件与目录 | Scheme VFS | 同步端口、路径和目录操作 |
 | 编辑器实体 | Chez | Buffer、View、Window、Workbench、mode 与 command |
 | 策略 | Chez | keymap、placement、provider 组合、触发与排序 |
 | 呈现 | Chez + terminal ABI | TUI frame 组合与 ANSI/Kitty 交互 |
@@ -82,10 +83,14 @@ native 地址当作身份；跨层身份使用 Scheme id、document id 和 revis
 编辑器只有一个持有状态的线程。Chez 在该线程执行 command loop，所有 command
 运行到完成，Document mutation、增量分析、状态切换和 frame 组合按顺序发生。
 
-libuv 提供 fd readiness、timer、signal、process、socket 和异步 filesystem
-操作。Scheme 调用 poll，native callback 只把完成结果写入 native 队列；poll
+libuv 提供 fd readiness、timer、signal、process、path watch 和 socket 操作。Scheme
+调用 poll，native callback 只把完成结果写入 native 队列；poll
 返回后，Scheme 拉取普通事件值并更新编辑器状态。该边界避免在 libuv callback
 或任意 FFI 栈上进入 Scheme。
+
+普通文件读取、写入、stat 和目录枚举通过 Scheme VFS 同步执行，不占用 libuv source。
+一次交互 turn 只执行有界文件工作；大规模枚举和搜索使用可增量推进的 package task，
+或使用受管子进程把结果作为流式事件送回 command loop。
 
 同步工作必须适合一次交互 turn。较大的工作拆成带 revision 的步骤，在多个
 event-loop turn 之间推进；完成结果只在 document identity、revision 和请求世代
@@ -142,18 +147,11 @@ runtime ABI 遵循 pull-based 约束：
 - 固定版本函数在 Scheme wrapper 装载时验证 ABI 兼容性；
 - 创建 handle 后由 Scheme 注册 interest；
 - poll 只驱动 libuv 并返回可读取事件数量；
-- Scheme drain timer、fd、file-read、file-write、directory-scan、path-change、
-  process-output 和 process-exit 等结果；
+- Scheme drain timer、fd、path-change、process-output 和 process-exit 等结果；
 - close 是显式、幂等的生命周期动作；
 - callback data 不保存 Scheme pointer；
 - status、libuv 稳定错误名与人类可读消息作为值跨 ABI 返回。
 
-文件写入在 libuv worker pool 中执行完整的临时文件写入与原子替换。worker 不访问
-Scheme 对象；完成 callback 只把状态加入 native event queue。
-
-目录扫描使用 `uv_fs_scandir`，并把 entry type、UTF-8 name 编码为 caller-owned
-event data。Scheme VFS 将其解码为不可变 entry；editor adapter 只保存 native
-source 与上层 request 的关联，不允许 callback 进入 Scheme 或持有 Editor。
 路径监听使用长生命周期 `uv_fs_event` source。event data 保存相对被监听目录的
 entry name，flags 保存 rename/change 分类；取消 source 会停止 handle，并在 close
 callback 后释放 native 所有权。

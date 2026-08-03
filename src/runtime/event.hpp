@@ -16,13 +16,9 @@ struct SourceId {
 enum class EventKind : std::uint8_t {
     Timer = 1,
     FdReady = 2,
-    FileRead = 3,
-    FileWrite = 4,
-    DirectoryScan = 5,
-    PathStat = 6,
-    PathChange = 7,
-    ProcessOutput = 8,
-    ProcessExit = 9,
+    PathChange = 3,
+    ProcessOutput = 4,
+    ProcessExit = 5,
 };
 
 enum class FdEvent : std::uint8_t {

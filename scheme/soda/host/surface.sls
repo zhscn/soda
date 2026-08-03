@@ -6,10 +6,30 @@
           surface-root-window
           surface-selected-window
           surface-set-selected-window!
-          surface-generation)
+          surface-generation
+          make-surface-input-message
+          surface-input-message?
+          surface-input-message-surface-id
+          surface-input-message-event)
   (import (rnrs)
           (soda kernel value)
+          (soda host input-event)
           (soda host window))
+
+  (define-record-type
+    (surface-input-message %make-surface-input-message surface-input-message?)
+    (fields
+      (immutable surface-id surface-input-message-surface-id)
+      (immutable event surface-input-message-event)))
+
+  (define (make-surface-input-message surface-id event)
+    (unless (and (integer? surface-id) (exact? surface-id) (not (negative? surface-id)))
+      (assertion-violation
+        'make-surface-input-message "invalid Surface identity" surface-id))
+    (unless (input-event? event)
+      (assertion-violation
+        'make-surface-input-message "expected an input event" event))
+    (%make-surface-input-message surface-id event))
 
   (define-record-type
     (surface %make-surface surface?)

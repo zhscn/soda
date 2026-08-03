@@ -211,23 +211,23 @@ Buffer 的多个 View 因此可以独立浏览。访问条目仍调用普通 dis
 显式 project command、adopt 或 language bootstrap 才解析 Project。Project 发现只产生
 描述值，LanguageSession 是否启动由 language policy 决定。
 
-resource enumerator 由 Project 操作按需启动，通过 libuv directory scan 逐层展开
-目录。扫描器先发布首个可用批次，随后按固定目录批量发布同一 generation 的累计路径
-snapshot，并在结束时发布完整 snapshot。picker 立即用已有候选响应输入，并在 snapshot
-增长时按当前 query 重新过滤。候选更新按稳定 resource identity 保留 selection 和
-viewport，不重启目录扫描。
+resource enumerator 由 Project 操作按需启动。内建 enumerator 使用同步 VFS 按固定目录
+预算逐层展开；大规模 workspace 可以选择受管 `fd`、`rg` 或语言专用枚举进程。扫描器
+先发布首个可用批次，随后发布同一 generation 的累计路径 snapshot，并在结束时发布
+完整 snapshot。picker 立即用已有候选响应输入，并在 snapshot 增长时按当前 query 重新
+过滤。候选更新按稳定 resource identity 保留 selection 和 viewport，不重启枚举任务。
 
 枚举 session 属于 Editor 的 Project resource cache，不属于启动它的 minibuffer。
 接受或取消 picker 只结束交互 session；枚举可以继续完成并服务下一次命令。重复命令
 复用已有 snapshot 或相同 generation 的在途 session，Project 切换后的批次只更新引用
-同一 Project id 的 picker。forget Project 和 Editor close 释放 scan source 与 session
-持有的目录 watch。
+同一 Project id 的 picker。forget Project 和 Editor close 释放枚举任务、受管进程与
+session 持有的目录 watch。
 
-需要内容的调用方通过异步 file read 单独读取资源。隐藏目录、VCS metadata、构建输出
-和依赖目录由枚举 policy 排除。enumerator 不为后台索引创建 Buffer；用户访问资源时
-才由普通文件打开流程建立 Buffer identity。session 按固定预算为已扫描目录建立 watch，
-watch 只承担失效通知；收到文件系统变化后启动新 generation 的异步重扫，并以累计
-snapshot 替换旧集合。超出 watch 预算的目录通过显式 refresh 重新枚举。
+需要内容的调用方通过同步 VFS 单独读取资源。隐藏目录、VCS metadata、构建输出和依赖
+目录由枚举 policy 排除。enumerator 不为后台索引创建 Buffer；用户访问资源时才由普通
+文件打开流程建立 Buffer identity。session 按固定预算为已扫描目录建立 watch，watch
+只承担失效通知；收到文件系统变化后启动新 generation 的枚举任务，并以累计 snapshot
+替换旧集合。超出 watch 预算的目录通过显式 refresh 重新枚举。
 
 ## Workbench
 

@@ -1,0 +1,202 @@
+(library (soda tui terminal-session)
+  (export make-terminal-input-session
+          terminal-input-session?
+          terminal-input-session-surface-id
+          terminal-input-session-active?
+          terminal-input-session-start!
+          terminal-input-session-event?
+          terminal-input-session-handle-event!
+          terminal-input-session-close!)
+  (import (rnrs)
+          (prefix (soda ffi runtime) native:)
+          (soda host surface)
+          (soda tui terminal-input))
+
+  (define escape-timeout-ms 25)
+
+  (define-record-type
+    (terminal-input-session %make-terminal-input-session
+                            terminal-input-session?)
+    (fields
+      (immutable runtime session-runtime)
+      (immutable terminal session-terminal)
+      (immutable surface-id terminal-input-session-surface-id)
+      (immutable input-fd session-input-fd)
+      (immutable publish! session-publish!)
+      (immutable control! session-control!)
+      (immutable decoder session-decoder)
+      (mutable input-source session-input-source session-input-source-set!)
+      (mutable escape-timer session-escape-timer session-escape-timer-set!)
+      (mutable active? terminal-input-session-active?
+               terminal-input-session-active?-set!)
+      (mutable closed? session-closed? session-closed?-set!)))
+
+  (define make-terminal-input-session
+    (case-lambda
+      [(runtime terminal surface-id publish! control!)
+       (make-terminal-input-session
+         runtime terminal surface-id 0 publish! control!)]
+      [(runtime terminal surface-id input-fd publish! control!)
+       (unless (native:runtime? runtime)
+         (assertion-violation
+           'make-terminal-input-session "expected a native runtime" runtime))
+       (unless (native:terminal? terminal)
+         (assertion-violation
+           'make-terminal-input-session "expected a terminal" terminal))
+       (unless (and (integer? surface-id) (exact? surface-id)
+                    (not (negative? surface-id)))
+         (assertion-violation
+           'make-terminal-input-session "invalid Surface identity" surface-id))
+       (unless (and (integer? input-fd) (exact? input-fd)
+                    (not (negative? input-fd)))
+         (assertion-violation
+           'make-terminal-input-session "invalid input descriptor" input-fd))
+       (unless (and (procedure? publish!) (procedure? control!))
+         (assertion-violation
+           'make-terminal-input-session
+           "publish and control sinks must be procedures"
+           publish! control!))
+       (%make-terminal-input-session
+         runtime terminal surface-id input-fd publish! control!
+         (make-terminal-input-decoder) #f #f #f #f)]))
+
+  (define (require-open who session)
+    (unless (terminal-input-session? session)
+      (assertion-violation who "expected a terminal input session" session))
+    (when (session-closed? session)
+      (assertion-violation who "terminal input session is closed" session)))
+
+  (define (cancel-source! session source)
+    (when source
+      (native:runtime-cancel! (session-runtime session) source)))
+
+  (define (cancel-escape-timer! session)
+    (let ([source (session-escape-timer session)])
+      (when source
+        (cancel-source! session source)
+        (session-escape-timer-set! session #f))))
+
+  (define (arm-escape-timer! session)
+    (cancel-escape-timer! session)
+    (when (terminal-input-decoder-pending? (session-decoder session))
+      (session-escape-timer-set!
+        session
+        (native:runtime-start-timer!
+          (session-runtime session) escape-timeout-ms 0))))
+
+  (define (publish-events! session events)
+    (for-each
+      (lambda (event)
+        ((session-publish! session)
+         (make-surface-input-message
+           (terminal-input-session-surface-id session) event)))
+      events)
+    (length events))
+
+  (define (terminal-input-session-start! session)
+    (require-open 'terminal-input-session-start! session)
+    (when (terminal-input-session-active? session)
+      (assertion-violation
+        'terminal-input-session-start! "terminal input session is active" session))
+    (native:terminal-enter-raw! (session-terminal session))
+    (guard
+      (condition
+        [else
+         (let ([source (session-input-source session)])
+           (when source
+             (guard (ignored [else #f])
+               (cancel-source! session source))
+             (session-input-source-set! session #f)))
+         (guard (ignored [else #f])
+           (native:terminal-leave-raw! (session-terminal session)))
+         (raise condition)])
+      (session-input-source-set!
+        session
+        (native:runtime-watch-fd!
+          (session-runtime session)
+          (session-input-fd session)
+          native:fd-readable))
+      ((session-control! session) terminal-input-enable-sequence)
+      (terminal-input-session-active?-set! session #t)
+      session))
+
+  (define (terminal-input-session-event? session event)
+    (and (terminal-input-session? session)
+         (native:event? event)
+         (or (and (session-input-source session)
+                  (= (native:event-source event)
+                     (session-input-source session))
+                  (eq? (native:event-kind event) 'fd-ready))
+             (and (session-escape-timer session)
+                  (= (native:event-source event)
+                     (session-escape-timer session))
+                  (eq? (native:event-kind event) 'timer)))))
+
+  (define (terminal-input-session-handle-event! session event)
+    (require-open 'terminal-input-session-handle-event! session)
+    (unless (terminal-input-session-active? session)
+      (assertion-violation
+        'terminal-input-session-handle-event!
+        "terminal input session is inactive"
+        session))
+    (cond
+      [(and (session-input-source session)
+            (= (native:event-source event) (session-input-source session))
+            (eq? (native:event-kind event) 'fd-ready))
+       (let ([bytes (native:terminal-read (session-terminal session))])
+         (if (not bytes)
+             0
+             (let ([count
+                     (publish-events!
+                       session
+                       (terminal-input-decoder-feed!
+                         (session-decoder session) bytes))])
+               (arm-escape-timer! session)
+               count)))]
+      [(and (session-escape-timer session)
+            (= (native:event-source event) (session-escape-timer session))
+            (eq? (native:event-kind event) 'timer))
+       (session-escape-timer-set! session #f)
+       (publish-events!
+         session
+         (terminal-input-decoder-flush! (session-decoder session)))]
+      [else #f]))
+
+  (define (terminal-input-session-close! session)
+    (unless (terminal-input-session? session)
+      (assertion-violation
+        'terminal-input-session-close! "expected a terminal input session" session))
+    (if (session-closed? session)
+        #f
+        (let ([failure #f]
+              [active? (terminal-input-session-active? session)]
+              [timer (session-escape-timer session)]
+              [input (session-input-source session)])
+          (define (attempt! thunk)
+            (guard
+              (condition
+                [else
+                 (unless failure (set! failure condition))
+                 #f])
+              (thunk)))
+          ;; Publish the terminal lifecycle transition before invoking fallible
+          ;; native or host cleanup. Repeated close requests remain idempotent
+          ;; even when one cleanup operation reports an error.
+          (session-closed?-set! session #t)
+          (terminal-input-session-active?-set! session #f)
+          (session-escape-timer-set! session #f)
+          (session-input-source-set! session #f)
+          (when timer
+            (attempt! (lambda () (cancel-source! session timer))))
+          (when input
+            (attempt! (lambda () (cancel-source! session input))))
+          (when active?
+            (attempt!
+              (lambda ()
+                ((session-control! session) terminal-input-disable-sequence)))
+            (attempt!
+              (lambda ()
+                (native:terminal-leave-raw! (session-terminal session)))))
+          (when failure (raise failure))
+          #t)))
+)

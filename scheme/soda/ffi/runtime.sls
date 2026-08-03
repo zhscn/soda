@@ -6,10 +6,6 @@
           runtime-poll-nowait!
           runtime-start-timer!
           runtime-watch-fd!
-          runtime-read-file!
-          runtime-write-file!
-          runtime-scan-directory!
-          runtime-stat-path!
           runtime-watch-path!
           runtime-spawn-process!
           runtime-spawn-terminal-process!
@@ -49,7 +45,7 @@
     (foreign-procedure __atomic "soda_runtime_abi_version" () unsigned-32))
 
   (define abi-version-checked
-    (unless (= (%abi-version) 10)
+    (unless (= (%abi-version) 11)
       (error 'soda-runtime "unsupported native runtime ABI version")))
 
   (define %runtime-create
@@ -63,20 +59,6 @@
   (define %watch-fd
     (foreign-procedure __atomic "soda_runtime_watch_fd"
                        (void* int unsigned-32)
-                       unsigned-64))
-  (define %read-file
-    (foreign-procedure __atomic "soda_runtime_read_file" (void* string) unsigned-64))
-  (define %write-file
-    (foreign-procedure __atomic "soda_runtime_write_file"
-                       (void* string u8* size_t)
-                       unsigned-64))
-  (define %scan-directory
-    (foreign-procedure __atomic "soda_runtime_scan_directory"
-                       (void* string)
-                       unsigned-64))
-  (define %stat-path
-    (foreign-procedure __atomic "soda_runtime_stat_path"
-                       (void* string int)
                        unsigned-64))
   (define %watch-path
     (foreign-procedure __atomic "soda_runtime_watch_path"
@@ -223,69 +205,6 @@
       (if (zero? source)
           (native-error 'runtime-watch-fd! runtime)
           source)))
-
-  (define (runtime-read-file! runtime path)
-    (require-runtime 'runtime-read-file! runtime)
-    (let ([source (%read-file (runtime-pointer runtime) path)])
-      (if (zero? source)
-          (native-error 'runtime-read-file! runtime)
-          source)))
-
-  (define (runtime-write-file! runtime path data)
-    (require-runtime 'runtime-write-file! runtime)
-    (unless (string? path)
-      (assertion-violation
-        'runtime-write-file!
-        "path must be a string"
-        path))
-    (unless (bytevector? data)
-      (assertion-violation
-        'runtime-write-file!
-        "data must be a bytevector"
-        data))
-    (let ([source
-            (%write-file
-              (runtime-pointer runtime)
-              path
-              data
-              (bytevector-length data))])
-      (if (zero? source)
-          (native-error 'runtime-write-file! runtime)
-          source)))
-
-  (define (runtime-scan-directory! runtime path)
-    (require-runtime 'runtime-scan-directory! runtime)
-    (unless (and (string? path) (positive? (string-length path)))
-      (assertion-violation
-        'runtime-scan-directory!
-        "path must be a non-empty string"
-        path))
-    (let ([source
-            (%scan-directory
-              (runtime-pointer runtime)
-              path)])
-      (if (zero? source)
-          (native-error 'runtime-scan-directory! runtime)
-          source)))
-
-  (define runtime-stat-path!
-    (case-lambda
-      [(runtime path) (runtime-stat-path! runtime path #t)]
-      [(runtime path follow-symlinks?)
-       (require-runtime 'runtime-stat-path! runtime)
-       (unless (and (string? path) (positive? (string-length path)))
-         (assertion-violation
-           'runtime-stat-path!
-           "path must be a non-empty string"
-           path))
-       (let ([source
-               (%stat-path
-                 (runtime-pointer runtime)
-                 path
-                 (if follow-symlinks? 1 0))])
-         (if (zero? source)
-             (native-error 'runtime-stat-path! runtime)
-             source))]))
 
   (define (runtime-watch-path! runtime path)
     (require-runtime 'runtime-watch-path! runtime)
@@ -542,13 +461,14 @@
                   (terminal-pointer terminal)
                   buffer
                   capacity)])
-         (when (negative? size)
-           (terminal-error 'terminal-read terminal))
-         (if (= size capacity)
-             buffer
-             (let ([output (make-bytevector size)])
-               (bytevector-copy! buffer 0 output 0 size)
-               output)))]))
+         (cond
+           [(= size -2) #f]
+           [(negative? size) (terminal-error 'terminal-read terminal)]
+           [(= size capacity) buffer]
+           [else
+            (let ([output (make-bytevector size)])
+              (bytevector-copy! buffer 0 output 0 size)
+              output)]))]))
 
   (define (terminal-write! terminal data)
     (require-terminal 'terminal-write! terminal)
@@ -617,13 +537,9 @@
     (case value
       [(1) 'timer]
       [(2) 'fd-ready]
-      [(3) 'file-read]
-      [(4) 'file-write]
-      [(5) 'directory-scan]
-      [(6) 'path-stat]
-      [(7) 'path-change]
-      [(8) 'process-output]
-      [(9) 'process-exit]
+      [(3) 'path-change]
+      [(4) 'process-output]
+      [(5) 'process-exit]
       [else (error 'runtime-poll! "unknown native event kind" value)]))
 
   (define (copy-current-data pointer)

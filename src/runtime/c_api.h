@@ -25,15 +25,11 @@ typedef struct soda_terminal soda_terminal;
 
 #define SODA_EVENT_TIMER 1U
 #define SODA_EVENT_FD_READY 2U
-#define SODA_EVENT_FILE_READ 3U
-#define SODA_EVENT_FILE_WRITE 4U
-#define SODA_EVENT_DIRECTORY_SCAN 5U
-#define SODA_EVENT_PATH_STAT 6U
-#define SODA_EVENT_PATH_CHANGE 7U
-#define SODA_EVENT_PROCESS_OUTPUT 8U
-#define SODA_EVENT_PROCESS_EXIT 9U
+#define SODA_EVENT_PATH_CHANGE 3U
+#define SODA_EVENT_PROCESS_OUTPUT 4U
+#define SODA_EVENT_PROCESS_EXIT 5U
 
-#define SODA_RUNTIME_ABI_VERSION 10U
+#define SODA_RUNTIME_ABI_VERSION 11U
 
 #define SODA_FD_READABLE (1U << 0U)
 #define SODA_FD_WRITABLE (1U << 1U)
@@ -51,12 +47,6 @@ SODA_RUNTIME_API uint32_t soda_runtime_abi_version(void);
 SODA_RUNTIME_API uint64_t soda_runtime_start_timer(soda_runtime* runtime, uint64_t timeout_ms,
                                                    uint64_t repeat_ms);
 SODA_RUNTIME_API uint64_t soda_runtime_watch_fd(soda_runtime* runtime, int fd, uint32_t events);
-SODA_RUNTIME_API uint64_t soda_runtime_read_file(soda_runtime* runtime, const char* path);
-SODA_RUNTIME_API uint64_t soda_runtime_write_file(soda_runtime* runtime, const char* path,
-                                                  const uint8_t* data, size_t size);
-SODA_RUNTIME_API uint64_t soda_runtime_scan_directory(soda_runtime* runtime, const char* path);
-SODA_RUNTIME_API uint64_t soda_runtime_stat_path(soda_runtime* runtime, const char* path,
-                                                 int follow_symlinks);
 SODA_RUNTIME_API uint64_t soda_runtime_watch_path(soda_runtime* runtime, const char* path);
 // Arguments are encoded as repeated uint32_t little-endian byte length followed
 // by that many UTF-8 bytes. The first argument names the executable and is also
@@ -65,9 +55,11 @@ SODA_RUNTIME_API uint64_t soda_runtime_spawn_process(soda_runtime* runtime,
                                                      const char* working_directory,
                                                      const uint8_t* arguments,
                                                      size_t arguments_size);
-SODA_RUNTIME_API uint64_t soda_runtime_spawn_terminal_process(
-    soda_runtime* runtime, const char* working_directory, const uint8_t* arguments,
-    size_t arguments_size, uint32_t rows, uint32_t columns);
+SODA_RUNTIME_API uint64_t soda_runtime_spawn_terminal_process(soda_runtime* runtime,
+                                                              const char* working_directory,
+                                                              const uint8_t* arguments,
+                                                              size_t arguments_size, uint32_t rows,
+                                                              uint32_t columns);
 SODA_RUNTIME_API int soda_runtime_write_process(soda_runtime* runtime, uint64_t source,
                                                 const uint8_t* data, size_t size);
 SODA_RUNTIME_API int soda_runtime_close_process_input(soda_runtime* runtime, uint64_t source);
@@ -90,12 +82,6 @@ SODA_RUNTIME_API uint64_t soda_runtime_event_source(soda_runtime* runtime);
 SODA_RUNTIME_API int soda_runtime_event_status(soda_runtime* runtime);
 SODA_RUNTIME_API uint32_t soda_runtime_event_flags(soda_runtime* runtime);
 SODA_RUNTIME_API size_t soda_runtime_event_data_size(soda_runtime* runtime);
-// Directory-scan data is a sequence of entries:
-//   uint8_t libuv_dirent_type, uint32_t little-endian name_size,
-//   name_size bytes of UTF-8 name.
-// Successful path-stat data contains five little-endian uint64_t values:
-//   size, mtime seconds, mtime nanoseconds, device, inode.
-// Its event flags contain the libuv directory-entry type of the resource.
 // Path-change data contains the changed entry name relative to the watched
 // directory. Its event flags contain SODA_PATH_RENAME and SODA_PATH_CHANGE.
 // Process-output data contains an arbitrary byte chunk. Its flags contain

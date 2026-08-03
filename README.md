@@ -1,14 +1,14 @@
 # Soda
 
 Soda 是一个 Scheme-first 的原生 TUI 编辑器。Chez Scheme 承载编辑器状态、命令和
-扩展策略；C/C++ 组件提供文本存储、异步 I/O、终端访问和可复用的语言机制。
+扩展策略；C/C++ 组件提供文本存储、终端与进程运行时和可复用的语言机制。
 
 ## 当前边界
 
 活动源码只包含精简 core 与 native mechanism wrapper：
 
 ```text
-native Text / Document / libuv / terminal / parser ABI
+native Text / Document / terminal/process runtime / parser ABI
                               │
                               ▼
 Soda core: value -> document -> buffer -> view/window
@@ -53,7 +53,7 @@ C launcher 注册 native ABI，嵌入 Chez runtime boot 和 Soda kernel/host boo
 ## Native mechanism
 
 - `soda_document`：`Text`、`Document`、事务、anchor、snapshot 和 undo tree；
-- `soda_runtime`：libuv timer、文件、目录、进程和 descriptor readiness；
+- `soda_runtime`：libuv timer、进程、path watch 和 descriptor readiness；
 - `soda_tree_sitter`：Tree-sitter core 与 grammar loading；
 - `soda_cpp_analysis`、`soda_indentation`：C/C++ 分析和缩进机制。
 

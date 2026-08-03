@@ -5,7 +5,7 @@
 | 能力 | 状态 |
 |---|---|
 | Kitty keyboard、legacy terminal 与 bracketed paste decoder | 已实现 |
-| raw terminal session 与 Surface message queue | 待实现 |
+| raw terminal session 与 Surface message queue | 部分实现 |
 | 增量 decoder 与规范 `InputEvent` | 已实现 |
 | 分层 keymap、prefix map、tombstone 与内省 | 已实现 |
 | per-View `InputState`、文本策略与单键捕获 | 已实现 |
@@ -65,6 +65,11 @@ bracketed paste，退出时恢复原状态。decoder 同时接受：
 legacy control byte `0x08` 表示 `C-h`。Backspace 只由 DEL（`0x7f`）或 Kitty
 协议中明确的 Backspace 事件表示；decoder 不使用终端的历史 `C-h`/Backspace
 兼容映射。
+
+TerminalInputSession 通过 libuv fd readiness 读取终端，并用单次 timer 解决 Escape
+歧义。session 把规范事件包装为带 Surface identity 的消息，通过注入的 publish sink
+进入 host queue；协议控制序列通过独立 control sink 进入终端输出队列。session 不处理
+文件 I/O，也不直接执行 command。
 
 按键归一为：
 

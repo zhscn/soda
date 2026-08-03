@@ -120,51 +120,6 @@ uint64_t soda_runtime_watch_fd(soda_runtime* runtime, int fd, uint32_t events) {
     });
 }
 
-uint64_t soda_runtime_read_file(soda_runtime* runtime, const char* path) {
-    return guard(runtime, uint64_t{0}, [&] {
-        if (path == nullptr) {
-            throw std::invalid_argument("file read path is null");
-        }
-        return runtime->runtime.read_file(path).value;
-    });
-}
-
-uint64_t soda_runtime_write_file(soda_runtime* runtime, const char* path, const uint8_t* data,
-                                 size_t size) {
-    return guard(runtime, uint64_t{0}, [&] {
-        if (path == nullptr) {
-            throw std::invalid_argument("file write path is null");
-        }
-        if (data == nullptr && size != 0) {
-            throw std::invalid_argument("file write data is null");
-        }
-        std::vector<std::byte> owned_data(size);
-        if (size != 0) {
-            std::ranges::copy_n(reinterpret_cast<const std::byte*>(data),
-                                static_cast<std::ptrdiff_t>(size), owned_data.begin());
-        }
-        return runtime->runtime.write_file(path, std::move(owned_data)).value;
-    });
-}
-
-uint64_t soda_runtime_scan_directory(soda_runtime* runtime, const char* path) {
-    return guard(runtime, uint64_t{0}, [&] {
-        if (path == nullptr) {
-            throw std::invalid_argument("directory scan path is null");
-        }
-        return runtime->runtime.scan_directory(path).value;
-    });
-}
-
-uint64_t soda_runtime_stat_path(soda_runtime* runtime, const char* path, int follow_symlinks) {
-    return guard(runtime, uint64_t{0}, [&] {
-        if (path == nullptr) {
-            throw std::invalid_argument("stat path is null");
-        }
-        return runtime->runtime.stat_path(path, follow_symlinks != 0).value;
-    });
-}
-
 uint64_t soda_runtime_watch_path(soda_runtime* runtime, const char* path) {
     return guard(runtime, uint64_t{0}, [&] {
         if (path == nullptr) {
@@ -185,17 +140,15 @@ uint64_t soda_runtime_spawn_process(soda_runtime* runtime, const char* working_d
     });
 }
 
-uint64_t soda_runtime_spawn_terminal_process(soda_runtime* runtime,
-                                             const char* working_directory,
-                                             const uint8_t* arguments,
-                                             size_t arguments_size, uint32_t rows,
-                                             uint32_t columns) {
+uint64_t soda_runtime_spawn_terminal_process(soda_runtime* runtime, const char* working_directory,
+                                             const uint8_t* arguments, size_t arguments_size,
+                                             uint32_t rows, uint32_t columns) {
     return guard(runtime, uint64_t{0}, [&] {
         const std::string directory =
             working_directory == nullptr ? std::string{} : std::string{working_directory};
         return runtime->runtime
-            .spawn_terminal_process(decode_process_arguments(arguments, arguments_size),
-                                    directory, rows, columns)
+            .spawn_terminal_process(decode_process_arguments(arguments, arguments_size), directory,
+                                    rows, columns)
             .value;
     });
 }
@@ -223,11 +176,10 @@ int soda_runtime_close_process_input(soda_runtime* runtime, uint64_t source) {
     });
 }
 
-int soda_runtime_resize_process_terminal(soda_runtime* runtime, uint64_t source,
-                                         uint32_t rows, uint32_t columns) {
+int soda_runtime_resize_process_terminal(soda_runtime* runtime, uint64_t source, uint32_t rows,
+                                         uint32_t columns) {
     return guard(runtime, -1, [&] {
-        runtime->runtime.resize_process_terminal(soda::runtime::SourceId{source}, rows,
-                                                 columns);
+        runtime->runtime.resize_process_terminal(soda::runtime::SourceId{source}, rows, columns);
         return 0;
     });
 }

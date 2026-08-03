@@ -624,6 +624,10 @@ decoder 维护跨 read 的 partial sequence，只在完整输入单元形成后�
 和 terminal capability 不进入 keymap。function key 在 KeyStroke 构造时规范化；Meta 是
 真实 modifier，不拆成 ESC prefix。用户级 key translation 不属于 decoder 或 kernel。
 
+TerminalInputSession 持有 raw-mode 生命周期、stdin readiness source 和 Escape timer。
+它通过注入的 publish sink 产生带 Surface identity 的输入消息，通过 control sink 请求
+启停 Kitty 与 bracketed-paste；输出 backpressure 仍由 terminal presenter 的队列负责。
+
 ```text
 KeyStroke {
   key,
@@ -1043,12 +1047,13 @@ Selection、transaction 和 input pipeline 工作。
 native 层提供窄 ABI：
 
 - `soda_document`：Text、DocumentSnapshot、native transaction、anchor 和 change mapping；
-- `soda_runtime`：libuv source、timer、filesystem、process 和 terminal readiness；
+- `soda_runtime`：libuv source、timer、path watch、process 和 terminal readiness；
 - `soda_tree_sitter`：Tree-sitter core 与 grammar loading；
 - `soda_cpp_analysis`：C/C++ token、CST、结构和缩进。
 
-editor kernel 只直接依赖 document ABI。Workbench host 使用 runtime ABI。TUI frontend 使用
-terminal ABI。Tree-sitter、C++ analyzer 和其他 parser ABI 由语言 package wrapper 使用。
+editor kernel 只直接依赖 document ABI。Workbench host 使用 runtime ABI；普通文件与
+目录操作由 Scheme VFS 同步完成。TUI frontend 使用 terminal ABI。Tree-sitter、C++
+analyzer 和其他 parser ABI 由语言 package wrapper 使用。
 
 发行构建产生分层 image：
 

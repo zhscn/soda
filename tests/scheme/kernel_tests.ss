@@ -1,6 +1,10 @@
 #!r6rs
 (import (rnrs)
         (rnrs eval)
+        (only (chezscheme)
+              delete-directory
+              get-process-id
+              mkdir)
         (soda kernel change)
         (soda kernel extension)
         (soda kernel range-set)
@@ -22,7 +26,10 @@
         (soda ffi cpp-analysis)
         (soda ffi indentation)
         (soda ffi tree-sitter)
-        (soda tui terminal-input))
+        (prefix (soda ffi runtime) native:)
+        (soda support vfs)
+        (soda tui terminal-input)
+        (soda tui terminal-session))
 
 (define (library-binding-hidden? library-name identifier)
   (guard (condition [else #t])
@@ -1026,6 +1033,38 @@
                        "\x1b;[<u\x1b;[?2004l"))
   (error 'kernel-tests "terminal input protocol sequences differ"))
 
+(let* ([event
+         (make-key-event
+           'character (char->integer #\a) #f #f 0 'press
+           (string->utf8 "a"))]
+       [message (make-surface-input-message (surface-id surface) event)])
+  (unless (and (= (surface-input-message-surface-id message)
+                  (surface-id surface))
+               (eq? (surface-input-message-event message) event))
+    (error 'kernel-tests "Surface input message differs" message)))
+
+(let ([native-runtime (native:make-runtime)]
+      [native-terminal (native:make-terminal)]
+      [messages '()]
+      [controls '()])
+  (dynamic-wind
+    (lambda () #f)
+    (lambda ()
+      (let ([session
+              (make-terminal-input-session
+                native-runtime native-terminal (surface-id surface)
+                (lambda (message) (set! messages (cons message messages)))
+                (lambda (control) (set! controls (cons control controls))))])
+        (unless (and (not (terminal-input-session-active? session))
+                     (terminal-input-session-close! session)
+                     (not (terminal-input-session-close! session))
+                     (null? messages)
+                     (null? controls))
+          (error 'kernel-tests "inactive terminal session lifecycle differs"))))
+    (lambda ()
+      (native:terminal-close! native-terminal)
+      (native:runtime-close! native-runtime))))
+
 (let* ([text-keymap (make-keymap 'text-test)]
        [text-context
          (make-input-context
@@ -1037,7 +1076,32 @@
   (unless (and (eq? (input-disposition-kind result) 'text)
                (bytevector=?
                  (input-disposition-value result) (string->utf8 "a")))
-    (error 'kernel-tests "unbound committed text was not dispatched" result)))
+  (error 'kernel-tests "unbound committed text was not dispatched" result)))
+
+(let* ([directory
+         (string-append
+           "/tmp/soda-vfs-kernel-" (number->string (get-process-id)))]
+       [path (vfs-path-join directory "content.bin")])
+  (dynamic-wind
+    (lambda () (mkdir directory))
+    (lambda ()
+      (unless (= (vfs-write-file path (string->utf8 "first value")) 11)
+        (error 'kernel-tests "synchronous VFS write size differs"))
+      (vfs-write-file path (string->utf8 "next"))
+      (unless (bytevector=? (vfs-read-file path) (string->utf8 "next"))
+        (error 'kernel-tests "synchronous VFS read/write differs"))
+      (let ([entries (vfs-list-directory directory)]
+            [stat (vfs-stat-path path)])
+        (unless (and (= (length entries) 1)
+                     (string=? (vfs-entry-name (car entries)) "content.bin")
+                     (eq? (vfs-entry-kind (car entries)) 'file)
+                     (eq? (vfs-stat-kind stat) 'file)
+                     (= (vfs-stat-size stat) 4)
+                     (vfs-stat-same-version? stat (vfs-stat-path path)))
+          (error 'kernel-tests "synchronous VFS metadata differs" entries stat))))
+    (lambda ()
+      (when (file-exists? path) (delete-file path))
+      (delete-directory directory #t))))
 
 (let* ([secondary
         (view-service-create!
