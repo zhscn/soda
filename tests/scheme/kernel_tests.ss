@@ -33,6 +33,7 @@
         (soda tui terminal-input)
         (soda tui terminal-session)
         (soda tui presenter)
+        (soda tui presenter-session)
         (soda view display)
         (soda view frame)
         (soda view compositor)
