@@ -11,7 +11,7 @@
 
 Soda 把普通 Scheme 过程、可交互参数读取和编辑器命令调用分开。命令定义保留普通
 过程，使库代码可以直接传入参数；command registry 持有交互元数据、文档、command
-class、适用 mode 和 advice。
+class 和 advice。
 
 ## Command definition
 
@@ -149,7 +149,6 @@ structure kind 和 motion direction 等选择结果，命令过程不再重新�
 
 ```text
 CommandInvocation {
-  id,
   definition,
   original context,
   remaining readers,
