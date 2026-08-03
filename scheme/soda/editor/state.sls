@@ -139,7 +139,6 @@
           bookmark-name
           bookmark-resource
           bookmark-buffer-id
-          bookmark-revision
           bookmark-line
           bookmark-column
           bookmark-annotation

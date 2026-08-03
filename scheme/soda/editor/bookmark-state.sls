@@ -3,7 +3,6 @@
           bookmark-name
           bookmark-name-set!
           bookmark-resource
-          bookmark-revision
           bookmark-buffer-id
           bookmark-buffer-id-set!
           bookmark-document
@@ -39,7 +38,6 @@
     (fields
       (mutable name bookmark-name bookmark-name-set!)
       resource
-      revision
       (mutable buffer-id bookmark-buffer-id bookmark-buffer-id-set!)
       (mutable document bookmark-document bookmark-document-set!)
       (mutable anchor bookmark-anchor bookmark-anchor-set!)
@@ -102,7 +100,6 @@
               (%make-bookmark
                 name
                 (buffer-resource buffer)
-                (buffer-revision buffer)
                 (buffer-id buffer)
                 (buffer-document buffer)
                 (document-create-anchor!
