@@ -8,18 +8,10 @@
           frame-presenter-present!
           frame-presenter-drain!)
   (import (rnrs)
-          (soda view frame))
+          (soda view frame)
+          (soda view theme))
 
   (define escape (string #\esc))
-
-  ;; Faces remain symbolic until the terminal boundary.  This default palette
-  ;; gives core selection/cursor semantics without prescribing a theme.
-  (define (face-sgr face)
-    (cond [(eq? face 'selection) "7"]
-          [(eq? face 'cursor) "7"]
-          [(eq? face 'error) "31"]
-          [(eq? face 'warning) "33"]
-          [else "0"]))
 
   (define (cursor-address row column)
     (string-append escape "[" (number->string (+ row 1)) ";"
@@ -33,7 +25,7 @@
           (- from 1)
           from)))
 
-  (define (write-span port frame span)
+  (define (write-span port frame span theme)
     (let* ([row (frame-row-span-row span)]
            [from (span-start frame span)]
            [to (frame-row-span-to span)])
@@ -44,7 +36,9 @@
             (unless (eq? face (frame-cell-face cell))
               (put-string port escape)
               (put-string port "[")
-              (put-string port (face-sgr (frame-cell-face cell)))
+              (put-string port
+                          (face-style->sgr
+                            (theme-face-style theme (frame-cell-face cell))))
               (put-char port #\m))
             (unless (frame-cell-continuation? cell)
               (put-string port (frame-cell-grapheme cell)))
@@ -52,14 +46,17 @@
 
   ;; The returned transaction is complete and can be written partially by a
   ;; presenter queue.  `old` may be #f for the first surface presentation.
-  (define (frame-diff->ansi old new)
-    (unless (frame? new)
-      (assertion-violation 'frame-diff->ansi "expected a new Frame" new))
-    (let-values ([(port get-output) (open-string-output-port)])
-      (for-each (lambda (span) (write-span port new span)) (frame-diff old new))
-      (put-string port escape)
-      (put-string port "[0m")
-      (get-output)))
+  (define frame-diff->ansi
+    (case-lambda
+      [(old new) (frame-diff->ansi old new default-theme)]
+      [(old new theme)
+       (unless (and (frame? new) (theme? theme))
+         (assertion-violation 'frame-diff->ansi "expected a new Frame and Theme" new theme))
+       (let-values ([(port get-output) (open-string-output-port)])
+         (for-each (lambda (span) (write-span port new span theme)) (frame-diff old new))
+         (put-string port escape)
+         (put-string port "[0m")
+         (get-output))]))
 
   ;; pending-target is the Frame described by pending-bytes.  It changes only
   ;; after the whole transaction is written, preserving a known terminal state

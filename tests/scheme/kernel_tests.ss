@@ -36,6 +36,7 @@
         (soda view frame)
         (soda view compositor)
         (soda view text-layout)
+        (soda view theme)
         (soda view plugin))
 
 (define (library-binding-hidden? library-name identifier)
@@ -1513,12 +1514,15 @@
            (or (string=? (substring text position (+ position size)) needle)
                (loop (+ position 1)))))))
 
+(unless (string=? (face-style->sgr (theme-face-style default-theme 'selection)) "0;7")
+  (error 'kernel-tests "Default terminal theme differs"))
+
 (let* ([base (make-frame 2 1)]
        [next (frame-with-cell base 0 0
                               (make-frame-cell "x" 1 #f 'selection #f))]
        [ansi (frame-diff->ansi base next)])
   (unless (and (contains-string? ansi "[1;1H")
-               (contains-string? ansi "[7m")
+               (contains-string? ansi "[0;7m")
                (contains-string? ansi "x"))
     (error 'kernel-tests "ANSI presenter encoding differs" ansi)))
 
