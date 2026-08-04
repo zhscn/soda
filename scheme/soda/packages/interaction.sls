@@ -21,6 +21,7 @@
           interaction-request-initial-value
           interaction-request-completion-source
           interaction-request-selection-policy
+          interaction-request-validator
           make-interaction-string-reader)
   (import (rnrs)
           (soda host command)
@@ -130,18 +131,23 @@
       (immutable prompt interaction-request-prompt)
       (immutable initial-value interaction-request-initial-value)
       (immutable completion-source interaction-request-completion-source)
-      (immutable selection-policy interaction-request-selection-policy)))
+      (immutable selection-policy interaction-request-selection-policy)
+      (immutable validator interaction-request-validator)))
 
   (define make-interaction-request
     (case-lambda
       [(kind prompt)
-       (make-interaction-request kind prompt #f #f 'free)]
+       (make-interaction-request kind prompt #f #f 'free #f)]
       [(kind prompt initial-value completion-source selection-policy)
+       (make-interaction-request kind prompt initial-value completion-source selection-policy #f)]
+      [(kind prompt initial-value completion-source selection-policy validator)
        (unless (and (symbol? kind) (string? prompt)
-                    (memq selection-policy '(free must-match)))
+                    (memq selection-policy '(free must-match))
+                    (or (not validator) (procedure? validator)))
          (assertion-violation 'make-interaction-request "invalid interaction request"
                               kind prompt selection-policy))
-       (%make-interaction-request kind prompt initial-value completion-source selection-policy)]))
+       (%make-interaction-request kind prompt initial-value completion-source selection-policy
+                                  validator)]))
 
   ;; The basic string reader provides the common bridge from an ordinary
   ;; command parameter to a frontend request.  Typed readers can use the same
@@ -155,7 +161,7 @@
          name
          (lambda (context arguments)
            (make-interactive-suspend
-             (make-interaction-request 'string prompt initial-value #f 'free)
+             (make-interaction-request 'string prompt initial-value #f 'free #f)
              (lambda (value) (make-interactive-ready (list value))))))]))
 
   (define (interaction-service-session-for-id service id)

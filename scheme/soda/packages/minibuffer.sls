@@ -188,13 +188,20 @@
                   [raw (and buffer (snapshot-string (buffer-state-document (buffer-state buffer))))]
                   [controller (minibuffer-session-completion session)]
                   [candidate (and controller (completion-controller-selected controller))]
+                  [snapshot (minibuffer-session-snapshot service session)]
+                  [request (interaction-session-request (minibuffer-session-interaction session))]
                   [policy (interaction-request-selection-policy
-                            (interaction-session-request (minibuffer-session-interaction session)))]
+                            request)]
                   [value (if candidate (completion-candidate-insert-text candidate) raw)])
-             (and value (or (eq? policy 'free) candidate)
+             (and value
+                  (or (eq? policy 'free) candidate
+                      (let ([validator (interaction-request-validator request)])
+                        (or (and validator (validator value snapshot))
+                            (and controller
+                                 (completion-controller-valid-input? controller value snapshot)))))
                   (begin
                     (when controller (completion-controller-accept! controller
-                                                                      (minibuffer-session-snapshot service session)))
+                                                                      snapshot))
                     (interaction-service-submit! (minibuffer-service-interactions service) value)))))))
   (define (minibuffer-service-refresh-completion! service)
     (let ([session (minibuffer-service-current service)])

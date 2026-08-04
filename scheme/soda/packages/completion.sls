@@ -5,14 +5,14 @@
           completion-candidate-group completion-candidate-payload
           make-completion-source completion-source?
           completion-source-refresh completion-source-preview
-          completion-source-restore completion-source-accept
+          completion-source-restore completion-source-accept completion-source-validate
           make-completion-controller completion-controller?
           completion-controller-source completion-controller-generation
           completion-controller-candidates completion-controller-selected-index
           completion-controller-selection-policy
           completion-controller-refresh! completion-controller-select!
           completion-controller-selected completion-controller-restore!
-          completion-controller-accept!)
+          completion-controller-accept! completion-controller-valid-input?)
   (import (rnrs))
 
   ;; Candidate identity and payload are stable source data. Presentation code
@@ -32,13 +32,18 @@
   ;; is reversible; accept is final and only runs after a successful submit.
   (define-record-type
     (completion-source %make-completion-source completion-source?)
-    (fields refresh preview restore accept))
+    (fields refresh preview restore accept validate))
   (define (optional-procedure? value) (or (not value) (procedure? value)))
-  (define (make-completion-source refresh preview restore accept)
-    (unless (and (procedure? refresh) (optional-procedure? preview)
-                 (optional-procedure? restore) (optional-procedure? accept))
-      (assertion-violation 'make-completion-source "invalid completion source"))
-    (%make-completion-source refresh preview restore accept))
+  (define make-completion-source
+    (case-lambda
+      [(refresh preview restore accept)
+       (make-completion-source refresh preview restore accept #f)]
+      [(refresh preview restore accept validate)
+       (unless (and (procedure? refresh) (optional-procedure? preview)
+                    (optional-procedure? restore) (optional-procedure? accept)
+                    (optional-procedure? validate))
+         (assertion-violation 'make-completion-source "invalid completion source"))
+       (%make-completion-source refresh preview restore accept validate)]))
 
   (define-record-type
     (completion-controller %make-completion-controller completion-controller?)
@@ -60,13 +65,19 @@
       (when restore (restore snapshot))))
   (define (completion-controller-refresh! controller snapshot)
     (completion-controller-restore! controller snapshot)
-    (let ([candidates ((completion-source-refresh (completion-controller-source controller)) snapshot)])
+    (let* ([selected (completion-controller-selected controller)]
+           [selected-id (and selected (completion-candidate-id selected))]
+           [candidates ((completion-source-refresh (completion-controller-source controller)) snapshot)])
       (unless (and (list? candidates) (for-all completion-candidate? candidates))
         (assertion-violation 'completion-controller-refresh! "source returned invalid candidates" candidates))
       (completion-controller-generation-set! controller (+ 1 (completion-controller-generation controller)))
       (completion-controller-candidates-set! controller (reverse (reverse candidates)))
       (completion-controller-selected-index-set! controller
-        (and (pair? candidates) 0))
+        (let loop ([items candidates] [index 0])
+          (and selected-id (pair? items)
+               (if (equal? selected-id (completion-candidate-id (car items)))
+                   index
+                   (loop (cdr items) (+ index 1))))))
       controller))
   (define (completion-controller-select! controller index snapshot)
     (unless (and (integer? index) (exact? index) (>= index -1)
@@ -84,4 +95,10 @@
           [accept (completion-source-accept (completion-controller-source controller))])
       (when (and candidate accept) (accept candidate snapshot))
       candidate))
+  (define (completion-controller-valid-input? controller input snapshot)
+    (unless (and (completion-controller? controller) (string? input))
+      (assertion-violation 'completion-controller-valid-input?
+                           "expected a completion controller and input" controller input))
+    (let ([validate (completion-source-validate (completion-controller-source controller))])
+      (and validate (validate input snapshot))))
 )

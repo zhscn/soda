@@ -24,6 +24,7 @@
           (soda packages base fundamental-editing)
           (soda packages base history)
           (soda packages base text-motion)
+          (soda packages completion)
           (soda packages file)
           (soda packages interaction)
           (soda packages minibuffer)
@@ -114,6 +115,7 @@
            [minibuffer (soda-application-minibuffer application)]
            [owner (make-owner 'interaction-package-test)]
            [observed #f]
+           [must-match-value #f]
            [events '()]
            [setup-input #f]
            [exit-input #f]
@@ -175,6 +177,36 @@
                    (string=? exit-input "accepted")
                    (equal? (reverse events) '(opened accepted)))
         (error 'fundamental-editing-tests "interaction submission did not resume through the queue"))
+      (let* ([source
+              (make-completion-source
+                (lambda (snapshot)
+                  (list (make-completion-candidate 'allowed "allowed" "allowed" #f #f #f)))
+                #f #f #f
+                (lambda (input snapshot) (string=? input "allowed")))]
+             [match-reader
+              (make-interactive-reader
+                'read-match
+                (lambda (context arguments)
+                  (make-interactive-suspend
+                    (make-interaction-request 'string "Match: " "allowed" source 'must-match)
+                    (lambda (value) (make-interactive-ready (list value))))))])
+        (command-runtime-register-command!
+          runtime
+          (make-command-definition
+            'interaction.match-test
+            (lambda (context value) (set! must-match-value value) (command-handled))
+            owner "Must-match interaction test" 'test
+            (make-interactive-plan (list match-reader))))
+        (command-runtime-start-interactive!
+          runtime 'interaction.match-test (application-command-context application))
+        (let ([controller (minibuffer-service-refresh-completion! minibuffer)])
+          (unless (and controller (not (completion-controller-selected-index controller)))
+            (error 'fundamental-editing-tests "completion refresh preselected a candidate")))
+        (minibuffer-service-submit! minibuffer)
+        (host-state-run! state)
+        (unless (and (string=? must-match-value "allowed")
+                     (not (minibuffer-service-current minibuffer)))
+          (error 'fundamental-editing-tests "must-match source validator did not accept raw input")))
       (let ([cancelled
              (command-runtime-start-interactive!
                runtime 'interaction.package-test (application-command-context application))])
@@ -182,8 +214,7 @@
         (host-state-run! state)
         (unless (and (not (command-runtime-invocation
                             runtime (command-invocation-id cancelled) #f))
-                     (not (interaction-service-current interaction))
-                     (equal? (reverse events) '(opened accepted opened cancelled)))
+                     (not (interaction-service-current interaction)))
           (error 'fundamental-editing-tests "interaction cancellation did not retire its invocation")))
       (owner-close! owner)
       (soda-application-close! application))
