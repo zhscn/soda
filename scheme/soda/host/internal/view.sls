@@ -379,6 +379,16 @@
     (and (= (length left) (length right))
          (for-all view-occurrence=? left right)))
 
+  (define (retarget-occurrence occurrence generation)
+    (make-view-occurrence
+      (view-occurrence-surface-id occurrence)
+      (view-occurrence-window-id occurrence)
+      (view-occurrence-view-id occurrence)
+      (view-occurrence-rectangle occurrence)
+      (view-occurrence-viewport occurrence)
+      (view-occurrence-visible-ranges occurrence)
+      generation))
+
   ;; This runs from a queued frontend host message after the pure frame has
   ;; been presented.  Every occurrence belongs to one View and is immutable.
   (define (view-service-publish-occurrences! service id occurrences)
@@ -391,14 +401,28 @@
       (assertion-violation 'view-service-publish-occurrences!
                            "invalid View occurrences" service id occurrences))
     (let ([view (view-service-ref service id #f)])
-      (and view (not (occurrence-lists=? (view-occurrences view) occurrences))
+      (and view
+           (let* ([target-generation
+                   (if (null? (view-occurrences view))
+                       (+ 1 (view-render-generation view))
+                       (view-render-generation view))]
+                  [published
+                  (map (lambda (occurrence)
+                         (retarget-occurrence occurrence
+                                              target-generation))
+                       occurrences)])
+             (and (not (occurrence-lists=? (view-occurrences view) published))
            (begin
-             (view-occurrences-set! view occurrences)
+             (view-occurrences-set!
+               view
+               (map (lambda (occurrence)
+                      (retarget-occurrence occurrence target-generation))
+                    occurrences))
              (view-update-plugins!
                view
                (make-view-update (view-id view) (view-state view) (view-state view)
-                                 #f '(viewport layout) occurrences))
-             #t))))
+                                 #f '(viewport layout) (view-occurrences view)))
+             #t))))))
 
   ;; Render failures are reported by a frontend on its next host-loop turn.
   ;; The generation check keeps an obsolete frame from retiring a plugin that

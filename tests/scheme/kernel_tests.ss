@@ -1367,10 +1367,15 @@
                      (car (surface-render-rendered-views render)))])
   (view-service-publish-occurrences! (host-state-views host) (view-id view)
                                      (list occurrence))
+  (let* ([next-render (render-surface surface (host-state-views host))]
+         [next-occurrence (rendered-view-occurrence
+                            (car (surface-render-rendered-views next-render)))])
   (unless (and (= (length seen) 1)
                (= (view-occurrence-view-id (car seen)) (view-id view))
-               (pair? (view-occurrence-visible-ranges (car seen))))
-    (error 'kernel-tests "View occurrence publication differs")))
+               (pair? (view-occurrence-visible-ranges (car seen)))
+               (not (view-service-publish-occurrences!
+                      (host-state-views host) (view-id view) (list next-occurrence))))
+    (error 'kernel-tests "View occurrence publication differs"))))
 
 ;; Structural transforms run before viewport clipping.  The initial source
 ;; window contains only two logical lines, but the fold placeholder leaves
