@@ -364,7 +364,11 @@
              [row 0]
              [column 0]
              [complete? #t]
-             [caret (selection-range-head (selection-primary-range selection))])
+             [caret (selection-range-head (selection-primary-range selection))]
+             ;; A trailing physical newline creates an empty final logical
+             ;; line.  It has no text fragment to contribute a DisplayMap
+             ;; boundary, so retain its visual caret position explicitly.
+             [trailing-break-caret #f])
          (define (put! target-row target-column cell)
            (vector-set! cells (+ (* target-row width) target-column) cell))
          (define (advance-line!)
@@ -426,6 +430,7 @@
               (set! column (+ column tab-width))
               #t]))
          (define (emit-text! fragment)
+           (set! trailing-break-caret #f)
            (let* ((string (display-text-text fragment))
                   (bytes (string->utf8 string))
                   (size (bytevector-length bytes))
@@ -486,12 +491,23 @@
                    [(display-break? fragment)
                     (when (>= row layout-height) (set! complete? #f))
                     (record-break! (display-break-source fragment))
+                    (set! trailing-break-caret
+                      (and (offset? (display-break-source fragment))
+                           (+ (display-break-source fragment) 1)))
                     (advance-line!)]
-                   [else (emit-widget! fragment)]))
+                   [else
+                    (set! trailing-break-caret #f)
+                    (emit-widget! fragment)]))
            (display-stream-fragments stream))
          (let* ([frame (make-frame width layout-height cells)]
                 [map (make-display-map (reverse entries))]
-                [cell (display-map-document->cell map caret 'after)]
+                [cell
+                 (if (and trailing-break-caret
+                          (= caret trailing-break-caret)
+                          (< row layout-height)
+                          (< column width))
+                     (+ (* row width) column)
+                     (display-map-document->cell map caret 'after))]
                 [capacity (* width layout-height)]
                 [cursor-row
                  (and (> width 0) (> layout-height 0)

@@ -2710,4 +2710,49 @@
                     'fundamental.delete-backward))
     (error 'kernel-tests "fundamental editing did not produce stable editor state"))
   (soda-application-close! application))
+
+;; A final newline owns an empty logical line.  Its caret belongs at the
+;; start of that line rather than the visual end of the preceding line.
+(let* ([document (make-document "a\n")]
+       [snapshot (document-snapshot document)]
+       [selection (make-selection (list (make-selection-range 2 2)))]
+       [layout (layout-text-snapshot snapshot selection 0 20 3)])
+  (unless (and (= (text-layout-cursor-row layout) 1)
+               (= (text-layout-cursor-column layout) 0))
+    (error 'kernel-tests "trailing newline caret did not remain on its empty line"))
+  (snapshot-close! snapshot)
+  (document-close! document))
+
+;; Surface input must observe every completed fundamental command within the
+;; same frontend step.  In particular, newline publishes its advanced caret
+;; before the next committed text event is resolved.
+(let* ([application (make-soda-application)]
+       [state (soda-application-state application)]
+       [surface (soda-application-surface application)]
+       [view (soda-application-view application)]
+       [buffer (soda-application-buffer application)]
+       [editing (soda-application-editing application)]
+       [frontend
+        (make-frontend
+          state surface
+          (lambda (active current-view)
+            (fundamental-input-context editing active current-view))
+          (lambda (context disposition)
+            (fundamental-input-disposition context disposition))
+          (lambda (render theme) #f)
+          (make-render-service) default-theme)])
+  (define (send! event)
+    (frontend-enqueue! frontend (make-surface-input-message (surface-id surface) event))
+    (frontend-step! frontend))
+  (send! (make-text-input-event 'text (string->utf8 "a")))
+  (send! (make-key-event 'enter 13 #f #f 0 'press (make-bytevector 0)))
+  (send! (make-text-input-event 'text (string->utf8 "b")))
+  (send! (make-key-event 'backspace 127 #f #f 0 'press (make-bytevector 0)))
+  (unless (and (string=? (buffer-string buffer) "a\n")
+               (= (selection-range-head
+                    (selection-primary-range (view-state-selection (view-state view))))
+                  2))
+    (error 'kernel-tests "fundamental frontend input did not advance its caret"))
+  (frontend-close! frontend)
+  (soda-application-close! application))
 (host-state-close! host)
