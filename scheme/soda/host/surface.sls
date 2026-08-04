@@ -2,6 +2,8 @@
   (export make-surface
           surface?
           surface-id
+          surface-frontend
+          surface-capabilities
           surface-size
           surface-root-window
           surface-selected-window
@@ -50,6 +52,8 @@
     (surface %make-surface surface?)
     (fields
       (immutable id surface-id)
+      (immutable frontend surface-frontend)
+      (immutable capabilities surface-capabilities)
       (mutable size surface-size surface-size-set!)
       (mutable root-window surface-root-window surface-root-window-set!)
       (mutable selected-window surface-selected-window surface-selected-window-set!)
@@ -62,14 +66,20 @@
     (and (pair? size) (integer? (car size)) (exact? (car size)) (>= (car size) 0)
          (integer? (cdr size)) (exact? (cdr size)) (>= (cdr size) 0)))
 
-  (define (make-surface root-window size)
-    (unless (and (window? root-window) (surface-size? size))
-      (assertion-violation 'make-surface "invalid root window or surface size"))
-    (window-layout! root-window 0 0 (car size) (cdr size))
-    (let ([selected (car (window-leaves root-window))])
-      (window-set-selected! selected #t)
-      (%make-surface (identity-source-next! surface-identities)
-                     size root-window selected '() 0)))
+  (define make-surface
+    (case-lambda
+      [(root-window size)
+       (make-surface 'headless '() root-window size)]
+      [(frontend capabilities root-window size)
+       (unless (and (window? root-window) (surface-size? size) (list? capabilities))
+         (assertion-violation 'make-surface
+                              "invalid Surface descriptor, root window, or size"
+                              frontend capabilities root-window size))
+       (window-layout! root-window 0 0 (car size) (cdr size))
+       (let ([selected (car (window-leaves root-window))])
+         (window-set-selected! selected #t)
+         (%make-surface (identity-source-next! surface-identities)
+                        frontend (list-copy capabilities) size root-window selected '() 0))]))
 
   (define (surface-active-window surface)
     (unless (surface? surface)

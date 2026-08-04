@@ -883,10 +883,12 @@
   (view-service-create!
     (host-state-views host) owner buffer configuration))
 (define leaf (make-leaf-window (view-id view) '(0 0 80 24)))
-(define surface (make-surface leaf '(80 . 24)))
+(define surface (make-surface 'terminal '(kitty color-256) leaf '(80 . 24)))
 (surface-service-register! (host-state-surfaces host) surface)
 (surface-set-selected-window! surface leaf)
-(unless (and (eq? (surface-selected-window surface) leaf)
+  (unless (and (eq? (surface-selected-window surface) leaf)
+             (eq? (surface-frontend surface) 'terminal)
+             (equal? (surface-capabilities surface) '(kitty color-256))
              (= (buffer-id buffer) (view-state-buffer-id (view-state view))))
   (error 'kernel-tests "host state protocol differs"))
 
