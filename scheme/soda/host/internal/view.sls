@@ -21,6 +21,7 @@
           view-service-ref
           view-service-views
           view-service-close-buffer-views!
+          view-service-retire-projection-failure!
           view-service-set-plugin-error-handler!
           view-service-set-close-handler!
           view-service-close-view!)
@@ -369,6 +370,32 @@
           (view-service-close-view! service (view-id view))))
       (view-service-views service))
     #t)
+
+  ;; Render failures are reported by a frontend on its next host-loop turn.
+  ;; The generation check keeps an obsolete frame from retiring a plugin that
+  ;; has since published a newer projection.
+  (define (view-service-retire-projection-failure! service id generation key condition)
+    (unless (and (view-service? service) (integer? id) (exact? id) (>= id 0)
+                 (integer? generation) (exact? generation) (>= generation 0)
+                 (symbol? key))
+      (assertion-violation 'view-service-retire-projection-failure!
+                           "invalid View projection failure" service id generation key))
+    (let ([view (view-service-ref service id #f)])
+      (and view
+           (= generation (view-render-generation view))
+           (let ([instance
+                  (let loop ([instances (view-plugin-instances view)])
+                    (and (pair? instances)
+                         (if (eq? key (view-plugin-key
+                                        (view-plugin-instance-plugin (car instances))))
+                             (car instances)
+                             (loop (cdr instances)))))])
+             (and instance (not (view-plugin-instance-destroyed? instance))
+                  (begin
+                    (report-plugin-error! view 'plugin-transform condition)
+                    (destroy-plugin-instance! view instance 'plugin-transform-cleanup)
+                    (publish-view-projection! view)
+                    #t))))))
 
   (define (view-service-close-view! service id)
     (let ([view (view-service-ref service id #f)])

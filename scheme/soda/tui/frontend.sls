@@ -21,6 +21,7 @@
           (soda host input)
           (soda host input-event)
           (soda host operation)
+          (soda host render)
           (soda host render-service)
           (soda host internal buffer)
           (soda host internal context)
@@ -237,6 +238,21 @@
                  (frontend-surface value)
                  (host-state-views (frontend-host-state value)))])
           ((frontend-present! value) render (frontend-theme value))
+          (for-each
+            (lambda (rendered)
+              (for-each
+                (lambda (failure)
+                  (frontend-enqueue!
+                    value
+                    (lambda ()
+                      (when (view-service-retire-projection-failure!
+                              (host-state-views (frontend-host-state value))
+                              (rendered-view-view-id rendered)
+                              (rendered-view-projection-generation rendered)
+                              (car failure) (cadr failure))
+                        (frontend-dirty?-set! value #t)))))
+                (rendered-view-transform-failures rendered)))
+            (surface-render-rendered-views render))
           (frontend-dirty?-set! value #f)
           render)))
 
