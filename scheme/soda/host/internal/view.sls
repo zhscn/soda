@@ -371,6 +371,8 @@
     (let ([view (view-service-ref service id #f)])
       (and view
            (let ([closed? (view-close! view)])
-             (when closed? ((view-service-close-handler service) view))
+             (when closed?
+               ((view-service-close-handler service) view)
+               (hashtable-delete! (view-service-table service) id))
              closed?))))
 )

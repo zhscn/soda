@@ -1058,6 +1058,10 @@
   (buffer-service-close-buffer! (host-state-buffers host) (buffer-id closing-buffer))
   (unless (and (not (buffer-service-ref (host-state-buffers host) (buffer-id closing-buffer) #f))
                (not (view-service-ref (host-state-views host) (view-id closing-view) #f))
+               (not (member closing-buffer
+                            (buffer-service-buffers (host-state-buffers host))))
+               (not (member closing-view
+                            (view-service-views (host-state-views host))))
                (not (surface-service-ref (host-state-surfaces host)
                                          (surface-id closing-surface) #f)))
     (error 'kernel-tests "Buffer close did not retire View and Surface")))

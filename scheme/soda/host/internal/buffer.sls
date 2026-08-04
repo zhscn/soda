@@ -144,7 +144,11 @@
   (define (buffer-service-close-buffer! service id)
     (let ([buffer (buffer-service-ref service id #f)])
       (and buffer
-           (begin
-             ((buffer-service-close-handler service) buffer)
-             (buffer-close! buffer)))))
+           (let ([closed?
+                  (begin
+                    ((buffer-service-close-handler service) buffer)
+                    (buffer-close! buffer))])
+             (when closed?
+               (hashtable-delete! (buffer-service-table service) id))
+             closed?))))
 )
