@@ -5,10 +5,11 @@
 | 能力 | 状态 |
 |---|---|
 | 非递归 request/session/continuation 协议 | 已实现 |
-| 独立 Buffer/View、history 与取消恢复 | 已实现 |
-| Vertico 风格候选窗口、固定高度与滚动 | 已实现 |
-| 固定集合和任意输入的 selection policy | 已实现 |
-| `interactive-completing-read` | 已实现 |
+| 独立 Buffer/View、接受、取消与 overlay 生命周期 | 已实现 |
+| completion controller 与 candidate source | 规划中 |
+| Vertico 风格候选窗口、固定高度与滚动 | 规划中 |
+| history、固定集合与任意输入 selection policy | 规划中 |
+| `interactive-completing-read` | 规划中 |
 
 ## 定位
 
@@ -81,6 +82,43 @@ PromptRequest {
 completion candidate、origin view id 和 request data。接受结果先关闭 session
 并恢复 origin view，再投递给 responder。取消值和 candidate 为 `#f`；没有 abort
 responder 时只完成清理。
+
+## 扩展边界
+
+PromptSession 是读取和资源生命周期，不规定候选如何生成、选择或显示。每个 session
+公开一个不可变 `PromptSnapshot`：request、input revision、point、origin context、当前
+selection、completion generation 和 presentation constraints。adapter 只能从 snapshot
+派生新的候选或预览请求；它通过命令消息提交选择、接受或取消，不能直接改写 prompt
+Buffer、View 或 Surface。
+
+completion controller 由 request 的 `completion-source` 创建，并维护：
+
+```text
+CompletionController {
+  source,
+  generation,
+  candidates,
+  selected_candidate?,
+  selection_policy,
+  matcher,
+  preview?
+}
+```
+
+source 可以同步或异步地产生结构化 candidate。异步回复必须携带 session id、input
+revision 和 generation；任一值不匹配时丢弃。candidate 保存稳定 identity、insert text、
+label、annotation、group、payload 与可选 preview target。controller 负责筛选、排序、
+候选选择和接受策略，presenter 只读取其已发布快照。
+
+Vertico 类 adapter 接收 controller snapshot，负责固定候选高度、scroll/index、prompt
+focus 与 candidate focus 之间的切换、以及 candidate 行的显示。它不拥有 completion
+source，也不解释 candidate payload。`free` reader 允许 index 为 `#f` 并接受 raw input；
+`must-match` reader 要求有效候选或 source validator。
+
+Consult 类 adapter 通过 source 的 `preview`、`restore`、`accept` 三个 action 接口提供
+预览。controller 在选中候选变化时提交可取消 preview request；关闭、取消、generation
+切换和 source 替换时调用 restore；最终接受只调用 accept。预览目标由 source payload
+解析，避免让 minibuffer 保存 project、buffer 或 window 的可变引用。
 
 ## Buffer、View 与焦点
 
