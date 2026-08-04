@@ -1532,6 +1532,12 @@
                        "\x1b;[<u\x1b;[?2004l"))
   (error 'kernel-tests "terminal input protocol sequences differ"))
 
+(unless (and (string=? terminal-alternate-screen-enable-sequence
+                       "\x1b;[?1049h\x1b;[H")
+             (string=? terminal-alternate-screen-disable-sequence
+                       "\x1b;[0m\x1b;[?1049l"))
+  (error 'kernel-tests "terminal alternate screen sequences differ"))
+
 (let* ([event
          (make-key-event
            'character (char->integer #\a) #f #f 0 'press

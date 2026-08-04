@@ -3,6 +3,8 @@
           terminal-input-session?
           terminal-input-session-surface-id
           terminal-input-session-active?
+          terminal-alternate-screen-enable-sequence
+          terminal-alternate-screen-disable-sequence
           terminal-input-session-start!
           terminal-input-session-event?
           terminal-input-session-handle-event!
@@ -13,6 +15,13 @@
           (soda tui terminal-input))
 
   (define escape-timeout-ms 25)
+
+  ;; DEC private mode 1049 preserves the invoking terminal's primary screen
+  ;; and cursor.  The frontend owns only this alternate screen; restoring it
+  ;; is therefore part of the same lifetime as raw input and Kitty protocol
+  ;; negotiation.
+  (define terminal-alternate-screen-enable-sequence "\x1b;[?1049h\x1b;[H")
+  (define terminal-alternate-screen-disable-sequence "\x1b;[0m\x1b;[?1049l")
 
   (define-record-type
     (terminal-input-session %make-terminal-input-session
@@ -27,6 +36,9 @@
       (immutable decoder session-decoder)
       (mutable input-source session-input-source session-input-source-set!)
       (mutable escape-timer session-escape-timer session-escape-timer-set!)
+      (mutable screen-active? session-screen-active? session-screen-active?-set!)
+      (mutable input-protocol-active? session-input-protocol-active?
+               session-input-protocol-active?-set!)
       (mutable active? terminal-input-session-active?
                terminal-input-session-active?-set!)
       (mutable closed? session-closed? session-closed?-set!)))
@@ -58,7 +70,7 @@
            publish! control!))
        (%make-terminal-input-session
          runtime terminal surface-id input-fd publish! control!
-         (make-terminal-input-decoder) #f #f #f #f)]))
+         (make-terminal-input-decoder) #f #f #f #f #f #f)]))
 
   (define (require-open who session)
     (unless (terminal-input-session? session)
@@ -105,8 +117,16 @@
          (let ([source (session-input-source session)])
            (when source
              (guard (ignored [else #f])
-               (cancel-source! session source))
+             (cancel-source! session source))
              (session-input-source-set! session #f)))
+         (when (session-input-protocol-active? session)
+           (guard (ignored [else #f])
+             ((session-control! session) terminal-input-disable-sequence))
+           (session-input-protocol-active?-set! session #f))
+         (when (session-screen-active? session)
+           (guard (ignored [else #f])
+             ((session-control! session) terminal-alternate-screen-disable-sequence))
+           (session-screen-active?-set! session #f))
          (guard (ignored [else #f])
            (native:terminal-leave-raw! (session-terminal session)))
          (raise condition)])
@@ -116,7 +136,10 @@
           (session-runtime session)
           (session-input-fd session)
           native:fd-readable))
+      ((session-control! session) terminal-alternate-screen-enable-sequence)
+      (session-screen-active?-set! session #t)
       ((session-control! session) terminal-input-enable-sequence)
+      (session-input-protocol-active?-set! session #t)
       (terminal-input-session-active?-set! session #t)
       session))
 
@@ -171,7 +194,9 @@
         (let ([failure #f]
               [active? (terminal-input-session-active? session)]
               [timer (session-escape-timer session)]
-              [input (session-input-source session)])
+              [input (session-input-source session)]
+              [screen-active? (session-screen-active? session)]
+              [input-protocol-active? (session-input-protocol-active? session)])
           (define (attempt! thunk)
             (guard
               (condition
@@ -186,14 +211,21 @@
           (terminal-input-session-active?-set! session #f)
           (session-escape-timer-set! session #f)
           (session-input-source-set! session #f)
+          (session-screen-active?-set! session #f)
+          (session-input-protocol-active?-set! session #f)
           (when timer
             (attempt! (lambda () (cancel-source! session timer))))
           (when input
             (attempt! (lambda () (cancel-source! session input))))
-          (when active?
+          (when input-protocol-active?
             (attempt!
               (lambda ()
-                ((session-control! session) terminal-input-disable-sequence)))
+                ((session-control! session) terminal-input-disable-sequence))))
+          (when screen-active?
+            (attempt!
+              (lambda ()
+                ((session-control! session) terminal-alternate-screen-disable-sequence))))
+          (when active?
             (attempt!
               (lambda ()
                 (native:terminal-leave-raw! (session-terminal session)))))
