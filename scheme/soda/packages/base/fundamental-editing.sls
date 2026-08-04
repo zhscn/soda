@@ -10,6 +10,7 @@
           (soda kernel selection)
           (soda kernel state)
           (soda kernel view-state)
+          (soda kernel viewport)
           (soda packages base text-motion)
           (soda host command)
           (soda host command-runtime)
@@ -283,6 +284,24 @@
       (lambda (text range)
         (if end? (text-size text) 0))))
 
+  (define (scroll-lines context delta)
+    (with-context-text
+      context
+      (lambda (text)
+        (let* ([state (command-context-view-state context)]
+               [viewport (view-state-viewport state)]
+               [last-line (- (text-line-count text) 1)]
+               [first-line (min last-line
+                                (max 0 (+ (viewport-first-line viewport) delta)))])
+          (make-view-transaction-spec
+            (command-context-view-id context) (view-state-generation state)
+            #f (make-viewport first-line 0) #f '() '() #f)))))
+
+  (define (scroll-page context direction)
+    ;; Surface height is a frontend concern.  A stable logical step keeps
+    ;; scrolling available before a layout-specific page-size policy exists.
+    (scroll-lines context (* direction 10)))
+
   (define (transpose-characters context)
     (let ([range (selection-primary-range (context-selection context))])
       (if (not (selection-range-empty? range))
@@ -551,6 +570,14 @@
         "Transpose the graphemes around point." 'editing
         (transpose-characters context))
       (install-command!
+        runtime owner 'fundamental.scroll-up (context)
+        "Scroll the Viewport toward the beginning of the Buffer." 'viewport
+        (scroll-page context -1))
+      (install-command!
+        runtime owner 'fundamental.scroll-down (context)
+        "Scroll the Viewport toward the end of the Buffer." 'viewport
+        (scroll-page context 1))
+      (install-command!
         runtime owner 'fundamental.set-mark (context)
         "Set the mark at every selection and activate the region." 'selection
         (set-mark context))
@@ -602,6 +629,7 @@
         ((list (control-stroke #\p)) 'fundamental.previous-line)
         ((list (control-stroke #\n)) 'fundamental.next-line)
         ((list (control-stroke #\t)) 'fundamental.transpose-characters)
+        ((list (control-stroke #\v)) 'fundamental.scroll-down)
         ((list (make-key-stroke 'character (char->integer #\space) 4)) 'fundamental.set-mark)
         ((list (control-stroke #\w)) 'fundamental.kill-region)
         ((list (control-stroke #\y)) 'fundamental.yank)
@@ -611,6 +639,7 @@
         ((list (make-key-stroke 'character (char->integer #\f) 2)) 'fundamental.forward-word)
         ((list (make-key-stroke 'character (char->integer #\w) 2)) 'fundamental.copy-region)
         ((list (make-key-stroke 'character (char->integer #\d) 2)) 'fundamental.kill-word)
+        ((list (make-key-stroke 'character (char->integer #\v) 2)) 'fundamental.scroll-up)
         ((list (make-key-stroke 'backspace #f 2)) 'fundamental.backward-kill-word)
         ((list (control-stroke #\d)) 'fundamental.delete-forward)
         ((list (control-stroke #\g)) 'application.quit)
@@ -621,6 +650,8 @@
         ((list (plain-stroke 'right #f)) 'fundamental.forward-char)
         ((list (plain-stroke 'home #f)) 'fundamental.beginning-of-line)
         ((list (plain-stroke 'end #f)) 'fundamental.end-of-line)
+        ((list (plain-stroke 'page-up #f)) 'fundamental.scroll-up)
+        ((list (plain-stroke 'page-down #f)) 'fundamental.scroll-down)
         ;; Non-character keys are normalized without a codepoint by
         ;; key-event->key-stroke. Terminal decoders retain their physical
         ;; codepoint on KeyEvent for inspection, but it is not part of keymap
@@ -649,5 +680,15 @@
       [(text)
        (make-command-invoke-message
          'fundamental.insert-text context (list (input-disposition-value disposition)) #f)]
+      [(pass)
+       (let ([event (command-context-event context)])
+         (and (pointer-event? event)
+              (eq? (pointer-event-type event) 'scroll)
+              (case (pointer-event-button event)
+                [(wheel-up)
+                 (make-command-invoke-message 'fundamental.scroll-up context '() #f)]
+                [(wheel-down)
+                 (make-command-invoke-message 'fundamental.scroll-down context '() #f)]
+                [else #f])))]
       [else #f]))
 )

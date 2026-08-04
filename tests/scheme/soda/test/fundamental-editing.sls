@@ -17,6 +17,7 @@
           (soda kernel selection)
           (soda kernel state)
           (soda kernel view-state)
+          (soda kernel viewport)
           (soda packages base fundamental-editing)
           (soda packages base text-motion)
           (soda tui frontend)
@@ -186,6 +187,23 @@
                    (selection-primary-range (view-state-selection (view-state view))))
                  9)
         (error 'fundamental-editing-tests "Buffer boundary motion is incorrect"))
+      (soda-application-close! application))
+
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [runtime (host-state-command-runtime state)]
+           [view (soda-application-view application)])
+      (command-runtime-start!
+        runtime 'fundamental.insert-text (application-command-context application)
+        (list (string->utf8 "0\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11")))
+      (command-runtime-start!
+        runtime 'fundamental.scroll-down (application-command-context application))
+      (unless (= (viewport-first-line (view-state-viewport (view-state view))) 10)
+        (error 'fundamental-editing-tests "scroll-down did not advance the Viewport"))
+      (command-runtime-start!
+        runtime 'fundamental.scroll-up (application-command-context application))
+      (unless (= (viewport-first-line (view-state-viewport (view-state view))) 0)
+        (error 'fundamental-editing-tests "scroll-up did not restore the Viewport"))
       (soda-application-close! application))
 
     (let* ([document (make-document "a\n")]
