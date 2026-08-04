@@ -13,6 +13,7 @@
           (soda host render-service)
           (soda host internal state)
           (soda host internal surface)
+          (soda support cleanup)
           (soda tui frontend)
           (soda tui presenter-session)
           (soda tui terminal-session)
@@ -43,31 +44,48 @@
                  (native:runtime? runtime) (native:terminal? terminal)
                  (procedure? resolver) (procedure? disposition) (theme? theme))
       (assertion-violation 'make-terminal-frontend "invalid terminal frontend dependencies"))
-    (let* ([presenter (make-terminal-presenter-session runtime terminal 1)]
-           [core
-            (make-frontend
-              state surface resolver disposition
-              (lambda (render active-theme)
-                (terminal-presenter-session-present! presenter render active-theme))
-              (make-render-service) theme)]
-           [input
-            (make-terminal-input-session
-              runtime terminal (surface-id surface) 0
-              (lambda (message) (frontend-enqueue! core message))
-              (lambda (control) (native:terminal-write! terminal control)))])
-      (%make-terminal-frontend core runtime terminal input presenter owns? #f #f)))
+    (let ([presenter #f]
+          [core #f]
+          [input #f])
+      (guard
+        (condition
+          [else
+           (guard (ignored [else #f])
+             (run-cleanups!
+               (list
+                 (lambda () (when input (terminal-input-session-close! input)))
+                 (lambda () (when presenter (terminal-presenter-session-close! presenter)))
+                 (lambda () (when core (frontend-close! core))))))
+           (raise condition)])
+        (set! presenter (make-terminal-presenter-session runtime terminal 1))
+        (set! core
+          (make-frontend
+            state surface resolver disposition
+            (lambda (render active-theme)
+              (terminal-presenter-session-present! presenter render active-theme))
+            (make-render-service) theme))
+        (set! input
+          (make-terminal-input-session
+            runtime terminal (surface-id surface) 0
+            (lambda (message) (frontend-enqueue! core message))
+            (lambda (control) (native:terminal-write! terminal control))))
+        (%make-terminal-frontend core runtime terminal input presenter owns? #f #f))))
 
   (define make-terminal-frontend
     (case-lambda
       [(state surface resolver disposition)
        (let ([runtime (native:make-runtime)]
-             [terminal (native:make-terminal)])
+             [terminal #f])
          (guard
            (condition
              [else
-              (native:terminal-close! terminal)
-              (native:runtime-close! runtime)
+              (guard (ignored [else #f])
+                (run-cleanups!
+                  (list
+                    (lambda () (when terminal (native:terminal-close! terminal)))
+                    (lambda () (native:runtime-close! runtime)))))
               (raise condition)])
+           (set! terminal (native:make-terminal))
            (make-terminal-frontend*
              state surface runtime terminal resolver disposition default-theme #t)))]
       [(state surface runtime terminal resolver disposition)
@@ -143,11 +161,20 @@
         (begin
           (terminal-frontend-closed?-set! value #t)
           (terminal-frontend-active?-set! value #f)
-          (terminal-input-session-close! (terminal-frontend-input value))
-          (terminal-presenter-session-close! (terminal-frontend-presenter value))
-          (frontend-close! (terminal-frontend-core value))
-          (when (terminal-frontend-owns-native? value)
-            (native:terminal-close! (terminal-frontend-terminal value))
-            (native:runtime-close! (terminal-frontend-runtime value)))
+          (run-cleanups!
+            (append
+              (list
+                (lambda ()
+                  (terminal-input-session-close! (terminal-frontend-input value)))
+                (lambda ()
+                  (terminal-presenter-session-close! (terminal-frontend-presenter value)))
+                (lambda () (frontend-close! (terminal-frontend-core value))))
+              (if (terminal-frontend-owns-native? value)
+                  (list
+                    (lambda ()
+                      (native:terminal-close! (terminal-frontend-terminal value)))
+                    (lambda ()
+                      (native:runtime-close! (terminal-frontend-runtime value))))
+                  '())))
           #t)))
 )

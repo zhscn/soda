@@ -12,6 +12,7 @@
   (import (rnrs)
           (prefix (soda ffi runtime) native:)
           (soda host surface)
+          (soda support cleanup)
           (soda tui terminal-input))
 
   (define escape-timeout-ms 25)
@@ -119,16 +120,18 @@
              (guard (ignored [else #f])
              (cancel-source! session source))
              (session-input-source-set! session #f)))
-         (when (session-input-protocol-active? session)
-           (guard (ignored [else #f])
-             ((session-control! session) terminal-input-disable-sequence))
-           (session-input-protocol-active?-set! session #f))
-         (when (session-screen-active? session)
-           (guard (ignored [else #f])
-             ((session-control! session) terminal-alternate-screen-disable-sequence))
-           (session-screen-active?-set! session #f))
          (guard (ignored [else #f])
-           (native:terminal-leave-raw! (session-terminal session)))
+           (run-cleanups!
+             (list
+               (lambda ()
+                 (when (session-input-protocol-active? session)
+                   ((session-control! session) terminal-input-disable-sequence)
+                   (session-input-protocol-active?-set! session #f)))
+               (lambda ()
+                 (when (session-screen-active? session)
+                   ((session-control! session) terminal-alternate-screen-disable-sequence)
+                   (session-screen-active?-set! session #f)))
+               (lambda () (native:terminal-leave-raw! (session-terminal session))))))
          (raise condition)])
       (session-input-source-set!
         session
@@ -191,19 +194,11 @@
         'terminal-input-session-close! "expected a terminal input session" session))
     (if (session-closed? session)
         #f
-        (let ([failure #f]
-              [active? (terminal-input-session-active? session)]
+        (let ([active? (terminal-input-session-active? session)]
               [timer (session-escape-timer session)]
               [input (session-input-source session)]
               [screen-active? (session-screen-active? session)]
               [input-protocol-active? (session-input-protocol-active? session)])
-          (define (attempt! thunk)
-            (guard
-              (condition
-                [else
-                 (unless failure (set! failure condition))
-                 #f])
-              (thunk)))
           ;; Publish the terminal lifecycle transition before invoking fallible
           ;; native or host cleanup. Repeated close requests remain idempotent
           ;; even when one cleanup operation reports an error.
@@ -213,22 +208,17 @@
           (session-input-source-set! session #f)
           (session-screen-active?-set! session #f)
           (session-input-protocol-active?-set! session #f)
-          (when timer
-            (attempt! (lambda () (cancel-source! session timer))))
-          (when input
-            (attempt! (lambda () (cancel-source! session input))))
-          (when input-protocol-active?
-            (attempt!
+          (run-cleanups!
+            (list
+              (lambda () (when timer (cancel-source! session timer)))
+              (lambda () (when input (cancel-source! session input)))
               (lambda ()
-                ((session-control! session) terminal-input-disable-sequence))))
-          (when screen-active?
-            (attempt!
+                (when input-protocol-active?
+                  ((session-control! session) terminal-input-disable-sequence)))
               (lambda ()
-                ((session-control! session) terminal-alternate-screen-disable-sequence))))
-          (when active?
-            (attempt!
+                (when screen-active?
+                  ((session-control! session) terminal-alternate-screen-disable-sequence)))
               (lambda ()
-                (native:terminal-leave-raw! (session-terminal session)))))
-          (when failure (raise failure))
-          #t)))
-)
+                (when active?
+                  (native:terminal-leave-raw! (session-terminal session))))))
+          #t))))

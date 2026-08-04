@@ -56,6 +56,13 @@
             conditions
             (view-owner view)
             (list 'view-plugin phase condition)
+             (lambda arguments #f)
+            '(dismiss))))
+      (dispatcher-set-error-reporter!
+        dispatch
+        (lambda (source condition)
+          (condition-service-capture
+            conditions owner (list 'dispatcher source condition)
             (lambda arguments #f)
             '(dismiss))))
       (view-service-set-close-handler!

@@ -19,6 +19,7 @@
           dispatcher-dispatch-specs!
           dispatcher-dispatch-view!
           dispatcher-dispatch-host!
+          dispatcher-set-error-reporter!
           dispatcher-set-listener!
           dispatcher-set-host-listener!
           dispatcher-add-listener!
@@ -69,6 +70,7 @@
       (immutable buffers dispatcher-buffers)
       (immutable views dispatcher-views)
       (immutable surfaces dispatcher-surfaces)
+      (mutable report-error! dispatcher-report-error! dispatcher-report-error!-set!)
       (mutable listener dispatcher-listener dispatcher-listener-set!)
       (mutable host-listener dispatcher-host-listener dispatcher-host-listener-set!)
       (mutable listeners dispatcher-listeners dispatcher-listeners-set!)
@@ -97,7 +99,7 @@
     (unless (or (not listener) (procedure? listener))
       (assertion-violation 'make-dispatcher "expected a listener or #f" listener))
     (%make-dispatcher
-      buffers views surfaces listener #f '() '() 'idle '() #f)]))
+      buffers views surfaces (lambda (source condition) #f) listener #f '() '() 'idle '() #f)]))
 
   (define (dispatcher-drain-deferred! dispatcher)
     (when (and (eq? (dispatcher-phase dispatcher) 'idle)
@@ -143,6 +145,25 @@
       (assertion-violation 'dispatcher-set-listener! "listener must be a procedure" listener))
     (dispatcher-listener-set! dispatcher listener)
     listener)
+
+  (define (dispatcher-set-error-reporter! dispatcher reporter)
+    (unless (and (dispatcher? dispatcher) (procedure? reporter))
+      (assertion-violation 'dispatcher-set-error-reporter!
+                           "expected a dispatcher and error reporter" dispatcher reporter))
+    (dispatcher-report-error!-set! dispatcher reporter)
+    reporter)
+
+  (define (dispatcher-report! dispatcher source condition)
+    (guard (ignored [else #f])
+      ((dispatcher-report-error! dispatcher) source condition)))
+
+  (define (dispatcher-notify-one! dispatcher source listener value)
+    (guard
+      (condition
+        [else
+         (dispatcher-report! dispatcher source condition)
+         #f])
+      (listener value)))
 
   (define (dispatcher-set-host-listener! dispatcher listener)
     (unless (or (not listener) (procedure? listener))
@@ -232,11 +253,16 @@
                       (dispatcher-notify!
                         dispatcher
                         (lambda ()
-        (let ([listener (dispatcher-host-listener dispatcher)])
-                            (when listener (listener update))
+                          (let ([listener (dispatcher-host-listener dispatcher)])
+                            (when listener
+                              (dispatcher-notify-one!
+                                dispatcher '(host listener) listener update)))
                           (for-each
-                            (lambda (entry) ((dispatcher-observer-procedure entry) update))
-                            (dispatcher-host-listeners dispatcher)))))
+                            (lambda (entry)
+                              (dispatcher-notify-one!
+                                dispatcher '(host observer)
+                                (dispatcher-observer-procedure entry) update))
+                            (dispatcher-host-listeners dispatcher))))
                       update)))))))
 
   (define (dispatcher-dispatch-host! dispatcher operation)
@@ -273,12 +299,16 @@
       (lambda ()
         (notify-view-plugins! dispatcher update)
         (let ([listener (dispatcher-listener dispatcher)])
-          (when listener (listener update)))
+          (when listener
+            (dispatcher-notify-one! dispatcher '(editor listener) listener update)))
         (for-each
-          (lambda (entry) ((dispatcher-observer-procedure entry) update))
+          (lambda (entry)
+            (dispatcher-notify-one!
+              dispatcher '(editor observer) (dispatcher-observer-procedure entry) update))
           (dispatcher-listeners dispatcher))
         (for-each
-          (lambda (listener) (listener update))
+          (lambda (listener)
+            (dispatcher-notify-one! dispatcher '(editor update-listener) listener update))
           (configuration-facet configuration update-listeners-facet 'buffer))))
     update)
 

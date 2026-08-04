@@ -20,6 +20,7 @@
           (soda host internal window)
           (soda host value)
           (soda packages base fundamental-editing)
+          (soda support cleanup)
           (soda tui terminal-frontend))
 
   ;; Bootstrap is composition only.  It supplies the first concrete Buffer,
@@ -41,31 +42,40 @@
   (define (make-soda-application)
     (let* ([state (make-host-state)]
            [owner (make-owner 'soda-application)]
-           [configuration (make-configuration '())]
-           [document (make-document "")]
-           [buffer
-            (buffer-service-create!
-              (host-state-buffers state) owner "*scratch*" document configuration)]
-           [view
-            (view-service-create!
-              (host-state-views state) owner buffer configuration)]
-           [surface
-            (make-surface
-              'terminal '(kitty color-256)
-              (make-leaf-window (view-id view) '(0 0 80 24))
-              '(80 . 24))]
-           [editing
-            (make-fundamental-editing!
-              (host-state-command-runtime state) owner)])
+           [document #f]
+           [document-owned? #t])
       (guard
         (condition
           [else
-           (owner-close! owner)
-           (host-state-close! state)
+           (guard (ignored [else #f])
+             (run-cleanups!
+               (list
+                 (lambda ()
+                   (when (and document document-owned?) (document-close! document)))
+                 (lambda () (when (owner-active? owner) (owner-close! owner)))
+                 (lambda () (host-state-close! state)))))
            (raise condition)])
-        (surface-service-register! (host-state-surfaces state) surface)
-        (%make-soda-application
-          state owner buffer view surface editing #f #f #f))))
+        (let* ([configuration (make-configuration '())]
+               [next-document (make-document "")]
+               [_document (set! document next-document)]
+               [buffer
+                (buffer-service-create!
+                  (host-state-buffers state) owner "*scratch*" document configuration)]
+               [_owned (set! document-owned? #f)]
+               [view
+                (view-service-create!
+                  (host-state-views state) owner buffer configuration)]
+               [surface
+                (make-surface
+                  'terminal '(kitty color-256)
+                  (make-leaf-window (view-id view) '(0 0 80 24))
+                  '(80 . 24))]
+               [editing
+                (make-fundamental-editing!
+                  (host-state-command-runtime state) owner)])
+          (surface-service-register! (host-state-surfaces state) surface)
+          (%make-soda-application
+            state owner buffer view surface editing #f #f #f)))))
 
   (define (require-open who application)
     (unless (and (soda-application? application)
@@ -101,8 +111,10 @@
       (guard
         (condition
           [else
-           (terminal-frontend-close! terminal)
            (soda-application-terminal-set! application #f)
+           (guard (ignored [else #f])
+             (run-cleanups!
+               (list (lambda () (terminal-frontend-close! terminal)))))
            (raise condition)])
         (let ([registration
                (command-runtime-register-effect-handler!
@@ -114,10 +126,12 @@
             (lambda () #f)
             (lambda () (terminal-frontend-run! terminal))
             (lambda ()
-              (registration-close! registration)
-              (terminal-frontend-close! terminal)
               (soda-application-terminal-set! application #f)
-              (soda-application-effect-registration-set! application #f)))))))
+              (soda-application-effect-registration-set! application #f)
+              (run-cleanups!
+                (list
+                  (lambda () (registration-close! registration))
+                  (lambda () (terminal-frontend-close! terminal))))))))))
 
   (define (soda-application-close! application)
     (unless (soda-application? application)
@@ -126,11 +140,11 @@
         #f
         (begin
           (let ([terminal (soda-application-terminal application)])
-            (when terminal
-              (terminal-frontend-close! terminal)
-              (soda-application-terminal-set! application #f)))
-          (owner-close! (soda-application-owner application))
-          (host-state-close! (soda-application-state application))
-          (soda-application-closed?-set! application #t)
-          #t)))
-)
+            (soda-application-closed?-set! application #t)
+            (soda-application-terminal-set! application #f)
+            (run-cleanups!
+              (list
+                (lambda () (when terminal (terminal-frontend-close! terminal)))
+                (lambda () (owner-close! (soda-application-owner application)))
+                (lambda () (host-state-close! (soda-application-state application)))))
+            #t)))))
