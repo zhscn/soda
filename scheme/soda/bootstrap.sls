@@ -142,8 +142,10 @@
                 runtime 'clipboard.write (soda-application-owner application) 'terminal-clipboard
                 (make-terminal-clipboard-effect-handler
                   (lambda (control) (terminal-frontend-write-control! terminal control))
-                  (memq 'osc52
-                        (surface-capabilities (soda-application-surface application)))
+                  (if (memq 'osc52
+                            (surface-capabilities (soda-application-surface application)))
+                      #t
+                      #f)
                   100000)))
             (soda-application-effect-registration-set! application registration)
             (dynamic-wind
