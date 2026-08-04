@@ -144,14 +144,22 @@
                                   [provided-stream (view-display-stream view)])
                               (let ([stream
                                      (if (not provided-stream)
-                                         (snapshot-display-stream
-                                           snapshot first-line (+ view-height visual-row)
-                                           (view-merged-decorations view))
+                                         #f
                                          provided-stream)])
-                                (layout-display-stream
-                                  (view-transform-display-stream view stream)
-                                  (view-state-selection state)
-                                  view-width view-height options visual-row)))])
+                                (if stream
+                                    (layout-display-stream
+                                      (view-transform-display-stream view stream)
+                                      (view-state-selection state)
+                                      view-width view-height options visual-row)
+                                    (layout-snapshot-display-stream
+                                      snapshot
+                                      (view-state-selection state)
+                                      first-line visual-row
+                                      view-width view-height
+                                      (view-merged-decorations view)
+                                      (lambda (base)
+                                        (view-transform-display-stream view base))
+                                      options))))])
                       (loop
                         (cdr leaves)
                         (cons (make-frame-placement row column (text-layout-frame layout)) placements)

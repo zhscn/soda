@@ -1275,6 +1275,35 @@
                (eq? (surface-hit-source (surface-render-hit-test render 0 1)) 'inlay))
     (error 'kernel-tests "cached View display transform differs")))
 
+;; Structural transforms run before viewport clipping.  The initial source
+;; window contains only two logical lines, but the fold placeholder leaves
+;; visual room for the trailing `z`, so the projection must extend its source
+;; prefix until that text becomes visible.
+(let* ([plugin
+        (make-view-plugin
+          'large-fold
+          (lambda (view) 'ready)
+          #f #f #f #f
+          (lambda (value)
+            (lambda (stream)
+              (display-stream-replace
+                stream 0 16 (list (make-display-text "FF" 0 16 'fold 'fold))))))]
+       [configuration
+        (make-configuration
+          (list (make-facet-provider view-plugins-facet (list plugin))))]
+       [document (make-document "a\na\na\na\na\na\na\na\nz")]
+       [buffer
+        (buffer-service-create! (host-state-buffers host) owner "*large-fold*"
+                                document configuration)]
+       [view (view-service-create! (host-state-views host) owner buffer configuration)]
+       [leaf (make-leaf-window (view-id view) '(0 0 2 2))]
+       [surface (make-surface leaf '(2 . 2))]
+       [render (render-surface surface (host-state-views host))]
+       [frame (surface-render-frame render)])
+  (unless (and (string=? (frame-cell-grapheme (frame-cell-at frame 0 0)) "F")
+               (string=? (frame-cell-grapheme (frame-cell-at frame 1 0)) "z"))
+    (error 'kernel-tests "document projection did not extend beyond a large fold")))
+
 (define control-x
   (make-key-stroke 'character (char->integer #\x) 4))
 (define control-s

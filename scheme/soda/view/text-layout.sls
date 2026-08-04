@@ -5,6 +5,7 @@
           text-layout-display-map
           text-layout-cursor-row
           text-layout-cursor-column
+          text-layout-complete?
           text-layout-document->point
           text-layout-point->document
           text-layout-point->display-entry
@@ -16,6 +17,7 @@
           default-text-layout-options
           text-layout-options-facet
           snapshot-display-stream
+          layout-snapshot-display-stream
           layout-display-stream
           layout-text-snapshot)
   (import (rnrs)
@@ -33,14 +35,19 @@
   ;; View or terminal state and therefore remains usable by headless clients.
   (define-record-type
     (text-layout %make-text-layout text-layout?)
-    (fields frame display-map cursor-row cursor-column))
+    (fields frame display-map cursor-row cursor-column complete?))
 
-  (define (make-text-layout frame display-map cursor-row cursor-column)
-    (unless (and (frame? frame) (display-map? display-map)
-                 (or (not cursor-row) (offset? cursor-row))
-                 (or (not cursor-column) (offset? cursor-column)))
-      (assertion-violation 'make-text-layout "invalid text layout result"))
-    (%make-text-layout frame display-map cursor-row cursor-column))
+  (define make-text-layout
+    (case-lambda
+      [(frame display-map cursor-row cursor-column)
+       (make-text-layout frame display-map cursor-row cursor-column #t)]
+      [(frame display-map cursor-row cursor-column complete?)
+       (unless (and (frame? frame) (display-map? display-map)
+                    (or (not cursor-row) (offset? cursor-row))
+                    (or (not cursor-column) (offset? cursor-column))
+                    (boolean? complete?))
+         (assertion-violation 'make-text-layout "invalid text layout result"))
+       (%make-text-layout frame display-map cursor-row cursor-column complete?)]))
 
   (define offset? nonnegative-exact-integer?)
 
@@ -204,7 +211,8 @@
                (- cursor-row drop))
           (let ([column (text-layout-cursor-column layout)])
             (and cursor-row (>= cursor-row drop) (< cursor-row source-height)
-                 column))))))
+                 column))
+          (text-layout-complete? layout)))))
 
   (define (bytevector-slice bytes from to)
     (let ([result (make-bytevector (- to from))])
@@ -279,6 +287,51 @@
                (lambda () (text->display-stream text first-line line-count decorations))
                (lambda () (text-close! text)))))]))
 
+  ;; A document-backed projection grows its source window only while the
+  ;; transformed result fits entirely inside the requested visual viewport.
+  ;; Structural transforms therefore run before clipping, and a large fold can
+  ;; pull following document text into view without constructing a stream for
+  ;; the whole document up front.  The transform receives successive immutable
+  ;; prefixes; it must be deterministic for a prefix of the document stream.
+  (define (layout-snapshot-display-stream snapshot selection first-line visual-row
+                                          width height decorations transform options)
+    (unless (and (snapshot? snapshot) (selection? selection)
+                 (offset? first-line) (offset? visual-row)
+                 (offset? width) (offset? height)
+                 (decoration-set? decorations)
+                 (or (not transform) (procedure? transform))
+                 (text-layout-options? options))
+      (assertion-violation 'layout-snapshot-display-stream
+                           "invalid document projection request"))
+    (let ([text (snapshot-text snapshot)])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (let ([line-total (text-line-count text)])
+            (define (project stream)
+              (if transform
+                  (let ([result (transform stream)])
+                    (unless (display-stream? result)
+                      (assertion-violation 'layout-snapshot-display-stream
+                                           "display transform returned a non-DisplayStream"
+                                           result))
+                    result)
+                  stream))
+            (define (layout stream)
+              (layout-display-stream (project stream) selection width height options visual-row))
+            (if (>= first-line line-total)
+                (layout (make-display-stream '()))
+                (let loop ([line-count (min (- line-total first-line)
+                                            (max 1 (+ height visual-row)))])
+                  (let* ([stream (text->display-stream text first-line line-count decorations)]
+                         [result (layout stream)]
+                         [available (- line-total first-line)])
+                    (if (or (not (text-layout-complete? result))
+                            (= line-count available))
+                        result
+                        (loop (min available (max (+ line-count 1) (* 2 line-count))))))))))
+        (lambda () (text-close! text)))))
+
   ;; Layout a pre-transformed DisplayStream.  This is the shared endpoint for
   ;; document text and View-local display providers: fragments retain their
   ;; document interval or virtual anchor, while this procedure owns only cell
@@ -299,6 +352,7 @@
              [entries '()]
              [row 0]
              [column 0]
+             [complete? #t]
              [caret (selection-range-head (selection-primary-range selection))])
          (define (put! target-row target-column cell)
            (vector-set! cells (+ (* target-row width) target-column) cell))
@@ -315,7 +369,9 @@
                    entries)))
          (define (emit! glyph glyph-width from to kind face source)
            (cond
-             [(or (>= row layout-height) (= width 0) (> glyph-width width)) #f]
+             [(or (>= row layout-height) (= width 0) (> glyph-width width))
+              (set! complete? #f)
+              #f]
              [(> (+ column glyph-width) width)
               (if (and (text-layout-options-wrap? options) (> column 0))
                   (begin (advance-line!) (emit! glyph glyph-width from to kind face source))
@@ -333,7 +389,9 @@
          ;; two.
          (define (emit-tab! tab-width from to kind face source)
            (cond
-             [(or (>= row layout-height) (= width 0) (> tab-width width)) #f]
+             [(or (>= row layout-height) (= width 0) (> tab-width width))
+              (set! complete? #f)
+              #f]
              [(> (+ column tab-width) width)
               (if (and (text-layout-options-wrap? options) (> column 0))
                   (begin (advance-line!)
@@ -390,20 +448,25 @@
                    (loop next))))))
          (define (emit-widget! fragment)
            (let loop-row ([remaining (display-widget-height fragment)])
-             (when (and (> remaining 0) (< row layout-height))
-               (let loop-column ([remaining-width (display-widget-width fragment)])
-                 (when (> remaining-width 0)
-                   (emit! " " 1
-                          (display-widget-anchor fragment) (display-widget-anchor fragment)
-                          'widget (display-widget-face fragment)
-                          (display-widget-source fragment))
-                   (loop-column (- remaining-width 1))))
-               (when (> remaining 1) (advance-line!))
-               (loop-row (- remaining 1)))))
+             (cond
+               [(= remaining 0) #t]
+               [(>= row layout-height) (set! complete? #f)]
+               [else
+                (let loop-column ([remaining-width (display-widget-width fragment)])
+                  (when (> remaining-width 0)
+                    (emit! " " 1
+                           (display-widget-anchor fragment) (display-widget-anchor fragment)
+                           'widget (display-widget-face fragment)
+                           (display-widget-source fragment))
+                    (loop-column (- remaining-width 1))))
+                (when (> remaining 1) (advance-line!))
+                (loop-row (- remaining 1))])))
          (for-each
            (lambda (fragment)
              (cond [(display-text? fragment) (emit-text! fragment)]
-                   [(display-break? fragment) (advance-line!)]
+                   [(display-break? fragment)
+                    (when (>= row layout-height) (set! complete? #f))
+                    (advance-line!)]
                    [else (emit-widget! fragment)]))
            (display-stream-fragments stream))
          (let* ([frame (make-frame width layout-height cells)]
@@ -419,7 +482,7 @@
                  (and cursor-row
                       (if cell (mod (min cell (- capacity 1)) width) 0))])
            (text-layout-drop-rows
-             (make-text-layout frame map cursor-row cursor-column)
+             (make-text-layout frame map cursor-row cursor-column complete?)
              visual-row)))]))
 
   ;; Compatibility adapter for callers that begin with a DocumentSnapshot.
