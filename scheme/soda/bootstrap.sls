@@ -6,6 +6,7 @@
           soda-application-view
           soda-application-surface
           soda-application-editing
+          soda-application-history
           soda-application-run!
           soda-application-close!)
   (import (rnrs)
@@ -36,6 +37,7 @@
       (immutable view soda-application-view)
       (immutable surface soda-application-surface)
       (immutable editing soda-application-editing)
+      (immutable history soda-application-history)
       (mutable terminal soda-application-terminal soda-application-terminal-set!)
       (mutable effect-registration soda-application-effect-registration
                soda-application-effect-registration-set!)
@@ -75,12 +77,13 @@
                [editing
                 (make-fundamental-editing!
                   (host-state-command-runtime state) owner)]
-               [_history
+               [history
                 (make-history! (host-state-command-runtime state)
                                (host-state-dispatch state) owner)])
           (surface-service-register! (host-state-surfaces state) surface)
+          (history-mark-saved! history (buffer-id buffer))
           (%make-soda-application
-            state owner buffer view surface editing #f #f #f)))))
+            state owner buffer view surface editing history #f #f #f)))))
 
   (define (require-open who application)
     (unless (and (soda-application? application)

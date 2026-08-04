@@ -19,6 +19,7 @@
           (soda kernel view-state)
           (soda kernel viewport)
           (soda packages base fundamental-editing)
+          (soda packages base history)
           (soda packages base text-motion)
           (soda tui frontend)
           (soda view frame)
@@ -101,13 +102,20 @@
     (let* ([application (make-soda-application)]
            [state (soda-application-state application)]
            [runtime (host-state-command-runtime state)]
-           [buffer (soda-application-buffer application)])
+           [buffer (soda-application-buffer application)]
+           [history (soda-application-history application)])
+      (unless (not (history-modified? history (buffer-id buffer)))
+        (error 'fundamental-editing-tests "fresh Buffer should begin at its History save point"))
       (command-runtime-start!
         runtime 'fundamental.insert-text (application-command-context application)
         (list (string->utf8 "history")))
+      (unless (history-modified? history (buffer-id buffer))
+        (error 'fundamental-editing-tests "editing did not advance History past its save point"))
       (command-runtime-start! runtime 'history.undo (application-command-context application))
       (unless (string=? (buffer-string buffer) "")
         (error 'fundamental-editing-tests "history.undo did not replay the inverse change"))
+      (unless (not (history-modified? history (buffer-id buffer)))
+        (error 'fundamental-editing-tests "undo did not return to the History save point"))
       (command-runtime-start! runtime 'history.redo (application-command-context application))
       (unless (string=? (buffer-string buffer) "history")
         (error 'fundamental-editing-tests "history.redo did not replay the original change"))

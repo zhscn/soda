@@ -1,5 +1,9 @@
 (library (soda packages base history)
-  (export make-history!)
+  (export make-history!
+          history?
+          history-mark-saved!
+          history-modified?
+          history-discard-buffer!)
   (import (rnrs)
           (soda kernel change) (soda kernel document) (soda kernel extension) (soda kernel state)
           (soda host command) (soda host command-runtime) (soda host dispatch)
@@ -9,6 +13,33 @@
     (fields undo redo saved
             (mutable registration history-registration history-registration-set!)))
   (define (stack-ref table id) (hashtable-ref table id '()))
+
+  (define (buffer-id? value)
+    (and (integer? value) (exact? value) (>= value 0)))
+
+  ;; A save point is the persistent undo-stack value at which the resource was
+  ;; last synchronized.  Transactions retain their tail, so undo and redo can
+  ;; return to the same save point without assigning document-specific state
+  ;; to the kernel.
+  (define (history-mark-saved! value buffer-id)
+    (unless (and (history? value) (buffer-id? buffer-id))
+      (assertion-violation 'history-mark-saved! "expected a history and Buffer id" value buffer-id))
+    (hashtable-set! (history-saved value) buffer-id (stack-ref (history-undo value) buffer-id))
+    #t)
+
+  (define (history-modified? value buffer-id)
+    (unless (and (history? value) (buffer-id? buffer-id))
+      (assertion-violation 'history-modified? "expected a history and Buffer id" value buffer-id))
+    (let ([saved (hashtable-ref (history-saved value) buffer-id #f)])
+      (or (not saved)
+          (not (eq? saved (stack-ref (history-undo value) buffer-id))))))
+
+  (define (history-discard-buffer! value buffer-id)
+    (unless (and (history? value) (buffer-id? buffer-id))
+      (assertion-violation 'history-discard-buffer! "expected a history and Buffer id" value buffer-id))
+    (hashtable-set! (history-undo value) buffer-id '())
+    (hashtable-set! (history-redo value) buffer-id '())
+    (history-mark-saved! value buffer-id))
   (define (inverse update)
     (let* ([changes (editor-update-changes update)]
            [old (editor-update-old-buffer-state update)]
