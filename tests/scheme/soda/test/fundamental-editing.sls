@@ -18,6 +18,7 @@
           (soda kernel state)
           (soda kernel view-state)
           (soda packages base fundamental-editing)
+          (soda packages base text-motion)
           (soda tui frontend)
           (soda view frame)
           (soda view text-layout)
@@ -106,6 +107,48 @@
                "trailing newline caret did not remain on its empty line"))
       (snapshot-close! snapshot)
       (document-close! document))
+
+    (let ([text (string->text "alpha _β gamma\nline")])
+      (unless (and (= (text-forward-word-offset text 0) 5)
+                   (= (text-forward-word-offset text 5) 9)
+                   (= (text-forward-word-offset text 9) 15)
+                   (= (text-backward-word-offset text 15) 10)
+                   (= (text-backward-word-offset text 10) 6)
+                   (= (text-line-start-offset text 18) 16)
+                   (= (text-line-end-offset text 18) 20))
+        (error 'fundamental-editing-tests
+               "Unicode word or logical-line motion differs"))
+      (text-close! text))
+
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [runtime (host-state-command-runtime state)]
+           [buffer (soda-application-buffer application)]
+           [view (soda-application-view application)]
+           [_insert
+            (command-runtime-start!
+              runtime 'fundamental.insert-text (application-command-context application)
+              (list (string->utf8 "alpha _β gamma\nline")))]
+           [backward-word
+            (command-runtime-start!
+              runtime 'fundamental.backward-word (application-command-context application))]
+           [line-start
+            (command-runtime-start!
+              runtime 'fundamental.beginning-of-line
+              (application-command-context application))]
+           [line-end
+            (command-runtime-start!
+              runtime 'fundamental.end-of-line (application-command-context application))])
+      (unless (and (eq? (command-invocation-phase backward-word) 'completed)
+                   (eq? (command-invocation-phase line-start) 'completed)
+                   (eq? (command-invocation-phase line-end) 'completed)
+                   (string=? (buffer-string buffer) "alpha _β gamma\nline")
+                   (= (selection-range-head
+                        (selection-primary-range (view-state-selection (view-state view))))
+                      20))
+        (error 'fundamental-editing-tests
+               "fundamental word and line commands did not publish View state"))
+      (soda-application-close! application))
 
     (let* ([application (make-soda-application)]
            [state (soda-application-state application)]

@@ -10,6 +10,7 @@
           (soda kernel selection)
           (soda kernel state)
           (soda kernel view-state)
+          (soda packages base text-motion)
           (soda host command)
           (soda host command-runtime)
           (soda host context)
@@ -147,6 +148,46 @@
             (command-context-view-id context) (view-state-generation state)
             next #f #f '() '() #f)))))
 
+  (define (move-selection-by context target)
+    (with-context-text
+      context
+      (lambda (text)
+        (let* ([selection (context-selection context)]
+               [next
+                (make-selection
+                  (map
+                    (lambda (range)
+                      (let ([position (target text range)])
+                        (make-selection-range position position)))
+                    (selection-ranges selection))
+                  (selection-primary selection))]
+               [state (command-context-view-state context)])
+          (make-view-transaction-spec
+            (command-context-view-id context) (view-state-generation state)
+            next #f #f '() '() #f)))))
+
+  (define (move-word context direction)
+    (move-selection-by
+      context
+      (lambda (text range)
+        ((if (eq? direction 'backward)
+             text-backward-word-offset
+             text-forward-word-offset)
+         text
+         (if (eq? direction 'backward)
+             (selection-range-from range)
+             (selection-range-to range))))))
+
+  (define (move-line-boundary context boundary)
+    (move-selection-by
+      context
+      (lambda (text range)
+        ((if (eq? boundary 'start)
+             text-line-start-offset
+             text-line-end-offset)
+         text
+         (selection-range-head range)))))
+
   (define (install-command! runtime owner name procedure documentation class)
     (command-runtime-register-command!
       runtime
@@ -181,17 +222,43 @@
         (lambda (context) (move-selection context 'forward))
         "Move every selection forward by one grapheme." 'motion)
       (install-command!
+        runtime owner 'fundamental.backward-word
+        (lambda (context) (move-word context 'backward))
+        "Move every selection backward by one Unicode word." 'motion)
+      (install-command!
+        runtime owner 'fundamental.forward-word
+        (lambda (context) (move-word context 'forward))
+        "Move every selection forward by one Unicode word." 'motion)
+      (install-command!
+        runtime owner 'fundamental.beginning-of-line
+        (lambda (context) (move-line-boundary context 'start))
+        "Move every selection to the start of its logical line." 'motion)
+      (install-command!
+        runtime owner 'fundamental.end-of-line
+        (lambda (context) (move-line-boundary context 'end))
+        "Move every selection to the end of its logical line." 'motion)
+      (install-command!
         runtime owner 'application.quit
         (lambda (context) (make-command-effect 'application.quit #f))
         "Request application shutdown." 'application)
       (keymap-bind! keymap (list (control-stroke #\b)) 'fundamental.backward-char)
       (keymap-bind! keymap (list (control-stroke #\f)) 'fundamental.forward-char)
+      (keymap-bind! keymap (list (control-stroke #\a)) 'fundamental.beginning-of-line)
+      (keymap-bind! keymap (list (control-stroke #\e)) 'fundamental.end-of-line)
+      (keymap-bind! keymap
+                   (list (make-key-stroke 'character (char->integer #\b) 2))
+                   'fundamental.backward-word)
+      (keymap-bind! keymap
+                   (list (make-key-stroke 'character (char->integer #\f) 2))
+                   'fundamental.forward-word)
       (keymap-bind! keymap (list (control-stroke #\d)) 'fundamental.delete-forward)
       (keymap-bind! keymap (list (control-stroke #\g)) 'application.quit)
       (keymap-bind! keymap (list (control-stroke #\x) (control-stroke #\c))
                    'application.quit)
       (keymap-bind! keymap (list (plain-stroke 'left #f)) 'fundamental.backward-char)
       (keymap-bind! keymap (list (plain-stroke 'right #f)) 'fundamental.forward-char)
+      (keymap-bind! keymap (list (plain-stroke 'home #f)) 'fundamental.beginning-of-line)
+      (keymap-bind! keymap (list (plain-stroke 'end #f)) 'fundamental.end-of-line)
       ;; Non-character keys are normalized without a codepoint by
       ;; key-event->key-stroke.  Terminal decoders retain their physical
       ;; codepoint on KeyEvent for inspection, but it is not part of keymap
