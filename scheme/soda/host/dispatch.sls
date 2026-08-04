@@ -30,7 +30,7 @@
           (soda kernel view-state)
           (soda host internal buffer)
           (soda host internal view)
-          (soda host context)
+          (soda host internal context)
           (soda host internal operation)
           (soda host internal surface)
           (soda host value)
