@@ -1,6 +1,9 @@
 #include "unicode/c_api.h"
+#include "unicode/grapheme.hpp"
 
 #include <utf8proc.h>
+
+#include <optional>
 
 int soda_unicode_grapheme_width(const uint8_t* bytes, size_t size) {
     if (bytes == nullptr || size == 0) {
@@ -19,26 +22,14 @@ size_t soda_unicode_next_grapheme_offset(const uint8_t* bytes, size_t size, size
     if (bytes == nullptr || start >= size) {
         return size;
     }
-    utf8proc_int32_t previous = 0;
-    auto consumed = utf8proc_iterate(bytes + start, static_cast<utf8proc_ssize_t>(size - start),
-                                     &previous);
-    if (consumed <= 0) {
-        return start + 1;
-    }
-    size_t offset = start + static_cast<size_t>(consumed);
-    utf8proc_int32_t state = 0;
-    while (offset < size) {
-        utf8proc_int32_t current = 0;
-        consumed = utf8proc_iterate(bytes + offset, static_cast<utf8proc_ssize_t>(size - offset),
-                                    &current);
+    return soda::unicode::next_grapheme_offset(size, start, [&](size_t offset) {
+        utf8proc_int32_t value = 0;
+        const auto consumed = utf8proc_iterate(
+            bytes + offset, static_cast<utf8proc_ssize_t>(size - offset), &value);
         if (consumed <= 0) {
-            return offset + 1;
+            return std::optional<soda::unicode::DecodedCodepoint>{};
         }
-        if (utf8proc_grapheme_break_stateful(previous, current, &state)) {
-            break;
-        }
-        previous = current;
-        offset += static_cast<size_t>(consumed);
-    }
-    return offset;
+        return std::optional<soda::unicode::DecodedCodepoint>{
+            soda::unicode::DecodedCodepoint{value, offset + static_cast<size_t>(consumed)}};
+    });
 }

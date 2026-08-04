@@ -3,6 +3,7 @@
 #include "document/c_api_internal.hpp"
 #include "document/document.hpp"
 #include "document/text.hpp"
+#include "unicode/grapheme.hpp"
 
 #include <algorithm>
 #include <array>
@@ -17,6 +18,8 @@
 #include <string_view>
 #include <thread>
 #include <utility>
+
+#include <utf8proc.h>
 
 struct soda_text {
     explicit soda_text(soda::Text requested_value) : value(std::move(requested_value)) {}
@@ -288,6 +291,34 @@ int soda_text_byte_at(const soda_text* text, uint32_t offset) {
     return guard(-1, [&] {
         const char value = require_handle(text, "text").value.byte_at(soda::TextOffset{offset});
         return static_cast<int>(static_cast<unsigned char>(value));
+    });
+}
+
+uint32_t soda_text_next_grapheme_offset(const soda_text* text, uint32_t offset) {
+    return guard<std::uint32_t>(SODA_TEXT_NPOS, [&] {
+        const soda::Text& value = require_handle(text, "text").value;
+        const std::uint32_t size = value.size_bytes();
+        if (offset >= size) {
+            return size;
+        }
+        return static_cast<std::uint32_t>(soda::unicode::next_grapheme_offset(
+            size, offset, [&](std::size_t position) {
+                std::array<std::uint8_t, 4> bytes{};
+                const std::size_t available = std::min<std::size_t>(bytes.size(), size - position);
+                for (std::size_t index = 0; index < available; ++index) {
+                    bytes[index] = static_cast<std::uint8_t>(
+                        value.byte_at(soda::TextOffset{static_cast<std::uint32_t>(position + index)}));
+                }
+                utf8proc_int32_t codepoint = 0;
+                const auto consumed = utf8proc_iterate(
+                    bytes.data(), static_cast<utf8proc_ssize_t>(available), &codepoint);
+                if (consumed <= 0) {
+                    return std::optional<soda::unicode::DecodedCodepoint>{};
+                }
+                return std::optional<soda::unicode::DecodedCodepoint>{
+                    soda::unicode::DecodedCodepoint{
+                        codepoint, position + static_cast<std::size_t>(consumed)}};
+            }));
     });
 }
 

@@ -32,6 +32,7 @@
           %text-utf16-size
           %text-copy
           %text-byte-at
+          %text-next-grapheme-offset
           %text-line-start
           %text-line-content-end
           %text-position
@@ -123,7 +124,7 @@
     (foreign-procedure __atomic "soda_document_last_error" () string))
 
   (define abi-version-checked
-    (unless (= (%abi-version) 2)
+    (unless (= (%abi-version) 3)
       (error 'soda-document "unsupported native document ABI version")))
 
   (define %text-create
@@ -142,6 +143,10 @@
                        int))
   (define %text-byte-at
     (foreign-procedure __atomic "soda_text_byte_at" (void* unsigned-32) int))
+  (define %text-next-grapheme-offset
+    (foreign-procedure __atomic "soda_text_next_grapheme_offset"
+                       (void* unsigned-32)
+                       unsigned-32))
   (define %text-line-start
     (foreign-procedure __atomic "soda_text_line_start"
                        (void* unsigned-32)

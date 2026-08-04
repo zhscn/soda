@@ -79,6 +79,14 @@ TEST_CASE("text ABI preserves bytes and coordinate queries") {
     CHECK(copy_text(text.get()) == "a\n\xF0\x9F\x98\x80");
 }
 
+TEST_CASE("text ABI shares Unicode grapheme boundaries with layout") {
+    const TextHandle text = make_text("a\xCC\x81\xF0\x9F\x87\xA8\xF0\x9F\x87\xA6");
+    REQUIRE(text != nullptr);
+    CHECK(soda_text_next_grapheme_offset(text.get(), 0) == 3);
+    CHECK(soda_text_next_grapheme_offset(text.get(), 3) == 11);
+    CHECK(soda_text_next_grapheme_offset(text.get(), 11) == 11);
+}
+
 TEST_CASE("document transaction exposes normalized changes and persistent snapshots") {
     DocumentHandle document = make_document("a\r\nb", 17);
     REQUIRE(document != nullptr);

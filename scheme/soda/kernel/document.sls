@@ -193,83 +193,12 @@
                 candidate
                 (loop (+ candidate 1)))))))
 
-  (define (text-codepoint-at value offset)
-    (let* ([first (text-byte-at value offset)]
-           [width
-            (cond
-              [(< first #x80) 1]
-              [(= (bitwise-and first #xe0) #xc0) 2]
-              [(= (bitwise-and first #xf0) #xe0) 3]
-              [else 4])]
-           [initial
-            (case width
-              [(1) first]
-              [(2) (bitwise-and first #x1f)]
-              [(3) (bitwise-and first #x0f)]
-              [else (bitwise-and first #x07)])])
-      (let loop ([index 1] [codepoint initial])
-        (if (= index width)
-            (values codepoint (+ offset width))
-            (loop
-              (+ index 1)
-              (+ (bitwise-arithmetic-shift-left codepoint 6)
-                 (bitwise-and (text-byte-at value (+ offset index)) #x3f)))))))
-
-  (define (grapheme-extend? codepoint)
-    (let ([category (char-general-category (integer->char codepoint))])
-      (or (memq category '(Mn Me Mc))
-          (and (<= #xfe00 codepoint) (<= codepoint #xfe0f))
-          (and (<= #xe0100 codepoint) (<= codepoint #xe01ef))
-          (and (<= #x1f3fb codepoint) (<= codepoint #x1f3ff)))))
-
-  (define (regional-indicator? codepoint)
-    (and (<= #x1f1e6 codepoint) (<= codepoint #x1f1ff)))
-
-  (define (grapheme-control? codepoint)
-    (and (not (= codepoint #x200d))
-         (memq
-           (char-general-category (integer->char codepoint))
-           '(Cc Cf Zl Zp))))
-
-  ;; Extended grapheme navigation covers combining marks, spacing marks,
-  ;; variation selectors, emoji modifiers, ZWJ sequences, CRLF, and regional
-  ;; indicator pairs. It operates directly on UTF-8 bytes and never copies the
-  ;; document merely to move a caret.
   (define (text-next-grapheme-offset value offset)
-    (let ([size (text-size value)])
-      (if (>= offset size)
-          size
-          (call-with-values
-            (lambda () (text-codepoint-at value offset))
-            (lambda (first next)
-              (let loop ([previous first]
-                         [position next]
-                         [regional-count (if (regional-indicator? first) 1 0)])
-                (if (>= position size)
-                    size
-                    (call-with-values
-                      (lambda () (text-codepoint-at value position))
-                      (lambda (current following)
-                        (if (and
-                              (not
-                                (and
-                                  (not (and (= previous #x0d) (= current #x0a)))
-                                  (or (grapheme-control? previous)
-                                      (grapheme-control? current))))
-                              (or
-                                (and (= previous #x0d) (= current #x0a))
-                                (grapheme-extend? current)
-                                (= current #x200d)
-                                (= previous #x200d)
-                                (and (regional-indicator? previous)
-                                     (regional-indicator? current)
-                                     (odd? regional-count))))
-                            (loop
-                              current following
-                              (if (regional-indicator? current)
-                                  (+ regional-count 1)
-                                  0))
-                            position))))))))))
+    (require-open 'text-next-grapheme-offset text? text-pointer value)
+    (checked-text-offset
+      'text-next-grapheme-offset
+      (lambda ()
+        (%text-next-grapheme-offset (text-pointer value) offset))))
 
   (define (text-previous-grapheme-offset value offset)
     (if (zero? offset)

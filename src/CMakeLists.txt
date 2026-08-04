@@ -14,6 +14,7 @@ add_library(soda_document STATIC
   document/text.cpp
 )
 target_include_directories(soda_document PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(soda_document PUBLIC utf8proc)
 target_compile_features(soda_document PUBLIC cxx_std_23)
 set_target_properties(soda_document PROPERTIES POSITION_INDEPENDENT_CODE ON)
 soda_target_warnings(soda_document)

@@ -23,7 +23,7 @@ typedef struct soda_snapshot soda_snapshot;
 typedef struct soda_transaction soda_transaction;
 typedef struct soda_change soda_change;
 
-#define SODA_DOCUMENT_ABI_VERSION 2U
+#define SODA_DOCUMENT_ABI_VERSION 3U
 #define SODA_TEXT_NPOS UINT32_MAX
 #define SODA_UNDO_NODE_NONE UINT32_MAX
 
@@ -44,6 +44,8 @@ SODA_DOCUMENT_API uint32_t soda_text_utf16_size(const soda_text* text);
 SODA_DOCUMENT_API int soda_text_copy(const soda_text* text, uint32_t start, uint32_t end,
                                      uint8_t* destination, size_t capacity);
 SODA_DOCUMENT_API int soda_text_byte_at(const soda_text* text, uint32_t offset);
+SODA_DOCUMENT_API uint32_t soda_text_next_grapheme_offset(const soda_text* text,
+                                                           uint32_t offset);
 SODA_DOCUMENT_API uint32_t soda_text_line_start(const soda_text* text, uint32_t line);
 SODA_DOCUMENT_API uint32_t soda_text_line_content_end(const soda_text* text, uint32_t line);
 SODA_DOCUMENT_API int soda_text_position(const soda_text* text, uint32_t offset, uint32_t* line,
