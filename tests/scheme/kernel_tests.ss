@@ -1925,6 +1925,30 @@
                (= (length writes) 2))
     (error 'kernel-tests "Frame presenter transaction differs" writes)))
 
+;; A newer desired Frame may arrive after some bytes of an older transaction
+;; have reached the terminal.  The old transaction must finish first, then a
+;; subsequent drain emits the newest state from the committed Frame.
+(let* ([presenter (make-frame-presenter)]
+       [first (frame-with-cell (make-frame 1 1) 0 0
+                               (make-frame-cell "a" 1 #f 'text #f))]
+       [second (frame-with-cell (make-frame 1 1) 0 0
+                                (make-frame-cell "b" 1 #f 'text #f))]
+       [writes 0]
+       [writer
+        (lambda (bytes offset)
+          (set! writes (+ writes 1))
+          (if (= writes 1) 1 (- (bytevector-length bytes) offset)))])
+  (frame-presenter-present! presenter first)
+  (unless (eq? (frame-presenter-drain! presenter writer) 'partial)
+    (error 'kernel-tests "Frame presenter did not begin partial transaction"))
+  (frame-presenter-present! presenter second)
+  (unless (and (eq? (frame-presenter-drain! presenter writer) 'committed)
+               (frame-presenter-dirty? presenter)
+               (eq? (frame-presenter-drain! presenter writer) 'committed)
+               (eq? (frame-presenter-committed-frame presenter) second)
+               (not (frame-presenter-dirty? presenter)))
+    (error 'kernel-tests "Frame presenter did not retire superseded frame")))
+
 ;; Themes resolve semantic faces only at the terminal boundary.  Reusing an
 ;; unchanged Frame with a different Theme still needs a full presentation.
 (let* ([presenter (make-frame-presenter)]

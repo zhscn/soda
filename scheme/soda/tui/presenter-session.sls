@@ -62,7 +62,13 @@
                (native:terminal-write-some! (session-terminal session) bytes offset)))])
       (case result
         [(would-block) (ensure-writable-watch! session)]
-        [(idle committed) (cancel-writable-watch! session)]
+        [(idle committed)
+         ;; A committed partial transaction may have been superseded while it
+         ;; was in flight.  Keep readiness armed so the newest desired Frame
+         ;; is encoded from the now-known terminal state.
+         (if (frame-presenter-dirty? (session-presenter session))
+             (ensure-writable-watch! session)
+             (cancel-writable-watch! session))]
         [else #f])
       result))
 

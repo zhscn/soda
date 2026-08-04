@@ -5,6 +5,7 @@
           frame-presenter-committed-frame
           frame-presenter-desired-frame
           frame-presenter-pending?
+          frame-presenter-dirty?
           frame-presenter-present!
           frame-presenter-drain!)
   (import (rnrs)
@@ -103,6 +104,25 @@
       (assertion-violation 'frame-presenter-pending? "expected a FramePresenter" presenter))
     (and (presenter-pending-bytes presenter) #t))
 
+  ;; A partial transaction is always dirty.  After it commits, desired state
+  ;; may still differ from the terminal's committed state because a newer
+  ;; Frame arrived while the old ANSI transaction was in flight.
+  (define (frame-presenter-dirty? presenter)
+    (unless (frame-presenter? presenter)
+      (assertion-violation 'frame-presenter-dirty? "expected a FramePresenter" presenter))
+    (or (frame-presenter-pending? presenter)
+        (let ([desired (frame-presenter-desired-frame presenter)]
+              [committed (frame-presenter-committed-frame presenter)])
+          (and desired
+               (or (not committed)
+                   (not (eq? (presenter-committed-theme presenter)
+                              (presenter-desired-theme presenter)))
+                   (pair? (frame-diff committed desired))
+                   (not (and (equal? (presenter-desired-cursor-row presenter)
+                                      (presenter-committed-cursor-row presenter))
+                             (equal? (presenter-desired-cursor-column presenter)
+                                      (presenter-committed-cursor-column presenter)))))))))
+
   (define frame-presenter-present!
     (case-lambda
       [(presenter frame) (frame-presenter-present! presenter frame default-theme #f #f)]
@@ -137,14 +157,7 @@
             [desired (frame-presenter-desired-frame presenter)]
             [committed-theme (presenter-committed-theme presenter)]
             [desired-theme (presenter-desired-theme presenter)])
-        (when (and desired
-                   (or (not committed)
-                       (not (eq? committed-theme desired-theme))
-                       (pair? (frame-diff committed desired))
-                       (not (and (equal? (presenter-desired-cursor-row presenter)
-                                          (presenter-committed-cursor-row presenter))
-                                 (equal? (presenter-desired-cursor-column presenter)
-                                          (presenter-committed-cursor-column presenter))))))
+        (when (and desired (frame-presenter-dirty? presenter))
           (presenter-pending-bytes-set! presenter
             (string->utf8
               ;; A terminal only stores resolved ANSI state.  Reusing a
