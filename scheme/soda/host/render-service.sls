@@ -55,17 +55,8 @@
     (let ([signature (render-signature service surface views)])
       (if (equal? signature (render-service-signature service))
           (render-service-last-render service)
-          ;; A render-local transform can retire itself after a contained
-          ;; failure.  Retry once against the newly published View cache so a
-          ;; failed plugin cannot leave its pre-failure output on screen.
-          (let build ([attempt-signature signature] [retries 1])
-            (let* ([render (render-surface surface views)]
-                   [current-signature (render-signature service surface views)])
-              (if (and (> retries 0)
-                       (not (equal? attempt-signature current-signature)))
-                  (build current-signature (- retries 1))
-                  (begin
-                    (render-service-signature-set! service attempt-signature)
-                    (render-service-render-set! service render)
-                    render)))))))
+          (let ([render (render-surface surface views)])
+            (render-service-signature-set! service signature)
+            (render-service-render-set! service render)
+            render))))
 )

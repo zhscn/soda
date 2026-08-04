@@ -11,6 +11,7 @@
           rendered-view-rectangle
           rendered-view-layout
           rendered-view-visible-ranges
+          rendered-view-transform-failures
           make-surface-hit
           surface-hit?
           surface-hit-view-id
@@ -40,16 +41,23 @@
   ;; routing.  It is part of a rendered Surface, not mutable View state.
   (define-record-type
     (rendered-view %make-rendered-view rendered-view?)
-    (fields view-id rectangle layout))
+    (fields view-id rectangle layout transform-failures))
 
   (define (rectangle? value)
     (and (list? value) (= (length value) 4)
          (for-all nonnegative-exact-integer? value)))
 
-  (define (make-rendered-view view-id rectangle layout)
-    (unless (and (rectangle? rectangle) (text-layout? layout))
-      (assertion-violation 'make-rendered-view "invalid rendered View" view-id rectangle layout))
-    (%make-rendered-view view-id (list-copy rectangle) layout))
+  (define make-rendered-view
+    (case-lambda
+      [(view-id rectangle layout)
+       (make-rendered-view view-id rectangle layout '())]
+      [(view-id rectangle layout transform-failures)
+       (unless (and (rectangle? rectangle) (text-layout? layout)
+                    (list? transform-failures))
+         (assertion-violation 'make-rendered-view "invalid rendered View"
+                              view-id rectangle layout transform-failures))
+       (%make-rendered-view view-id (list-copy rectangle) layout
+                            (list-copy transform-failures))]))
 
   (define (rendered-view-visible-ranges rendered)
     (unless (rendered-view? rendered)
@@ -142,34 +150,39 @@
                            [viewport (view-state-viewport state)]
                            [first-line (viewport-first-line viewport)]
                            [visual-row (viewport-visual-row viewport)]
-                           [layout
+                           [projection
                             (let ([options
                                   (configuration-facet
                                      (view-state-configuration state)
                                      text-layout-options-facet 'view)]
                                   [provided-stream (view-display-stream view)])
-                              (let ([stream
-                                     (if (not provided-stream)
-                                         #f
-                                         provided-stream)])
-                                (if stream
-                                    (layout-display-stream
-                                      (view-transform-display-stream view stream)
-                                      (view-state-selection state)
-                                      view-width view-height options visual-row)
-                                    (layout-snapshot-display-stream
-                                      snapshot
-                                      (view-state-selection state)
-                                      first-line visual-row
-                                      view-width view-height
-                                      (view-merged-decorations view)
-                                      (lambda (base)
-                                        (view-transform-display-stream view base))
-                                      options))))])
+                              (let ([failures '()])
+                                (define (transform base)
+                                  (let-values ([(stream transform-failures)
+                                                (view-transform-display-stream view base)])
+                                    (set! failures transform-failures)
+                                    stream))
+                                (list
+                                  (if provided-stream
+                                      (layout-display-stream
+                                        (transform provided-stream)
+                                        (view-state-selection state)
+                                        view-width view-height options visual-row)
+                                      (layout-snapshot-display-stream
+                                        snapshot
+                                        (view-state-selection state)
+                                        first-line visual-row
+                                        view-width view-height
+                                        (view-merged-decorations view)
+                                        transform options))
+                                  failures))) ]
+                           [layout (car projection)]
+                           [transform-failures (cadr projection)])
                       (loop
                         (cdr leaves)
                         (cons (make-frame-placement row column (text-layout-frame layout)) placements)
-                        (cons (make-rendered-view (view-id view) rectangle layout) rendered-views)
+                        (cons (make-rendered-view (view-id view) rectangle layout transform-failures)
+                              rendered-views)
                         (if (and (eq? leaf (surface-active-window surface))
                                  (text-layout-cursor-row layout))
                             (+ row (text-layout-cursor-row layout))

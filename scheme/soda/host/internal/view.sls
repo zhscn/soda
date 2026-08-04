@@ -272,34 +272,33 @@
             (loop (cdr instances) (if transform (cons transform result) result))))))
 
   ;; A transform is prepared by a plugin update but executed against the
-  ;; current visible base stream.  Failure is contained at the View boundary,
-  ;; matching decoration and update failures.
+  ;; current visible base stream.  Rendering is a pure projection: a transform
+  ;; failure returns the last safe stream plus structured failure data.  The
+  ;; dispatcher owns subsequent reporting and plugin retirement.
   (define (view-transform-display-stream view stream)
     (unless (and (view? view) (not (view-closed? view)) (display-stream? stream))
       (assertion-violation 'view-transform-display-stream
                            "expected a live View and DisplayStream" view stream))
-    (let loop ([instances (view-plugin-instances view)] [current stream])
+    (let loop ([instances (view-plugin-instances view)] [current stream] [failures '()])
       (if (null? instances)
-          current
+          (values current (reverse failures))
           (let* ([instance (car instances)]
                  [transform (view-plugin-instance-display-transform instance)])
             (if (not transform)
-                (loop (cdr instances) current)
+                (loop (cdr instances) current failures)
                 (guard
                   (condition
                     [else
-                     (report-plugin-error! view 'plugin-display-transform condition)
-                     (destroy-plugin-instance! view instance 'plugin-display-transform-cleanup)
-                     (refresh-view-decorations! view)
-                     (refresh-view-display-stream! view)
-                     (view-render-generation-set!
-                       view (+ 1 (view-render-generation view)))
-                     (loop (cdr instances) current)])
+                     (loop (cdr instances) current
+                           (cons (list (view-plugin-key
+                                         (view-plugin-instance-plugin instance))
+                                       condition)
+                                 failures))])
                   (let ([next (transform current)])
                     (unless (display-stream? next)
                       (assertion-violation 'view-transform-display-stream
                                            "plugin transform returned a non-DisplayStream" next))
-                    (loop (cdr instances) next))))))))
+                    (loop (cdr instances) next failures))))))))
 
   (define-record-type
     (view-service %make-view-service view-service?)

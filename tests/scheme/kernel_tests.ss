@@ -2367,8 +2367,8 @@
     (error 'kernel-tests "failed display plugin left a stale render")))
 
 ;; A transform runs while rendering rather than while publishing a ViewUpdate.
-;; If it fails, its provider output must be discarded before this render request
-;; becomes the RenderService cache entry.
+;; Its failure leaves the View untouched, produces a safe base projection, and
+;; remains attached to the immutable rendered result for host-side handling.
 (let* ([plugin
         (make-view-plugin
           'failing-transform
@@ -2391,10 +2391,14 @@
        [leaf (make-leaf-window (view-id view) '(0 0 2 1))]
        [surface (make-surface leaf '(2 . 1))]
        [service (make-render-service)]
-       [render (render-service-render! service surface (host-state-views host))])
+       [render (render-service-render! service surface (host-state-views host))]
+       [cached (render-service-render! service surface (host-state-views host))])
   (unless (and (string=? (frame-cell-grapheme
-                           (frame-cell-at (surface-render-frame render) 0 0)) "x")
-               (view-plugin-instance-destroyed?
-                 (car (view-plugin-instances view))))
-    (error 'kernel-tests "failed display transform left a stale render")))
+                           (frame-cell-at (surface-render-frame render) 0 0)) "v")
+               (not (view-plugin-instance-destroyed?
+                      (car (view-plugin-instances view))))
+               (= (length (rendered-view-transform-failures
+                            (car (surface-render-rendered-views render)))) 1)
+               (eq? render cached))
+    (error 'kernel-tests "failed display transform was not isolated from rendering")))
 (host-state-close! host)
