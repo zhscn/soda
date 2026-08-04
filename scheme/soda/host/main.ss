@@ -1,10 +1,14 @@
 #!chezscheme
 (import (chezscheme)
-        (soda host internal state))
+        (soda bootstrap))
 
 (scheme-start
-  (lambda arguments
-    (let ([state (make-host-state)])
-      (host-state-run! state)
-      (host-state-close! state)
-      0)))
+ (lambda arguments
+  (let ([application (make-soda-application)])
+    (dynamic-wind
+      (lambda () #f)
+      (lambda ()
+        (soda-application-run! application)
+        0)
+      (lambda ()
+        (soda-application-close! application))))))

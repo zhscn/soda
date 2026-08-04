@@ -35,6 +35,8 @@
         (soda ffi cpp-analysis)
         (soda ffi indentation)
         (soda ffi tree-sitter)
+        (soda bootstrap)
+        (soda packages base fundamental-editing)
         (prefix (soda ffi runtime) native:)
         (soda support vfs)
         (soda tui terminal-input)
@@ -50,6 +52,25 @@
         (soda view text-layout)
         (soda view theme)
         (soda view plugin))
+
+(define (application-command-context application)
+  (let* ([state (soda-application-state application)]
+         [surface (soda-application-surface application)]
+         [view (soda-application-view application)]
+         [buffer (soda-application-buffer application)]
+         [active (surface-active-context surface (host-state-views state))])
+    (make-command-context
+      #f
+      (active-context-surface-id active)
+      (active-context-window-id active)
+      (view-id view)
+      (buffer-id buffer)
+      (buffer-state buffer)
+      (view-state view)
+      #f '() #f active 'fundamental-test)))
+
+(define (buffer-string buffer)
+  (snapshot-string (buffer-state-document (buffer-state buffer))))
 
 (define (library-binding-hidden? library-name identifier)
   (guard (condition [else #t])
@@ -2634,4 +2655,48 @@
     (error 'kernel-tests "frontend orchestration did not route input and rendering"))
   (frontend-close! frontend)
   (owner-close! package-owner))
+
+;; The first application is ordinary composition.  Its fundamental package
+;; turns committed text into transactions and keeps movement deletion on
+;; grapheme boundaries without requiring a terminal adapter.
+(let* ([application (make-soda-application)]
+       [state (soda-application-state application)]
+       [runtime (host-state-command-runtime state)]
+       [buffer (soda-application-buffer application)]
+       [view (soda-application-view application)]
+       [editing (soda-application-editing application)]
+       [inserted
+        (command-runtime-start!
+          runtime 'fundamental.insert-text (application-command-context application)
+          (list (string->utf8 "a😀")))]
+       [backward
+        (command-runtime-start!
+          runtime 'fundamental.backward-char (application-command-context application))]
+       [deleted
+        (command-runtime-start!
+          runtime 'fundamental.delete-forward (application-command-context application))]
+       [context
+        (fundamental-input-context
+          editing
+          (surface-active-context (soda-application-surface application)
+                                  (host-state-views state))
+          view)]
+       [disposition
+        (fundamental-input-disposition
+          (application-command-context application)
+          (input-dispatch context (make-text-input-event 'text (string->utf8 "b"))))])
+  (unless (and (eq? (command-invocation-phase inserted) 'completed)
+               (eq? (command-invocation-phase backward) 'completed)
+               (eq? (command-invocation-phase deleted) 'completed)
+               (string=? (buffer-string buffer) "a")
+               (= (selection-range-from
+                    (selection-primary-range (view-state-selection (view-state view))))
+                  1)
+               (= (input-context-view-id context) (view-id view))
+               (= (input-context-buffer-id context) (buffer-id buffer))
+               (command-invoke-message? disposition)
+               (eq? (command-invoke-message-name disposition)
+                    'fundamental.insert-text))
+    (error 'kernel-tests "fundamental editing did not produce stable editor state"))
+  (soda-application-close! application))
 (host-state-close! host)
