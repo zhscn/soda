@@ -261,6 +261,69 @@
          text
          (selection-range-head range)))))
 
+  ;; Logical vertical motion is kept separate from visual-row motion.  The
+  ;; latter belongs to the layout package because it depends on wrapping and
+  ;; DisplayMap state; this command only uses the document line index.
+  (define (move-logical-line context delta)
+    (move-selection-by
+      context
+      (lambda (text range)
+        (let* ([point (selection-range-head range)]
+               [position (text-position text point)]
+               [line (car position)]
+               [column (cdr position)]
+               [target (min (max 0 (+ line delta)) (- (text-line-count text) 1))]
+               [start (text-line-start text target)]
+               [end (text-line-content-end text target)])
+          (min (+ start column) end)))))
+
+  (define (move-buffer-boundary context end?)
+    (move-selection-by
+      context
+      (lambda (text range)
+        (if end? (text-size text) 0))))
+
+  (define (transpose-characters context)
+    (let ([range (selection-primary-range (context-selection context))])
+      (if (not (selection-range-empty? range))
+          (command-handled)
+          (with-context-text
+            context
+            (lambda (text)
+              (let* ([point (selection-range-head range)]
+                     [size (text-size text)])
+                (if (or (zero? point) (zero? size))
+                    (command-handled)
+                    (let* ([middle (if (= point size)
+                                       (text-previous-grapheme-offset text point)
+                                       point)]
+                           [start (text-previous-grapheme-offset text middle)]
+                           [end (text-next-grapheme-offset text middle)])
+                      (if (= start middle)
+                          (command-handled)
+                          (let* ([left (text-subbytevector text start middle)]
+                                 [right (text-subbytevector text middle end)]
+                                 [replacement
+                                  (let ([output (make-bytevector
+                                                  (+ (bytevector-length left)
+                                                     (bytevector-length right)))])
+                                    (bytevector-copy! right 0 output 0 (bytevector-length right))
+                                    (bytevector-copy! left 0 output (bytevector-length right)
+                                                      (bytevector-length left))
+                                    output)]
+                                 [changes (make-change-set
+                                            size
+                                            (list (make-text-change start end replacement)))]
+                                 [selection
+                                  (make-selection
+                                    (list (collapse-range range end))
+                                    0)])
+                            (make-transaction-spec
+                              (command-context-buffer-id context)
+                              (command-context-view-id context)
+                              (buffer-state-generation (command-context-buffer-state context))
+                              changes selection '() '())))))))))))
+
   (define (view-selection-transaction context selection)
     (let ([state (command-context-view-state context)])
       (make-view-transaction-spec
@@ -468,6 +531,26 @@
         "Move every selection to the end of its logical line." 'motion
         (move-line-boundary context 'end))
       (install-command!
+        runtime owner 'fundamental.previous-line (context)
+        "Move every selection to the preceding logical line." 'motion
+        (move-logical-line context -1))
+      (install-command!
+        runtime owner 'fundamental.next-line (context)
+        "Move every selection to the following logical line." 'motion
+        (move-logical-line context 1))
+      (install-command!
+        runtime owner 'fundamental.beginning-of-buffer (context)
+        "Move every selection to the beginning of the Buffer." 'motion
+        (move-buffer-boundary context #f))
+      (install-command!
+        runtime owner 'fundamental.end-of-buffer (context)
+        "Move every selection to the end of the Buffer." 'motion
+        (move-buffer-boundary context #t))
+      (install-command!
+        runtime owner 'fundamental.transpose-characters (context)
+        "Transpose the graphemes around point." 'editing
+        (transpose-characters context))
+      (install-command!
         runtime owner 'fundamental.set-mark (context)
         "Set the mark at every selection and activate the region." 'selection
         (set-mark context))
@@ -516,6 +599,9 @@
         ((list (control-stroke #\f)) 'fundamental.forward-char)
         ((list (control-stroke #\a)) 'fundamental.beginning-of-line)
         ((list (control-stroke #\e)) 'fundamental.end-of-line)
+        ((list (control-stroke #\p)) 'fundamental.previous-line)
+        ((list (control-stroke #\n)) 'fundamental.next-line)
+        ((list (control-stroke #\t)) 'fundamental.transpose-characters)
         ((list (make-key-stroke 'character (char->integer #\space) 4)) 'fundamental.set-mark)
         ((list (control-stroke #\w)) 'fundamental.kill-region)
         ((list (control-stroke #\y)) 'fundamental.yank)

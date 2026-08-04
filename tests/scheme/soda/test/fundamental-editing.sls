@@ -162,6 +162,32 @@
           (error 'fundamental-editing-tests "mark-whole-buffer or point exchange is incorrect")))
       (soda-application-close! application))
 
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [runtime (host-state-command-runtime state)]
+           [buffer (soda-application-buffer application)]
+           [view (soda-application-view application)])
+      (command-runtime-start!
+        runtime 'fundamental.insert-text (application-command-context application)
+        (list (string->utf8 "ab\n1234\nz")))
+      (command-runtime-start!
+        runtime 'fundamental.previous-line (application-command-context application))
+      (command-runtime-start!
+        runtime 'fundamental.forward-char (application-command-context application))
+      (command-runtime-start!
+        runtime 'fundamental.transpose-characters (application-command-context application))
+      (unless (string=? (buffer-string buffer) "ab\n1324\nz")
+        (error 'fundamental-editing-tests "transpose-characters did not preserve grapheme ranges"))
+      (command-runtime-start!
+        runtime 'fundamental.beginning-of-buffer (application-command-context application))
+      (command-runtime-start!
+        runtime 'fundamental.end-of-buffer (application-command-context application))
+      (unless (= (selection-range-head
+                   (selection-primary-range (view-state-selection (view-state view))))
+                 9)
+        (error 'fundamental-editing-tests "Buffer boundary motion is incorrect"))
+      (soda-application-close! application))
+
     (let* ([document (make-document "a\n")]
            [snapshot (document-snapshot document)]
            [selection (make-selection (list (make-selection-range 2 2)))]
