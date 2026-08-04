@@ -6,6 +6,7 @@
           text-layout-cursor-row
           text-layout-cursor-column
           text-layout-complete?
+          text-layout-visible-ranges
           text-layout-document->point
           text-layout-point->document
           text-layout-point->display-entry
@@ -50,6 +51,11 @@
        (%make-text-layout frame display-map cursor-row cursor-column complete?)]))
 
   (define offset? nonnegative-exact-integer?)
+
+  (define (text-layout-visible-ranges layout)
+    (unless (text-layout? layout)
+      (assertion-violation 'text-layout-visible-ranges "expected a TextLayout" layout))
+    (display-map-visible-ranges (text-layout-display-map layout)))
 
   ;; Layout policy is explicit rather than inherited from a terminal frontend.
   ;; A View later supplies this from its configuration facets.

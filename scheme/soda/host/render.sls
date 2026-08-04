@@ -10,6 +10,7 @@
           rendered-view-view-id
           rendered-view-rectangle
           rendered-view-layout
+          rendered-view-visible-ranges
           make-surface-hit
           surface-hit?
           surface-hit-view-id
@@ -49,6 +50,11 @@
     (unless (and (rectangle? rectangle) (text-layout? layout))
       (assertion-violation 'make-rendered-view "invalid rendered View" view-id rectangle layout))
     (%make-rendered-view view-id (list-copy rectangle) layout))
+
+  (define (rendered-view-visible-ranges rendered)
+    (unless (rendered-view? rendered)
+      (assertion-violation 'rendered-view-visible-ranges "expected a RenderedView" rendered))
+    (text-layout-visible-ranges (rendered-view-layout rendered)))
 
   (define-record-type
     (surface-hit %make-surface-hit surface-hit?)

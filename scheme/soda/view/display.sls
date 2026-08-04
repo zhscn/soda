@@ -10,7 +10,8 @@
           display-map-entry-cell-from display-map-entry-cell-to display-map-entry-kind
           display-map-entry-source make-display-map display-map? display-map-entries
           display-map-document->cell display-map-cell->document display-map-document-range
-          display-map-cell-range)
+          display-map-cell-range
+          display-map-visible-ranges)
   (import (rnrs) (soda kernel value))
 
   (define offset? nonnegative-exact-integer?)
@@ -228,4 +229,27 @@
                                  (> (display-map-entry-cell-to entry) from)))
                         (cons entry result)
                         result)))))))
+
+  ;; Visible document ranges are derived from the displayed map entries rather
+  ;; than from a source-line approximation.  Virtual and widget entries have
+  ;; empty document intervals and therefore do not make unrelated document
+  ;; text visible.  Adjacent source intervals coalesce into one half-open
+  ;; range; structural replacements preserve their explicit source interval.
+  (define (display-map-visible-ranges map)
+    (unless (display-map? map)
+      (assertion-violation 'display-map-visible-ranges "expected a DisplayMap" map))
+    (let loop ([entries (display-map-entries map)] [result '()])
+      (if (null? entries)
+          (reverse result)
+          (let* ([entry (car entries)]
+                 [from (display-map-entry-document-from entry)]
+                 [to (display-map-entry-document-to entry)])
+            (cond
+              [(= from to) (loop (cdr entries) result)]
+              [(and (pair? result) (<= from (cdr (car result))))
+               (loop (cdr entries)
+                     (cons (cons (car (car result)) (max to (cdr (car result))))
+                           (cdr result)))]
+              [else
+               (loop (cdr entries) (cons (cons from to) result))])))))
 )

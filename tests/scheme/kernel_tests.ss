@@ -2118,6 +2118,20 @@
                (= (display-map-document->cell map 2 'after) 3))
     (error 'kernel-tests "DisplayStream layout differs")))
 
+;; Visible ranges come from the finished display mapping.  They exclude
+;; virtual content and retain source gaps created by structural projection.
+(let* ([stream
+        (make-display-stream
+          (list (make-display-text "a" 0 1 'text 'document)
+                (make-display-text ":" 1 1 'hint 'inlay)
+                (make-display-text "F" 2 4 'fold 'fold)
+                (make-display-text "z" 5 6 'text 'document)))]
+       [layout (layout-display-stream
+                 stream (make-selection (list (make-selection-range 0 0))) 8 1)])
+  (unless (equal? (text-layout-visible-ranges layout)
+                  (list (cons 0 1) (cons 2 4) (cons 5 6)))
+    (error 'kernel-tests "TextLayout visible ranges differ")))
+
 (let* ([stream
         (make-display-stream
           (list (make-display-text "e\x301;" 0 3 'text 'document)))]
