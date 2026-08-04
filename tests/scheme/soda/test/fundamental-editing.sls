@@ -101,6 +101,21 @@
     (let* ([application (make-soda-application)]
            [state (soda-application-state application)]
            [runtime (host-state-command-runtime state)]
+           [buffer (soda-application-buffer application)])
+      (command-runtime-start!
+        runtime 'fundamental.insert-text (application-command-context application)
+        (list (string->utf8 "history")))
+      (command-runtime-start! runtime 'history.undo (application-command-context application))
+      (unless (string=? (buffer-string buffer) "")
+        (error 'fundamental-editing-tests "history.undo did not replay the inverse change"))
+      (command-runtime-start! runtime 'history.redo (application-command-context application))
+      (unless (string=? (buffer-string buffer) "history")
+        (error 'fundamental-editing-tests "history.redo did not replay the original change"))
+      (soda-application-close! application))
+
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [runtime (host-state-command-runtime state)]
            [buffer (soda-application-buffer application)]
            [view (soda-application-view application)])
       (command-runtime-start!

@@ -20,6 +20,7 @@
           (soda host internal window)
           (soda host value)
           (soda packages base fundamental-editing)
+          (soda packages base history)
           (soda support cleanup)
           (soda tui clipboard)
           (soda tui terminal-frontend))
@@ -73,7 +74,10 @@
                   '(80 . 24))]
                [editing
                 (make-fundamental-editing!
-                  (host-state-command-runtime state) owner)])
+                  (host-state-command-runtime state) owner)]
+               [_history
+                (make-history! (host-state-command-runtime state)
+                               (host-state-dispatch state) owner)])
           (surface-service-register! (host-state-surfaces state) surface)
           (%make-soda-application
             state owner buffer view surface editing #f #f #f)))))
