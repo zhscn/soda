@@ -9,6 +9,7 @@
           soda-application-history
           soda-application-files
           soda-application-interaction
+          soda-application-minibuffer
           soda-application-run!
           soda-application-close!)
   (import (rnrs)
@@ -26,6 +27,7 @@
           (soda packages base history)
           (soda packages file)
           (soda packages interaction)
+          (soda packages minibuffer)
           (soda support cleanup)
           (soda tui clipboard)
           (soda tui terminal-frontend))
@@ -44,6 +46,7 @@
       (immutable history soda-application-history)
       (immutable files soda-application-files)
       (immutable interaction soda-application-interaction)
+      (immutable minibuffer soda-application-minibuffer)
       (mutable terminal soda-application-terminal soda-application-terminal-set!)
       (mutable effect-registration soda-application-effect-registration
                soda-application-effect-registration-set!)
@@ -90,11 +93,12 @@
                 (make-file-service! (host-state-command-runtime state)
                                     (host-state-buffers state) owner history)]
                [interaction
-                (make-interaction-service! (host-state-command-runtime state) owner)])
+                (make-interaction-service! (host-state-command-runtime state) owner)]
+               [minibuffer (make-minibuffer-service! state interaction owner)])
           (surface-service-register! (host-state-surfaces state) surface)
           (history-mark-saved! history (buffer-id buffer))
           (%make-soda-application
-            state owner buffer view surface editing history files interaction #f #f #f)))))
+            state owner buffer view surface editing history files interaction minibuffer #f #f #f)))))
 
   (define (require-open who application)
     (unless (and (soda-application? application)
