@@ -2533,31 +2533,6 @@
     (error 'kernel-tests "interactive command resume did not preserve its invocation"))
   (owner-close! package-owner))
 
-;; Owner cleanup cancels a suspended invocation and removes it from the
-;; runtime, so package unload cannot leave a stale continuation target.
-(let* ([package-owner (make-owner 'command-unload-test)]
-       [runtime (host-state-command-runtime host)]
-       [reader
-        (make-interactive-reader
-          'pending
-          (lambda (context arguments)
-            (make-interactive-suspend 'pending
-              (lambda (value) (make-interactive-ready (list value))))))]
-       [definition
-        (make-command-definition
-          'command.unload-test
-          (lambda (context value) (command-handled))
-          package-owner (make-interactive-plan (list reader)))]
-       [_command (command-register! (host-state-commands host) definition)]
-       [invocation
-        (command-runtime-start-interactive!
-          runtime 'command.unload-test (make-command-context #f #f 'test))]
-       [id (command-invocation-id invocation)])
-  (owner-close! package-owner)
-  (unless (and (eq? (command-invocation-phase invocation) 'cancelled)
-               (not (command-runtime-invocation runtime id #f)))
-    (error 'kernel-tests "package unload left an active command invocation")))
-
 ;; Command messages run at HostState's runtime-queue boundary rather than
 ;; recursively from the input or interaction implementation.
 (let* ([package-owner (make-owner 'command-queue-test)]

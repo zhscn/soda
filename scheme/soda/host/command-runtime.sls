@@ -44,7 +44,6 @@
       (immutable queue command-runtime-queue)
       (immutable conditions command-runtime-conditions)
       (immutable invocations command-runtime-invocations)
-      (immutable registrations command-runtime-registrations)
       (immutable advice command-runtime-advice)
       (immutable hooks command-runtime-hooks)
       (immutable effects command-runtime-effects)
@@ -61,7 +60,7 @@
       (assertion-violation 'make-command-runtime "invalid command runtime dependencies"))
     (%make-command-runtime
       owner registry dispatcher queue conditions
-      (make-eqv-hashtable) (make-eqv-hashtable) (make-eq-hashtable) (make-eq-hashtable)
+      (make-eqv-hashtable) (make-eq-hashtable) (make-eq-hashtable)
       (make-eq-hashtable) #f #f 0))
 
   (define-record-type
@@ -322,14 +321,8 @@
       result))
 
   (define (retire-invocation! service invocation)
-    (let* ([id (command-invocation-id invocation)]
-           [registrations (command-runtime-registrations service)]
-           [registration (hashtable-ref registrations id #f)])
-      ;; Remove identity first: closing its owner registration may call back
-      ;; into command-runtime-cancel!, which then sees no live invocation.
-      (hashtable-delete! (command-runtime-invocations service) id)
-      (hashtable-delete! registrations id)
-      (when registration (registration-close! registration)))
+    (hashtable-delete! (command-runtime-invocations service)
+                       (command-invocation-id invocation))
     invocation)
 
   (define (capture-command-condition! service invocation condition)
@@ -388,13 +381,6 @@
                  (make-command-invocation definition context arguments))])
       (hashtable-set! (command-runtime-invocations service)
                       (command-invocation-id invocation) invocation)
-      (hashtable-set!
-        (command-runtime-registrations service)
-        (command-invocation-id invocation)
-        (make-registration
-          (command-definition-owner definition)
-          (lambda ()
-            (command-runtime-cancel! service (command-invocation-id invocation)))))
       (advance-invocation! service invocation #f #f)))
 
   (define command-runtime-start!

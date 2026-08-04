@@ -949,10 +949,9 @@ CommandRuntime
   set interaction handler           -> request presentation adapter
 ```
 
-每个 registration 归属于一个 `Owner`。卸载 package 时，其 command、advice、hook、
-effect handler 和未完成 invocation 一起撤销。advice 支持 `before`、`after`、`around`、
-`filter-args` 与 `filter-return` placement；hook 观察 invocation 与已规范化 result，不能
-取得 runtime 内部表或 dispatcher publication state。
+每个 registration 归属于一个 `Owner`，并随 host 生命周期清理。advice 支持 `before`、
+`after`、`around`、`filter-args` 与 `filter-return` placement；hook 观察 invocation 与
+已规范化 result，不能取得 runtime 内部表或 dispatcher publication state。
 
 命令结果是一个有序 outcome 序列：`handled`、`TransactionSpec`、
 `ViewTransactionSpec`、`HostOperation` 或 `CommandEffect`。runtime 依序提交前四类
