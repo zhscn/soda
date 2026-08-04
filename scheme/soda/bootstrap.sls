@@ -21,6 +21,7 @@
           (soda host value)
           (soda packages base fundamental-editing)
           (soda support cleanup)
+          (soda tui clipboard)
           (soda tui terminal-frontend))
 
   ;; Bootstrap is composition only.  It supplies the first concrete Buffer,
@@ -67,7 +68,7 @@
                   (host-state-views state) owner buffer configuration)]
                [surface
                 (make-surface
-                  'terminal '(kitty color-256)
+                  'terminal '(kitty color-256 osc52)
                   (make-leaf-window (view-id view) '(0 0 80 24))
                   '(80 . 24))]
                [editing
@@ -116,22 +117,46 @@
              (run-cleanups!
                (list (lambda () (terminal-frontend-close! terminal)))))
            (raise condition)])
-        (let ([registration
-               (command-runtime-register-effect-handler!
-                 runtime 'application.quit (soda-application-owner application) 'stop-terminal
-                 (lambda (service invocation effect)
-                   (stop-application-terminal! application)))])
-          (soda-application-effect-registration-set! application registration)
-          (dynamic-wind
-            (lambda () #f)
-            (lambda () (terminal-frontend-run! terminal))
-            (lambda ()
-              (soda-application-terminal-set! application #f)
-              (soda-application-effect-registration-set! application #f)
-              (run-cleanups!
-                (list
-                  (lambda () (registration-close! registration))
-                  (lambda () (terminal-frontend-close! terminal))))))))))
+        (let ([registration #f]
+              [clipboard-registration #f])
+          (guard
+            (condition
+              [else
+               (soda-application-terminal-set! application #f)
+               (soda-application-effect-registration-set! application #f)
+               (guard (ignored [else #f])
+                 (run-cleanups!
+                   (list
+                     (lambda () (when clipboard-registration
+                                  (registration-close! clipboard-registration)))
+                     (lambda () (when registration (registration-close! registration)))
+                     (lambda () (terminal-frontend-close! terminal)))))
+               (raise condition)])
+            (set! registration
+              (command-runtime-register-effect-handler!
+                runtime 'application.quit (soda-application-owner application) 'stop-terminal
+                (lambda (service invocation effect)
+                  (stop-application-terminal! application))))
+            (set! clipboard-registration
+              (command-runtime-register-effect-handler!
+                runtime 'clipboard.write (soda-application-owner application) 'terminal-clipboard
+                (make-terminal-clipboard-effect-handler
+                  (lambda (control) (terminal-frontend-write-control! terminal control))
+                  (memq 'osc52
+                        (surface-capabilities (soda-application-surface application)))
+                  100000)))
+            (soda-application-effect-registration-set! application registration)
+            (dynamic-wind
+              (lambda () #f)
+              (lambda () (terminal-frontend-run! terminal))
+              (lambda ()
+                (soda-application-terminal-set! application #f)
+                (soda-application-effect-registration-set! application #f)
+                (run-cleanups!
+                  (list
+                    (lambda () (registration-close! clipboard-registration))
+                    (lambda () (registration-close! registration))
+                    (lambda () (terminal-frontend-close! terminal)))))))))))
 
   (define (soda-application-close! application)
     (unless (soda-application? application)

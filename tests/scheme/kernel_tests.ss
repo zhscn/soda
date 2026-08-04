@@ -47,6 +47,7 @@
         (soda tui presenter-session)
         (soda test fundamental-editing)
         (soda test host-integration)
+        (soda test terminal-clipboard)
         (soda view display)
         (soda view frame)
         (soda view compositor)
@@ -2666,4 +2667,5 @@
 
 (run-fundamental-editing-tests!)
 (run-host-integration-tests!)
+(run-terminal-clipboard-tests!)
 (host-state-close! host)

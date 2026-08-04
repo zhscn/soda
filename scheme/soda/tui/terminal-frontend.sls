@@ -7,6 +7,7 @@
           terminal-frontend-stop!
           terminal-frontend-step!
           terminal-frontend-run!
+          terminal-frontend-write-control!
           terminal-frontend-close!)
   (import (rnrs)
           (prefix (soda ffi runtime) native:)
@@ -122,6 +123,11 @@
     (require-open 'terminal-frontend-stop! value)
     (terminal-frontend-active?-set! value #f)
     #t)
+
+  (define (terminal-frontend-write-control! value control)
+    (require-open 'terminal-frontend-write-control! value)
+    (terminal-presenter-session-write-control!
+      (terminal-frontend-presenter value) control))
 
   (define (terminal-frontend-handle-native-event! value event)
     (cond

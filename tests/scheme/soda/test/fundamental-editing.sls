@@ -97,6 +97,38 @@
                "fundamental editing did not produce stable editor state"))
       (soda-application-close! application))
 
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [runtime (host-state-command-runtime state)]
+           [buffer (soda-application-buffer application)]
+           [view (soda-application-view application)])
+      (command-runtime-start!
+        runtime 'fundamental.insert-text (application-command-context application)
+        (list (string->utf8 "alpha beta")))
+      (command-runtime-start!
+        runtime 'fundamental.set-mark (application-command-context application))
+      (command-runtime-start!
+        runtime 'fundamental.backward-word (application-command-context application))
+      (let ([region (selection-primary-range (view-state-selection (view-state view)))])
+        (unless (and (= (selection-range-anchor region) 10)
+                     (= (selection-range-head region) 6))
+          (error 'fundamental-editing-tests
+                 "set-mark and motion did not form the expected region")))
+      (command-runtime-start!
+        runtime 'fundamental.kill-region (application-command-context application))
+      (unless (and (string=? (buffer-string buffer) "alpha ")
+                   (= (selection-range-head
+                        (selection-primary-range (view-state-selection (view-state view))))
+                      6))
+        (error 'fundamental-editing-tests
+               "kill-region did not delete the primary active region"))
+      (command-runtime-start!
+        runtime 'fundamental.yank (application-command-context application))
+      (unless (string=? (buffer-string buffer) "alpha beta")
+        (error 'fundamental-editing-tests
+               "yank did not restore the newest kill-ring entry"))
+      (soda-application-close! application))
+
     (let* ([document (make-document "a\n")]
            [snapshot (document-snapshot document)]
            [selection (make-selection (list (make-selection-range 2 2)))]
