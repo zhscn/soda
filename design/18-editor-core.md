@@ -573,6 +573,10 @@ Window、focus、Buffer lifecycle 和 Surface mutation 使用 HostOperation，�
 dispatcher 串行执行并产生 HostUpdate。command、runtime message、internal refresh 和测试
 都只能调用 dispatcher，不持有 registry 内部可变表。
 
+公开的 Window、Surface 与 context library 只暴露 identity、value 和 placement query；Window
+tree layout、Surface focus/resize/interaction 及 placement resolver 位于 host internal，只由
+dispatcher 使用。功能包不能通过读取 leaf 或 active context 取得可变 placement API。
+
 HostOperation 使用 target identity，不携带 Surface、View 或 registry 对象。基础 operation 包括
 按 Surface/View identity 聚焦、将一个已有 View 放入当前 leaf 的新 split、移除指定 leaf、调整
 Surface cell size，以及携带 `DisplayRequest` 的 placement 路由。Window tree mutation 只改变 placement，不关闭
