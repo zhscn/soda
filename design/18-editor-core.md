@@ -978,7 +978,6 @@ pending argument、step task 或 invocation，并回到最近的 command loop bo
 ```text
 BufferState
   + ViewState
-  + ContentPropertySet
   + DecorationSet facets
   + ViewPlugin decorations
       -> DisplayStream
@@ -986,9 +985,10 @@ BufferState
       -> Frame
 ```
 
-Decoration 描述 face、replacement、virtual text、invisibility、widget attachment 和 layer。
-Decoration 是 View/render state，不自动进入 history。需要随内容 undo 的显示语义保存在
-ContentPropertySet，由 display provider 转换为 DecorationSet。
+DecorationSet 描述有优先级的 face range，是 View/render state，不自动进入 history。
+replacement、virtual text、invisibility 与 widget attachment 由完整 DisplayStream provider 或
+有序 DisplayStream transform 表达。结构显示只经过这一条投影路径，因而不会与 range face
+产生第二套重叠、排序或 source mapping 规则。
 
 DisplayMap 保存 document offset、display cell 和 virtual content 之间的映射。cursor、hit
 test、vertical motion、describe-char 和 source location 使用同一映射。renderer 按可见
