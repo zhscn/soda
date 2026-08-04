@@ -26,6 +26,7 @@
           (soda packages base text-motion)
           (soda packages file)
           (soda packages interaction)
+          (soda packages minibuffer)
           (soda packages resource)
           (soda support vfs)
           (soda tui frontend)
@@ -110,15 +111,18 @@
            [state (soda-application-state application)]
            [runtime (host-state-command-runtime state)]
            [interaction (soda-application-interaction application)]
+           [minibuffer (soda-application-minibuffer application)]
            [owner (make-owner 'interaction-package-test)]
            [observed #f]
            [events '()]
+           [setup-input #f]
+           [exit-input #f]
            [reader
             (make-interactive-reader
               'read-value
               (lambda (context arguments)
                 (make-interactive-suspend
-                  (make-interaction-request 'string "Value: ")
+                  (make-interaction-request 'string "Value: " "accepted" #f 'free)
                   (lambda (value) (make-interactive-ready (list value))))))]
            [_listener
             (interaction-service-add-listener!
@@ -129,6 +133,14 @@
               interaction owner
               (lambda (event session)
                 (assertion-violation 'interaction-listener-test "listener failure" event)))]
+           [_setup-hook
+            (minibuffer-service-add-hook!
+              minibuffer 'setup owner
+              (lambda (snapshot) (set! setup-input (prompt-snapshot-input snapshot))))]
+           [_exit-hook
+            (minibuffer-service-add-hook!
+              minibuffer 'exit owner
+              (lambda (snapshot) (set! exit-input (prompt-snapshot-input snapshot))))]
            [_command
             (command-runtime-register-command!
               runtime
@@ -151,12 +163,16 @@
                    (eq? (interaction-session-reader-name session) 'read-value)
                    (eq? (interaction-request-kind (interaction-session-request session)) 'string)
                    (string=? (interaction-request-prompt (interaction-session-request session))
-                             "Value: "))
+                             "Value: ")
+                   (minibuffer-service-current minibuffer)
+                   (string=? setup-input "accepted"))
         (error 'fundamental-editing-tests "interactive command did not open a reusable session"))
-      (interaction-service-submit! interaction "accepted")
+      (command-runtime-start! runtime 'minibuffer.accept (application-command-context application))
       (host-state-run! state)
       (unless (and (string=? observed "accepted")
                    (not (interaction-service-current interaction))
+                   (not (minibuffer-service-current minibuffer))
+                   (string=? exit-input "accepted")
                    (equal? (reverse events) '(opened accepted)))
         (error 'fundamental-editing-tests "interaction submission did not resume through the queue"))
       (let ([cancelled

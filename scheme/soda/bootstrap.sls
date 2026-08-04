@@ -113,17 +113,7 @@
 
   (define (make-disposition-handler application)
     (lambda (context disposition)
-      (case (input-disposition-kind disposition)
-        [(command)
-         (case (input-disposition-value disposition)
-           [(minibuffer.accept)
-            (minibuffer-service-submit! (soda-application-minibuffer application))
-            #f]
-           [(minibuffer.cancel)
-            (minibuffer-service-cancel! (soda-application-minibuffer application))
-            #f]
-           [else (fundamental-input-disposition context disposition)])]
-        [else (fundamental-input-disposition context disposition)])))
+      (fundamental-input-disposition context disposition)))
 
   (define (stop-application-terminal! application)
     (let ([terminal (soda-application-terminal application)])

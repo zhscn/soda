@@ -10,8 +10,13 @@
           minibuffer-session-origin-view-id
           minibuffer-session-completion
           prompt-snapshot?
-          prompt-snapshot-session-id prompt-snapshot-input
+          prompt-snapshot-session-id prompt-snapshot-request
+          prompt-snapshot-input prompt-snapshot-input-revision
+          prompt-snapshot-point prompt-snapshot-selection
           prompt-snapshot-origin-context prompt-snapshot-completion-generation
+          prompt-snapshot-presentation
+          minibuffer-session-snapshot
+          minibuffer-service-add-hook!
           minibuffer-service-refresh-completion!
           minibuffer-service-select-completion!
           minibuffer-input-context
@@ -19,9 +24,11 @@
           minibuffer-service-cancel!)
   (import (rnrs)
           (soda kernel document)
+          (soda kernel selection)
           (soda kernel state)
           (soda kernel view-state)
           (soda host command)
+          (soda host command-runtime)
           (soda host input)
           (soda host input-event)
           (soda host internal buffer)
@@ -37,15 +44,20 @@
   ;; their session stack and its interaction overlay placement.
   (define-record-type
     (minibuffer-session %make-minibuffer-session minibuffer-session?)
-    (fields interaction buffer-id view-id origin-view-id surface-id
+    (fields interaction buffer-id view-id origin-view-id surface-id rectangle
             (mutable completion minibuffer-session-completion minibuffer-session-completion-set!)))
   (define-record-type
     (prompt-snapshot %make-prompt-snapshot prompt-snapshot?)
-    (fields session-id input origin-context completion-generation))
+    (fields session-id request input input-revision point selection origin-context
+            completion-generation presentation))
+  (define-record-type minibuffer-hook
+    (fields owner procedure))
   (define-record-type
     (minibuffer-service %make-minibuffer-service minibuffer-service?)
     (fields state interactions owner keymap
             (mutable sessions minibuffer-service-sessions minibuffer-service-sessions-set!)
+            (mutable setup-hooks minibuffer-service-setup-hooks minibuffer-service-setup-hooks-set!)
+            (mutable exit-hooks minibuffer-service-exit-hooks minibuffer-service-exit-hooks-set!)
             (mutable registration minibuffer-service-registration minibuffer-service-registration-set!)))
 
   (define (session-for service interaction)
@@ -61,13 +73,59 @@
     (let ([buffer (buffer-service-ref (host-state-buffers (minibuffer-service-state service))
                                       (minibuffer-session-buffer-id session) #f)])
       (and buffer (snapshot-string (buffer-state-document (buffer-state buffer))))))
-  (define (session-snapshot service session)
-    (%make-prompt-snapshot
-      (interaction-session-invocation-id (minibuffer-session-interaction session))
-      (or (session-input service session) "")
-      (interaction-session-context (minibuffer-session-interaction session))
-      (let ([controller (minibuffer-session-completion session)])
-        (if controller (completion-controller-generation controller) 0))))
+  (define (minibuffer-session-snapshot service session)
+    (unless (and (minibuffer-service? service) (minibuffer-session? session))
+      (assertion-violation 'minibuffer-session-snapshot
+                           "expected a minibuffer service and session" service session))
+    (let* ([state (minibuffer-service-state service)]
+           [buffer (buffer-service-ref (host-state-buffers state)
+                                       (minibuffer-session-buffer-id session) #f)]
+           [view (view-service-ref (host-state-views state)
+                                   (minibuffer-session-view-id session) #f)]
+           [selection (and view (view-state-selection (view-state view)))]
+           [range (and selection (selection-primary-range selection))]
+           [controller (minibuffer-session-completion session)]
+           [surface (surface-service-ref (host-state-surfaces state)
+                                         (minibuffer-session-surface-id session) #f)])
+      (%make-prompt-snapshot
+        (interaction-session-invocation-id (minibuffer-session-interaction session))
+        (interaction-session-request (minibuffer-session-interaction session))
+        (if buffer (snapshot-string (buffer-state-document (buffer-state buffer))) "")
+        (if buffer (buffer-state-generation (buffer-state buffer)) 0)
+        (if range (selection-range-head range) 0)
+        selection
+        (interaction-session-context (minibuffer-session-interaction session))
+        (if controller (completion-controller-generation controller) 0)
+        (list (cons 'surface-id (minibuffer-session-surface-id session))
+              (cons 'surface-size (and surface (surface-size surface)))
+              (cons 'overlay-rectangle (minibuffer-session-rectangle session))))))
+  (define (notify-hooks! hooks snapshot)
+    (for-each
+      (lambda (hook)
+        (guard (ignored [else #f])
+          ((minibuffer-hook-procedure hook) snapshot)))
+      hooks))
+  (define (minibuffer-service-add-hook! service phase owner procedure)
+    (unless (and (minibuffer-service? service) (memq phase '(setup exit))
+                 (owner? owner) (procedure? procedure))
+      (assertion-violation 'minibuffer-service-add-hook!
+                           "expected a minibuffer service, phase, owner, and procedure"
+                           service phase owner procedure))
+    (owner-assert-active 'minibuffer-service-add-hook! owner)
+    (let* ([hook (make-minibuffer-hook owner procedure)]
+           [accessor (if (eq? phase 'setup)
+                         minibuffer-service-setup-hooks
+                         minibuffer-service-exit-hooks)]
+           [setter (if (eq? phase 'setup)
+                       minibuffer-service-setup-hooks-set!
+                       minibuffer-service-exit-hooks-set!)])
+      (setter service (append (accessor service) (list hook)))
+      (make-registration
+        owner
+        (lambda ()
+          (setter service
+                  (filter (lambda (item) (not (eq? item hook)))
+                          (accessor service)))))))
   (define (control-stroke character)
     (make-key-stroke 'character (char->integer character) 4))
   (define (minibuffer-input-context service active view)
@@ -97,17 +155,23 @@
                [size (surface-size surface)]
                [rectangle (list (max 0 (- (cdr size) 1)) 0 (car size) 1)])
           (surface-push-interaction! surface (view-id view) rectangle)
-          (minibuffer-service-sessions-set!
-            service
-            (cons (%make-minibuffer-session interaction (buffer-id buffer) (view-id view)
-                                             (view-id origin) (surface-id surface) #f)
-                  (minibuffer-service-sessions service))))))
+          (let ([session
+                  (%make-minibuffer-session interaction (buffer-id buffer) (view-id view)
+                                             (view-id origin) (surface-id surface) rectangle #f)])
+            (minibuffer-service-sessions-set!
+              service (cons session (minibuffer-service-sessions service)))
+            (notify-hooks! (minibuffer-service-setup-hooks service)
+                           (minibuffer-session-snapshot service session))))))
         )
   (define (close! service interaction)
     (let ([session (session-for service interaction)])
       (when session
         (let ([controller (minibuffer-session-completion session)])
-          (when controller (completion-controller-restore! controller (session-snapshot service session))))
+          (when controller
+            (completion-controller-restore! controller
+                                            (minibuffer-session-snapshot service session))))
+        (notify-hooks! (minibuffer-service-exit-hooks service)
+                       (minibuffer-session-snapshot service session))
         (minibuffer-service-sessions-set!
           service (filter (lambda (item) (not (eq? item session)))
                           (minibuffer-service-sessions service)))
@@ -130,7 +194,7 @@
              (and value (or (eq? policy 'free) candidate)
                   (begin
                     (when controller (completion-controller-accept! controller
-                                                                      (session-snapshot service session)))
+                                                                      (minibuffer-session-snapshot service session)))
                     (interaction-service-submit! (minibuffer-service-interactions service) value)))))))
   (define (minibuffer-service-refresh-completion! service)
     (let ([session (minibuffer-service-current service)])
@@ -142,12 +206,13 @@
                                         (make-completion-controller
                                           source (interaction-request-selection-policy request)))])
                     (minibuffer-session-completion-set! session controller)
-                    (completion-controller-refresh! controller (session-snapshot service session))))))))
+                    (completion-controller-refresh! controller
+                                                    (minibuffer-session-snapshot service session))))))))
   (define (minibuffer-service-select-completion! service index)
     (let ([session (minibuffer-service-current service)])
       (and session (minibuffer-session-completion session)
            (completion-controller-select! (minibuffer-session-completion session) index
-                                          (session-snapshot service session)))))
+                                          (minibuffer-session-snapshot service session)))))
   (define (minibuffer-service-cancel! service)
     (and (minibuffer-service-current service)
          (interaction-service-cancel! (minibuffer-service-interactions service))))
@@ -159,7 +224,19 @@
       (keymap-bind! keymap (list (control-stroke #\j)) 'minibuffer.accept)
       (keymap-bind! keymap (list (control-stroke #\g)) 'minibuffer.cancel)
       (keymap-bind! keymap (list (make-key-stroke 'escape #f 0)) 'minibuffer.cancel)
-      (let ([service (%make-minibuffer-service state interactions owner keymap '() #f)])
+      (let ([service (%make-minibuffer-service state interactions owner keymap '() '() '() #f)])
+      (command-runtime-register-command!
+        (host-state-command-runtime state)
+        (make-command-definition
+          'minibuffer.accept
+          (lambda (context) (minibuffer-service-submit! service) (command-handled))
+          owner "Accept the current minibuffer input." 'minibuffer #f))
+      (command-runtime-register-command!
+        (host-state-command-runtime state)
+        (make-command-definition
+          'minibuffer.cancel
+          (lambda (context) (minibuffer-service-cancel! service) (command-handled))
+          owner "Cancel the current minibuffer input." 'minibuffer #f))
       (minibuffer-service-registration-set!
         service
         (interaction-service-add-listener!

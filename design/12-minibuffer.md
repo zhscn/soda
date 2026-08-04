@@ -6,7 +6,7 @@
 |---|---|
 | 非递归 request/session/continuation 协议 | 已实现 |
 | 独立 Buffer/View、接受、取消与 overlay 生命周期 | 已实现 |
-| completion controller 与 candidate source | 规划中 |
+| completion controller 与 candidate source | 已实现 |
 | Vertico 风格候选窗口、固定高度与滚动 | 规划中 |
 | history、固定集合与任意输入 selection policy | 规划中 |
 | `interactive-completing-read` | 规划中 |
@@ -77,6 +77,11 @@ PromptRequest {
 `PromptSession` 保存 session id、request、transient buffer/view id、origin view id、
 状态和 history 游标。session id 单调递增，供后续 completion generation 和异步
 结果校验使用。
+
+`minibuffer.accept` 与 `minibuffer.cancel` 是普通 command。minibuffer keymap 只绑定
+这两个命令，frontend 按所有其他 command 相同的队列路径投递它们。`setup` 和 `exit`
+hook 以 owner-scoped registration 安装，回调只接收 `PromptSnapshot`；hook 不能持有或
+改写 transient Buffer、View 与 Surface。
 
 `PromptResult` 包含 session id、`accepted` 或 `aborted` 状态、最终值、选中的
 completion candidate、origin view id 和 request data。接受结果先关闭 session
