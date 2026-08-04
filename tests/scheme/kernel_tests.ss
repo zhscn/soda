@@ -45,6 +45,8 @@
         (soda tui terminal-session)
         (soda tui presenter)
         (soda tui presenter-session)
+        (soda test fundamental-editing)
+        (soda test host-integration)
         (soda view display)
         (soda view frame)
         (soda view compositor)
@@ -2662,103 +2664,6 @@
   (frontend-close! frontend)
   (owner-close! package-owner))
 
-;; The first application is ordinary composition.  Its fundamental package
-;; turns committed text into transactions and keeps movement deletion on
-;; grapheme boundaries without requiring a terminal adapter.
-(let* ([application (make-soda-application)]
-       [state (soda-application-state application)]
-       [runtime (host-state-command-runtime state)]
-       [buffer (soda-application-buffer application)]
-       [view (soda-application-view application)]
-       [editing (soda-application-editing application)]
-       [inserted
-        (command-runtime-start!
-          runtime 'fundamental.insert-text (application-command-context application)
-          (list (string->utf8 "a😀")))]
-       [backward
-        (command-runtime-start!
-          runtime 'fundamental.backward-char (application-command-context application))]
-       [deleted
-        (command-runtime-start!
-          runtime 'fundamental.delete-forward (application-command-context application))]
-       [context
-        (fundamental-input-context
-          editing
-          (surface-active-context (soda-application-surface application)
-                                  (host-state-views state))
-          view)]
-       [disposition
-        (fundamental-input-disposition
-          (application-command-context application)
-          (input-dispatch context (make-text-input-event 'text (string->utf8 "b"))))]
-       [enter
-        (input-dispatch
-          context (make-key-event 'enter 13 #f #f 0 'press (make-bytevector 0)))]
-       [backspace
-        (input-dispatch
-          context (make-key-event 'backspace 127 #f #f 0 'press (make-bytevector 0)))])
-  (unless (and (eq? (command-invocation-phase inserted) 'completed)
-               (eq? (command-invocation-phase backward) 'completed)
-               (eq? (command-invocation-phase deleted) 'completed)
-               (string=? (buffer-string buffer) "a")
-               (= (selection-range-from
-                    (selection-primary-range (view-state-selection (view-state view))))
-                  1)
-               (= (input-context-view-id context) (view-id view))
-               (= (input-context-buffer-id context) (buffer-id buffer))
-               (command-invoke-message? disposition)
-               (eq? (command-invoke-message-name disposition)
-                    'fundamental.insert-text)
-               (eq? (input-disposition-kind enter) 'command)
-               (eq? (input-disposition-value enter) 'fundamental.newline)
-               (eq? (input-disposition-kind backspace) 'command)
-               (eq? (input-disposition-value backspace)
-                    'fundamental.delete-backward))
-    (error 'kernel-tests "fundamental editing did not produce stable editor state"))
-  (soda-application-close! application))
-
-;; A final newline owns an empty logical line.  Its caret belongs at the
-;; start of that line rather than the visual end of the preceding line.
-(let* ([document (make-document "a\n")]
-       [snapshot (document-snapshot document)]
-       [selection (make-selection (list (make-selection-range 2 2)))]
-       [layout (layout-text-snapshot snapshot selection 0 20 3)])
-  (unless (and (= (text-layout-cursor-row layout) 1)
-               (= (text-layout-cursor-column layout) 0))
-    (error 'kernel-tests "trailing newline caret did not remain on its empty line"))
-  (snapshot-close! snapshot)
-  (document-close! document))
-
-;; Surface input must observe every completed fundamental command within the
-;; same frontend step.  In particular, newline publishes its advanced caret
-;; before the next committed text event is resolved.
-(let* ([application (make-soda-application)]
-       [state (soda-application-state application)]
-       [surface (soda-application-surface application)]
-       [view (soda-application-view application)]
-       [buffer (soda-application-buffer application)]
-       [editing (soda-application-editing application)]
-       [frontend
-        (make-frontend
-          state surface
-          (lambda (active current-view)
-            (fundamental-input-context editing active current-view))
-          (lambda (context disposition)
-            (fundamental-input-disposition context disposition))
-          (lambda (render theme) #f)
-          (make-render-service) default-theme)])
-  (define (send! event)
-    (frontend-enqueue! frontend (make-surface-input-message (surface-id surface) event))
-    (frontend-step! frontend))
-  (send! (make-text-input-event 'text (string->utf8 "a")))
-  (send! (make-key-event 'enter 13 #f #f 0 'press (make-bytevector 0)))
-  (send! (make-text-input-event 'text (string->utf8 "b")))
-  (send! (make-key-event 'backspace 127 #f #f 0 'press (make-bytevector 0)))
-  (unless (and (string=? (buffer-string buffer) "a\n")
-               (= (selection-range-head
-                    (selection-primary-range (view-state-selection (view-state view))))
-                  2))
-    (error 'kernel-tests "fundamental frontend input did not advance its caret"))
-  (frontend-close! frontend)
-  (soda-application-close! application))
+(run-fundamental-editing-tests!)
+(run-host-integration-tests!)
 (host-state-close! host)

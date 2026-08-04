@@ -40,6 +40,12 @@ file(GLOB_RECURSE SODA_TEST_SCHEME_SOURCES
   "${PROJECT_SOURCE_DIR}/scheme/*.ss"
 )
 
+file(GLOB_RECURSE SODA_TEST_SUPPORT_SCHEME_SOURCES
+  CONFIGURE_DEPENDS
+  "${CMAKE_CURRENT_SOURCE_DIR}/scheme/soda/*.sls"
+  "${CMAKE_CURRENT_SOURCE_DIR}/scheme/soda/*.ss"
+)
+
 add_executable(scheme_kernel_tests
   "${PROJECT_SOURCE_DIR}/src/launcher/main.c"
 )
@@ -64,7 +70,10 @@ soda_embed_chez_application(scheme_kernel_tests
   SOURCE_DIR "${PROJECT_SOURCE_DIR}/scheme"
   PROGRAM "soda/test/kernel-tests.ss"
   PROGRAM_SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/scheme/kernel_tests.ss"
-  SOURCES ${SODA_TEST_SCHEME_SOURCES}
+  SOURCES
+    ${SODA_TEST_SCHEME_SOURCES}
+    ${SODA_TEST_SUPPORT_SCHEME_SOURCES}
+  EXTRA_SOURCE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/scheme"
 )
 add_test(NAME scheme_kernel_tests COMMAND scheme_kernel_tests)
 set_tests_properties(scheme_kernel_tests PROPERTIES

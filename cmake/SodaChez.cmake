@@ -37,7 +37,7 @@ find_library(SODA_CHEZ_KERNEL_LIBRARY
 function(soda_embed_chez_application target)
   set(options)
   set(one_value_args SOURCE_DIR PROGRAM PROGRAM_SOURCE)
-  set(multi_value_args SOURCES)
+  set(multi_value_args SOURCES EXTRA_SOURCE_DIRS)
   cmake_parse_arguments(SODA_CHEZ
     "${options}"
     "${one_value_args}"
@@ -73,6 +73,8 @@ function(soda_embed_chez_application target)
 
   set(program_stage_commands)
   set(program_stage_depends)
+  set(extra_stage_commands)
+  set(extra_stage_depends)
   if(SODA_CHEZ_PROGRAM_SOURCE)
     get_filename_component(program_directory "${SODA_CHEZ_PROGRAM}" DIRECTORY)
     if(NOT program_directory)
@@ -86,6 +88,20 @@ function(soda_embed_chez_application target)
         "${staging_dir}/${SODA_CHEZ_PROGRAM}")
     list(APPEND program_stage_depends "${SODA_CHEZ_PROGRAM_SOURCE}")
   endif()
+
+  foreach(extra_source_dir IN LISTS SODA_CHEZ_EXTRA_SOURCE_DIRS)
+    if(NOT IS_DIRECTORY "${extra_source_dir}")
+      message(FATAL_ERROR
+        "soda_embed_chez_application EXTRA_SOURCE_DIRS must contain directories: "
+        "${extra_source_dir}"
+      )
+    endif()
+    list(APPEND extra_stage_commands
+      COMMAND "${CMAKE_COMMAND}" -E copy_directory
+        "${extra_source_dir}"
+        "${staging_dir}")
+    list(APPEND extra_stage_depends "${extra_source_dir}")
+  endforeach()
 
   add_custom_command(
     OUTPUT
@@ -135,6 +151,7 @@ function(soda_embed_chez_application target)
     COMMAND "${CMAKE_COMMAND}" -E copy_directory
       "${SODA_CHEZ_SOURCE_DIR}"
       "${staging_dir}"
+    ${extra_stage_commands}
     ${program_stage_commands}
     COMMAND
       "${SODA_CHEZ_SCHEME_EXECUTABLE}"
@@ -162,6 +179,7 @@ function(soda_embed_chez_application target)
       "${SODA_CHEZ_PETITE_BOOT}"
       "${SODA_CHEZ_SCHEME_BOOT}"
       ${SODA_CHEZ_SOURCES}
+      ${extra_stage_depends}
       ${program_stage_depends}
       ${SODA_CHEZ_PROGRAM_SOURCE}
     BYPRODUCTS
