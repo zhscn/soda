@@ -18,17 +18,17 @@
         (soda host condition)
         (soda host internal context)
         (soda host dispatch)
-        (soda host buffer)
+        (soda host internal buffer)
         (soda host input)
         (soda host input-event)
         (soda host operation)
         (soda host runtime)
         (soda host render)
         (soda host render-service)
-        (soda host state)
+        (soda host internal state)
         (soda host internal surface)
         (soda host value)
-        (soda host view)
+        (soda host internal view)
         (soda host internal window)
         (soda kernel document)
         (soda kernel range-set)
@@ -66,6 +66,12 @@
           (library-binding-hidden? '(soda host view) 'view-publish-state!)
           (library-binding-hidden? '(soda host surface) 'surface-resize!)
           (library-binding-hidden? '(soda host surface) 'surface-set-selected-window!)
+          (library-binding-hidden? '(soda host buffer) 'make-buffer-service)
+          (library-binding-hidden? '(soda host view) 'make-view-service)
+          (library-binding-hidden? '(soda host surface) 'make-surface-service)
+          (library-binding-hidden? '(soda host state) 'host-state-buffers)
+          (library-binding-hidden? '(soda host state) 'host-state-dispatch)
+          (library-binding-hidden? '(soda host state) 'host-state-commands)
           (library-binding-hidden? '(soda host context) 'surface-select-view!)
           (library-binding-hidden? '(soda host context) 'surface-route-display-request!)
           (library-binding-hidden? '(soda host window) 'make-split-window)
@@ -1357,14 +1363,13 @@
                     (list control-x control-s)))
              'command)
   (error 'kernel-tests "keymap resolver differs"))
-(define input-service (make-input-service))
 (define input-context
   (make-input-context
     0 0 (list (make-input-layer 'global test-keymap #f 'ignore))
     (view-state-input-state (view-state view))))
 (define prefix-result
-  (input-service-dispatch
-    input-service input-context
+  (input-dispatch
+    input-context
     (make-key-event
       'character (char->integer #\x) #f #f 4 'press (make-bytevector 0))))
 (unless (eq? (input-disposition-kind prefix-result) 'consume)
@@ -1382,8 +1387,7 @@
                control-x))
   (error 'kernel-tests "input dispatch mutated its starting InputState"))
 (define pending-result
-  (input-service-dispatch
-    input-service
+  (input-dispatch
     (make-input-context
       0 0 (input-context-layers input-context)
       (input-disposition-input-state prefix-result))
@@ -1544,7 +1548,7 @@
        [event (make-key-event
                 'character (char->integer #\a) #f #f 0 'press
                 (string->utf8 "a"))]
-       [result (input-service-dispatch input-service text-context event)])
+       [result (input-dispatch text-context event)])
   (unless (and (eq? (input-disposition-kind result) 'text)
                (bytevector=?
                  (input-disposition-value result) (string->utf8 "a")))
@@ -2454,7 +2458,7 @@
               (list (make-command-effect 'command-test-effect number))))
           package-owner
           "Command runtime test" 'editing #f)]
-       [_command (command-register! (host-state-commands host) definition)]
+       [_command (command-runtime-register-command! runtime definition)]
        [_effect-handler
         (command-runtime-register-effect-handler!
           runtime 'command-test-effect package-owner 'record-effect
@@ -2509,7 +2513,7 @@
                                          (list first second)))))
           package-owner
           (make-interactive-plan (list first-reader second-reader)))]
-       [_command (command-register! (host-state-commands host) definition)]
+       [_command (command-runtime-register-command! runtime definition)]
        [_handler
         (command-runtime-register-effect-handler!
           runtime 'interactive-command-effect package-owner 'record-interactive
@@ -2545,7 +2549,7 @@
             (set! observed value)
             (command-handled))
           package-owner)]
-       [_command (command-register! (host-state-commands host) definition)])
+       [_command (command-runtime-register-command! runtime definition)])
   (command-runtime-enqueue!
     runtime
     (make-command-invoke-message
@@ -2565,7 +2569,7 @@
           'command.condition-test
           (lambda (context) (error 'command-condition-test "expected failure"))
           package-owner)]
-       [_command (command-register! (host-state-commands host) definition)]
+       [_command (command-runtime-register-command! runtime definition)]
        [invocation
         (command-runtime-start!
           runtime 'command.condition-test (make-command-context #f #f 'test))])

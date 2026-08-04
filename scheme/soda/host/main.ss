@@ -1,6 +1,6 @@
 #!chezscheme
 (import (chezscheme)
-        (soda host state))
+        (soda host internal state))
 
 (scheme-start
   (lambda arguments

@@ -23,9 +23,9 @@
           display-request-provenance)
   (import (rnrs)
           (soda kernel value)
-          (soda host buffer)
+          (soda host internal buffer)
           (soda host internal surface)
-          (soda host view)
+          (soda host internal view)
           (soda host internal window))
 
   ;; ActiveContext is a snapshot of the selected leaf.  It has no mutable

@@ -8,11 +8,11 @@
           (soda kernel state)
           (soda kernel view-state)
           (soda kernel value)
-          (soda host buffer)
+          (soda host internal buffer)
           (soda host render)
-          (soda host surface)
-          (soda host view)
-          (soda host window))
+          (soda host internal surface)
+          (soda host internal view)
+          (soda host internal window))
 
   ;; Rendering is a pure projection, while this service owns the optional
   ;; frontend cache.  Its signature contains only published generations and

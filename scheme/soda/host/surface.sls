@@ -1,6 +1,5 @@
 (library (soda host surface)
-  (export make-surface
-          surface?
+  (export surface?
           surface-id
           surface-frontend
           surface-capabilities
@@ -11,12 +10,6 @@
           surface-active-window
           surface-windows
           surface-generation
-          make-surface-service
-          surface-service?
-          surface-service-register!
-          surface-service-ref
-          surface-service-surfaces
-          surface-service-remove!
           make-surface-input-message
           surface-input-message?
           surface-input-message-surface-id

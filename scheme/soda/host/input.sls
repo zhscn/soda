@@ -43,11 +43,6 @@
           input-context-stack
           input-layer-compose
           resolve-key-sequence
-          make-input-service
-          input-service?
-          input-service-dispatch
-          input-service-reset-view
-          input-service-cancel
           input-disposition?
           input-disposition-kind
           input-disposition-value
@@ -332,24 +327,15 @@
       [() (%make-input-disposition 'consume #f #f)]
       [(input-state) (%make-input-disposition 'consume #f input-state)]))
 
-  (define-record-type
-    (input-service %make-input-service input-service?)
-    (fields))
-
-  (define (make-input-service)
-    (%make-input-service))
-
-  (define (input-service-reset-view service context)
-    (unless (and (input-service? service) (input-context? context))
-      (assertion-violation
-        'input-service-reset-view "expected a service and input context" service context))
+  (define (input-reset context)
+    (unless (input-context? context)
+      (assertion-violation 'input-reset "expected an input context" context))
     (let ([stack (input-context-stack context)])
       (%make-input-stack (input-stack-sessions stack) #f #f #f)))
 
-  (define (input-service-cancel service context)
-    (unless (and (input-service? service) (input-context? context))
-      (assertion-violation
-        'input-service-cancel "expected a service and input context" service context))
+  (define (input-cancel context)
+    (unless (input-context? context)
+      (assertion-violation 'input-cancel "expected an input context" context))
     (input-stack-reset (input-context-stack context)))
 
   (define (resolve-command layers sequence result)
@@ -368,61 +354,53 @@
                       (list 'command replacement source (cadddr result))
                       (loop (cdr items)))))))))
 
-  (define (input-service-dispatch service context event)
-    (unless (and (input-service? service)
-                 (input-context? context)
+  (define (input-dispatch context event)
+    (unless (and (input-context? context)
                  (input-event? event))
       (assertion-violation
-        'input-service-dispatch "expected a service, context and event" service context event))
+        'input-dispatch "expected an input context and event" context event))
     (let* ([stack (input-context-stack context)]
            [pending (input-stack-pending-sequence stack)])
-      (if (not (key-event? event))
-          (let* ([reset (input-service-reset-view service context)]
-                 [result (input-dispatch context event)])
-            (%make-input-disposition
-              (input-disposition-kind result)
-              (input-disposition-value result)
-              reset))
-          (if (eq? (key-event-type event) 'release)
-              (input-pass stack)
-              (let* ([stroke (key-event->key-stroke event)]
-                     [sequence (if pending
-                                   (append pending (list stroke))
-                                   (list stroke))]
-                     [result (resolve-command
-                               (input-context-layers context)
-                               sequence
-                               (resolve-key-sequence
-                                 (input-context-layers context) sequence))])
-                (case (car result)
-                  [(prefix)
-                   (input-consume
-                     (input-stack-with-pending-sequence stack sequence))]
-                  [(command)
-                   (%make-input-disposition
-                     'command (cadr result)
-                     (input-service-reset-view service context))]
-                  [else
-                   (if (and
-                         (positive?
-                           (bytevector-length (key-event-text event)))
-                         (accepting-text-layer?
-                           (input-context-layers context)))
-                       (%make-input-disposition
-                         'text (key-event-text event)
-                         (input-service-reset-view service context))
-                       (%make-input-disposition
-                         'undefined sequence
-                         (input-service-reset-view service context)))]))))))
+      (cond
+        [(not (key-event? event))
+         (let* ([reset (input-reset context)]
+                [result (input-dispatch-once context event)])
+           (%make-input-disposition
+             (input-disposition-kind result)
+             (input-disposition-value result)
+             reset))]
+        [(eq? (key-event-type event) 'release)
+         (input-pass stack)]
+        [else
+         (let* ([stroke (key-event->key-stroke event)]
+                [sequence (if pending
+                              (append pending (list stroke))
+                              (list stroke))]
+                [result (resolve-command
+                          (input-context-layers context)
+                          sequence
+                          (resolve-key-sequence
+                            (input-context-layers context) sequence))])
+           (case (car result)
+             [(prefix)
+              (input-consume
+                (input-stack-with-pending-sequence stack sequence))]
+             [(command)
+              (%make-input-disposition 'command (cadr result) (input-reset context))]
+             [else
+              (if (and (positive? (bytevector-length (key-event-text event)))
+                       (accepting-text-layer? (input-context-layers context)))
+                  (%make-input-disposition 'text (key-event-text event) (input-reset context))
+                  (%make-input-disposition 'undefined sequence (input-reset context)))]))])))
 
   (define (accepting-text-layer? layers)
     (and (pair? layers)
          (or (eq? (input-layer-text-policy (car layers)) 'accept)
              (accepting-text-layer? (cdr layers)))))
 
-  (define (input-dispatch context event)
+  (define (input-dispatch-once context event)
     (unless (and (input-context? context) (input-event? event))
-      (assertion-violation 'input-dispatch "expected an input context and event" context event))
+      (assertion-violation 'input-dispatch-once "expected an input context and event" context event))
       (if (text-input-event? event)
         (let ([layers (input-context-layers context)])
           (if (accepting-text-layer? layers)

@@ -7,7 +7,6 @@
           owner-generation
           owner-active?
           owner-add-cleanup!
-          owner-next-generation!
           owner-close!
           owner-assert-active
           make-registration
@@ -48,12 +47,6 @@
       (assertion-violation 'owner-add-cleanup! "cleanup must be a procedure" cleanup))
     (owner-cleanups-set! owner (cons cleanup (owner-cleanups owner)))
     cleanup)
-
-  (define (owner-next-generation! owner)
-    (owner-assert-active 'owner-next-generation! owner)
-    (let ([generation (+ 1 (owner-generation owner))])
-      (owner-generation-set! owner generation)
-      generation))
 
   (define (owner-close! owner)
     (owner-assert-active 'owner-close! owner)

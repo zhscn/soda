@@ -1,6 +1,7 @@
 (library (soda host command-runtime)
   (export make-command-runtime
           command-runtime?
+          command-runtime-register-command!
           command-runtime-start!
           command-runtime-start-interactive!
           command-runtime-resume!
@@ -63,6 +64,15 @@
       (make-eqv-hashtable) (make-eq-hashtable) (make-eq-hashtable)
       (make-eq-hashtable) #f #f 0))
 
+  ;; Command definitions are registered through their runtime, so a package
+  ;; never needs access to the mutable CommandRegistry implementation.
+  (define (command-runtime-register-command! service definition)
+    (unless (and (command-runtime? service) (command-definition? definition))
+      (assertion-violation 'command-runtime-register-command!
+                           "expected a command runtime and definition"
+                           service definition))
+    (command-register! (command-runtime-registry service) definition))
+
   (define-record-type
     (runtime-advice %make-runtime-advice runtime-advice?)
     (fields
@@ -118,6 +128,24 @@
     (unless (and (symbol? name) (procedure? procedure))
       (assertion-violation who "invalid named registration" name procedure)))
 
+  ;; Advice, hooks, and effect handlers differ in dispatch semantics, not in
+  ;; ownership.  One registration path keeps duplicate detection, ordering,
+  ;; and owner cleanup identical for all three lifecycle facets.
+  (define (register-named-entry! who service table scope name owner procedure entry-name make-entry)
+    (assert-active-registration who owner name procedure)
+    (let ([existing (hashtable-ref table scope '())])
+      (when (exists (lambda (entry) (eq? name (entry-name entry))) existing)
+        (assertion-violation who "registration is already registered" scope name))
+      (let ([entry (make-entry)])
+        (hashtable-set! table scope (append existing (list entry)))
+        (make-registration
+          owner
+          (lambda ()
+            (hashtable-set!
+              table scope
+              (filter (lambda (item) (not (eq? item entry)))
+                      (hashtable-ref table scope '()))))))))
+
   (define command-runtime-set-interaction-handler!
     (case-lambda
       [(service handler)
@@ -150,39 +178,18 @@
     (unless (and (command-runtime? service) (symbol? kind))
       (assertion-violation 'command-runtime-register-effect-handler!
                            "invalid runtime or effect kind" service kind))
-    (assert-active-registration 'command-runtime-register-effect-handler! owner name procedure)
-    (let* ([table (command-runtime-effects service)]
-           [existing (hashtable-ref table kind '())])
-      (when (exists (lambda (entry) (eq? name (effect-handler-name entry))) existing)
-        (assertion-violation 'command-runtime-register-effect-handler!
-                             "effect handler is already registered" kind name))
-      (let ([entry (%make-effect-handler name owner procedure (next-order! service))])
-        (hashtable-set! table kind (append existing (list entry)))
-        (make-registration
-          owner
-          (lambda ()
-            (hashtable-set!
-              table kind
-              (filter (lambda (item) (not (eq? item entry)))
-                      (hashtable-ref table kind '()))))))))
+    (register-named-entry!
+      'command-runtime-register-effect-handler! service (command-runtime-effects service)
+      kind name owner procedure effect-handler-name
+      (lambda () (%make-effect-handler name owner procedure (next-order! service)))))
 
   (define (command-runtime-add-hook! service phase owner name procedure)
     (unless (and (command-runtime? service) (memq phase '(pre-command post-command command-error)))
       (assertion-violation 'command-runtime-add-hook! "invalid runtime or hook phase" service phase))
-    (assert-active-registration 'command-runtime-add-hook! owner name procedure)
-    (let* ([table (command-runtime-hooks service)]
-           [existing (hashtable-ref table phase '())])
-      (when (exists (lambda (entry) (eq? name (runtime-hook-name entry))) existing)
-        (assertion-violation 'command-runtime-add-hook! "hook is already registered" phase name))
-      (let ([entry (%make-runtime-hook name owner procedure (next-order! service))])
-        (hashtable-set! table phase (append existing (list entry)))
-        (make-registration
-          owner
-          (lambda ()
-            (hashtable-set!
-              table phase
-              (filter (lambda (item) (not (eq? item entry)))
-                      (hashtable-ref table phase '()))))))))
+    (register-named-entry!
+      'command-runtime-add-hook! service (command-runtime-hooks service)
+      phase name owner procedure runtime-hook-name
+      (lambda () (%make-runtime-hook name owner procedure (next-order! service)))))
 
   (define command-advice-placements
     '(before after around filter-args filter-return))
@@ -199,23 +206,12 @@
                               command name where depth))
        (unless (command-lookup (command-runtime-registry service) command #f)
          (assertion-violation 'command-runtime-add-advice! "unknown command" command))
-       (assert-active-registration 'command-runtime-add-advice! owner name procedure)
-       (let* ([table (command-runtime-advice service)]
-              [existing (hashtable-ref table command '())])
-         (when (exists (lambda (entry) (eq? name (runtime-advice-name entry))) existing)
-           (assertion-violation 'command-runtime-add-advice! "advice is already registered"
-                                command name))
-         (let ([entry
-                 (%make-runtime-advice
-                   name owner where procedure depth (next-order! service))])
-           (hashtable-set! table command (append existing (list entry)))
-           (make-registration
-             owner
-             (lambda ()
-               (hashtable-set!
-                 table command
-                 (filter (lambda (item) (not (eq? item entry)))
-                         (hashtable-ref table command '())))))))]))
+       (register-named-entry!
+         'command-runtime-add-advice! service (command-runtime-advice service)
+         command name owner procedure runtime-advice-name
+         (lambda ()
+           (%make-runtime-advice
+             name owner where procedure depth (next-order! service))))]))
 
   (define (normalize-command-result value)
     (cond

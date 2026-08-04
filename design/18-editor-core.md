@@ -15,7 +15,7 @@ editor kernel
                               │
                               ▼
 workbench host
-  Buffer / View / Window / Surface / command / input / runtime / package / condition
+  Buffer / View / Window / Surface / command / input / runtime / condition
                               │
                               ▼
 TUI frontend
@@ -88,7 +88,7 @@ Workbench host 增加多 Buffer、多 View、Window tree、Surface、Scheme comm
           ├──> window/surface/placement
           ├──> input/command/dispatch
           ├──> runtime/task/condition
-          └──> package/service
+          └──> host protocol
 
 (soda tui ...)
   terminal input -> Surface input
@@ -102,8 +102,9 @@ Workbench host 增加多 Buffer、多 View、Window tree、Surface、Scheme comm
   depend on kernel and declared host capabilities
 ```
 
-不提供聚合全部 API 的大 facade。package activation context 只暴露 manifest 声明的
-capability。editor kernel 不导入 host，host 不导入 TUI，TUI 不导入功能包。
+不提供聚合全部 API 的大 facade。功能包通过具名 host protocol 注册能力；public host library
+只暴露不可变值、identity 和注册入口，mutable service 只属于 host internal namespace。editor
+kernel 不导入 host，host 不导入 TUI，TUI 不导入功能包。
 
 ## Editor kernel
 
@@ -594,13 +595,9 @@ Owner 管理可撤销资源：
 - condition、interaction 和 continuation payload；
 - Buffer/View attachment。
 
-package activation 在 contribution transaction 中建立 extension 和 service。activation
-失败会按逆序撤销注册并关闭 owner。deactivation 先 dispatch configuration removal，使
-StateField 和 ViewPlugin 完成退出，再取消 task、关闭 native resource 和 owner。
-
-service contract 是具名、带版本的 capability。package 只依赖 manifest 声明的 service，
-可选依赖通过 capability query 发现。service procedure 返回普通值、TransactionSpec、
-HostOperation、Effect 或 Request，不返回 registry 内部可变对象。
+Owner 是功能包注册、task、native resource、condition 和 interaction payload 的生命周期边界。
+Owner 关闭时按注册顺序撤销关联资源。功能包服务通过具名 protocol 提供，procedure 返回普通值、
+TransactionSpec、HostOperation、Effect 或 Request，不返回 registry 内部可变对象。
 
 ### Message、Effect 与异步任务
 
@@ -649,7 +646,7 @@ EditorCondition {
 ```
 
 condition service 保存 continuation 和 restart；debugger package 只负责将其投影为普通
-Buffer。dismiss、resume 和 owner deactivation 是一次性状态转换。功能包异常不会退出
+Buffer。dismiss、resume 和 owner close 是一次性状态转换。功能包异常不会退出
 command loop 或破坏已发布 state。
 
 ## 输入系统
@@ -1092,7 +1089,7 @@ DisplayStream、Frame 和 damage contract 不依赖终端协议。
 
 ## 标准功能包
 
-标准发行版通过 package manifest 组合功能，不为标准包增加 host 特权：
+标准发行版通过启动装配组合功能，不为标准包增加 host 特权：
 
 ```text
 fundamental-editing
@@ -1183,7 +1180,6 @@ src/                          native mechanisms and launcher
 ```
 
 kernel 不导入 host、TUI 或 package namespace。host 不导入 TUI 或 package namespace。
-构建系统对依赖方向执行静态检查。
 
 ## 接口与规模约束
 
@@ -1193,7 +1189,7 @@ kernel 不导入 host、TUI 或 package namespace。host 不导入 TUI 或 packa
 - package state 进入 StateField、ViewPlugin 或 package instance，不向 Buffer/View record
   添加功能字段；
 - renderer、input、dispatcher 和 condition boundary 中不出现 package-specific branch；
-- 一个功能包可以从 manifest 移除，而无需修改 kernel、host 或 TUI source；
+- 一个功能包可以从发行装配中移除，而无需修改 kernel、host 或 TUI source；
 - 单个底层 library 保持一个职责，不提供跨层 re-export facade；
 - Soda kernel 与 host 的非生成 Scheme 源码保持在可独立审查的固定规模预算内，新增机制
   需要证明至少被两个相互独立的功能包共享。
@@ -1212,7 +1208,7 @@ kernel contract tests 覆盖：
 host contract tests 覆盖：
 
 - 同一 Buffer 多 View 的 Selection、viewport、InputState 和 terminal cursor 独立；
-- Buffer/View close、owner unload 和 configuration removal 不产生悬空 identity；
+- Buffer/View close、owner close 和 configuration removal 不产生悬空 identity；
 - Window tree、selected Window、active context 和 interaction focus 的一致性；
 - keymap parent/remap、完整序列跨层解析和 resolver introspection 一致；
 - per-View durable/transient InputState 生命周期与 key/text 归一；
@@ -1220,8 +1216,7 @@ host contract tests 覆盖：
 - command invocation suspend/resume 保持原 target 和 arguments；
 - request identity、scope、generation、cancel 和 stale result retirement；
 - condition、restart、continuation 和 command loop recovery；
-- package activation/deactivation 的 StateField、Facet、ViewPlugin、task 和 native resource
-  清理顺序。
+- StateField、Facet、ViewPlugin、task 和 native resource 的 owner 清理顺序。
 
 TUI contract tests 覆盖：
 
