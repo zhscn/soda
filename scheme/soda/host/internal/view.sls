@@ -5,6 +5,7 @@
           view-buffer
           view-state
           view-render-generation
+          view-projection
           view-plugin-instances
           view-decorations
           view-merged-decorations
@@ -33,6 +34,8 @@
           (soda host input)
           (soda host value)
           (soda view plugin)
+          (soda view internal plugin)
+          (soda view projection)
           (soda view display)
           (soda view decoration))
 
@@ -44,9 +47,8 @@
             (immutable plugin-error! view-plugin-error!)
             (mutable state view-state view-state-set!)
             (mutable plugins view-plugin-instances view-plugin-instances-set!)
-            (mutable decoration-cache view-decoration-cache
-                     view-decoration-cache-set!)
-            (mutable display-stream view-display-stream view-display-stream-set!)
+            (mutable projection view-published-projection
+                     view-published-projection-set!)
             (mutable render-generation view-render-generation
                      view-render-generation-set!)
             (mutable closed? view-closed? view-closed?-set!)))
@@ -89,19 +91,8 @@
           (let ([instance (car instances)])
             (if (view-plugin-instance-destroyed? instance)
                 (loop (cdr instances) result)
-                (guard
-                  (condition
-                    [else
-                     (report-plugin-error! view 'plugin-decorations condition)
-                     (destroy-plugin-instance! view instance 'plugin-decoration-cleanup)
-                     (loop (cdr instances) result)])
-                  (loop (cdr instances)
-                        (cons (view-plugin-instance-decorations instance) result))))))))
-
-  (define (refresh-view-decorations! view)
-    (view-decoration-cache-set!
-      view
-      (merge-decoration-sets (collect-view-decorations view))))
+                (loop (cdr instances)
+                      (cons (view-plugin-instance-decorations instance) result)))))))
 
   (define (validate-display-providers! plugins)
     (let ([providers
@@ -112,18 +103,48 @@
           "a View configuration may contain only one full DisplayStream provider"
           (map view-plugin-key providers)))))
 
-  (define (refresh-view-display-stream! view)
+  (define (collect-view-display-stream view)
     (let loop ([instances (view-plugin-instances view)] [result #f])
       (if (null? instances)
-          (view-display-stream-set! view result)
+          result
           (let ([stream (view-plugin-instance-display-stream (car instances))])
             (if stream
                 (if result
                     (assertion-violation
                       'view-display-stream
                       "multiple ViewPlugin instances produced full DisplayStreams")
-                    (loop (cdr instances) stream))
+                (loop (cdr instances) stream))
                 (loop (cdr instances) result))))))
+
+  (define (collect-view-transforms view)
+    (let loop ([instances (view-plugin-instances view)] [result '()])
+      (if (null? instances)
+          (reverse result)
+          (let* ([instance (car instances)]
+                 [transform (view-plugin-instance-display-transform instance)])
+            (loop (cdr instances)
+                  (if transform
+                      (cons (cons (view-plugin-key
+                                    (view-plugin-instance-plugin instance))
+                                  transform)
+                            result)
+                      result))))))
+
+  (define (publish-view-projection! view)
+    (let ([next-generation (+ 1 (view-render-generation view))])
+      (view-render-generation-set! view next-generation)
+      (view-published-projection-set!
+        view
+        (make-view-projection
+          next-generation
+          (merge-decoration-sets (collect-view-decorations view))
+          (collect-view-display-stream view)
+          (collect-view-transforms view)))))
+
+  (define (view-projection view)
+    (unless (and (view? view) (not (view-closed? view)))
+      (assertion-violation 'view-projection "expected a live View" view))
+    (view-published-projection view))
 
   (define (display-plugin? instance)
     (let ([plugin (view-plugin-instance-plugin instance)])
@@ -197,13 +218,12 @@
                               (buffer-state-generation (buffer-state buffer))
                               (empty-selection) default-viewport
                               (or input-state (default-input-stack)) configuration)
-             '() (make-decoration-set '()) #f 0 #f)])
+             '() (make-view-projection 0 (make-decoration-set '()) #f '()) 0 #f)])
       (validate-display-providers! (configuration-view-plugins configuration))
       (view-plugin-instances-set!
         view
         (create-plugin-instances! view (configuration-view-plugins configuration)))
-      (refresh-view-decorations! view)
-      (refresh-view-display-stream! view)
+      (publish-view-projection! view)
       (owner-add-cleanup! owner (lambda () (on-close view)))
       view))
 
@@ -212,8 +232,13 @@
       (assertion-violation 'view-publish-state! "view is closed" view))
     (unless (view-state? state)
       (assertion-violation 'view-publish-state! "expected a view state" state))
-    (view-state-set! view state)
-    (reconcile-view-plugins! view (view-state-configuration state))
+    (let ([configuration-changed?
+           (not (eq? (view-state-configuration (view-state view))
+                     (view-state-configuration state)))])
+      (view-state-set! view state)
+      (when configuration-changed?
+        (reconcile-view-plugins! view (view-state-configuration state))
+        (publish-view-projection! view)))
     state)
 
   (define (view-close! view)
@@ -225,7 +250,6 @@
           (for-each (lambda (instance)
                       (destroy-plugin-instance! view instance 'plugin-destroy))
                     (view-plugin-instances view))
-          (view-display-stream-set! view #f)
           (view-closed?-set! view #t)
           #t)))
 
@@ -246,30 +270,29 @@
                  #f])
               (view-plugin-instance-update! instance update))))
         (view-plugin-instances view))
-      (refresh-view-decorations! view)
-      (refresh-view-display-stream! view)
       (when (or output-changed? (render-damage? update view))
-        (view-render-generation-set! view (+ 1 (view-render-generation view))))
+        (publish-view-projection! view))
       view))
 
   (define (view-decorations view)
     (unless (and (view? view) (not (view-closed? view)))
       (assertion-violation 'view-decorations "expected a live View" view))
-    (collect-view-decorations view))
+    (list (view-projection-decorations (view-projection view))))
 
   (define (view-merged-decorations view)
     (unless (and (view? view) (not (view-closed? view)))
       (assertion-violation 'view-merged-decorations "expected a live View" view))
-    (view-decoration-cache view))
+    (view-projection-decorations (view-projection view)))
+
+  (define (view-display-stream view)
+    (unless (and (view? view) (not (view-closed? view)))
+      (assertion-violation 'view-display-stream "expected a live View" view))
+    (view-projection-display-stream (view-projection view)))
 
   (define (view-display-transforms view)
     (unless (and (view? view) (not (view-closed? view)))
       (assertion-violation 'view-display-transforms "expected a live View" view))
-    (let loop ([instances (view-plugin-instances view)] [result '()])
-      (if (null? instances)
-          (reverse result)
-          (let ([transform (view-plugin-instance-display-transform (car instances))])
-            (loop (cdr instances) (if transform (cons transform result) result))))))
+    (map cdr (view-projection-transforms (view-projection view))))
 
   ;; A transform is prepared by a plugin update but executed against the
   ;; current visible base stream.  Rendering is a pure projection: a transform
@@ -279,26 +302,7 @@
     (unless (and (view? view) (not (view-closed? view)) (display-stream? stream))
       (assertion-violation 'view-transform-display-stream
                            "expected a live View and DisplayStream" view stream))
-    (let loop ([instances (view-plugin-instances view)] [current stream] [failures '()])
-      (if (null? instances)
-          (values current (reverse failures))
-          (let* ([instance (car instances)]
-                 [transform (view-plugin-instance-display-transform instance)])
-            (if (not transform)
-                (loop (cdr instances) current failures)
-                (guard
-                  (condition
-                    [else
-                     (loop (cdr instances) current
-                           (cons (list (view-plugin-key
-                                         (view-plugin-instance-plugin instance))
-                                       condition)
-                                 failures))])
-                  (let ([next (transform current)])
-                    (unless (display-stream? next)
-                      (assertion-violation 'view-transform-display-stream
-                                           "plugin transform returned a non-DisplayStream" next))
-                    (loop (cdr instances) next failures))))))))
+    (view-projection-transform-display-stream (view-projection view) stream))
 
   (define-record-type
     (view-service %make-view-service view-service?)

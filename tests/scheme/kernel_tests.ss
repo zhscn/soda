@@ -54,7 +54,8 @@
         (soda view decoration)
         (soda view text-layout)
         (soda view theme)
-        (soda view plugin))
+        (soda view plugin)
+        (soda view internal plugin))
 
 (define (application-command-context application)
   (let* ([state (soda-application-state application)]
@@ -90,6 +91,8 @@
           (library-binding-hidden? '(soda host buffer) 'buffer-document)
           (library-binding-hidden? '(soda host buffer) 'buffer-publish-state!)
           (library-binding-hidden? '(soda host view) 'view-publish-state!)
+          (library-binding-hidden? '(soda host view) 'view-plugin-instances)
+          (library-binding-hidden? '(soda view plugin) 'make-view-plugin-instance)
           (library-binding-hidden? '(soda host surface) 'surface-resize!)
           (library-binding-hidden? '(soda host surface) 'surface-set-selected-window!)
           (library-binding-hidden? '(soda host buffer) 'make-buffer-service)

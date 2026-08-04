@@ -10,6 +10,7 @@
           rendered-view-view-id
           rendered-view-rectangle
           rendered-view-layout
+          rendered-view-projection-generation
           rendered-view-visible-ranges
           rendered-view-transform-failures
           make-surface-hit
@@ -34,6 +35,7 @@
           (soda view compositor)
           (soda view decoration)
           (soda view display)
+          (soda view projection)
           (soda view frame)
           (soda view text-layout))
 
@@ -41,7 +43,7 @@
   ;; routing.  It is part of a rendered Surface, not mutable View state.
   (define-record-type
     (rendered-view %make-rendered-view rendered-view?)
-    (fields view-id rectangle layout transform-failures))
+    (fields view-id rectangle layout projection-generation transform-failures))
 
   (define (rectangle? value)
     (and (list? value) (= (length value) 4)
@@ -50,13 +52,17 @@
   (define make-rendered-view
     (case-lambda
       [(view-id rectangle layout)
-       (make-rendered-view view-id rectangle layout '())]
+       (make-rendered-view view-id rectangle layout 0 '())]
       [(view-id rectangle layout transform-failures)
+       (make-rendered-view view-id rectangle layout 0 transform-failures)]
+      [(view-id rectangle layout projection-generation transform-failures)
        (unless (and (rectangle? rectangle) (text-layout? layout)
+                    (integer? projection-generation) (exact? projection-generation)
+                    (>= projection-generation 0)
                     (list? transform-failures))
          (assertion-violation 'make-rendered-view "invalid rendered View"
-                              view-id rectangle layout transform-failures))
-       (%make-rendered-view view-id (list-copy rectangle) layout
+                              view-id rectangle layout projection-generation transform-failures))
+       (%make-rendered-view view-id (list-copy rectangle) layout projection-generation
                             (list-copy transform-failures))]))
 
   (define (rendered-view-visible-ranges rendered)
@@ -150,16 +156,19 @@
                            [viewport (view-state-viewport state)]
                            [first-line (viewport-first-line viewport)]
                            [visual-row (viewport-visual-row viewport)]
+                           [view-projection (view-projection view)]
                            [projection
                             (let ([options
                                   (configuration-facet
                                      (view-state-configuration state)
                                      text-layout-options-facet 'view)]
-                                  [provided-stream (view-display-stream view)])
+                                  [provided-stream
+                                   (view-projection-display-stream view-projection)])
                               (let ([failures '()])
                                 (define (transform base)
                                   (let-values ([(stream transform-failures)
-                                                (view-transform-display-stream view base)])
+                                                (view-projection-transform-display-stream
+                                                  view-projection base)])
                                     (set! failures transform-failures)
                                     stream))
                                 (list
@@ -173,7 +182,7 @@
                                         (view-state-selection state)
                                         first-line visual-row
                                         view-width view-height
-                                        (view-merged-decorations view)
+                                        (view-projection-decorations view-projection)
                                         transform options))
                                   failures))) ]
                            [layout (car projection)]
@@ -181,7 +190,9 @@
                       (loop
                         (cdr leaves)
                         (cons (make-frame-placement row column (text-layout-frame layout)) placements)
-                        (cons (make-rendered-view (view-id view) rectangle layout transform-failures)
+                        (cons (make-rendered-view (view-id view) rectangle layout
+                                                  (view-projection-generation view-projection)
+                                                  transform-failures)
                               rendered-views)
                         (if (and (eq? leaf (surface-active-window surface))
                                  (text-layout-cursor-row layout))
