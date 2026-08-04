@@ -7,6 +7,7 @@
           host-state-views
           host-state-surfaces
           host-state-commands
+          host-state-command-runtime
           host-state-conditions
           host-state-dispatch
           host-state-packages
@@ -16,6 +17,7 @@
   (import (rnrs)
           (soda host buffer)
           (soda host command)
+          (soda host command-runtime)
           (soda host condition)
           (soda host dispatch)
           (soda host runtime)
@@ -33,6 +35,7 @@
       (immutable views host-state-views)
       (immutable surfaces host-state-surfaces)
       (immutable commands host-state-commands)
+      (immutable command-runtime host-state-command-runtime)
       (immutable conditions host-state-conditions)
       (immutable dispatch host-state-dispatch)
       (immutable packages host-state-packages)
@@ -47,6 +50,8 @@
            [commands (make-command-registry)]
            [conditions (make-condition-service)]
            [dispatch (make-dispatcher buffers views surfaces)]
+           [command-runtime
+             (make-command-runtime owner commands dispatch runtime conditions)]
            [packages (make-package-service)])
       (view-service-set-plugin-error-handler!
         views
@@ -66,7 +71,7 @@
         (lambda (buffer)
           (view-service-close-buffer-views! views (buffer-id buffer))))
       (%make-host-state
-        owner runtime buffers views surfaces commands conditions dispatch packages #f)))
+        owner runtime buffers views surfaces commands command-runtime conditions dispatch packages #f)))
 
   (define (host-state-close! state)
     (unless (host-state? state)
@@ -90,11 +95,18 @@
   (define (host-state-run! state . options)
     (unless (and (host-state? state) (not (host-state-closed? state)))
       (assertion-violation 'host-state-run! "host state is closed" state))
-    (let ([handler (if (null? options) (lambda (message)
-                                          (when (procedure? message) (message)))
-                        (car options))]
+    (let ([handler (if (null? options)
+                       (lambda (message) (when (procedure? message) (message)))
+                       (car options))]
           [limit (if (or (null? options) (null? (cdr options))) #f (cadr options))])
       (unless (procedure? handler)
         (assertion-violation 'host-state-run! "handler must be a procedure" handler))
-      (runtime-drain! (host-state-runtime state) handler limit)))
+      (runtime-drain!
+        (host-state-runtime state)
+        (lambda (message)
+          (unless
+            (command-runtime-handle-message!
+              (host-state-command-runtime state) message)
+            (handler message)))
+        limit)))
 )

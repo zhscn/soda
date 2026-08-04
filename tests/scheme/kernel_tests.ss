@@ -14,6 +14,8 @@
         (soda kernel viewport)
         (soda kernel view-state)
         (soda host command)
+        (soda host command-runtime)
+        (soda host condition)
         (soda host internal context)
         (soda host dispatch)
         (soda host buffer)
@@ -2437,4 +2439,165 @@
                             (car (surface-render-rendered-views render)))) 1)
                (eq? render cached))
     (error 'kernel-tests "failed display transform was not isolated from rendering")))
+
+;; Command packages exchange declarations and result values with the runtime;
+;; they never receive a Dispatcher or a terminal-specific interaction object.
+(let* ([package-owner (make-owner 'command-test)]
+       [runtime (host-state-command-runtime host)]
+       [effects '()]
+       [hooks '()]
+       [definition
+        (make-command-definition
+          'command.test
+          (lambda (context number)
+            (make-command-result
+              (list (make-command-effect 'command-test-effect number))))
+          package-owner
+          "Command runtime test" 'editing #f)]
+       [_command (command-register! (host-state-commands host) definition)]
+       [_effect-handler
+        (command-runtime-register-effect-handler!
+          runtime 'command-test-effect package-owner 'record-effect
+          (lambda (service invocation effect)
+            (set! effects (cons (command-effect-payload effect) effects))))]
+       [_pre-hook
+        (command-runtime-add-hook!
+          runtime 'pre-command package-owner 'record-pre
+          (lambda (invocation) (set! hooks (cons 'pre hooks))))]
+       [_post-hook
+        (command-runtime-add-hook!
+          runtime 'post-command package-owner 'record-post
+          (lambda (invocation result) (set! hooks (cons 'post hooks))))]
+       [_advice
+        (command-runtime-add-advice!
+          runtime 'command.test package-owner 'increment-argument 'filter-args
+          (lambda (context arguments) (map (lambda (value) (+ value 1)) arguments)))]
+       [invocation
+        (command-runtime-start!
+          runtime 'command.test (make-command-context #f #f 'test) (list 4))])
+  (unless (and (eq? (command-invocation-phase invocation) 'completed)
+               (equal? effects '(5))
+               (equal? hooks '(post pre))
+               (not (command-runtime-invocation runtime
+                                                 (command-invocation-id invocation) #f)))
+    (error 'kernel-tests "command lifecycle did not dispatch outcomes"))
+  (owner-close! package-owner))
+
+;; Interactive suspension is data-driven.  Resume continues the original
+;; invocation after the UI package has produced a decoder input.
+(let* ([package-owner (make-owner 'interactive-command-test)]
+       [runtime (host-state-command-runtime host)]
+       [effect-values '()]
+       [suspended #f]
+       [first-reader
+        (make-interactive-reader
+          'first
+          (lambda (context arguments) (make-interactive-ready (list 'first))))]
+       [second-reader
+        (make-interactive-reader
+          'second
+          (lambda (context arguments)
+            (make-interactive-suspend
+              '(read-second)
+              (lambda (value) (make-interactive-ready (list value))))))]
+       [definition
+        (make-command-definition
+          'command.interactive-test
+          (lambda (context first second)
+            (make-command-result
+              (list (make-command-effect 'interactive-command-effect
+                                         (list first second)))))
+          package-owner
+          (make-interactive-plan (list first-reader second-reader)))]
+       [_command (command-register! (host-state-commands host) definition)]
+       [_handler
+        (command-runtime-register-effect-handler!
+          runtime 'interactive-command-effect package-owner 'record-interactive
+          (lambda (service invocation effect)
+            (set! effect-values (cons (command-effect-payload effect) effect-values))))]
+       [_interaction
+        (command-runtime-set-interaction-handler!
+          runtime package-owner
+          (lambda (service invocation request)
+            (set! suspended (cons (command-invocation-id invocation) request))))]
+       [invocation
+        (command-runtime-start-interactive!
+          runtime 'command.interactive-test (make-command-context #f #f 'test))]
+       [_resumed
+        (command-runtime-resume! runtime (command-invocation-id invocation) 'second)])
+  (unless (and (equal? suspended (cons (command-invocation-id invocation) '(read-second)))
+               (eq? (command-invocation-phase invocation) 'completed)
+               (equal? effect-values '((first second)))
+               (not (command-runtime-invocation runtime
+                                                 (command-invocation-id invocation) #f)))
+    (error 'kernel-tests "interactive command resume did not preserve its invocation"))
+  (owner-close! package-owner))
+
+;; Owner cleanup cancels a suspended invocation and removes it from the
+;; runtime, so package unload cannot leave a stale continuation target.
+(let* ([package-owner (make-owner 'command-unload-test)]
+       [runtime (host-state-command-runtime host)]
+       [reader
+        (make-interactive-reader
+          'pending
+          (lambda (context arguments)
+            (make-interactive-suspend 'pending
+              (lambda (value) (make-interactive-ready (list value))))))]
+       [definition
+        (make-command-definition
+          'command.unload-test
+          (lambda (context value) (command-handled))
+          package-owner (make-interactive-plan (list reader)))]
+       [_command (command-register! (host-state-commands host) definition)]
+       [invocation
+        (command-runtime-start-interactive!
+          runtime 'command.unload-test (make-command-context #f #f 'test))]
+       [id (command-invocation-id invocation)])
+  (owner-close! package-owner)
+  (unless (and (eq? (command-invocation-phase invocation) 'cancelled)
+               (not (command-runtime-invocation runtime id #f)))
+    (error 'kernel-tests "package unload left an active command invocation")))
+
+;; Command messages run at HostState's runtime-queue boundary rather than
+;; recursively from the input or interaction implementation.
+(let* ([package-owner (make-owner 'command-queue-test)]
+       [runtime (host-state-command-runtime host)]
+       [observed #f]
+       [definition
+        (make-command-definition
+          'command.queue-test
+          (lambda (context value)
+            (set! observed value)
+            (command-handled))
+          package-owner)]
+       [_command (command-register! (host-state-commands host) definition)])
+  (command-runtime-enqueue!
+    runtime
+    (make-command-invoke-message
+      'command.queue-test (make-command-context #f #f 'queue) (list 'queued)))
+  (host-state-run! host)
+  (unless (eq? observed 'queued)
+    (error 'kernel-tests "host command loop did not consume queued command message"))
+  (owner-close! package-owner))
+
+;; A command exception stops only that invocation.  It becomes an editor
+;; condition at the host boundary instead of escaping the frontend loop.
+(let* ([package-owner (make-owner 'command-condition-test)]
+       [runtime (host-state-command-runtime host)]
+       [before (length (condition-service-entries (host-state-conditions host)))]
+       [definition
+        (make-command-definition
+          'command.condition-test
+          (lambda (context) (error 'command-condition-test "expected failure"))
+          package-owner)]
+       [_command (command-register! (host-state-commands host) definition)]
+       [invocation
+        (command-runtime-start!
+          runtime 'command.condition-test (make-command-context #f #f 'test))])
+  (unless (and (eq? (command-invocation-phase invocation) 'cancelled)
+               (editor-condition? (command-invocation-condition invocation))
+               (= (length (condition-service-entries (host-state-conditions host)))
+                  (+ before 1)))
+    (error 'kernel-tests "command exception was not captured as an editor condition"))
+  (owner-close! package-owner))
 (host-state-close! host)

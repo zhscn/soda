@@ -927,9 +927,43 @@ CommandContext {
 target resolver 在 invocation 开始时产生稳定 identity。异步恢复使用保存的 context
 identity 重新解析对象，不从当前 focus 猜测目标。
 
-command 可以返回 handled、TransactionSpec、HostOperation、InteractionRequest 或它们的
-有序组合。I/O 通过 Effect 请求。普通 Scheme 调用可以直接调用显式参数入口；keymap 和
-M-x 使用 interactive invocation。
+command 可以返回 handled、TransactionSpec、ViewTransactionSpec、HostOperation、
+CommandEffect 或它们的有序组合。I/O 通过 CommandEffect 请求。普通 Scheme 调用可以直接
+调用显式参数入口；keymap 和 M-x 使用 interactive invocation。
+
+### Package boundary
+
+`(soda host command)` 是 command package 的纯协议库。它定义
+`CommandDefinition`、`CommandContext`、`InteractivePlan`、`CommandResult` 和
+`CommandEffect`；命令过程只接收 context 与已经解析的普通参数，不接收 Dispatcher、
+BufferService、terminal session 或 mutable Editor。
+
+`(soda host command-runtime)` 是 host-owned lifecycle service。它提供以下注册边界：
+
+```text
+CommandRuntime
+  register command definition       -> command registry
+  add advice(command, placement)    -> invocation wrapper
+  add hook(pre | post | error)      -> lifecycle observer
+  register effect(kind, handler)    -> named I/O adapter
+  set interaction handler           -> request presentation adapter
+```
+
+每个 registration 归属于一个 `Owner`。卸载 package 时，其 command、advice、hook、
+effect handler 和未完成 invocation 一起撤销。advice 支持 `before`、`after`、`around`、
+`filter-args` 与 `filter-return` placement；hook 观察 invocation 与已规范化 result，不能
+取得 runtime 内部表或 dispatcher publication state。
+
+命令结果是一个有序 outcome 序列：`handled`、`TransactionSpec`、
+`ViewTransactionSpec`、`HostOperation` 或 `CommandEffect`。runtime 依序提交前四类
+host mutation；`CommandEffect` 只路由给同 kind 的注册 handler。effect handler 可以投递
+后续 runtime message，但不在命令调用栈中重新进入 command loop。
+
+interactive reader 的 resolver 接收 `(context arguments)`，返回 `InteractiveReady` 或
+`InteractiveSuspend(request, decoder)`。interaction handler 获得 invocation identity 与
+request；它把用户结果封装为 resume message。decoder 将该结果转换为 ready values，runtime
+再继续同一个 invocation。reader、completion、minibuffer 和 RPC 都遵守此协议，因此可以
+替换具体交互界面而不改变 command definition。
 
 ### CommandInvocation
 
@@ -938,8 +972,10 @@ CommandInvocation {
   id,
   definition,
   context,
+  remaining_readers,
+  arguments,
   phase: resolving | reading | executing | completed | cancelled,
-  interaction_id?,
+  suspension?,
   result?,
   condition_id?
 }
