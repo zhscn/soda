@@ -68,7 +68,10 @@
       (immutable views dispatcher-views)
       (immutable surfaces dispatcher-surfaces)
       (mutable listener dispatcher-listener dispatcher-listener-set!)
-      (mutable host-listener dispatcher-host-listener dispatcher-host-listener-set!)))
+      (mutable host-listener dispatcher-host-listener dispatcher-host-listener-set!)
+      (mutable phase dispatcher-phase dispatcher-phase-set!)
+      (mutable deferred dispatcher-deferred dispatcher-deferred-set!)
+      (mutable draining? dispatcher-draining? dispatcher-draining?-set!)))
 
   (define make-dispatcher
     (case-lambda
@@ -86,7 +89,46 @@
     (unless (or (not listener) (procedure? listener))
       (assertion-violation 'make-dispatcher "expected a listener or #f" listener))
     (%make-dispatcher
-      buffers views surfaces listener #f)]))
+      buffers views surfaces listener #f 'idle '() #f)]))
+
+  (define (dispatcher-drain-deferred! dispatcher)
+    (when (and (eq? (dispatcher-phase dispatcher) 'idle)
+               (pair? (dispatcher-deferred dispatcher))
+               (not (dispatcher-draining? dispatcher)))
+      (dynamic-wind
+        (lambda () (dispatcher-draining?-set! dispatcher #t))
+        (lambda ()
+          (let loop ()
+            (when (pair? (dispatcher-deferred dispatcher))
+              (let ([queued (dispatcher-deferred dispatcher)])
+                (dispatcher-deferred-set! dispatcher '())
+                (for-each (lambda (thunk) (dispatcher-run! dispatcher thunk)) queued)
+                (loop)))))
+        (lambda () (dispatcher-draining?-set! dispatcher #f)))))
+
+  ;; Publication is non-reentrant.  Work requested from a plugin or listener
+  ;; observes the completed update only after this notification boundary.
+  (define (dispatcher-run! dispatcher thunk)
+    (if (eq? (dispatcher-phase dispatcher) 'idle)
+        (let ([result
+               (dynamic-wind
+                 (lambda () (dispatcher-phase-set! dispatcher 'publishing))
+                 thunk
+                 (lambda () (dispatcher-phase-set! dispatcher 'idle)))])
+          (unless (dispatcher-draining? dispatcher)
+            (dispatcher-drain-deferred! dispatcher))
+          result)
+        (begin
+          (dispatcher-deferred-set!
+            dispatcher (append (dispatcher-deferred dispatcher) (list thunk)))
+          #f)))
+
+  (define (dispatcher-notify! dispatcher thunk)
+    (let ([phase (dispatcher-phase dispatcher)])
+      (dynamic-wind
+        (lambda () (dispatcher-phase-set! dispatcher 'notifying))
+        thunk
+        (lambda () (dispatcher-phase-set! dispatcher phase)))))
 
   (define (dispatcher-set-listener! dispatcher listener)
     (unless (or (not listener) (procedure? listener))
@@ -101,7 +143,7 @@
     (dispatcher-host-listener-set! dispatcher listener)
     listener)
 
-  (define (dispatcher-dispatch-host! dispatcher operation)
+  (define (dispatcher-dispatch-host-now! dispatcher operation)
     (unless (and (dispatcher? dispatcher) (host-operation? operation))
       (assertion-violation 'dispatcher-dispatch-host!
                            "expected a Dispatcher and HostOperation"
@@ -153,9 +195,20 @@
                                  (if (eq? (host-operation-kind operation) 'resize-surface)
                                      '(resize layout)
                                      '(chrome))))])
-                      (let ([listener (dispatcher-host-listener dispatcher)])
-                        (when listener (listener update)))
+                      (dispatcher-notify!
+                        dispatcher
+                        (lambda ()
+                          (let ([listener (dispatcher-host-listener dispatcher)])
+                            (when listener (listener update)))))
                       update)))))))
+
+  (define (dispatcher-dispatch-host! dispatcher operation)
+    (unless (and (dispatcher? dispatcher) (host-operation? operation))
+      (assertion-violation 'dispatcher-dispatch-host!
+                           "expected a Dispatcher and HostOperation"
+                           dispatcher operation))
+    (dispatcher-run! dispatcher
+                     (lambda () (dispatcher-dispatch-host-now! dispatcher operation))))
 
   (define (notify-view-plugins! dispatcher update)
     (for-each
@@ -175,6 +228,18 @@
                 update
                 (editor-update-damage update))))))
       (editor-update-views update))
+    update)
+
+  (define (dispatcher-notify-editor-update! dispatcher update configuration)
+    (dispatcher-notify!
+      dispatcher
+      (lambda ()
+        (notify-view-plugins! dispatcher update)
+        (let ([listener (dispatcher-listener dispatcher)])
+          (when listener (listener update)))
+        (for-each
+          (lambda (listener) (listener update))
+          (configuration-facet configuration update-listeners-facet 'buffer))))
     update)
 
   (define (prepare-native-change! document changes)
@@ -339,16 +404,8 @@
                     (transaction-annotations transaction)
                     (resolved-transaction-scroll-request resolved)
                     (if (change-set-empty? changes) '(selection) '(document selection)))])
-            (notify-view-plugins! dispatcher update)
-            (let ([listener (dispatcher-listener dispatcher)])
-              (when listener (listener update)))
-            (for-each
-              (lambda (listener) (listener update))
-              (configuration-facet
-                (buffer-state-configuration new-buffer-state)
-                update-listeners-facet
-                'buffer))
-            update)))))))
+            (dispatcher-notify-editor-update!
+              dispatcher update (buffer-state-configuration new-buffer-state)))))))))
 
   (define (apply-resolved-transaction-extension dispatcher resolved facet)
     (let ([buffer
@@ -392,7 +449,7 @@
                        "transaction extension returned an invalid value"
                        next)])))))))
 
-  (define (dispatcher-dispatch-specs! dispatcher specs)
+  (define (dispatcher-dispatch-specs-now! dispatcher specs)
     (unless (and (dispatcher? dispatcher)
                  (list? specs)
                  (for-all transaction-spec? specs))
@@ -429,10 +486,21 @@
                  (dispatcher-dispatch-resolved-internal!
                    dispatcher extended))))))
 
+  (define (dispatcher-dispatch-specs! dispatcher specs)
+    (unless (and (dispatcher? dispatcher)
+                 (list? specs)
+                 (for-all transaction-spec? specs))
+      (assertion-violation
+        'dispatcher-dispatch-specs!
+        "expected a dispatcher and a list of transaction specs"))
+    (dispatcher-run! dispatcher
+                     (lambda () (dispatcher-dispatch-specs-now! dispatcher specs))))
+
   (define (dispatcher-dispatch! dispatcher spec)
     (unless (and (dispatcher? dispatcher) (transaction-spec? spec))
       (assertion-violation 'dispatcher-dispatch! "expected a dispatcher and transaction spec"))
-    (dispatcher-dispatch-specs! dispatcher (list spec)))
+    (dispatcher-run! dispatcher
+                     (lambda () (dispatcher-dispatch-specs-now! dispatcher (list spec)))) )
 
   (define (selection-within-length? selection length)
     (for-all
@@ -441,7 +509,7 @@
              (<= (selection-range-head range) length)))
       (selection-ranges selection)))
 
-  (define (dispatcher-dispatch-view! dispatcher spec)
+  (define (dispatcher-dispatch-view-now! dispatcher spec)
     (unless (and (dispatcher? dispatcher) (view-transaction-spec? spec))
       (assertion-violation
         'dispatcher-dispatch-view!
@@ -517,14 +585,14 @@
                   (view-transaction-spec-scroll-request spec)
                   damage)])
           (view-publish-state! view new-state)
-          (notify-view-plugins! dispatcher update)
-          (let ([listener (dispatcher-listener dispatcher)])
-            (when listener (listener update)))
-          (for-each
-            (lambda (listener) (listener update))
-            (configuration-facet
-              (buffer-state-configuration buffer-state)
-              update-listeners-facet
-              'buffer))
-          update))))
+          (dispatcher-notify-editor-update!
+            dispatcher update (buffer-state-configuration buffer-state))))))
+
+  (define (dispatcher-dispatch-view! dispatcher spec)
+    (unless (and (dispatcher? dispatcher) (view-transaction-spec? spec))
+      (assertion-violation
+        'dispatcher-dispatch-view!
+        "expected a dispatcher and ViewTransactionSpec"))
+    (dispatcher-run! dispatcher
+                     (lambda () (dispatcher-dispatch-view-now! dispatcher spec))))
 )

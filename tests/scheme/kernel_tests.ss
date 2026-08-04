@@ -870,6 +870,42 @@
 
 (define host (make-host-state))
 (define owner (make-owner 'kernel-test))
+(let* ([document (make-document "abc")]
+       [configuration (make-configuration '())]
+       [buffer (buffer-service-create! (host-state-buffers host) owner "*deferred*"
+                                       document configuration)]
+       [view (view-service-create! (host-state-views host) owner buffer configuration)]
+       [dispatcher (host-state-dispatch host)]
+       [listener-count 0]
+       [queued-result #t]
+       [queued? #f]
+       [first-selection (make-selection (list (make-selection-range 1 1)))]
+       [second-selection (make-selection (list (make-selection-range 2 2)))])
+  (dispatcher-set-listener!
+    dispatcher
+    (lambda (update)
+      (set! listener-count (+ listener-count 1))
+      (unless queued?
+        (set! queued? #t)
+        (let ([state (view-state view)])
+          (set! queued-result
+            (dispatcher-dispatch-view!
+              dispatcher
+              (make-view-transaction-spec
+                (view-id view) (view-state-generation state)
+                second-selection #f #f '() '() #f)))))))
+  (dispatcher-dispatch-view!
+    dispatcher
+    (make-view-transaction-spec
+      (view-id view) (view-state-generation (view-state view))
+      first-selection #f #f '() '() #f))
+  (dispatcher-set-listener! dispatcher #f)
+  (unless (and (not queued-result)
+               (= listener-count 2)
+               (= (selection-range-head
+                    (selection-primary-range (view-state-selection (view-state view))))
+                  2))
+    (error 'kernel-tests "Dispatcher did not defer a reentrant view update")))
 (let ([text (string->text "e\x301;\x1f469;\x200d;\x1f4bb;")])
   (let ([first (text-next-grapheme-offset text 0)]
         [second (text-next-grapheme-offset text 3)]
