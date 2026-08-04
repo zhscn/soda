@@ -228,6 +228,13 @@
              (frontend-host-state value)
              (lambda (message) (frontend-handle-queued-message! value message))))]))
 
+  (define (add-render-occurrence groups id occurrence)
+    (let loop ([remaining groups])
+      (cond [(null? remaining) (list (cons id (list occurrence)))]
+            [(= id (caar remaining))
+             (cons (cons id (cons occurrence (cdar remaining))) (cdr remaining))]
+            [else (cons (car remaining) (loop (cdr remaining)))])))
+
   (define (frontend-render! value)
     (require-open 'frontend-render! value)
     (if (not (frontend-dirty? value))
@@ -238,6 +245,22 @@
                  (frontend-surface value)
                  (host-state-views (frontend-host-state value)))])
           ((frontend-present! value) render (frontend-theme value))
+          (let loop ([rendered (surface-render-rendered-views render)] [groups '()])
+            (if (null? rendered)
+                (for-each
+                  (lambda (group)
+                    (frontend-enqueue!
+                      value
+                      (lambda ()
+                        (when (view-service-publish-occurrences!
+                                (host-state-views (frontend-host-state value))
+                                (car group) (reverse (cdr group)))
+                          (frontend-dirty?-set! value #t)))))
+                  groups)
+                (let ([item (car rendered)])
+                  (loop (cdr rendered)
+                        (add-render-occurrence groups (rendered-view-view-id item)
+                                        (rendered-view-occurrence item))))))
           (for-each
             (lambda (rendered)
               (for-each

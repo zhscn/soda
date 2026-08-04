@@ -55,6 +55,7 @@
         (soda view text-layout)
         (soda view theme)
         (soda view plugin)
+        (soda view occurrence)
         (soda view internal plugin))
 
 (define (application-command-context application)
@@ -1347,6 +1348,29 @@
                (eq? (surface-hit-kind (surface-render-hit-test render 0 1)) 'virtual)
                (eq? (surface-hit-source (surface-render-hit-test render 0 1)) 'inlay))
     (error 'kernel-tests "cached View display transform differs")))
+
+;; Occurrence updates expose the viewport-local projection to a ViewPlugin
+;; without making the pure renderer mutate the live View.
+(let* ([seen '()]
+       [plugin (make-view-plugin
+                 'occurrences (lambda (view) 'ready)
+                 (lambda (value update) (set! seen (view-update-occurrences update)))
+                 #f #f)]
+       [configuration (make-configuration
+                        (list (make-facet-provider view-plugins-facet (list plugin))))]
+       [buffer (buffer-service-create! (host-state-buffers host) owner "*occurrences*"
+                                       (make-document "abc") configuration)]
+       [view (view-service-create! (host-state-views host) owner buffer configuration)]
+       [surface (make-surface (make-leaf-window (view-id view) '(0 0 3 1)) '(3 . 1))]
+       [render (render-surface surface (host-state-views host))]
+       [occurrence (rendered-view-occurrence
+                     (car (surface-render-rendered-views render)))])
+  (view-service-publish-occurrences! (host-state-views host) (view-id view)
+                                     (list occurrence))
+  (unless (and (= (length seen) 1)
+               (= (view-occurrence-view-id (car seen)) (view-id view))
+               (pair? (view-occurrence-visible-ranges (car seen))))
+    (error 'kernel-tests "View occurrence publication differs")))
 
 ;; Structural transforms run before viewport clipping.  The initial source
 ;; window contains only two logical lines, but the fold placeholder leaves

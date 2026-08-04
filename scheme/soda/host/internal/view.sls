@@ -6,6 +6,7 @@
           view-state
           view-render-generation
           view-projection
+          view-occurrences
           view-plugin-instances
           view-decorations
           view-merged-decorations
@@ -22,6 +23,7 @@
           view-service-views
           view-service-close-buffer-views!
           view-service-retire-projection-failure!
+          view-service-publish-occurrences!
           view-service-set-plugin-error-handler!
           view-service-set-close-handler!
           view-service-close-view!)
@@ -37,6 +39,7 @@
           (soda view plugin)
           (soda view internal plugin)
           (soda view projection)
+          (soda view occurrence)
           (soda view display)
           (soda view decoration))
 
@@ -50,6 +53,7 @@
             (mutable plugins view-plugin-instances view-plugin-instances-set!)
             (mutable projection view-published-projection
                      view-published-projection-set!)
+            (mutable occurrences view-occurrences view-occurrences-set!)
             (mutable render-generation view-render-generation
                      view-render-generation-set!)
             (mutable closed? view-closed? view-closed?-set!)))
@@ -219,7 +223,7 @@
                               (buffer-state-generation (buffer-state buffer))
                               (empty-selection) default-viewport
                               (or input-state (default-input-stack)) configuration)
-             '() (make-view-projection 0 (make-decoration-set '()) #f '()) 0 #f)])
+             '() (make-view-projection 0 (make-decoration-set '()) #f '()) '() 0 #f)])
       (validate-display-providers! (configuration-view-plugins configuration))
       (view-plugin-instances-set!
         view
@@ -370,6 +374,31 @@
           (view-service-close-view! service (view-id view))))
       (view-service-views service))
     #t)
+
+  (define (occurrence-lists=? left right)
+    (and (= (length left) (length right))
+         (for-all view-occurrence=? left right)))
+
+  ;; This runs from a queued frontend host message after the pure frame has
+  ;; been presented.  Every occurrence belongs to one View and is immutable.
+  (define (view-service-publish-occurrences! service id occurrences)
+    (unless (and (view-service? service) (integer? id) (exact? id) (>= id 0)
+                 (list? occurrences)
+                 (for-all (lambda (occurrence)
+                            (and (view-occurrence? occurrence)
+                                 (= (view-occurrence-view-id occurrence) id)))
+                          occurrences))
+      (assertion-violation 'view-service-publish-occurrences!
+                           "invalid View occurrences" service id occurrences))
+    (let ([view (view-service-ref service id #f)])
+      (and view (not (occurrence-lists=? (view-occurrences view) occurrences))
+           (begin
+             (view-occurrences-set! view occurrences)
+             (view-update-plugins!
+               view
+               (make-view-update (view-id view) (view-state view) (view-state view)
+                                 #f '(viewport layout) occurrences))
+             #t))))
 
   ;; Render failures are reported by a frontend on its next host-loop turn.
   ;; The generation check keeps an obsolete frame from retiring a plugin that

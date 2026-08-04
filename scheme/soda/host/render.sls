@@ -10,6 +10,7 @@
           rendered-view-view-id
           rendered-view-rectangle
           rendered-view-layout
+          rendered-view-occurrence
           rendered-view-projection-generation
           rendered-view-visible-ranges
           rendered-view-transform-failures
@@ -36,6 +37,7 @@
           (soda view decoration)
           (soda view display)
           (soda view projection)
+          (soda view occurrence)
           (soda view frame)
           (soda view text-layout))
 
@@ -43,7 +45,7 @@
   ;; routing.  It is part of a rendered Surface, not mutable View state.
   (define-record-type
     (rendered-view %make-rendered-view rendered-view?)
-    (fields view-id rectangle layout projection-generation transform-failures))
+    (fields view-id rectangle layout occurrence projection-generation transform-failures))
 
   (define (rectangle? value)
     (and (list? value) (= (length value) 4)
@@ -52,17 +54,18 @@
   (define make-rendered-view
     (case-lambda
       [(view-id rectangle layout)
-       (make-rendered-view view-id rectangle layout 0 '())]
+       (make-rendered-view view-id rectangle layout #f 0 '())]
       [(view-id rectangle layout transform-failures)
-       (make-rendered-view view-id rectangle layout 0 transform-failures)]
-      [(view-id rectangle layout projection-generation transform-failures)
+       (make-rendered-view view-id rectangle layout #f 0 transform-failures)]
+      [(view-id rectangle layout occurrence projection-generation transform-failures)
        (unless (and (rectangle? rectangle) (text-layout? layout)
+                    (or (not occurrence) (view-occurrence? occurrence))
                     (integer? projection-generation) (exact? projection-generation)
                     (>= projection-generation 0)
                     (list? transform-failures))
          (assertion-violation 'make-rendered-view "invalid rendered View"
-                              view-id rectangle layout projection-generation transform-failures))
-       (%make-rendered-view view-id (list-copy rectangle) layout projection-generation
+                              view-id rectangle layout occurrence projection-generation transform-failures))
+       (%make-rendered-view view-id (list-copy rectangle) layout occurrence projection-generation
                             (list-copy transform-failures))]))
 
   (define (rendered-view-visible-ranges rendered)
@@ -190,7 +193,12 @@
                       (loop
                         (cdr leaves)
                         (cons (make-frame-placement row column (text-layout-frame layout)) placements)
-                        (cons (make-rendered-view (view-id view) rectangle layout
+                        (cons (make-rendered-view
+                                (view-id view) rectangle layout
+                                (make-view-occurrence
+                                  (surface-id surface) (window-id leaf) (view-id view)
+                                  rectangle viewport (text-layout-visible-ranges layout)
+                                  (view-projection-generation view-projection))
                                                   (view-projection-generation view-projection)
                                                   transform-failures)
                               rendered-views)

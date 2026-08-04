@@ -1,6 +1,7 @@
 (library (soda view plugin)
   (export make-view-update view-update? view-update-view-id view-update-start-state
-          view-update-state view-update-editor-update view-update-damage view-update-damaged?
+          view-update-state view-update-editor-update view-update-damage view-update-occurrences
+          view-update-damaged?
           make-view-plugin view-plugin? view-plugin-key view-plugin-create view-plugin-update
           view-plugin-destroy view-plugin-decorations view-plugin-display view-plugin-transform
           view-plugins-facet configuration-view-plugins)
@@ -9,12 +10,19 @@
   ;; ViewUpdate is immutable input from the dispatcher publication boundary.
   (define-record-type
     (view-update %make-view-update view-update?)
-    (fields view-id start-state state editor-update damage))
+    (fields view-id start-state state editor-update damage occurrences))
   (define (copy-list values) (reverse (reverse values)))
-  (define (make-view-update view-id start-state state editor-update damage)
+  (define make-view-update
+    (case-lambda
+      [(view-id start-state state editor-update damage)
+       (make-view-update view-id start-state state editor-update damage '())]
+      [(view-id start-state state editor-update damage occurrences)
     (unless (and (integer? view-id) (exact? view-id) (>= view-id 0) (list? damage))
       (assertion-violation 'make-view-update "invalid view update" view-id damage))
-    (%make-view-update view-id start-state state editor-update (copy-list damage)))
+       (unless (list? occurrences)
+         (assertion-violation 'make-view-update "occurrences must be a list" occurrences))
+       (%make-view-update view-id start-state state editor-update (copy-list damage)
+                          (copy-list occurrences))]))
   (define (view-update-damaged? update kind)
     (unless (and (view-update? update) (symbol? kind))
       (assertion-violation 'view-update-damaged? "expected a ViewUpdate and damage kind"
