@@ -8,6 +8,7 @@
           minibuffer-session-buffer-id
           minibuffer-session-view-id
           minibuffer-session-origin-view-id
+          minibuffer-input-context
           minibuffer-service-submit!
           minibuffer-service-cancel!)
   (import (rnrs)
@@ -15,7 +16,10 @@
           (soda kernel state)
           (soda kernel view-state)
           (soda host command)
+          (soda host input)
+          (soda host input-event)
           (soda host internal buffer)
+          (soda host internal context)
           (soda host internal state)
           (soda host internal surface)
           (soda host internal view)
@@ -29,7 +33,7 @@
     (fields interaction buffer-id view-id origin-view-id surface-id))
   (define-record-type
     (minibuffer-service %make-minibuffer-service minibuffer-service?)
-    (fields state interactions owner
+    (fields state interactions owner keymap
             (mutable sessions minibuffer-service-sessions minibuffer-service-sessions-set!)
             (mutable registration minibuffer-service-registration minibuffer-service-registration-set!)))
 
@@ -42,6 +46,15 @@
     (and (minibuffer-service? service)
          (let ([sessions (minibuffer-service-sessions service)])
            (and (pair? sessions) (car sessions)))))
+  (define (control-stroke character)
+    (make-key-stroke 'character (char->integer character) 4))
+  (define (minibuffer-input-context service active view)
+    (let ([session (minibuffer-service-current service)])
+      (and session (= (minibuffer-session-view-id session) (view-id view))
+           (make-input-context
+             (active-context-view-id active) (active-context-buffer-id active)
+             (list (make-input-layer 'minibuffer (minibuffer-service-keymap service) #f 'accept))
+             (view-state-input-state (view-state view))))))
   (define (origin-surface service interaction)
     (surface-service-ref
       (host-state-surfaces (minibuffer-service-state service))
@@ -92,7 +105,12 @@
   (define (make-minibuffer-service! state interactions owner)
     (unless (and (host-state? state) (interaction-service? interactions) (owner? owner))
       (assertion-violation 'make-minibuffer-service! "invalid minibuffer dependencies"))
-    (let ([service (%make-minibuffer-service state interactions owner '() #f)])
+    (let ([keymap (make-keymap 'minibuffer)])
+      (keymap-bind! keymap (list (make-key-stroke 'enter #f 0)) 'minibuffer.accept)
+      (keymap-bind! keymap (list (control-stroke #\j)) 'minibuffer.accept)
+      (keymap-bind! keymap (list (control-stroke #\g)) 'minibuffer.cancel)
+      (keymap-bind! keymap (list (make-key-stroke 'escape #f 0)) 'minibuffer.cancel)
+      (let ([service (%make-minibuffer-service state interactions owner keymap '() #f)])
       (minibuffer-service-registration-set!
         service
         (interaction-service-add-listener!
@@ -100,5 +118,5 @@
           (lambda (kind interaction)
             (cond [(eq? kind 'opened) (open! service interaction)]
                   [(memq kind '(accepted cancelled)) (close! service interaction)]))))
-      service))
+      service)))
 )

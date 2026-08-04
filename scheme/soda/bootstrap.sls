@@ -17,6 +17,7 @@
           (soda kernel extension)
           (soda host command)
           (soda host command-runtime)
+          (soda host input)
           (soda host internal buffer)
           (soda host internal state)
           (soda host internal surface)
@@ -107,11 +108,22 @@
 
   (define (make-resolver application)
     (lambda (active view)
-      (fundamental-input-context (soda-application-editing application) active view)))
+      (or (minibuffer-input-context (soda-application-minibuffer application) active view)
+          (fundamental-input-context (soda-application-editing application) active view))))
 
   (define (make-disposition-handler application)
     (lambda (context disposition)
-      (fundamental-input-disposition context disposition)))
+      (case (input-disposition-kind disposition)
+        [(command)
+         (case (input-disposition-value disposition)
+           [(minibuffer.accept)
+            (minibuffer-service-submit! (soda-application-minibuffer application))
+            #f]
+           [(minibuffer.cancel)
+            (minibuffer-service-cancel! (soda-application-minibuffer application))
+            #f]
+           [else (fundamental-input-disposition context disposition)])]
+        [else (fundamental-input-disposition context disposition)])))
 
   (define (stop-application-terminal! application)
     (let ([terminal (soda-application-terminal application)])
