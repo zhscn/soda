@@ -17,7 +17,6 @@
           transaction-spec-effects
           transaction-spec-annotations
           transaction-spec-scroll-request
-          transaction-spec-filter
           transaction-spec-sequential?
           resolved-transaction?
           resolved-transaction-buffer-id
@@ -28,7 +27,6 @@
           resolved-transaction-effects
           resolved-transaction-annotations
           resolved-transaction-scroll-request
-          resolved-transaction-filter-disabled?
           resolve-transaction-specs
           make-resolved-transaction
           make-transaction
@@ -143,24 +141,23 @@
       (immutable effects transaction-spec-effects)
       (immutable annotations transaction-spec-annotations)
       (immutable scroll-request transaction-spec-scroll-request)
-      (immutable filter transaction-spec-filter)
       (immutable sequential? transaction-spec-sequential?)))
 
   (define make-transaction-spec
     (case-lambda
       [(buffer-id start-generation changes)
        (make-transaction-spec
-         buffer-id #f start-generation changes #f '() '() #f #f #f)]
+         buffer-id #f start-generation changes #f '() '() #f #f)]
       [(buffer-id origin-view-id start-generation changes selection effects annotations)
        (make-transaction-spec
-         buffer-id origin-view-id start-generation changes selection effects annotations #f #f #f)]
+         buffer-id origin-view-id start-generation changes selection effects annotations #f #f)]
       [(buffer-id origin-view-id start-generation changes selection effects annotations
-                  scroll-request filter)
+                  scroll-request)
        (make-transaction-spec
          buffer-id origin-view-id start-generation changes selection effects annotations
-         scroll-request filter #f)]
+         scroll-request #f)]
       [(buffer-id origin-view-id start-generation changes selection effects annotations
-                  scroll-request filter sequential?)
+                  scroll-request sequential?)
        (unless (change-set? changes)
          (assertion-violation 'make-transaction-spec "expected a change set" changes))
        (unless (and (exact-integer? start-generation) (>= start-generation 0))
@@ -171,14 +168,14 @@
        (unless (or (not selection) (selection? selection))
          (assertion-violation
            'make-transaction-spec "selection must be a Selection or #f" selection))
-       (unless (and (boolean? filter) (boolean? sequential?))
+       (unless (boolean? sequential?)
          (assertion-violation
-           'make-transaction-spec "filter and sequential flags must be boolean"))
+           'make-transaction-spec "sequential flag must be boolean" sequential?))
        (%make-transaction-spec
          buffer-id origin-view-id start-generation changes selection
          (normalize-state-effect-list 'make-transaction-spec effects)
          (normalize-annotation-list 'make-transaction-spec annotations)
-         scroll-request filter sequential?)]))
+         scroll-request sequential?)]))
 
   (define-record-type
     (resolved-transaction %make-resolved-transaction resolved-transaction?)
@@ -190,8 +187,7 @@
       (immutable selection resolved-transaction-selection)
       (immutable effects resolved-transaction-effects)
       (immutable annotations resolved-transaction-annotations)
-      (immutable scroll-request resolved-transaction-scroll-request)
-      (immutable filter-disabled? resolved-transaction-filter-disabled?)))
+      (immutable scroll-request resolved-transaction-scroll-request)))
 
   (define-record-type
     (transaction %make-transaction transaction?)
@@ -220,7 +216,7 @@
   ;; make-transaction-from-resolved therefore does not map them a second time.
   (define (make-resolved-transaction
            buffer-id origin-view-id start-generation changes selection
-           effects annotations scroll-request filter-disabled?)
+           effects annotations scroll-request)
     (unless (change-set? changes)
       (assertion-violation
         'make-resolved-transaction "expected a change set" changes))
@@ -235,16 +231,11 @@
         selection))
     (validate-selection-length
       'make-resolved-transaction selection (change-set-new-length changes))
-    (unless (boolean? filter-disabled?)
-      (assertion-violation
-        'make-resolved-transaction
-        "filter-disabled? must be boolean"
-        filter-disabled?))
     (%make-resolved-transaction
       buffer-id origin-view-id start-generation changes selection
       (normalize-state-effect-list 'make-resolved-transaction effects)
       (normalize-annotation-list 'make-resolved-transaction annotations)
-      scroll-request filter-disabled?))
+      scroll-request))
 
   (define (selection-within-length? selection length)
     (and (selection? selection)
@@ -327,7 +318,7 @@
       (if (null? specs)
           (%make-resolved-transaction
             #f #f #f
-            (make-change-set old-length '()) #f '() '() #f #f)
+            (make-change-set old-length '()) #f '() '() #f)
           (let* ([first (car specs)]
                  [first-changes (transaction-spec-changes first)])
             (unless (= old-length (change-set-old-length first-changes))
@@ -346,16 +337,14 @@
                                   (transaction-spec-effects first))]
                        [reversed-annotations
                         (reverse (transaction-spec-annotations first))]
-                       [scroll-request (transaction-spec-scroll-request first)]
-                       [filter-disabled?
-                        (transaction-spec-filter first)])
+                       [scroll-request (transaction-spec-scroll-request first)])
               (if (null? items)
                   (%make-resolved-transaction
                     (transaction-spec-buffer-id first)
                     origin-view-id
                     (transaction-spec-start-generation first)
                     combined selection effects (reverse reversed-annotations)
-                    scroll-request filter-disabled?)
+                    scroll-request)
                   (let* ([spec (car items)]
                          [sequential? (transaction-spec-sequential? spec)]
                          [next (transaction-spec-changes spec)]
@@ -407,10 +396,7 @@
                           (transaction-spec-annotations spec))
                         (if (transaction-spec-scroll-request spec)
                             (transaction-spec-scroll-request spec)
-                            scroll-request)
-                        (or filter-disabled? (transaction-spec-filter spec))))))))))
-    )
-
+                            scroll-request))))))))))
   (define (map-effects changes effects)
     (let ([description (change-set-change-desc changes)])
       (let loop ([items (normalize-state-effect-list 'make-transaction effects)]

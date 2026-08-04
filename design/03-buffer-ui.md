@@ -273,9 +273,9 @@ BufferItem {
 `item-at-point`、`next-item`、`previous-item` 和 `activate-item` 是通用命令；它们查询当前
 View selection 下的 item，不解析显示字符串。
 
-action 以 symbol 标识，并通过 owner-scoped action registry 解析。StateField 和 RangeSet
-不保存可失效的 procedure closure。action 收到稳定 `BufferItem`、CommandContext 和 producer
-generation，再产生普通 command outcome。
+action 以 `(provider_id, symbol)` 标识，并通过 owner-scoped action registry 解析。StateField 和
+RangeSet 不保存可失效的 procedure closure。action 收到稳定 `BufferItem`、CommandContext 和
+producer generation，再产生普通 command outcome。
 
 face、不可见、replacement 与虚拟文本仍由 Decoration/DisplayMap 提供。semantic item 与
 decoration 可以覆盖同一 range，但没有继承或所有权关系。

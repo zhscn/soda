@@ -336,7 +336,7 @@
         (make-transaction-spec
           0 #f 0
           (make-change-set 6 (list (make-text-change 2 2 "Y")))
-          #f '() '() #f #f #t)]
+          #f '() '() #f #t)]
        [sequential-resolved
         (resolve-transaction-specs
           (list first-spec sequential-spec)
@@ -1773,9 +1773,9 @@
   (error 'kernel-tests "dispatcher did not resolve a batch update"))
 
 (let* ([reject-filter
-        (lambda (value)
-          (unless (resolved-transaction? value)
-            (error 'kernel-tests "transaction filter did not receive resolved state"))
+        (lambda (state value)
+          (unless (and (buffer-state? state) (resolved-transaction? value))
+            (error 'kernel-tests "transaction filter did not receive BufferState and resolved state"))
           #f)]
        [reject-configuration
         (make-configuration
@@ -1798,7 +1798,7 @@
             (buffer-id reject-buffer) (view-id reject-view) 0
             (make-change-set 5 (list (make-text-change 5 5 "!")))
             #f '() '()))]
-       [allowed
+       [bypass-rejected
         (dispatcher-dispatch!
           (host-state-dispatch host)
           (make-transaction-spec
@@ -1806,12 +1806,12 @@
             (make-change-set 5 (list (make-text-change 5 5 "!")))
             #f '() '() #f #t))])
   (unless (and (not rejected)
-               allowed
-               (= (buffer-state-generation (buffer-state reject-buffer)) 1)
+               (not bypass-rejected)
+               (= (buffer-state-generation (buffer-state reject-buffer)) 0)
                (string=? (snapshot-string
                            (buffer-state-document (buffer-state reject-buffer)))
-                         "hello!"))
-    (error 'kernel-tests "transaction filter policy differs")))
+                         "hello"))
+    (error 'kernel-tests "transaction filter policy can be bypassed")))
 
 (let* ([target-document (make-document "other")]
        [target-buffer
@@ -1819,7 +1819,7 @@
           (host-state-buffers host) owner "*target*" target-document
           (make-configuration '()))]
        [retarget-filter
-        (lambda (resolved)
+        (lambda (state resolved)
           (make-resolved-transaction
             (buffer-id target-buffer)
             (resolved-transaction-origin-view-id resolved)
@@ -1828,8 +1828,7 @@
             (resolved-transaction-selection resolved)
             (resolved-transaction-effects resolved)
             (resolved-transaction-annotations resolved)
-            (resolved-transaction-scroll-request resolved)
-            (resolved-transaction-filter-disabled? resolved)))]
+            (resolved-transaction-scroll-request resolved)))]
        [source-configuration
         (make-configuration
           (list

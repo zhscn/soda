@@ -65,6 +65,8 @@
           buffer-item-action-invoke
           install-buffer-item-commands!)
   (import (rnrs)
+          (only (chezscheme) equal-hash string->immutable-string
+                bytevector->immutable-bytevector)
           (soda kernel change)
           (soda kernel document)
           (soda kernel extension)
@@ -229,7 +231,7 @@
   (define (make-buffer-edit-policy-extension policy)
     (unless (buffer-edit-policy? policy)
       (assertion-violation 'make-buffer-edit-policy-extension "expected an EditPolicy" policy))
-    (let ([filter (lambda (transaction) (apply-edit-policy policy transaction))])
+    (let ([filter (lambda (state transaction) (apply-edit-policy policy transaction))])
       (list (make-facet-provider buffer-edit-policies-facet (list policy))
             (make-facet-provider transaction-filters-facet (list filter)))))
 
@@ -242,6 +244,11 @@
             (immutable actions buffer-item-actions)
             (immutable primary-action buffer-item-primary-action)))
 
+  (define (stable-identity value)
+    (cond [(string? value) (string->immutable-string value)]
+          [(bytevector? value) (bytevector->immutable-bytevector value)]
+          [else value]))
+
   (define (make-buffer-item provider-id id kind payload actions primary-action)
     (unless (and (or (symbol? provider-id) (string? provider-id))
                  (or (symbol? id) (string? id) (integer? id))
@@ -249,17 +256,33 @@
                  (or (not primary-action)
                      (and (symbol? primary-action) (memq primary-action actions))))
       (assertion-violation 'make-buffer-item "invalid BufferItem" provider-id id kind))
-    (%make-buffer-item provider-id id kind payload (list-copy actions) primary-action))
+    (%make-buffer-item (stable-identity provider-id) (stable-identity id)
+                       kind payload (list-copy actions) primary-action))
+
+  (define (assert-buffer-item-ranges who ranges)
+    (unless (range-set? ranges)
+      (assertion-violation who "expected an item RangeSet" ranges))
+    (for-each
+      (lambda (range)
+        (unless (buffer-item? (range-value-value range))
+          (assertion-violation who "item ranges must contain BufferItem values" range)))
+      (range-set-ranges ranges))
+    ranges)
 
   (define (replacement-item-effect transaction)
     (let loop ([effects (transaction-effects transaction)] [replacement #f])
       (if (null? effects)
           replacement
           (let ([effect (car effects)])
-            (loop (cdr effects)
-                  (if (eq? (state-effect-type effect) 'buffer-items-replace)
-                      (state-effect-value effect)
-                      replacement))))))
+            (if (eq? (state-effect-type effect) 'buffer-items-replace)
+                (let ([ranges
+                       (assert-buffer-item-ranges
+                         'buffer-item-field (state-effect-value effect))])
+                  (when replacement
+                    (assertion-violation 'buffer-item-field
+                                         "transaction contains multiple item replacements"))
+                  (loop (cdr effects) ranges))
+                (loop (cdr effects) replacement))))))
 
   (define buffer-item-field
     (make-state-field
@@ -272,14 +295,7 @@
               (range-set-map-change old (transaction-changes transaction)))))))
 
   (define (make-buffer-items-effect ranges)
-    (unless (range-set? ranges)
-      (assertion-violation 'make-buffer-items-effect "expected an item RangeSet" ranges))
-    (for-each
-      (lambda (range)
-        (unless (buffer-item? (range-value-value range))
-          (assertion-violation 'make-buffer-items-effect
-                               "item ranges must contain BufferItem values" range)))
-      (range-set-ranges ranges))
+    (assert-buffer-item-ranges 'make-buffer-items-effect ranges)
     ;; Projection ranges are authored in the resulting document coordinates.
     (make-state-effect 'buffer-items-replace ranges (lambda (value ignored) value)))
 
@@ -300,6 +316,12 @@
           [(bytevector? text) (bytevector-length text)]
           [else #f]))
 
+  (define (immutable-projection-text text)
+    (cond [(string? text) (string->immutable-string text)]
+          [(bytevector? text) (bytevector->immutable-bytevector text)]
+          [else (assertion-violation 'immutable-projection-text
+                                     "expected text" text)]))
+
   (define (make-projection-update generation text item-ranges decorations semantic-position-map)
     (unless (and (integer? generation) (exact? generation) (>= generation 0)
                  (projection-text-length text) (range-set? item-ranges))
@@ -316,35 +338,80 @@
                                  "item range exceeds projected text" range length)))
         (range-set-ranges item-ranges)))
     (%make-projection-update generation
-                             (if (bytevector? text) (bytevector-copy text) text)
+                             (immutable-projection-text text)
                              item-ranges decorations semantic-position-map))
 
+  (define (projection-transaction-effects value)
+    (cond [(transaction? value) (transaction-effects value)]
+          [(resolved-transaction? value) (resolved-transaction-effects value)]
+          [else
+           (assertion-violation 'projection-effect
+                                "expected a Transaction or ResolvedTransaction" value)]))
+
   (define (projection-effect transaction)
-    (let loop ([effects (transaction-effects transaction)] [replacement #f])
+    (let loop ([effects (projection-transaction-effects transaction)] [replacement #f])
       (if (null? effects)
           replacement
           (let ([effect (car effects)])
-            (loop (cdr effects)
-                  (if (eq? (state-effect-type effect) 'generated-projection-replace)
-                      (state-effect-value effect)
-                      replacement))))))
+            (if (eq? (state-effect-type effect) 'generated-projection-replace)
+                (let ([update (state-effect-value effect)])
+                  (unless (projection-update? update)
+                    (assertion-violation 'generated-projection-field
+                                         "projection effect must contain a ProjectionUpdate"
+                                         update))
+                  (when replacement
+                    (assertion-violation 'generated-projection-field
+                                         "transaction contains multiple projection updates"))
+                  (loop (cdr effects) update))
+                (loop (cdr effects) replacement))))))
+
+  (define (projection-newer? old update)
+    (or (not old)
+        (> (projection-update-model-generation update)
+           (projection-update-model-generation old))))
+
+  (define (generated-projection-filter state resolved)
+    (let ([update (projection-effect resolved)])
+      (if (not update)
+          resolved
+          (let ([old (buffer-state-field state generated-projection-field)])
+            (if (projection-newer? old update) resolved #f)))))
 
   (define generated-projection-field
     (make-state-field
       'generated-projection 'buffer
       (lambda (ignored) #f)
-      (lambda (old transaction) (or (projection-effect transaction) old))))
+      (lambda (old transaction)
+        (let ([update (projection-effect transaction)])
+          (cond [(not update) old]
+                [(projection-newer? old update) update]
+                [else
+                 (assertion-violation 'generated-projection-field
+                                      "stale projection escaped its transaction filter"
+                                      update old)])))))
+
+  (define (semantic-position-restore-entries? positions)
+    (and (list? positions)
+         (for-all
+           (lambda (entry)
+             (and (pair? entry) (integer? (car entry)) (exact? (car entry))
+                  (>= (car entry) 0) (semantic-position? (cdr entry))))
+           positions)))
 
   (define (restore-position-for-view transaction view-id)
     (let loop ([effects (transaction-effects transaction)])
       (and (pair? effects)
            (let ([effect (car effects)])
              (if (eq? (state-effect-type effect) 'semantic-position-restore)
-                 (let find ([entries (state-effect-value effect)])
+                 (let ([entries (state-effect-value effect)])
+                   (unless (semantic-position-restore-entries? entries)
+                     (assertion-violation 'generated-projection-selection-mapper
+                                          "semantic restore effect has invalid entries" entries))
+                   (let find ([entries entries])
                    (and (pair? entries)
                         (if (= (caar entries) view-id)
                             (cdar entries)
-                            (find (cdr entries)))))
+                            (find (cdr entries))))))
                  (loop (cdr effects)))))))
 
   (define (generated-projection-selection-mapper view-id old-view-state transaction selection)
@@ -357,6 +424,8 @@
   (define (generated-projection-extension)
     (list generated-projection-field
           (buffer-item-field-extension)
+          (make-facet-provider transaction-filters-facet
+                               (list generated-projection-filter))
           (make-facet-provider view-selection-mappers-facet
                                (list generated-projection-selection-mapper))))
 
@@ -440,7 +509,8 @@
                      (and (integer? desired-column) (exact? desired-column)
                           (>= desired-column 0))))
       (assertion-violation 'make-semantic-position "invalid semantic position"))
-    (%make-semantic-position provider-id item-id offset fallback desired-column))
+    (%make-semantic-position (stable-identity provider-id) (stable-identity item-id)
+                             offset fallback desired-column))
 
   (define (item-range-at-point state point)
     (let outer ([sets (buffer-item-ranges state)])
@@ -491,12 +561,7 @@
              (make-selection (list (make-selection-range point point)))))))
 
   (define (make-semantic-position-restore-effect positions)
-    (unless (and (list? positions)
-                 (for-all
-                   (lambda (entry)
-                     (and (pair? entry) (integer? (car entry)) (exact? (car entry))
-                          (>= (car entry) 0) (semantic-position? (cdr entry))))
-                   positions))
+    (unless (semantic-position-restore-entries? positions)
       (assertion-violation 'make-semantic-position-restore-effect
                            "expected View id to SemanticPosition pairs" positions))
     (make-state-effect 'semantic-position-restore (list-copy positions)
@@ -509,31 +574,46 @@
     (fields owner procedure))
 
   (define (make-buffer-item-action-service)
-    (%make-buffer-item-action-service (make-eq-hashtable)))
+    (%make-buffer-item-action-service (make-hashtable equal-hash equal?)))
 
-  (define (buffer-item-action-register! service owner name procedure)
+  (define (buffer-item-action-key provider-id name)
+    (list (stable-identity provider-id) name))
+
+  (define (buffer-item-action-register! service owner provider-id name procedure)
     (unless (and (buffer-item-action-service? service) (owner? owner)
+                 (or (symbol? provider-id) (string? provider-id))
                  (symbol? name) (procedure? procedure))
       (assertion-violation 'buffer-item-action-register!
-                           "expected an action service, owner, name, and procedure"))
+                           "expected an action service, owner, provider, name, and procedure"))
     (owner-assert-active 'buffer-item-action-register! owner)
-    (when (hashtable-contains? (buffer-item-action-service-table service) name)
-      (assertion-violation 'buffer-item-action-register! "action is already registered" name))
-    (let ([entry (make-buffer-item-action-entry owner procedure)])
-      (hashtable-set! (buffer-item-action-service-table service) name entry)
+    (let* ([key (buffer-item-action-key provider-id name)]
+           [entry (make-buffer-item-action-entry owner procedure)])
+      (when (hashtable-contains? (buffer-item-action-service-table service) key)
+        (assertion-violation 'buffer-item-action-register!
+                             "action is already registered for provider" provider-id name))
+      (hashtable-set! (buffer-item-action-service-table service) key entry)
       (make-registration
         owner
         (lambda ()
-          (when (eq? (hashtable-ref (buffer-item-action-service-table service) name #f) entry)
-            (hashtable-delete! (buffer-item-action-service-table service) name))))))
+          (when (eq? (hashtable-ref (buffer-item-action-service-table service) key #f) entry)
+            (hashtable-delete! (buffer-item-action-service-table service) key))))))
 
   (define (buffer-item-action-invoke service name item context)
     (unless (and (buffer-item-action-service? service) (symbol? name)
                  (buffer-item? item) (command-context? context))
       (assertion-violation 'buffer-item-action-invoke "invalid item action invocation" name item))
-    (let ([entry (hashtable-ref (buffer-item-action-service-table service) name #f)])
+    (let ([entry (hashtable-ref (buffer-item-action-service-table service)
+                                (buffer-item-action-key
+                                  (buffer-item-provider-id item) name) #f)])
       (and entry (owner-active? (buffer-item-action-entry-owner entry))
-           ((buffer-item-action-entry-procedure entry) item context))))
+           ((buffer-item-action-entry-procedure entry)
+            item context
+            (let ([state (command-context-buffer-state context)])
+              (and state
+                   (let ([projection
+                          (buffer-state-field state generated-projection-field #f)])
+                     (and projection
+                          (projection-update-model-generation projection)))))))))
 
   (define (all-item-ranges state)
     (list-sort

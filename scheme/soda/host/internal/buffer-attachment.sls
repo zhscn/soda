@@ -90,6 +90,12 @@
                            "invalid BufferAttachment declaration"
                            service owner buffer key generation close-query refresh destroy))
     (owner-assert-active 'buffer-attachment-service-install! owner)
+    (unless (eq? (buffer-service-ref (buffer-attachment-service-buffers service)
+                                    (buffer-id buffer) #f)
+                 buffer)
+      (assertion-violation 'buffer-attachment-service-install!
+                           "Buffer does not belong to this BufferAttachmentService"
+                           buffer))
     (let* ([token (attachment-token (buffer-id buffer) key)]
            [table (buffer-attachment-service-table service)])
       (when (hashtable-ref table token #f)

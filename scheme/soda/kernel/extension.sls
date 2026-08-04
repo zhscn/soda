@@ -236,8 +236,9 @@
     (fold-left append '() values))
 
   ;; Providers contribute procedures of the form
-  ;; resolved-transaction -> resolved-transaction | #f.  They observe the
-  ;; complete normalized batch, rather than individual source specs.
+  ;; BufferState, resolved-transaction -> resolved-transaction | #f.  They
+  ;; observe the current immutable state and complete normalized batch rather
+  ;; than individual source specs.
   (define transaction-filters-facet
     (make-facet 'transaction-filters '() append-values))
 

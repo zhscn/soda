@@ -73,11 +73,14 @@
         views
         (lambda (view)
           (surface-service-prune-view! surfaces (view-id view))))
+      (buffer-service-set-close-query-handler!
+        buffers
+        (lambda (buffer)
+          (buffer-attachment-service-prepare-close! buffer-attachments buffer)))
       (buffer-service-set-close-handler!
         buffers
         (lambda (buffer)
-          (and (buffer-attachment-service-prepare-close! buffer-attachments buffer)
-               (view-service-close-buffer-views! views (buffer-id buffer))
+          (and (view-service-close-buffer-views! views (buffer-id buffer))
                (buffer-attachment-service-destroy-buffer! buffer-attachments buffer))))
       (%make-host-state
         owner runtime buffers buffer-attachments views surfaces commands command-runtime conditions dispatch #f)))
@@ -87,15 +90,22 @@
       (assertion-violation 'host-state-close! "expected a host state" state))
     (if (host-state-closed? state)
         #f
-        (begin
-          (runtime-close! (host-state-runtime state))
-          (for-each
-            (lambda (buffer)
-              (buffer-service-close-buffer! (host-state-buffers state) (buffer-id buffer)))
-            (buffer-service-buffers (host-state-buffers state)))
-          (owner-close! (host-state-owner state))
-          (host-state-closed?-set! state #t)
-          #t)))
+        (let loop ()
+          (let ([buffers (buffer-service-buffers (host-state-buffers state))])
+            (cond
+              [(null? buffers)
+               (runtime-close! (host-state-runtime state))
+               (owner-close! (host-state-owner state))
+               (host-state-closed?-set! state #t)
+               #t]
+              [(buffer-service-close-buffer! (host-state-buffers state)
+                                             (buffer-id (car buffers)))
+               ;; Teardown may synchronously open a replacement Buffer.  Take
+               ;; a fresh catalog snapshot before deciding shutdown is done.
+               (loop)]
+              ;; A veto leaves the HostState usable.  A caller can resolve the
+              ;; close query and retry instead of losing live Buffer resources.
+              [else #f])))))
 
   ;; The frontend owns polling native events.  The host loop only drains
   ;; bounded runtime messages and therefore remains usable by headless tests

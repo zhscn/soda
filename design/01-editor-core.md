@@ -323,7 +323,8 @@ resolve current states
 ```
 
 transaction filter 可以拒绝或转换 transaction。filter 是纯状态变换，不执行 I/O，不进入
-command loop，也不直接 dispatch 嵌套 transaction。update listener 观察已提交的
+command loop，也不直接 dispatch 嵌套 transaction。filter 接收当前 immutable `BufferState`
+和归一化 transaction；所有 transaction 都经过 filter 链。update listener 观察已提交的
 EditorUpdate，需要继续工作时向 runtime 投递 message。
 
 Annotation 描述整个 transaction 的事实，例如：

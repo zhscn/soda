@@ -21,11 +21,13 @@
           buffer-service-bind-key!
           buffer-service-ref
           buffer-service-buffers
+          buffer-service-set-close-query-handler!
           buffer-service-set-close-handler!
           buffer-service-add-close-listener!
           buffer-service-close-buffer!)
   (import (rnrs)
-          (only (chezscheme) weak-cons bwp-object? equal-hash)
+          (only (chezscheme) weak-cons bwp-object? equal-hash
+                string->immutable-string bytevector->immutable-bytevector)
           (soda kernel document)
           (soda kernel state)
           (soda kernel value)
@@ -55,7 +57,11 @@
   (define (make-buffer-key namespace identity)
     (unless (symbol? namespace)
       (assertion-violation 'make-buffer-key "namespace must be a symbol" namespace))
-    (%make-buffer-key namespace identity))
+    (%make-buffer-key
+      namespace
+      (cond [(string? identity) (string->immutable-string identity)]
+            [(bytevector? identity) (bytevector->immutable-bytevector identity)]
+            [else identity])))
 
   (define (buffer-live? buffer)
     (and (buffer? buffer) (eq? (buffer-lifecycle buffer) 'live)))
@@ -137,6 +143,9 @@
             (immutable table buffer-service-table)
             (immutable catalog buffer-service-catalog)
             (immutable reverse-catalog buffer-service-reverse-catalog)
+            (immutable close-requests buffer-service-close-requests)
+            (mutable close-query! buffer-service-close-query-handler
+                     buffer-service-close-query-handler-set!)
             (mutable close! buffer-service-close-handler buffer-service-close-handler-set!)
             (mutable close-listeners buffer-service-close-listeners
                      buffer-service-close-listeners-set!)))
@@ -144,7 +153,15 @@
   (define (make-buffer-service)
     (%make-buffer-service (make-identity-source) (make-eqv-hashtable)
                           (make-hashtable equal-hash equal?) (make-eqv-hashtable)
-                          (lambda (buffer) #t) '()))
+                          (make-eqv-hashtable)
+                          (lambda (buffer) #t) (lambda (buffer) #t) '()))
+
+  (define (buffer-service-set-close-query-handler! service handler)
+    (unless (and (buffer-service? service) (procedure? handler))
+      (assertion-violation 'buffer-service-set-close-query-handler!
+                           "expected a BufferService and close query handler" service handler))
+    (buffer-service-close-query-handler-set! service handler)
+    handler)
 
   (define (buffer-service-set-close-handler! service handler)
     (unless (and (buffer-service? service) (procedure? handler))
@@ -254,12 +271,20 @@
   (define (buffer-service-close-buffer! service id)
     (let ([buffer (buffer-service-ref service id #f)])
       (and buffer
+           (not (hashtable-contains? (buffer-service-close-requests service) id))
            (dynamic-wind
-             (lambda () (buffer-lifecycle-set! buffer 'closing))
              (lambda ()
-               (let ([allowed? ((buffer-service-close-handler service) buffer)])
+               (hashtable-set! (buffer-service-close-requests service) id #t))
+             (lambda ()
+               (let ([allowed? ((buffer-service-close-query-handler service) buffer)])
                  (and allowed?
-                      (begin
+                      (dynamic-wind
+                        (lambda () (buffer-lifecycle-set! buffer 'closing))
+                        (lambda ()
+                          (unless ((buffer-service-close-handler service) buffer)
+                            (assertion-violation
+                              'buffer-service-close-buffer!
+                              "close handler rejected a Buffer after close query" buffer))
                         (for-each
                           (lambda (listener)
                             (guard (ignored [else #f]) (listener buffer)))
@@ -267,13 +292,20 @@
                         ;; Remove the identity before releasing Document state.
                         (let ([token (hashtable-ref (buffer-service-reverse-catalog service) id #f)])
                           (when token
-                            (hashtable-delete! (buffer-service-catalog service) token)
+                            ;; Attachment teardown can synchronously open a replacement
+                            ;; for the same key.  Retire only this Buffer's binding.
+                            (let ([bound-id
+                                   (hashtable-ref (buffer-service-catalog service) token #f)])
+                              (when (and bound-id (= bound-id id))
+                                (hashtable-delete! (buffer-service-catalog service) token)))
                             (hashtable-delete! (buffer-service-reverse-catalog service) id)))
                         (let ([closed? (buffer-close! buffer)])
                           (when closed?
                             (hashtable-delete! (buffer-service-table service) id))
-                          closed?)))))
+                          closed?))
+                        (lambda ()
+                          (when (eq? (buffer-lifecycle buffer) 'closing)
+                            (buffer-lifecycle-set! buffer 'live)))))))
              (lambda ()
-               (when (eq? (buffer-lifecycle buffer) 'closing)
-                 (buffer-lifecycle-set! buffer 'live))))))
-))
+               (hashtable-delete! (buffer-service-close-requests service) id))))
+)))

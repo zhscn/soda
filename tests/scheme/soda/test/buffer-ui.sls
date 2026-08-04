@@ -1,6 +1,7 @@
 (library (soda test buffer-ui)
   (export run-buffer-ui-tests!)
   (import (rnrs)
+          (only (chezscheme) string-set!)
           (soda bootstrap)
           (soda kernel change)
           (soda kernel document)
@@ -26,7 +27,8 @@
     (let* ([state (make-host-state)]
            [owner (make-owner 'buffer-catalog-test)]
            [buffers (host-state-buffers state)]
-           [key (make-buffer-key 'test "shared")]
+           [key-input (string-copy "shared")]
+           [key (make-buffer-key 'test key-input)]
            [builds 0]
            [first
             (buffer-service-open-or-create!
@@ -40,6 +42,9 @@
               (lambda ()
                 (set! builds (+ builds 1))
                 (make-test-buffer buffers owner "*incorrect*")))])
+      (string-set! key-input 0 #\X)
+      (unless (eq? (buffer-service-find-key buffers key #f) first)
+        (error 'buffer-ui-tests "BufferKey retained mutable identity input"))
       (unless (and (= builds 1) (= (buffer-id first) (buffer-id second))
                    (eq? (buffer-lifecycle first) 'live))
         (error 'buffer-ui-tests "BufferKey did not reuse one live Buffer"))
@@ -93,6 +98,73 @@
       (owner-close! attachment-owner)
       (owner-close! buffer-owner)
       (host-state-close! state)))
+
+  (define (run-attachment-service-ownership-test!)
+    (let* ([first (make-host-state)]
+           [second (make-host-state)]
+           [owner (make-owner 'foreign-attachment-test)]
+           [buffer-owner (make-owner 'foreign-buffer-test)]
+           [foreign-buffer
+            (make-test-buffer (host-state-buffers second) buffer-owner "*foreign*")]
+           [rejected? #f])
+      (guard (condition [else (set! rejected? #t)])
+        (buffer-attachment-service-install!
+          (host-state-buffer-attachments first) owner foreign-buffer 'foreign 0 #f #f
+          (lambda () #f)))
+      (unless rejected?
+        (error 'buffer-ui-tests "attachment service accepted a foreign Buffer"))
+      (owner-close! owner)
+      (owner-close! buffer-owner)
+      (host-state-close! first)
+      (host-state-close! second)))
+
+  (define (run-close-reentrancy-test!)
+    (let* ([state (make-host-state)]
+           [owner (make-owner 'close-reentrancy-test)]
+           [buffers (host-state-buffers state)]
+           [attachments (host-state-buffer-attachments state)]
+           [key (make-buffer-key 'test "reentrant")]
+           [original
+            (buffer-service-open-or-create!
+              buffers owner key
+              (lambda () (make-test-buffer buffers owner "*original*")))]
+           [replacement #f])
+      (buffer-attachment-service-install!
+        attachments owner original 'replacement 0 #f #f
+        (lambda ()
+          (set! replacement
+                (buffer-service-open-or-create!
+                  buffers owner key
+                  (lambda () (make-test-buffer buffers owner "*replacement*"))))))
+      (unless (buffer-service-close-buffer! buffers (buffer-id original))
+        (error 'buffer-ui-tests "close did not accept a reentrant replacement"))
+      (unless (and replacement
+                   (not (= (buffer-id original) (buffer-id replacement)))
+                   (eq? (buffer-service-find-key buffers key #f) replacement))
+        (error 'buffer-ui-tests "close removed the replacement BufferKey binding"))
+      (unless (and (host-state-close! state) (not (buffer-live? replacement)))
+        (error 'buffer-ui-tests "HostState close retained a replacement Buffer"))
+      (owner-close! owner)
+      ))
+
+  (define (run-host-close-veto-test!)
+    (let* ([state (make-host-state)]
+           [buffer-owner (make-owner 'host-close-buffer-test)]
+           [attachment-owner (make-owner 'host-close-attachment-test)]
+           [buffer (make-test-buffer (host-state-buffers state) buffer-owner "*veto*")]
+           [allow? #f])
+      (buffer-attachment-service-install!
+        (host-state-buffer-attachments state) attachment-owner buffer 'veto 0
+        (lambda (ignored) allow?) #f (lambda () #f))
+      (when (host-state-close! state)
+        (error 'buffer-ui-tests "HostState closed despite a Buffer close veto"))
+      (unless (and (not (host-state-closed? state)) (buffer-live? buffer))
+        (error 'buffer-ui-tests "close veto left HostState partially closed"))
+      (set! allow? #t)
+      (unless (host-state-close! state)
+        (error 'buffer-ui-tests "HostState did not close after veto resolution"))
+      (owner-close! attachment-owner)
+      (owner-close! buffer-owner)))
 
   (define (run-owner-detach-test!)
     (let* ([state (make-host-state)]
@@ -163,11 +235,15 @@
           (make-selection (list (make-selection-range 2 2))) #f #f '() '() #f))
       (let* ([position (semantic-position-at-point (buffer-state buffer) 2)]
              [projected-item (make-buffer-item 'test 'alpha 'entry '() '(open) 'open)]
+             [projected-text (string-copy "result")]
              [update
               (make-projection-update
-                9 "result"
+                9 projected-text
                 (make-range-set (list (make-range-value 0 6 projected-item)))
                 '() '())])
+        (string-set! projected-text 0 #\X)
+        (unless (string=? (projection-update-text update) "result")
+          (error 'buffer-ui-tests "ProjectionUpdate retained mutable text"))
         (dispatcher-dispatch!
           dispatch
           (make-projection-transaction-spec
@@ -180,18 +256,40 @@
                      (= (selection-range-head
                           (selection-primary-range (view-state-selection (view-state view))))
                         1))
-          (error 'buffer-ui-tests "generated projection did not atomically restore item position")))
+          (error 'buffer-ui-tests "generated projection did not atomically restore item position"))
+        (let ([stale
+               (make-projection-update
+                 8 "stale"
+                 (make-range-set (list (make-range-value 0 5 projected-item)))
+                 '() '())])
+          (when (dispatcher-dispatch!
+                  dispatch
+                  (make-projection-transaction-spec
+                    (buffer-id buffer) #f (buffer-state buffer) stale
+                    (list (make-edit-authority-annotation authority))))
+            (error 'buffer-ui-tests "stale ProjectionUpdate was published"))
+          (unless (string=? (snapshot-string (buffer-state-document (buffer-state buffer))) "result")
+            (error 'buffer-ui-tests "stale ProjectionUpdate replaced document text"))))
       (let* ([actions (make-buffer-item-action-service)]
-             [activated #f])
+             [activated #f]
+             [other-item (make-buffer-item 'other 'alpha 'entry '() '(open) 'open)]
+             [other-activated #f])
         (buffer-item-action-register!
-          actions owner 'open
-          (lambda (received context)
+          actions owner 'test 'open
+          (lambda (received context generation)
             (set! activated (and (eq? received item) (command-context? context)))
+            (command-handled)))
+        (buffer-item-action-register!
+          actions owner 'other 'open
+          (lambda (received context generation)
+            (set! other-activated (and (eq? received other-item) (command-context? context)))
             (command-handled)))
         (buffer-item-action-invoke actions 'open item
                                    (make-command-context 0 (buffer-id buffer) 'buffer-ui-test))
-        (unless activated
-          (error 'buffer-ui-tests "semantic item action did not receive stable item identity")))
+        (buffer-item-action-invoke actions 'open other-item
+                                   (make-command-context 0 (buffer-id buffer) 'buffer-ui-test))
+        (unless (and activated other-activated)
+          (error 'buffer-ui-tests "semantic item actions did not dispatch by provider identity")))
       (owner-close! owner)
       (host-state-close! state)))
 
@@ -207,6 +305,9 @@
   (define (run-buffer-ui-tests!)
     (run-buffer-catalog-test!)
     (run-buffer-attachment-test!)
+    (run-attachment-service-ownership-test!)
+    (run-close-reentrancy-test!)
+    (run-host-close-veto-test!)
     (run-owner-detach-test!)
     (run-item-and-policy-test!)
     (run-bootstrap-buffer-ui-test!)))

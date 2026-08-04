@@ -512,7 +512,7 @@
                      [current resolved])
             (if (null? extensions)
                 current
-                (let ([next ((car extensions) current)])
+                (let ([next ((car extensions) (buffer-state buffer) current)])
                   (cond
                     [(not next) #f]
                     [(resolved-transaction? next)
@@ -564,10 +564,8 @@
                     (buffer-state-document (buffer-state buffer)))]
                  [resolved (resolve-transaction-specs specs old-length)]
                  [filtered
-                  (if (resolved-transaction-filter-disabled? resolved)
-                      resolved
-                      (apply-resolved-transaction-extension
-                        dispatcher resolved transaction-filters-facet))]
+                  (apply-resolved-transaction-extension
+                    dispatcher resolved transaction-filters-facet)]
                  [extended
                   (and filtered
                        (apply-resolved-transaction-extension
