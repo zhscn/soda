@@ -21,6 +21,9 @@
           command-resume-message?
           command-resume-message-invocation-id
           command-resume-message-value
+          make-command-cancel-message
+          command-cancel-message?
+          command-cancel-message-invocation-id
           command-runtime-enqueue!
           command-runtime-handle-message!)
   (import (rnrs)
@@ -184,7 +187,8 @@
       (lambda () (%make-effect-handler name owner procedure (next-order! service)))))
 
   (define (command-runtime-add-hook! service phase owner name procedure)
-    (unless (and (command-runtime? service) (memq phase '(pre-command post-command command-error)))
+    (unless (and (command-runtime? service)
+                 (memq phase '(pre-command post-command command-error command-cancel)))
       (assertion-violation 'command-runtime-add-hook! "invalid runtime or hook phase" service phase))
     (register-named-entry!
       'command-runtime-add-hook! service (command-runtime-hooks service)
@@ -402,8 +406,12 @@
       (assertion-violation 'command-runtime-cancel! "expected a command runtime" service))
     (let ([invocation (command-runtime-invocation service id #f)])
       (and invocation
-           (command-invocation-cancel! invocation)
-           (retire-invocation! service invocation))))
+           (let ([cancelled? (command-invocation-cancel! invocation)])
+             (when cancelled?
+               (guard (ignored [else #f])
+                 (run-hooks! service 'command-cancel invocation))
+               (retire-invocation! service invocation))
+             cancelled?))))
 
   ;; Queue messages let terminal, RPC, and minibuffer packages resume work at
   ;; the command-loop boundary without retaining continuations across a UI or
@@ -437,9 +445,21 @@
       (assertion-violation 'make-command-resume-message "invalid invocation id" invocation-id))
     (%make-command-resume-message invocation-id value))
 
+  (define-record-type
+    (command-cancel-message %make-command-cancel-message command-cancel-message?)
+    (fields
+      (immutable invocation-id command-cancel-message-invocation-id)))
+
+  (define (make-command-cancel-message invocation-id)
+    (unless (and (exact-integer-value? invocation-id) (>= invocation-id 0))
+      (assertion-violation 'make-command-cancel-message "invalid invocation id" invocation-id))
+    (%make-command-cancel-message invocation-id))
+
   (define (command-runtime-enqueue! service message)
     (unless (and (command-runtime? service)
-                 (or (command-invoke-message? message) (command-resume-message? message)))
+                 (or (command-invoke-message? message)
+                     (command-resume-message? message)
+                     (command-cancel-message? message)))
       (assertion-violation 'command-runtime-enqueue! "invalid command message" message))
     (runtime-enqueue! (command-runtime-queue service) message))
 
@@ -474,6 +494,10 @@
          (command-runtime-resume!
            service (command-resume-message-invocation-id message)
            (command-resume-message-value message))
+         #t]
+        [(command-cancel-message? message)
+         (command-runtime-cancel!
+           service (command-cancel-message-invocation-id message))
          #t]
         [else #f])))
 )

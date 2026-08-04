@@ -13,6 +13,7 @@
           buffer-service-ref
           buffer-service-buffers
           buffer-service-set-close-handler!
+          buffer-service-add-close-listener!
           buffer-service-close-buffer!)
   (import (rnrs)
           (only (chezscheme) weak-cons bwp-object?)
@@ -104,11 +105,13 @@
     (buffer-service %make-buffer-service buffer-service?)
     (fields (immutable identities buffer-service-identities)
             (immutable table buffer-service-table)
-            (mutable close! buffer-service-close-handler buffer-service-close-handler-set!)))
+            (mutable close! buffer-service-close-handler buffer-service-close-handler-set!)
+            (mutable close-listeners buffer-service-close-listeners
+                     buffer-service-close-listeners-set!)))
 
   (define (make-buffer-service)
     (%make-buffer-service (make-identity-source) (make-eqv-hashtable)
-                          (lambda (buffer) #f)))
+                          (lambda (buffer) #f) '()))
 
   (define (buffer-service-set-close-handler! service handler)
     (unless (and (buffer-service? service) (procedure? handler))
@@ -116,6 +119,25 @@
                            "expected a BufferService and close handler" service handler))
     (buffer-service-close-handler-set! service handler)
     handler)
+
+  ;; The primary close handler preserves host invariants; package listeners
+  ;; run after it and before the Buffer releases its document resources.
+  (define (buffer-service-add-close-listener! service owner procedure)
+    (unless (and (buffer-service? service) (owner? owner) (procedure? procedure))
+      (assertion-violation 'buffer-service-add-close-listener!
+                           "expected a BufferService, owner, and procedure"
+                           service owner procedure))
+    (owner-assert-active 'buffer-service-add-close-listener! owner)
+    (let ([listener procedure])
+      (buffer-service-close-listeners-set!
+        service (append (buffer-service-close-listeners service) (list listener)))
+      (make-registration
+        owner
+        (lambda ()
+          (buffer-service-close-listeners-set!
+            service
+            (filter (lambda (item) (not (eq? item listener)))
+                    (buffer-service-close-listeners service)))))))
 
   (define (buffer-service-create! service owner name document configuration)
     (unless (buffer-service? service)
@@ -147,6 +169,10 @@
            (let ([closed?
                   (begin
                     ((buffer-service-close-handler service) buffer)
+                    (for-each
+                      (lambda (listener)
+                        (guard (ignored [else #f]) (listener buffer)))
+                      (buffer-service-close-listeners service))
                     (buffer-close! buffer))])
              (when closed?
                (hashtable-delete! (buffer-service-table service) id))

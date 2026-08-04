@@ -14,7 +14,9 @@
           (soda host internal view)
           (soda host render-service)
           (soda host value)
+          (soda kernel change)
           (soda kernel document)
+          (soda kernel extension)
           (soda kernel selection)
           (soda kernel state)
           (soda kernel view-state)
@@ -122,6 +124,11 @@
             (interaction-service-add-listener!
               interaction owner
               (lambda (event session) (set! events (cons event events))))]
+           [_failing-listener
+            (interaction-service-add-listener!
+              interaction owner
+              (lambda (event session)
+                (assertion-violation 'interaction-listener-test "listener failure" event)))]
            [_command
             (command-runtime-register-command!
               runtime
@@ -156,9 +163,11 @@
              (command-runtime-start-interactive!
                runtime 'interaction.package-test (application-command-context application))])
         (interaction-service-cancel! interaction)
+        (host-state-run! state)
         (unless (and (not (command-runtime-invocation
                             runtime (command-invocation-id cancelled) #f))
-                     (not (interaction-service-current interaction)))
+                     (not (interaction-service-current interaction))
+                     (equal? (reverse events) '(opened accepted opened cancelled)))
           (error 'fundamental-editing-tests "interaction cancellation did not retire its invocation")))
       (owner-close! owner)
       (soda-application-close! application))
@@ -207,13 +216,43 @@
                          (not (history-modified? history (buffer-id buffer))))
               (error 'fundamental-editing-tests
                      "file.save did not synchronize the resource save point"))
+            (command-runtime-start! runtime 'fundamental.insert-text
+                                    (application-command-context application)
+                                    (list (string->utf8 " local")))
+            (vfs-write-file path (string->utf8 "external"))
+            (command-runtime-start! runtime 'file.save
+                                    (application-command-context application))
+            (unless (string=? (utf8->string (vfs-read-file path)) "external")
+              (error 'fundamental-editing-tests
+                     "file.save overwrote an externally modified resource"))
+            (command-runtime-start! runtime 'file.visit
+                                    (application-command-context application) (list path))
             (command-runtime-start! runtime 'file.save-as
                                     (application-command-context application) (list saved-as))
-            (unless (and (string=? (utf8->string (vfs-read-file saved-as)) "first value")
+            (unless (and (string=? (utf8->string (vfs-read-file saved-as)) "external")
                          (string=? (resource-locator
                                     (file-service-resource files (buffer-id buffer))) saved-as))
               (error 'fundamental-editing-tests
                      "file.save-as did not rebind the file resource"))
+            (let* ([secondary-owner (make-owner 'file-close-test)]
+                   [secondary-document (make-document "")]
+                   [secondary
+                    (buffer-service-create!
+                      (host-state-buffers state) secondary-owner "*file-close*"
+                      secondary-document (make-configuration '()))]
+                   [secondary-context
+                    (make-command-context
+                      #f #f #f #f (buffer-id secondary)
+                      (buffer-state secondary) #f #f '() #f #f 'file-close-test)])
+              (unless (not (history-modified? history (buffer-id secondary)))
+                (error 'fundamental-editing-tests
+                       "a newly created Buffer should begin at the implicit History save point"))
+              (command-runtime-start! runtime 'file.visit secondary-context (list path))
+              (buffer-service-close-buffer! (host-state-buffers state) (buffer-id secondary))
+              (unless (not (file-service-resource files (buffer-id secondary) #f))
+                (error 'fundamental-editing-tests
+                       "closing a Buffer did not release its file resource binding"))
+              (owner-close! secondary-owner))
             (soda-application-close! application)))
         (lambda ()
           (when (file-exists? path) (delete-file path))
@@ -239,6 +278,38 @@
       (command-runtime-start! runtime 'history.redo (application-command-context application))
       (unless (string=? (buffer-string buffer) "history")
         (error 'fundamental-editing-tests "history.redo did not replay the original change"))
+      (soda-application-close! application))
+
+    ;; Kernel changes allow textual inserts as well as bytevectors.  History
+    ;; must invert either representation without owning its own coordinate
+    ;; protocol.
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [runtime (host-state-command-runtime state)]
+           [buffer (soda-application-buffer application)]
+           [owner (make-owner 'history-string-test)]
+           [_command
+            (command-runtime-register-command!
+              runtime
+              (make-command-definition
+                'history.string-change
+                (lambda (context)
+                  (let ([buffer-state (command-context-buffer-state context)])
+                    (make-transaction-spec
+                      (command-context-buffer-id context)
+                      (command-context-view-id context)
+                      (buffer-state-generation buffer-state)
+                      (make-change-set 0 (list (make-text-change 0 0 "text")))
+                      #f '() '())))
+                owner "Insert a textual change for History." 'test #f))])
+      (command-runtime-start! runtime 'history.string-change
+                              (application-command-context application))
+      (command-runtime-start! runtime 'history.undo
+                              (application-command-context application))
+      (unless (string=? (buffer-string buffer) "")
+        (error 'fundamental-editing-tests
+               "history.undo did not support a string TextChange"))
+      (owner-close! owner)
       (soda-application-close! application))
 
     (let* ([application (make-soda-application)]

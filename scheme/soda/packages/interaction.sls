@@ -11,6 +11,7 @@
           interaction-session-invocation-id
           interaction-session-command-name
           interaction-session-reader-name
+          interaction-session-status
           interaction-session-request
           interaction-session-context
           make-interaction-request
@@ -35,6 +36,7 @@
       (immutable invocation-id interaction-session-invocation-id)
       (immutable command-name interaction-session-command-name)
       (immutable reader-name interaction-session-reader-name)
+      (mutable status interaction-session-status interaction-session-status-set!)
       (immutable request interaction-session-request)
       (immutable context interaction-session-context)))
 
@@ -58,7 +60,10 @@
   (define (notify! service kind session)
     (for-each
       (lambda (listener)
-        ((interaction-listener-procedure listener) kind session))
+        ;; UI observers never execute a user command.  Their failures must not
+        ;; turn a suspended invocation into a command condition.
+        (guard (ignored [else #f])
+          ((interaction-listener-procedure listener) kind session)))
       (interaction-service-listeners service)))
 
   (define (remove-session! service target event)
@@ -108,7 +113,7 @@
               (command-invocation-id invocation)
               (command-definition-name (command-invocation-definition invocation))
               (reader-name invocation)
-              request
+              'open request
               (command-invocation-context invocation))])
       (interaction-service-sessions-set!
         service (cons session (interaction-service-sessions service)))
@@ -153,42 +158,56 @@
              (make-interaction-request 'string prompt initial-value #f 'free)
              (lambda (value) (make-interactive-ready (list value))))))]))
 
-  ;; Submission always travels through Runtime's queue.  This preserves the
-  ;; command-loop boundary when an adapter accepts input while rendering or
-  ;; handling native events.
+  (define (interaction-service-session-for-id service id)
+    (let loop ([sessions (interaction-service-sessions service)])
+      (and (pair? sessions)
+           (if (= (interaction-session-invocation-id (car sessions)) id)
+               (car sessions)
+               (loop (cdr sessions))))))
+
+  ;; Submission and cancellation travel through Runtime's queue.  This keeps
+  ;; native input, TUI actions, and RPC adapters at the same command boundary.
   (define (interaction-service-submit! service value)
     (unless (interaction-service? service)
       (assertion-violation 'interaction-service-submit! "expected an interaction service" service))
     (let ([session (interaction-service-current service)])
-      (and session
+      (and session (eq? (interaction-session-status session) 'open)
            (begin
-             (remove-session! service session 'accepted)
              (command-runtime-enqueue!
                (interaction-service-runtime service)
                (make-command-resume-message
                  (interaction-session-invocation-id session) value))
+             (remove-session! service session 'accepted)
              session))))
 
   (define (interaction-service-cancel! service)
     (unless (interaction-service? service)
       (assertion-violation 'interaction-service-cancel! "expected an interaction service" service))
     (let ([session (interaction-service-current service)])
-      (and session
+      (and session (eq? (interaction-session-status session) 'open)
            (begin
-             (command-runtime-cancel!
+             (command-runtime-enqueue!
                (interaction-service-runtime service)
-               (interaction-session-invocation-id session))
-             (remove-session! service session 'cancelled)
+               (make-command-cancel-message
+                 (interaction-session-invocation-id session)))
+             (interaction-session-status-set! session 'cancelling)
              session))))
 
   (define (interaction-service-cancel-all! service)
     (unless (interaction-service? service)
       (assertion-violation 'interaction-service-cancel-all! "expected an interaction service" service))
-    (let loop ([cancelled '()])
-      (let ([session (interaction-service-cancel! service)])
-        (if session
-            (loop (cons session cancelled))
-            (reverse cancelled)))))
+    (prune-sessions! service)
+    (let ([sessions
+            (filter (lambda (session) (eq? (interaction-session-status session) 'open))
+                    (interaction-service-sessions service))])
+      (for-each
+        (lambda (session)
+          (command-runtime-enqueue!
+            (interaction-service-runtime service)
+            (make-command-cancel-message (interaction-session-invocation-id session)))
+          (interaction-session-status-set! session 'cancelling))
+        sessions)
+      sessions))
 
   (define (make-interaction-service! runtime owner)
     (unless (and (command-runtime? runtime) (owner? owner))
@@ -202,5 +221,12 @@
           runtime owner
           (lambda (ignored invocation request)
             (open-session! service invocation request))))
+      (command-runtime-add-hook!
+        runtime 'command-cancel owner 'close-interaction-session
+        (lambda (invocation)
+          (let ([session
+                 (interaction-service-session-for-id
+                   service (command-invocation-id invocation))])
+            (when session (remove-session! service session 'cancelled)))))
       service))
 )

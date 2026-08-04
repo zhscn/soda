@@ -87,7 +87,8 @@
                 (make-history! (host-state-command-runtime state)
                                (host-state-dispatch state) owner)]
                [files
-                (make-file-service! (host-state-command-runtime state) owner history)]
+                (make-file-service! (host-state-command-runtime state)
+                                    (host-state-buffers state) owner history)]
                [interaction
                 (make-interaction-service! (host-state-command-runtime state) owner)])
           (surface-service-register! (host-state-surfaces state) surface)

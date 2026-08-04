@@ -30,9 +30,9 @@
   (define (history-modified? value buffer-id)
     (unless (and (history? value) (buffer-id? buffer-id))
       (assertion-violation 'history-modified? "expected a history and Buffer id" value buffer-id))
-    (let ([saved (hashtable-ref (history-saved value) buffer-id #f)])
-      (or (not saved)
-          (not (eq? saved (stack-ref (history-undo value) buffer-id))))))
+    (and (hashtable-contains? (history-saved value) buffer-id)
+         (not (eq? (hashtable-ref (history-saved value) buffer-id #f)
+                   (stack-ref (history-undo value) buffer-id)))))
 
   (define (history-discard-buffer! value buffer-id)
     (unless (and (history? value) (buffer-id? buffer-id))
@@ -41,18 +41,11 @@
     (hashtable-set! (history-redo value) buffer-id '())
     (history-mark-saved! value buffer-id))
   (define (inverse update)
-    (let* ([changes (editor-update-changes update)]
-           [old (editor-update-old-buffer-state update)]
-           [inverse-changes
-            (map (lambda (change)
-                   (let* ([from (change-set-map-offset changes (text-change-from change) 'before)]
-                          [inserted (text-change-insert change)]
-                          [to (+ from (bytevector-length inserted))])
-                     (make-text-change from to
-                       (snapshot-subbytevector (buffer-state-document old)
-                                               (text-change-from change) (text-change-to change)))))
-                 (change-set-changes changes))])
-      (make-change-set (change-set-new-length changes) inverse-changes)))
+    (let ([changes (editor-update-changes update)]
+          [old (editor-update-old-buffer-state update)])
+      ;; ChangeSet owns the string/bytevector normalization and multi-range
+      ;; coordinate mapping.  History must not reconstruct that protocol.
+      (change-set-invert changes (snapshot-bytevector (buffer-state-document old)))))
   (define (replay context changes)
     (make-transaction-spec (command-context-buffer-id context) (command-context-view-id context)
                            (buffer-state-generation (command-context-buffer-state context))
@@ -70,6 +63,10 @@
               (unless (exists (lambda (a) (eq? (annotation-key a) 'history.replay))
                               (editor-update-annotations update))
                 (unless (change-set-empty? (editor-update-changes update))
+                  ;; Buffers created after History are clean until their first
+                  ;; transaction.  Capture that initial stack before pushing.
+                  (unless (hashtable-contains? (history-saved value) id)
+                    (history-mark-saved! value id))
                   (hashtable-set! (history-undo value) id
                     (cons (make-history-entry (inverse update) (editor-update-changes update))
                           (stack-ref (history-undo value) id)))
