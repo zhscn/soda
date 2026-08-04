@@ -23,6 +23,7 @@
           (soda packages base history)
           (soda packages base text-motion)
           (soda packages file)
+          (soda packages interaction)
           (soda packages resource)
           (soda support vfs)
           (soda tui frontend)
@@ -103,6 +104,65 @@
                "fundamental editing did not produce stable editor state"))
       (soda-application-close! application))
 
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [runtime (host-state-command-runtime state)]
+           [interaction (soda-application-interaction application)]
+           [owner (make-owner 'interaction-package-test)]
+           [observed #f]
+           [events '()]
+           [reader
+            (make-interactive-reader
+              'read-value
+              (lambda (context arguments)
+                (make-interactive-suspend
+                  (make-interaction-request 'string "Value: ")
+                  (lambda (value) (make-interactive-ready (list value))))))]
+           [_listener
+            (interaction-service-add-listener!
+              interaction owner
+              (lambda (event session) (set! events (cons event events))))]
+           [_command
+            (command-runtime-register-command!
+              runtime
+              (make-command-definition
+                'interaction.package-test
+                (lambda (context value)
+                  (set! observed value)
+                  (command-handled))
+                owner "Interaction package test" 'test
+                (make-interactive-plan (list reader))))]
+           [invocation
+            (command-runtime-start-interactive!
+              runtime 'interaction.package-test (application-command-context application))]
+           [session (interaction-service-current interaction)])
+      (unless (and session
+                   (= (interaction-session-invocation-id session)
+                      (command-invocation-id invocation))
+                   (eq? (interaction-session-command-name session)
+                        'interaction.package-test)
+                   (eq? (interaction-session-reader-name session) 'read-value)
+                   (eq? (interaction-request-kind (interaction-session-request session)) 'string)
+                   (string=? (interaction-request-prompt (interaction-session-request session))
+                             "Value: "))
+        (error 'fundamental-editing-tests "interactive command did not open a reusable session"))
+      (interaction-service-submit! interaction "accepted")
+      (host-state-run! state)
+      (unless (and (string=? observed "accepted")
+                   (not (interaction-service-current interaction))
+                   (equal? (reverse events) '(opened accepted)))
+        (error 'fundamental-editing-tests "interaction submission did not resume through the queue"))
+      (let ([cancelled
+             (command-runtime-start-interactive!
+               runtime 'interaction.package-test (application-command-context application))])
+        (interaction-service-cancel! interaction)
+        (unless (and (not (command-runtime-invocation
+                            runtime (command-invocation-id cancelled) #f))
+                     (not (interaction-service-current interaction)))
+          (error 'fundamental-editing-tests "interaction cancellation did not retire its invocation")))
+      (owner-close! owner)
+      (soda-application-close! application))
+
     (let* ([path (string-append "/tmp/soda-file-package-"
                                 (number->string (get-process-id)) ".txt")]
            [saved-as (string-append path ".copy")])
@@ -117,7 +177,17 @@
                  [runtime (host-state-command-runtime state)]
                  [buffer (soda-application-buffer application)]
                  [history (soda-application-history application)]
-                 [files (soda-application-files application)])
+                 [files (soda-application-files application)]
+                 [interaction (soda-application-interaction application)])
+            (command-runtime-start-interactive!
+              runtime 'file.visit (application-command-context application))
+            (let ([request (interaction-session-request
+                             (interaction-service-current interaction))])
+              (unless (and (eq? (interaction-request-kind request) 'string)
+                           (string=? (interaction-request-prompt request) "Visit file: "))
+                (error 'fundamental-editing-tests
+                       "file.visit did not declare a reusable file interaction")))
+            (interaction-service-cancel! interaction)
             (command-runtime-start! runtime 'file.visit
                                     (application-command-context application) (list path))
             (unless (and (string=? (buffer-string buffer) "first")

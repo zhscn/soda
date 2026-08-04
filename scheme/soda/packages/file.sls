@@ -12,6 +12,7 @@
           (soda host command-runtime)
           (soda host value)
           (soda packages base history)
+          (soda packages interaction)
           (soda packages resource)
           (soda support vfs))
 
@@ -66,9 +67,10 @@
         (make-change-set length (list (make-text-change 0 length contents)))
         (reset-selection) '() '())))
 
-  (define (install-file-command! runtime owner name documentation procedure)
+  (define (install-file-command! runtime owner name documentation readers procedure)
     (command-runtime-register-command! runtime
-      (make-command-definition name procedure owner documentation 'file #f)))
+      (make-command-definition
+        name procedure owner documentation 'file (make-interactive-plan readers))))
 
   (define (make-file-service! runtime owner history)
     (unless (and (command-runtime? runtime) (owner? owner)
@@ -97,6 +99,7 @@
             (when history
               (history-mark-saved! history (file-write-buffer-id request))))))
       (install-file-command! runtime owner 'file.visit "Visit a file in the active Buffer."
+        (list (make-interaction-string-reader 'file-name "Visit file: "))
         (lambda (context path)
           (let* ([resource (canonical-file-resource path)]
                  [contents (vfs-read-file (resource-locator resource))]
@@ -105,7 +108,7 @@
               (replace-buffer-contents context contents)
               (make-command-effect 'file.load
                 (make-file-load id resource contents #t))))))
-      (install-file-command! runtime owner 'file.revert "Reload the active Buffer's visited file."
+      (install-file-command! runtime owner 'file.revert "Reload the active Buffer's visited file." '()
         (lambda (context)
           (let ([resource (file-service-resource service (command-context-buffer-id context) #f)])
             (if (not resource)
@@ -116,7 +119,7 @@
                     (make-command-effect 'file.load
                       (make-file-load (command-context-buffer-id context)
                                       resource contents #t))))))))
-      (install-file-command! runtime owner 'file.save "Write the active Buffer to its visited file."
+      (install-file-command! runtime owner 'file.save "Write the active Buffer to its visited file." '()
         (lambda (context)
           (let ([resource (file-service-resource service (command-context-buffer-id context) #f)])
             (if (not resource)
@@ -128,6 +131,7 @@
                     (snapshot-bytevector
                       (buffer-state-document (command-context-buffer-state context)))))))))
       (install-file-command! runtime owner 'file.save-as "Write the active Buffer to a file and visit it."
+        (list (make-interaction-string-reader 'file-name "Write file: "))
         (lambda (context path)
           (let ([resource (canonical-file-resource path)])
             (make-command-effect
