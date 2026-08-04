@@ -1,6 +1,7 @@
 (library (soda test fundamental-editing)
   (export run-fundamental-editing-tests!)
   (import (rnrs)
+          (only (chezscheme) get-process-id)
           (soda bootstrap)
           (soda host command)
           (soda host command-runtime)
@@ -21,6 +22,9 @@
           (soda packages base fundamental-editing)
           (soda packages base history)
           (soda packages base text-motion)
+          (soda packages file)
+          (soda packages resource)
+          (soda support vfs)
           (soda tui frontend)
           (soda view frame)
           (soda view text-layout)
@@ -98,6 +102,52 @@
         (error 'fundamental-editing-tests
                "fundamental editing did not produce stable editor state"))
       (soda-application-close! application))
+
+    (let* ([path (string-append "/tmp/soda-file-package-"
+                                (number->string (get-process-id)) ".txt")]
+           [saved-as (string-append path ".copy")])
+      (dynamic-wind
+        (lambda ()
+          (when (file-exists? path) (delete-file path))
+          (when (file-exists? saved-as) (delete-file saved-as))
+          (vfs-write-file path (string->utf8 "first")))
+        (lambda ()
+          (let* ([application (make-soda-application)]
+                 [state (soda-application-state application)]
+                 [runtime (host-state-command-runtime state)]
+                 [buffer (soda-application-buffer application)]
+                 [history (soda-application-history application)]
+                 [files (soda-application-files application)])
+            (command-runtime-start! runtime 'file.visit
+                                    (application-command-context application) (list path))
+            (unless (and (string=? (buffer-string buffer) "first")
+                         (not (history-modified? history (buffer-id buffer)))
+                         (string=? (resource-locator
+                                    (file-service-resource files (buffer-id buffer))) path))
+              (error 'fundamental-editing-tests
+                     "file.visit did not bind a saved file resource"))
+            (command-runtime-start! runtime 'fundamental.end-of-buffer
+                                    (application-command-context application))
+            (command-runtime-start! runtime 'fundamental.insert-text
+                                    (application-command-context application)
+                                    (list (string->utf8 " value")))
+            (command-runtime-start! runtime 'file.save
+                                    (application-command-context application))
+            (unless (and (string=? (utf8->string (vfs-read-file path)) "first value")
+                         (not (history-modified? history (buffer-id buffer))))
+              (error 'fundamental-editing-tests
+                     "file.save did not synchronize the resource save point"))
+            (command-runtime-start! runtime 'file.save-as
+                                    (application-command-context application) (list saved-as))
+            (unless (and (string=? (utf8->string (vfs-read-file saved-as)) "first value")
+                         (string=? (resource-locator
+                                    (file-service-resource files (buffer-id buffer))) saved-as))
+              (error 'fundamental-editing-tests
+                     "file.save-as did not rebind the file resource"))
+            (soda-application-close! application)))
+        (lambda ()
+          (when (file-exists? path) (delete-file path))
+          (when (file-exists? saved-as) (delete-file saved-as)))))
 
     (let* ([application (make-soda-application)]
            [state (soda-application-state application)]
