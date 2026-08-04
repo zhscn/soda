@@ -355,8 +355,8 @@
                 (vector->list values)))))
 
   (define (view-service-close-buffer-views! service target-buffer-id)
-    (unless (and (view-service? service) (integer? target-buffer-id)
-                 (exact? target-buffer-id) (>= target-buffer-id 0))
+    (unless (and (view-service? service)
+                 (nonnegative-exact-integer? target-buffer-id))
       (assertion-violation 'view-service-close-buffer-views!
                            "invalid ViewService or Buffer identity"
                            service target-buffer-id))

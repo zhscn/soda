@@ -43,7 +43,7 @@
 
   (define (rectangle? value)
     (and (list? value) (= (length value) 4)
-         (for-all (lambda (cell) (and (integer? cell) (exact? cell) (>= cell 0))) value)))
+         (for-all nonnegative-exact-integer? value)))
 
   (define (make-rendered-view view-id rectangle layout)
     (unless (and (rectangle? rectangle) (text-layout? layout))
@@ -69,7 +69,7 @@
     (fields frame cursor-row cursor-column rendered-views))
 
   (define (offset-or-false? value)
-    (or (not value) (and (integer? value) (exact? value) (>= value 0))))
+    (or (not value) (nonnegative-exact-integer? value)))
 
   (define make-surface-render
     (case-lambda
@@ -113,8 +113,8 @@
     (let* ([size (surface-size surface)]
            [width (car size)]
            [height (cdr size)])
-      (unless (and (integer? width) (exact? width) (>= width 0)
-                   (integer? height) (exact? height) (>= height 0))
+      (unless (and (nonnegative-exact-integer? width)
+                   (nonnegative-exact-integer? height))
         (assertion-violation 'render-surface "invalid Surface size" size))
       (let loop ([leaves (surface-windows surface)]
                  [placements '()] [rendered-views '()] [cursor-row #f] [cursor-column #f])

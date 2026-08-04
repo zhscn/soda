@@ -19,10 +19,10 @@
           host-update-resolution
           host-update-damage)
   (import (rnrs)
+          (soda kernel value)
           (soda host context))
 
-  (define (identity? value)
-    (and (integer? value) (exact? value) (>= value 0)))
+  (define identity? nonnegative-exact-integer?)
 
   ;; HostOperation is the package-facing mutation value.  It contains target
   ;; identities and immutable request data, never a mutable registry object.
@@ -74,8 +74,8 @@
 
   (define (surface-size? value)
     (and (pair? value)
-         (integer? (car value)) (exact? (car value)) (>= (car value) 0)
-         (integer? (cdr value)) (exact? (cdr value)) (>= (cdr value) 0)))
+         (nonnegative-exact-integer? (car value))
+         (nonnegative-exact-integer? (cdr value))))
 
   (define (make-resize-surface-operation surface-id size)
     (unless (and (identity? surface-id) (surface-size? size))

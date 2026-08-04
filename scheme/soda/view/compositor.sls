@@ -6,6 +6,7 @@
           frame-placement-frame
           compose-frame)
   (import (rnrs)
+          (soda kernel value)
           (soda view frame))
 
   ;; A placement is a paint layer in surface coordinates.  Later placements
@@ -15,8 +16,7 @@
     (frame-placement %make-frame-placement frame-placement?)
     (fields row column frame))
 
-  (define (offset? value)
-    (and (integer? value) (exact? value) (>= value 0)))
+  (define offset? nonnegative-exact-integer?)
 
   (define (make-frame-placement row column frame)
     (unless (and (offset? row) (offset? column) (frame? frame))

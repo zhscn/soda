@@ -76,7 +76,7 @@
         (apply append (map window-leaves (window-children window)))))
 
   (define (cell-count? value)
-    (and (integer? value) (exact? value) (>= value 0)))
+    (nonnegative-exact-integer? value))
 
   (define (weighted-extents extent weights)
     (let* ([total (apply + weights)]

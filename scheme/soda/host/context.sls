@@ -22,6 +22,7 @@
           display-request-placement-hint
           display-request-provenance)
   (import (rnrs)
+          (soda kernel value)
           (soda host buffer)
           (soda host surface)
           (soda host view)
@@ -34,8 +35,7 @@
     (active-context %make-active-context active-context?)
     (fields surface-id window-id view-id buffer-id interaction-stack))
 
-  (define (identity? value)
-    (and (integer? value) (exact? value) (>= value 0)))
+  (define identity? nonnegative-exact-integer?)
 
   (define (make-active-context surface-id window-id view-id buffer-id interaction-stack)
     (unless (and (identity? surface-id) (identity? window-id)

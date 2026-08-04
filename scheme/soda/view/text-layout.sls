@@ -23,6 +23,7 @@
           (soda kernel extension)
           (soda kernel range-set)
           (soda kernel selection)
+          (soda kernel value)
           (soda ffi unicode)
           (soda view decoration)
           (soda view display)
@@ -41,8 +42,7 @@
       (assertion-violation 'make-text-layout "invalid text layout result"))
     (%make-text-layout frame display-map cursor-row cursor-column))
 
-  (define (offset? value)
-    (and (integer? value) (exact? value) (>= value 0)))
+  (define offset? nonnegative-exact-integer?)
 
   ;; Layout policy is explicit rather than inherited from a terminal frontend.
   ;; A View later supplies this from its configuration facets.

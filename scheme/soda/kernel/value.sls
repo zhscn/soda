@@ -1,5 +1,6 @@
 (library (soda kernel value)
   (export exact-integer?
+          nonnegative-exact-integer?
           list-copy
           vector-copy
           make-identity-source
@@ -9,6 +10,9 @@
 
   (define (exact-integer? value)
     (and (integer? value) (exact? value)))
+
+  (define (nonnegative-exact-integer? value)
+    (and (exact-integer? value) (>= value 0)))
 
   (define (list-copy value)
     (if (null? value) '() (cons (car value) (list-copy (cdr value)))))

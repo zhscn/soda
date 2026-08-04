@@ -10,6 +10,7 @@
         (soda kernel range-set)
         (soda kernel selection)
         (soda kernel state)
+        (soda kernel value)
         (soda kernel viewport)
         (soda kernel view-state)
         (soda host command)
@@ -50,6 +51,12 @@
   (guard (condition [else #t])
     (eval identifier (apply environment (list library-name)))
     #f))
+
+(unless (and (nonnegative-exact-integer? 0)
+             (nonnegative-exact-integer? 7)
+             (not (nonnegative-exact-integer? -1))
+             (not (nonnegative-exact-integer? 1.5)))
+  (error 'kernel-tests "nonnegative exact integer predicate differs"))
 
 (unless (and
           (library-binding-hidden? '(soda host buffer) 'buffer-document)

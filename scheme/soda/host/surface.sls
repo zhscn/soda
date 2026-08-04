@@ -40,7 +40,7 @@
       (immutable event surface-input-message-event)))
 
   (define (make-surface-input-message surface-id event)
-    (unless (and (integer? surface-id) (exact? surface-id) (not (negative? surface-id)))
+    (unless (nonnegative-exact-integer? surface-id)
       (assertion-violation
         'make-surface-input-message "invalid Surface identity" surface-id))
     (unless (input-event? event)
@@ -63,8 +63,8 @@
   (define surface-identities (make-identity-source))
 
   (define (surface-size? size)
-    (and (pair? size) (integer? (car size)) (exact? (car size)) (>= (car size) 0)
-         (integer? (cdr size)) (exact? (cdr size)) (>= (cdr size) 0)))
+    (and (pair? size) (nonnegative-exact-integer? (car size))
+         (nonnegative-exact-integer? (cdr size))))
 
   (define make-surface
     (case-lambda
@@ -125,12 +125,11 @@
           (surface-generation-set! surface (+ 1 (surface-generation surface)))
           window)))
 
-  (define (view-id? value)
-    (and (integer? value) (exact? value) (>= value 0)))
+  (define view-id? nonnegative-exact-integer?)
 
   (define (rectangle? value)
     (and (list? value) (= (length value) 4)
-         (for-all (lambda (cell) (and (integer? cell) (exact? cell) (>= cell 0)))
+         (for-all nonnegative-exact-integer?
                   value)))
 
   (define (surface-push-interaction! surface view-id rectangle)
@@ -296,8 +295,7 @@
                               (surface-id surface))])))
 
   (define (surface-service-ref service id . default)
-    (unless (and (surface-service? service)
-                 (integer? id) (exact? id) (>= id 0))
+    (unless (and (surface-service? service) (nonnegative-exact-integer? id))
       (assertion-violation 'surface-service-ref "invalid SurfaceService or identity"
                            service id))
     (let ([surface (hashtable-ref (surface-service-table service) id #f)])
@@ -311,8 +309,7 @@
       (lambda (ids values) (vector->list values))))
 
   (define (surface-service-remove! service id)
-    (unless (and (surface-service? service)
-                 (integer? id) (exact? id) (>= id 0))
+    (unless (and (surface-service? service) (nonnegative-exact-integer? id))
       (assertion-violation 'surface-service-remove! "invalid SurfaceService or identity"
                            service id))
     (let ([surface (hashtable-ref (surface-service-table service) id #f)])

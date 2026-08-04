@@ -13,7 +13,7 @@
           display-map-cell-range)
   (import (rnrs) (soda kernel value))
 
-  (define (offset? value) (and (exact-integer? value) (>= value 0)))
+  (define offset? nonnegative-exact-integer?)
   (define-record-type (display-text %make-display-text display-text?)
     (fields text from to face source))
   (define (make-display-text text from to face source)
