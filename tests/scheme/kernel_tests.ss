@@ -38,6 +38,8 @@
         (prefix (soda ffi runtime) native:)
         (soda support vfs)
         (soda tui terminal-input)
+        (soda tui frontend)
+        (soda tui terminal-frontend)
         (soda tui terminal-session)
         (soda tui presenter)
         (soda tui presenter-session)
@@ -2578,5 +2580,58 @@
                (= (length (condition-service-entries (host-state-conditions host)))
                   (+ before 1)))
     (error 'kernel-tests "command exception was not captured as an editor condition"))
+  (owner-close! package-owner))
+
+;; Frontend orchestration converts queued Surface input into a published
+;; InputState and a command-runtime message, then redraws only after the
+;; dispatcher reports a changed View or Surface.
+(let* ([package-owner (make-owner 'frontend-command-test)]
+       [runtime (host-state-command-runtime host)]
+       [keymap (make-keymap 'frontend-test)]
+       [key (make-key-stroke 'character (char->integer #\f) 4)]
+       [observed #f]
+       [renders 0]
+       [definition
+        (make-command-definition
+          'command.frontend-test
+          (lambda (context)
+            (set! observed context)
+            (command-handled))
+          package-owner)]
+       [_command (command-runtime-register-command! runtime definition)]
+       [_binding (keymap-bind! keymap (list key) 'command.frontend-test)]
+       [frontend
+        (make-frontend
+          host surface
+          (lambda (active active-view)
+            (make-input-context
+              (active-context-view-id active)
+              (active-context-buffer-id active)
+              (list (make-input-layer 'frontend keymap #f 'ignore))
+              (view-state-input-state (view-state active-view))))
+          (lambda (context disposition) #f)
+          (lambda (render theme) (set! renders (+ renders 1)))
+          (make-render-service)
+          default-theme)]
+       [event
+        (make-key-event
+          'character (char->integer #\f) #f #f 4 'press (make-bytevector 0))])
+  (frontend-step! frontend)
+  (frontend-enqueue!
+    frontend
+    (make-surface-input-message (surface-id surface) event))
+  (frontend-step! frontend)
+  (frontend-resize! frontend '(60 . 20))
+  (frontend-step! frontend)
+  (unless (and observed
+               (= (command-context-surface-id observed) (surface-id surface))
+               (= (command-context-window-id observed) (window-id leaf))
+               (= (command-context-view-id observed) (view-id view))
+               (= (command-context-buffer-id observed) (buffer-id buffer))
+               (key-event? (command-context-event observed))
+               (equal? (surface-size surface) '(60 . 20))
+               (>= renders 3))
+    (error 'kernel-tests "frontend orchestration did not route input and rendering"))
+  (frontend-close! frontend)
   (owner-close! package-owner))
 (host-state-close! host)

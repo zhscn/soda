@@ -20,7 +20,9 @@
           dispatcher-dispatch-view!
           dispatcher-dispatch-host!
           dispatcher-set-listener!
-          dispatcher-set-host-listener!)
+          dispatcher-set-host-listener!
+          dispatcher-add-listener!
+          dispatcher-add-host-listener!)
   (import (rnrs)
           (soda kernel change)
           (soda kernel document)
@@ -69,9 +71,15 @@
       (immutable surfaces dispatcher-surfaces)
       (mutable listener dispatcher-listener dispatcher-listener-set!)
       (mutable host-listener dispatcher-host-listener dispatcher-host-listener-set!)
+      (mutable listeners dispatcher-listeners dispatcher-listeners-set!)
+      (mutable host-listeners dispatcher-host-listeners dispatcher-host-listeners-set!)
       (mutable phase dispatcher-phase dispatcher-phase-set!)
       (mutable deferred dispatcher-deferred dispatcher-deferred-set!)
       (mutable draining? dispatcher-draining? dispatcher-draining?-set!)))
+
+  (define-record-type
+    (dispatcher-observer %make-dispatcher-observer dispatcher-observer?)
+    (fields (immutable procedure dispatcher-observer-procedure)))
 
   (define make-dispatcher
     (case-lambda
@@ -89,7 +97,7 @@
     (unless (or (not listener) (procedure? listener))
       (assertion-violation 'make-dispatcher "expected a listener or #f" listener))
     (%make-dispatcher
-      buffers views surfaces listener #f 'idle '() #f)]))
+      buffers views surfaces listener #f '() '() 'idle '() #f)]))
 
   (define (dispatcher-drain-deferred! dispatcher)
     (when (and (eq? (dispatcher-phase dispatcher) 'idle)
@@ -142,6 +150,32 @@
                            "expected a listener or #f" listener))
     (dispatcher-host-listener-set! dispatcher listener)
     listener)
+
+  ;; Host-owned observers supplement the compatibility listener slots.  The
+  ;; registration is tied to an Owner, so a frontend or package can observe
+  ;; publication without replacing another observer or leaking after close.
+  (define (add-observer! who dispatcher owner listener access set-access!)
+    (unless (and (dispatcher? dispatcher) (owner? owner) (procedure? listener))
+      (assertion-violation who "expected a dispatcher, owner, and listener"
+                           dispatcher owner listener))
+    (owner-assert-active who owner)
+    (let ([entry (%make-dispatcher-observer listener)])
+      (set-access! dispatcher (append (access dispatcher) (list entry)))
+      (make-registration
+        owner
+        (lambda ()
+          (set-access!
+            dispatcher
+            (filter (lambda (item) (not (eq? item entry)))
+                    (access dispatcher)))))))
+
+  (define (dispatcher-add-listener! dispatcher owner listener)
+    (add-observer! 'dispatcher-add-listener! dispatcher owner listener
+                   dispatcher-listeners dispatcher-listeners-set!))
+
+  (define (dispatcher-add-host-listener! dispatcher owner listener)
+    (add-observer! 'dispatcher-add-host-listener! dispatcher owner listener
+                   dispatcher-host-listeners dispatcher-host-listeners-set!))
 
   (define (dispatcher-dispatch-host-now! dispatcher operation)
     (unless (and (dispatcher? dispatcher) (host-operation? operation))
@@ -198,8 +232,11 @@
                       (dispatcher-notify!
                         dispatcher
                         (lambda ()
-                          (let ([listener (dispatcher-host-listener dispatcher)])
-                            (when listener (listener update)))))
+        (let ([listener (dispatcher-host-listener dispatcher)])
+                            (when listener (listener update))
+                          (for-each
+                            (lambda (entry) ((dispatcher-observer-procedure entry) update))
+                            (dispatcher-host-listeners dispatcher)))))
                       update)))))))
 
   (define (dispatcher-dispatch-host! dispatcher operation)
@@ -237,6 +274,9 @@
         (notify-view-plugins! dispatcher update)
         (let ([listener (dispatcher-listener dispatcher)])
           (when listener (listener update)))
+        (for-each
+          (lambda (entry) ((dispatcher-observer-procedure entry) update))
+          (dispatcher-listeners dispatcher))
         (for-each
           (lambda (listener) (listener update))
           (configuration-facet configuration update-listeners-facet 'buffer))))
