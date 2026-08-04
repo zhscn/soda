@@ -29,7 +29,7 @@ LexOutput lex(const Text& text);
 
 struct TextEdit;
 
-// Incremental relex (design/01-kernel.md §7): `old_tokens`/`old_line_states` are the
+// Incremental relex (design/08-cpp-analysis.md "Lossless lexer"): `old_tokens`/`old_line_states` are the
 // lex of `old_text` (borrowed, not consumed), `edits` the normalized edit
 // list (old coordinates, ascending, non-overlapping) that turns `old_text`
 // into `new_text`. Rescans only the damaged window: restarts at the nearest
@@ -44,7 +44,7 @@ LexOutput relex(const std::vector<Token>& old_tokens,
                 const Text& new_text, std::span<const TextEdit> edits);
 
 // Long-lived token streams (SyntaxTree) hold a chunked TokenBuffer so the
-// splice below is sublinear (design/01-kernel.md §214); the scanned window itself stays
+// splice below is sublinear (design/08-cpp-analysis.md "Lossless lexer"); the scanned window itself stays
 // a flat LexOutput.
 
 // The raw relex plan: which old tokens/lines survive and what was rescanned.

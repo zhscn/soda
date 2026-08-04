@@ -10,7 +10,7 @@ using namespace soda;
 
 namespace {
 
-// Fixture format from design/01-kernel.md §13.3: '^' marks the caret.
+// Fixture format for design/08-cpp-analysis.md "缩进模型": '^' marks the caret.
 std::pair<std::string, TextOffset> parse_caret(std::string_view fixture) {
     std::size_t pos = fixture.find('^');
     REQUIRE(pos != std::string_view::npos);
@@ -219,7 +219,7 @@ TEST_CASE("switch, case labels and case bodies") {
 }
 
 TEST_CASE("constructor initializer list, typed step by step") {
-    // design/01-kernel.md §13.3 sequence fixture
+    // Sequence fixture for design/08-cpp-analysis.md "缩进模型".
     Document doc("Foo::Foo()");
     TextOffset caret{10};
 
@@ -441,7 +441,7 @@ TEST_CASE("preprocessor directives stay at column zero") {
 }
 
 TEST_CASE("unclosed macro invocation leaves distant indent stable") {
-    // design/01-kernel.md §14.7 last sample: bounded degradation
+    // Bounded-degradation sample for design/08-cpp-analysis.md "缩进模型".
     std::string fixture = "#define DECLARE(x) x\n\nDECLARE(\nnamespace foo {^\nint x;\n}\n";
     CHECK(enter(fixture) == "#define DECLARE(x) x\n\nDECLARE(\nnamespace foo {\n^\nint x;\n}\n");
 }

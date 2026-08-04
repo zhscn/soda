@@ -15,7 +15,7 @@ struct SyntaxNode;
 using SyntaxNodeId = std::uint32_t;
 inline constexpr SyntaxNodeId kInvalidNode = 0xFFFFFFFFu;
 
-// Length-encoded, position-independent, immutable syntax node (design/01-kernel.md §607,
+// Length-encoded, position-independent, immutable syntax node (design/08-cpp-analysis.md "容错 CST",
 // "green tree 的另一半"). A node records its total token span as a relative
 // `width`; children carry a relative `leading` (the parent-owned tokens, trivia
 // included, that precede them since the previous child or the node start).

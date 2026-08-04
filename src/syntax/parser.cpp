@@ -11,7 +11,7 @@ namespace soda {
 
 namespace {
 
-// design/01-kernel.md §8.4: tokens that resynchronize the parser after opaque or
+// design/08-cpp-analysis.md "容错 CST": tokens that resynchronize the parser after opaque or
 // broken constructs. Seeing one of these mid-declaration ends the current
 // node instead of swallowing distant structure.
 // FOO_BAR(...) with nothing after it on the line: a macro invocation used
@@ -868,7 +868,7 @@ private:
                 continue;
             }
             // Unclosed paren: bail at structure that clearly is not an
-            // argument, so damage stays bounded (design/01-kernel.md §7.4b, §8.4).
+            // argument, so damage stays bounded (design/08-cpp-analysis.md "容错 CST").
             // class/struct only bails at the start of a line: mid-line it is
             // a type mention (`(struct sockaddr *)&Addr`), not a declaration
             // the unclosed paren would swallow.
@@ -978,7 +978,7 @@ private:
         close(g);
     }
 
-    // Template-angle heuristic (design/01-kernel.md §7.4a): only pair '<...>' in
+    // Template-angle heuristic (design/08-cpp-analysis.md "容错 CST"): only pair '<...>' in
     // declarative positions; give up on statement structure or imbalance and
     // let '<' stay an ordinary operator. Never produces an error node.
     std::uint32_t match_angles(std::uint32_t from) {
@@ -1271,7 +1271,7 @@ private:
     std::vector<SyntaxNode> build_;
     std::vector<SyntaxNodeId> stack_;
 
-    // Preprocessor conditional reconciliation (design/01-kernel.md §276): each open
+    // Preprocessor conditional reconciliation (design/08-cpp-analysis.md "容错 CST"): each open
     // #if/#ifdef/#ifndef consumed at a container's item-loop level records the
     // owner loop's stack depth; a following #else/#elif restores to it so
     // alternative branches parse as siblings (one branch's net brace effect
@@ -1328,7 +1328,7 @@ SyntaxTree parse(const Text& text, TokenBuffer tokens) {
     return Parser<TextCharSource>(source, std::move(tokens)).run();
 }
 
-// ---- incremental reparse (design/01-kernel.md §17) -----------------------------------
+// ---- incremental reparse (design/08-cpp-analysis.md "Analysis session") --------------
 
 namespace {
 

@@ -1,5 +1,16 @@
 # Soda Editor Kernel 与 Workbench Host
 
+## 实现状态
+
+| 能力 | 状态 |
+|---|---|
+| ChangeSet、Selection、StateField、Facet、Compartment 与 transaction | 已实现 |
+| Buffer、View、Window、Surface、Dispatcher 与 owner lifecycle | 已实现 |
+| command runtime、input resolver、condition boundary 与 host queue | 已实现 |
+| View projection、Frame、compositor 与 terminal presenter | 部分实现 |
+| 标准编辑、file、history、interaction 与 minibuffer package | 部分实现 |
+| Buffer-local mode、generated UI 与高级功能 package | 未实现 |
+
 ## 定位
 
 Soda 由编辑器状态内核、Workbench host、TUI frontend 和功能包组成。四层共享同一套
@@ -447,6 +458,9 @@ Buffer registry 分配不复用的 identity。跨 command turn 和异步边界�
 所有面向用户的文本界面使用 Buffer。generated Buffer 将领域 model 投影为文本，并将
 semantic id、location、action 和 face 保存到 package-owned StateField/RangeSet。command
 通过 point 下的 range value 取得 payload，不解析显示字符串。
+
+Buffer identity、局部 mode、attachment、semantic item、refresh 和 editable projection 的
+完整合同见 [03-buffer-ui.md](03-buffer-ui.md)。
 
 ### View
 
@@ -1164,7 +1178,7 @@ native launcher + runtime resources
 
 C launcher 注册 native symbol 和 boot image，再进入 host startup。application trailer/TOC、
 boot section、library visibility 和资源 archive 属于 packaging contract，见
-[17-packaging.md](17-packaging.md)。这些机制不进入 editor state 或 command loop。
+[09-packaging.md](09-packaging.md)。这些机制不进入 editor state 或 command loop。
 
 源码边界：
 

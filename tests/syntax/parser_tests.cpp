@@ -25,7 +25,7 @@ void check_node(const SyntaxTree& tree, SyntaxNodeId id) {
     }
 }
 
-// design/01-kernel.md §14.3: terminates (implied), root covers everything, children
+// design/08-cpp-analysis.md "容错 CST": terminates (implied), root covers everything, children
 // are ordered/nested, no zero-length loops (progress guarantee).
 void check_tree_invariants(const SyntaxTree& tree) {
     const SyntaxNode& root = tree.node(tree.root());
@@ -224,7 +224,7 @@ TEST_CASE("split-brace #if/#else branches parse as sibling alternatives") {
     // #ifdef A opens a brace in one branch, #else opens another, and a single
     // '}' after #endif closes it. clang-format's model treats the branches as
     // alternatives (one net brace), so f and g are siblings, not g nested
-    // inside f's unclosed body. design/01-kernel.md §276.
+    // inside f's unclosed body. See design/08-cpp-analysis.md "容错 CST".
     SyntaxTree tree =
         parse_checked("#ifdef A\nvoid f() {\n#else\nvoid g() {\n#endif\n    body();\n}\n");
     CHECK(find_all(tree, SyntaxKind::PreprocessorDirective).size() == 3);
@@ -481,7 +481,7 @@ TEST_CASE("fuzz: arbitrary input never breaks parser invariants") {
     }
 }
 
-// design/01-kernel.md §14: structural churn — how many levels of the caret's ancestor
+// design/08-cpp-analysis.md "容错 CST": structural churn — how many levels of the caret's ancestor
 // path change per typed character. Error recovery's goal is edit stability:
 // prefixes should converge to a stable spine early and stay there, not flip
 // between label/expression/error readings.

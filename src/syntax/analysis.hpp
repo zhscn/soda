@@ -20,7 +20,7 @@ struct Analysis {
     SyntaxTree tree;
 };
 
-// Revision-keyed memo of analyze() (design/01-kernel.md §6: syntax is a pure function
+// Revision-keyed memo of analyze() (design/08-cpp-analysis.md "Analysis session": syntax is a pure function
 // of a snapshot; this class only caches it and advances the cache
 // incrementally along edit lists). Not thread-safe; one per consumer.
 class Analyzer {

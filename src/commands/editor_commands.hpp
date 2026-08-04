@@ -24,7 +24,7 @@ struct EnterResult {
 // instead of repeated full passes. The Analyzer-less overloads are
 // conveniences for one-shot callers.
 
-// The Enter handler pipeline (design/01-kernel.md §11): EnterBetweenBraces, then the
+// The Enter handler pipeline (design/08-cpp-analysis.md "缩进模型"): EnterBetweenBraces, then the
 // newline-and-indent fallback. One transaction, one undo unit; the handler
 // predicate is structural, never keystroke history.
 EnterResult press_enter(Document& document, TextOffset caret, const CppIndentStyle& style,
@@ -54,7 +54,7 @@ struct TypeCharsResult {
     DocumentChange change;
 };
 
-// On-typing reindent (design/01-kernel.md §10.3): insert `ch` at the caret and, when a
+// On-typing reindent (design/08-cpp-analysis.md "缩进模型"): insert `ch` at the caret and, when a
 // structural predicate holds, reindent the line in the same transaction —
 // ':' completing a case label / access specifier / ctor initializer intro,
 // '}' or '#' typed as the line's first content. One transaction, one undo

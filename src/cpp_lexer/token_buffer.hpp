@@ -8,7 +8,7 @@
 
 namespace soda {
 
-// Chunked token storage with chunk-relative byte offsets (design/01-kernel.md §214: the
+// Chunked token storage with chunk-relative byte offsets (design/08-cpp-analysis.md "Lossless lexer": the
 // token half of the length-encoded tree). Tokens inside a chunk store ranges
 // relative to the chunk's base; materialization adds the base back, so the
 // visible API still hands out absolute-offset Tokens by value. An edit's

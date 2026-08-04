@@ -5,7 +5,7 @@ Soda 是一个 Scheme-first 的原生 TUI 编辑器。Chez Scheme 承载编辑�
 
 ## 当前边界
 
-活动源码只包含精简 core 与 native mechanism wrapper：
+活动源码包含精简 core、native mechanism wrapper 和少量基础功能包：
 
 ```text
 native Text / Document / terminal/process runtime / parser ABI
@@ -15,12 +15,13 @@ Soda core: value -> document -> buffer -> view/window
                          input/command -> display/frame
                               │
                               ▼
-future packages: files, modes, minibuffer, language, LSP, REPL, debugger
+feature packages: editing, files, interaction, completion, modes, language, LSP, REPL
 ```
 
-core 的公开 UI 容器是 Buffer。View 保存 point、selection 和 viewport；Extent 保存
-face、display、action、location 等区间属性；Window 只负责 View 的布局和焦点。功能包
-通过 owner-scoped package、service、command 和 Buffer transaction 组合。
+core 的公开 UI 容器是 Buffer。Buffer 发布不可变 BufferState；View 保存 selection、viewport
+和输入状态；Window 只负责 View 的布局和焦点。区间数据通过 RangeSet、Decoration 和
+DisplayMap 组合。功能包通过 owner-scoped registration、command、StateField、Facet 和
+transaction 扩展这些稳定边界。
 
 ## 实现状态
 
@@ -32,10 +33,11 @@ face、display、action、location 等区间属性；Window 只负责 View 的�
 | core message、task、Frame、display stream | 部分实现 |
 | owner-scoped package、service 与资源清理 | 部分实现 |
 | core boot image 与 native launcher | 部分实现 |
-| 文件编辑、major mode、minibuffer、补全、语言服务、LSP、REPL、debugger | 未实现 |
+| 基础编辑、文件、history、interaction、minibuffer 与 completion package | 部分实现 |
+| major mode、语言服务、Project/LSP、REPL 与 debugger package | 未实现 |
 
-细分契约和后续 package 边界见[设计文档索引](design/README.md)，core 的目标模型见
-[18-editor-core.md](design/18-editor-core.md)。
+细分契约和 package 边界见[设计文档索引](design/README.md)，core 模型见
+[01-editor-core.md](design/01-editor-core.md)。
 
 ## 构建与验证
 
@@ -61,6 +63,6 @@ Tree-sitter grammar 与 query 资源位于 `runtime/`，按发行包一并安装
 
 ## Archive
 
-旧 editor、TUI、旧 Scheme 功能包及其测试位于 [archive](archive/README.md)，不属于
-活动构建输入。它们保留原有 library name，便于单独查阅或在显式增加
+非活动 editor、TUI、Scheme 功能包及其测试位于 [archive](archive/README.md)，不属于
+活动构建输入。它们保留各自的 library name，便于单独查阅或在显式增加
 `archive/scheme` library directory 后进行实验。

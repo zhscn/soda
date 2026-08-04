@@ -825,7 +825,7 @@ LexOutput relex(const std::vector<Token>& old_tokens,
 void relex_apply(TokenBuffer& tokens, std::vector<LexerState>& line_states, RelexSplice&& s) {
     // One structural pass: replace the window and rebase the suffix chunks by
     // delta — O(chunk count + window), the flat vector's O(token count)
-    // suffix shift and memmove are gone (design/01-kernel.md §214).
+    // suffix shift and memmove are gone (design/08-cpp-analysis.md "Lossless lexer").
     tokens.splice(s.keep_tokens, s.stop_token, s.scanned.tokens, s.delta);
     splice_vector(line_states, s.restart_line + 1, s.hit_eof ? line_states.size() : s.stop_line + 1,
                   s.scanned.line_states);

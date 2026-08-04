@@ -10,7 +10,7 @@
 
 namespace soda {
 
-// T3 expression-continuation engine (design/01-kernel.md §10.2, 决策十修订).
+// T3 expression-continuation engine (design/08-cpp-analysis.md "缩进模型").
 //
 // Replays clang-format's ContinuationIndenter column rules over the actual
 // layout of the statement containing `line` and returns the column the

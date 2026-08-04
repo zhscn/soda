@@ -135,10 +135,9 @@ viewport、持久 keymap layers、InputState 栈和 pending key sequence；
 切换 active view 同时切换命令的 buffer 与输入上下文。Editor 关闭时释放仍在
 registry 中的 Buffer。
 
-进程内 REPL 使用同一个 command loop 和事件队列。持久求值 namespace 由
-InteractionSession 持有，transcript 是普通 Buffer；求值产生的编辑器修改排成
-后续 command message。request identity、来源 revision、I/O 重定向和失败状态见
-[10-interaction.md](10-interaction.md)。
+进程内 evaluator 使用同一个 command loop 和事件队列。持久求值 namespace 由独立
+package session 持有，transcript 使用 [03-buffer-ui.md](03-buffer-ui.md) 的普通 generated
+Buffer；求值产生的编辑器修改排成后续 command message。
 
 ## Runtime ABI
 

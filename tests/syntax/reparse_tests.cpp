@@ -209,7 +209,7 @@ TEST_CASE("reparse: fuzz against full parse") {
 TEST_CASE("reparse: edits around split-brace #if/#else match a full parse") {
     // Both branches open a brace, one shared '}' after #endif. A reparse whose
     // span starts between #if and #else must not flatten the sibling structure
-    // the full parse produces (design/01-kernel.md §276).
+    // the full parse produces (design/08-cpp-analysis.md "容错 CST").
     const std::string text = "int h() {\n"    // 0
                              "#ifdef A\n"     // 1
                              "  int x = 1;\n" // 2

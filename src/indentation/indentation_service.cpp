@@ -101,7 +101,7 @@ int column_at(const TextCharSource& text, const Text& lines, TextOffset offset, 
     return col;
 }
 
-// design/01-kernel.md §9.5: structural columns may become tabs; alignment beyond the
+// Per design/08-cpp-analysis.md "缩进模型", structural columns may become tabs; alignment beyond the
 // structural part is always spaces.
 std::string materialize(int structural_cols, int target_cols, const CppIndentStyle& style) {
     target_cols = std::max(target_cols, 0);
@@ -749,7 +749,7 @@ private:
         if (first_significant_) {
             node = query_node_at(tree_, query);
         } else {
-            // design/01-kernel.md §10.2 steps 6-9: anchor on the last non-trivia block
+            // The "缩进模型" contract: anchor on the last non-trivia block
             // before the caret; blocks that are complete and already ended
             // defer to their parent.
             auto prev = last_significant_before(tree_, query);
@@ -999,7 +999,7 @@ private:
     }
 
     // T3: replay clang-format's continuation column rules over the actual
-    // statement layout (design/01-kernel.md §10.2). False = fall back to the T2 table.
+    // statement layout (design/08-cpp-analysis.md "缩进模型"). False = fall back to the T2 table.
     bool expression_engine(SyntaxNodeId controlling, FormatRole role) {
         auto column = expression_continuation_column(snapshot_, tree_, line_, controlling, style_,
                                                      decision_.trace);

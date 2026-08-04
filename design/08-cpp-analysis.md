@@ -1,4 +1,4 @@
-# C++ 语言内核
+# C++ 语言分析内核
 
 ## 实现状态
 
@@ -13,8 +13,8 @@
 
 C++ 语言内核从 `Text` 或 `DocumentSnapshot` 派生 lossless token、容错 CST、
 结构查询与缩进结果。它不拥有 editor buffer、view、major mode 或终端状态。
-编辑器通过 [09-language-modes.md](09-language-modes.md) 的 syntax provider
-将这些能力接入某个 buffer。
+语言 package 通过 [01-editor-core.md](01-editor-core.md) 的 StateField、Facet 和
+View projection 将这些能力接入 Buffer；native analyzer 不依赖 mode registry。
 
 ## 分层
 

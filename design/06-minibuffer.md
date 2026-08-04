@@ -7,9 +7,9 @@
 | 非递归 request/session/continuation 协议 | 已实现 |
 | 独立 Buffer/View、接受、取消与 overlay 生命周期 | 已实现 |
 | completion controller 与 candidate source | 已实现 |
-| Vertico 风格候选窗口、固定高度与滚动 | 规划中 |
-| history、固定集合与任意输入 selection policy | 规划中 |
-| `interactive-completing-read` | 规划中 |
+| Vertico 风格候选窗口、固定高度与滚动 | 未实现 |
+| history、固定集合与任意输入 selection policy | 未实现 |
+| `interactive-completing-read` | 未实现 |
 
 ## 定位
 

@@ -1,6 +1,6 @@
 # Project、Resource 与 LSP Workspace
 
-## 总体状态
+## 实现状态
 
 未实现。
 

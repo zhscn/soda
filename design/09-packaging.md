@@ -56,8 +56,8 @@ Chez 发行版中的 `scheme-script.boot` 是 `scheme-script` 可执行文件使
 - Chez kernel。
 
 语言 grammar 不进入可执行文件。grammar shared library 和 Soda-owned query bundle
-作为 runtime package 安装，由 [09-language-modes.md](09-language-modes.md) 的
-language runtime 按需加载。runtime root 的查找契约见项目 [README](../README.md)。
+作为 runtime package 安装，由语言 package 按需加载。runtime root 的查找契约见项目
+[README](../README.md)。
 
 ## 安装布局
 
@@ -78,7 +78,7 @@ Scheme application 打包器使用运行中 Soda 所携带的 Chez compiler，�
 - **Chez runtime**：Chez kernel、Chez boot 和用户 program，不注册 Soda native
   symbols；
 - **Soda runtime**：Soda launcher、native ABI、所需 `(soda ...)` library 和用户
-  program，可承载 [16-tui-applications.md](16-tui-applications.md) 定义的 sole host。
+  program，可使用 editor kernel、Buffer UI 与 TUI frontend。
 
 两类产物共享 boot container：
 

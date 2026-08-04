@@ -72,7 +72,7 @@ public:
     std::string dump(std::string_view text) const;
 
     // The length-encoded green tree — the source of truth from which red nodes
-    // are materialized (design/01-kernel.md §607). Null only for a default-constructed tree.
+    // are materialized (design/08-cpp-analysis.md "容错 CST"). Null only for a default-constructed tree.
     const GreenRef& green_root() const { return green_root_; }
 
 private:
@@ -105,7 +105,7 @@ private:
     // Every '#' token classified as a conditional directive (Open/Alt/Close),
     // ascending by token index. Built by the full parse, maintained across
     // reparse splices, so the per-keystroke pp-safety check walks this list
-    // instead of rescanning every token (design/01-kernel.md §17 perf note).
+    // instead of rescanning every token (design/08-cpp-analysis.md "Analysis session").
     std::vector<PPDirective> pp_dirs_;
     // Copies of a tree share their immutable lazy cache. set_green() detaches
     // before an incrementally reparsed copy starts materializing new nodes.
@@ -123,7 +123,7 @@ SyntaxTree parse(const Text& text);
 SyntaxTree parse(const Text& text, LexOutput lexed);
 SyntaxTree parse(const Text& text, TokenBuffer tokens);
 
-// In-place incremental reparse (design/01-kernel.md §17): advances `tree` (the parse of
+// In-place incremental reparse (design/08-cpp-analysis.md "Analysis session"): advances `tree` (the parse of
 // `old_text`, with `line_states` from its lex) to the parse of `new_text`,
 // given the normalized edit list between the two. Internally: incremental
 // relex, then either verbatim node reuse (token sequence unchanged), a

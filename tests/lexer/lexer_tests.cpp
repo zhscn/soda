@@ -12,7 +12,7 @@ using namespace soda;
 
 namespace {
 
-// design/01-kernel.md §14.2: contiguous coverage, no overlap, concat == input,
+// design/08-cpp-analysis.md "Lossless lexer": contiguous coverage, no overlap, concat == input,
 // EndOfFile terminator.
 void check_invariants(std::string_view text, const LexOutput& out) {
     REQUIRE(!out.tokens.empty());
