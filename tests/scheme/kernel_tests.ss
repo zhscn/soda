@@ -24,7 +24,7 @@
         (soda host render)
         (soda host render-service)
         (soda host state)
-        (soda host surface)
+        (soda host internal surface)
         (soda host value)
         (soda host view)
         (soda host window)
@@ -61,7 +61,9 @@
 (unless (and
           (library-binding-hidden? '(soda host buffer) 'buffer-document)
           (library-binding-hidden? '(soda host buffer) 'buffer-publish-state!)
-          (library-binding-hidden? '(soda host view) 'view-publish-state!))
+          (library-binding-hidden? '(soda host view) 'view-publish-state!)
+          (library-binding-hidden? '(soda host surface) 'surface-resize!)
+          (library-binding-hidden? '(soda host surface) 'surface-set-selected-window!))
   (error 'kernel-tests "public host facade exposes dispatcher mutation"))
 
 (define selection

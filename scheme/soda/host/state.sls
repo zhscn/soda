@@ -20,7 +20,7 @@
           (soda host dispatch)
           (soda host runtime)
           (soda host package)
-          (soda host surface)
+          (soda host internal surface)
           (soda host value)
           (soda host view))
 

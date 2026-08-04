@@ -32,7 +32,7 @@
           (soda host internal view)
           (soda host context)
           (soda host internal operation)
-          (soda host surface)
+          (soda host internal surface)
           (soda host value)
           (soda view plugin))
 

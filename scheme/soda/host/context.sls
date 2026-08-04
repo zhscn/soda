@@ -24,7 +24,7 @@
   (import (rnrs)
           (soda kernel value)
           (soda host buffer)
-          (soda host surface)
+          (soda host internal surface)
           (soda host view)
           (soda host window))
 
