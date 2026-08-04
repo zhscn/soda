@@ -129,6 +129,39 @@
                "yank did not restore the newest kill-ring entry"))
       (soda-application-close! application))
 
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [runtime (host-state-command-runtime state)]
+           [buffer (soda-application-buffer application)]
+           [view (soda-application-view application)])
+      (command-runtime-start!
+        runtime 'fundamental.insert-text (application-command-context application)
+        (list (string->utf8 "abc\ndef")))
+      (command-runtime-start!
+        runtime 'fundamental.beginning-of-line (application-command-context application))
+      (command-runtime-start!
+        runtime 'fundamental.open-line (application-command-context application))
+      (unless (and (string=? (buffer-string buffer) "abc\n\ndef")
+                   (= (selection-range-head
+                        (selection-primary-range (view-state-selection (view-state view))))
+                      4))
+        (error 'fundamental-editing-tests "open-line did not preserve point"))
+      (command-runtime-start!
+        runtime 'fundamental.kill-line (application-command-context application))
+      (command-runtime-start!
+        runtime 'fundamental.kill-word (application-command-context application))
+      (unless (string=? (buffer-string buffer) "abc\n")
+        (error 'fundamental-editing-tests "line and word kill did not use text boundaries"))
+      (command-runtime-start!
+        runtime 'fundamental.mark-whole-buffer (application-command-context application))
+      (command-runtime-start!
+        runtime 'fundamental.exchange-point-and-mark (application-command-context application))
+      (let ([range (selection-primary-range (view-state-selection (view-state view)))])
+        (unless (and (= (selection-range-anchor range) 4)
+                     (= (selection-range-head range) 0))
+          (error 'fundamental-editing-tests "mark-whole-buffer or point exchange is incorrect")))
+      (soda-application-close! application))
+
     (let* ([document (make-document "a\n")]
            [snapshot (document-snapshot document)]
            [selection (make-selection (list (make-selection-range 2 2)))]

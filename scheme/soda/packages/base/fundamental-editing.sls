@@ -126,6 +126,33 @@
         (buffer-state-generation (command-context-buffer-state context))
         change-set next-selection '() '())))
 
+  ;; `open-line` is deliberately distinct from newline: it inserts before
+  ;; each caret and maps that caret with before affinity, so typing continues
+  ;; on the original line.
+  (define (open-line context)
+    (let* ([selection (context-selection context)]
+           [length (context-document-length context)]
+           [changes
+            (map (lambda (range)
+                   (let ([point (selection-range-head range)])
+                     (make-text-change point point (string->utf8 "\n"))))
+                 (selection-ranges selection))]
+           [change-set (make-change-set length changes)]
+           [next-selection
+            (make-selection
+              (map (lambda (range)
+                     (collapse-range
+                       range
+                       (change-set-map-offset change-set
+                                              (selection-range-head range) 'before)))
+                   (selection-ranges selection))
+              (selection-primary selection))])
+      (make-transaction-spec
+        (command-context-buffer-id context)
+        (command-context-view-id context)
+        (buffer-state-generation (command-context-buffer-state context))
+        change-set next-selection '() '())))
+
   (define (delete-selection-or-character context direction)
     (let ([selection (context-selection context)]
           [length (context-document-length context)])
@@ -247,6 +274,38 @@
     (view-selection-transaction context
                                 (deactivate-mark-selection (context-selection context))))
 
+  (define (mark-whole-buffer context)
+    (let* ([selection (context-selection context)]
+           [length (context-document-length context)]
+           [range (selection-primary-range selection)])
+      (view-selection-transaction
+        context
+        (make-selection
+          (list
+            (make-selection-range
+              0 length
+              (selection-range-affinity range)
+              'character
+              (set-mark-active (selection-range-metadata range) #t)))
+          0))))
+
+  (define (exchange-point-and-mark context)
+    (let* ([selection (context-selection context)]
+           [range (selection-primary-range selection)])
+      (if (not (mark-active? range))
+          (command-handled)
+          (view-selection-transaction
+            context
+            (make-selection
+              (list
+                (make-selection-range
+                  (selection-range-head range)
+                  (selection-range-anchor range)
+                  (selection-range-affinity range)
+                  (selection-range-granularity range)
+                  (selection-range-metadata range)))
+              0)))))
+
   (define (primary-region-bytes context)
     (let ([range (selection-primary-range (context-selection context))])
       (and (not (selection-range-empty? range))
@@ -279,17 +338,17 @@
               (make-command-effect 'fundamental.record-kill bytes)
               (make-command-effect 'clipboard.write bytes))))))
 
-  (define (kill-region context)
-    (let ([range (selection-primary-range (context-selection context))]
-          [bytes (primary-region-bytes context)])
-      (if (not bytes)
-          (command-handled)
+  (define (kill-range context range start end)
+    (if (= start end)
+        (command-handled)
+        (let ([bytes
+               (with-context-text
+                 context
+                 (lambda (text) (text-subbytevector text start end)))])
           (let* ([length (context-document-length context)]
-                 [start (selection-range-from range)]
                  [changes (make-change-set
                             length
-                            (list (make-text-change start (selection-range-to range)
-                                                    (make-bytevector 0))))]
+                            (list (make-text-change start end (make-bytevector 0))))]
                  [selection (make-selection (list (collapse-range range start)) 0)])
             (make-command-result
               (list
@@ -300,6 +359,39 @@
                   changes selection '() '())
                 (make-command-effect 'fundamental.record-kill bytes)
                 (make-command-effect 'clipboard.write bytes)))))))
+
+  (define (kill-region context)
+    (let ([range (selection-primary-range (context-selection context))])
+      (kill-range context range (selection-range-from range) (selection-range-to range))))
+
+  (define (kill-word context direction)
+    (let ([range (selection-primary-range (context-selection context))])
+      (if (not (selection-range-empty? range))
+          (kill-region context)
+          (with-context-text
+            context
+            (lambda (text)
+              (let* ([point (selection-range-head range)]
+                     [other ((if (eq? direction 'backward)
+                                 text-backward-word-offset
+                                 text-forward-word-offset)
+                             text point)])
+                (kill-range context range (min point other) (max point other))))))))
+
+  (define (kill-line context)
+    (let ([range (selection-primary-range (context-selection context))])
+      (if (not (selection-range-empty? range))
+          (kill-region context)
+          (with-context-text
+            context
+            (lambda (text)
+              (let* ([point (selection-range-head range)]
+                     [line (car (text-position text point))]
+                     [end (text-line-content-end text line)]
+                     [to (if (< point end)
+                             end
+                             (text-next-grapheme-offset text point))])
+                (kill-range context range point to)))))))
 
   (define (yank context editing)
     (let ([ring (fundamental-editing-kill-ring editing)])
@@ -339,6 +431,10 @@
         runtime owner 'fundamental.newline (context)
         "Insert a newline at every selection." 'editing
         (replace-selection context (string->utf8 "\n")))
+      (install-command!
+        runtime owner 'fundamental.open-line (context)
+        "Insert a newline before every caret without moving it." 'editing
+        (open-line context))
       (install-command!
         runtime owner 'fundamental.delete-backward (context)
         "Delete the active region or preceding grapheme." 'editing
@@ -380,6 +476,14 @@
         "Deactivate every active region." 'selection
         (deactivate-mark context))
       (install-command!
+        runtime owner 'fundamental.mark-whole-buffer (context)
+        "Select the whole Buffer." 'selection
+        (mark-whole-buffer context))
+      (install-command!
+        runtime owner 'fundamental.exchange-point-and-mark (context)
+        "Exchange point and mark in the primary region." 'selection
+        (exchange-point-and-mark context))
+      (install-command!
         runtime owner 'fundamental.copy-region (context)
         "Copy the primary active region to the kill ring and clipboard." 'kill
         (copy-region context))
@@ -387,6 +491,18 @@
         runtime owner 'fundamental.kill-region (context)
         "Kill the primary active region to the kill ring and clipboard." 'kill
         (kill-region context))
+      (install-command!
+        runtime owner 'fundamental.kill-word (context)
+        "Kill the active region or the following word." 'kill
+        (kill-word context 'forward))
+      (install-command!
+        runtime owner 'fundamental.backward-kill-word (context)
+        "Kill the active region or the preceding word." 'kill
+        (kill-word context 'backward))
+      (install-command!
+        runtime owner 'fundamental.kill-line (context)
+        "Kill the active region or text through the next logical line boundary." 'kill
+        (kill-line context))
       (install-command!
         runtime owner 'fundamental.yank (context)
         "Insert the newest kill-ring entry at every selection." 'yank
@@ -403,12 +519,18 @@
         ((list (make-key-stroke 'character (char->integer #\space) 4)) 'fundamental.set-mark)
         ((list (control-stroke #\w)) 'fundamental.kill-region)
         ((list (control-stroke #\y)) 'fundamental.yank)
+        ((list (control-stroke #\o)) 'fundamental.open-line)
+        ((list (control-stroke #\k)) 'fundamental.kill-line)
         ((list (make-key-stroke 'character (char->integer #\b) 2)) 'fundamental.backward-word)
         ((list (make-key-stroke 'character (char->integer #\f) 2)) 'fundamental.forward-word)
         ((list (make-key-stroke 'character (char->integer #\w) 2)) 'fundamental.copy-region)
+        ((list (make-key-stroke 'character (char->integer #\d) 2)) 'fundamental.kill-word)
+        ((list (make-key-stroke 'backspace #f 2)) 'fundamental.backward-kill-word)
         ((list (control-stroke #\d)) 'fundamental.delete-forward)
         ((list (control-stroke #\g)) 'application.quit)
         ((list (control-stroke #\x) (control-stroke #\c)) 'application.quit)
+        ((list (control-stroke #\x) (control-stroke #\h)) 'fundamental.mark-whole-buffer)
+        ((list (control-stroke #\x) (control-stroke #\x)) 'fundamental.exchange-point-and-mark)
         ((list (plain-stroke 'left #f)) 'fundamental.backward-char)
         ((list (plain-stroke 'right #f)) 'fundamental.forward-char)
         ((list (plain-stroke 'home #f)) 'fundamental.beginning-of-line)

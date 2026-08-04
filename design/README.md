@@ -32,6 +32,7 @@
 | [16-tui-applications.md](16-tui-applications.md) | Buffer 承载的声明式 TUI application framework | 已实现 |
 | [17-packaging.md](17-packaging.md) | 单文件编辑器发行与 Scheme application 打包 | 部分实现 |
 | [18-editor-core.md](18-editor-core.md) | 精简 editor core、统一 Buffer UI 与功能包边界 | 部分实现 |
+| [19-project-lsp.md](19-project-lsp.md) | Project、资源绑定与 LSP workspace 路由 | 未实现 |
 
 ## 规范边界
 
@@ -46,6 +47,7 @@
 - `10` 定义交互与调试 session；`17` 只定义构建和发行边界。
 - `18` 定义目标 editor core、统一 Buffer presentation 和功能包依赖边界；其他文档的
   领域机制作为独立 package 接入该边界。
+- `19` 定义 Project、资源绑定和 LSP workspace 的集成边界。
 
 当前实现文档描述的依赖方向：
 
