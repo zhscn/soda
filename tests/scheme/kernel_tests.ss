@@ -2684,7 +2684,13 @@
        [disposition
         (fundamental-input-disposition
           (application-command-context application)
-          (input-dispatch context (make-text-input-event 'text (string->utf8 "b"))))])
+          (input-dispatch context (make-text-input-event 'text (string->utf8 "b"))))]
+       [enter
+        (input-dispatch
+          context (make-key-event 'enter 13 #f #f 0 'press (make-bytevector 0)))]
+       [backspace
+        (input-dispatch
+          context (make-key-event 'backspace 127 #f #f 0 'press (make-bytevector 0)))])
   (unless (and (eq? (command-invocation-phase inserted) 'completed)
                (eq? (command-invocation-phase backward) 'completed)
                (eq? (command-invocation-phase deleted) 'completed)
@@ -2696,7 +2702,12 @@
                (= (input-context-buffer-id context) (buffer-id buffer))
                (command-invoke-message? disposition)
                (eq? (command-invoke-message-name disposition)
-                    'fundamental.insert-text))
+                    'fundamental.insert-text)
+               (eq? (input-disposition-kind enter) 'command)
+               (eq? (input-disposition-value enter) 'fundamental.newline)
+               (eq? (input-disposition-kind backspace) 'command)
+               (eq? (input-disposition-value backspace)
+                    'fundamental.delete-backward))
     (error 'kernel-tests "fundamental editing did not produce stable editor state"))
   (soda-application-close! application))
 (host-state-close! host)

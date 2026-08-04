@@ -192,9 +192,13 @@
                    'application.quit)
       (keymap-bind! keymap (list (plain-stroke 'left #f)) 'fundamental.backward-char)
       (keymap-bind! keymap (list (plain-stroke 'right #f)) 'fundamental.forward-char)
-      (keymap-bind! keymap (list (plain-stroke 'backspace 127)) 'fundamental.delete-backward)
+      ;; Non-character keys are normalized without a codepoint by
+      ;; key-event->key-stroke.  Terminal decoders retain their physical
+      ;; codepoint on KeyEvent for inspection, but it is not part of keymap
+      ;; identity.
+      (keymap-bind! keymap (list (plain-stroke 'backspace #f)) 'fundamental.delete-backward)
       (keymap-bind! keymap (list (plain-stroke 'delete #f)) 'fundamental.delete-forward)
-      (keymap-bind! keymap (list (plain-stroke 'enter 13)) 'fundamental.newline)
+      (keymap-bind! keymap (list (plain-stroke 'enter #f)) 'fundamental.newline)
       (%make-fundamental-editing keymap)))
 
   (define (fundamental-input-context editing active view)
