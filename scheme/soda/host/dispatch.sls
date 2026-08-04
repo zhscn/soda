@@ -349,6 +349,22 @@
       (lambda (effect) (state-effect-for-view? effect origin?))
       effects))
 
+  ;; A Buffer transaction maps every View by byte offset first.  Configured
+  ;; mappers may then replace that result with a richer semantic position,
+  ;; such as a generated item's stable identity.  This keeps one publication
+  ;; boundary for the Buffer and all of its Views without teaching Dispatcher
+  ;; about individual feature packages.
+  (define (apply-view-selection-mappers configuration view old-state transaction selection)
+    (let loop ([mappers (configuration-facet configuration view-selection-mappers-facet 'buffer)]
+               [current selection])
+      (if (null? mappers)
+          current
+          (let ([next ((car mappers) (view-id view) old-state transaction current)])
+            (unless (selection? next)
+              (assertion-violation 'dispatcher-dispatch!
+                                   "view selection mapper must return a Selection" next))
+            (loop (cdr mappers) next)))))
+
   (define (assert-view-generations! views buffer-id generation)
     (for-each
       (lambda (view)
@@ -426,12 +442,16 @@
                 (map
                   (lambda (view)
                     (let* ([current (view-state view)]
-                           [selection
+                           [mapped-selection
                             (if (and origin (= (view-id view) (view-id origin))
                                      (transaction-selection transaction))
                                 (transaction-selection transaction)
                                 (selection-map-change
                                   (view-state-selection current) changes))]
+                           [selection
+                            (apply-view-selection-mappers
+                              (buffer-state-configuration new-buffer-state)
+                              view current transaction mapped-selection)]
                            [origin?
                             (and origin (= (view-id view) (view-id origin)))]
                            [new-state

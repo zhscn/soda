@@ -41,6 +41,7 @@
           transaction-filters-facet
           transaction-extenders-facet
           update-listeners-facet
+          view-selection-mappers-facet
           make-compartment
           compartment?
           compartment-name
@@ -245,6 +246,12 @@
 
   (define update-listeners-facet
     (make-facet 'update-listeners '() append-values))
+
+  ;; Buffer configuration can supply pure mappers for View-local selections
+  ;; during a shared Buffer transaction.  The dispatcher owns invocation and
+  ;; validates the resulting Selection; packages only provide semantics.
+  (define view-selection-mappers-facet
+    (make-facet 'view-selection-mappers '() append-values))
 
   (define-record-type
     (facet-provider %make-facet-provider facet-provider?)

@@ -4,6 +4,7 @@
           host-state-owner
           host-state-runtime
           host-state-buffers
+          host-state-buffer-attachments
           host-state-views
           host-state-surfaces
           host-state-commands
@@ -15,6 +16,7 @@
           host-state-close!)
   (import (rnrs)
           (soda host internal buffer)
+          (soda host internal buffer-attachment)
           (soda host command)
           (soda host command-runtime)
           (soda host condition)
@@ -30,6 +32,7 @@
       (immutable owner host-state-owner)
       (immutable runtime host-state-runtime)
       (immutable buffers host-state-buffers)
+      (immutable buffer-attachments host-state-buffer-attachments)
       (immutable views host-state-views)
       (immutable surfaces host-state-surfaces)
       (immutable commands host-state-commands)
@@ -42,6 +45,7 @@
     (let* ([owner (make-owner 'host)]
            [runtime (make-runtime)]
            [buffers (make-buffer-service)]
+           [buffer-attachments (make-buffer-attachment-service buffers)]
            [views (make-view-service)]
            [surfaces (make-surface-service)]
            [commands (make-command-registry)]
@@ -72,9 +76,11 @@
       (buffer-service-set-close-handler!
         buffers
         (lambda (buffer)
-          (view-service-close-buffer-views! views (buffer-id buffer))))
+          (and (buffer-attachment-service-prepare-close! buffer-attachments buffer)
+               (view-service-close-buffer-views! views (buffer-id buffer))
+               (buffer-attachment-service-destroy-buffer! buffer-attachments buffer))))
       (%make-host-state
-        owner runtime buffers views surfaces commands command-runtime conditions dispatch #f)))
+        owner runtime buffers buffer-attachments views surfaces commands command-runtime conditions dispatch #f)))
 
   (define (host-state-close! state)
     (unless (host-state? state)

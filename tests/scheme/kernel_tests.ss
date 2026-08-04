@@ -46,6 +46,7 @@
         (soda tui presenter)
         (soda tui presenter-session)
         (soda test fundamental-editing)
+        (soda test buffer-ui)
         (soda test host-integration)
         (soda test terminal-clipboard)
         (soda view display)
@@ -2706,6 +2707,7 @@
   (owner-close! package-owner))
 
 (run-fundamental-editing-tests!)
+(run-buffer-ui-tests!)
 (run-host-integration-tests!)
 (run-terminal-clipboard-tests!)
 (host-state-close! host)

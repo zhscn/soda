@@ -10,6 +10,7 @@
           soda-application-files
           soda-application-interaction
           soda-application-minibuffer
+          soda-application-buffer-item-actions
           soda-application-run!
           soda-application-close!)
   (import (rnrs)
@@ -28,6 +29,7 @@
           (soda packages base history)
           (soda packages file)
           (soda packages interaction)
+          (soda packages buffer-ui)
           (soda packages minibuffer)
           (soda support cleanup)
           (soda tui clipboard)
@@ -48,6 +50,7 @@
       (immutable files soda-application-files)
       (immutable interaction soda-application-interaction)
       (immutable minibuffer soda-application-minibuffer)
+      (immutable buffer-item-actions soda-application-buffer-item-actions)
       (mutable terminal soda-application-terminal soda-application-terminal-set!)
       (mutable effect-registration soda-application-effect-registration
                soda-application-effect-registration-set!)
@@ -69,7 +72,7 @@
                  (lambda () (when (owner-active? owner) (owner-close! owner)))
                  (lambda () (host-state-close! state)))))
            (raise condition)])
-        (let* ([configuration (make-configuration '())]
+        (let* ([configuration (make-configuration (buffer-item-field-extension))]
                [next-document (make-document "")]
                [_document (set! document next-document)]
                [buffer
@@ -95,11 +98,15 @@
                                     (host-state-buffers state) owner history)]
                [interaction
                 (make-interaction-service! (host-state-command-runtime state) owner)]
-               [minibuffer (make-minibuffer-service! state interaction owner)])
+               [minibuffer (make-minibuffer-service! state interaction owner)]
+               [buffer-item-actions (make-buffer-item-action-service)])
+          (install-buffer-item-commands!
+            (host-state-command-runtime state) owner buffer-item-actions)
           (surface-service-register! (host-state-surfaces state) surface)
           (history-mark-saved! history (buffer-id buffer))
           (%make-soda-application
-            state owner buffer view surface editing history files interaction minibuffer #f #f #f)))))
+            state owner buffer view surface editing history files interaction minibuffer buffer-item-actions
+            #f #f #f)))))
 
   (define (require-open who application)
     (unless (and (soda-application? application)
@@ -109,7 +116,13 @@
   (define (make-resolver application)
     (lambda (active view)
       (or (minibuffer-input-context (soda-application-minibuffer application) active view)
-          (fundamental-input-context (soda-application-editing application) active view))))
+          (buffer-input-context
+            active view
+            (list
+              (make-input-layer
+                'fundamental
+                (fundamental-editing-keymap (soda-application-editing application))
+                #f 'accept))))))
 
   (define (make-disposition-handler application)
     (lambda (context disposition)

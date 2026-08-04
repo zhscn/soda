@@ -7,11 +7,11 @@
 | Buffer identity、immutable BufferState 与多 View | 已实现 |
 | StateField、Facet、Compartment 与事务重配置 | 已实现 |
 | owner-scoped Buffer close listener | 已实现 |
-| canonical BufferKey 与 open-or-reuse registry | 未实现 |
-| 标准 mode、input、edit policy 与 display Facet | 未实现 |
-| BufferAttachment 生命周期与 close query | 未实现 |
-| generated projection、semantic item 与 action registry | 未实现 |
-| identity-preserving refresh 与多 View 位置恢复 | 未实现 |
+| canonical BufferKey 与 open-or-reuse registry | 已实现 |
+| 标准 mode、input、edit policy 与 display Facet | 已实现 |
+| BufferAttachment 生命周期与 close query | 部分实现 |
+| generated projection、semantic item 与 action registry | 部分实现 |
+| identity-preserving refresh 与多 View 位置恢复 | 部分实现 |
 | editable projection session | 未实现 |
 | message/update/effect application Buffer | 未实现 |
 
