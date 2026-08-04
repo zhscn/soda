@@ -2077,7 +2077,11 @@
   (unless (and (= (length (display-stream-fragments stream)) 3)
                (display-break? (cadr (display-stream-fragments stream)))
                (eq? (frame-cell-face
-                     (frame-cell-at (text-layout-frame layout) 1 0)) 'keyword))
+                     (frame-cell-at (text-layout-frame layout) 1 0)) 'keyword)
+               (eq? (display-map-entry-kind
+                     (text-layout-point->display-entry layout 0 1)) 'line-break)
+               (= (text-layout-point->document layout 0 1) 1)
+               (equal? (text-layout-visible-ranges layout) (list (cons 0 3))))
     (error 'kernel-tests "document DisplayStream projection differs"))
   (snapshot-close! snapshot)
   (document-close! document))

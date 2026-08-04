@@ -10,7 +10,7 @@
           display-map-entry-cell-from display-map-entry-cell-to display-map-entry-kind
           display-map-entry-source make-display-map display-map? display-map-entries
           display-map-document->cell display-map-cell->document display-map-document-range
-          display-map-cell-range
+          display-map-cell-range display-map-cell-boundary-entry
           display-map-visible-ranges)
   (import (rnrs) (soda kernel value))
 
@@ -105,14 +105,18 @@
                #t)]
         [else (loop (cdr remaining) (cons (car remaining) result) inserted?)])))
 
-  ;; Entries are atomic grapheme or virtual spans.  Empty document intervals
-  ;; represent virtual content, while every entry occupies display cells.
+  ;; Entries are atomic grapheme, virtual, widget, or physical line-break
+  ;; spans.  Virtual content has an empty document interval; line breaks have
+  ;; an empty cell interval at their visual boundary.
   (define-record-type (display-map-entry %make-display-map-entry display-map-entry?)
     (fields document-from document-to cell-from cell-to kind source))
   (define (make-display-map-entry document-from document-to cell-from cell-to kind source)
     (unless (and (offset? document-from) (offset? document-to) (<= document-from document-to)
-                 (offset? cell-from) (offset? cell-to) (< cell-from cell-to)
-                 (memq kind '(text virtual widget line-break)))
+                 (offset? cell-from) (offset? cell-to) (<= cell-from cell-to)
+                 (memq kind '(text virtual widget line-break))
+                 (if (eq? kind 'line-break)
+                     (= cell-from cell-to)
+                     (< cell-from cell-to)))
       (assertion-violation 'make-display-map-entry "invalid display map entry"
                            document-from document-to cell-from cell-to kind))
     (%make-display-map-entry document-from document-to cell-from cell-to kind source))
@@ -229,6 +233,22 @@
                                  (> (display-map-entry-cell-to entry) from)))
                         (cons entry result)
                         result)))))))
+
+  ;; A line break is a zero-cell source boundary.  It is queried separately
+  ;; from ordinary cell ranges so hit testing a blank cell at end-of-line can
+  ;; still report the newline rather than an unrelated neighboring glyph.
+  (define (display-map-cell-boundary-entry map cell)
+    (unless (and (display-map? map) (offset? cell))
+      (assertion-violation 'display-map-cell-boundary-entry
+                           "expected a DisplayMap and cell offset" map cell))
+    (let loop ([entries (display-map-entries map)])
+      (and (pair? entries)
+           (let ([entry (car entries)])
+             (if (and (= (display-map-entry-cell-from entry) cell)
+                      (= (display-map-entry-cell-to entry) cell)
+                      (eq? (display-map-entry-kind entry) 'line-break))
+                 entry
+                 (loop (cdr entries)))))))
 
   ;; Visible document ranges are derived from the displayed map entries rather
   ;; than from a source-line approximation.  Virtual and widget entries have

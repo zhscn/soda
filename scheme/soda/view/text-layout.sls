@@ -105,8 +105,11 @@
     (let ([frame (text-layout-frame layout)])
       (and (< row (frame-height frame))
            (< column (frame-width frame))
-           (display-map-cell->document (text-layout-display-map layout)
-                                       (+ (* row (frame-width frame)) column)))))
+           (let* ([map (text-layout-display-map layout)]
+                  [cell (+ (* row (frame-width frame)) column)])
+             (or (display-map-cell->document map cell)
+                 (let ([entry (display-map-cell-boundary-entry map cell)])
+                   (and entry (display-map-entry-document-from entry))))))))
 
   (define (text-layout-point->display-entry layout row column)
     (unless (and (text-layout? layout) (offset? row) (offset? column))
@@ -115,11 +118,11 @@
     (let ([frame (text-layout-frame layout)])
       (and (< row (frame-height frame))
            (< column (frame-width frame))
-           (let ([entries
-                  (display-map-cell-range (text-layout-display-map layout)
-                                          (+ (* row (frame-width frame)) column)
-                                          (+ (* row (frame-width frame)) column 1))])
-             (and (pair? entries) (car entries))))))
+           (let* ([map (text-layout-display-map layout)]
+                  [cell (+ (* row (frame-width frame)) column)]
+                  [entries (display-map-cell-range map cell (+ cell 1))])
+             (or (and (pair? entries) (car entries))
+                 (display-map-cell-boundary-entry map cell))))))
 
   ;; Return the document location on a visual row DELTA away from OFFSET.
   ;; The caller owns its durable goal column; omitting it uses OFFSET's current
@@ -192,7 +195,9 @@
                     ;; Layout entries are atomic glyph or widget cells, so an
                     ;; entry cannot span a visual-row crop boundary.
                     (loop (cdr remaining)
-                          (if (and (<= cell-start from) (<= to cell-end))
+                          (if (if (= from to)
+                                  (and (< cell-start from) (< from cell-end))
+                                  (and (<= cell-start from) (<= to cell-end)))
                               (cons (make-display-map-entry
                                       (display-map-entry-document-from entry)
                                       (display-map-entry-document-to entry)
@@ -373,6 +378,14 @@
                      (+ (* target-row width) target-column glyph-width)
                      kind source)
                    entries)))
+         (define (record-break! source)
+           (when (offset? source)
+             (set! entries
+               (cons (make-display-map-entry
+                       source (+ source 1)
+                       (+ (* row width) column) (+ (* row width) column)
+                       'line-break source)
+                     entries))))
          (define (emit! glyph glyph-width from to kind face source)
            (cond
              [(or (>= row layout-height) (= width 0) (> glyph-width width))
@@ -472,6 +485,7 @@
              (cond [(display-text? fragment) (emit-text! fragment)]
                    [(display-break? fragment)
                     (when (>= row layout-height) (set! complete? #f))
+                    (record-break! (display-break-source fragment))
                     (advance-line!)]
                    [else (emit-widget! fragment)]))
            (display-stream-fragments stream))
