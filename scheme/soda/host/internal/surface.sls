@@ -31,7 +31,7 @@
   (import (rnrs)
           (soda kernel value)
           (soda host input-event)
-          (soda host window))
+          (soda host internal window))
 
   (define-record-type
     (surface-input-message %make-surface-input-message surface-input-message?)

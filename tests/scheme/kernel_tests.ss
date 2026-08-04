@@ -27,7 +27,7 @@
         (soda host internal surface)
         (soda host value)
         (soda host view)
-        (soda host window)
+        (soda host internal window)
         (soda kernel document)
         (soda kernel range-set)
         (soda ffi cpp-analysis)
@@ -65,7 +65,9 @@
           (library-binding-hidden? '(soda host surface) 'surface-resize!)
           (library-binding-hidden? '(soda host surface) 'surface-set-selected-window!)
           (library-binding-hidden? '(soda host context) 'surface-select-view!)
-          (library-binding-hidden? '(soda host context) 'surface-route-display-request!))
+          (library-binding-hidden? '(soda host context) 'surface-route-display-request!)
+          (library-binding-hidden? '(soda host window) 'make-split-window)
+          (library-binding-hidden? '(soda host window) 'window-layout!))
   (error 'kernel-tests "public host facade exposes dispatcher mutation"))
 
 (define selection

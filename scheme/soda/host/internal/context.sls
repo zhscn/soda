@@ -26,7 +26,7 @@
           (soda host buffer)
           (soda host internal surface)
           (soda host view)
-          (soda host window))
+          (soda host internal window))
 
   ;; ActiveContext is a snapshot of the selected leaf.  It has no mutable
   ;; editor state, so an asynchronous package result can retain and validate
