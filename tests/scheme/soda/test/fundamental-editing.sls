@@ -26,6 +26,7 @@
           (soda packages base text-motion)
           (soda packages completion)
           (soda packages file)
+          (soda packages search)
           (soda packages interaction)
           (soda packages minibuffer)
           (soda packages resource)
@@ -108,6 +109,36 @@
                         'fundamental.delete-backward))
         (error 'fundamental-editing-tests
                "fundamental editing did not produce stable editor state"))
+      (soda-application-close! application))
+
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [runtime (host-state-command-runtime state)]
+           [buffer (soda-application-buffer application)]
+           [view (soda-application-view application)])
+      (command-runtime-start! runtime 'fundamental.insert-text
+                              (application-command-context application)
+                              (list (string->utf8 "alpha beta alpha")))
+      (command-runtime-start! runtime 'search.forward
+                              (application-command-context application) (list "alpha"))
+      (let ([range (selection-primary-range (view-state-selection (view-state view)))])
+        (unless (and (= (selection-range-from range) 0)
+                     (= (selection-range-to range) 5))
+          (error 'fundamental-editing-tests "search.forward did not select its first match")))
+      (command-runtime-start! runtime 'search.next (application-command-context application))
+      (let ([range (selection-primary-range (view-state-selection (view-state view)))])
+        (unless (and (= (selection-range-from range) 11)
+                     (= (selection-range-to range) 16))
+          (error 'fundamental-editing-tests "search.next did not repeat from the selected match")))
+      (command-runtime-start! runtime 'search.previous (application-command-context application))
+      (let ([range (selection-primary-range (view-state-selection (view-state view)))])
+        (unless (and (= (selection-range-from range) 0)
+                     (= (selection-range-to range) 5))
+          (error 'fundamental-editing-tests "search.previous did not reverse the search direction")))
+      (command-runtime-start! runtime 'search.replace-all
+                              (application-command-context application) (list "alpha" "A"))
+      (unless (string=? (buffer-string buffer) "A beta A")
+        (error 'fundamental-editing-tests "search.replace-all did not use one Buffer transaction"))
       (soda-application-close! application))
 
     (let* ([application (make-soda-application)]

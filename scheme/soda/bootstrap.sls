@@ -8,6 +8,7 @@
           soda-application-editing
           soda-application-history
           soda-application-files
+          soda-application-search
           soda-application-interaction
           soda-application-minibuffer
           soda-application-buffer-item-actions
@@ -28,6 +29,7 @@
           (soda packages base fundamental-editing)
           (soda packages base history)
           (soda packages file)
+          (soda packages search)
           (soda packages interaction)
           (soda packages buffer-ui)
           (soda packages minibuffer)
@@ -48,6 +50,7 @@
       (immutable editing soda-application-editing)
       (immutable history soda-application-history)
       (immutable files soda-application-files)
+      (immutable search soda-application-search)
       (immutable interaction soda-application-interaction)
       (immutable minibuffer soda-application-minibuffer)
       (immutable buffer-item-actions soda-application-buffer-item-actions)
@@ -95,6 +98,8 @@
                                (host-state-dispatch state) owner)]
                [files
                 (make-file-service! state owner history)]
+               [search
+                (make-search-service! (host-state-command-runtime state) owner)]
                [interaction
                 (make-interaction-service! (host-state-command-runtime state) owner)]
                [minibuffer (make-minibuffer-service! state interaction owner)]
@@ -104,7 +109,7 @@
           (surface-service-register! (host-state-surfaces state) surface)
           (history-mark-saved! history (buffer-id buffer))
           (%make-soda-application
-            state owner buffer view surface editing history files interaction minibuffer buffer-item-actions
+            state owner buffer view surface editing history files search interaction minibuffer buffer-item-actions
             #f #f #f)))))
 
   (define (require-open who application)
@@ -118,6 +123,10 @@
           (buffer-input-context
             active view
             (list
+              (make-input-layer
+                'search
+                (search-keymap (soda-application-search application))
+                #f 'pass)
               (make-input-layer
                 'fundamental
                 (fundamental-editing-keymap (soda-application-editing application))
