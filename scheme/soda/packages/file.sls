@@ -4,7 +4,7 @@
           file-service-resource
           file-keymap)
   (import (rnrs)
-          (only (chezscheme) current-directory)
+          (only (chezscheme) current-directory get-process-id)
           (soda kernel change)
           (soda kernel document)
           (soda kernel extension)
@@ -24,6 +24,7 @@
           (soda host input-event)
           (soda host value)
           (soda packages base history)
+          (soda packages buffer-ui)
           (soda packages completion)
           (soda packages interaction)
           (soda packages resource)
@@ -43,7 +44,10 @@
       (immutable keymap file-keymap)))
 
   (define-record-type file-binding
-    (fields resource version))
+    (fields resource version lock))
+
+  (define-record-type file-lock
+    (fields path token))
 
   (define-record-type file-load
     (fields buffer-id resource version discard-history?))
@@ -72,6 +76,11 @@
 
   (define file-backup-compartment (make-compartment 'file-backup 'buffer))
 
+  ;; A lock conflict is Buffer-local.  The compartment prevents this safety
+  ;; policy from leaking into the next file visited from a read-only Buffer.
+  (define file-lock-read-only-compartment
+    (make-compartment 'file-lock-read-only 'buffer))
+
   (define (file-backup-enabled? configuration)
     (configuration-facet configuration file-backup-facet 'buffer))
 
@@ -94,6 +103,28 @@
       (vfs-resolve-path (vfs-directory-path (current-directory)) path)))
 
   (define (file-backup-path path) (string-append path "~"))
+
+  (define (file-lock-file-path resource)
+    (string-append (resource-locator resource) ".soda-lock"))
+
+  (define file-lock-serial 0)
+
+  (define (next-file-lock-token)
+    (set! file-lock-serial (+ file-lock-serial 1))
+    (string->utf8
+      (string-append "soda " (number->string (get-process-id)) " "
+                     (number->string file-lock-serial) "\n")))
+
+  (define (acquire-file-lock resource)
+    (let* ([path (file-lock-file-path resource)]
+           [token (next-file-lock-token)])
+      (and (vfs-create-exclusive-file! path token)
+           (make-file-lock path token))))
+
+  (define (release-file-lock! lock)
+    (and lock
+         (vfs-delete-file-if-matches!
+           (file-lock-path lock) (file-lock-token lock))))
 
   (define (string-prefix? prefix value)
     (let ([length (string-length prefix)])
@@ -224,10 +255,35 @@
                 'file-name "Write file: " #f file-name-completion-source 'free)
               (lambda (value) (make-interactive-ready (list value))))))))
 
-  (define (set-resource! service buffer-id resource version)
-    (let ([binding (make-file-binding resource version)])
-      (hashtable-set! (file-service-resources service) buffer-id binding)
-      binding))
+  (define set-resource!
+    (case-lambda
+      [(service buffer-id resource version)
+       (set-resource! service buffer-id resource version #f)]
+      [(service buffer-id resource version lock)
+       (let ([binding (make-file-binding resource version lock)])
+         (hashtable-set! (file-service-resources service) buffer-id binding)
+         binding)]))
+
+  (define (file-buffer-configuration context lock-conflict?)
+    ;; New file Buffers inherit ordinary editing configuration from the active
+    ;; Buffer.  The lock compartment is replaced at this boundary so a prior
+    ;; conflict cannot make unrelated files read-only.
+    (let* ([base (buffer-state-configuration (command-context-buffer-state context))]
+           [extensions
+            (filter
+              (lambda (extension)
+                (not (and (compartment-entry? extension)
+                          (eq? (compartment-entry-compartment extension)
+                               file-lock-read-only-compartment))))
+              (configuration-extensions base))])
+      (make-configuration
+        (append extensions
+                (list
+                  (compartment-of
+                    file-lock-read-only-compartment
+                    (if lock-conflict?
+                        (make-buffer-read-only-extension #t)
+                        '())))))))
 
   (define (file-buffer-key resource)
     (make-buffer-key 'file (resource-locator resource)))
@@ -240,12 +296,6 @@
       (if (vfs-file-exists? path)
           (values (vfs-read-file path) (vfs-stat-path path))
           (values (empty-bytes) #f))))
-
-  (define (file-buffer-configuration context)
-    ;; New file Buffers start with the currently active Buffer configuration.
-    ;; Mode selection is a later package concern; this preserves fundamental
-    ;; editing and any ordinary Buffer-local extensions at the open boundary.
-    (buffer-state-configuration (command-context-buffer-state context)))
 
   (define (open-file-buffer! service request)
     (unless (file-visit? request)
@@ -260,20 +310,27 @@
             (buffer-service-open-or-create!
               buffers (file-service-owner service) key
               (lambda ()
-                (call-with-values
-                  (lambda () (resource-contents resource))
-                  (lambda (contents version)
-                    (let ([created
-                           (buffer-service-create!
-                             buffers (file-service-owner service)
-                             (resource-locator resource)
-                             (make-document contents)
-                             (file-buffer-configuration context))])
-                      (set-resource! service (buffer-id created) resource version)
-                      (when (file-service-history service)
-                        (history-mark-saved! (file-service-history service)
-                                             (buffer-id created)))
-                      created)))))]
+                (let ([lock (acquire-file-lock resource)] [created? #f])
+                  (dynamic-wind
+                    (lambda () #f)
+                    (lambda ()
+                      (call-with-values
+                        (lambda () (resource-contents resource))
+                        (lambda (contents version)
+                          (let ([created
+                                 (buffer-service-create!
+                                   buffers (file-service-owner service)
+                                   (resource-locator resource)
+                                   (make-document contents)
+                                   (file-buffer-configuration context (not lock)))])
+                            (set-resource! service (buffer-id created) resource version lock)
+                            (when (file-service-history service)
+                              (history-mark-saved! (file-service-history service)
+                                                   (buffer-id created)))
+                            (set! created? #t)
+                            created))))
+                    (lambda ()
+                      (unless created? (release-file-lock! lock)))))))]
            [current-id (command-context-buffer-id context)])
       (if (= (buffer-id buffer) current-id)
           buffer
@@ -285,7 +342,7 @@
             (let ([view
                    (view-service-create!
                      views (file-service-owner service) buffer
-                     (file-buffer-configuration context))])
+                     (buffer-state-configuration (buffer-state buffer)))])
               (unless
                 (dispatcher-dispatch-host!
                   (host-state-dispatch state)
@@ -511,8 +568,10 @@
           (let ([request (command-effect-payload effect)])
             (unless (file-load? request)
               (assertion-violation 'file.load "invalid file load request" request))
-            (set-resource! service (file-load-buffer-id request)
-                           (file-load-resource request) (file-load-version request))
+            (let ([binding (file-service-binding service (file-load-buffer-id request) #f)])
+              (set-resource! service (file-load-buffer-id request)
+                             (file-load-resource request) (file-load-version request)
+                             (and binding (file-binding-lock binding))))
             (when (and (file-load-discard-history? request) history)
               (history-discard-buffer! history (file-load-buffer-id request))))))
       (command-runtime-register-effect-handler!
@@ -525,9 +584,20 @@
                    [path (resource-locator resource)]
                    [expected (file-write-expected-version request)]
                    [target
-                    (buffer-service-ref buffers (file-write-buffer-id request) #f)])
+                    (buffer-service-ref buffers (file-write-buffer-id request) #f)]
+                   [binding
+                    (file-service-binding service (file-write-buffer-id request) #f)]
+                   [transfer-lock?
+                    (and (file-write-rebind? request)
+                         (or (not binding)
+                             (not (string=? (resource-locator resource)
+                                            (resource-locator
+                                              (file-binding-resource binding))))))]
+                   [new-lock (and target transfer-lock? (acquire-file-lock resource))])
               (unless target
                 (assertion-violation 'file.write "target Buffer is no longer live" request))
+              (when (and transfer-lock? (not new-lock))
+                (assertion-violation 'file.write "destination is locked by another Soda session" path))
               ;; Verify ownership of the destination before touching it.  A
               ;; failed Save As must not overwrite an open file Buffer owned
               ;; by another resource identity.
@@ -539,16 +609,27 @@
               (when expected
                 (unless (vfs-stat-same-version? expected (vfs-stat-path path))
                   (assertion-violation 'file.write "file changed outside Soda" path)))
-              (when (and (file-backup-enabled?
-                           (buffer-state-configuration (buffer-state target)))
-                         (vfs-file-exists? path))
-                (vfs-write-file (file-backup-path path) (vfs-read-file path)))
-              (vfs-write-file path (file-write-contents request))
-              (when target
-                (buffer-service-rebind-key!
-                  buffers (file-buffer-key resource) target))
-              (set-resource! service (file-write-buffer-id request)
-                             resource (vfs-stat-path path)))
+              (let ([written? #f])
+                (dynamic-wind
+                  (lambda () #f)
+                  (lambda ()
+                    (when (and (file-backup-enabled?
+                                 (buffer-state-configuration (buffer-state target)))
+                               (vfs-file-exists? path))
+                      (vfs-write-file (file-backup-path path) (vfs-read-file path)))
+                    (vfs-write-file path (file-write-contents request))
+                    (buffer-service-rebind-key! buffers (file-buffer-key resource) target)
+                    (set-resource! service (file-write-buffer-id request)
+                                   resource (vfs-stat-path path)
+                                   (if transfer-lock?
+                                       new-lock
+                                       (and binding (file-binding-lock binding))))
+                    (set! written? #t)
+                    (when transfer-lock?
+                      (release-file-lock! (and binding (file-binding-lock binding)))))
+                  (lambda ()
+                    (when (and transfer-lock? (not written?))
+                      (release-file-lock! new-lock))))))
             (when history
               (history-mark-saved! history (file-write-buffer-id request))))))
       (command-runtime-register-effect-handler!
@@ -718,6 +799,8 @@
       (buffer-service-add-close-listener!
         buffers owner
         (lambda (buffer)
+          (let ([binding (file-service-binding service (buffer-id buffer) #f)])
+            (when binding (release-file-lock! (file-binding-lock binding))))
           (hashtable-delete! (file-service-resources service) (buffer-id buffer))
           (when history (history-discard-buffer! history (buffer-id buffer)))))
       service))

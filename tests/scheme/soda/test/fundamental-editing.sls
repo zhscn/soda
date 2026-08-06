@@ -1237,6 +1237,57 @@
           (when (file-exists? saved-as) (delete-file saved-as))
           (when (file-exists? scratch-save) (delete-file scratch-save)))))
 
+    ;; Visiting claims a sibling lock file for the Buffer lifetime.  A foreign
+    ;; claim leaves the Buffer read-only and survives Soda's close path.
+    (let* ([path (string-append "/tmp/soda-file-lock-"
+                                (number->string (get-process-id)) ".txt")]
+           [lock (string-append path ".soda-lock")]
+           [foreign-token (string->utf8 "foreign-lock")])
+      (dynamic-wind
+        (lambda ()
+          (when (file-exists? path) (delete-file path))
+          (when (file-exists? lock) (delete-file lock))
+          (vfs-write-file path (string->utf8 "contents")))
+        (lambda ()
+          (let* ([application (make-soda-application)]
+                 [state (soda-application-state application)]
+                 [runtime (host-state-command-runtime state)])
+            (command-runtime-start!
+              runtime 'file.visit (application-command-context application) (list path))
+            (unless (vfs-file-exists? lock)
+              (error 'fundamental-editing-tests "visiting a file did not acquire its lock"))
+            (soda-application-close! application)
+            (unless (not (vfs-file-exists? lock))
+              (error 'fundamental-editing-tests "closing a file Buffer did not release its lock")))
+          (unless (vfs-create-exclusive-file! lock foreign-token)
+            (error 'fundamental-editing-tests "unable to create a foreign file lock"))
+          (let* ([application (make-soda-application)]
+                 [state (soda-application-state application)]
+                 [runtime (host-state-command-runtime state)])
+            (command-runtime-start!
+              runtime 'file.visit (application-command-context application) (list path))
+            (let ([buffer
+                   (buffer-service-ref
+                     (host-state-buffers state)
+                     (command-context-buffer-id (application-command-context application)))])
+              (unless (buffer-read-only? (buffer-state-configuration (buffer-state buffer)))
+                (error 'fundamental-editing-tests
+                       "a foreign lock did not make the visited Buffer read-only"))
+              (command-runtime-start!
+                runtime 'fundamental.insert-text
+                (application-command-context application) (list (string->utf8 "blocked")))
+              (unless (string=? (buffer-string buffer) "contents")
+                (error 'fundamental-editing-tests
+                       "a foreign lock did not reject normal editing")))
+            (soda-application-close! application))
+          (unless (and (vfs-file-exists? lock)
+                       (bytevector=? (vfs-read-file lock) foreign-token))
+            (error 'fundamental-editing-tests
+                   "closing a conflicted Buffer changed the foreign lock")))
+        (lambda ()
+          (when (file-exists? path) (delete-file path))
+          (when (file-exists? lock) (delete-file lock)))))
+
     ;; File backup is Buffer-local and captures the immediately preceding
     ;; on-disk contents before every ordinary save.  It uses the same atomic
     ;; VFS write path as the target file.

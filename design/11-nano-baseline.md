@@ -23,7 +23,7 @@ Soda 保持自己的 Buffer、View 与 command 抽象。Nano 的命令名称和�
 | 外部修改检测 | 已实现 |
 | regular file 的同目录原子写入与 mode 保留 | 已实现 |
 | 同目录 `path~` 备份策略 | 已实现 |
-| 锁文件策略 | 未实现 |
+| 相邻 `.soda-lock` 锁文件、冲突只读打开与 token 匹配释放 | 已实现 |
 
 ### 文本编辑
 
