@@ -193,7 +193,16 @@
                                            "keymap command binding must be a symbol" name))
                     (command-runtime-enqueue!
                       (host-state-command-runtime (frontend-host-state value))
-                      (make-command-invoke-message name command-context '() #f)))]
+                      ;; Keymap bindings preserve the command declaration:
+                      ;; commands with an InteractivePlan (save, close,
+                      ;; search, quit) collect their arguments through the
+                      ;; interaction service; primitive edit commands run
+                      ;; immediately with no synthetic reader.
+                      (make-command-invoke-message
+                        name command-context '()
+                        (command-runtime-command-interactive?
+                          (host-state-command-runtime (frontend-host-state value))
+                          name))))]
                  [else
                   (enqueue-disposition-result!
                     value

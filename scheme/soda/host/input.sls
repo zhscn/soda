@@ -274,15 +274,25 @@
       (if entry (cdr entry) 100)))
 
   ;; Build the canonical layer order once at the host boundary.  The resolver
-  ;; itself remains pure and receives the resulting immutable list.
+  ;; itself remains pure and receives the resulting immutable list.  Layers
+  ;; at the same semantic rank retain their declaration order, which lets a
+  ;; host compose independent package maps without inventing package-specific
+  ;; precedence kinds.
   (define (input-layer-compose layers)
     (unless (list? layers)
       (assertion-violation 'input-layer-compose "layers must be a list" layers))
-    (list-sort
-      (lambda (left right)
-        (< (input-layer-rank (input-layer-kind left))
-           (input-layer-rank (input-layer-kind right))))
-      (list-copy layers)))
+    (let index ([remaining layers] [next 0] [indexed '()])
+      (if (null? remaining)
+          (map cdr
+               (list-sort
+                 (lambda (left right)
+                   (let ([left-rank (input-layer-rank (input-layer-kind (cdr left)))]
+                         [right-rank (input-layer-rank (input-layer-kind (cdr right)))])
+                     (or (< left-rank right-rank)
+                         (and (= left-rank right-rank) (< (car left) (car right))))))
+                 (reverse indexed)))
+          (index (cdr remaining) (+ next 1)
+                 (cons (cons next (car remaining)) indexed)))))
 
   (define (lookup-layer map sequence)
     (cond

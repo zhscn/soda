@@ -1434,6 +1434,18 @@
                     (list control-x control-s)))
              'command)
   (error 'kernel-tests "keymap resolver differs"))
+(let* ([first (make-keymap 'first-package)]
+       [second (make-keymap 'second-package)]
+       [_first-binding (keymap-bind! first (list control-s) 'first-command)]
+       [_second-binding (keymap-bind! second (list control-s) 'second-command)]
+       [layers
+        (input-layer-compose
+          (list (make-input-layer 'first-package first #f 'pass)
+                (make-input-layer 'second-package second #f 'pass)))])
+  (unless (and (eq? (input-layer-kind (car layers)) 'first-package)
+               (eq? (cadr (resolve-key-sequence layers (list control-s)))
+                    'first-command))
+    (error 'kernel-tests "equal-priority input layers did not retain declaration order")))
 (define input-context
   (make-input-context
     0 0 (list (make-input-layer 'global test-keymap #f 'ignore))
@@ -2676,10 +2688,16 @@
        [definition
         (make-command-definition
           'command.frontend-test
-          (lambda (context)
-            (set! observed context)
+          (lambda (context value)
+            (set! observed (cons context value))
             (command-handled))
-          package-owner)]
+          package-owner
+          (make-interactive-plan
+            (list
+              (make-interactive-reader
+                'frontend-value
+                (lambda (context arguments)
+                  (make-interactive-ready (list 'frontend)))))))]
        [_command (command-runtime-register-command! runtime definition)]
        [_binding (keymap-bind! keymap (list key) 'command.frontend-test)]
        [frontend
@@ -2706,11 +2724,13 @@
   (frontend-resize! frontend '(60 . 20))
   (frontend-step! frontend)
   (unless (and observed
-               (= (command-context-surface-id observed) (surface-id surface))
-               (= (command-context-window-id observed) (window-id leaf))
-               (= (command-context-view-id observed) (view-id view))
-               (= (command-context-buffer-id observed) (buffer-id buffer))
-               (key-event? (command-context-event observed))
+               (let ([context (car observed)])
+                 (and (= (command-context-surface-id context) (surface-id surface))
+                      (= (command-context-window-id context) (window-id leaf))
+                      (= (command-context-view-id context) (view-id view))
+                      (= (command-context-buffer-id context) (buffer-id buffer))
+                      (key-event? (command-context-event context))))
+               (eq? (cdr observed) 'frontend)
                (equal? (surface-size surface) '(60 . 20))
                (>= renders 3))
     (error 'kernel-tests "frontend orchestration did not route input and rendering"))
@@ -2872,6 +2892,35 @@
     (lambda ()
       (native:runtime-close! native-runtime)
       (soda-application-close! application))))
+
+;; Buffer-local help input must outrank the fundamental global binding: C-g
+;; closes help instead of reopening it.
+(let* ([application (make-soda-application)]
+       [state (soda-application-state application)]
+       [runtime (host-state-command-runtime state)])
+  (dynamic-wind
+    (lambda () #f)
+    (lambda ()
+      (command-runtime-start! runtime 'help.show (application-command-context application))
+      (let* ([surface (soda-application-surface application)]
+             [active (surface-active-context surface (host-state-views state))]
+             [view (view-service-ref (host-state-views state) (active-context-view-id active))]
+             [context
+              (buffer-input-context
+                active view
+                (list (make-input-layer
+                        'fundamental
+                        (fundamental-editing-keymap (soda-application-editing application))
+                        #f 'accept)))]
+             [disposition
+              (input-dispatch
+                context
+                (make-key-event
+                  'character (char->integer #\g) #f #f 4 'press (make-bytevector 0)))])
+        (unless (and (eq? (input-disposition-kind disposition) 'command)
+                     (eq? (input-disposition-value disposition) 'file.close))
+          (error 'kernel-tests "help Buffer did not override C-g with close"))))
+    (lambda () (soda-application-close! application))))
 
 ;; A semantic spelling item can carry immutable target data through an
 ;; interactive prompt.  The prompt answer is applied only to the exact source

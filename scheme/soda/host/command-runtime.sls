@@ -2,6 +2,7 @@
   (export make-command-runtime
           command-runtime?
           command-runtime-register-command!
+          command-runtime-command-interactive?
           command-runtime-start!
           command-runtime-start-interactive!
           command-runtime-resume!
@@ -370,6 +371,16 @@
       (assertion-violation 'command-runtime "command name must be a symbol" name))
     (or (command-lookup (command-runtime-registry service) name #f)
         (assertion-violation 'command-runtime "unknown command" name)))
+
+  ;; The frontend owns input dispatch but not command declarations.  It asks
+  ;; the runtime whether a named key binding has an InteractivePlan, then
+  ;; preserves that declaration in its queued invocation message.
+  (define (command-runtime-command-interactive? service name)
+    (unless (command-runtime? service)
+      (assertion-violation 'command-runtime-command-interactive?
+                           "expected a command runtime" service))
+    (interactive-plan?
+      (command-definition-interaction-spec (lookup-definition service name))))
 
   (define (start! service name context interactive? arguments)
     (unless (and (command-runtime? service) (command-context? context) (list? arguments))

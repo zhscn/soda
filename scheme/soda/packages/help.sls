@@ -25,7 +25,10 @@
     (make-configuration
       (list
         (make-buffer-input-layer-extension
-          (list (make-input-layer 'help keymap #f 'accept)))
+          ;; A help Buffer owns this local binding.  `buffer` has a defined
+          ;; precedence above the fundamental fallback, unlike a package name
+          ;; that would otherwise share the default rank.
+          (list (make-input-layer 'buffer keymap #f 'accept)))
         (make-buffer-edit-policy-extension (make-buffer-edit-policy 'reject)))))
 
   (define (open-help! service context)
