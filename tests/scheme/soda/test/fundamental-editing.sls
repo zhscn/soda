@@ -21,6 +21,7 @@
           (soda kernel document)
           (soda kernel extension)
           (soda kernel range-set)
+          (soda kernel regex)
           (soda kernel selection)
           (soda kernel state)
           (soda kernel view-state)
@@ -492,6 +493,62 @@
                         'search.toggle-whole-word))
         (error 'fundamental-editing-tests
                "search policies or their key bindings are incorrect"))
+      (soda-application-close! application))
+
+    ;; Nano's regexp mode is View-local.  It keeps the ordinary search,
+    ;; repeat and replacement command lifecycle while changing only the
+    ;; matcher to POSIX ERE.
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [runtime (host-state-command-runtime state)]
+           [buffer (soda-application-buffer application)]
+           [view (soda-application-view application)]
+           [search (soda-application-search application)])
+      (let ([text (string->text "foo12 bar123 foo9\nFOO42")]
+            [regex (compile-regex "foo[0-9]+" #t)])
+        (dynamic-wind
+          (lambda () #f)
+          (lambda ()
+            (unless (and (equal? (regex-find regex text 0 (text-size text) 'forward)
+                                  (cons 0 5))
+                         (equal? (regex-find regex text 0 (text-size text) 'backward)
+                                  (cons 13 17))
+                         (equal? (regex-collect regex text 0 (text-size text))
+                                 (list (cons 0 5) (cons 13 17))))
+              (error 'fundamental-editing-tests "native ERE matcher did not return expected ranges")))
+          (lambda ()
+            (regex-close! regex)
+            (text-close! text))))
+      (command-runtime-start! runtime 'fundamental.insert-text
+                              (application-command-context application)
+                              (list (string->utf8 "foo12 bar123 foo9\nFOO42")))
+      (command-runtime-start! runtime 'fundamental.beginning-of-buffer
+                              (application-command-context application))
+      (command-runtime-start! runtime 'search.toggle-regular-expression
+                              (application-command-context application))
+      (command-runtime-start! runtime 'search.forward
+                              (application-command-context application) (list "foo[0-9]+"))
+      (let ([range (selection-primary-range (view-state-selection (view-state view)))])
+        (unless (and (= (selection-range-from range) 0)
+                     (= (selection-range-to range) 5))
+          (error 'fundamental-editing-tests "regexp search did not select its first ERE match")))
+      (command-runtime-start! runtime 'search.next (application-command-context application))
+      (let ([range (selection-primary-range (view-state-selection (view-state view)))])
+        (unless (and (= (selection-range-from range) 13)
+                     (= (selection-range-to range) 17))
+          (error 'fundamental-editing-tests "regexp repeat did not retain ERE policy")))
+      (command-runtime-start! runtime 'search.toggle-case-sensitive
+                              (application-command-context application))
+      (command-runtime-start! runtime 'fundamental.beginning-of-buffer
+                              (application-command-context application))
+      (command-runtime-start! runtime 'search.replace-all
+                              (application-command-context application) (list "foo[0-9]+" "item"))
+      (unless (and (string=? (buffer-string buffer) "item bar123 item\nitem")
+                   (eq? (keymap-lookup
+                          (search-keymap search)
+                          (list (make-key-stroke 'character (char->integer #\r) 2)))
+                        'search.toggle-regular-expression))
+        (error 'fundamental-editing-tests "regexp replacement or key binding is incorrect"))
       (soda-application-close! application))
 
     (let* ([application (make-soda-application)]

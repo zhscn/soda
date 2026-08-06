@@ -1,5 +1,6 @@
 #include "document/c_api.h"
 #include "indentation/c_api.h"
+#include "regex/c_api.h"
 #include "runtime/c_api.h"
 #include "syntax/c_api.h"
 #include "tree_sitter/c_api.h"

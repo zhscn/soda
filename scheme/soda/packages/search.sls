@@ -6,6 +6,7 @@
           (soda kernel change)
           (soda kernel document)
           (soda kernel extension)
+          (soda kernel regex)
           (soda kernel selection)
           (soda kernel state)
           (soda kernel view-state)
@@ -22,8 +23,8 @@
           (soda host value)
           (soda packages interaction))
 
-  ;; Search is View-local interaction state.  A normal lookup remembers only
-  ;; its latest literal query, while query replace owns an explicit session
+  ;; Search is View-local interaction state.  A normal lookup remembers its
+  ;; latest query and matcher policy, while query replace owns an explicit session
   ;; whose decisions are requested through the regular interaction protocol.
   (define-record-type
     (search-query %make-search-query search-query?)
@@ -31,7 +32,8 @@
             (immutable text search-query-text)
             (immutable direction search-query-direction)
             (immutable case-sensitive? search-query-case-sensitive?)
-            (immutable whole-word? search-query-whole-word?)))
+            (immutable whole-word? search-query-whole-word?)
+            (immutable regular-expression? search-query-regular-expression?)))
 
   ;; Search policy belongs to the initiating View.  The policy is captured in
   ;; SearchQuery so repeat and query-replace retain their meaning after later
@@ -52,6 +54,13 @@
 
   (define search-whole-word-compartment
     (make-compartment 'search-whole-word 'view))
+
+  (define search-regular-expression-facet
+    (make-facet 'search-regular-expression 'view #f
+                (lambda (values) (first-value values #f)) eq? eq?))
+
+  (define search-regular-expression-compartment
+    (make-compartment 'search-regular-expression 'view))
 
   (define (search-case-sensitive? context)
     (configuration-facet
@@ -74,6 +83,17 @@
       (assertion-violation 'make-search-whole-word-extension
                            "expected a boolean" value))
     (make-facet-provider search-whole-word-facet value))
+
+  (define (search-regular-expression? context)
+    (configuration-facet
+      (view-state-configuration (command-context-view-state context))
+      search-regular-expression-facet 'view))
+
+  (define (make-search-regular-expression-extension value)
+    (unless (boolean? value)
+      (assertion-violation 'make-search-regular-expression-extension
+                           "expected a boolean" value))
+    (make-facet-provider search-regular-expression-facet value))
 
   (define-record-type
     (search-service %make-search-service search-service?)
@@ -161,11 +181,25 @@
         (lambda () (procedure text))
         (lambda () (text-close! text)))))
 
-  (define (make-query context value direction)
+  (define make-query
+    (case-lambda
+      [(context value direction)
+       (make-query context value direction (search-regular-expression? context))]
+      [(context value direction regular-expression?)
     (unless (and (string? value) (memq direction '(forward backward)))
-      (assertion-violation 'search "invalid literal query or direction" value direction))
+      (assertion-violation 'search "invalid query or direction" value direction))
+    (unless (boolean? regular-expression?)
+      (assertion-violation 'search "invalid regular-expression policy" regular-expression?))
+    ;; Compile once at command entry so an invalid ERE is reported before the
+    ;; query becomes repeatable View state.  Match operations compile their
+    ;; short-lived native matcher independently, so remembered queries never
+    ;; own native resources.
+    (when regular-expression?
+      (let ([regex (compile-regex value (search-case-sensitive? context))])
+        (regex-close! regex)))
     (%make-search-query (command-context-buffer-id context) (string->utf8 value) direction
-                        (search-case-sensitive? context) (search-whole-word? context)))
+                        (search-case-sensitive? context) (search-whole-word? context)
+                        regular-expression?)]))
 
   (define (query-empty? query)
     (zero? (bytevector-length (search-query-text query))))
@@ -268,6 +302,77 @@
                   (and (< point size) (find-backward text query point size)))]
              [else #f]))))
 
+  (define (regular-expression-matches text query start stop)
+    (let ([regex
+           (compile-regex (utf8->string (search-query-text query))
+                          (search-query-case-sensitive? query))])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (let ([matches (regex-collect regex text start stop)])
+            (if (search-query-whole-word? query)
+                (let loop ([remaining matches] [output '()])
+                  (if (null? remaining)
+                      (reverse output)
+                      (let ([match (car remaining)])
+                        (loop (cdr remaining)
+                              (if (whole-word-match? text query
+                                                     (match-start match) (match-end match))
+                                  (cons match output)
+                                  output)))))
+                matches)))
+        (lambda () (regex-close! regex)))))
+
+  (define (regular-expression-match text query start stop direction)
+    (let ([regex
+           (compile-regex (utf8->string (search-query-text query))
+                          (search-query-case-sensitive? query))])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          ;; A word-boundary policy can reject the native first match, so it
+          ;; needs the filtered collection.  The normal path asks the native
+          ;; matcher for one match only.
+          (if (search-query-whole-word? query)
+              (let ([matches (regular-expression-matches text query start stop)])
+                (and (pair? matches)
+                     (if (eq? direction 'forward)
+                         (car matches)
+                         (car (reverse matches)))))
+              (regex-find regex text start stop direction)))
+        (lambda () (regex-close! regex)))))
+
+  (define (find-regular-expression text query point)
+    (let ([size (text-size text)])
+      (case (search-query-direction query)
+        [(forward)
+         (let ([match (regular-expression-match text query point size 'forward)])
+           (if (not match)
+               (and (> point 0)
+                    (regular-expression-match text query 0 point 'forward))
+               match))]
+        [(backward)
+         (let ([match (regular-expression-match text query 0 point 'backward)])
+           (if (not match)
+               (and (< point size)
+                    (regular-expression-match text query point size 'backward))
+               match))]
+        [else #f])))
+
+  ;; Query-replace advances monotonically through the current revision.  It
+  ;; must not use the user-facing wrap-around lookup used by search.next.
+  (define (find-query-in-range text query start stop direction)
+    (if (search-query-regular-expression? query)
+        (regular-expression-match text query start stop direction)
+        (if (eq? direction 'forward)
+            (find-forward text query start stop)
+            (find-backward text query start stop))))
+
+  (define (find-query text query point)
+    (if (search-query-regular-expression? query)
+        (find-regular-expression text query point)
+        (find-literal text query point)))
+
   (define (match-selection from width)
     (make-selection
       (list (make-selection-range from (+ from width)))
@@ -287,7 +392,7 @@
         (context-text
           context
           (lambda (text)
-            (let ([match (find-literal text query
+            (let ([match (find-query text query
                                        (search-start-point context
                                                            (search-query-direction query)
                                                            repeat?))])
@@ -300,19 +405,30 @@
                                        (- (match-end match) (match-start match)))
                       #f #f '() '() #f))))))))
 
-  (define (all-matches text query)
-    (let loop ([start 0] [matches '()])
-      (let ([found (find-forward text query start (text-size text))])
-        (if (not found)
-            (reverse matches)
-            (loop (match-end found) (cons found matches))))))
+  (define (advance-match text match)
+    (if (> (match-end match) (match-start match))
+        (match-end match)
+        (text-next-character-offset text (match-start match))))
 
-  (define (all-matches-from text query start)
+  (define (all-literal-matches text query start)
     (let loop ([position start] [matches '()])
       (let ([found (find-forward text query position (text-size text))])
-        (if found
-            (loop (match-end found) (cons found matches))
-            (reverse matches)))))
+        (if (not found)
+            (reverse matches)
+            (let ([next (advance-match text found)])
+              (if (<= next position)
+                  (reverse (cons found matches))
+                  (loop next (cons found matches))))))))
+
+  (define (all-matches text query)
+    (if (search-query-regular-expression? query)
+        (regular-expression-matches text query 0 (text-size text))
+        (all-literal-matches text query 0)))
+
+  (define (all-matches-from text query start)
+    (if (search-query-regular-expression? query)
+        (regular-expression-matches text query start (text-size text))
+        (all-literal-matches text query start)))
 
   (define (select-query-replace-match! service session context)
     (let* ([state (command-context-view-state context)]
@@ -339,9 +455,9 @@
                 (let* ([query (query-replace-session-query session)]
                        [match
                         (and (not (query-empty? query))
-                             (find-forward text query
-                                           (query-replace-session-scan session)
-                                           (text-size text)))])
+                             (find-query-in-range
+                               text query (query-replace-session-scan session)
+                               (text-size text) 'forward))])
                   (if (not match)
                       (finish-query-replace! service session)
                       (begin
@@ -388,7 +504,14 @@
               (snapshot-byte-size (buffer-state-document state))
               (list (make-text-change from to replacement)))])
       (query-replace-session-scan-set!
-        session (+ from (bytevector-length replacement)))
+        session
+        (if (= from to)
+            (context-text
+              context
+              (lambda (text)
+                (+ from (bytevector-length replacement)
+                   (- (text-next-character-offset text from) from))))
+            (+ from (bytevector-length replacement))))
       (make-transaction-spec
         (command-context-buffer-id context) (command-context-view-id context)
         (buffer-state-generation state) change-set
@@ -457,7 +580,8 @@
            (= (search-query-buffer-id query) (command-context-buffer-id context))
            (%make-search-query (search-query-buffer-id query) (search-query-text query) direction
                                (search-query-case-sensitive? query)
-                               (search-query-whole-word? query)))))
+                               (search-query-whole-word? query)
+                               (search-query-regular-expression? query)))))
 
   (define (install-command! runtime owner name documentation readers procedure)
     (command-runtime-register-command!
@@ -484,7 +608,14 @@
                    (make-command-effect 'search.query-replace.advance session))]
             [(string-ci=? value "n")
              (query-replace-session-scan-set!
-               session (query-replace-session-match-end session))
+               session
+               (context-text
+                 context
+                 (lambda (text)
+                   (advance-match
+                     text
+                     (cons (query-replace-session-match-start session)
+                           (query-replace-session-match-end session))))))
              (make-command-effect 'search.query-replace.advance session)]
             [(string=? value "!")
              (let ([result (replace-all-query-replace-matches context session)])
@@ -536,6 +667,26 @@
                                  (if enabled? "disabled" "enabled"))))
           update)))
 
+  (define (toggle-regular-expression context)
+    (let* ([state (command-context-view-state context)]
+           [enabled? (search-regular-expression? context)]
+           [effect
+            (make-compartment-reconfigure-effect
+              search-regular-expression-compartment
+              (make-search-regular-expression-extension (not enabled?)))]
+           [update
+            (make-view-transaction-spec
+              (command-context-view-id context) (view-state-generation state)
+              #f #f #f (list effect) '() #f)]
+           [surface-id (command-context-surface-id context)])
+      (if (and (integer? surface-id) (exact? surface-id) (>= surface-id 0))
+          (list update
+                (make-set-surface-message-operation
+                  surface-id
+                  (string-append "Search regular-expression matching "
+                                 (if enabled? "disabled" "enabled"))))
+          update)))
+
   (define (make-search-service! state owner)
     (unless (and (host-state? state) (owner? owner))
       (assertion-violation 'make-search-service! "expected a HostState and owner"
@@ -560,21 +711,21 @@
         (list #\y #\n #\q))
       (keymap-bind! decision-keymap (list (plain-stroke #\!)) 'minibuffer.accept-key)
       (keymap-bind! decision-keymap (list (plain-stroke #\space)) 'minibuffer.accept-key)
-      (install-command! runtime owner 'search.forward "Search forward for literal text."
+      (install-command! runtime owner 'search.forward "Search forward for text."
                         (list forward-reader)
         (lambda (context value)
           (let ([query (remember-query! service context (make-query context value 'forward))])
             (select-match context query #f))))
-      (install-command! runtime owner 'search.backward "Search backward for literal text."
+      (install-command! runtime owner 'search.backward "Search backward for text."
                         (list backward-reader)
         (lambda (context value)
           (let ([query (remember-query! service context (make-query context value 'backward))])
             (select-match context query #f))))
-      (install-command! runtime owner 'search.next "Repeat the latest literal search forward." #f
+      (install-command! runtime owner 'search.next "Repeat the latest search forward." #f
         (lambda (context)
           (let ([query (remembered-query service context 'forward)])
             (if query (select-match context query #t) (command-handled)))))
-      (install-command! runtime owner 'search.previous "Repeat the latest literal search backward." #f
+      (install-command! runtime owner 'search.previous "Repeat the latest search backward." #f
         (lambda (context)
           (let ([query (remembered-query service context 'backward)])
             (if query (select-match context query #t) (command-handled)))))
@@ -584,13 +735,16 @@
       (install-command! runtime owner 'search.toggle-whole-word
                         "Toggle whole-word matching for new searches in the active View." #f
         (lambda (context) (toggle-whole-word context)))
-      (install-command! runtime owner 'search.replace-all "Replace every literal match in the active Buffer."
+      (install-command! runtime owner 'search.toggle-regular-expression
+                        "Toggle POSIX ERE matching for new searches in the active View." #f
+        (lambda (context) (toggle-regular-expression context)))
+      (install-command! runtime owner 'search.replace-all "Replace every search match in the active Buffer."
                         (list forward-reader replace-reader)
         (lambda (context value replacement)
           (let ([query (remember-query! service context (make-query context value 'forward))])
             (replace-all context query replacement))))
       (install-command! runtime owner 'search.query-replace
-                        "Replace literal matches one at a time in the active Buffer."
+                        "Replace search matches one at a time in the active Buffer."
                         (list forward-reader replace-reader)
         (lambda (context value replacement)
           (let ([session (start-query-replace! service context value replacement)])
@@ -622,6 +776,7 @@
       (keymap-bind! keymap (list (meta-stroke #\w)) 'search.next)
       (keymap-bind! keymap (list (meta-stroke #\C)) 'search.toggle-case-sensitive)
       (keymap-bind! keymap (list (meta-stroke #\`)) 'search.toggle-whole-word)
+      (keymap-bind! keymap (list (meta-stroke #\r)) 'search.toggle-regular-expression)
       (keymap-bind! keymap
                     (list (make-key-stroke 'character (char->integer #\w) 3))
                     'search.previous)
