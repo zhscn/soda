@@ -10,11 +10,9 @@
           (soda packages base text-motion)
           (soda host command)
           (soda host command-runtime)
-          (soda host dispatch)
           (soda host input)
           (soda host input-event)
-          (soda host internal operation)
-          (soda host internal state)
+          (soda host package)
           (soda host value))
 
   ;; MessageService is a command-facing adapter for Surface chrome.  A
@@ -22,7 +20,7 @@
   ;; published, single-line status value rendered above the current Frame.
   (define-record-type
     (message-service %make-message-service message-service?)
-    (fields state owner keymap))
+    (fields host owner keymap))
 
   (define-record-type message-request
     (fields context text))
@@ -94,18 +92,17 @@
   (define (show-message! service request)
     (unless (message-request? request)
       (assertion-violation 'message.show "invalid message request" request))
-    (dispatcher-dispatch-host!
-      (host-state-dispatch (message-service-state service))
-      (make-set-surface-message-operation
-        (command-context-surface-id (message-request-context request))
-        (message-request-text request))))
+    (package-host-set-surface-message!
+      (message-service-host service)
+      (command-context-surface-id (message-request-context request))
+      (message-request-text request)))
 
-  (define (make-message-service! state owner)
-    (unless (and (host-state? state) (owner? owner))
-      (assertion-violation 'make-message-service! "expected host state and owner" state owner))
-    (let* ([runtime (host-state-command-runtime state)]
+  (define (make-message-service! host owner)
+    (unless (and (package-host? host) (owner? owner))
+      (assertion-violation 'make-message-service! "expected package host and owner" host owner))
+    (let* ([runtime (package-host-command-runtime host)]
            [keymap (make-keymap 'message)]
-           [service (%make-message-service state owner keymap)])
+           [service (%make-message-service host owner keymap)])
       (command-runtime-register-effect-handler!
         runtime 'message.show owner 'show-surface-message
         (lambda (ignored invocation effect)

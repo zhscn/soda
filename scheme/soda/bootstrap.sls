@@ -129,8 +129,8 @@
                [directories (make-directory-service! state owner files buffer-item-actions)]
                [buffer-lists (make-buffer-list-service! state owner history buffer-item-actions)]
                [spelling (make-spell-service! state owner processes buffer-item-actions)]
-               [messages (make-message-service! state owner)]
-               [_help (make-help-service! state owner)]
+               [messages (make-message-service! host owner)]
+               [_help (make-help-service! host owner)]
                [search
                 (make-search-service! state owner)]
                [interaction
