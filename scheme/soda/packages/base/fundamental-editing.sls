@@ -24,6 +24,7 @@
           (soda host value)
           (soda packages interaction)
           (soda ffi unicode)
+          (soda view frame)
           (soda view text-layout))
 
   ;; Fundamental editing is an ordinary package: it owns command
@@ -62,20 +63,46 @@
            (let ([entry (assq 'mark-active metadata)])
              (and entry (cdr entry))))))
 
+  (define (without-selection-metadata metadata key)
+    (if (list? metadata)
+        (filter (lambda (entry)
+                  (not (and (pair? entry) (eq? (car entry) key))))
+                metadata)
+        '()))
+
   (define (set-mark-active metadata active?)
     (cons (cons 'mark-active active?)
-          (if (list? metadata)
-              (filter (lambda (entry)
-                        (not (and (pair? entry) (eq? (car entry) 'mark-active))))
-                      metadata)
-              '())))
+          (without-selection-metadata metadata 'mark-active)))
+
+  ;; Vertical motion owns a desired display column.  It is Selection metadata,
+  ;; not View state: multiple carets may have independent goals, and ordinary
+  ;; horizontal motion or editing clears it through collapse-range/motion-range.
+  (define (selection-vertical-goal range default)
+    (let ([metadata (selection-range-metadata range)])
+      (if (list? metadata)
+          (let ([entry (assq 'vertical-goal-column metadata)])
+            (if (and entry (integer? (cdr entry)) (exact? (cdr entry)) (>= (cdr entry) 0))
+                (cdr entry)
+                default))
+          default)))
+
+  (define (with-selection-vertical-goal range column)
+    (make-selection-range
+      (selection-range-anchor range) (selection-range-head range)
+      (selection-range-affinity range) (selection-range-granularity range)
+      (cons (cons 'vertical-goal-column column)
+            (without-selection-metadata
+              (selection-range-metadata range) 'vertical-goal-column))))
 
   (define (collapse-range range position)
     (make-selection-range
       position position
       (selection-range-affinity range)
       (selection-range-granularity range)
-      (set-mark-active (selection-range-metadata range) #f)))
+      (set-mark-active
+        (without-selection-metadata
+          (selection-range-metadata range) 'vertical-goal-column)
+        #f)))
 
   (define (motion-range range position)
     (if (mark-active? range)
@@ -83,7 +110,8 @@
           (selection-range-anchor range) position
           (selection-range-affinity range)
           (selection-range-granularity range)
-          (selection-range-metadata range))
+          (without-selection-metadata
+            (selection-range-metadata range) 'vertical-goal-column))
         (collapse-range range position)))
 
   (define (set-mark-selection selection)
@@ -501,20 +529,98 @@
            [end (text-line-content-end text target)])
       (min (+ start column) end)))
 
+  (define (context-layout-options context)
+    (configuration-facet
+      (view-state-configuration (command-context-view-state context))
+      text-layout-options-facet 'view))
+
+  (define (visual-position-for-range text layout options range)
+    (and (text-layout? layout)
+         (> (frame-width (text-layout-frame layout)) 0)
+         (text-layout-document-visual-position
+           text options (frame-width (text-layout-frame layout))
+           (selection-range-head range))))
+
+  (define (vertical-goal-column text layout options range)
+    (let ([default
+           (or (and (text-layout? layout)
+                    (let ([point
+                           (text-layout-document->point
+                             layout (selection-range-head range))])
+                      (and point (cdr point))))
+               (let ([position (visual-position-for-range text layout options range)])
+                 (and position (visual-position-column position)))
+               0)])
+      (selection-vertical-goal range default)))
+
   ;; A terminal frontend supplies its last compatible immutable TextLayout in
-  ;; CommandContext.  This makes ordinary vertical editing honor soft wraps,
-  ;; tabs, wide graphemes, and DisplayMap association without letting the
-  ;; command package access terminal state.  Headless callers and movements
-  ;; beyond a currently measured layout retain the logical-line fallback.
+  ;; CommandContext.  Its geometry selects the active width; TextLayout's
+  ;; document visual measurement then works across both visible and unrendered
+  ;; rows rather than reverting to logical lines.
+  ;; The resulting Viewport advances one visual row when the caret reaches a
+  ;; frame edge, so the next presentation keeps it visible.
   (define (move-logical-line context delta)
-    (move-selection-by
+    (with-context-text
       context
-      (lambda (text range)
-        (let ([layout (command-context-layout context)])
-          (or (and (text-layout? layout)
-                   (text-layout-vertical-target
-                     layout (selection-range-head range) delta))
-              (logical-line-target text range delta))))))
+      (lambda (text)
+        (let* ([selection (context-selection context)]
+               [layout (command-context-layout context)]
+               [options (context-layout-options context)]
+               [width
+                (and (text-layout? layout)
+                     (frame-width (text-layout-frame layout)))]
+               [visual-target
+                (lambda (range goal)
+                  (and width (> width 0)
+                       (let ([position (visual-position-for-range text layout options range)])
+                         (and position
+                              (text-layout-visual-step
+                                text options width position delta goal)))))]
+               [target
+                (lambda (range goal)
+                  (or (let ([position (visual-target range goal)])
+                        (and position (visual-position-offset position)))
+                      (and (text-layout? layout)
+                           (text-layout-vertical-target
+                             layout (selection-range-head range) delta goal))
+                      (logical-line-target text range delta)))]
+               [next
+                (make-selection
+                  (map (lambda (range)
+                         (let ([goal (vertical-goal-column text layout options range)])
+                           (with-selection-vertical-goal
+                             (motion-range range (target range goal)) goal)))
+                       (selection-ranges selection))
+                  (selection-primary selection))]
+               [state (command-context-view-state context)]
+               [primary (selection-primary-range selection)]
+               [primary-goal (vertical-goal-column text layout options primary)]
+               [primary-target (visual-target primary primary-goal)]
+               [viewport
+                (and primary-target width (> width 0)
+                     (let* ([frame (text-layout-frame layout)]
+                            [point (text-layout-document->point
+                                     layout (selection-range-head primary))]
+                            [height (frame-height frame)]
+                            [current (view-state-viewport state)])
+                       (and point (> height 0)
+                            (or (and (positive? delta) (>= (car point) (- height 1)))
+                                (and (negative? delta) (zero? (car point))))
+                            (let* ([top
+                                    (text-layout-visual-position-at
+                                      text options width
+                                      (viewport-first-line current)
+                                      (viewport-visual-row current))]
+                                   [shifted
+                                    (text-layout-visual-step text options width top
+                                                             (if (positive? delta) 1 -1))])
+                              (and shifted
+                                   (make-viewport
+                                     (visual-position-line shifted)
+                                     (visual-position-row shifted)))))))])
+          (make-view-transaction-spec
+            (command-context-view-id context) (view-state-generation state)
+            next viewport #f '() '() #f)))))
 
   (define (move-buffer-boundary context end?)
     (move-selection-by
@@ -823,9 +929,36 @@
             #f (make-viewport first-line 0) #f '() '() #f)))))
 
   (define (scroll-page context direction)
-    ;; Surface height is a frontend concern.  A stable logical step keeps
-    ;; scrolling available before a layout-specific page-size policy exists.
-    (scroll-lines context (* direction 10)))
+    ;; A TextLayout supplies the presented frame height, so page movement is
+    ;; expressed in visual rows rather than a hard-coded logical-line count.
+    ;; Headless callers retain the bounded logical fallback.
+    (let ([layout (command-context-layout context)])
+      (if (and (text-layout? layout)
+               (> (frame-width (text-layout-frame layout)) 0)
+               (> (frame-height (text-layout-frame layout)) 0))
+          (with-context-text
+            context
+            (lambda (text)
+              (let* ([state (command-context-view-state context)]
+                     [current (view-state-viewport state)]
+                     [options (context-layout-options context)]
+                     [top
+                      (text-layout-visual-position-at
+                        text options (frame-width (text-layout-frame layout))
+                        (viewport-first-line current) (viewport-visual-row current))]
+                     [target
+                      (text-layout-visual-step
+                        text options (frame-width (text-layout-frame layout)) top
+                        (* direction (frame-height (text-layout-frame layout))))])
+                (if target
+                    (make-view-transaction-spec
+                      (command-context-view-id context) (view-state-generation state)
+                      #f
+                      (make-viewport (visual-position-line target)
+                                     (visual-position-row target))
+                      #f '() '() #f)
+                    (command-handled)))))
+          (scroll-lines context (* direction 10)))))
 
   (define (transpose-characters context)
     (let ([range (selection-primary-range (context-selection context))])

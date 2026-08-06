@@ -1679,6 +1679,173 @@
                  "vertical movement did not follow presented soft-wrap rows")))
       (soda-application-close! application))
 
+    ;; Consecutive vertical commands preserve a desired display column across
+    ;; short rows; a horizontal command establishes a fresh desired column.
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [runtime (host-state-command-runtime state)]
+           [buffer (soda-application-buffer application)]
+           [view (soda-application-view application)]
+           [options (make-text-layout-options 4 #t)])
+      (command-runtime-start!
+        runtime 'fundamental.insert-text (application-command-context application)
+        (list (string->utf8 "abcdefghi\nx\nabcdefghi")))
+      (command-runtime-start!
+        runtime 'fundamental.beginning-of-buffer (application-command-context application))
+      (command-runtime-start!
+        runtime 'fundamental.forward-char (application-command-context application))
+      (command-runtime-start!
+        runtime 'fundamental.forward-char (application-command-context application))
+      (command-runtime-start!
+        runtime 'fundamental.forward-char (application-command-context application))
+      (let ([layout
+             (layout-snapshot-display-stream
+               (buffer-state-document (buffer-state buffer))
+               (view-state-selection (view-state view)) 0 0 4 8
+               (make-decoration-set '()) #f options)])
+        (command-runtime-start!
+          runtime 'fundamental.next-line (application-command-context application layout))
+        (command-runtime-start!
+          runtime 'fundamental.next-line (application-command-context application layout))
+        (command-runtime-start!
+          runtime 'fundamental.next-line (application-command-context application layout)))
+      (unless (= (selection-range-head
+                   (selection-primary-range (view-state-selection (view-state view))))
+                 11)
+        (error 'fundamental-editing-tests
+               "vertical movement did not retain the desired column through a short row"))
+      (command-runtime-start!
+        runtime 'fundamental.backward-char (application-command-context application))
+      (let ([layout
+             (layout-snapshot-display-stream
+               (buffer-state-document (buffer-state buffer))
+               (view-state-selection (view-state view)) 0 0 4 8
+               (make-decoration-set '()) #f options)])
+        (command-runtime-start!
+          runtime 'fundamental.next-line (application-command-context application layout)))
+      (unless (= (selection-range-head
+                   (selection-primary-range (view-state-selection (view-state view))))
+                 12)
+        (error 'fundamental-editing-tests
+               "horizontal movement did not reset the vertical desired column"))
+      (soda-application-close! application))
+
+    ;; Raw visual measurement remains available after a caret reaches the
+    ;; edge of the last rendered frame.  It shares tab and wide-grapheme
+    ;; geometry with TextLayout rather than falling back to logical lines.
+    (let* ([text (string->text "abcdEF\nxy")]
+           [options (make-text-layout-options 4 #t)]
+           [position (text-layout-document-visual-position text options 4 4)]
+           [next (text-layout-visual-step text options 4 position 1)]
+           [previous (text-layout-visual-step text options 4 next -1)]
+           [tab-text (string->text "a\tbc")]
+           [tab-position (text-layout-document-visual-position tab-text options 4 2)]
+           [wide-text (string->text "a界b")]
+           [wide-position (text-layout-document-visual-position wide-text options 3 4)])
+      (unless (and (= (visual-position-line position) 0)
+                   (= (visual-position-row position) 1)
+                   (= (visual-position-offset next) 7)
+                   (= (visual-position-line next) 1)
+                   (= (visual-position-row next) 0)
+                   (= (visual-position-offset previous) 4)
+                   (= (visual-position-row tab-position) 1)
+                   (= (visual-position-row wide-position) 1))
+        (error 'fundamental-editing-tests
+               "unbounded visual row measurement is incorrect"))
+      (text-close! text)
+      (text-close! tab-text)
+      (text-close! wide-text))
+
+    ;; Vertical motion and paging cross a rendered boundary in one command.
+    ;; The Viewport advances by visual rows, so a subsequent presentation keeps
+    ;; the caret in the same screen row without changing Buffer state.
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [runtime (host-state-command-runtime state)]
+           [buffer (soda-application-buffer application)]
+           [view (soda-application-view application)]
+           [options (make-text-layout-options 4 #t)])
+      (command-runtime-start!
+        runtime 'fundamental.insert-text (application-command-context application)
+        (list (string->utf8 "abcdefghijk")))
+      (command-runtime-start!
+        runtime 'fundamental.beginning-of-buffer (application-command-context application))
+      (let ([layout
+             (layout-snapshot-display-stream
+               (buffer-state-document (buffer-state buffer))
+               (view-state-selection (view-state view)) 0 0 4 2
+               (make-decoration-set '()) #f options)])
+        (command-runtime-start!
+          runtime 'fundamental.next-line (application-command-context application layout)))
+      (let ([layout
+             (layout-snapshot-display-stream
+               (buffer-state-document (buffer-state buffer))
+               (view-state-selection (view-state view)) 0 0 4 2
+               (make-decoration-set '()) #f options)])
+        (command-runtime-start!
+          runtime 'fundamental.next-line (application-command-context application layout)))
+      (unless (and (= (selection-range-head
+                        (selection-primary-range (view-state-selection (view-state view))))
+                      8)
+                   (= (viewport-first-line (view-state-viewport (view-state view))) 0)
+                   (= (viewport-visual-row (view-state-viewport (view-state view))) 1))
+        (error 'fundamental-editing-tests
+               "visual next-line did not cross the rendered boundary"))
+      (let ([layout
+             (layout-snapshot-display-stream
+               (buffer-state-document (buffer-state buffer))
+               (view-state-selection (view-state view)) 0 1 4 2
+               (make-decoration-set '()) #f options)])
+        (command-runtime-start!
+          runtime 'fundamental.previous-line (application-command-context application layout)))
+      (unless (and (= (selection-range-head
+                        (selection-primary-range (view-state-selection (view-state view))))
+                      4)
+                   (= (viewport-visual-row (view-state-viewport (view-state view))) 1))
+        (error 'fundamental-editing-tests
+               "visual previous-line did not retain a visible target row"))
+      (let ([layout
+             (layout-snapshot-display-stream
+               (buffer-state-document (buffer-state buffer))
+               (view-state-selection (view-state view)) 0 1 4 2
+               (make-decoration-set '()) #f options)])
+        (command-runtime-start!
+          runtime 'fundamental.previous-line (application-command-context application layout)))
+      (unless (and (= (selection-range-head
+                        (selection-primary-range (view-state-selection (view-state view))))
+                      0)
+                   (= (viewport-visual-row (view-state-viewport (view-state view))) 0))
+        (error 'fundamental-editing-tests
+               "visual previous-line did not restore the preceding viewport row"))
+      (let ([layout
+             (layout-snapshot-display-stream
+               (buffer-state-document (buffer-state buffer))
+               (view-state-selection (view-state view)) 0 0 4 2
+               (make-decoration-set '()) #f options)])
+        (command-runtime-start!
+          runtime 'fundamental.scroll-down (application-command-context application layout)))
+      (unless (= (viewport-visual-row (view-state-viewport (view-state view))) 2)
+        (error 'fundamental-editing-tests "page down did not use visual frame height"))
+      (let ([layout
+             (layout-snapshot-display-stream
+               (buffer-state-document (buffer-state buffer))
+               (view-state-selection (view-state view)) 0 2 4 2
+               (make-decoration-set '()) #f options)])
+        (command-runtime-start!
+          runtime 'fundamental.scroll-down (application-command-context application layout)))
+      (unless (= (viewport-visual-row (view-state-viewport (view-state view))) 2)
+        (error 'fundamental-editing-tests "page down did not clamp at the final visual row"))
+      (let ([layout
+             (layout-snapshot-display-stream
+               (buffer-state-document (buffer-state buffer))
+               (view-state-selection (view-state view)) 0 2 4 2
+               (make-decoration-set '()) #f options)])
+        (command-runtime-start!
+          runtime 'fundamental.scroll-up (application-command-context application layout)))
+      (unless (= (viewport-visual-row (view-state-viewport (view-state view))) 0)
+        (error 'fundamental-editing-tests "page up did not restore visual viewport origin"))
+      (soda-application-close! application))
+
     (let* ([application (make-soda-application)]
            [state (soda-application-state application)]
            [runtime (host-state-command-runtime state)]
