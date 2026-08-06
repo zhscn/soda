@@ -1099,11 +1099,15 @@
         (frontend-enqueue!
           frontend (make-surface-input-message (surface-id surface) event))
         (frontend-step! frontend))
+      (dispatcher-dispatch-host!
+        (host-state-dispatch state)
+        (make-set-surface-message-operation (surface-id surface) "previous feedback"))
       (send! (make-text-input-event 'text (string->utf8 "a")))
       (send! (make-key-event 'enter 13 #f #f 0 'press (make-bytevector 0)))
       (send! (make-text-input-event 'text (string->utf8 "b")))
       (send! (make-key-event 'backspace 127 #f #f 0 'press (make-bytevector 0)))
       (unless (and (string=? (buffer-string buffer) "a\n")
+                   (not (surface-status-message surface))
                    (= (selection-range-head
                         (selection-primary-range (view-state-selection (view-state view))))
                       2))

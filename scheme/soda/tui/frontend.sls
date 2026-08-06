@@ -155,6 +155,14 @@
     (require-open 'frontend-dispatch-input! value)
     (unless (input-event? event)
       (assertion-violation 'frontend-dispatch-input! "expected an input event" event))
+    ;; Surface messages are echo-area feedback.  The next user input clears a
+    ;; previous message before dispatching its command, while a command that
+    ;; emits a new message publishes it again at the same boundary.
+    (when (surface-status-message (frontend-surface value))
+      (dispatcher-dispatch-host!
+        (host-state-dispatch (frontend-host-state value))
+        (make-set-surface-message-operation
+          (surface-id (frontend-surface value)) #f)))
     (let ([current (active-view value)])
       (and current
            (let* ([active (car current)]
