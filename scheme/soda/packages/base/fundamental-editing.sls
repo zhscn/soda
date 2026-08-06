@@ -18,7 +18,8 @@
           (soda host input)
           (soda host input-event)
           (soda host view)
-          (soda host value))
+          (soda host value)
+          (soda packages interaction))
 
   ;; Fundamental editing is an ordinary package: it owns command
   ;; registrations and a keymap, while all mutation remains a TransactionSpec
@@ -283,6 +284,51 @@
       context
       (lambda (text range)
         (if end? (text-size text) 0))))
+
+  (define (goto-line-column context line column)
+    (unless (and (integer? line) (exact? line) (> line 0)
+                 (integer? column) (exact? column) (> column 0))
+      (assertion-violation 'fundamental.goto-line
+                           "line and column must be positive"
+                           line column))
+    (move-selection-by
+      context
+      (lambda (text range)
+        (let* ([target-line (min (- line 1) (- (text-line-count text) 1))]
+               [start (text-line-start text target-line)]
+               [end (text-line-content-end text target-line)])
+          (min (+ start (- column 1)) end)))))
+
+  (define (find-character value character)
+    (let loop ([index 0])
+      (cond [(= index (string-length value)) #f]
+            [(char=? (string-ref value index) character) index]
+            [else (loop (+ index 1))])))
+
+  (define (parse-goto-position value)
+    (unless (string? value)
+      (assertion-violation 'fundamental.goto-line "expected a line number string" value))
+    (let ([separator (find-character value #\,)])
+      (let ([line (string->number (if separator
+                                      (substring value 0 separator)
+                                      value))]
+            [column (if separator
+                        (string->number (substring value (+ separator 1) (string-length value)))
+                        1)])
+        (unless (and (integer? line) (exact? line) (> line 0)
+                     (integer? column) (exact? column) (> column 0))
+          (assertion-violation 'fundamental.goto-line
+                               "expected LINE or LINE,COLUMN" value))
+        (list line column))))
+
+  (define (make-goto-reader)
+    (make-interactive-reader
+      'line-column
+      (lambda (context arguments)
+        (make-interactive-suspend
+          (make-interaction-request 'line-column "Go to line: " #f #f 'free)
+          (lambda (value)
+            (make-interactive-ready (parse-goto-position value)))))))
 
   (define (scroll-lines context delta)
     (with-context-text
@@ -565,6 +611,13 @@
         runtime owner 'fundamental.end-of-buffer (context)
         "Move every selection to the end of the Buffer." 'motion
         (move-buffer-boundary context #t))
+      (command-runtime-register-command!
+        runtime
+        (make-command-definition
+          'fundamental.goto-line
+          (lambda (context line column) (goto-line-column context line column))
+          owner "Move every selection to one-based LINE and optional COLUMN." 'motion
+          (make-interactive-plan (list (make-goto-reader)))))
       (install-command!
         runtime owner 'fundamental.transpose-characters (context)
         "Transpose the graphemes around point." 'editing
@@ -643,6 +696,7 @@
         ((list (make-key-stroke 'backspace #f 2)) 'fundamental.backward-kill-word)
         ((list (control-stroke #\d)) 'fundamental.delete-forward)
         ((list (control-stroke #\g)) 'application.quit)
+        ((list (control-stroke #\_)) 'fundamental.goto-line)
         ((list (control-stroke #\x) (control-stroke #\c)) 'application.quit)
         ((list (control-stroke #\x) (control-stroke #\h)) 'fundamental.mark-whole-buffer)
         ((list (control-stroke #\x) (control-stroke #\x)) 'fundamental.exchange-point-and-mark)

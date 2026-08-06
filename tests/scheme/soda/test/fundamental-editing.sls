@@ -114,6 +114,25 @@
     (let* ([application (make-soda-application)]
            [state (soda-application-state application)]
            [runtime (host-state-command-runtime state)]
+           [view (soda-application-view application)])
+      (command-runtime-start! runtime 'fundamental.insert-text
+                              (application-command-context application)
+                              (list (string->utf8 "zero\none\ntwo")))
+      (command-runtime-start! runtime 'fundamental.goto-line
+                              (application-command-context application) (list 2 2))
+      (let ([range (selection-primary-range (view-state-selection (view-state view)))])
+        (unless (= (selection-range-head range) 6)
+          (error 'fundamental-editing-tests "goto-line did not use logical line and byte column")))
+      (command-runtime-start! runtime 'fundamental.goto-line
+                              (application-command-context application) (list 3 99))
+      (let ([range (selection-primary-range (view-state-selection (view-state view)))])
+        (unless (= (selection-range-head range) 12)
+          (error 'fundamental-editing-tests "goto-line did not clamp a column to line end")))
+      (soda-application-close! application))
+
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [runtime (host-state-command-runtime state)]
            [buffer (soda-application-buffer application)]
            [view (soda-application-view application)])
       (command-runtime-start! runtime 'fundamental.insert-text
