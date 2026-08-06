@@ -4,6 +4,7 @@
           surface-id
           surface-frontend
           surface-capabilities
+          surface-status-message
           surface-size
           surface-root-window
           surface-selected-window
@@ -17,6 +18,7 @@
           surface-push-interaction!
           surface-pop-interaction!
           surface-resize!
+          surface-set-status-message!
           surface-generation
           make-surface-service
           surface-service?
@@ -56,6 +58,7 @@
       (immutable id surface-id)
       (immutable frontend surface-frontend)
       (immutable capabilities surface-capabilities)
+      (mutable status-message surface-status-message surface-status-message-set!)
       (mutable size surface-size surface-size-set!)
       (mutable root-window surface-root-window surface-root-window-set!)
       (mutable selected-window surface-selected-window surface-selected-window-set!)
@@ -81,7 +84,25 @@
        (let ([selected (car (window-leaves root-window))])
          (window-set-selected! selected #t)
          (%make-surface (identity-source-next! surface-identities)
-                        frontend (list-copy capabilities) size root-window selected '() 0))]))
+                        frontend (list-copy capabilities) #f size root-window selected '() 0))]))
+
+  (define (surface-set-status-message! surface message)
+    (unless (and (surface? surface)
+                 (or (not message)
+                     (and (string? message)
+                          (not (exists (lambda (character)
+                                         (or (char=? character #\newline)
+                                             (char=? character #\return)))
+                                       (string->list message))))))
+      (assertion-violation 'surface-set-status-message!
+                           "expected a Surface and a single-line message or false"
+                           surface message))
+    (if (equal? message (surface-status-message surface))
+        #f
+        (begin
+          (surface-status-message-set! surface (and message (string-copy message)))
+          (surface-generation-set! surface (+ 1 (surface-generation surface)))
+          #t)))
 
   (define (surface-active-window surface)
     (unless (surface? surface)

@@ -11,6 +11,7 @@
           make-pop-interaction-operation
           make-display-request-operation
           make-resize-surface-operation
+          make-set-surface-message-operation
           make-host-update
           host-update?
           host-update-operation
@@ -92,6 +93,23 @@
     ;; Copy the pair so later caller mutation cannot alter an operation that
     ;; has already entered the dispatcher queue.
     (%make-host-operation 'resize-surface surface-id (cons (car size) (cdr size))))
+
+  ;; A Surface message is chrome, not document content.  It is immutable
+  ;; operation data so a package can request feedback without receiving a
+  ;; mutable Surface or frontend handle.
+  (define (make-set-surface-message-operation surface-id message)
+    (unless (and (identity? surface-id)
+                 (or (not message)
+                     (and (string? message)
+                          (not (exists (lambda (character)
+                                         (or (char=? character #\newline)
+                                             (char=? character #\return)))
+                                       (string->list message))))))
+      (assertion-violation 'make-set-surface-message-operation
+                           "invalid Surface identity or single-line message"
+                           surface-id message))
+    (%make-host-operation 'set-surface-message surface-id
+                          (and message (string-copy message))))
 
   ;; HostUpdate preserves both the focused context and the resolved placement.
   ;; With preserve focus these can differ: resolution identifies where a

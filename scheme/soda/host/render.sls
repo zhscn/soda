@@ -33,6 +33,7 @@
           (soda host internal surface)
           (soda host internal view)
           (soda host internal window)
+          (soda ffi unicode)
           (soda view compositor)
           (soda view decoration)
           (soda view display)
@@ -40,6 +41,40 @@
           (soda view occurrence)
           (soda view frame)
           (soda view text-layout))
+
+  (define (status-frame width message)
+    (let* ([cells (make-vector
+                    width
+                    (make-frame-cell " " 1 #f 'message 'surface-message))]
+           [bytes (string->utf8 message)]
+           [size (bytevector-length bytes)])
+      (let loop ([offset 0] [column 0])
+        (when (and (< offset size) (< column width))
+          (let* ([next (unicode-next-grapheme-offset bytes offset)]
+                 [glyph (utf8->string
+                          (let ([fragment (make-bytevector (- next offset))])
+                            (bytevector-copy! bytes offset fragment 0 (- next offset))
+                            fragment))]
+                 [glyph-width (max 1 (unicode-grapheme-width (string->utf8 glyph)))])
+            (if (> (+ column glyph-width) width)
+                #f
+                (begin
+                  (vector-set! cells column
+                               (make-frame-cell glyph glyph-width #f 'message 'surface-message))
+                  (when (= glyph-width 2)
+                    (vector-set! cells (+ column 1)
+                                 (make-frame-cell "" 0 #t 'message 'surface-message)))
+                  (loop next (+ column glyph-width)))))))
+      (make-frame width 1 cells)))
+
+  (define (compose-surface-frame width height placements message)
+    (compose-frame
+      width height
+      (if (and message (positive? height))
+          (append placements
+                  (list (make-frame-placement (- height 1) 0
+                                              (status-frame width message))))
+          placements)))
 
   ;; RenderedView retains the pure layout projection needed for coordinate
   ;; routing.  It is part of a rendered Surface, not mutable View state.
@@ -142,9 +177,12 @@
       (let loop ([leaves (surface-windows surface)]
                  [placements '()] [rendered-views '()] [cursor-row #f] [cursor-column #f])
           (if (null? leaves)
-              (make-surface-render
-                (compose-frame width height (reverse placements)) cursor-row cursor-column
-                (reverse rendered-views))
+              (let ([message (surface-status-message surface)])
+                (make-surface-render
+                  (compose-surface-frame width height (reverse placements) message)
+                  (if (and message cursor-row (= cursor-row (- height 1))) #f cursor-row)
+                  (if (and message cursor-row (= cursor-row (- height 1))) #f cursor-column)
+                  (reverse rendered-views)))
               (let* ([leaf (car leaves)]
                      [view (view-service-ref views (window-view-id leaf) #f)])
                 (if (not view)

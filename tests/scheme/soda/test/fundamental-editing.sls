@@ -5,12 +5,15 @@
           (soda bootstrap)
           (soda host command)
           (soda host command-runtime)
+          (soda host dispatch)
           (soda host input)
           (soda host input-event)
           (soda host internal buffer)
           (soda host internal context)
           (soda host internal state)
           (soda host internal surface)
+          (soda host internal operation)
+          (soda host render)
           (soda host internal view)
           (soda host render-service)
           (soda host value)
@@ -28,6 +31,7 @@
           (soda packages completion)
           (soda packages file)
           (soda packages search)
+          (soda packages message)
           (soda packages interaction)
           (soda packages minibuffer)
           (soda packages resource)
@@ -206,6 +210,37 @@
                                 (list (string->utf8 "mutate")))
         (unless (not (string-contains? (buffer-string help-buffer) "mutate"))
           (error 'fundamental-editing-tests "help Buffer accepted an ordinary edit")))
+      (soda-application-close! application))
+
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [runtime (host-state-command-runtime state)]
+           [surface (soda-application-surface application)]
+           [messages (soda-application-messages application)])
+      (command-runtime-start! runtime 'message.show-position
+                              (application-command-context application))
+      (let* ([render (render-surface surface (host-state-views state))]
+             [frame (surface-render-frame render)]
+             [row (- (frame-height frame) 1)])
+        (unless (and (string=? (surface-status-message surface) "Line 1, column 1")
+                     (eq? (keymap-lookup
+                            (message-keymap messages)
+                            (list (make-key-stroke 'character (char->integer #\c) 4)))
+                          'message.show-position)
+                     (string=? (frame-cell-grapheme (frame-cell-at frame row 0)) "L")
+                     (eq? (frame-cell-face (frame-cell-at frame row 0)) 'message))
+          (error 'fundamental-editing-tests
+                 "position command did not publish a Surface message chrome")))
+      (dispatcher-dispatch-host!
+        (host-state-dispatch state)
+        (make-set-surface-message-operation (surface-id surface) "界"))
+      (let* ([frame (surface-render-frame (render-surface surface (host-state-views state)))]
+             [row (- (frame-height frame) 1)])
+        (unless (and (string=? (frame-cell-grapheme (frame-cell-at frame row 0)) "界")
+                     (= (frame-cell-width (frame-cell-at frame row 0)) 2)
+                     (frame-cell-continuation? (frame-cell-at frame row 1)))
+          (error 'fundamental-editing-tests
+                 "Surface message chrome did not preserve wide grapheme cells")))
       (soda-application-close! application))
 
     (let* ([application (make-soda-application)]

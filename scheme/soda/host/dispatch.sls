@@ -242,6 +242,10 @@
                        [(resize-surface)
                         (and (surface-resize! surface (host-operation-value operation))
                              (surface-active-context surface (dispatcher-views dispatcher)))]
+                       [(set-surface-message)
+                        (and (surface-set-status-message!
+                               surface (host-operation-value operation))
+                             #t)]
                        [else
                         (assertion-violation 'dispatcher-dispatch-host!
                                              "unsupported HostOperation" operation)])]

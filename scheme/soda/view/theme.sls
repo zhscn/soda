@@ -47,6 +47,7 @@
     (make-theme
       (list (cons 'selection (make-face-style #f #f '(reverse)))
             (cons 'cursor (make-face-style #f #f '(reverse)))
+            (cons 'message (make-face-style #f #f '(reverse)))
             (cons 'error (make-face-style 1 #f '()))
             (cons 'warning (make-face-style 3 #f '())))
       (make-face-style #f #f '())))
