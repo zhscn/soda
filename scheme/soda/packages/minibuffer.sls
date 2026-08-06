@@ -32,13 +32,12 @@
           (soda kernel view-state)
           (soda host command)
           (soda host command-runtime)
+          (soda host context)
           (soda host input)
           (soda host input-event)
-          (soda host internal buffer)
-          (soda host internal context)
-          (soda host internal state)
-          (soda host internal surface)
-          (soda host internal view)
+          (soda host buffer)
+          (soda host package)
+          (soda host view)
           (soda host value)
           (soda packages interaction)
           (soda packages completion)
@@ -56,7 +55,7 @@
     (fields owner procedure))
   (define-record-type
     (minibuffer-service %make-minibuffer-service minibuffer-service?)
-    (fields state interactions owner keymap
+    (fields host interactions owner keymap
             (mutable sessions minibuffer-service-sessions minibuffer-service-sessions-set!)
             (mutable setup-hooks minibuffer-service-setup-hooks minibuffer-service-setup-hooks-set!)
             (mutable exit-hooks minibuffer-service-exit-hooks minibuffer-service-exit-hooks-set!)
@@ -111,8 +110,8 @@
          (let ([sessions (minibuffer-service-sessions service)])
            (and (pair? sessions) (car sessions)))))
   (define (session-input service session)
-    (let ([buffer (buffer-service-ref (host-state-buffers (minibuffer-service-state service))
-                                      (minibuffer-session-buffer-id session) #f)])
+    (let ([buffer (package-host-buffer-ref (minibuffer-service-host service)
+                                           (minibuffer-session-buffer-id session) #f)])
       (and buffer (snapshot-string (buffer-state-document (buffer-state buffer))))))
 
   ;; Buffer selections are UTF-8 byte offsets; completion source boundaries
@@ -134,16 +133,14 @@
     (unless (and (minibuffer-service? service) (minibuffer-session? session))
       (assertion-violation 'minibuffer-session-snapshot
                            "expected a minibuffer service and session" service session))
-    (let* ([state (minibuffer-service-state service)]
-           [buffer (buffer-service-ref (host-state-buffers state)
-                                       (minibuffer-session-buffer-id session) #f)]
-           [view (view-service-ref (host-state-views state)
-                                   (minibuffer-session-view-id session) #f)]
+    (let* ([host (minibuffer-service-host service)]
+           [buffer (package-host-buffer-ref host (minibuffer-session-buffer-id session) #f)]
+           [view (package-host-view-ref host (minibuffer-session-view-id session) #f)]
            [selection (and view (view-state-selection (view-state view)))]
            [range (and selection (selection-primary-range selection))]
            [controller (minibuffer-session-completion session)]
-           [surface (surface-service-ref (host-state-surfaces state)
-                                         (minibuffer-session-surface-id session) #f)]
+           [surface-size (package-host-surface-size
+                           host (minibuffer-session-surface-id session))]
            [input (if buffer (snapshot-string (buffer-state-document (buffer-state buffer))) "")]
            [point (if range
                       (input-byte-offset->character-index input
@@ -159,7 +156,7 @@
         (interaction-session-context (minibuffer-session-interaction session))
         (if controller (completion-controller-generation controller) 0)
         (list (cons 'surface-id (minibuffer-session-surface-id session))
-              (cons 'surface-size (and surface (surface-size surface)))
+              (cons 'surface-size surface-size)
               (cons 'overlay-rectangle (minibuffer-session-rectangle session))))))
   (define (notify-hooks! hooks snapshot)
     (for-each
@@ -209,36 +206,33 @@
                (active-context-view-id active) (active-context-buffer-id active)
                (input-layer-compose layers)
                (view-state-input-state (view-state view)))))))
-  (define (origin-surface service interaction)
-    (surface-service-ref
-      (host-state-surfaces (minibuffer-service-state service))
-      (command-context-surface-id (interaction-session-context interaction)) #f))
   (define (open! service interaction)
-    (let* ([state (minibuffer-service-state service)]
+    (let* ([host (minibuffer-service-host service)]
            [context (interaction-session-context interaction)]
-           [origin (view-service-ref (host-state-views state) (command-context-view-id context) #f)]
-           [surface (origin-surface service interaction)])
-      (when (and origin surface)
+           [origin (package-host-view-ref host (command-context-view-id context) #f)]
+           [size (package-host-surface-size host (command-context-surface-id context))])
+      (when (and origin size)
         (let* ([request (interaction-session-request interaction)]
                [configuration
                 (minibuffer-configuration
                   (view-state-configuration (view-state origin)) request)]
                [document (make-document (or (interaction-request-initial-value request) ""))]
-               [buffer (buffer-service-create! (host-state-buffers state) (minibuffer-service-owner service)
-                                               " *minibuffer*" document configuration)]
-               [view (view-service-create! (host-state-views state) (minibuffer-service-owner service)
-                                          buffer configuration)]
-               [size (surface-size surface)]
+               [buffer (package-host-create-buffer! host (minibuffer-service-owner service)
+                                                    " *minibuffer*" document configuration)]
+               [view (package-host-create-view! host (minibuffer-service-owner service)
+                                                buffer configuration)]
                [rectangle (list (max 0 (- (cdr size) 1)) 0 (car size) 1)])
-          (surface-push-interaction! surface (view-id view) rectangle)
-          (let ([session
-                  (%make-minibuffer-session interaction (buffer-id buffer) (view-id view)
-                                             (view-id origin) (surface-id surface) rectangle #f)])
-            (minibuffer-service-sessions-set!
-              service (cons session (minibuffer-service-sessions service)))
-            (notify-hooks! (minibuffer-service-setup-hooks service)
-                           (minibuffer-session-snapshot service session))))))
-        )
+          (if (package-host-push-interaction-view!
+                host (command-context-surface-id context) (view-id view) rectangle)
+              (let ([session
+                     (%make-minibuffer-session interaction (buffer-id buffer) (view-id view)
+                                                (view-id origin) (command-context-surface-id context)
+                                                rectangle #f)])
+                (minibuffer-service-sessions-set!
+                  service (cons session (minibuffer-service-sessions service)))
+                (notify-hooks! (minibuffer-service-setup-hooks service)
+                               (minibuffer-session-snapshot service session)))
+              (package-host-close-buffer! host (buffer-id buffer)))))))
   (define (close! service interaction)
     (let ([session (session-for service interaction)])
       (when session
@@ -251,16 +245,15 @@
         (minibuffer-service-sessions-set!
           service (filter (lambda (item) (not (eq? item session)))
                           (minibuffer-service-sessions service)))
-        (let ([surface (surface-service-ref (host-state-surfaces (minibuffer-service-state service))
-                                            (minibuffer-session-surface-id session) #f)])
-          (when surface (surface-pop-interaction! surface)))
-        (buffer-service-close-buffer! (host-state-buffers (minibuffer-service-state service))
-                                      (minibuffer-session-buffer-id session)))))
+        (package-host-pop-interaction-view!
+          (minibuffer-service-host service) (minibuffer-session-surface-id session))
+        (package-host-close-buffer! (minibuffer-service-host service)
+                                    (minibuffer-session-buffer-id session)))))
   (define (minibuffer-service-submit! service)
     (let ([session (minibuffer-service-current service)])
       (and session
-           (let* ([buffer (buffer-service-ref (host-state-buffers (minibuffer-service-state service))
-                                               (minibuffer-session-buffer-id session) #f)]
+           (let* ([buffer (package-host-buffer-ref (minibuffer-service-host service)
+                                                    (minibuffer-session-buffer-id session) #f)]
                   [raw (and buffer (snapshot-string (buffer-state-document (buffer-state buffer))))]
                   [controller (minibuffer-session-completion session)]
                   [candidate (and controller (completion-controller-selected controller))]
@@ -366,8 +359,8 @@
   (define (minibuffer-service-cancel! service)
     (and (minibuffer-service-current service)
          (interaction-service-cancel! (minibuffer-service-interactions service))))
-  (define (make-minibuffer-service! state interactions owner)
-    (unless (and (host-state? state) (interaction-service? interactions) (owner? owner))
+  (define (make-minibuffer-service! host interactions owner)
+    (unless (and (package-host? host) (interaction-service? interactions) (owner? owner))
       (assertion-violation 'make-minibuffer-service! "invalid minibuffer dependencies"))
     (let ([keymap (make-keymap 'minibuffer)])
       (keymap-bind! keymap (list (make-key-stroke 'enter #f 0)) 'minibuffer.accept)
@@ -375,15 +368,15 @@
       (keymap-bind! keymap (list (make-key-stroke 'tab #f 0)) 'minibuffer.complete)
       (keymap-bind! keymap (list (control-stroke #\g)) 'minibuffer.cancel)
       (keymap-bind! keymap (list (make-key-stroke 'escape #f 0)) 'minibuffer.cancel)
-      (let ([service (%make-minibuffer-service state interactions owner keymap '() '() '() #f)])
+      (let ([service (%make-minibuffer-service host interactions owner keymap '() '() '() #f)])
       (command-runtime-register-command!
-        (host-state-command-runtime state)
+        (package-host-command-runtime host)
         (make-command-definition
           'minibuffer.accept
           (lambda (context) (minibuffer-service-submit! service) (command-handled))
           owner "Accept the current minibuffer input." 'minibuffer #f))
       (command-runtime-register-command!
-        (host-state-command-runtime state)
+        (package-host-command-runtime host)
         (make-command-definition
           'minibuffer.accept-key
           (lambda (context)
@@ -405,14 +398,14 @@
           owner "Accept a discrete answer supplied by the current prompt keymap."
           'minibuffer #f))
       (command-runtime-register-command!
-        (host-state-command-runtime state)
+        (package-host-command-runtime host)
         (make-command-definition
           'minibuffer.complete
           (lambda (context) (minibuffer-service-complete! service context))
           owner "Apply the current prompt completion without accepting the prompt."
           'minibuffer #f))
       (command-runtime-register-command!
-        (host-state-command-runtime state)
+        (package-host-command-runtime host)
         (make-command-definition
           'minibuffer.cancel
           (lambda (context) (minibuffer-service-cancel! service) (command-handled))

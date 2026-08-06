@@ -33,6 +33,7 @@
           (soda host internal surface)
           (soda host internal view)
           (soda host internal window)
+          (soda host package)
           (soda host value)
           (soda packages base fundamental-editing)
           (soda packages base history)
@@ -82,6 +83,7 @@
 
   (define (make-soda-application)
     (let* ([state (make-host-state)]
+           [host (make-package-host state)]
            [owner (make-owner 'soda-application)]
            [document #f]
            [document-owned? #t])
@@ -133,7 +135,7 @@
                 (make-search-service! state owner)]
                [interaction
                 (make-interaction-service! (host-state-command-runtime state) owner)]
-               [minibuffer (make-minibuffer-service! state interaction owner)])
+               [minibuffer (make-minibuffer-service! host interaction owner)])
           (install-buffer-item-commands!
             (host-state-command-runtime state) owner buffer-item-actions)
           (surface-service-register! (host-state-surfaces state) surface)
