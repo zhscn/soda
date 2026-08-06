@@ -24,6 +24,7 @@
           minibuffer-service-cancel!)
   (import (rnrs)
           (soda kernel document)
+          (soda kernel change)
           (soda kernel extension)
           (soda kernel range-set)
           (soda kernel selection)
@@ -51,10 +52,6 @@
     (minibuffer-session %make-minibuffer-session minibuffer-session?)
     (fields interaction buffer-id view-id origin-view-id surface-id rectangle
             (mutable completion minibuffer-session-completion minibuffer-session-completion-set!)))
-  (define-record-type
-    (prompt-snapshot %make-prompt-snapshot prompt-snapshot?)
-    (fields session-id request input input-revision point selection origin-context
-            completion-generation presentation))
   (define-record-type minibuffer-hook
     (fields owner procedure))
   (define-record-type
@@ -117,6 +114,22 @@
     (let ([buffer (buffer-service-ref (host-state-buffers (minibuffer-service-state service))
                                       (minibuffer-session-buffer-id session) #f)])
       (and buffer (snapshot-string (buffer-state-document (buffer-state buffer))))))
+
+  ;; Buffer selections are UTF-8 byte offsets; completion source boundaries
+  ;; are string character indexes.  Convert at the prompt boundary so every
+  ;; source shares one convention, including paths with non-ASCII names.
+  (define (input-byte-offset->character-index input offset)
+    (let loop ([index 0] [bytes 0])
+      (cond
+        [(= bytes offset) index]
+        [(= index (string-length input)) index]
+        [else
+         (loop (+ index 1)
+               (+ bytes
+                  (bytevector-length
+                    (string->utf8
+                      (string (string-ref input index))))))])))
+
   (define (minibuffer-session-snapshot service session)
     (unless (and (minibuffer-service? service) (minibuffer-session? session))
       (assertion-violation 'minibuffer-session-snapshot
@@ -130,13 +143,18 @@
            [range (and selection (selection-primary-range selection))]
            [controller (minibuffer-session-completion session)]
            [surface (surface-service-ref (host-state-surfaces state)
-                                         (minibuffer-session-surface-id session) #f)])
-      (%make-prompt-snapshot
+                                         (minibuffer-session-surface-id session) #f)]
+           [input (if buffer (snapshot-string (buffer-state-document (buffer-state buffer))) "")]
+           [point (if range
+                      (input-byte-offset->character-index input
+                                                          (selection-range-head range))
+                      0)])
+      (make-prompt-snapshot
         (interaction-session-invocation-id (minibuffer-session-interaction session))
         (interaction-session-request (minibuffer-session-interaction session))
-        (if buffer (snapshot-string (buffer-state-document (buffer-state buffer))) "")
+        input
         (if buffer (buffer-state-generation (buffer-state buffer)) 0)
-        (if range (selection-range-head range) 0)
+        point
         selection
         (interaction-session-context (minibuffer-session-interaction session))
         (if controller (completion-controller-generation controller) 0)
@@ -261,6 +279,73 @@
                     (minibuffer-session-completion-set! session controller)
                     (completion-controller-refresh! controller
                                                     (minibuffer-session-snapshot service session))))))))
+
+  (define (string-prefix? prefix value)
+    (let ([length (string-length prefix)])
+      (and (<= length (string-length value))
+           (string=? prefix (substring value 0 length)))))
+
+  (define (common-prefix strings)
+    (if (null? strings)
+        ""
+        (let* ([first (car strings)]
+               [limit (string-length first)])
+          (let loop ([index 0])
+            (if (or (= index limit)
+                    (exists
+                      (lambda (value)
+                        (or (= index (string-length value))
+                            (not (char=? (string-ref first index)
+                                         (string-ref value index)))))
+                      (cdr strings)))
+                (substring first 0 index)
+                (loop (+ index 1)))))))
+
+  (define (replace-prompt-input context value)
+    (let* ([state (command-context-buffer-state context)]
+           [length (snapshot-byte-size (buffer-state-document state))]
+           [bytes (string->utf8 value)]
+           [selection (make-selection
+                        (list (make-selection-range
+                                (bytevector-length bytes) (bytevector-length bytes))))])
+      (make-transaction-spec
+        (command-context-buffer-id context) (command-context-view-id context)
+        (buffer-state-generation state)
+        (make-change-set length (list (make-text-change 0 length bytes)))
+        selection '() '())))
+
+  ;; Completion application is a normal prompt-buffer transaction.  Sources
+  ;; continue to own candidate generation; this service only chooses one
+  ;; explicit candidate, a sole candidate, or an unambiguous shared prefix.
+  (define (minibuffer-service-complete! service context)
+    (let ([session (minibuffer-service-current service)])
+      (if (or (not session)
+              (not (= (command-context-buffer-id context)
+                      (minibuffer-session-buffer-id session))))
+          (command-handled)
+          (let* ([controller (minibuffer-service-refresh-completion! service)]
+                 [snapshot (minibuffer-session-snapshot service session)]
+                 [input (prompt-snapshot-input snapshot)]
+                 [candidates (and controller
+                                  (completion-controller-candidates controller))]
+                 [selected (and controller
+                                (completion-controller-selected controller))]
+                 [value
+                  (cond
+                    [selected (completion-candidate-insert-text selected)]
+                    [(and (pair? candidates) (null? (cdr candidates)))
+                     (completion-candidate-insert-text (car candidates))]
+                    [else
+                     (let ([prefix
+                            (common-prefix
+                              (map completion-candidate-insert-text
+                                   (or candidates '())))])
+                       (and (> (string-length prefix) (string-length input))
+                            (string-prefix? input prefix)
+                            prefix))])])
+            (if value
+                (replace-prompt-input context value)
+                (command-handled))))))
   (define (minibuffer-service-select-completion! service index)
     (let ([session (minibuffer-service-current service)])
       (and session (minibuffer-session-completion session)
@@ -275,6 +360,7 @@
     (let ([keymap (make-keymap 'minibuffer)])
       (keymap-bind! keymap (list (make-key-stroke 'enter #f 0)) 'minibuffer.accept)
       (keymap-bind! keymap (list (control-stroke #\j)) 'minibuffer.accept)
+      (keymap-bind! keymap (list (make-key-stroke 'tab #f 0)) 'minibuffer.complete)
       (keymap-bind! keymap (list (control-stroke #\g)) 'minibuffer.cancel)
       (keymap-bind! keymap (list (make-key-stroke 'escape #f 0)) 'minibuffer.cancel)
       (let ([service (%make-minibuffer-service state interactions owner keymap '() '() '() #f)])
@@ -284,6 +370,13 @@
           'minibuffer.accept
           (lambda (context) (minibuffer-service-submit! service) (command-handled))
           owner "Accept the current minibuffer input." 'minibuffer #f))
+      (command-runtime-register-command!
+        (host-state-command-runtime state)
+        (make-command-definition
+          'minibuffer.complete
+          (lambda (context) (minibuffer-service-complete! service context))
+          owner "Apply the current prompt completion without accepting the prompt."
+          'minibuffer #f))
       (command-runtime-register-command!
         (host-state-command-runtime state)
         (make-command-definition

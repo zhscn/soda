@@ -401,12 +401,24 @@
                          (eq? (display-text-face fragment) 'minibuffer.prompt))
               (error 'fundamental-editing-tests
                      "minibuffer prompt was not projected as virtual View content")))))
+      (command-runtime-start! runtime 'fundamental.end-of-buffer
+                              (application-command-context application))
+      (command-runtime-start! runtime 'fundamental.insert-text
+                              (application-command-context application)
+                              (list (string->utf8 "é")))
+      (let ([snapshot
+             (minibuffer-session-snapshot
+               minibuffer (minibuffer-service-current minibuffer))])
+        (unless (and (string=? (prompt-snapshot-input snapshot) "acceptedé")
+                     (= (prompt-snapshot-point snapshot) 9))
+          (error 'fundamental-editing-tests
+                 "prompt snapshots did not convert UTF-8 byte point to character index")))
       (command-runtime-start! runtime 'minibuffer.accept (application-command-context application))
       (host-state-run! state)
-      (unless (and (string=? observed "accepted")
+      (unless (and (string=? observed "acceptedé")
                    (not (interaction-service-current interaction))
                    (not (minibuffer-service-current minibuffer))
-                   (string=? exit-input "accepted")
+                   (string=? exit-input "acceptedé")
                    (equal? (reverse events) '(opened accepted)))
         (error 'fundamental-editing-tests "interaction submission did not resume through the queue"))
       (let* ([source
@@ -505,10 +517,35 @@
               runtime 'file.visit (application-command-context application))
             (let ([request (interaction-session-request
                              (interaction-service-current interaction))])
-              (unless (and (eq? (interaction-request-kind request) 'string)
+              (unless (and (eq? (interaction-request-kind request) 'file-name)
+                           (completion-source?
+                             (interaction-request-completion-source request))
                            (string=? (interaction-request-prompt request) "Visit file: "))
                 (error 'fundamental-editing-tests
                        "file.visit did not declare a reusable file interaction")))
+            (command-runtime-start!
+              runtime 'fundamental.insert-text (application-command-context application)
+              (list (string->utf8 (substring path 0 (- (string-length path) 4)))))
+            (let ([controller (minibuffer-service-refresh-completion!
+                                (soda-application-minibuffer application))])
+              (unless (and controller
+                           (exists
+                             (lambda (candidate)
+                               (string=? (completion-candidate-insert-text candidate) path))
+                             (completion-controller-candidates controller)))
+                (error 'fundamental-editing-tests
+                       "file-name completion did not offer the visited file")))
+            (command-runtime-start! runtime 'minibuffer.complete
+                                    (application-command-context application))
+            (let* ([session (minibuffer-service-current
+                              (soda-application-minibuffer application))]
+                   [prompt-buffer
+                    (buffer-service-ref
+                      (host-state-buffers state)
+                      (minibuffer-session-buffer-id session))])
+              (unless (string=? (buffer-string prompt-buffer) path)
+                (error 'fundamental-editing-tests
+                       "minibuffer.complete did not apply the path common prefix")))
             (interaction-service-cancel! interaction)
             (host-state-run! state)
             (command-runtime-start! runtime 'file.visit

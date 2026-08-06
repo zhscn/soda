@@ -23,6 +23,7 @@
           (soda host input-event)
           (soda host value)
           (soda packages base history)
+          (soda packages completion)
           (soda packages interaction)
           (soda packages resource)
           (soda support vfs))
@@ -69,6 +70,65 @@
     (require-path 'canonical-file-resource path)
     (make-resource 'file
       (vfs-resolve-path (vfs-directory-path (current-directory)) path)))
+
+  (define (string-prefix? prefix value)
+    (let ([length (string-length prefix)])
+      (and (<= length (string-length value))
+           (string=? prefix (substring value 0 length)))))
+
+  (define (path-field-start value point)
+    (let loop ([index (- point 1)])
+      (cond [(negative? index) 0]
+            [(vfs-path-separator? (string-ref value index)) (+ index 1)]
+            [else (loop (- index 1))])))
+
+  ;; File-name completion has no project ownership.  It resolves the path
+  ;; field under point against the process directory, preserving the spelling
+  ;; already typed in the prompt for the candidate insertion text.
+  (define (file-name-candidates snapshot)
+    (let* ([input (prompt-snapshot-input snapshot)]
+           [point (prompt-snapshot-point snapshot)]
+           [length (string-length input)])
+      ;; Completion replacement currently addresses one whole prompt value.
+      ;; Do not offer a candidate if text after point would be overwritten.
+      (if (not (= point length))
+          '()
+          (let* ([start (path-field-start input point)]
+                 [directory-prefix (substring input 0 start)]
+                 [name-prefix (substring input start point)]
+                 [directory
+                  (if (zero? (string-length directory-prefix))
+                      (vfs-directory-path (current-directory))
+                      (vfs-resolve-path
+                        (vfs-directory-path (current-directory)) directory-prefix))])
+            (guard (condition [else '()])
+              (map
+                (lambda (entry)
+                  (let* ([name (vfs-entry-name entry)]
+                         [directory? (eq? (vfs-entry-kind entry) 'directory)]
+                         [label (if directory? (vfs-directory-path name) name)]
+                         [insert-text (string-append directory-prefix label)])
+                    (make-completion-candidate
+                      (vfs-path-join directory name) insert-text label
+                      (if directory? "directory" "file") "file" entry)))
+                (filter
+                  (lambda (entry)
+                    (and (not (string=? (vfs-entry-name entry) "."))
+                         (not (string=? (vfs-entry-name entry) ".."))
+                         (string-prefix? name-prefix (vfs-entry-name entry))))
+                  (vfs-list-directory directory))))))))
+
+  (define file-name-completion-source
+    (make-completion-source file-name-candidates #f #f #f))
+
+  (define (make-file-name-reader prompt)
+    (make-interactive-reader
+      'file-name
+      (lambda (context arguments)
+        (make-interactive-suspend
+          (make-interaction-request
+            'file-name prompt #f file-name-completion-source 'free)
+          (lambda (value) (make-interactive-ready (list value)))))))
 
   (define (file-service-binding service buffer-id . default)
     (unless (and (file-service? service) (buffer-id? buffer-id))
@@ -387,13 +447,13 @@
                         (resource-locator (file-insert-resource request))))
                 #f)))))
       (install-file-command! runtime owner 'file.visit "Visit a file in the active Window."
-        (list (make-interaction-string-reader 'file-name "Visit file: "))
+        (list (make-file-name-reader "Visit file: "))
         (lambda (context path)
           (make-command-effect 'file.visit
             (make-file-visit context (canonical-file-resource path)))))
       (install-file-command! runtime owner 'file.insert
         "Insert a file's contents at every active selection."
-        (list (make-interaction-string-reader 'file-name "Insert file: "))
+        (list (make-file-name-reader "Insert file: "))
         (lambda (context path)
           (make-command-effect
             'file.insert
@@ -419,7 +479,8 @@
               (if (file-service-binding service (command-context-buffer-id context) #f)
                   (make-interactive-ready '())
                   (make-interactive-suspend
-                    (make-interaction-request 'file-name "Write file: " #f #f 'free)
+                    (make-interaction-request
+                      'file-name "Write file: " #f file-name-completion-source 'free)
                     (lambda (value) (make-interactive-ready (list value))))))))
         (lambda (context . name)
           (let ([binding (file-service-binding service (command-context-buffer-id context) #f)])
@@ -436,7 +497,7 @@
                         (buffer-state-document (command-context-buffer-state context))
                         resource #f #t)))))))
       (install-file-command! runtime owner 'file.save-as "Write the active Buffer to a file and visit it."
-        (list (make-interaction-string-reader 'file-name "Write file: "))
+        (list (make-file-name-reader "Write file: "))
         (lambda (context path)
           (let ([resource (canonical-file-resource path)])
             (make-command-effect

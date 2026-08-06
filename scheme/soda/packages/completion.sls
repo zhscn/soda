@@ -3,6 +3,12 @@
           completion-candidate-id completion-candidate-insert-text
           completion-candidate-label completion-candidate-annotation
           completion-candidate-group completion-candidate-payload
+          make-prompt-snapshot prompt-snapshot?
+          prompt-snapshot-session-id prompt-snapshot-request
+          prompt-snapshot-input prompt-snapshot-input-revision
+          prompt-snapshot-point prompt-snapshot-selection
+          prompt-snapshot-origin-context prompt-snapshot-completion-generation
+          prompt-snapshot-presentation
           make-completion-source completion-source?
           completion-source-refresh completion-source-preview
           completion-source-restore completion-source-accept completion-source-validate
@@ -14,6 +20,28 @@
           completion-controller-selected completion-controller-restore!
           completion-controller-accept! completion-controller-valid-input?)
   (import (rnrs))
+
+  ;; Completion providers receive this immutable request context instead of
+  ;; depending on the minibuffer service that happens to present it.  The
+  ;; minibuffer also uses it for lifecycle hooks, so package sources can be
+  ;; shared by any future prompt frontend.
+  (define-record-type
+    (prompt-snapshot %make-prompt-snapshot prompt-snapshot?)
+    (fields session-id request input input-revision point selection origin-context
+            completion-generation presentation))
+  (define (make-prompt-snapshot session-id request input input-revision point selection
+                                origin-context completion-generation presentation)
+    (unless (and (integer? session-id) (exact? session-id) (>= session-id 0)
+                 (string? input) (integer? input-revision) (exact? input-revision)
+                 (>= input-revision 0) (integer? point) (exact? point) (>= point 0)
+                 (<= point (string-length input))
+                 (integer? completion-generation) (exact? completion-generation)
+                 (>= completion-generation 0) (list? presentation))
+      (assertion-violation 'make-prompt-snapshot "invalid prompt snapshot"
+                           session-id input input-revision point))
+    (%make-prompt-snapshot
+      session-id request input input-revision point selection origin-context
+      completion-generation (reverse (reverse presentation))))
 
   ;; Candidate identity and payload are stable source data. Presentation code
   ;; may choose its own matching, grouping and rendering without changing it.
@@ -28,8 +56,9 @@
       (assertion-violation 'make-completion-candidate "invalid completion candidate" id))
     (%make-completion-candidate id insert-text label annotation group payload))
 
-  ;; Source callbacks receive a PromptSnapshot owned by minibuffer.  Preview
-  ;; is reversible; accept is final and only runs after a successful submit.
+  ;; Source callbacks receive a PromptSnapshot from the active prompt
+  ;; frontend. Preview is reversible; accept is final and only runs after a
+  ;; successful submit.
   (define-record-type
     (completion-source %make-completion-source completion-source?)
     (fields refresh preview restore accept validate))
