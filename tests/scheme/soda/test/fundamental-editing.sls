@@ -104,7 +104,8 @@
            [redo
             (input-dispatch
               context (make-key-event 'character (char->integer #\e) #f #f 2 'press
-                                      (make-bytevector 0)))])
+                                      (make-bytevector 0)))]
+           [file-map (file-keymap (soda-application-files application))])
       (unless (and (eq? (command-invocation-phase inserted) 'completed)
                    (eq? (command-invocation-phase backward) 'completed)
                    (eq? (command-invocation-phase deleted) 'completed)
@@ -123,7 +124,11 @@
                    (eq? (input-disposition-value backspace)
                         'fundamental.delete-backward)
                    (eq? (input-disposition-value undo) 'history.undo)
-                   (eq? (input-disposition-value redo) 'history.redo))
+                   (eq? (input-disposition-value redo) 'history.redo)
+                   (eq? (keymap-lookup
+                          file-map
+                          (list (make-key-stroke 'character (char->integer #\o) 4)))
+                         'file.save))
         (error 'fundamental-editing-tests
                "fundamental editing did not produce stable editor state"))
       (soda-application-close! application))

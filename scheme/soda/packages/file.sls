@@ -509,6 +509,9 @@
       (keymap-bind! keymap
                     (list (make-key-stroke 'character (char->integer #\r) 4))
                     'file.insert)
+      (keymap-bind! keymap
+                    (list (make-key-stroke 'character (char->integer #\o) 4))
+                    'file.save)
       (buffer-service-add-close-listener!
         buffers owner
         (lambda (buffer)
