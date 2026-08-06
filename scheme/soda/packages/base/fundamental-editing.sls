@@ -934,6 +934,7 @@
         ((list (make-key-stroke 'character (char->integer #\space) 4)) 'fundamental.set-mark)
         ((list (control-stroke #\w)) 'fundamental.kill-region)
         ((list (control-stroke #\y)) 'fundamental.yank)
+        ((list (control-stroke #\u)) 'fundamental.yank)
         ((list (control-stroke #\o)) 'fundamental.open-line)
         ((list (control-stroke #\k)) 'fundamental.kill-line)
         ((list (make-key-stroke 'character (char->integer #\b) 2)) 'fundamental.backward-word)
