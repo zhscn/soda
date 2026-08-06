@@ -28,6 +28,7 @@
           render-surface
           render-surface-frame)
   (import (rnrs)
+          (soda kernel document)
           (soda kernel state)
           (soda kernel extension)
           (soda kernel value)
@@ -45,6 +46,53 @@
           (soda view occurrence)
           (soda view frame)
           (soda view text-layout))
+
+  (define (decimal-width value)
+    (let loop ([value (max 1 value)] [width 0])
+      (if (zero? value) width (loop (div value 10) (+ width 1)))))
+
+  (define (line-number-gutter-width snapshot view-width configuration)
+    (if (not (line-numbers-enabled? configuration))
+        0
+        (let ([text (snapshot-text snapshot)])
+          (dynamic-wind
+            (lambda () #f)
+            (lambda ()
+              (let ([width (+ 1 (decimal-width (text-line-count text)))])
+                (if (< width view-width) width 0)))
+            (lambda () (text-close! text))))))
+
+  (define (number-string value width)
+    (let* ([text (number->string value)] [padding (- width (string-length text))])
+      (string-append (make-string (max 0 padding) #\space) text)))
+
+  (define (line-number-frame snapshot layout width)
+    (let* ([content (text-layout-frame layout)]
+           [height (frame-height content)]
+           [cells (make-vector (* width height)
+                               (make-frame-cell " " 1 #f 'line-number 'gutter))]
+           [text (snapshot-text snapshot)])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (let loop ([row 0] [previous #f])
+            (when (< row height)
+              (let find ([column 0] [offset #f])
+                (if (or offset (= column (frame-width content)))
+                    (let ([line (and offset (car (text-position text offset)))])
+                      (when (and line (not (equal? line previous)))
+                        (let ([label (number-string (+ line 1) (- width 1))])
+                          (let fill ([index 0])
+                            (when (< index (string-length label))
+                              (vector-set! cells (+ (* row width) index)
+                                           (make-frame-cell (string (string-ref label index)) 1 #f
+                                                            'line-number 'gutter))
+                              (fill (+ index 1))))))
+                      (loop (+ row 1) (or line previous)))
+                    (find (+ column 1)
+                          (text-layout-point->document layout row column)))))))
+        (lambda () (text-close! text)))
+      (make-frame width height cells)))
 
   (define (status-frame width message)
     (let* ([cells (make-vector
@@ -209,6 +257,10 @@
                            [view-height (cadddr rectangle)]
                            [state (view-state view)]
                            [snapshot (buffer-state-document (buffer-state (view-buffer view)))]
+                           [configuration (view-state-configuration state)]
+                           [gutter-width
+                            (line-number-gutter-width snapshot view-width configuration)]
+                           [content-width (- view-width gutter-width)]
                            [viewport (view-state-viewport state)]
                            [first-line (viewport-first-line viewport)]
                            [visual-row (viewport-visual-row viewport)]
@@ -216,7 +268,7 @@
                            [projection
                             (let ([options
                                   (configuration-facet
-                                     (view-state-configuration state)
+                                     configuration
                                      text-layout-options-facet 'view)]
                                   [provided-stream
                                    (view-projection-display-stream view-projection)])
@@ -232,12 +284,12 @@
                                       (layout-display-stream
                                         (transform provided-stream)
                                         (view-state-selection state)
-                                        view-width view-height options visual-row)
+                                        content-width view-height options visual-row)
                                       (layout-snapshot-display-stream
                                         snapshot
                                         (view-state-selection state)
                                         first-line visual-row
-                                        view-width view-height
+                                        content-width view-height
                                         (view-projection-decorations view-projection)
                                         transform options))
                                   failures))) ]
@@ -245,17 +297,26 @@
                            [transform-failures (cadr projection)])
                       (loop
                         (cdr leaves)
-                        (cons (make-frame-placement row column (text-layout-frame layout)) placements)
+                        (append
+                          (if (> gutter-width 0)
+                              (list (make-frame-placement row column
+                                                          (line-number-frame snapshot layout gutter-width)))
+                              '())
+                          (list (make-frame-placement row (+ column gutter-width)
+                                                      (text-layout-frame layout)))
+                          placements)
                         (cons (make-rendered-view
-                                (view-id view) (window-id leaf) rectangle layout
+                                (view-id view) (window-id leaf)
+                                (list row (+ column gutter-width) content-width view-height) layout
                                 (make-view-occurrence
                                   (surface-id surface) (window-id leaf) (view-id view)
-                                  rectangle viewport (text-layout-visible-ranges layout)
+                                  (list row (+ column gutter-width) content-width view-height)
+                                  viewport (text-layout-visible-ranges layout)
                                   (view-projection-generation view-projection))
                                   (view-projection-generation view-projection)
                                   (buffer-state-generation (buffer-state (view-buffer view)))
                                   viewport
-                                  (view-state-configuration state)
+                                  configuration
                                   transform-failures)
                               rendered-views)
                         (if (and (eq? leaf (surface-active-window surface))
@@ -264,7 +325,7 @@
                             cursor-row)
                         (if (and (eq? leaf (surface-active-window surface))
                                  (text-layout-cursor-column layout))
-                            (+ column (text-layout-cursor-column layout))
+                            (+ column gutter-width (text-layout-cursor-column layout))
                             cursor-column)))))))))
 
   (define (render-surface-frame surface views)

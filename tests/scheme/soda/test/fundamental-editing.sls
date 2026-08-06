@@ -1642,6 +1642,8 @@
       (command-runtime-start!
         runtime 'editor.toggle-soft-wrap (application-command-context application))
       (command-runtime-start!
+        runtime 'editor.toggle-line-numbers (application-command-context application))
+      (command-runtime-start!
         runtime 'editor.set-tab-width (application-command-context application) (list 4))
       (command-runtime-start!
         runtime 'editor.set-indent-width (application-command-context application) (list 2))
@@ -1656,6 +1658,8 @@
       (let ([layout
              (configuration-facet (view-state-configuration (view-state view))
                                   text-layout-options-facet 'view)]
+            [line-numbers?
+             (line-numbers-enabled? (view-state-configuration (view-state view)))]
             [indent-options
              (configuration-indent-options
                (buffer-state-configuration (buffer-state buffer)))]
@@ -1670,6 +1674,7 @@
                      (= (fill-options-column fill-options) 12)
                      (fill-options-auto-fill? fill-options)
                      (not (text-layout-options-wrap? layout))
+                     line-numbers?
                      (= (text-layout-options-tab-width layout) 4)
                      (eq? (keymap-lookup
                             (editor-options-keymap options)
@@ -1689,6 +1694,13 @@
                           'editor.toggle-auto-fill))
           (error 'fundamental-editing-tests
                  "editing option scope or reconfiguration is incorrect")))
+      (let ([frame (surface-render-frame
+                     (render-surface (soda-application-surface application)
+                                     (host-state-views state)))])
+        (unless (and (string=? (frame-cell-grapheme (frame-cell-at frame 0 0)) "1")
+                     (eq? (frame-cell-face (frame-cell-at frame 0 0)) 'line-number)
+                     (string=? (frame-cell-grapheme (frame-cell-at frame 1 0)) "2"))
+          (error 'fundamental-editing-tests "line-number gutter did not render logical rows")))
       (command-runtime-start!
         runtime 'editor.toggle-read-only (application-command-context application))
       (command-runtime-start!

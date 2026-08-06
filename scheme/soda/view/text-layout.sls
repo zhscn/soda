@@ -26,6 +26,10 @@
           text-layout-options-wrap?
           default-text-layout-options
           text-layout-options-facet
+          line-number-facet
+          line-number-compartment
+          line-numbers-enabled?
+          make-line-number-extension
           snapshot-display-stream
           layout-snapshot-display-stream
           layout-display-stream
@@ -79,6 +83,26 @@
     (%make-text-layout-options tab-width wrap?))
 
   (define default-text-layout-options (make-text-layout-options 8 #t))
+
+  ;; Line numbers are View chrome.  They consume terminal columns but never
+  ;; alter document/display coordinates or the TextLayout's DisplayMap.
+  (define (first-option values default)
+    (if (null? values) default (car values)))
+
+  (define line-number-facet
+    (make-facet 'line-numbers 'view #f
+                (lambda (values) (first-option values #f)) eq? eq?))
+
+  (define line-number-compartment
+    (make-compartment 'line-numbers 'view))
+
+  (define (line-numbers-enabled? configuration)
+    (configuration-facet configuration line-number-facet 'view))
+
+  (define (make-line-number-extension enabled?)
+    (unless (boolean? enabled?)
+      (assertion-violation 'make-line-number-extension "expected a boolean" enabled?))
+    (make-facet-provider line-number-facet enabled?))
 
   ;; VisualPosition identifies a raw-document visual row under the same
   ;; grapheme, tab, and wrapping policy used by TextLayout.  It deliberately
