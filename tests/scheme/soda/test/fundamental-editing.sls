@@ -368,6 +368,28 @@
           (soda-application-close! application)
           (guard (condition [else #f]) (delete-file path)))))
 
+    (let* ([path (string-append "/tmp/soda-startup-position-"
+                                (number->string (get-process-id)) ".txt")]
+           [application (make-soda-application)])
+      (dynamic-wind
+        (lambda () (vfs-write-file path (string->utf8 "first\nsecond\nthird")))
+        (lambda ()
+          (soda-application-open-files! application (list "+2,2" path))
+          (let* ([state (soda-application-state application)]
+                 [surface (soda-application-surface application)]
+                 [active (surface-active-context surface (host-state-views state))]
+                 [view (view-service-ref (host-state-views state)
+                                         (active-context-view-id active))]
+                 [point
+                  (selection-range-head
+                    (selection-primary-range (view-state-selection (view-state view))))])
+            (unless (= point 7)
+              (error 'fundamental-editing-tests
+                     "startup +LINE,COLUMN did not move to the requested file position" point))))
+        (lambda ()
+          (soda-application-close! application)
+          (guard (condition [else #f]) (delete-file path)))))
+
     ;; Nano aliases are declarative entries in the fundamental keymap.  They
     ;; reuse the same command implementations as their primary bindings.
     (let* ([application (make-soda-application)]

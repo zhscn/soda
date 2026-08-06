@@ -162,19 +162,81 @@
         (view-state view)
         #f '() #f active source)))
 
+  (define-record-type startup-position
+    (fields line column))
+
+  (define-record-type startup-file
+    (fields path position))
+
+  (define (parse-positive-integer text)
+    (let ([value (string->number text)])
+      (and (integer? value) (exact? value) (> value 0) value)))
+
+  ;; The command-line position syntax follows Nano's compact +LINE[,COLUMN]
+  ;; form.  Positions apply to one following file and are converted into an
+  ;; ordinary motion command after the file Buffer becomes active.
+  (define (parse-startup-position argument)
+    (and (> (string-length argument) 1)
+         (char=? (string-ref argument 0) #\+)
+         (let* ([body (substring argument 1 (string-length argument))]
+                [separator
+                 (let loop ([index 0])
+                   (cond [(= index (string-length body)) #f]
+                         [(char=? (string-ref body index) #\,) index]
+                         [else (loop (+ index 1))]))]
+                [line-text (if separator (substring body 0 separator) body)]
+                [column-text
+                 (and separator
+                      (substring body (+ separator 1) (string-length body)))]
+                [line (parse-positive-integer line-text)]
+                [column (if column-text (parse-positive-integer column-text) 1)])
+           (and line column (make-startup-position line column)))))
+
+  (define (startup-files arguments)
+    (let loop ([remaining arguments] [position #f] [files '()])
+      (cond
+        [(null? remaining)
+         (when position
+           (assertion-violation 'soda-application-open-files!
+                                "startup position must be followed by a file"))
+         (reverse files)]
+        [else
+         (let ([argument (car remaining)])
+           (unless (and (string? argument) (positive? (string-length argument)))
+             (assertion-violation 'soda-application-open-files!
+                                  "expected non-empty command-line strings" argument))
+           (if (char=? (string-ref argument 0) #\+)
+               (let ([parsed (parse-startup-position argument)])
+                 (unless parsed
+                   (assertion-violation 'soda-application-open-files!
+                                        "invalid startup position; expected +LINE[,COLUMN]"
+                                        argument))
+                 (when position
+                   (assertion-violation 'soda-application-open-files!
+                                        "startup position must be followed by a file"))
+                 (loop (cdr remaining) parsed files))
+               (loop (cdr remaining) #f
+                     (cons (make-startup-file argument position) files))))])))
+
   (define (soda-application-open-files! application paths)
     (require-open 'soda-application-open-files! application)
-    (unless (and (list? paths)
-                 (for-all (lambda (path) (and (string? path) (positive? (string-length path))))
-                          paths))
+    (unless (list? paths)
       (assertion-violation 'soda-application-open-files!
-                           "expected a list of non-empty file names" paths))
+                           "expected command-line arguments as a list" paths))
     (let ([runtime (host-state-command-runtime (soda-application-state application))])
       (for-each
-        (lambda (path)
+        (lambda (file)
           (command-runtime-start!
-            runtime 'file.visit (application-command-context application 'startup) (list path)))
-        paths))
+            runtime 'file.visit (application-command-context application 'startup)
+            (list (startup-file-path file)))
+          (let ([position (startup-file-position file)])
+            (when position
+              (command-runtime-start!
+                runtime 'fundamental.goto-line
+                (application-command-context application 'startup)
+                (list (startup-position-line position)
+                      (startup-position-column position))))))
+        (startup-files paths)))
     application)
 
   (define (make-resolver application)
