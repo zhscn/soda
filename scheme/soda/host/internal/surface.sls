@@ -18,6 +18,7 @@
           surface-push-interaction!
           surface-pop-interaction!
           surface-resize!
+          surface-invalidate!
           surface-set-status-message!
           surface-generation
           make-surface-service
@@ -129,6 +130,15 @@
           (window-layout! (surface-root-window surface) 0 0 (car size) (cdr size))
           (surface-generation-set! surface (+ 1 (surface-generation surface)))
           size)))
+
+  ;; A presentation refresh is a host-visible change even when geometry and
+  ;; editor state are unchanged.  It invalidates the render signature without
+  ;; smuggling frontend handles into package commands.
+  (define (surface-invalidate! surface)
+    (unless (surface? surface)
+      (assertion-violation 'surface-invalidate! "expected a Surface" surface))
+    (surface-generation-set! surface (+ 1 (surface-generation surface)))
+    #t)
 
   (define (surface-set-selected-window! surface window)
     (unless (and (surface? surface) (window? window))

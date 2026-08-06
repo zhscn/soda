@@ -78,6 +78,7 @@
            [runtime (host-state-command-runtime state)]
            [buffer (soda-application-buffer application)]
            [view (soda-application-view application)]
+           [surface (soda-application-surface application)]
            [editing (soda-application-editing application)]
            [inserted
             (command-runtime-start!
@@ -129,6 +130,10 @@
             (input-dispatch
               context (make-key-event 'character (char->integer #\6) #f #f 4 'press
                                       (make-bytevector 0)))]
+           [before-surface-generation (surface-generation surface)]
+           [redraw
+            (command-runtime-start!
+              runtime 'fundamental.redraw (application-command-context application))]
            [file-map (file-keymap (soda-application-files application))])
       (unless (and (eq? (command-invocation-phase inserted) 'completed)
                    (eq? (command-invocation-phase backward) 'completed)
@@ -153,6 +158,12 @@
                    (eq? (input-disposition-value cut-text) 'fundamental.cut-text)
                    (eq? (input-disposition-value justify) 'fundamental.fill-paragraph)
                    (eq? (input-disposition-value set-mark) 'fundamental.set-mark)
+                   (eq? (command-invocation-phase redraw) 'completed)
+                   (= (surface-generation surface) (+ before-surface-generation 1))
+                   (eq? (keymap-lookup
+                          (fundamental-editing-keymap editing)
+                          (list (make-key-stroke 'character (char->integer #\l) 4)))
+                        'fundamental.redraw)
                    (eq? (keymap-lookup
                           file-map
                           (list (make-key-stroke 'character (char->integer #\o) 4)))

@@ -11,6 +11,7 @@
           make-pop-interaction-operation
           make-display-request-operation
           make-resize-surface-operation
+          make-invalidate-surface-operation
           make-set-surface-message-operation
           make-host-update
           host-update?
@@ -93,6 +94,12 @@
     ;; Copy the pair so later caller mutation cannot alter an operation that
     ;; has already entered the dispatcher queue.
     (%make-host-operation 'resize-surface surface-id (cons (car size) (cdr size))))
+
+  (define (make-invalidate-surface-operation surface-id)
+    (unless (identity? surface-id)
+      (assertion-violation 'make-invalidate-surface-operation
+                           "invalid Surface identity" surface-id))
+    (%make-host-operation 'invalidate-surface surface-id #f))
 
   ;; A Surface message is chrome, not document content.  It is immutable
   ;; operation data so a package can request feedback without receiving a

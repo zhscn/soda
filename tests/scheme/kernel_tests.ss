@@ -1068,6 +1068,10 @@
           (make-remove-window-operation
             (surface-id single-surface)
             (active-context-window-id (host-update-resolution split-update))))]
+       [redraw-update
+        (dispatcher-dispatch-host!
+          (host-state-dispatch host)
+          (make-invalidate-surface-operation (surface-id split-surface)))]
        [generation (surface-generation split-surface)])
   (unless (and (host-update? split-update)
                (= (active-context-view-id (host-update-resolution split-update))
@@ -1106,7 +1110,9 @@
                (host-update? resize-update)
                (equal? (host-update-damage resize-update) '(resize layout))
                (equal? (surface-size split-surface) '(16 . 2))
-               (= (length host-updates) 8)
+               (host-update? redraw-update)
+               (equal? (host-update-damage redraw-update) '(redraw))
+               (= (length host-updates) 9)
                (eq? (surface-selected-window split-surface) left)
                (eq? (surface-set-selected-window! split-surface left) left)
                (= (surface-generation split-surface) generation)

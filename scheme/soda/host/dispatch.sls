@@ -242,6 +242,8 @@
                        [(resize-surface)
                         (and (surface-resize! surface (host-operation-value operation))
                              (surface-active-context surface (dispatcher-views dispatcher)))]
+                       [(invalidate-surface)
+                        (and (surface-invalidate! surface) #t)]
                        [(set-surface-message)
                         (and (surface-set-status-message!
                                surface (host-operation-value operation))
@@ -264,9 +266,10 @@
                              operation (surface-id surface) old-context new-context resolution
                              (if (= start-generation (surface-generation surface))
                                  '()
-                                 (if (eq? (host-operation-kind operation) 'resize-surface)
-                                     '(resize layout)
-                                     '(chrome))))])
+                                 (case (host-operation-kind operation)
+                                   [(resize-surface) '(resize layout)]
+                                   [(invalidate-surface) '(redraw)]
+                                   [else '(chrome)])))])
                       (dispatcher-notify!
                         dispatcher
                         (lambda ()

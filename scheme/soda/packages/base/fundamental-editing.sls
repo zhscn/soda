@@ -17,6 +17,7 @@
           (soda host context)
           (soda host input)
           (soda host input-event)
+          (soda host operation)
           (soda host view)
           (soda host value)
           (soda packages interaction))
@@ -907,6 +908,13 @@
         "Scroll the Viewport toward the end of the Buffer." 'viewport
         (scroll-page context 1))
       (install-command!
+        runtime owner 'fundamental.redraw (context)
+        "Request a fresh presentation of the active Surface." 'interface
+        (let ([surface-id (command-context-surface-id context)])
+          (if (and (integer? surface-id) (exact? surface-id) (>= surface-id 0))
+              (make-invalidate-surface-operation surface-id)
+              (command-handled))))
+      (install-command!
         runtime owner 'fundamental.set-mark (context)
         "Set the mark at every selection and activate the region." 'selection
         (set-mark context))
@@ -959,6 +967,7 @@
         ((list (control-stroke #\n)) 'fundamental.next-line)
         ((list (control-stroke #\j)) 'fundamental.fill-paragraph)
         ((list (control-stroke #\t)) 'fundamental.transpose-characters)
+        ((list (control-stroke #\l)) 'fundamental.redraw)
         ((list (control-stroke #\y)) 'fundamental.scroll-up)
         ((list (control-stroke #\v)) 'fundamental.scroll-down)
         ((list (make-key-stroke 'character (char->integer #\space) 4)) 'fundamental.set-mark)

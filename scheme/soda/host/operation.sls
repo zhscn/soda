@@ -11,6 +11,7 @@
           make-pop-interaction-operation
           make-display-request-operation
           make-resize-surface-operation
+          make-invalidate-surface-operation
           make-set-surface-message-operation
           host-update?
           host-update-operation
