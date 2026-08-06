@@ -473,6 +473,99 @@
               (view-selection-transaction
                 context (make-selection ranges (selection-primary selection))))))))
 
+  (define (paragraph-line-blank? text line)
+    (let loop ([offset (text-line-start text line)]
+               [end (text-line-content-end text line)])
+      (or (= offset end)
+          (and (memv (text-byte-at text offset) '(9 32))
+               (loop (+ offset 1) end)))))
+
+  (define (paragraph-bounds text point)
+    (let* ([line (car (text-position text point))]
+           [last (- (text-line-count text) 1)])
+      (if (paragraph-line-blank? text line)
+          (cons (text-line-start text line) (text-line-content-end text line))
+          (let ([first
+                 (let loop ([current line])
+                   (if (or (zero? current)
+                           (paragraph-line-blank? text (- current 1)))
+                       current
+                       (loop (- current 1))))]
+                [final
+                 (let loop ([current line])
+                   (if (or (= current last)
+                           (paragraph-line-blank? text (+ current 1)))
+                       current
+                       (loop (+ current 1))))])
+            (cons (text-line-start text first)
+                  (text-line-content-end text final))))))
+
+  (define (split-words value)
+    (let loop ([characters (string->list value)] [word '()] [words '()])
+      (cond [(null? characters)
+             (reverse (if (null? word) words
+                          (cons (list->string (reverse word)) words)))]
+            [(char-whitespace? (car characters))
+             (loop (cdr characters) '()
+                   (if (null? word) words
+                       (cons (list->string (reverse word)) words)))]
+            [else (loop (cdr characters) (cons (car characters) word) words)])))
+
+  (define (leading-whitespace value)
+    (let loop ([index 0])
+      (if (and (< index (string-length value))
+               (memv (string-ref value index) '(#\space #\tab)))
+          (loop (+ index 1))
+          (substring value 0 index))))
+
+  (define (fill-words words prefix width)
+    (let-values ([(port extract) (open-string-output-port)])
+      (put-string port prefix)
+      (let loop ([remaining words] [column (string-length prefix)] [first? #t])
+        (unless (null? remaining)
+          (let* ([word (car remaining)]
+                 [gap (if first? 0 1)]
+                 [next (+ column gap (string-length word))])
+            (if (and (not first?) (> next width))
+                (begin
+                  (put-char port #\newline)
+                  (put-string port prefix)
+                  (put-string port word)
+                  (loop (cdr remaining) (+ (string-length prefix) (string-length word)) #f))
+                (begin
+                  (unless first? (put-char port #\space))
+                  (put-string port word)
+                  (loop (cdr remaining) next #f))))))
+      (extract)))
+
+  (define (fill-paragraph context)
+    (with-context-text
+      context
+      (lambda (text)
+        (let* ([selection (context-selection context)]
+               [range (selection-primary-range selection)]
+               [bounds (if (selection-range-empty? range)
+                           (paragraph-bounds text (selection-range-head range))
+                           (cons (selection-range-from range) (selection-range-to range)))]
+               [start (car bounds)] [end (cdr bounds)]
+               [value (utf8->string (text-subbytevector text start end))]
+               [words (split-words value)])
+          (if (null? words)
+              (command-handled)
+              (let* ([prefix (leading-whitespace value)]
+                     [replacement (string->utf8 (fill-words words prefix 80))]
+                     [change-set
+                      (make-change-set
+                        (text-size text) (list (make-text-change start end replacement)))]
+                     [point (change-set-map-offset change-set end 'after)])
+                (make-transaction-spec
+                  (command-context-buffer-id context)
+                  (command-context-view-id context)
+                  (buffer-state-generation (command-context-buffer-state context))
+                  change-set
+                  (make-selection (list (collapse-range range point)) 0)
+                  '() '())))))))
+
   (define (scroll-lines context delta)
     (with-context-text
       context
@@ -774,6 +867,10 @@
         "Move point to the matching ASCII parenthesis, bracket, or brace." 'motion
         (move-matching-delimiter context))
       (install-command!
+        runtime owner 'fundamental.fill-paragraph (context)
+        "Reflow the active region or paragraph at point to eighty columns." 'editing
+        (fill-paragraph context))
+      (install-command!
         runtime owner 'fundamental.transpose-characters (context)
         "Transpose the graphemes around point." 'editing
         (transpose-characters context))
@@ -857,6 +954,8 @@
          'fundamental.unindent-lines)
         ((list (make-key-stroke 'character (char->integer #\]) 2))
          'fundamental.matching-delimiter)
+        ((list (make-key-stroke 'character (char->integer #\q) 2))
+         'fundamental.fill-paragraph)
         ((list (plain-stroke 'left #f)) 'fundamental.backward-char)
         ((list (plain-stroke 'right #f)) 'fundamental.forward-char)
         ((list (plain-stroke 'home #f)) 'fundamental.beginning-of-line)

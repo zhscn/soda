@@ -175,6 +175,19 @@
     (let* ([application (make-soda-application)]
            [state (soda-application-state application)]
            [runtime (host-state-command-runtime state)]
+           [buffer (soda-application-buffer application)])
+      (command-runtime-start! runtime 'fundamental.insert-text
+                              (application-command-context application)
+                              (list (string->utf8 "  alpha beta\ngamma   delta")))
+      (command-runtime-start! runtime 'fundamental.fill-paragraph
+                              (application-command-context application))
+      (unless (string=? (buffer-string buffer) "  alpha beta gamma delta")
+        (error 'fundamental-editing-tests "fill-paragraph did not normalize one paragraph"))
+      (soda-application-close! application))
+
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [runtime (host-state-command-runtime state)]
            [buffer (soda-application-buffer application)]
            [view (soda-application-view application)])
       (command-runtime-start! runtime 'fundamental.insert-text
