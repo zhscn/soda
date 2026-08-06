@@ -152,6 +152,29 @@
     (let* ([application (make-soda-application)]
            [state (soda-application-state application)]
            [runtime (host-state-command-runtime state)]
+           [view (soda-application-view application)])
+      (command-runtime-start! runtime 'fundamental.insert-text
+                              (application-command-context application)
+                              (list (string->utf8 "a(b(c)d)e")))
+      (command-runtime-start! runtime 'fundamental.beginning-of-buffer
+                              (application-command-context application))
+      (command-runtime-start! runtime 'fundamental.forward-char
+                              (application-command-context application))
+      (command-runtime-start! runtime 'fundamental.matching-delimiter
+                              (application-command-context application))
+      (let ([range (selection-primary-range (view-state-selection (view-state view)))])
+        (unless (= (selection-range-head range) 7)
+          (error 'fundamental-editing-tests "matching-delimiter did not skip nested delimiters")))
+      (command-runtime-start! runtime 'fundamental.matching-delimiter
+                              (application-command-context application))
+      (let ([range (selection-primary-range (view-state-selection (view-state view)))])
+        (unless (= (selection-range-head range) 1)
+          (error 'fundamental-editing-tests "matching-delimiter did not scan backward from a close delimiter")))
+      (soda-application-close! application))
+
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [runtime (host-state-command-runtime state)]
            [buffer (soda-application-buffer application)]
            [view (soda-application-view application)])
       (command-runtime-start! runtime 'fundamental.insert-text

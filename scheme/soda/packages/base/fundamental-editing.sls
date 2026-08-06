@@ -418,6 +418,61 @@
                   (map-selection-through-changes selection change-set)
                   '() '())))))))
 
+  (define (delimiter-pair byte)
+    (case byte
+      [(40) (cons 40 41)]
+      [(91) (cons 91 93)]
+      [(123) (cons 123 125)]
+      [(41) (cons 40 41)]
+      [(93) (cons 91 93)]
+      [(125) (cons 123 125)]
+      [else #f]))
+
+  (define (matching-delimiter-offset text point)
+    (let ([size (text-size text)])
+      (and (< point size)
+           (let* ([byte (text-byte-at text point)]
+                  [pair (delimiter-pair byte)])
+             (and pair
+                  (let ([open (car pair)] [close (cdr pair)])
+                    (cond
+                      [(= byte open)
+                       (let scan ([position (+ point 1)] [depth 1])
+                         (cond [(= position size) #f]
+                               [(= (text-byte-at text position) open)
+                                (scan (+ position 1) (+ depth 1))]
+                               [(= (text-byte-at text position) close)
+                                (if (= depth 1) position
+                                    (scan (+ position 1) (- depth 1)))]
+                               [else (scan (+ position 1) depth)]))]
+                      [(= byte close)
+                       (let scan ([position (- point 1)] [depth 1])
+                         (cond [(< position 0) #f]
+                               [(= (text-byte-at text position) close)
+                                (scan (- position 1) (+ depth 1))]
+                               [(= (text-byte-at text position) open)
+                                (if (= depth 1) position
+                                    (scan (- position 1) (- depth 1)))]
+                               [else (scan (- position 1) depth)]))]
+                      [else #f])))))))
+
+  (define (move-matching-delimiter context)
+    (with-context-text
+      context
+      (lambda (text)
+        (let* ([selection (context-selection context)]
+               [ranges
+                (map
+                  (lambda (range)
+                    (let ([match (matching-delimiter-offset
+                                   text (selection-range-head range))])
+                      (if match (motion-range range match) range)))
+                  (selection-ranges selection))])
+          (if (for-all eq? ranges (selection-ranges selection))
+              (command-handled)
+              (view-selection-transaction
+                context (make-selection ranges (selection-primary selection))))))))
+
   (define (scroll-lines context delta)
     (with-context-text
       context
@@ -715,6 +770,10 @@
         "Remove one tab or up to four leading spaces from selected logical lines." 'editing
         (shift-selected-lines context 'unindent))
       (install-command!
+        runtime owner 'fundamental.matching-delimiter (context)
+        "Move point to the matching ASCII parenthesis, bracket, or brace." 'motion
+        (move-matching-delimiter context))
+      (install-command!
         runtime owner 'fundamental.transpose-characters (context)
         "Transpose the graphemes around point." 'editing
         (transpose-characters context))
@@ -796,6 +855,8 @@
          'fundamental.indent-lines)
         ((list (control-stroke #\x) (plain-stroke 'character (char->integer #\<)))
          'fundamental.unindent-lines)
+        ((list (make-key-stroke 'character (char->integer #\]) 2))
+         'fundamental.matching-delimiter)
         ((list (plain-stroke 'left #f)) 'fundamental.backward-char)
         ((list (plain-stroke 'right #f)) 'fundamental.forward-char)
         ((list (plain-stroke 'home #f)) 'fundamental.beginning-of-line)
