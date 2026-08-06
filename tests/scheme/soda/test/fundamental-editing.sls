@@ -96,7 +96,15 @@
               context (make-key-event 'enter 13 #f #f 0 'press (make-bytevector 0)))]
            [backspace
             (input-dispatch
-              context (make-key-event 'backspace 127 #f #f 0 'press (make-bytevector 0)))])
+              context (make-key-event 'backspace 127 #f #f 0 'press (make-bytevector 0)))]
+           [undo
+            (input-dispatch
+              context (make-key-event 'character (char->integer #\u) #f #f 2 'press
+                                      (make-bytevector 0)))]
+           [redo
+            (input-dispatch
+              context (make-key-event 'character (char->integer #\e) #f #f 2 'press
+                                      (make-bytevector 0)))])
       (unless (and (eq? (command-invocation-phase inserted) 'completed)
                    (eq? (command-invocation-phase backward) 'completed)
                    (eq? (command-invocation-phase deleted) 'completed)
@@ -113,7 +121,9 @@
                    (eq? (input-disposition-value enter) 'fundamental.newline)
                    (eq? (input-disposition-kind backspace) 'command)
                    (eq? (input-disposition-value backspace)
-                        'fundamental.delete-backward))
+                        'fundamental.delete-backward)
+                   (eq? (input-disposition-value undo) 'history.undo)
+                   (eq? (input-disposition-value redo) 'history.redo))
         (error 'fundamental-editing-tests
                "fundamental editing did not produce stable editor state"))
       (soda-application-close! application))

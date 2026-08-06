@@ -956,6 +956,8 @@
          'fundamental.matching-delimiter)
         ((list (make-key-stroke 'character (char->integer #\q) 2))
          'fundamental.fill-paragraph)
+        ((list (make-key-stroke 'character (char->integer #\u) 2)) 'history.undo)
+        ((list (make-key-stroke 'character (char->integer #\e) 2)) 'history.redo)
         ((list (plain-stroke 'left #f)) 'fundamental.backward-char)
         ((list (plain-stroke 'right #f)) 'fundamental.forward-char)
         ((list (plain-stroke 'home #f)) 'fundamental.beginning-of-line)
