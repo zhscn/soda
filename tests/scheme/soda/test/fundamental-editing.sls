@@ -1644,6 +1644,8 @@
       (command-runtime-start!
         runtime 'editor.toggle-line-numbers (application-command-context application))
       (command-runtime-start!
+        runtime 'editor.toggle-guide-column (application-command-context application))
+      (command-runtime-start!
         runtime 'editor.set-tab-width (application-command-context application) (list 4))
       (command-runtime-start!
         runtime 'editor.set-indent-width (application-command-context application) (list 2))
@@ -1660,6 +1662,7 @@
                                   text-layout-options-facet 'view)]
             [line-numbers?
              (line-numbers-enabled? (view-state-configuration (view-state view)))]
+            [guide (guide-column (view-state-configuration (view-state view)))]
             [indent-options
              (configuration-indent-options
                (buffer-state-configuration (buffer-state buffer)))]
@@ -1675,6 +1678,7 @@
                      (fill-options-auto-fill? fill-options)
                      (not (text-layout-options-wrap? layout))
                      line-numbers?
+                     (= guide 80)
                      (= (text-layout-options-tab-width layout) 4)
                      (eq? (keymap-lookup
                             (editor-options-keymap options)

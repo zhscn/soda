@@ -170,6 +170,21 @@
         context
         (string-append "Line numbers " (if enabled? "disabled" "enabled")))))
 
+  (define (toggle-guide-column context)
+    (let* ([state (command-context-view-state context)]
+           [configuration (view-state-configuration state)]
+           [column (guide-column configuration)]
+           [effect
+            (make-compartment-reconfigure-effect
+              guide-column-compartment
+              (make-guide-column-extension (if column #f 80)))])
+      (result-with-message
+        (make-view-transaction-spec
+          (command-context-view-id context) (view-state-generation state)
+          #f #f #f (list effect) '() #f)
+        context
+        (if column "Guide column disabled" "Guide column set to 80"))))
+
   (define (set-tab-width context width)
     (unless (and (integer? width) (exact? width) (> width 0))
       (assertion-violation 'editor.set-tab-width "expected a positive tab width" width))
@@ -255,6 +270,10 @@
         runtime owner 'editor.toggle-line-numbers
         "Toggle line-number gutter for the active View."
         (lambda (context) (toggle-line-numbers context)))
+      (install-command!
+        runtime owner 'editor.toggle-guide-column
+        "Toggle an 80-column guide for the active View."
+        (lambda (context) (toggle-guide-column context)))
       (install-command!
         runtime owner 'editor.toggle-tab-to-spaces
         "Toggle whether Tab inserts spaces or a tab in the active Buffer."

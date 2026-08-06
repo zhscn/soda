@@ -30,6 +30,10 @@
           line-number-compartment
           line-numbers-enabled?
           make-line-number-extension
+          guide-column-facet
+          guide-column-compartment
+          guide-column
+          make-guide-column-extension
           snapshot-display-stream
           layout-snapshot-display-stream
           layout-display-stream
@@ -103,6 +107,24 @@
     (unless (boolean? enabled?)
       (assertion-violation 'make-line-number-extension "expected a boolean" enabled?))
     (make-facet-provider line-number-facet enabled?))
+
+  (define guide-column-facet
+    (make-facet 'guide-column 'view #f
+                (lambda (values) (first-option values #f)) equal? equal?))
+
+  (define guide-column-compartment
+    (make-compartment 'guide-column 'view))
+
+  ;; #f disables the guide; a positive column is one-based in user-facing
+  ;; text coordinates, so 80 marks terminal cell index 79.
+  (define (guide-column configuration)
+    (configuration-facet configuration guide-column-facet 'view))
+
+  (define (make-guide-column-extension column)
+    (unless (or (not column) (and (integer? column) (exact? column) (> column 0)))
+      (assertion-violation 'make-guide-column-extension
+                           "expected #f or a positive guide column" column))
+    (make-facet-provider guide-column-facet column))
 
   ;; VisualPosition identifies a raw-document visual row under the same
   ;; grapheme, tab, and wrapping policy used by TextLayout.  It deliberately

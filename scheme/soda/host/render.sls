@@ -94,6 +94,29 @@
         (lambda () (text-close! text)))
       (make-frame width height cells)))
 
+  (define (append-face face overlay)
+    (if (list? face) (append face (list overlay)) (list face overlay)))
+
+  (define (guide-column-frame frame column)
+    (if (or (not column) (>= (- column 1) (frame-width frame)))
+        frame
+        (let ([target (- column 1)])
+          (let loop ([row 0] [updates '()])
+            (if (= row (frame-height frame))
+                (frame-with-cells frame updates)
+                (let ([cell (frame-cell-at frame row target)])
+                  (loop (+ row 1)
+                        (if (frame-cell-continuation? cell)
+                            updates
+                            (cons (list row target
+                                        (make-frame-cell
+                                          (frame-cell-grapheme cell)
+                                          (frame-cell-width cell)
+                                          #f
+                                          (append-face (frame-cell-face cell) 'guide-column)
+                                          (frame-cell-source cell)))
+                                  updates)))))))))
+
   (define (status-frame width message)
     (let* ([cells (make-vector
                     width
@@ -261,6 +284,7 @@
                            [gutter-width
                             (line-number-gutter-width snapshot view-width configuration)]
                            [content-width (- view-width gutter-width)]
+                           [guide-column (guide-column configuration)]
                            [viewport (view-state-viewport state)]
                            [first-line (viewport-first-line viewport)]
                            [visual-row (viewport-visual-row viewport)]
@@ -303,7 +327,8 @@
                                                           (line-number-frame snapshot layout gutter-width)))
                               '())
                           (list (make-frame-placement row (+ column gutter-width)
-                                                      (text-layout-frame layout)))
+                                                      (guide-column-frame
+                                                        (text-layout-frame layout) guide-column)))
                           placements)
                         (cons (make-rendered-view
                                 (view-id view) (window-id leaf)
