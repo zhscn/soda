@@ -306,6 +306,12 @@
         (unless (and (= (selection-range-from range) 0)
                      (= (selection-range-to range) 5))
           (error 'fundamental-editing-tests "search.previous did not reverse the search direction")))
+      (unless
+        (eq? (keymap-lookup
+               (search-keymap (soda-application-search application))
+               (list (make-key-stroke 'character (char->integer #\w) 3)))
+             'search.previous)
+        (error 'fundamental-editing-tests "Meta-Shift-w did not bind reverse search repetition"))
       (command-runtime-start! runtime 'search.replace-all
                               (application-command-context application) (list "alpha" "A"))
       (unless (string=? (buffer-string buffer) "A beta A")

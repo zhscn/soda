@@ -482,5 +482,8 @@
       (keymap-bind! keymap (list (control-stroke #\w)) 'search.forward)
       (keymap-bind! keymap (list (control-stroke #\\)) 'search.query-replace)
       (keymap-bind! keymap (list (meta-stroke #\w)) 'search.next)
+      (keymap-bind! keymap
+                    (list (make-key-stroke 'character (char->integer #\w) 3))
+                    'search.previous)
       service))
 )
