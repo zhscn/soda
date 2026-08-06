@@ -11,14 +11,12 @@
           (soda kernel view-state)
           (soda host command)
           (soda host command-runtime)
-          (soda host dispatch)
-          (soda host internal buffer)
-          (soda host internal operation)
-          (soda host internal state)
-          (soda host internal view)
+          (soda host buffer)
+          (soda host package)
           (soda host input)
           (soda host input-event)
           (soda host value)
+          (soda host view)
           (soda packages base history)
           (soda packages buffer-ui))
 
@@ -28,7 +26,7 @@
   ;; packages.
   (define-record-type
     (buffer-list-service %make-buffer-list-service buffer-list-service?)
-    (fields state owner history actions keymap result-keymap authority lists))
+    (fields host owner history actions keymap result-keymap authority lists))
 
   (define-record-type buffer-list-state
     (fields (mutable generation buffer-list-state-generation
@@ -60,8 +58,7 @@
         (lambda (buffer)
           (not (hashtable-contains? (buffer-list-service-lists service)
                                     (buffer-id buffer))))
-        (buffer-service-buffers
-          (host-state-buffers (buffer-list-service-state service))))))
+        (package-host-buffers (buffer-list-service-host service)))))
 
   (define (modified-marker service buffer)
     (if (and (not (generated-buffer? buffer))
@@ -110,8 +107,8 @@
                   [update
                    (make-projection-update generation (car layout) (cdr layout) '() '())]
                   [published
-                   (dispatcher-dispatch!
-                     (host-state-dispatch (buffer-list-service-state service))
+                   (package-host-dispatch!
+                     (buffer-list-service-host service)
                      (make-projection-transaction-spec
                        (buffer-id buffer) #f (buffer-state buffer) update
                        (list (make-edit-authority-annotation
@@ -123,16 +120,14 @@
 
   (define (show-buffer-list! service request)
     (let* ([context (buffer-list-open-request-context request)]
-           [state (buffer-list-service-state service)]
-           [buffers (host-state-buffers state)]
-           [views (host-state-views state)]
+           [host (buffer-list-service-host service)]
            [key (make-buffer-key 'buffer-list 'default)]
            [buffer
-            (buffer-service-open-or-create!
-              buffers (buffer-list-service-owner service) key
+            (package-host-open-or-create-buffer!
+              host (buffer-list-service-owner service) key
               (lambda ()
-                (buffer-service-create!
-                  buffers (buffer-list-service-owner service) "*Buffer List*"
+                (package-host-create-buffer!
+                  host (buffer-list-service-owner service) "*Buffer List*"
                   (make-document "") (buffer-list-configuration service))))])
       (unless (hashtable-ref (buffer-list-service-lists service) (buffer-id buffer) #f)
         (hashtable-set! (buffer-list-service-lists service) (buffer-id buffer)
@@ -141,16 +136,13 @@
       (if (= (buffer-id buffer) (command-context-buffer-id context))
           buffer
           (let ([view
-                 (view-service-create!
-                   views (buffer-list-service-owner service) buffer
+                 (package-host-create-view!
+                   host (buffer-list-service-owner service) buffer
                    (buffer-state-configuration (buffer-state buffer)))])
             (unless
-              (dispatcher-dispatch-host!
-                (host-state-dispatch state)
-                (make-replace-window-view-operation
-                  (command-context-surface-id context)
-                  (command-context-window-id context) (view-id view)))
-              (view-service-close-view! views (view-id view))
+              (package-host-replace-window-view!
+                host (command-context-surface-id context)
+                (command-context-window-id context) (view-id view))
               (assertion-violation 'buffer.list
                                    "origin Window is no longer available" context))
             buffer))))
@@ -158,43 +150,38 @@
   (define (refresh-buffer-list! service request)
     (let* ([context (buffer-list-refresh-request-context request)]
            [buffer
-            (buffer-service-ref (host-state-buffers (buffer-list-service-state service))
+            (package-host-buffer-ref (buffer-list-service-host service)
                                 (command-context-buffer-id context) #f)])
       (and buffer (publish-buffer-list! service buffer))))
 
   (define (visit-buffer! service item context ignored)
     (let* ([target-id (buffer-item-payload item)]
-           [state (buffer-list-service-state service)]
-           [target (buffer-service-ref (host-state-buffers state) target-id #f)])
+           [host (buffer-list-service-host service)]
+           [target (package-host-buffer-ref host target-id #f)])
       (if (or (not target) (= target-id (command-context-buffer-id context)))
           (command-handled)
-          (let* ([views (host-state-views state)]
-                 [view
-                  (view-service-create!
-                    views (buffer-list-service-owner service) target
+          (let* ([view
+                  (package-host-create-view!
+                    host (buffer-list-service-owner service) target
                     (buffer-state-configuration (buffer-state target)))])
             (unless
-              (dispatcher-dispatch-host!
-                (host-state-dispatch state)
-                (make-replace-window-view-operation
-                  (command-context-surface-id context)
-                  (command-context-window-id context) (view-id view)))
-              (view-service-close-view! views (view-id view))
+              (package-host-replace-window-view!
+                host (command-context-surface-id context)
+                (command-context-window-id context) (view-id view))
               (assertion-violation 'buffer-list.visit
                                    "origin Window is no longer available" context))
             (command-handled)))))
 
   (define (close-buffer! service item context ignored)
     (let ([target-id (buffer-item-payload item)])
-      (if (not (buffer-service-ref
-                 (host-state-buffers (buffer-list-service-state service)) target-id #f))
+      (if (not (package-host-buffer-ref (buffer-list-service-host service) target-id #f))
           (command-handled)
           (begin
             ;; The File package owns save decisions and close replacement.
             ;; Preserve the result Buffer's context while passing the selected
             ;; Buffer as an explicit command target.
             (command-runtime-enqueue!
-              (host-state-command-runtime (buffer-list-service-state service))
+              (package-host-command-runtime (buffer-list-service-host service))
               (make-command-invoke-message 'file.close context (list target-id) #t))
             (command-handled)))))
 
@@ -211,19 +198,19 @@
               (command-handled))
           (command-handled))))
 
-  (define (make-buffer-list-service! state owner history actions)
-    (unless (and (host-state? state) (owner? owner) (history? history)
+  (define (make-buffer-list-service! host owner history actions)
+    (unless (and (package-host? host) (owner? owner) (history? history)
                  (buffer-item-action-service? actions))
       (assertion-violation 'make-buffer-list-service!
                            "expected HostState, owner, History, and BufferItem actions"
-                           state owner history actions))
-    (let* ([runtime (host-state-command-runtime state)]
+                           host owner history actions))
+    (let* ([runtime (package-host-command-runtime host)]
            [keymap (make-keymap 'buffer-list)]
            [result-keymap (make-keymap 'buffer-list-result)]
            [authority (make-edit-authority owner 'buffer-list-refresh)]
            [service
             (%make-buffer-list-service
-              state owner history actions keymap result-keymap authority (make-eqv-hashtable))])
+              host owner history actions keymap result-keymap authority (make-eqv-hashtable))])
       (keymap-bind! keymap (list (control-stroke #\x) (control-stroke #\b)) 'buffer.list)
       (keymap-bind! result-keymap (list (make-key-stroke 'enter #f 0)) 'buffer.activate-item)
       (keymap-bind! result-keymap (list (make-key-stroke 'character (char->integer #\g) 0))
@@ -268,8 +255,8 @@
           'buffer-list.close-item
           (lambda (context) (close-item-at-point! service context))
           owner "Close the Buffer item at point." 'buffer #f))
-      (buffer-service-add-close-listener!
-        (host-state-buffers state) owner
+      (package-host-add-buffer-close-listener!
+        host owner
         (lambda (buffer)
           (hashtable-delete! (buffer-list-service-lists service) (buffer-id buffer))))
       service))

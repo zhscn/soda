@@ -11,15 +11,13 @@
           (soda kernel state)
           (soda host command)
           (soda host command-runtime)
-          (soda host dispatch)
-          (soda host internal buffer)
-          (soda host internal operation)
-          (soda host internal state)
-          (soda host internal view)
+          (soda host buffer)
+          (soda host package)
           (soda host input)
           (soda host input-event)
           (soda host operation)
           (soda host value)
+          (soda host view)
           (soda packages buffer-ui)
           (soda packages file)
           (soda packages resource)
@@ -31,7 +29,7 @@
   ;; input loop.
   (define-record-type
     (directory-service %make-directory-service directory-service?)
-    (fields state owner files actions keymap result-keymap authority directories))
+    (fields host owner files actions keymap result-keymap authority directories))
 
   (define-record-type directory-state
     (fields path (mutable generation directory-state-generation directory-state-generation-set!)))
@@ -136,8 +134,8 @@
                   [update
                    (make-projection-update generation (car layout) (cdr layout) '() '())]
                   [published
-                   (dispatcher-dispatch!
-                     (host-state-dispatch (directory-service-state service))
+                   (package-host-dispatch!
+                     (directory-service-host service)
                      (make-projection-transaction-spec
                        (buffer-id buffer) #f (buffer-state buffer) update
                        (list (make-edit-authority-annotation
@@ -146,11 +144,9 @@
                   (begin (directory-state-generation-set! state generation) published))))))
 
   (define (show-directory-error! service context path)
-    (dispatcher-dispatch-host!
-      (host-state-dispatch (directory-service-state service))
-      (make-set-surface-message-operation
-        (command-context-surface-id context)
-        (string-append "Not a readable directory: " path))))
+    (package-host-set-surface-message!
+      (directory-service-host service) (command-context-surface-id context)
+      (string-append "Not a readable directory: " path)))
 
   (define (directory-buffer-key path)
     (make-buffer-key 'directory path))
@@ -161,15 +157,13 @@
            [path (normalize-directory requested)])
       (if (not path)
           (show-directory-error! service context requested)
-          (let* ([state (directory-service-state service)]
-                 [buffers (host-state-buffers state)]
-                 [views (host-state-views state)]
+          (let* ([host (directory-service-host service)]
                  [buffer
-                  (buffer-service-open-or-create!
-                    buffers (directory-service-owner service) (directory-buffer-key path)
+                  (package-host-open-or-create-buffer!
+                    host (directory-service-owner service) (directory-buffer-key path)
                     (lambda ()
-                      (buffer-service-create!
-                        buffers (directory-service-owner service)
+                      (package-host-create-buffer!
+                        host (directory-service-owner service)
                         (string-append "*Directory: " path "*")
                         (make-document "") (directory-configuration service))))]
                  [directory-state
@@ -180,16 +174,13 @@
                               (buffer-id buffer) directory-state)
               (publish-directory! service buffer))
             (let ([view
-                   (view-service-create!
-                     views (directory-service-owner service) buffer
+                   (package-host-create-view!
+                     host (directory-service-owner service) buffer
                      (buffer-state-configuration (buffer-state buffer)))])
               (unless
-                (dispatcher-dispatch-host!
-                  (host-state-dispatch state)
-                  (make-replace-window-view-operation
-                    (command-context-surface-id context)
-                    (command-context-window-id context) (view-id view)))
-                (view-service-close-view! views (view-id view))
+                (package-host-replace-window-view!
+                  host (command-context-surface-id context)
+                  (command-context-window-id context) (view-id view))
                 (assertion-violation 'directory.browse
                                      "origin Window is no longer available" context))
               buffer)))))
@@ -197,13 +188,13 @@
   (define (refresh-directory! service request)
     (let* ([context (directory-refresh-request-context request)]
            [buffer
-            (buffer-service-ref (host-state-buffers (directory-service-state service))
+            (package-host-buffer-ref (directory-service-host service)
                                 (command-context-buffer-id context) #f)])
       (and buffer (publish-directory! service buffer))))
 
   (define (activate-directory-entry! service item context ignored)
     (let ([entry (buffer-item-payload item)]
-          [runtime (host-state-command-runtime (directory-service-state service))])
+          [runtime (package-host-command-runtime (directory-service-host service))])
       (if (not (directory-entry? entry))
           (command-handled)
           (begin
@@ -216,19 +207,19 @@
                 context (list (directory-entry-path entry)) #f))
             (command-handled)))))
 
-  (define (make-directory-service! state owner files actions)
-    (unless (and (host-state? state) (owner? owner) (file-service? files)
+  (define (make-directory-service! host owner files actions)
+    (unless (and (package-host? host) (owner? owner) (file-service? files)
                  (buffer-item-action-service? actions))
       (assertion-violation 'make-directory-service!
                            "expected HostState, owner, file service, and BufferItem actions"
-                           state owner files actions))
-    (let* ([runtime (host-state-command-runtime state)]
+                           host owner files actions))
+    (let* ([runtime (package-host-command-runtime host)]
            [keymap (make-keymap 'directory)]
            [result-keymap (make-keymap 'directory-result)]
            [authority (make-edit-authority owner 'directory-refresh)]
            [service
             (%make-directory-service
-              state owner files actions keymap result-keymap authority (make-eqv-hashtable))])
+              host owner files actions keymap result-keymap authority (make-eqv-hashtable))])
       (keymap-bind! keymap (list (control-stroke #\x) (control-stroke #\d)) 'directory.browse)
       (keymap-bind! result-keymap (list (make-key-stroke 'enter #f 0)) 'buffer.activate-item)
       (keymap-bind! result-keymap (list (control-stroke #\g)) 'file.close)
@@ -269,8 +260,8 @@
           (lambda (context)
             (make-command-effect 'directory.refresh (make-directory-refresh-request context)))
           owner "Refresh the directory entries in the current Directory Buffer." 'directory #f))
-      (buffer-service-add-close-listener!
-        (host-state-buffers state) owner
+      (package-host-add-buffer-close-listener!
+        host owner
         (lambda (buffer)
           (hashtable-delete! (directory-service-directories service) (buffer-id buffer))))
       service))
