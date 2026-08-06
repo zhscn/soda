@@ -109,6 +109,18 @@
             (input-dispatch
               context (make-key-event 'character (char->integer #\u) #f #f 4 'press
                                       (make-bytevector 0)))]
+           [cut-text
+            (input-dispatch
+              context (make-key-event 'character (char->integer #\k) #f #f 4 'press
+                                      (make-bytevector 0)))]
+           [justify
+            (input-dispatch
+              context (make-key-event 'character (char->integer #\j) #f #f 4 'press
+                                      (make-bytevector 0)))]
+           [set-mark
+            (input-dispatch
+              context (make-key-event 'character (char->integer #\6) #f #f 4 'press
+                                      (make-bytevector 0)))]
            [file-map (file-keymap (soda-application-files application))])
       (unless (and (eq? (command-invocation-phase inserted) 'completed)
                    (eq? (command-invocation-phase backward) 'completed)
@@ -130,6 +142,9 @@
                    (eq? (input-disposition-value undo) 'history.undo)
                    (eq? (input-disposition-value redo) 'history.redo)
                    (eq? (input-disposition-value uncut) 'fundamental.yank)
+                   (eq? (input-disposition-value cut-text) 'fundamental.cut-text)
+                   (eq? (input-disposition-value justify) 'fundamental.fill-paragraph)
+                   (eq? (input-disposition-value set-mark) 'fundamental.set-mark)
                    (eq? (keymap-lookup
                           file-map
                           (list (make-key-stroke 'character (char->integer #\o) 4)))
@@ -140,6 +155,35 @@
                          'file.revert))
         (error 'fundamental-editing-tests
                "fundamental editing did not produce stable editor state"))
+      (soda-application-close! application))
+
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [runtime (host-state-command-runtime state)]
+           [buffer (soda-application-buffer application)]
+           [view (soda-application-view application)])
+      (command-runtime-start! runtime 'fundamental.insert-text
+                              (application-command-context application)
+                              (list (string->utf8 "first\nsecond\nthird")))
+      (command-runtime-start! runtime 'fundamental.goto-line
+                              (application-command-context application) (list 2 3))
+      (command-runtime-start! runtime 'fundamental.cut-text
+                              (application-command-context application))
+      (unless (and (string=? (buffer-string buffer) "first\nthird")
+                   (= (selection-range-head
+                        (selection-primary-range (view-state-selection (view-state view))))
+                      6))
+        (error 'fundamental-editing-tests
+               "cut-text did not cut the complete current logical line"))
+      (command-runtime-start! runtime 'fundamental.set-mark
+                              (application-command-context application))
+      (command-runtime-start! runtime 'fundamental.forward-char
+                              (application-command-context application))
+      (command-runtime-start! runtime 'fundamental.cut-text
+                              (application-command-context application))
+      (unless (string=? (buffer-string buffer) "first\nhird")
+        (error 'fundamental-editing-tests
+               "cut-text did not preserve active-region semantics"))
       (soda-application-close! application))
 
     (let* ([application (make-soda-application)]

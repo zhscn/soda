@@ -757,6 +757,30 @@
                              (text-next-grapheme-offset text point))])
                 (kill-range context range point to)))))))
 
+  ;; Nano's Cut Text command operates on the whole logical line when there is
+  ;; no active region.  Keep it separate from `kill-line`: packages that want
+  ;; Emacs-style kill-to-end-of-line retain that reusable primitive.
+  (define (cut-text context)
+    (let ([range (selection-primary-range (context-selection context))])
+      (if (not (selection-range-empty? range))
+          (kill-region context)
+          (with-context-text
+            context
+            (lambda (text)
+              (let* ([point (selection-range-head range)]
+                     [line (car (text-position text point))]
+                     [from (text-line-start text line)]
+                     [content-end (text-line-content-end text line)]
+                     [size (text-size text)]
+                     ;; Include the line terminator when one exists.  This
+                     ;; makes cutting a middle line leave its neighbours
+                     ;; adjacent, while a final unterminated line remains a
+                     ;; valid empty Buffer.
+                     [to (if (< content-end size)
+                             (text-next-grapheme-offset text content-end)
+                             content-end)])
+                (kill-range context range from to)))))))
+
   (define (yank context editing)
     (let ([ring (fundamental-editing-kill-ring editing)])
       (if (null? ring)
@@ -919,6 +943,10 @@
         "Kill the active region or text through the next logical line boundary." 'kill
         (kill-line context))
       (install-command!
+        runtime owner 'fundamental.cut-text (context)
+        "Cut the active region, or the current logical line when no region is active." 'kill
+        (cut-text context))
+      (install-command!
         runtime owner 'fundamental.yank (context)
         "Insert the newest kill-ring entry at every selection." 'yank
         (yank context editing))
@@ -929,14 +957,17 @@
         ((list (control-stroke #\e)) 'fundamental.end-of-line)
         ((list (control-stroke #\p)) 'fundamental.previous-line)
         ((list (control-stroke #\n)) 'fundamental.next-line)
+        ((list (control-stroke #\j)) 'fundamental.fill-paragraph)
         ((list (control-stroke #\t)) 'fundamental.transpose-characters)
         ((list (control-stroke #\v)) 'fundamental.scroll-down)
         ((list (make-key-stroke 'character (char->integer #\space) 4)) 'fundamental.set-mark)
+        ((list (control-stroke #\6)) 'fundamental.set-mark)
+        ((list (control-stroke #\^)) 'fundamental.set-mark)
         ((list (control-stroke #\w)) 'fundamental.kill-region)
         ((list (control-stroke #\y)) 'fundamental.yank)
         ((list (control-stroke #\u)) 'fundamental.yank)
         ((list (control-stroke #\o)) 'fundamental.open-line)
-        ((list (control-stroke #\k)) 'fundamental.kill-line)
+        ((list (control-stroke #\k)) 'fundamental.cut-text)
         ((list (make-key-stroke 'character (char->integer #\b) 2)) 'fundamental.backward-word)
         ((list (make-key-stroke 'character (char->integer #\f) 2)) 'fundamental.forward-word)
         ((list (make-key-stroke 'character (char->integer #\w) 2)) 'fundamental.copy-region)
