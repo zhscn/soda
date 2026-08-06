@@ -162,6 +162,11 @@ buffer-update-listeners  post-publication observers
 Facet output 是由 configuration 派生的只读结果。命令和 presenter 查询 Facet，不根据
 buffer name、package type 或 major mode symbol 分支。
 
+编辑选项使用与 mode 相同的声明式边界。自动缩进是 Buffer scope `auto-indent` Facet，因而
+新建的 file Buffer 可以继承来源 Buffer 的行为；soft wrap 与 tab width 是 View scope
+`text-layout-options` Facet，同一 Buffer 的不同 View 可以采用不同布局。选项的交互命令只
+提交对应 Compartment 的重配置 effect，不维护平行的全局可变设置表。
+
 ### Compartment
 
 需要在 Buffer 生命周期内替换的一组 extension 使用 Buffer scope `Compartment`：
@@ -171,6 +176,9 @@ buffer name、package type 或 major mode symbol 分支。
 - generated / editable projection mode；
 - language profile；
 - Buffer 级 display policy。
+
+View scope Compartment 适用于仅影响单个显示位置的设置，例如 soft wrap、tab width、cursor
+style 和临时 display profile。它们由 ViewTransaction 重配置，不改变共享 BufferState。
 
 切换 mode 是一次 configuration transaction。旧 StateField 的销毁、新 StateField 的创建、
 Facet 重算和 ViewPlugin reconciliation 在同一 publication boundary 发生。

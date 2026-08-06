@@ -7,11 +7,13 @@
   (import (rnrs)
           (soda kernel change)
           (soda kernel document)
+          (soda kernel extension)
           (soda kernel selection)
           (soda kernel state)
           (soda kernel view-state)
           (soda kernel viewport)
           (soda packages base text-motion)
+          (soda packages base editing-options)
           (soda host command)
           (soda host command-runtime)
           (soda host context)
@@ -128,6 +130,66 @@
         (command-context-view-id context)
         (buffer-state-generation (command-context-buffer-state context))
         change-set next-selection '() '())))
+
+  (define (append-bytevectors left right)
+    (let* ([left-length (bytevector-length left)]
+           [right-length (bytevector-length right)]
+           [result (make-bytevector (+ left-length right-length))])
+      (bytevector-copy! left 0 result 0 left-length)
+      (bytevector-copy! right 0 result left-length right-length)
+      result))
+
+  (define (line-indentation text point)
+    (let* ([line (car (text-position text point))]
+           [start (text-line-start text line)]
+           [end (text-line-content-end text line)])
+      (let loop ([offset start])
+        (if (and (< offset end)
+                 (memv (text-byte-at text offset) '(9 32)))
+            (loop (+ offset 1))
+            (text-subbytevector text start offset)))))
+
+  ;; Newline retains each caret's own leading indentation.  It is a single
+  ;; transaction even for multiple selections, so history and listeners see
+  ;; one editing operation rather than an inserted newline followed by edits.
+  (define (insert-newline context)
+    (if (not (auto-indent-enabled?
+               (buffer-state-configuration (command-context-buffer-state context))))
+        (replace-selection context (string->utf8 "\n"))
+        (with-context-text
+          context
+          (lambda (text)
+            (let* ([selection (context-selection context)]
+                   [length (context-document-length context)]
+                   [changes
+                    (map
+                      (lambda (range)
+                        (let ([inserted
+                               (append-bytevectors
+                                 (string->utf8 "\n")
+                                 (line-indentation text
+                                                   (selection-range-head range)))])
+                          (make-text-change
+                            (selection-range-from range)
+                            (selection-range-to range)
+                            inserted)))
+                      (selection-ranges selection))]
+                   [change-set (make-change-set length changes)]
+                   [next-selection
+                    (make-selection
+                      (map
+                        (lambda (range)
+                          (collapse-range
+                            range
+                            (change-set-map-offset
+                              change-set (selection-range-to range) 'after)))
+                        (selection-ranges selection))
+                      (selection-primary selection))])
+              (make-transaction-spec
+                (command-context-buffer-id context)
+                (command-context-view-id context)
+                (buffer-state-generation (command-context-buffer-state context))
+                change-set next-selection '() '()))))))
 
   ;; `open-line` is deliberately distinct from newline: it inserts before
   ;; each caret and maps that caret with before affinity, so typing continues
@@ -818,8 +880,8 @@
         (replace-selection context inserted))
       (install-command!
         runtime owner 'fundamental.newline (context)
-        "Insert a newline at every selection." 'editing
-        (replace-selection context (string->utf8 "\n")))
+        "Insert a newline and preserve leading indentation at every selection." 'editing
+        (insert-newline context))
       (install-command!
         runtime owner 'fundamental.open-line (context)
         "Insert a newline before every caret without moving it." 'editing

@@ -6,6 +6,7 @@
           soda-application-view
           soda-application-surface
           soda-application-editing
+          soda-application-options
           soda-application-history
           soda-application-files
           soda-application-directories
@@ -35,6 +36,7 @@
           (soda host value)
           (soda packages base fundamental-editing)
           (soda packages base history)
+          (soda packages editor-options)
           (soda packages file)
           (soda packages directory)
           (soda packages buffer-list)
@@ -61,6 +63,7 @@
       (immutable view soda-application-view)
       (immutable surface soda-application-surface)
       (immutable editing soda-application-editing)
+      (immutable options soda-application-options)
       (immutable history soda-application-history)
       (immutable files soda-application-files)
       (immutable directories soda-application-directories)
@@ -111,6 +114,9 @@
                [editing
                 (make-fundamental-editing!
                   (host-state-command-runtime state) owner)]
+               [options
+                (make-editor-options-service!
+                  (host-state-command-runtime state) owner)]
                [history
                 (make-history! (host-state-command-runtime state)
                                (host-state-dispatch state) owner)]
@@ -133,7 +139,7 @@
           (surface-service-register! (host-state-surfaces state) surface)
           (history-mark-saved! history (buffer-id buffer))
           (%make-soda-application
-            state owner buffer view surface editing history files directories processes spelling messages search interaction minibuffer buffer-item-actions buffer-lists
+            state owner buffer view surface editing options history files directories processes spelling messages search interaction minibuffer buffer-item-actions buffer-lists
             #f #f #f)))))
 
   (define (require-open who application)
@@ -245,6 +251,10 @@
           (buffer-input-context
             active view
             (list
+              (make-input-layer
+                'editor-options
+                (editor-options-keymap (soda-application-options application))
+                #f 'pass)
               (make-input-layer
                 'search
                 (search-keymap (soda-application-search application))

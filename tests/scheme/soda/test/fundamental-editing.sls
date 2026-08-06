@@ -26,11 +26,13 @@
           (soda kernel view-state)
           (soda kernel viewport)
           (soda packages base fundamental-editing)
+          (soda packages base editing-options)
           (soda packages base history)
           (soda packages base text-motion)
           (soda packages completion)
           (soda packages file)
           (soda packages directory)
+          (soda packages editor-options)
           (soda packages buffer-list)
           (soda packages search)
           (soda packages message)
@@ -1337,6 +1339,46 @@
                "trailing newline caret did not remain on its empty line"))
       (snapshot-close! snapshot)
       (document-close! document))
+
+    ;; Editing options are immutable state contributions: auto-indent follows
+    ;; the Buffer across commands, while layout choices remain View-local.
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [runtime (host-state-command-runtime state)]
+           [buffer (soda-application-buffer application)]
+           [view (soda-application-view application)]
+           [options (soda-application-options application)])
+      (command-runtime-start!
+        runtime 'fundamental.insert-text (application-command-context application)
+        (list (string->utf8 "\talpha")))
+      (command-runtime-start!
+        runtime 'fundamental.newline (application-command-context application))
+      (unless (string=? (buffer-string buffer) "\talpha\n\t")
+        (error 'fundamental-editing-tests
+               "auto-indent did not preserve leading whitespace on newline"))
+      (command-runtime-start!
+        runtime 'editor.toggle-auto-indent (application-command-context application))
+      (command-runtime-start!
+        runtime 'fundamental.newline (application-command-context application))
+      (command-runtime-start!
+        runtime 'editor.toggle-soft-wrap (application-command-context application))
+      (command-runtime-start!
+        runtime 'editor.set-tab-width (application-command-context application) (list 4))
+      (let ([layout
+             (configuration-facet (view-state-configuration (view-state view))
+                                  text-layout-options-facet 'view)])
+        (unless (and (string=? (buffer-string buffer) "\talpha\n\t\n")
+                     (not (auto-indent-enabled?
+                            (buffer-state-configuration (buffer-state buffer))))
+                     (not (text-layout-options-wrap? layout))
+                     (= (text-layout-options-tab-width layout) 4)
+                     (eq? (keymap-lookup
+                            (editor-options-keymap options)
+                            (list (make-key-stroke 'character (char->integer #\i) 2)))
+                          'editor.toggle-auto-indent))
+          (error 'fundamental-editing-tests
+                 "editing option scope or reconfiguration is incorrect")))
+      (soda-application-close! application))
 
     (let ([text (string->text "alpha _β gamma\nline")])
       (unless (and (= (text-forward-word-offset text 0) 5)
