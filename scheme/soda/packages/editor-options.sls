@@ -9,6 +9,7 @@
           (soda kernel state)
           (soda kernel view-state)
           (soda packages base editing-options)
+          (soda packages buffer-ui)
           (soda packages interaction)
           (soda host command)
           (soda host command-runtime)
@@ -52,6 +53,18 @@
       (reconfigure-buffer-option
         context effect
         (string-append "Auto-indent " (if enabled? "disabled" "enabled")))))
+
+  (define (toggle-read-only context)
+    (let* ([configuration
+            (buffer-state-configuration (command-context-buffer-state context))]
+           [enabled? (buffer-read-only? configuration)]
+           [effect
+            (make-compartment-reconfigure-effect
+              buffer-read-only-compartment
+              (make-buffer-read-only-extension (not enabled?)))])
+      (reconfigure-buffer-option
+        context effect
+        (string-append "Buffer is " (if enabled? "editable" "read-only")))))
 
   (define (reconfigure-buffer-option context effect message)
     (result-with-message
@@ -173,6 +186,10 @@
         "Toggle automatic leading indentation for the active Buffer."
         (lambda (context) (reconfigure-auto-indent context)))
       (install-command!
+        runtime owner 'editor.toggle-read-only
+        "Toggle whether ordinary commands may change the active Buffer."
+        (lambda (context) (toggle-read-only context)))
+      (install-command!
         runtime owner 'editor.toggle-soft-wrap
         "Toggle visual line wrapping for the active View."
         (lambda (context) (toggle-soft-wrap context)))
@@ -191,6 +208,7 @@
         (lambda (context width) (set-tab-width context width))
         (list (make-tab-width-reader)))
       (keymap-bind! keymap (list (meta-stroke #\i)) 'editor.toggle-auto-indent)
+      (keymap-bind! keymap (list (meta-stroke #\R)) 'editor.toggle-read-only)
       (keymap-bind! keymap (list (meta-stroke #\E)) 'editor.toggle-tab-to-spaces)
       (keymap-bind! keymap (list (meta-stroke #\T)) 'editor.set-indent-width)
       (keymap-bind! keymap (list (meta-stroke #\$)) 'editor.toggle-soft-wrap)

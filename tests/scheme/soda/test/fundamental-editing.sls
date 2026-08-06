@@ -33,6 +33,7 @@
           (soda packages file)
           (soda packages directory)
           (soda packages editor-options)
+          (soda packages buffer-ui)
           (soda packages buffer-list)
           (soda packages search)
           (soda packages message)
@@ -1485,9 +1486,32 @@
                      (eq? (keymap-lookup
                             (editor-options-keymap options)
                             (list (make-key-stroke 'character (char->integer #\E) 2)))
-                          'editor.toggle-tab-to-spaces))
+                          'editor.toggle-tab-to-spaces)
+                     (eq? (keymap-lookup
+                            (editor-options-keymap options)
+                            (list (make-key-stroke 'character (char->integer #\R) 2)))
+                          'editor.toggle-read-only))
           (error 'fundamental-editing-tests
                  "editing option scope or reconfiguration is incorrect")))
+      (command-runtime-start!
+        runtime 'editor.toggle-read-only (application-command-context application))
+      (command-runtime-start!
+        runtime 'fundamental.insert-text (application-command-context application)
+        (list (string->utf8 "blocked")))
+      (unless (and (buffer-read-only? (buffer-state-configuration (buffer-state buffer)))
+                   (string=? (buffer-string buffer) "\talpha\n\t\n  "))
+        (error 'fundamental-editing-tests
+               "read-only option did not reject a normal editing command"))
+      (command-runtime-start!
+        runtime 'editor.toggle-read-only (application-command-context application))
+      (command-runtime-start!
+        runtime 'fundamental.insert-text (application-command-context application)
+        (list (string->utf8 "editable")))
+      (unless (and (not (buffer-read-only?
+                          (buffer-state-configuration (buffer-state buffer))))
+                   (string=? (buffer-string buffer) "\talpha\n\t\n  editable"))
+        (error 'fundamental-editing-tests
+               "read-only option did not restore normal editing"))
       (soda-application-close! application))
 
     (let ([text (string->text "alpha _β gamma\nline")])

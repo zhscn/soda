@@ -10,6 +10,9 @@
           buffer-mode-facet
           buffer-input-layers-facet
           buffer-edit-policies-facet
+          buffer-read-only-facet
+          buffer-read-only-compartment
+          buffer-read-only?
           buffer-display-profile-facet
           buffer-item-ranges-facet
           buffer-update-listeners-facet
@@ -17,6 +20,7 @@
           make-buffer-input-layer-extension
           buffer-input-context
           make-buffer-display-profile-extension
+          make-buffer-read-only-extension
           make-edit-authority
           edit-authority?
           make-edit-authority-annotation
@@ -94,6 +98,16 @@
     (make-facet 'buffer-input-layers 'buffer '() append-values equal? equal?))
   (define buffer-edit-policies-facet
     (make-facet 'buffer-edit-policies 'buffer '() append-values eq? eq?))
+  ;; Read-only is an ordinary Buffer configuration contribution.  The facet
+  ;; is descriptive so chrome and commands can report the state; the paired
+  ;; EditPolicy is authoritative and rejects all unprivileged content changes.
+  ;; Generated packages can install their own policy independently, so turning
+  ;; this user-facing option off never grants write access to a Dired/result
+  ;; Buffer.
+  (define buffer-read-only-facet
+    (make-facet 'buffer-read-only 'buffer #f first-value eq? eq?))
+  (define buffer-read-only-compartment
+    (make-compartment 'buffer-read-only 'buffer))
   (define buffer-display-profile-facet
     (make-facet 'buffer-display-profile 'buffer '() append-values equal? equal?))
   (define buffer-item-ranges-facet
@@ -171,6 +185,9 @@
                            "display profile contributions must be a list" contributions))
     (make-facet-provider buffer-display-profile-facet (list-copy contributions)))
 
+  (define (buffer-read-only? configuration)
+    (configuration-facet configuration buffer-read-only-facet 'buffer))
+
   ;; Edit authority is an owner-scoped capability carried in an annotation.
   ;; It lets a producer refresh a protected/generated Buffer without granting
   ;; unrestricted write access to unrelated commands.
@@ -234,6 +251,16 @@
     (let ([filter (lambda (state transaction) (apply-edit-policy policy transaction))])
       (list (make-facet-provider buffer-edit-policies-facet (list policy))
             (make-facet-provider transaction-filters-facet (list filter)))))
+
+  (define (make-buffer-read-only-extension enabled?)
+    (unless (boolean? enabled?)
+      (assertion-violation 'make-buffer-read-only-extension
+                           "expected a read-only boolean" enabled?))
+    (append
+      (list (make-facet-provider buffer-read-only-facet enabled?))
+      (if enabled?
+          (make-buffer-edit-policy-extension (make-buffer-edit-policy 'reject))
+          '())))
 
   (define-record-type
     (buffer-item %make-buffer-item buffer-item?)

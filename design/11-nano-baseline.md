@@ -35,7 +35,7 @@ Soda 保持自己的 Buffer、View 与 command 抽象。Nano 的命令名称和�
 | 行缩进/反缩进、自动缩进与 paragraph fill | 已实现 |
 | 可配置 tab-to-spaces 与 indent unit | 已实现 |
 | 自动 hard wrap | 未实现 |
-| 只读编辑策略与受保护 Buffer 内容 | 部分实现 |
+| 只读编辑策略与受保护 Buffer 内容 | 已实现 |
 
 ### 查找与工具
 
