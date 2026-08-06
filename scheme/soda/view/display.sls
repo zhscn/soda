@@ -130,15 +130,21 @@
                      (>= (display-map-entry-cell-from next)
                          (display-map-entry-cell-to previous))
                      (loop next (cdr rest))))))))
+  ;; Document and cell order share the same monotonic entry sequence.  One
+  ;; vector therefore serves both binary-search projections; retaining a
+  ;; second index only duplicates every DisplayMap entry.
   (define-record-type (display-map %make-display-map display-map?)
-    (fields entries document-index cell-index))
+    (fields index))
   (define (make-display-map entries)
     (unless (and (list? entries) (for-all display-map-entry? entries)
                  (entries-ordered? entries))
       (assertion-violation 'make-display-map
                            "entries must be ordered, non-overlapping map entries" entries))
-    (let ([copy (list-copy entries)])
-      (%make-display-map copy (list->vector copy) (list->vector copy))))
+    (%make-display-map (list->vector entries)))
+  (define (display-map-entries map)
+    (unless (display-map? map)
+      (assertion-violation 'display-map-entries "expected a DisplayMap" map))
+    (vector->list (display-map-index map)))
   (define (vector-lower-bound index accessor value)
     (let loop ([low 0] [high (vector-length index)])
       (if (= low high) low
@@ -156,7 +162,7 @@
            (list (display-map-entry-cell-to entry))]
           [else '()]))
   (define (document-boundary-cells map offset)
-    (let* ([index (display-map-document-index map)]
+    (let* ([index (display-map-index map)]
            [start (vector-lower-bound index display-map-entry-document-from offset)])
       (let backwards ([position (- start 1)] [result '()])
         (if (or (negative? position)
@@ -186,7 +192,7 @@
     (unless (and (display-map? map) (offset? cell))
       (assertion-violation 'display-map-cell->document "expected a DisplayMap and cell offset"
                            map cell))
-    (let* ([index (display-map-cell-index map)]
+    (let* ([index (display-map-index map)]
            [position (vector-lower-bound index display-map-entry-cell-to (+ cell 1))])
       (and (< position (vector-length index))
            (let ([entry (vector-ref index position)])
@@ -196,7 +202,7 @@
   (define (display-map-document-range map from to)
     (unless (and (display-map? map) (offset? from) (offset? to) (<= from to))
       (assertion-violation 'display-map-document-range "invalid document range" map from to))
-    (let* ([index (display-map-document-index map)]
+    (let* ([index (display-map-index map)]
            [first (max 0 (- (vector-lower-bound index display-map-entry-document-from from) 1))])
       (let loop ([position first] [result '()])
         (if (or (= position (vector-length index))
@@ -218,7 +224,7 @@
   (define (display-map-cell-range map from to)
     (unless (and (display-map? map) (offset? from) (offset? to) (<= from to))
       (assertion-violation 'display-map-cell-range "invalid cell range" map from to))
-    (let* ([index (display-map-cell-index map)]
+    (let* ([index (display-map-index map)]
            [first (max 0 (- (vector-lower-bound index display-map-entry-cell-from from) 1))])
       (let loop ([position first] [result '()])
         (if (or (= position (vector-length index))
