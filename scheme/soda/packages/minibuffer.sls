@@ -24,6 +24,8 @@
           minibuffer-service-cancel!)
   (import (rnrs)
           (soda kernel document)
+          (soda kernel extension)
+          (soda kernel range-set)
           (soda kernel selection)
           (soda kernel state)
           (soda kernel view-state)
@@ -38,7 +40,10 @@
           (soda host internal view)
           (soda host value)
           (soda packages interaction)
-          (soda packages completion))
+          (soda packages completion)
+          (soda view decoration)
+          (soda view display)
+          (soda view plugin))
 
   ;; Prompt buffers are ordinary transient buffers.  The service owns only
   ;; their session stack and its interaction overlay placement.
@@ -59,6 +64,45 @@
             (mutable setup-hooks minibuffer-service-setup-hooks minibuffer-service-setup-hooks-set!)
             (mutable exit-hooks minibuffer-service-exit-hooks minibuffer-service-exit-hooks-set!)
             (mutable registration minibuffer-service-registration minibuffer-service-registration-set!)))
+
+  ;; Prompt chrome is virtual View content, never part of the transient
+  ;; Document.  Commands consequently receive exactly the text the user
+  ;; entered, while DisplayMap still places the caret after the prompt.
+  (define minibuffer-view-compartment
+    (make-compartment 'minibuffer-view 'view))
+
+  (define (minibuffer-input-decorations value)
+    (let* ([view (car value)]
+           [snapshot
+            (buffer-state-document (buffer-state (view-buffer view)))]
+           [length (snapshot-byte-size snapshot)])
+      (if (zero? length)
+          (make-decoration-set '())
+          (make-decoration-set
+            (list
+              (make-range-value
+                0 length (make-face-decoration 'minibuffer.input 0)))))))
+
+  (define (make-minibuffer-prompt-plugin prompt)
+    (make-view-plugin
+      'minibuffer-prompt
+      (lambda (view) (cons view prompt))
+      #f #f minibuffer-input-decorations #f
+      (lambda (value)
+        (lambda (stream)
+          (display-stream-insert
+            stream 0
+            (list
+              (make-display-text (cdr value) 0 0 'minibuffer.prompt
+                                 (list 'minibuffer 'prompt))))))))
+
+  (define (minibuffer-configuration base request)
+    (configuration-reconfigure
+      base minibuffer-view-compartment
+      (make-facet-provider
+        view-plugins-facet
+        (list (make-minibuffer-prompt-plugin
+                (interaction-request-prompt request))))))
 
   (define (session-for service interaction)
     (let loop ([sessions (minibuffer-service-sessions service)])
@@ -145,8 +189,10 @@
            [origin (view-service-ref (host-state-views state) (command-context-view-id context) #f)]
            [surface (origin-surface service interaction)])
       (when (and origin surface)
-        (let* ([configuration (view-state-configuration (view-state origin))]
-               [request (interaction-session-request interaction)]
+        (let* ([request (interaction-session-request interaction)]
+               [configuration
+                (minibuffer-configuration
+                  (view-state-configuration (view-state origin)) request)]
                [document (make-document (or (interaction-request-initial-value request) ""))]
                [buffer (buffer-service-create! (host-state-buffers state) (minibuffer-service-owner service)
                                                " *minibuffer*" document configuration)]

@@ -17,6 +17,7 @@
           (soda kernel change)
           (soda kernel document)
           (soda kernel extension)
+          (soda kernel range-set)
           (soda kernel selection)
           (soda kernel state)
           (soda kernel view-state)
@@ -32,7 +33,10 @@
           (soda packages resource)
           (soda support vfs)
           (soda tui frontend)
+          (soda view decoration)
+          (soda view display)
           (soda view frame)
+          (soda view projection)
           (soda view text-layout)
           (soda view theme))
 
@@ -369,6 +373,34 @@
                    (minibuffer-service-current minibuffer)
                    (string=? setup-input "accepted"))
         (error 'fundamental-editing-tests "interactive command did not open a reusable session"))
+      (let* ([prompt-session (minibuffer-service-current minibuffer)]
+             [prompt-view
+              (view-service-ref
+                (host-state-views state)
+                (minibuffer-session-view-id prompt-session))])
+        (let ([ranges
+               (range-set-ranges
+                 (view-projection-decorations (view-projection prompt-view)))])
+          (unless (and (= (length ranges) 1)
+                       (= (range-value-from (car ranges)) 0)
+                       (= (range-value-to (car ranges)) 8)
+                       (eq? (face-decoration-face (range-value-value (car ranges)))
+                            'minibuffer.input))
+            (error 'fundamental-editing-tests
+                   "minibuffer input did not receive its dedicated face")))
+        (let-values ([(stream failures)
+                      (view-transform-display-stream prompt-view (make-display-stream '()))])
+          (unless (null? failures)
+            (error 'fundamental-editing-tests
+                   "minibuffer prompt transform reported a failure" failures))
+          (let ([fragment (car (display-stream-fragments stream))])
+            (unless (and (display-text? fragment)
+                         (string=? (display-text-text fragment) "Value: ")
+                         (= (display-text-from fragment) 0)
+                         (= (display-text-to fragment) 0)
+                         (eq? (display-text-face fragment) 'minibuffer.prompt))
+              (error 'fundamental-editing-tests
+                     "minibuffer prompt was not projected as virtual View content")))))
       (command-runtime-start! runtime 'minibuffer.accept (application-command-context application))
       (host-state-run! state)
       (unless (and (string=? observed "accepted")
