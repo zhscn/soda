@@ -27,6 +27,7 @@
           (soda host command)
           (soda host command-runtime)
           (soda host input)
+          (soda host input-event)
           (soda host internal buffer)
           (soda host internal context)
           (soda host internal state)
@@ -76,6 +77,7 @@
       (immutable minibuffer soda-application-minibuffer)
       (immutable buffer-item-actions soda-application-buffer-item-actions)
       (immutable buffer-lists soda-application-buffer-lists)
+      (immutable default-keymap soda-application-default-keymap)
       (mutable terminal soda-application-terminal soda-application-terminal-set!)
       (mutable effect-registration soda-application-effect-registration
                soda-application-effect-registration-set!)
@@ -135,14 +137,32 @@
                 (make-search-service! state owner)]
                [interaction
                 (make-interaction-service! (host-state-command-runtime state) owner)]
-               [minibuffer (make-minibuffer-service! host interaction owner)])
+               [minibuffer (make-minibuffer-service! host interaction owner)]
+               [default-keymap (make-default-keymap)])
           (install-buffer-item-commands!
             (host-state-command-runtime state) owner buffer-item-actions)
           (surface-service-register! (host-state-surfaces state) surface)
           (history-mark-saved! history (buffer-id buffer))
           (%make-soda-application
-            state owner buffer view surface editing options history files directories processes spelling messages search interaction minibuffer buffer-item-actions buffer-lists
+            state owner buffer view surface editing options history files directories processes spelling messages search interaction minibuffer buffer-item-actions buffer-lists default-keymap
             #f #f #f)))))
+
+  ;; Application policy belongs to composition.  Fundamental editing exports
+  ;; only its own commands, so alternate applications may bind help, history,
+  ;; or shutdown differently without importing a default command name.
+  (define (make-default-keymap)
+    (let ([keymap (make-keymap 'soda-default)])
+      (keymap-bind! keymap (list (make-key-stroke 'character (char->integer #\g) 4))
+                    'help.show)
+      (keymap-bind! keymap
+                    (list (make-key-stroke 'character (char->integer #\x) 4)
+                          (make-key-stroke 'character (char->integer #\c) 4))
+                    'application.quit)
+      (keymap-bind! keymap (list (make-key-stroke 'character (char->integer #\u) 2))
+                    'history.undo)
+      (keymap-bind! keymap (list (make-key-stroke 'character (char->integer #\e) 2))
+                    'history.redo)
+      keymap))
 
   (define (require-open who application)
     (unless (and (soda-application? application)
@@ -284,6 +304,10 @@
               (make-input-layer
                 'buffer-list
                 (buffer-list-keymap (soda-application-buffer-lists application))
+                #f 'pass)
+              (make-input-layer
+                'application
+                (soda-application-default-keymap application)
                 #f 'pass)
               (make-input-layer
                 'fundamental

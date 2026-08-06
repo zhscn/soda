@@ -136,14 +136,6 @@
            [backspace
             (input-dispatch
               context (make-key-event 'backspace 127 #f #f 0 'press (make-bytevector 0)))]
-           [undo
-            (input-dispatch
-              context (make-key-event 'character (char->integer #\u) #f #f 2 'press
-                                      (make-bytevector 0)))]
-           [redo
-            (input-dispatch
-              context (make-key-event 'character (char->integer #\e) #f #f 2 'press
-                                      (make-bytevector 0)))]
            [uncut
             (input-dispatch
               context (make-key-event 'character (char->integer #\u) #f #f 4 'press
@@ -182,8 +174,6 @@
                    (eq? (input-disposition-kind backspace) 'command)
                    (eq? (input-disposition-value backspace)
                         'fundamental.delete-backward)
-                   (eq? (input-disposition-value undo) 'history.undo)
-                   (eq? (input-disposition-value redo) 'history.redo)
                    (eq? (input-disposition-value uncut) 'fundamental.yank)
                    (eq? (input-disposition-value cut-text) 'fundamental.cut-text)
                    (eq? (input-disposition-value justify) 'fundamental.fill-paragraph)
