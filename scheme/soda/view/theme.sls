@@ -52,11 +52,31 @@
             (cons 'warning (make-face-style 3 #f '())))
       (make-face-style #f #f '())))
 
-  (define (theme-face-style theme face)
-    (unless (and (theme? theme) (symbol? face))
-      (assertion-violation 'theme-face-style "expected a Theme and face symbol" theme face))
-    (let ([entry (assq face (theme-faces theme))])
+  (define (theme-lookup theme name)
+    (let ([entry (assq name (theme-faces theme))])
       (if entry (cdr entry) (theme-fallback theme))))
+
+  (define (append-unique left right)
+    (fold-left (lambda (output value)
+                 (if (memq value output) output (append output (list value))))
+               left right))
+
+  (define (merge-face-styles base overlay)
+    (make-face-style
+      (or (face-style-foreground overlay) (face-style-foreground base))
+      (or (face-style-background overlay) (face-style-background base))
+      (append-unique (face-style-attributes base) (face-style-attributes overlay))))
+
+  (define (theme-face-style theme face)
+    (unless (and (theme? theme)
+                 (or (symbol? face)
+                     (and (list? face) (pair? face) (for-all symbol? face))))
+      (assertion-violation 'theme-face-style "expected a Theme and face or face stack"
+                           theme face))
+    (if (symbol? face)
+        (theme-lookup theme face)
+        (fold-left merge-face-styles (theme-fallback theme)
+                   (map (lambda (name) (theme-lookup theme name)) face))))
 
   (define (face-style->sgr style)
     (unless (face-style? style)

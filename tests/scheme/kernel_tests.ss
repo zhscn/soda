@@ -2175,7 +2175,8 @@
        [selection (make-selection (list (make-selection-range 1 3)))]
        [layout (layout-text-snapshot snapshot selection 0 4 2)])
   (unless (and (string=? (frame-cell-grapheme (frame-cell-at (text-layout-frame layout) 0 0)) "a")
-               (eq? (frame-cell-face (frame-cell-at (text-layout-frame layout) 0 1)) 'selection)
+               (equal? (frame-cell-face (frame-cell-at (text-layout-frame layout) 0 1))
+                       '(text selection))
                (eq? (frame-cell-face (frame-cell-at (text-layout-frame layout) 1 0)) 'text)
                (= (display-map-cell->document (text-layout-display-map layout) 4) 3)
                (equal? (text-layout-document->point layout 3) '(1 . 0))
@@ -2209,6 +2210,30 @@
        [layout (layout-text-snapshot snapshot selection 0 3 1 decorations)])
   (unless (eq? (frame-cell-face (frame-cell-at (text-layout-frame layout) 0 1)) 'keyword)
     (error 'kernel-tests "RangeSet decoration layout differs"))
+  (snapshot-close! snapshot)
+  (document-close! document))
+
+(let* ([document (make-document "abc")]
+       [snapshot (document-snapshot document)]
+       [selection (make-selection (list (make-selection-range 1 2)))]
+       [decorations
+        (make-decoration-set
+          (list (make-range-value 1 2 (make-face-decoration 'keyword 1))
+                (make-range-value 1 2 (make-face-decoration 'warning 10))))]
+       [layout (layout-text-snapshot snapshot selection 0 3 1 decorations)]
+       [face (frame-cell-face (frame-cell-at (text-layout-frame layout) 0 1))]
+       [theme
+        (make-theme
+          (list (cons 'keyword (make-face-style 6 #f '(bold)))
+                (cons 'warning (make-face-style #f 1 '(underline)))
+                (cons 'selection (make-face-style #f #f '(reverse))))
+          (make-face-style #f #f '()))]
+       [style (theme-face-style theme face)])
+  (unless (and (equal? face '(text keyword warning selection))
+               (= (face-style-foreground style) 6)
+               (= (face-style-background style) 1)
+               (equal? (face-style-attributes style) '(bold underline reverse)))
+    (error 'kernel-tests "overlapping decoration style composition differs" face style))
   (snapshot-close! snapshot)
   (document-close! document))
 

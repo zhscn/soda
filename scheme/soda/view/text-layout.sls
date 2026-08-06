@@ -438,7 +438,7 @@
                    (set! remaining-spans (cdr remaining-spans))
                    (advance)]
                   [(< offset (range-span-from span)) 'text]
-                  [else (decoration-face (range-span-values span) 'text)])))))
+                  [else (decoration-face-stack (range-span-values span) 'text)])))))
       (let loop-line ([line start] [result '()])
         (if (> line last)
             (make-display-stream (reverse result))
@@ -627,20 +627,21 @@
                                    (- (text-layout-options-tab-width options)
                                       (mod column (text-layout-options-tab-width options)))
                                    (max 1 (grapheme-width glyph)))))
+                         (define (selected-face face)
+                           (if (selected? selection document-from document-to)
+                               (if (list? face) (append face (list 'selection))
+                                   (list face 'selection))
+                               face))
                          (if tab?
                              (emit-tab! glyph-width
                                         document-from document-to
                                         (if identity? 'text 'virtual)
-                                        (if (selected? selection document-from document-to)
-                                            'selection
-                                            face)
+                                        (selected-face face)
                                         source)
                              (emit! glyph glyph-width
                                     document-from document-to
                                     (if identity? 'text 'virtual)
-                                    (if (selected? selection document-from document-to)
-                                        'selection
-                                        face)
+                                    (selected-face face)
                                     source))))
                    (loop next))))))
          (define (emit-widget! fragment)

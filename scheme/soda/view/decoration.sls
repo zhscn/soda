@@ -6,6 +6,7 @@
           make-decoration-set
           decoration-set?
           merge-decoration-sets
+          decoration-face-stack
           decoration-face)
   (import (rnrs)
           (soda kernel range-set))
@@ -49,4 +50,32 @@
                              (face-decoration-priority winner)))
                       candidate
                       winner))))))
+
+  ;; A decoration span may carry several independently-owned visual roles.
+  ;; Their priority orders layers from base to overlay; equal priorities keep
+  ;; the RangeSet sweep order, making composition deterministic without
+  ;; assigning semantic meaning to package registration order.
+  (define (insert-decoration decoration ordered)
+    (cond
+      [(null? ordered) (list decoration)]
+      [(< (face-decoration-priority decoration)
+          (face-decoration-priority (car ordered)))
+       (cons decoration ordered)]
+      [else (cons (car ordered) (insert-decoration decoration (cdr ordered)))]))
+
+  (define (ordered-decorations ranges)
+    (let loop ([remaining ranges] [ordered '()])
+      (if (null? remaining)
+          ordered
+          (loop (cdr remaining)
+                (insert-decoration (range-value-value (car remaining)) ordered)))))
+
+  ;; A single semantic face remains a symbol for compatibility.  Overlaps use
+  ;; a low-to-high face stack consumed by Theme; a later overlay supplies only
+  ;; the style fields it intends to replace.
+  (define (decoration-face-stack ranges fallback)
+    (let ([faces (map face-decoration-face (ordered-decorations ranges))])
+      (cond [(null? faces) fallback]
+            [(null? (cdr faces)) (car faces)]
+            [else (cons fallback faces)])))
 )

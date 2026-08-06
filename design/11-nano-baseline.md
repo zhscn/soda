@@ -59,7 +59,7 @@ Soda 保持自己的 Buffer、View 与 command 抽象。Nano 的命令名称和�
 | Buffer-local automatic indentation | 已实现 |
 | View-local soft wrap 与 tab width | 已实现 |
 | line-number gutter、constant position display 与 guide column | 未实现 |
-| 可组合 selection/search/diagnostic/semantic style overlay | 部分实现 |
+| 可组合 selection/search/diagnostic/semantic style overlay | 已实现 |
 | soft-wrap visual-row motion | 已实现 |
 | viewport-relative paging | 已实现 |
 

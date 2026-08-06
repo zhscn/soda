@@ -34,7 +34,7 @@
       (let loop ([column from] [face #f])
         (when (< column to)
           (let ([cell (frame-cell-at frame row column)])
-            (unless (eq? face (frame-cell-face cell))
+            (unless (equal? face (frame-cell-face cell))
               (put-string port escape)
               (put-string port "[")
               (put-string port
