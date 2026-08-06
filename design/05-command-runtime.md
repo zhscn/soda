@@ -51,12 +51,18 @@ CommandContext {
   key_sequence,
   prefix_argument?,
   target,
-  source
+  source,
+  layout?
 }
 ```
 
 异步 continuation 使用保存的 identity 重新解析对象，不从恢复时的当前焦点猜测目标。需要严格
 revision 的命令验证冻结 BufferState generation；明确作用于当前焦点的后续命令创建新 context。
+
+`layout` 是 frontend 已呈现的不可变 `TextLayout` 测量值。frontend 仅在它仍对应同一 Buffer
+generation、viewport 和 View configuration 时附带该值；它不暴露 terminal、Surface 或 renderer
+service。命令可用它执行 visual-row motion、point/display 映射和其他显示坐标查询；没有该值的
+headless 调用保留逻辑文本语义。
 
 ## Result 与 effect
 

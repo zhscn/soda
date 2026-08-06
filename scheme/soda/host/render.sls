@@ -8,10 +8,14 @@
           make-rendered-view
           rendered-view?
           rendered-view-view-id
+          rendered-view-window-id
           rendered-view-rectangle
           rendered-view-layout
           rendered-view-occurrence
           rendered-view-projection-generation
+          rendered-view-buffer-generation
+          rendered-view-viewport
+          rendered-view-configuration
           rendered-view-visible-ranges
           rendered-view-transform-failures
           make-surface-hit
@@ -80,7 +84,8 @@
   ;; routing.  It is part of a rendered Surface, not mutable View state.
   (define-record-type
     (rendered-view %make-rendered-view rendered-view?)
-    (fields view-id rectangle layout occurrence projection-generation transform-failures))
+    (fields view-id window-id rectangle layout occurrence projection-generation
+            buffer-generation viewport configuration transform-failures))
 
   (define (rectangle? value)
     (and (list? value) (= (length value) 4)
@@ -89,18 +94,28 @@
   (define make-rendered-view
     (case-lambda
       [(view-id rectangle layout)
-       (make-rendered-view view-id rectangle layout #f 0 '())]
+       (make-rendered-view view-id #f rectangle layout #f 0 #f #f #f '())]
       [(view-id rectangle layout transform-failures)
-       (make-rendered-view view-id rectangle layout #f 0 transform-failures)]
+       (make-rendered-view view-id #f rectangle layout #f 0 #f #f #f transform-failures)]
       [(view-id rectangle layout occurrence projection-generation transform-failures)
-       (unless (and (rectangle? rectangle) (text-layout? layout)
+       (make-rendered-view view-id #f rectangle layout occurrence projection-generation
+                           #f #f #f transform-failures)]
+      [(view-id window-id rectangle layout occurrence projection-generation buffer-generation
+                  viewport configuration transform-failures)
+       (unless (and (or (not window-id) (nonnegative-exact-integer? window-id))
+                    (rectangle? rectangle) (text-layout? layout)
                     (or (not occurrence) (view-occurrence? occurrence))
                     (integer? projection-generation) (exact? projection-generation)
                     (>= projection-generation 0)
+                    (or (not buffer-generation)
+                        (and (integer? buffer-generation) (exact? buffer-generation)
+                             (>= buffer-generation 0)))
+                    (or (not viewport) (viewport? viewport))
                     (list? transform-failures))
          (assertion-violation 'make-rendered-view "invalid rendered View"
                               view-id rectangle layout occurrence projection-generation transform-failures))
-       (%make-rendered-view view-id (list-copy rectangle) layout occurrence projection-generation
+       (%make-rendered-view view-id window-id (list-copy rectangle) layout occurrence projection-generation
+                            buffer-generation viewport configuration
                             (list-copy transform-failures))]))
 
   (define (rendered-view-visible-ranges rendered)
@@ -232,13 +247,16 @@
                         (cdr leaves)
                         (cons (make-frame-placement row column (text-layout-frame layout)) placements)
                         (cons (make-rendered-view
-                                (view-id view) rectangle layout
+                                (view-id view) (window-id leaf) rectangle layout
                                 (make-view-occurrence
                                   (surface-id surface) (window-id leaf) (view-id view)
                                   rectangle viewport (text-layout-visible-ranges layout)
                                   (view-projection-generation view-projection))
-                                                  (view-projection-generation view-projection)
-                                                  transform-failures)
+                                  (view-projection-generation view-projection)
+                                  (buffer-state-generation (buffer-state (view-buffer view)))
+                                  viewport
+                                  (view-state-configuration state)
+                                  transform-failures)
                               rendered-views)
                         (if (and (eq? leaf (surface-active-window surface))
                                  (text-layout-cursor-row layout))

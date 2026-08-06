@@ -932,12 +932,18 @@ CommandContext {
   key_sequence,
   prefix_argument?,
   target,
-  source
+  source,
+  layout?
 }
 ```
 
 target resolver 在 invocation 开始时产生稳定 identity。异步恢复使用保存的 context
 identity 重新解析对象，不从当前 focus 猜测目标。
+
+terminal frontend 可在 command context 中附带与当前 document generation、viewport 和 View
+configuration 一致的不可变 `TextLayout`。它是可选的测量 port，不携带 renderer、terminal 或
+Surface 的可变访问；vertical motion 与 display-coordinate command 使用该值，headless command
+保留逻辑文本 fallback。
 
 command 可以返回 handled、TransactionSpec、ViewTransactionSpec、HostOperation、
 CommandEffect 或它们的有序组合。I/O 通过 CommandEffect 请求。普通 Scheme 调用可以直接

@@ -49,23 +49,26 @@
           (soda view text-layout)
           (soda view theme))
 
-  (define (application-command-context application)
-    (let* ([state (soda-application-state application)]
-           [surface (soda-application-surface application)]
-           [active (surface-active-context surface (host-state-views state))]
-           [view (view-service-ref (host-state-views state)
-                                   (active-context-view-id active))]
-           [buffer (buffer-service-ref (host-state-buffers state)
-                                       (active-context-buffer-id active))])
-      (make-command-context
-        #f
-        (active-context-surface-id active)
-        (active-context-window-id active)
-        (view-id view)
-        (buffer-id buffer)
-        (buffer-state buffer)
-        (view-state view)
-        #f '() #f active 'fundamental-test)))
+  (define application-command-context
+    (case-lambda
+      [(application) (application-command-context application #f)]
+      [(application layout)
+       (let* ([state (soda-application-state application)]
+              [surface (soda-application-surface application)]
+              [active (surface-active-context surface (host-state-views state))]
+              [view (view-service-ref (host-state-views state)
+                                      (active-context-view-id active))]
+              [buffer (buffer-service-ref (host-state-buffers state)
+                                          (active-context-buffer-id active))])
+         (make-command-context
+           #f
+           (active-context-surface-id active)
+           (active-context-window-id active)
+           (view-id view)
+           (buffer-id buffer)
+           (buffer-state buffer)
+           (view-state view)
+           #f '() #f active 'fundamental-test layout))]))
 
   (define (buffer-string buffer)
     (snapshot-string (buffer-state-document (buffer-state buffer))))
@@ -1549,6 +1552,41 @@
                "Unicode word or logical-line motion differs"))
       (text-close! text))
 
+    ;; A presented TextLayout is optional command input.  It supplies visual
+    ;; rows for wrapped text without giving fundamental editing terminal or
+    ;; renderer ownership; the same immutable layout remains valid while only
+    ;; selection state changes.
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [runtime (host-state-command-runtime state)]
+           [buffer (soda-application-buffer application)]
+           [view (soda-application-view application)])
+      (command-runtime-start!
+        runtime 'fundamental.insert-text (application-command-context application)
+        (list (string->utf8 "abcdefghijk")))
+      (command-runtime-start!
+        runtime 'fundamental.beginning-of-buffer (application-command-context application))
+      (let* ([snapshot (buffer-state-document (buffer-state buffer))]
+             [layout
+              (layout-text-snapshot
+                snapshot (view-state-selection (view-state view)) 0 4 4
+                (make-decoration-set '()) (make-text-layout-options 4 #t))])
+        (command-runtime-start!
+          runtime 'fundamental.next-line
+          (application-command-context application layout))
+        (command-runtime-start!
+          runtime 'fundamental.next-line
+          (application-command-context application layout))
+        (command-runtime-start!
+          runtime 'fundamental.previous-line
+          (application-command-context application layout))
+        (unless (= (selection-range-head
+                     (selection-primary-range (view-state-selection (view-state view))))
+                   4)
+          (error 'fundamental-editing-tests
+                 "vertical movement did not follow presented soft-wrap rows")))
+      (soda-application-close! application))
+
     (let* ([application (make-soda-application)]
            [state (soda-application-state application)]
            [runtime (host-state-command-runtime state)]
@@ -1613,5 +1651,47 @@
                       3))
         (error 'fundamental-editing-tests
                "fundamental frontend input did not insert a tab or advance its caret"))
+      (frontend-close! frontend)
+      (soda-application-close! application))
+
+    ;; The frontend attaches its current compatible layout to each command
+    ;; context.  Wrapped C-n/C-p therefore use visual rows rather than
+    ;; treating the one physical line as immobile.
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [surface (soda-application-surface application)]
+           [view (soda-application-view application)]
+           [buffer (soda-application-buffer application)]
+           [editing (soda-application-editing application)]
+           [frontend
+            (make-frontend
+              state surface
+              (lambda (active current-view)
+                (fundamental-input-context editing active current-view))
+              (lambda (context disposition)
+                (fundamental-input-disposition context disposition))
+              (lambda (render theme) #f)
+              (make-render-service) default-theme)])
+      (define (send! event)
+        (frontend-enqueue!
+          frontend (make-surface-input-message (surface-id surface) event))
+        (frontend-step! frontend))
+      (frontend-resize! frontend '(4 . 4))
+      (frontend-step! frontend)
+      (send! (make-text-input-event 'text (string->utf8 "abcdefghijk")))
+      (send! (make-key-event 'character (char->integer #\a) #f #f 4 'press
+                             (make-bytevector 0)))
+      (send! (make-key-event 'character (char->integer #\n) #f #f 4 'press
+                             (make-bytevector 0)))
+      (send! (make-key-event 'character (char->integer #\n) #f #f 4 'press
+                             (make-bytevector 0)))
+      (send! (make-key-event 'character (char->integer #\p) #f #f 4 'press
+                             (make-bytevector 0)))
+      (unless (and (string=? (buffer-string buffer) "abcdefghijk")
+                   (= (selection-range-head
+                        (selection-primary-range (view-state-selection (view-state view))))
+                      4))
+        (error 'fundamental-editing-tests
+               "frontend did not pass its visual layout to vertical motion"))
       (frontend-close! frontend)
       (soda-application-close! application))))

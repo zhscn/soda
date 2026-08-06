@@ -13,6 +13,7 @@
           frontend-resize!
           frontend-close!)
   (import (rnrs)
+          (soda kernel state)
           (soda kernel view-state)
           (soda host command)
           (soda host command-runtime)
@@ -118,6 +119,29 @@
                 (list (key-event->key-stroke event)))
         '()))
 
+  ;; A layout is command input only while it still describes the same document,
+  ;; viewport, and View configuration.  Selection and InputState may change
+  ;; between consecutive key events without invalidating DisplayMap geometry.
+  (define (active-command-layout value active view)
+    (let ([render (render-service-last-render (frontend-render-service value))]
+          [state (view-state view)]
+          [buffer-state (buffer-state (view-buffer view))])
+      (and render
+           (let find ([rendered (surface-render-rendered-views render)])
+             (and (pair? rendered)
+                  (let ([candidate (car rendered)])
+                    (if (and (= (rendered-view-view-id candidate) (view-id view))
+                             (= (rendered-view-window-id candidate)
+                                (active-context-window-id active))
+                             (= (rendered-view-buffer-generation candidate)
+                                (buffer-state-generation buffer-state))
+                             (equal? (rendered-view-viewport candidate)
+                                     (view-state-viewport state))
+                             (eq? (rendered-view-configuration candidate)
+                                  (view-state-configuration state)))
+                        (rendered-view-layout candidate)
+                        (find (cdr rendered)))))))))
+
   (define (make-active-command-context value active view event sequence prefix-argument)
     (let* ([state (frontend-host-state value)]
            [current-view
@@ -138,7 +162,8 @@
         sequence
         prefix-argument
         active
-        'tui-frontend)))
+        'tui-frontend
+        (active-command-layout value active current-view))))
 
   (define (enqueue-disposition-result! value result)
     (when result

@@ -27,6 +27,7 @@
           command-context-prefix-argument
           command-context-target
           command-context-source
+          command-context-layout
           make-interactive-reader
           interactive-reader?
           interactive-reader-name
@@ -152,19 +153,30 @@
       (immutable key-sequence command-context-key-sequence)
       (immutable prefix-argument command-context-prefix-argument)
       (immutable target command-context-target)
-      (immutable source command-context-source)))
+      (immutable source command-context-source)
+      ;; A frontend may attach the immutable TextLayout that it last
+      ;; presented for this View.  Command packages treat it as an optional
+      ;; read-only measurement; headless callers use #f and retain logical
+      ;; motion semantics.
+      (immutable layout command-context-layout)))
 
   (define make-command-context
     (case-lambda
       [(view-id buffer-id source)
        (%make-command-context
-         view-id buffer-id #f #f #f #f #f #f '() #f #f source)]
+         view-id buffer-id #f #f #f #f #f #f '() #f #f source #f)]
       [(invocation-id surface-id window-id view-id buffer-id buffer-state view-state event
                       key-sequence prefix-argument target source)
        (%make-command-context
          view-id buffer-id invocation-id surface-id window-id buffer-state view-state event
          (if (list? key-sequence) (list-copy key-sequence) '())
-         prefix-argument target source)]))
+         prefix-argument target source #f)]
+      [(invocation-id surface-id window-id view-id buffer-id buffer-state view-state event
+                      key-sequence prefix-argument target source layout)
+       (%make-command-context
+         view-id buffer-id invocation-id surface-id window-id buffer-state view-state event
+         (if (list? key-sequence) (list-copy key-sequence) '())
+         prefix-argument target source layout)]))
 
   ;; Interactive readers are the only suspension protocol CommandRuntime
   ;; understands.  A reader returns ready values synchronously, or a request

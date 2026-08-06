@@ -22,7 +22,8 @@
           (soda host operation)
           (soda host view)
           (soda host value)
-          (soda packages interaction))
+          (soda packages interaction)
+          (soda view text-layout))
 
   ;; Fundamental editing is an ordinary package: it owns command
   ;; registrations and a keymap, while all mutation remains a TransactionSpec
@@ -338,21 +339,30 @@
          text
          (selection-range-head range)))))
 
-  ;; Logical vertical motion is kept separate from visual-row motion.  The
-  ;; latter belongs to the layout package because it depends on wrapping and
-  ;; DisplayMap state; this command only uses the document line index.
+  (define (logical-line-target text range delta)
+    (let* ([point (selection-range-head range)]
+           [position (text-position text point)]
+           [line (car position)]
+           [column (cdr position)]
+           [target (min (max 0 (+ line delta)) (- (text-line-count text) 1))]
+           [start (text-line-start text target)]
+           [end (text-line-content-end text target)])
+      (min (+ start column) end)))
+
+  ;; A terminal frontend supplies its last compatible immutable TextLayout in
+  ;; CommandContext.  This makes ordinary vertical editing honor soft wraps,
+  ;; tabs, wide graphemes, and DisplayMap association without letting the
+  ;; command package access terminal state.  Headless callers and movements
+  ;; beyond a currently measured layout retain the logical-line fallback.
   (define (move-logical-line context delta)
     (move-selection-by
       context
       (lambda (text range)
-        (let* ([point (selection-range-head range)]
-               [position (text-position text point)]
-               [line (car position)]
-               [column (cdr position)]
-               [target (min (max 0 (+ line delta)) (- (text-line-count text) 1))]
-               [start (text-line-start text target)]
-               [end (text-line-content-end text target)])
-          (min (+ start column) end)))))
+        (let ([layout (command-context-layout context)])
+          (or (and (text-layout? layout)
+                   (text-layout-vertical-target
+                     layout (selection-range-head range) delta))
+              (logical-line-target text range delta))))))
 
   (define (move-buffer-boundary context end?)
     (move-selection-by
