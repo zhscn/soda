@@ -1565,6 +1565,36 @@
                "Unicode word or logical-line motion differs"))
       (text-close! text))
 
+    ;; Auto-fill turns one existing whitespace into a hard newline in the
+    ;; same transaction as committed text insertion.  It preserves long words
+    ;; and history observes the complete wrapped edit as one undo step.
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [runtime (host-state-command-runtime state)]
+           [buffer (soda-application-buffer application)])
+      (command-runtime-start!
+        runtime 'editor.set-fill-column (application-command-context application) (list 10))
+      (command-runtime-start!
+        runtime 'editor.toggle-auto-fill (application-command-context application))
+      (command-runtime-start!
+        runtime 'fundamental.insert-text (application-command-context application)
+        (list (string->utf8 "one two three")))
+      (unless (string=? (buffer-string buffer) "one two\nthree")
+        (error 'fundamental-editing-tests
+               "auto-fill did not hard-wrap at the previous whitespace"))
+      (command-runtime-start!
+        runtime 'history.undo (application-command-context application))
+      (unless (string=? (buffer-string buffer) "")
+        (error 'fundamental-editing-tests
+               "auto-fill insertion did not remain one undoable transaction"))
+      (command-runtime-start!
+        runtime 'fundamental.insert-text (application-command-context application)
+        (list (string->utf8 "averylongword")))
+      (unless (string=? (buffer-string buffer) "averylongword")
+        (error 'fundamental-editing-tests
+               "auto-fill split a word without an available whitespace"))
+      (soda-application-close! application))
+
     ;; A presented TextLayout is optional command input.  It supplies visual
     ;; rows for wrapped text without giving fundamental editing terminal or
     ;; renderer ownership; the same immutable layout remains valid while only
