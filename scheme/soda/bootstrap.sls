@@ -130,7 +130,7 @@
                [buffer-item-actions (make-buffer-item-action-service)]
                [directories (make-directory-service! host owner files buffer-item-actions)]
                [buffer-lists (make-buffer-list-service! host owner history buffer-item-actions)]
-               [spelling (make-spell-service! state owner processes buffer-item-actions)]
+               [spelling (make-spell-service! host owner processes buffer-item-actions)]
                [messages (make-message-service! host owner)]
                [_help (make-help-service! host owner)]
                [search

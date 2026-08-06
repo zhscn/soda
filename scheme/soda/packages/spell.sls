@@ -14,14 +14,12 @@
           (soda kernel view-state)
           (soda host command)
           (soda host command-runtime)
-          (soda host dispatch)
+          (soda host buffer)
           (soda host input)
           (soda host input-event)
-          (soda host internal buffer)
-          (soda host internal operation)
-          (soda host internal state)
-          (soda host internal view)
+          (soda host package)
           (soda host value)
+          (soda host view)
           (soda packages buffer-ui)
           (soda packages completion)
           (soda packages interaction)
@@ -32,7 +30,7 @@
   ;; process lifetime, stdin and event delivery.
   (define-record-type
     (spell-service %make-spell-service spell-service?)
-    (fields state owner processes keymap result-keymap))
+    (fields host owner processes keymap result-keymap))
 
   (define-record-type spell-request
     (fields context buffer-id buffer-name buffer-generation source input))
@@ -237,34 +235,27 @@
     (make-selection (list (make-selection-range offset offset))))
 
   (define (show-stale-source-message! service context)
-    (dispatcher-dispatch-host!
-      (host-state-dispatch (spell-service-state service))
-      (make-set-surface-message-operation
-        (command-context-surface-id context)
-        "Spelling result is stale; run spell check again.")))
+    (package-host-set-surface-message!
+      (spell-service-host service) (command-context-surface-id context)
+      "Spelling result is stale; run spell check again."))
 
   (define (open-finding! service finding context)
-    (let* ([state (spell-service-state service)]
-           [buffers (host-state-buffers state)]
-           [views (host-state-views state)]
-           [source (buffer-service-ref buffers (spell-finding-buffer-id finding) #f)])
+    (let* ([host (spell-service-host service)]
+           [source (package-host-buffer-ref host (spell-finding-buffer-id finding) #f)])
       (if (or (not source)
               (not (= (buffer-state-generation (buffer-state source))
                       (spell-finding-buffer-generation finding))))
           (begin (show-stale-source-message! service context) #f)
           (let ([view
-                 (view-service-create!
-                   views (spell-service-owner service) source
+                 (package-host-create-view!
+                   host (spell-service-owner service) source
                    (buffer-state-configuration (buffer-state source)))])
-            (if (not (dispatcher-dispatch-host!
-                       (host-state-dispatch state)
-                       (make-replace-window-view-operation
-                         (command-context-surface-id context)
-                         (command-context-window-id context) (view-id view))))
-                (begin (view-service-close-view! views (view-id view)) #f)
+            (if (not (package-host-replace-window-view!
+                       host (command-context-surface-id context)
+                       (command-context-window-id context) (view-id view)))
+                #f
                 (begin
-                  (dispatcher-dispatch-view!
-                    (host-state-dispatch state)
+                  (package-host-dispatch-view! host
                     (make-view-transaction-spec
                       (view-id view) (view-state-generation (view-state view))
                       (source-selection (spell-finding-offset finding))
@@ -286,7 +277,7 @@
         (let ([source-context (open-finding! service finding context)])
           (when source-context
             (command-runtime-enqueue!
-              (host-state-command-runtime (spell-service-state service))
+              (package-host-command-runtime (spell-service-host service))
               (make-command-invoke-message
                 'spell.correct source-context (list finding) #t)))))
       (command-handled)))
@@ -314,34 +305,28 @@
               selection '() '())))))
 
   (define (show-spell-report! service request status output)
-    (let* ([state (spell-service-state service)]
+    (let* ([host (spell-service-host service)]
            [context (spell-request-context request)]
-           [buffers (host-state-buffers state)]
-           [views (host-state-views state)]
            [layout (report-layout request status output)]
            [configuration (spell-result-configuration service)]
            [buffer
-            (buffer-service-create!
-              buffers (spell-service-owner service)
+            (package-host-create-buffer!
+              host (spell-service-owner service)
               (string-append "*Spelling: " (spell-request-buffer-name request) "*")
               (make-document (car layout))
               configuration)]
            [view
-            (view-service-create! views (spell-service-owner service) buffer configuration)])
-      (dispatcher-dispatch!
-        (host-state-dispatch state)
+            (package-host-create-view! host (spell-service-owner service) buffer configuration)])
+      (package-host-dispatch! host
         (make-transaction-spec
           (buffer-id buffer) #f (buffer-state-generation (buffer-state buffer))
           (make-change-set (snapshot-byte-size (buffer-state-document (buffer-state buffer))) '())
           #f (list (make-buffer-items-effect (cdr layout))) '()))
       (unless
-        (dispatcher-dispatch-host!
-          (host-state-dispatch state)
-          (make-replace-window-view-operation
-            (command-context-surface-id context)
-            (command-context-window-id context) (view-id view)))
-        (view-service-close-view! views (view-id view))
-        (buffer-service-close-buffer! buffers (buffer-id buffer)))
+        (package-host-replace-window-view!
+          host (command-context-surface-id context)
+          (command-context-window-id context) (view-id view))
+        (package-host-close-buffer! host (buffer-id buffer)))
       buffer))
 
   (define (start-spell-check! service request)
@@ -373,16 +358,16 @@
                 (lambda (value) (make-interactive-ready (list value))))
               (assertion-violation 'spell.correct "missing spelling finding" finding))))))
 
-  (define (make-spell-service! state owner processes actions)
-    (unless (and (host-state? state) (owner? owner) (process-service? processes)
+  (define (make-spell-service! host owner processes actions)
+    (unless (and (package-host? host) (owner? owner) (process-service? processes)
                  (buffer-item-action-service? actions))
       (assertion-violation 'make-spell-service!
                            "expected host state, owner, process service, and item actions"
-                           state owner processes actions))
-    (let* ([runtime (host-state-command-runtime state)]
+                           host owner processes actions))
+    (let* ([runtime (package-host-command-runtime host)]
            [keymap (make-keymap 'spell)]
            [result-keymap (make-keymap 'spell-result)]
-           [service (%make-spell-service state owner processes keymap result-keymap)])
+           [service (%make-spell-service host owner processes keymap result-keymap)])
       (keymap-bind! result-keymap
                     (list (make-key-stroke 'enter #f 0)) 'buffer.activate-item)
       (keymap-bind! result-keymap (list (control-stroke #\r)) 'spell.correct-item)
@@ -431,8 +416,7 @@
                   context
                   (command-context-buffer-id context)
                   (buffer-name
-                    (buffer-service-ref
-                      (host-state-buffers state) (command-context-buffer-id context)))
+                    (package-host-buffer-ref host (command-context-buffer-id context)))
                   (buffer-state-generation buffer-state)
                   (snapshot-string (buffer-state-document buffer-state))
                   (snapshot-bytevector (buffer-state-document buffer-state))))))
