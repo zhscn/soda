@@ -109,15 +109,15 @@
                [files
                 (make-file-service! state owner history)]
                [processes (make-process-service! state owner)]
-               [spelling (make-spell-service! state owner processes)]
+               [buffer-item-actions (make-buffer-item-action-service)]
+               [spelling (make-spell-service! state owner processes buffer-item-actions)]
                [messages (make-message-service! state owner)]
                [_help (make-help-service! state owner)]
                [search
                 (make-search-service! state owner)]
                [interaction
                 (make-interaction-service! (host-state-command-runtime state) owner)]
-               [minibuffer (make-minibuffer-service! state interaction owner)]
-               [buffer-item-actions (make-buffer-item-action-service)])
+               [minibuffer (make-minibuffer-service! state interaction owner)])
           (install-buffer-item-commands!
             (host-state-command-runtime state) owner buffer-item-actions)
           (surface-service-register! (host-state-surfaces state) surface)

@@ -37,6 +37,7 @@
         (soda ffi tree-sitter)
         (soda bootstrap)
         (soda packages base fundamental-editing)
+        (soda packages buffer-ui)
         (soda packages process)
         (soda packages spell)
         (prefix (soda ffi runtime) native:)
@@ -64,9 +65,10 @@
 (define (application-command-context application)
   (let* ([state (soda-application-state application)]
          [surface (soda-application-surface application)]
-         [view (soda-application-view application)]
-         [buffer (soda-application-buffer application)]
-         [active (surface-active-context surface (host-state-views state))])
+         [active (surface-active-context surface (host-state-views state))]
+         [view
+          (view-service-ref (host-state-views state) (active-context-view-id active))]
+         [buffer (view-buffer view)])
     (make-command-context
       #f
       (active-context-surface-id active)
@@ -2826,7 +2828,43 @@
                runtime 'fundamental.insert-text (application-command-context application)
                (list (string->utf8 "must-not-edit")))
              (unless (string=? output (buffer-string buffer))
-               (error 'kernel-tests "spell report Buffer accepted an ordinary edit"))]
+               (error 'kernel-tests "spell report Buffer accepted an ordinary edit"))
+             (when (string-contains? output "Line 1: & helo")
+               (let* ([item-ranges (buffer-item-ranges (buffer-state buffer))]
+                      [item-range (and (pair? item-ranges)
+                                       (pair? (range-set-ranges (car item-ranges)))
+                                       (car (range-set-ranges (car item-ranges))))])
+                 (unless item-range
+                   (error 'kernel-tests "spell report did not expose a navigable finding"))
+                 (let* ([report-active
+                         (surface-active-context (soda-application-surface application)
+                                                 (host-state-views state))]
+                        [report-view
+                         (view-service-ref (host-state-views state)
+                                           (active-context-view-id report-active))])
+                   (dispatcher-dispatch-view!
+                     (host-state-dispatch state)
+                     (make-view-transaction-spec
+                       (view-id report-view) (view-state-generation (view-state report-view))
+                       (make-selection
+                         (list (make-selection-range (range-value-from item-range)
+                                                     (range-value-from item-range))))
+                       #f #f '() '() #f)))
+                 (command-runtime-start!
+                   runtime 'buffer.activate-item (application-command-context application))
+                 (let* ([source-active
+                         (surface-active-context (soda-application-surface application)
+                                                 (host-state-views state))]
+                        [source-view
+                         (view-service-ref (host-state-views state)
+                                           (active-context-view-id source-active))]
+                        [source-selection
+                         (selection-primary-range
+                           (view-state-selection (view-state source-view)))])
+                   (unless (and (= (buffer-id (view-buffer source-view))
+                                   (buffer-id (soda-application-buffer application)))
+                                (= (selection-range-head source-selection) 0))
+                     (error 'kernel-tests "spell finding activation did not visit source location")))))]
             [(zero? remaining)
              (error 'kernel-tests "spell check did not display a parsed report" output)]
             [else (poll (- remaining 1))]))))

@@ -5,9 +5,13 @@
   (import (rnrs)
           (only (chezscheme) current-directory)
           (prefix (soda ffi runtime) native:)
+          (soda kernel change)
           (soda kernel document)
           (soda kernel extension)
+          (soda kernel range-set)
+          (soda kernel selection)
           (soda kernel state)
+          (soda kernel view-state)
           (soda host command)
           (soda host command-runtime)
           (soda host dispatch)
@@ -26,10 +30,16 @@
   ;; process lifetime, stdin and event delivery.
   (define-record-type
     (spell-service %make-spell-service spell-service?)
-    (fields state owner processes keymap))
+    (fields state owner processes keymap result-keymap))
 
   (define-record-type spell-request
-    (fields context buffer-name input))
+    (fields context buffer-id buffer-name buffer-generation source input))
+
+  ;; A finding carries source coordinates from the immutable snapshot handed
+  ;; to Hunspell.  Result Buffers are therefore navigable without treating
+  ;; their rendered protocol text as editor state.
+  (define-record-type spell-finding
+    (fields buffer-id buffer-generation offset line word protocol))
 
   (define (control-stroke character)
     (make-key-stroke 'character (char->integer character) 4))
@@ -65,55 +75,170 @@
     (and (positive? (string-length line))
          (memv (string-ref line 0) '(#\& #\? #\#))))
 
-  ;; Hunspell -a separates reports for input lines with an empty line.  The
-  ;; full protocol line is retained, including suggestions, so no candidate
-  ;; data is discarded before a future corrective UI consumes it.
-  (define (spell-report buffer-name status output)
-    (let loop ([lines (split-lines output)] [source-line 1] [findings '()])
+  (define (whitespace? character)
+    (or (char=? character #\space) (char=? character #\tab)))
+
+  (define (protocol-fields line)
+    (let ([length (string-length line)])
+      (let loop ([index 0] [fields '()])
+        (if (= index length)
+            (reverse fields)
+            (cond
+              [(char=? (string-ref line index) #\:) (reverse fields)]
+              [(whitespace? (string-ref line index))
+               (loop (+ index 1) fields)]
+              [else
+               (let end ([next index])
+                 (if (or (= next length)
+                         (whitespace? (string-ref line next))
+                         (char=? (string-ref line next) #\:))
+                     (loop next (cons (substring line index next) fields))
+                     (end (+ next 1))))])))))
+
+  ;; Hunspell's machine protocol reports a zero-based character column.  The
+  ;; final numeric token before ':' is the column for &, ?, and # responses.
+  (define (protocol-location line)
+    (let ([fields (protocol-fields line)])
+      (and (pair? fields) (pair? (cdr fields))
+           (let loop ([items (reverse (cdr fields))])
+             (and (pair? items)
+                  (let ([number (string->number (car items))])
+                    (if (and number (integer? number) (>= number 0))
+                        (cons (cadr fields) number)
+                        (loop (cdr items)))))))))
+
+  (define (source-offset-at source line column word)
+    (let ([length (string-length source)])
+      (let find-line ([index 0] [current 1])
+        (cond
+          [(> current line) #f]
+          [(= current line)
+           (let ([target (+ index column)] [word-length (string-length word)])
+             (and (<= target length)
+                  (<= (+ target word-length) length)
+                  (string=? (substring source target (+ target word-length)) word)
+                  (bytevector-length (string->utf8 (substring source 0 target)))))]
+          [(= index length) #f]
+          [(char=? (string-ref source index) #\newline)
+           (find-line (+ index 1) (+ current 1))]
+          [else (find-line (+ index 1) current)]))))
+
+  (define (report-layout request status output)
+    (let loop ([lines (split-lines output)] [source-line 1]
+               [text (string-append "Spelling report: "
+                                    (spell-request-buffer-name request)
+                                    "\nRET visits a finding; C-g closes this report.\n\n")]
+               [ranges '()] [serial 0])
       (cond
         [(null? lines)
-         (let ([header (string-append "Spelling report: " buffer-name "\n\n")])
-           (cond
-             [(not (zero? status))
-              (string-append header "Hunspell exited with status "
-                             (number->string status) "\n"
-                             (if (zero? (string-length output)) "" output))]
-             [(null? findings) (string-append header "No unrecognized words.\n")]
-             [else
-              (string-append
-                header
-                (apply string-append (reverse findings)))]))]
+         (let ([tail
+                (cond [(not (zero? status))
+                       (string-append "Hunspell exited with status "
+                                      (number->string status) "\n" output)]
+                      [(null? ranges) "No unrecognized words.\n"]
+                      [else ""])])
+           (cons (string-append text tail) (make-range-set (reverse ranges))))]
         [(zero? (string-length (car lines)))
-         (loop (cdr lines) (+ source-line 1) findings)]
+         (loop (cdr lines) (+ source-line 1) text ranges serial)]
         [(finding-line? (car lines))
-         (loop
-           (cdr lines) source-line
-           (cons (string-append "Line " (number->string source-line) ": "
-                                (car lines) "\n")
-                 findings))]
-        [else (loop (cdr lines) source-line findings)])))
+         (let* ([protocol (car lines)]
+                [location (protocol-location protocol)]
+                [entry (string-append "Line " (number->string source-line) ": " protocol "\n")]
+                [start (bytevector-length (string->utf8 text))]
+                [finding
+                 (and location
+                      (let ([offset
+                             (source-offset-at (spell-request-source request)
+                                               source-line (cdr location) (car location))])
+                        (and offset
+                             (make-spell-finding
+                               (spell-request-buffer-id request)
+                               (spell-request-buffer-generation request)
+                               offset source-line (car location) protocol))) )]
+                [next-ranges
+                 (if finding
+                     (cons (make-range-value
+                             start (+ start (bytevector-length (string->utf8 entry)))
+                             (make-buffer-item 'spell serial 'finding finding '(visit) 'visit))
+                           ranges)
+                     ranges)])
+           (loop (cdr lines) source-line (string-append text entry) next-ranges
+                 (+ serial 1)))]
+        [else (loop (cdr lines) source-line text ranges serial)])))
 
-  (define (spell-result-configuration)
+  (define (spell-result-configuration service)
     (make-configuration
       (list
+        (buffer-item-field-extension)
+        (make-buffer-input-layer-extension
+          (list (make-input-layer 'buffer (spell-service-result-keymap service) #f 'ignore)))
         (make-buffer-edit-policy-extension
           (make-buffer-edit-policy 'reject)))))
+
+  (define (source-selection offset)
+    (make-selection (list (make-selection-range offset offset))))
+
+  (define (show-stale-source-message! service context)
+    (dispatcher-dispatch-host!
+      (host-state-dispatch (spell-service-state service))
+      (make-set-surface-message-operation
+        (command-context-surface-id context)
+        "Spelling result is stale; run spell check again.")))
+
+  (define (visit-finding! service item context ignored)
+    (let ([finding (buffer-item-payload item)])
+      (if (not (spell-finding? finding))
+          (command-handled)
+          (let* ([state (spell-service-state service)]
+                 [buffers (host-state-buffers state)]
+                 [views (host-state-views state)]
+                 [source (buffer-service-ref buffers (spell-finding-buffer-id finding) #f)])
+            (if (or (not source)
+                    (not (= (buffer-state-generation (buffer-state source))
+                            (spell-finding-buffer-generation finding))))
+                (begin (show-stale-source-message! service context) (command-handled))
+                (let ([view
+                       (view-service-create!
+                         views (spell-service-owner service) source
+                         (buffer-state-configuration (buffer-state source)))])
+                  (if (not (dispatcher-dispatch-host!
+                             (host-state-dispatch state)
+                             (make-replace-window-view-operation
+                               (command-context-surface-id context)
+                               (command-context-window-id context) (view-id view))))
+                      (begin
+                        (view-service-close-view! views (view-id view))
+                        (command-handled))
+                      (begin
+                        (dispatcher-dispatch-view!
+                          (host-state-dispatch state)
+                          (make-view-transaction-spec
+                            (view-id view) (view-state-generation (view-state view))
+                            (source-selection (spell-finding-offset finding))
+                            #f #f '() '() #f))
+                        (command-handled)))))))))
 
   (define (show-spell-report! service request status output)
     (let* ([state (spell-service-state service)]
            [context (spell-request-context request)]
            [buffers (host-state-buffers state)]
            [views (host-state-views state)]
-           [configuration (spell-result-configuration)]
+           [layout (report-layout request status output)]
+           [configuration (spell-result-configuration service)]
            [buffer
             (buffer-service-create!
               buffers (spell-service-owner service)
               (string-append "*Spelling: " (spell-request-buffer-name request) "*")
-              (make-document
-                (spell-report (spell-request-buffer-name request) status output))
+              (make-document (car layout))
               configuration)]
            [view
             (view-service-create! views (spell-service-owner service) buffer configuration)])
+      (dispatcher-dispatch!
+        (host-state-dispatch state)
+        (make-transaction-spec
+          (buffer-id buffer) #f (buffer-state-generation (buffer-state buffer))
+          (make-change-set (snapshot-byte-size (buffer-state-document (buffer-state buffer))) '())
+          #f (list (make-buffer-items-effect (cdr layout))) '()))
       (unless
         (dispatcher-dispatch-host!
           (host-state-dispatch state)
@@ -139,14 +264,22 @@
               service request status
               (utf8->string (concatenate-bytevectors (reverse chunks)))))))))
 
-  (define (make-spell-service! state owner processes)
-    (unless (and (host-state? state) (owner? owner) (process-service? processes))
+  (define (make-spell-service! state owner processes actions)
+    (unless (and (host-state? state) (owner? owner) (process-service? processes)
+                 (buffer-item-action-service? actions))
       (assertion-violation 'make-spell-service!
-                           "expected host state, owner, and process service"
-                           state owner processes))
+                           "expected host state, owner, process service, and item actions"
+                           state owner processes actions))
     (let* ([runtime (host-state-command-runtime state)]
            [keymap (make-keymap 'spell)]
-           [service (%make-spell-service state owner processes keymap)])
+           [result-keymap (make-keymap 'spell-result)]
+           [service (%make-spell-service state owner processes keymap result-keymap)])
+      (keymap-bind! result-keymap
+                    (list (make-key-stroke 'enter #f 0)) 'buffer.activate-item)
+      (keymap-bind! result-keymap (list (control-stroke #\g)) 'file.close)
+      (buffer-item-action-register!
+        actions owner 'spell 'visit
+        (lambda (item context generation) (visit-finding! service item context generation)))
       (command-runtime-register-effect-handler!
         runtime 'spell.check owner 'hunspell-check
         (lambda (ignored invocation effect)
@@ -161,9 +294,12 @@
                 'spell.check
                 (make-spell-request
                   context
+                  (command-context-buffer-id context)
                   (buffer-name
                     (buffer-service-ref
                       (host-state-buffers state) (command-context-buffer-id context)))
+                  (buffer-state-generation buffer-state)
+                  (snapshot-string (buffer-state-document buffer-state))
                   (snapshot-bytevector (buffer-state-document buffer-state))))))
           owner "Check the active Buffer with Hunspell and show reported words."
           'tool #f))
