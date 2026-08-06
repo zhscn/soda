@@ -16,14 +16,12 @@
           (soda kernel view-state)
           (soda host command)
           (soda host command-runtime)
-          (soda host dispatch)
+          (soda host buffer)
           (soda host input)
           (soda host input-event)
-          (soda host internal buffer)
-          (soda host internal operation)
-          (soda host internal state)
-          (soda host internal view)
+          (soda host package)
           (soda host value)
+          (soda host view)
           (soda packages interaction))
 
   ;; ProcessService owns package-level process identity and output Buffer
@@ -31,7 +29,7 @@
   ;; time; commands do not otherwise depend on terminal implementation.
   (define-record-type
     (process-service %make-process-service process-service?)
-    (fields state owner keymap processes
+    (fields host owner keymap processes
             (mutable runtime process-service-runtime process-service-runtime-set!)))
 
   ;; A ProcessJob is the package boundary for a finite, pipe-backed external
@@ -101,37 +99,29 @@
 
   (define (append-output! service buffer-id bytes)
     (let ([buffer
-           (buffer-service-ref
-             (host-state-buffers (process-service-state service))
-             buffer-id #f)])
+           (package-host-buffer-ref (process-service-host service) buffer-id #f)])
       (if buffer
-          (dispatcher-dispatch!
-            (host-state-dispatch (process-service-state service))
+          (package-host-dispatch! (process-service-host service)
             (process-output-transaction buffer bytes))
           #f)))
 
   (define (open-output-buffer! service request)
-    (let* ([state (process-service-state service)]
+    (let* ([host (process-service-host service)]
            [context (process-request-context request)]
-           [buffers (host-state-buffers state)]
-           [views (host-state-views state)]
            [configuration
             (buffer-state-configuration (command-context-buffer-state context))]
            [buffer
-            (buffer-service-create!
-              buffers (process-service-owner service)
+            (package-host-create-buffer!
+              host (process-service-owner service)
               (make-process-buffer-name (process-request-command request))
               (make-document "") configuration)]
            [view
-            (view-service-create! views (process-service-owner service) buffer configuration)])
+            (package-host-create-view! host (process-service-owner service) buffer configuration)])
       (unless
-        (dispatcher-dispatch-host!
-          (host-state-dispatch state)
-          (make-replace-window-view-operation
-            (command-context-surface-id context)
-            (command-context-window-id context) (view-id view)))
-        (view-service-close-view! views (view-id view))
-        (buffer-service-close-buffer! buffers (buffer-id buffer))
+        (package-host-replace-window-view!
+          host (command-context-surface-id context)
+          (command-context-window-id context) (view-id view))
+        (package-host-close-buffer! host (buffer-id buffer))
         (assertion-violation 'process.execute
                              "origin Window is no longer available" context))
       buffer))
@@ -215,13 +205,13 @@
                 #t]
                [else #f])))))
 
-  (define (make-process-service! state owner)
-    (unless (and (host-state? state) (owner? owner))
+  (define (make-process-service! host owner)
+    (unless (and (package-host? host) (owner? owner))
       (assertion-violation 'make-process-service! "invalid process service dependencies"
-                           state owner))
-    (let* ([runtime (host-state-command-runtime state)]
+                           host owner))
+    (let* ([runtime (package-host-command-runtime host)]
            [keymap (make-keymap 'process)]
-           [service (%make-process-service state owner keymap (make-eqv-hashtable) #f)])
+           [service (%make-process-service host owner keymap (make-eqv-hashtable) #f)])
       (command-runtime-register-effect-handler!
         runtime 'process.spawn owner 'native-process-spawn
         (lambda (ignored invocation effect)

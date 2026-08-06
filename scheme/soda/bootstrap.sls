@@ -124,7 +124,7 @@
                                (host-state-dispatch state) owner)]
                [files
                 (make-file-service! state owner history)]
-               [processes (make-process-service! state owner)]
+               [processes (make-process-service! host owner)]
                [buffer-item-actions (make-buffer-item-action-service)]
                [directories (make-directory-service! state owner files buffer-item-actions)]
                [buffer-lists (make-buffer-list-service! state owner history buffer-item-actions)]
