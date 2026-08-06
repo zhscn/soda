@@ -38,6 +38,7 @@
         (soda bootstrap)
         (soda packages base fundamental-editing)
         (soda packages buffer-ui)
+        (soda packages interaction)
         (soda packages process)
         (soda packages spell)
         (prefix (soda ffi runtime) native:)
@@ -2867,6 +2868,70 @@
                      (error 'kernel-tests "spell finding activation did not visit source location")))))]
             [(zero? remaining)
              (error 'kernel-tests "spell check did not display a parsed report" output)]
+            [else (poll (- remaining 1))]))))
+    (lambda ()
+      (native:runtime-close! native-runtime)
+      (soda-application-close! application))))
+
+;; A semantic spelling item can carry immutable target data through an
+;; interactive prompt.  The prompt answer is applied only to the exact source
+;; revision that Hunspell inspected.
+(let* ([application (make-soda-application)]
+       [state (soda-application-state application)]
+       [runtime (host-state-command-runtime state)]
+       [processes (soda-application-processes application)]
+       [interactions (soda-application-interaction application)]
+       [native-runtime (native:make-runtime)])
+  (dynamic-wind
+    (lambda () #f)
+    (lambda ()
+      (process-service-attach-runtime! processes native-runtime)
+      (command-runtime-start!
+        runtime 'fundamental.insert-text (application-command-context application)
+        (list (string->utf8 "helo\n")))
+      (command-runtime-start!
+        runtime 'spell.check (application-command-context application))
+      (let poll ([remaining 4])
+        (for-each
+          (lambda (event) (process-service-handle-runtime-event! processes event))
+          (native:runtime-poll! native-runtime))
+        (let* ([active
+                (surface-active-context (soda-application-surface application)
+                                        (host-state-views state))]
+               [report-view
+                (view-service-ref (host-state-views state) (active-context-view-id active))]
+               [report-buffer (view-buffer report-view)]
+               [output (buffer-string report-buffer)])
+          (cond
+            [(and (string=? (buffer-name report-buffer) "*Spelling: *scratch**")
+                  (or (string-contains? output "Line 1: & helo")
+                      (string-contains? output "Hunspell exited with status")))
+             (when (string-contains? output "Line 1: & helo")
+               (let* ([ranges (buffer-item-ranges (buffer-state report-buffer))]
+                      [item-range (and (pair? ranges)
+                                       (pair? (range-set-ranges (car ranges)))
+                                       (car (range-set-ranges (car ranges))))])
+                 (unless item-range
+                   (error 'kernel-tests "spell correction report has no item"))
+                 (dispatcher-dispatch-view!
+                   (host-state-dispatch state)
+                   (make-view-transaction-spec
+                     (view-id report-view) (view-state-generation (view-state report-view))
+                     (make-selection
+                       (list (make-selection-range (range-value-from item-range)
+                                                   (range-value-from item-range))))
+                     #f #f '() '() #f))
+                 (command-runtime-start!
+                   runtime 'spell.correct-item (application-command-context application))
+                 (host-state-run! state)
+                 (unless (interaction-service-current interactions)
+                   (error 'kernel-tests "spell correction did not request a replacement"))
+                 (interaction-service-submit! interactions "hello")
+                 (host-state-run! state)
+                 (unless (string=? (buffer-string (soda-application-buffer application)) "hello\n")
+                   (error 'kernel-tests "spell correction did not replace the source word"))))]
+            [(zero? remaining)
+             (error 'kernel-tests "spell correction did not display a report" output)]
             [else (poll (- remaining 1))]))))
     (lambda ()
       (native:runtime-close! native-runtime)

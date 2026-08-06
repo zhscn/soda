@@ -377,7 +377,7 @@
     (let* ([definition (lookup-definition service name)]
            [invocation
              (if interactive?
-                 (make-interactive-command-invocation definition context)
+                 (make-interactive-command-invocation definition context arguments)
                  (make-command-invocation definition context arguments))])
       (hashtable-set! (command-runtime-invocations service)
                       (command-invocation-id invocation) invocation)
@@ -388,8 +388,10 @@
       [(service name context) (start! service name context #f '())]
       [(service name context arguments) (start! service name context #f arguments)]))
 
-  (define (command-runtime-start-interactive! service name context)
-    (start! service name context #t '()))
+  (define command-runtime-start-interactive!
+    (case-lambda
+      [(service name context) (start! service name context #t '())]
+      [(service name context arguments) (start! service name context #t arguments)]))
 
   (define (command-runtime-invocation service id . default)
     (let ([value (hashtable-ref (command-runtime-invocations service) id #f)])
@@ -484,7 +486,8 @@
          (if (command-invoke-message-interactive? message)
              (command-runtime-start-interactive!
                service (command-invoke-message-name message)
-               (command-invoke-message-context message))
+               (command-invoke-message-context message)
+               (command-invoke-message-arguments message))
              (command-runtime-start!
                service (command-invoke-message-name message)
                (command-invoke-message-context message)

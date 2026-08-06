@@ -259,16 +259,25 @@
       (identity-source-next! invocation-identities)
       definition context '() (list-copy arguments) 'resolving #f #f #f))
 
-  (define (make-interactive-command-invocation definition context)
-    (unless (and (command-definition? definition) (command-context? context)
-                 (interactive-plan? (command-definition-interaction-spec definition)))
-      (assertion-violation 'make-interactive-command-invocation
-                           "command has no interactive plan" definition))
-    (%make-command-invocation
-      (identity-source-next! invocation-identities)
-      definition context
-      (interactive-plan-readers (command-definition-interaction-spec definition))
-      '() 'resolving #f #f #f))
+  ;; An interactive invocation may carry explicit leading arguments.  This
+  ;; lets a command started from a semantic BufferItem retain its immutable
+  ;; target while ordinary InteractiveReaders collect the remaining values.
+  (define make-interactive-command-invocation
+    (case-lambda
+      [(definition context)
+       (make-interactive-command-invocation definition context '())]
+      [(definition context arguments)
+       (unless (and (command-definition? definition) (command-context? context)
+                    (interactive-plan? (command-definition-interaction-spec definition))
+                    (list? arguments))
+         (assertion-violation 'make-interactive-command-invocation
+                              "command has no interactive plan or invalid arguments"
+                              definition))
+       (%make-command-invocation
+         (identity-source-next! invocation-identities)
+         definition context
+         (interactive-plan-readers (command-definition-interaction-spec definition))
+         (list-copy arguments) 'resolving #f #f #f)]))
 
   (define (invocation-active? invocation)
     (memq (command-invocation-phase invocation) '(resolving reading executing)))

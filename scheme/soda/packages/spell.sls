@@ -23,6 +23,8 @@
           (soda host internal view)
           (soda host value)
           (soda packages buffer-ui)
+          (soda packages completion)
+          (soda packages interaction)
           (soda packages process))
 
   ;; Spelling is an ordinary tool package.  It owns Hunspell's line protocol
@@ -123,11 +125,67 @@
            (find-line (+ index 1) (+ current 1))]
           [else (find-line (+ index 1) current)]))))
 
+  (define (string-index value character)
+    (let loop ([index 0])
+      (and (< index (string-length value))
+           (if (char=? (string-ref value index) character)
+               index
+               (loop (+ index 1))))))
+
+  (define (trim-horizontal-space value)
+    (let* ([length (string-length value)]
+           [start (let loop ([index 0])
+                    (if (and (< index length) (whitespace? (string-ref value index)))
+                        (loop (+ index 1)) index))]
+           [end (let loop ([index length])
+                  (if (and (> index start) (whitespace? (string-ref value (- index 1))))
+                      (loop (- index 1)) index))])
+      (substring value start end)))
+
+  (define (split-suggestions value)
+    (let loop ([start 0] [index 0] [items '()])
+      (if (= index (string-length value))
+          (let ([item (trim-horizontal-space (substring value start index))])
+            (reverse (if (zero? (string-length item)) items (cons item items))))
+          (if (char=? (string-ref value index) #\,)
+              (let ([item (trim-horizontal-space (substring value start index))])
+                (loop (+ index 1) (+ index 1)
+                      (if (zero? (string-length item)) items (cons item items))))
+              (loop start (+ index 1) items)))))
+
+  (define (finding-suggestions finding)
+    (let* ([protocol (spell-finding-protocol finding)]
+           [colon (string-index protocol #\:)])
+      (if colon
+          (split-suggestions (substring protocol (+ colon 1) (string-length protocol)))
+          '())))
+
+  (define (finding-completion-source finding)
+    (let ([suggestions (finding-suggestions finding)])
+      (make-completion-source
+        (lambda (snapshot)
+          (let loop ([items suggestions] [index 0])
+            (if (null? items)
+                '()
+                (cons (make-completion-candidate
+                        index (car items) (car items) #f "spelling" (car items))
+                      (loop (cdr items) (+ index 1))))))
+        #f #f #f
+        (lambda (value snapshot) (string? value)))))
+
+  (define (bytevector-prefix-at? bytes offset expected)
+    (and (<= (+ offset (bytevector-length expected)) (bytevector-length bytes))
+         (let loop ([index 0])
+           (or (= index (bytevector-length expected))
+               (and (= (bytevector-u8-ref bytes (+ offset index))
+                       (bytevector-u8-ref expected index))
+                    (loop (+ index 1)))))))
+
   (define (report-layout request status output)
     (let loop ([lines (split-lines output)] [source-line 1]
                [text (string-append "Spelling report: "
                                     (spell-request-buffer-name request)
-                                    "\nRET visits a finding; C-g closes this report.\n\n")]
+                                    "\nRET visits a finding; C-r replaces it; C-g closes this report.\n\n")]
                [ranges '()] [serial 0])
       (cond
         [(null? lines)
@@ -185,38 +243,75 @@
         (command-context-surface-id context)
         "Spelling result is stale; run spell check again.")))
 
+  (define (open-finding! service finding context)
+    (let* ([state (spell-service-state service)]
+           [buffers (host-state-buffers state)]
+           [views (host-state-views state)]
+           [source (buffer-service-ref buffers (spell-finding-buffer-id finding) #f)])
+      (if (or (not source)
+              (not (= (buffer-state-generation (buffer-state source))
+                      (spell-finding-buffer-generation finding))))
+          (begin (show-stale-source-message! service context) #f)
+          (let ([view
+                 (view-service-create!
+                   views (spell-service-owner service) source
+                   (buffer-state-configuration (buffer-state source)))])
+            (if (not (dispatcher-dispatch-host!
+                       (host-state-dispatch state)
+                       (make-replace-window-view-operation
+                         (command-context-surface-id context)
+                         (command-context-window-id context) (view-id view))))
+                (begin (view-service-close-view! views (view-id view)) #f)
+                (begin
+                  (dispatcher-dispatch-view!
+                    (host-state-dispatch state)
+                    (make-view-transaction-spec
+                      (view-id view) (view-state-generation (view-state view))
+                      (source-selection (spell-finding-offset finding))
+                      #f #f '() '() #f))
+                  (make-command-context
+                    #f (command-context-surface-id context) (command-context-window-id context)
+                    (view-id view) (buffer-id source) (buffer-state source) (view-state view)
+                    #f '() #f #f 'spell)))))))
+
   (define (visit-finding! service item context ignored)
     (let ([finding (buffer-item-payload item)])
       (if (not (spell-finding? finding))
           (command-handled)
-          (let* ([state (spell-service-state service)]
-                 [buffers (host-state-buffers state)]
-                 [views (host-state-views state)]
-                 [source (buffer-service-ref buffers (spell-finding-buffer-id finding) #f)])
-            (if (or (not source)
-                    (not (= (buffer-state-generation (buffer-state source))
-                            (spell-finding-buffer-generation finding))))
-                (begin (show-stale-source-message! service context) (command-handled))
-                (let ([view
-                       (view-service-create!
-                         views (spell-service-owner service) source
-                         (buffer-state-configuration (buffer-state source)))])
-                  (if (not (dispatcher-dispatch-host!
-                             (host-state-dispatch state)
-                             (make-replace-window-view-operation
-                               (command-context-surface-id context)
-                               (command-context-window-id context) (view-id view))))
-                      (begin
-                        (view-service-close-view! views (view-id view))
-                        (command-handled))
-                      (begin
-                        (dispatcher-dispatch-view!
-                          (host-state-dispatch state)
-                          (make-view-transaction-spec
-                            (view-id view) (view-state-generation (view-state view))
-                            (source-selection (spell-finding-offset finding))
-                            #f #f '() '() #f))
-                        (command-handled)))))))))
+          (begin (open-finding! service finding context) (command-handled)))))
+
+  (define (queue-correction! service item context ignored)
+    (let ([finding (buffer-item-payload item)])
+      (when (spell-finding? finding)
+        (let ([source-context (open-finding! service finding context)])
+          (when source-context
+            (command-runtime-enqueue!
+              (host-state-command-runtime (spell-service-state service))
+              (make-command-invoke-message
+                'spell.correct source-context (list finding) #t)))))
+      (command-handled)))
+
+  (define (apply-correction service context finding replacement)
+    (let* ([buffer-state (command-context-buffer-state context)]
+           [document (buffer-state-document buffer-state)]
+           [offset (spell-finding-offset finding)]
+           [expected (string->utf8 (spell-finding-word finding))]
+           [replacement-bytes (string->utf8 replacement)]
+           [bytes (snapshot-bytevector document)])
+      (if (or (not (spell-finding? finding))
+              (not (= (command-context-buffer-id context) (spell-finding-buffer-id finding)))
+              (not (= (buffer-state-generation buffer-state)
+                      (spell-finding-buffer-generation finding)))
+              (not (bytevector-prefix-at? bytes offset expected)))
+          (begin (show-stale-source-message! service context) (command-handled))
+          (let* ([end (+ offset (bytevector-length expected))]
+                 [selection (source-selection (+ offset (bytevector-length replacement-bytes)))])
+            (make-transaction-spec
+              (command-context-buffer-id context) (command-context-view-id context)
+              (buffer-state-generation buffer-state)
+              (make-change-set (bytevector-length bytes)
+                               (list (make-text-change offset end replacement-bytes)))
+              selection '() '())))))
 
   (define (show-spell-report! service request status output)
     (let* ([state (spell-service-state service)]
@@ -264,6 +359,20 @@
               service request status
               (utf8->string (concatenate-bytevectors (reverse chunks)))))))))
 
+  (define (make-spell-replacement-reader)
+    (make-interactive-reader
+      'spell-replacement
+      (lambda (context arguments)
+        (let ([finding (and (pair? arguments) (car arguments))])
+          (if (spell-finding? finding)
+              (make-interactive-suspend
+                (make-interaction-request
+                  'spell-replacement
+                  (string-append "Replace " (spell-finding-word finding) " with: ")
+                  "" (finding-completion-source finding) 'free)
+                (lambda (value) (make-interactive-ready (list value))))
+              (assertion-violation 'spell.correct "missing spelling finding" finding))))))
+
   (define (make-spell-service! state owner processes actions)
     (unless (and (host-state? state) (owner? owner) (process-service? processes)
                  (buffer-item-action-service? actions))
@@ -276,10 +385,36 @@
            [service (%make-spell-service state owner processes keymap result-keymap)])
       (keymap-bind! result-keymap
                     (list (make-key-stroke 'enter #f 0)) 'buffer.activate-item)
+      (keymap-bind! result-keymap (list (control-stroke #\r)) 'spell.correct-item)
       (keymap-bind! result-keymap (list (control-stroke #\g)) 'file.close)
       (buffer-item-action-register!
         actions owner 'spell 'visit
         (lambda (item context generation) (visit-finding! service item context generation)))
+      (buffer-item-action-register!
+        actions owner 'spell 'correct
+        (lambda (item context generation) (queue-correction! service item context generation)))
+      (command-runtime-register-command!
+        runtime
+        (make-command-definition
+          'spell.correct-item
+          (lambda (context)
+            (let ([item (buffer-item-at-point
+                          (command-context-buffer-state context)
+                          (selection-range-head
+                            (selection-primary-range
+                              (view-state-selection (command-context-view-state context)))))])
+              (if item
+                  (or (buffer-item-action-invoke actions 'correct item context) (command-handled))
+                  (command-handled))))
+          owner "Prompt for a replacement of the spelling finding at point." 'tool #f))
+      (command-runtime-register-command!
+        runtime
+        (make-command-definition
+          'spell.correct
+          (lambda (context finding replacement)
+            (apply-correction service context finding replacement))
+          owner "Replace a spelling finding after choosing a correction." 'tool
+          (make-interactive-plan (list (make-spell-replacement-reader)))))
       (command-runtime-register-effect-handler!
         runtime 'spell.check owner 'hunspell-check
         (lambda (ignored invocation effect)
