@@ -165,6 +165,29 @@
                "fundamental editing did not produce stable editor state"))
       (soda-application-close! application))
 
+    ;; Nano aliases are declarative entries in the fundamental keymap.  They
+    ;; reuse the same command implementations as their primary bindings.
+    (let* ([application (make-soda-application)]
+           [keymap (fundamental-editing-keymap (soda-application-editing application))]
+           [meta (lambda (character)
+                   (make-key-stroke 'character (char->integer character) 2))]
+           [control (lambda (character)
+                      (make-key-stroke 'character (char->integer character) 4))])
+      (unless (and (eq? (keymap-lookup keymap (list (control #\y)))
+                       'fundamental.scroll-up)
+                   (eq? (keymap-lookup keymap (list (meta #\6)))
+                       'fundamental.copy-region)
+                   (eq? (keymap-lookup keymap (list (meta #\a)))
+                       'fundamental.set-mark)
+                   (eq? (keymap-lookup keymap (list (meta #\g)))
+                       'fundamental.goto-line)
+                   (eq? (keymap-lookup keymap (list (meta #\\)))
+                       'fundamental.beginning-of-buffer)
+                   (eq? (keymap-lookup keymap (list (meta #\/)))
+                       'fundamental.end-of-buffer))
+        (error 'fundamental-editing-tests "Nano editing aliases are not bound"))
+      (soda-application-close! application))
+
     (let* ([application (make-soda-application)]
            [state (soda-application-state application)]
            [runtime (host-state-command-runtime state)]
