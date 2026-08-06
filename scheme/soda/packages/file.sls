@@ -7,6 +7,7 @@
           (only (chezscheme) current-directory)
           (soda kernel change)
           (soda kernel document)
+          (soda kernel extension)
           (soda kernel selection)
           (soda kernel state)
           (soda kernel view-state)
@@ -59,6 +60,27 @@
   (define-record-type file-insert
     (fields context resource))
 
+  ;; Backups are a Buffer policy: visiting the same file through another View
+  ;; observes the same save behavior, while an unrelated Buffer retains its
+  ;; own choice.  The VFS remains unaware of backup naming or retention.
+  (define (first-value values default)
+    (if (null? values) default (car values)))
+
+  (define file-backup-facet
+    (make-facet 'file-backup 'buffer #f
+                (lambda (values) (first-value values #f)) eq? eq?))
+
+  (define file-backup-compartment (make-compartment 'file-backup 'buffer))
+
+  (define (file-backup-enabled? configuration)
+    (configuration-facet configuration file-backup-facet 'buffer))
+
+  (define (make-file-backup-extension enabled?)
+    (unless (boolean? enabled?)
+      (assertion-violation 'make-file-backup-extension
+                           "expected a backup policy boolean" enabled?))
+    (make-facet-provider file-backup-facet enabled?))
+
   (define (buffer-id? value)
     (and (integer? value) (exact? value) (>= value 0)))
 
@@ -70,6 +92,8 @@
     (require-path 'canonical-file-resource path)
     (make-resource 'file
       (vfs-resolve-path (vfs-directory-path (current-directory)) path)))
+
+  (define (file-backup-path path) (string-append path "~"))
 
   (define (string-prefix? prefix value)
     (let ([length (string-length prefix)])
@@ -294,6 +318,30 @@
       (make-file-write
         buffer-id resource (snapshot-bytevector document) version rebind?)))
 
+  (define (toggle-backup context)
+    (let* ([buffer-state (command-context-buffer-state context)]
+           [enabled? (file-backup-enabled? (buffer-state-configuration buffer-state))]
+           [effect
+            (make-compartment-reconfigure-effect
+              file-backup-compartment
+              (make-file-backup-extension (not enabled?)))]
+           [update
+            (make-transaction-spec
+              (command-context-buffer-id context)
+              (command-context-view-id context)
+              (buffer-state-generation buffer-state)
+              (make-change-set
+                (snapshot-byte-size (buffer-state-document buffer-state)) '())
+              #f (list effect) '())]
+           [surface-id (command-context-surface-id context)])
+      (if (and (integer? surface-id) (exact? surface-id) (>= surface-id 0))
+          (list update
+                (make-set-surface-message-operation
+                  surface-id
+                  (string-append "File backups "
+                                 (if enabled? "disabled" "enabled"))))
+          update)))
+
   (define (modified-file-buffer? service buffer)
     (and buffer
          (file-service-binding service (buffer-id buffer) #f)
@@ -477,22 +525,24 @@
                    [path (resource-locator resource)]
                    [expected (file-write-expected-version request)]
                    [target
-                    (and (file-write-rebind? request)
-                         (buffer-service-ref buffers (file-write-buffer-id request) #f))])
-              (when (and (file-write-rebind? request) (not target))
+                    (buffer-service-ref buffers (file-write-buffer-id request) #f)])
+              (unless target
                 (assertion-violation 'file.write "target Buffer is no longer live" request))
               ;; Verify ownership of the destination before touching it.  A
               ;; failed Save As must not overwrite an open file Buffer owned
               ;; by another resource identity.
-              (when target
-                (let ([existing (buffer-service-find-key buffers (file-buffer-key resource) #f)])
-                  (when (and existing (not (= (buffer-id existing) (buffer-id target))))
-                    (assertion-violation 'file.write
-                                         "destination is already visited by another Buffer"
-                                         path))))
+              (let ([existing (buffer-service-find-key buffers (file-buffer-key resource) #f)])
+                (when (and existing (not (= (buffer-id existing) (buffer-id target))))
+                  (assertion-violation 'file.write
+                                       "destination is already visited by another Buffer"
+                                       path)))
               (when expected
                 (unless (vfs-stat-same-version? expected (vfs-stat-path path))
                   (assertion-violation 'file.write "file changed outside Soda" path)))
+              (when (and (file-backup-enabled?
+                           (buffer-state-configuration (buffer-state target)))
+                         (vfs-file-exists? path))
+                (vfs-write-file (file-backup-path path) (vfs-read-file path)))
               (vfs-write-file path (file-write-contents request))
               (when target
                 (buffer-service-rebind-key!
@@ -550,6 +600,10 @@
                     (make-command-effect 'file.load
                       (make-file-load (command-context-buffer-id context)
                                       resource version #t))))))))
+      (install-file-command! runtime owner 'file.toggle-backup
+        "Toggle adjacent backup creation before writing an existing file."
+        '()
+        (lambda (context) (toggle-backup context)))
       (install-file-command! runtime owner 'file.save "Write the active Buffer to its visited file."
         (list (make-save-file-name-reader service) (make-overwrite-reader service))
         (lambda (context . arguments)
@@ -658,6 +712,9 @@
       (keymap-bind! keymap
                     (list (make-key-stroke 'character (char->integer #\r) 2))
                     'file.revert)
+      (keymap-bind! keymap
+                    (list (make-key-stroke 'character (char->integer #\B) 2))
+                    'file.toggle-backup)
       (buffer-service-add-close-listener!
         buffers owner
         (lambda (buffer)

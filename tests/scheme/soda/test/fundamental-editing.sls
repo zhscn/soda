@@ -1237,6 +1237,55 @@
           (when (file-exists? saved-as) (delete-file saved-as))
           (when (file-exists? scratch-save) (delete-file scratch-save)))))
 
+    ;; File backup is Buffer-local and captures the immediately preceding
+    ;; on-disk contents before every ordinary save.  It uses the same atomic
+    ;; VFS write path as the target file.
+    (let* ([path (string-append "/tmp/soda-file-backup-"
+                                (number->string (get-process-id)) ".txt")]
+           [backup (string-append path "~")]
+           [application (make-soda-application)])
+      (dynamic-wind
+        (lambda ()
+          (when (file-exists? path) (delete-file path))
+          (when (file-exists? backup) (delete-file backup))
+          (vfs-write-file path (string->utf8 "original")))
+        (lambda ()
+          (let* ([state (soda-application-state application)]
+                 [runtime (host-state-command-runtime state)]
+                 [files (soda-application-files application)])
+            (command-runtime-start!
+              runtime 'file.visit (application-command-context application) (list path))
+            (command-runtime-start!
+              runtime 'file.toggle-backup (application-command-context application))
+            (command-runtime-start!
+              runtime 'fundamental.end-of-buffer (application-command-context application))
+            (command-runtime-start!
+              runtime 'fundamental.insert-text
+              (application-command-context application) (list (string->utf8 " first")))
+            (command-runtime-start!
+              runtime 'file.save (application-command-context application))
+            (unless (and (string=? (utf8->string (vfs-read-file path)) "original first")
+                         (string=? (utf8->string (vfs-read-file backup)) "original")
+                         (eq? (keymap-lookup
+                                (file-keymap files)
+                                (list (make-key-stroke 'character (char->integer #\B) 2)))
+                              'file.toggle-backup))
+              (error 'fundamental-editing-tests
+                     "file backup did not retain the pre-save resource contents"))
+            (command-runtime-start!
+              runtime 'fundamental.insert-text
+              (application-command-context application) (list (string->utf8 " second")))
+            (command-runtime-start!
+              runtime 'file.save (application-command-context application))
+            (unless (and (string=? (utf8->string (vfs-read-file path)) "original first second")
+                         (string=? (utf8->string (vfs-read-file backup)) "original first"))
+              (error 'fundamental-editing-tests
+                     "file backup did not advance with the saved resource"))
+            (soda-application-close! application)))
+        (lambda ()
+          (when (file-exists? path) (delete-file path))
+          (when (file-exists? backup) (delete-file backup)))))
+
     ;; Write Out and Save As preserve an explicit overwrite boundary.  A
     ;; declined confirmation changes neither the resource nor the Buffer's
     ;; file association.
