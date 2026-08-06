@@ -6,7 +6,9 @@
           (soda kernel document)
           (soda kernel extension)
           (soda kernel range-set)
+          (soda kernel selection)
           (soda kernel state)
+          (soda kernel view-state)
           (soda host command)
           (soda host command-runtime)
           (soda host dispatch)
@@ -26,7 +28,7 @@
   ;; packages.
   (define-record-type
     (buffer-list-service %make-buffer-list-service buffer-list-service?)
-    (fields state owner history keymap result-keymap authority lists))
+    (fields state owner history actions keymap result-keymap authority lists))
 
   (define-record-type buffer-list-state
     (fields (mutable generation buffer-list-state-generation
@@ -83,7 +85,8 @@
                  [end (+ start (bytevector-length (string->utf8 row)))]
                  [item
                   (make-buffer-item
-                    'buffer-list (buffer-id buffer) 'buffer (buffer-id buffer) '(visit) 'visit)])
+                    'buffer-list (buffer-id buffer) 'buffer (buffer-id buffer)
+                    '(visit close) 'visit)])
             (loop (cdr buffers) (string-append text row)
                   (cons (make-range-value start end item) ranges))))))
 
@@ -181,6 +184,33 @@
                                    "origin Window is no longer available" context))
             (command-handled)))))
 
+  (define (close-buffer! service item context ignored)
+    (let ([target-id (buffer-item-payload item)])
+      (if (not (buffer-service-ref
+                 (host-state-buffers (buffer-list-service-state service)) target-id #f))
+          (command-handled)
+          (begin
+            ;; The File package owns save decisions and close replacement.
+            ;; Preserve the result Buffer's context while passing the selected
+            ;; Buffer as an explicit command target.
+            (command-runtime-enqueue!
+              (host-state-command-runtime (buffer-list-service-state service))
+              (make-command-invoke-message 'file.close context (list target-id) #t))
+            (command-handled)))))
+
+  (define (close-item-at-point! service context)
+    (let ([item
+           (buffer-item-at-point
+             (command-context-buffer-state context)
+             (selection-range-head
+               (selection-primary-range
+                 (view-state-selection (command-context-view-state context)))))])
+      (if (and item (memq 'close (buffer-item-actions item)))
+          (or (buffer-item-action-invoke
+                (buffer-list-service-actions service) 'close item context)
+              (command-handled))
+          (command-handled))))
+
   (define (make-buffer-list-service! state owner history actions)
     (unless (and (host-state? state) (owner? owner) (history? history)
                  (buffer-item-action-service? actions))
@@ -193,16 +223,22 @@
            [authority (make-edit-authority owner 'buffer-list-refresh)]
            [service
             (%make-buffer-list-service
-              state owner history keymap result-keymap authority (make-eqv-hashtable))])
+              state owner history actions keymap result-keymap authority (make-eqv-hashtable))])
       (keymap-bind! keymap (list (control-stroke #\x) (control-stroke #\b)) 'buffer.list)
       (keymap-bind! result-keymap (list (make-key-stroke 'enter #f 0)) 'buffer.activate-item)
       (keymap-bind! result-keymap (list (make-key-stroke 'character (char->integer #\g) 0))
                     'buffer-list.refresh)
+      (keymap-bind! result-keymap (list (make-key-stroke 'character (char->integer #\d) 0))
+                    'buffer-list.close-item)
       (keymap-bind! result-keymap (list (control-stroke #\g)) 'file.close)
       (buffer-item-action-register!
         actions owner 'buffer-list 'visit
         (lambda (item context generation)
           (visit-buffer! service item context generation)))
+      (buffer-item-action-register!
+        actions owner 'buffer-list 'close
+        (lambda (item context generation)
+          (close-buffer! service item context generation)))
       (command-runtime-register-effect-handler!
         runtime 'buffer-list.open owner 'open-buffer-list
         (lambda (ignored invocation effect)
@@ -226,6 +262,12 @@
             (make-command-effect
               'buffer-list.refresh (make-buffer-list-refresh-request context)))
           owner "Refresh the generated Buffer List." 'buffer #f))
+      (command-runtime-register-command!
+        runtime
+        (make-command-definition
+          'buffer-list.close-item
+          (lambda (context) (close-item-at-point! service context))
+          owner "Close the Buffer item at point." 'buffer #f))
       (buffer-service-add-close-listener!
         (host-state-buffers state) owner
         (lambda (buffer)

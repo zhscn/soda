@@ -271,13 +271,35 @@
   ;; The reader evaluates dirty state at command invocation time.  The
   ;; minibuffer is therefore a normal interaction overlay; it does not hold a
   ;; Buffer close transaction open while the user decides.
-  (define (make-active-buffer-close-reader service)
+  ;; `file.close` accepts an optional initial Buffer identity.  Interactive
+  ;; invocations without one close the active Buffer; generated result Buffers
+  ;; can supply another live target without changing the selected Window.
+  (define (make-buffer-close-target-reader)
+    (make-interactive-reader
+      'buffer-target
+      (lambda (context arguments)
+        (cond
+          [(null? arguments)
+           (make-interactive-ready (list (command-context-buffer-id context)))]
+          [(and (null? (cdr arguments)) (buffer-id? (car arguments)))
+           (make-interactive-ready '())]
+          [else
+           (assertion-violation 'file.close
+                                "expected an optional Buffer identity before close decision"
+                                arguments)]))))
+
+  (define (make-buffer-close-decision-reader service)
     (make-interactive-reader
       'save-decision
       (lambda (context arguments)
+        (unless (and (pair? arguments) (null? (cdr arguments))
+                     (buffer-id? (car arguments)))
+          (assertion-violation 'file.close
+                               "close decision requires exactly one Buffer identity"
+                               arguments))
         (let ([buffer
                (buffer-service-ref (host-state-buffers (file-service-state service))
-                                   (command-context-buffer-id context) #f)])
+                                   (car arguments) #f)])
           (if (modified-file-buffer? service buffer)
               (make-interactive-suspend
                 (make-decision-request
@@ -508,25 +530,26 @@
                   (buffer-state-document (command-context-buffer-state context)))
                 #f #t)))))
       (install-file-command! runtime owner 'file.close "Close the active file Buffer."
-        (list (make-active-buffer-close-reader service))
-        (lambda (context decision)
+        (list (make-buffer-close-target-reader)
+              (make-buffer-close-decision-reader service))
+        (lambda (context target-id decision)
           (case decision
             [(cancel) (command-handled)]
             [(save)
-             (let ([binding (file-service-binding service (command-context-buffer-id context) #f)])
-               (if binding
-                   (list
-                     (make-file-write-effect
-                       (command-context-buffer-id context)
-                       (buffer-state-document (command-context-buffer-state context))
-                       (file-binding-resource binding) (file-binding-version binding) #f)
-                     (make-command-effect 'file.close
-                                          (make-file-close (command-context-buffer-id context))))
-                   (make-command-effect 'file.close
-                                        (make-file-close (command-context-buffer-id context)))))]
+             (let* ([target (buffer-service-ref buffers target-id #f)]
+                    [binding (and target (file-service-binding service target-id #f))])
+               (if (not target)
+                   (command-handled)
+                   (if binding
+                       (list
+                         (make-file-write-effect
+                           target-id
+                           (buffer-state-document (buffer-state target))
+                           (file-binding-resource binding) (file-binding-version binding) #f)
+                         (make-command-effect 'file.close (make-file-close target-id)))
+                       (make-command-effect 'file.close (make-file-close target-id)))))]
             [else
-             (make-command-effect 'file.close
-                                  (make-file-close (command-context-buffer-id context)))])))
+             (make-command-effect 'file.close (make-file-close target-id))])))
       ;; Exit is a normal interactive command.  It asks once for all modified
       ;; visited files, performs writes first, and only then notifies the
       ;; frontend to terminate.  Unvisited scratch Buffers remain disposable.

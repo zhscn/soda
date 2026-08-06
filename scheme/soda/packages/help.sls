@@ -16,7 +16,7 @@
           (soda packages buffer-ui))
 
   (define help-text
-    "Soda Nano Help\n\nC-x C-f  Visit file\nC-x C-d  Browse directory\nC-x C-b  List buffers\nC-o      Write out\nC-x C-s  Save file\nC-x C-w  Save file as\nC-r      Insert file\nTAB      Complete prompt input\nC-c      Current position\nC-l      Refresh screen\nC-t      Check spelling\nM-D      Count words, lines, characters\nM-!      Execute command\nM-r      Revert file\nC-w      Search\nM-w/M-W  Repeat search forward/backward\nC-\\      Query replace\nC-k      Cut text or line\nC-u      Uncut text\nM-6      Copy region\nM-a/C-6  Set mark\nC-j      Justify paragraph\nM-g/C-_  Go to line\nC-y/C-v  Previous/next page\nM-\\/M-/ First/last line\nM-u      Undo\nM-e      Redo\nC-x C-k  Close buffer\nC-x C-c  Exit\nM-]      Matching delimiter\nC-g      Close help\n")
+    "Soda Nano Help\n\nC-x C-f  Visit file\nC-x C-d  Browse directory\nC-x C-b  List buffers (RET visit, d close)\nC-o      Write out\nC-x C-s  Save file\nC-x C-w  Save file as\nC-r      Insert file\nTAB      Complete prompt input\nC-c      Current position\nC-l      Refresh screen\nC-t      Check spelling\nM-D      Count words, lines, characters\nM-!      Execute command\nM-r      Revert file\nC-w      Search\nM-w/M-W  Repeat search forward/backward\nC-\\      Query replace\nC-k      Cut text or line\nC-u      Uncut text\nM-6      Copy region\nM-a/C-6  Set mark\nC-j      Justify paragraph\nM-g/C-_  Go to line\nC-y/C-v  Previous/next page\nM-\\/M-/ First/last line\nM-u      Undo\nM-e      Redo\nC-x C-k  Close buffer\nC-x C-c  Exit\nM-]      Matching delimiter\nC-g      Close help\n")
 
   (define-record-type help-service
     (fields state owner keymap))

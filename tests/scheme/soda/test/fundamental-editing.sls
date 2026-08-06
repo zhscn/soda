@@ -266,7 +266,8 @@
         (lambda ()
           (let* ([state (soda-application-state application)]
                  [runtime (host-state-command-runtime state)]
-                 [scratch (soda-application-buffer application)])
+                 [scratch (soda-application-buffer application)]
+                 [interaction (soda-application-interaction application)])
             (command-runtime-start! runtime 'file.visit
                                     (application-command-context application) (list path))
             (let* ([file-context (application-command-context application)]
@@ -308,7 +309,41 @@
                              (application-command-context application))
                            list-id)
                   (error 'fundamental-editing-tests
-                         "buffer.list did not reuse its canonical generated Buffer"))))))
+                         "buffer.list did not reuse its canonical generated Buffer"))
+                ;; `d` retains the Buffer List as the active context and
+                ;; passes the selected row as an explicit close target.  The
+                ;; normal File package still owns its save/discard prompt.
+                (command-runtime-start! runtime 'buffer.next-item
+                                        (application-command-context application))
+                (command-runtime-start! runtime 'buffer.next-item
+                                        (application-command-context application))
+                (command-runtime-start! runtime 'buffer-list.close-item
+                                        (application-command-context application))
+                (host-state-run! state)
+                (let ([request (interaction-session-request
+                                 (interaction-service-current interaction))])
+                  (unless (and (eq? (interaction-request-kind request) 'save-decision)
+                               (string=? (interaction-request-prompt request)
+                                         (string-append "Save changes to " path
+                                                        "? (save/discard/cancel) ")))
+                    (error 'fundamental-editing-tests
+                           "buffer.list close did not preserve the file save decision")))
+                (interaction-service-submit! interaction "discard")
+                (host-state-run! state)
+                (unless (and (not (buffer-service-ref
+                                    (host-state-buffers state) file-id #f))
+                             (= (command-context-buffer-id
+                                 (application-command-context application))
+                                list-id))
+                  (error 'fundamental-editing-tests
+                         "buffer.list close did not retire its explicit target"))
+                (command-runtime-start! runtime 'buffer-list.refresh
+                                        (application-command-context application))
+                (unless (not (string-contains?
+                               (buffer-string
+                                 (buffer-service-ref (host-state-buffers state) list-id)) path))
+                  (error 'fundamental-editing-tests
+                         "buffer.list refresh retained a closed Buffer row"))))))
         (lambda ()
           (soda-application-close! application)
           (guard (condition [else #f]) (delete-file path)))))
