@@ -134,7 +134,7 @@
                [messages (make-message-service! host owner)]
                [_help (make-help-service! host owner)]
                [search
-                (make-search-service! state owner)]
+                (make-search-service! host owner)]
                [interaction
                 (make-interaction-service! (host-state-command-runtime state) owner)]
                [minibuffer (make-minibuffer-service! host interaction owner)]

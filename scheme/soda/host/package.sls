@@ -3,6 +3,7 @@
           package-host?
           package-host-command-runtime
           package-host-dispatch!
+          package-host-dispatch-view!
           package-host-buffer-ref
           package-host-buffers
           package-host-open-or-create-buffer!
@@ -46,6 +47,9 @@
 
   (define (package-host-dispatch! host specification)
     (dispatcher-dispatch! (host-state-dispatch (package-host-state host)) specification))
+
+  (define (package-host-dispatch-view! host specification)
+    (dispatcher-dispatch-view! (host-state-dispatch (package-host-state host)) specification))
 
   (define (package-host-buffer-ref host id . default)
     (apply buffer-service-ref (host-state-buffers (package-host-state host)) id default))

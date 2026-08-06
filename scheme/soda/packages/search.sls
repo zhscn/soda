@@ -13,14 +13,13 @@
           (soda packages base text-motion)
           (soda host command)
           (soda host command-runtime)
-          (soda host dispatch)
+          (soda host buffer)
           (soda host input)
           (soda host input-event)
           (soda host operation)
-          (soda host internal buffer)
-          (soda host internal state)
-          (soda host internal view)
+          (soda host package)
           (soda host value)
+          (soda host view)
           (soda packages interaction))
 
   ;; Search is View-local interaction state.  A normal lookup remembers its
@@ -97,7 +96,7 @@
 
   (define-record-type
     (search-service %make-search-service search-service?)
-    (fields (immutable state search-service-state)
+    (fields (immutable host search-service-host)
             (immutable keymap search-keymap)
             (immutable queries search-service-queries)
             (immutable query-replaces search-service-query-replaces)))
@@ -151,13 +150,9 @@
   ;; a command context from the current Buffer/View pair rather than retaining
   ;; an old snapshot across a replacement decision.
   (define (query-replace-current-context service session)
-    (let* ([state (search-service-state service)]
-           [buffer
-            (buffer-service-ref (host-state-buffers state)
-                                (query-replace-session-buffer-id session) #f)]
-           [view
-            (view-service-ref (host-state-views state)
-                              (query-replace-session-view-id session) #f)])
+    (let* ([host (search-service-host service)]
+           [buffer (package-host-buffer-ref host (query-replace-session-buffer-id session) #f)]
+           [view (package-host-view-ref host (query-replace-session-view-id session) #f)])
       (and buffer view
            (= (buffer-id (view-buffer view)) (buffer-id buffer))
            (make-command-context
@@ -434,8 +429,8 @@
     (let* ([state (command-context-view-state context)]
            [query (query-replace-session-query session)]
            [start (query-replace-session-match-start session)])
-      (dispatcher-dispatch-view!
-        (host-state-dispatch (search-service-state service))
+      (package-host-dispatch-view!
+        (search-service-host service)
         (make-view-transaction-spec
           (command-context-view-id context) (view-state-generation state)
           (match-selection start (- (query-replace-session-match-end session) start))
@@ -468,7 +463,7 @@
                                (query-replace-current-context service session)])
                           (when next-context
                             (command-runtime-enqueue!
-                              (host-state-command-runtime (search-service-state service))
+                              (package-host-command-runtime (search-service-host service))
                               (make-command-invoke-message
                                 'search.query-replace.decision next-context '() #t)))))))))))))
 
@@ -687,16 +682,16 @@
                                  (if enabled? "disabled" "enabled"))))
           update)))
 
-  (define (make-search-service! state owner)
-    (unless (and (host-state? state) (owner? owner))
-      (assertion-violation 'make-search-service! "expected a HostState and owner"
-                           state owner))
-    (let* ([runtime (host-state-command-runtime state)]
+  (define (make-search-service! host owner)
+    (unless (and (package-host? host) (owner? owner))
+      (assertion-violation 'make-search-service! "expected a PackageHost and owner"
+                           host owner))
+    (let* ([runtime (package-host-command-runtime host)]
            [keymap (make-keymap 'search)]
            [decision-keymap (make-keymap 'query-replace-decision)]
            [service
             (%make-search-service
-              state keymap (make-eqv-hashtable) (make-eqv-hashtable))]
+              host keymap (make-eqv-hashtable) (make-eqv-hashtable))]
            [forward-reader (make-interaction-string-reader 'search "Search: ")]
            [backward-reader (make-interaction-string-reader 'search "Search backward: ")]
            [replace-reader (make-interaction-string-reader 'search "Replace: ")]
