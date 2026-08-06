@@ -125,7 +125,7 @@
                 (make-history! (host-state-command-runtime state)
                                (host-state-dispatch state) owner)]
                [files
-                (make-file-service! state owner history)]
+                (make-file-service! host owner history)]
                [processes (make-process-service! host owner)]
                [buffer-item-actions (make-buffer-item-action-service)]
                [directories (make-directory-service! host owner files buffer-item-actions)]

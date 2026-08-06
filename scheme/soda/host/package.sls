@@ -9,6 +9,7 @@
           package-host-open-or-create-buffer!
           package-host-create-buffer!
           package-host-close-buffer!
+          package-host-close-buffer-with-fallback!
           package-host-add-buffer-close-listener!
           package-host-find-buffer-key
           package-host-rebind-buffer-key!
@@ -21,12 +22,16 @@
           package-host-pop-interaction-view!
           package-host-set-surface-message!)
   (import (rnrs)
+          (soda kernel document)
+          (soda kernel state)
+          (soda kernel view-state)
           (soda host command-runtime)
           (soda host dispatch)
           (soda host internal buffer)
           (soda host internal state)
           (soda host internal surface)
           (soda host internal view)
+          (soda host internal window)
           (soda host operation)
           (soda host value))
 
@@ -67,6 +72,58 @@
 
   (define (package-host-close-buffer! host id)
     (buffer-service-close-buffer! (host-state-buffers (package-host-state host)) id))
+
+  ;; Closing a placed Buffer is a host lifecycle operation.  The host replaces
+  ;; every occurrence before retirement, so a feature package never traverses
+  ;; Surface trees or leaves a Window targeting a retired View.
+  (define (package-host-close-buffer-with-fallback! host owner target-id)
+    (let* ((state (package-host-state host))
+           (buffers (host-state-buffers state))
+           (views (host-state-views state))
+           (surfaces (host-state-surfaces state))
+           (target (buffer-service-ref buffers target-id #f)))
+      (and target
+           (let ((fallback
+                  (let find-surface ((remaining (surface-service-surfaces surfaces)))
+                    (and (pair? remaining)
+                         (or (let find-window ((windows
+                                                (window-leaves
+                                                  (surface-root-window (car remaining)))))
+                               (and (pair? windows)
+                                    (let ((view (view-service-ref views
+                                                                  (window-view-id (car windows)) #f)))
+                                      (if (and view
+                                               (not (= (buffer-id (view-buffer view)) target-id)))
+                                          (view-buffer view)
+                                          (find-window (cdr windows))))))
+                             (find-surface (cdr remaining)))))))
+             (let ((replacement-buffer
+                    (or fallback
+                        (buffer-service-create!
+                          buffers owner "*scratch*" (make-document "")
+                          (buffer-state-configuration (buffer-state target))))))
+               (for-each
+                 (lambda (surface)
+                   (for-each
+                     (lambda (window)
+                       (let ((view (view-service-ref views (window-view-id window) #f)))
+                         (when (and view (= (buffer-id (view-buffer view)) target-id))
+                           (let ((replacement
+                                  (view-service-create!
+                                    views owner replacement-buffer
+                                    (view-state-configuration (view-state view)))))
+                             (unless (dispatcher-dispatch-host!
+                                       (host-state-dispatch state)
+                                       (make-replace-window-view-operation
+                                         (surface-id surface) (window-id window)
+                                         (view-id replacement)))
+                               (view-service-close-view! views (view-id replacement))
+                               (assertion-violation
+                                 'package-host-close-buffer-with-fallback!
+                                 "unable to replace a Buffer View before close" target-id))))))
+                     (window-leaves (surface-root-window surface))))
+                 (surface-service-surfaces surfaces))
+               (buffer-service-close-buffer! buffers target-id))))))
 
   (define (package-host-add-buffer-close-listener! host owner procedure)
     (buffer-service-add-close-listener!

@@ -13,16 +13,13 @@
           (soda kernel view-state)
           (soda host command)
           (soda host command-runtime)
-          (soda host dispatch)
-          (soda host internal buffer)
-          (soda host internal operation)
-          (soda host internal state)
-          (soda host internal surface)
-          (soda host internal view)
-          (soda host internal window)
+          (soda host buffer)
+          (soda host package)
           (soda host input)
           (soda host input-event)
+          (soda host operation)
           (soda host value)
+          (soda host view)
           (soda packages base history)
           (soda packages buffer-ui)
           (soda packages completion)
@@ -38,7 +35,7 @@
     (file-service %make-file-service file-service?)
     (fields
       (immutable resources file-service-resources)
-      (immutable state file-service-state)
+      (immutable host file-service-host)
       (immutable owner file-service-owner)
       (immutable history file-service-history)
       (immutable keymap file-keymap)))
@@ -302,13 +299,11 @@
       (assertion-violation 'file.visit "invalid file visit request" request))
     (let* ([context (file-visit-context request)]
            [resource (file-visit-resource request)]
-           [state (file-service-state service)]
-           [buffers (host-state-buffers state)]
-           [views (host-state-views state)]
+           [host (file-service-host service)]
            [key (file-buffer-key resource)]
            [buffer
-            (buffer-service-open-or-create!
-              buffers (file-service-owner service) key
+            (package-host-open-or-create-buffer!
+              host (file-service-owner service) key
               (lambda ()
                 (let ([lock (acquire-file-lock resource)] [created? #f])
                   (dynamic-wind
@@ -318,8 +313,8 @@
                         (lambda () (resource-contents resource))
                         (lambda (contents version)
                           (let ([created
-                                 (buffer-service-create!
-                                   buffers (file-service-owner service)
+                                 (package-host-create-buffer!
+                                   host (file-service-owner service)
                                    (resource-locator resource)
                                    (make-document contents)
                                    (file-buffer-configuration context (not lock)))])
@@ -340,14 +335,11 @@
               (assertion-violation 'file.visit
                                    "file visit requires a routed Window context" context))
             (let ([view
-                   (view-service-create!
-                     views (file-service-owner service) buffer
+                   (package-host-create-view!
+                     host (file-service-owner service) buffer
                      (buffer-state-configuration (buffer-state buffer)))])
               (unless
-                (dispatcher-dispatch-host!
-                  (host-state-dispatch state)
-                  (make-replace-window-view-operation surface-id window-id (view-id view)))
-                (view-service-close-view! views (view-id view))
+                (package-host-replace-window-view! host surface-id window-id (view-id view))
                 (assertion-violation 'file.visit "origin Window is no longer available" context))
               buffer)))))
 
@@ -408,8 +400,7 @@
   (define (modified-file-buffers service)
     (filter
       (lambda (buffer) (modified-file-buffer? service buffer))
-      (buffer-service-buffers
-        (host-state-buffers (file-service-state service)))))
+      (package-host-buffers (file-service-host service))))
 
   (define (close-decision value)
     (cond
@@ -460,7 +451,7 @@
                                "close decision requires exactly one Buffer identity"
                                arguments))
         (let ([buffer
-               (buffer-service-ref (host-state-buffers (file-service-state service))
+               (package-host-buffer-ref (file-service-host service)
                                    (car arguments) #f)])
           (if (modified-file-buffer? service buffer)
               (make-interactive-suspend
@@ -487,77 +478,18 @@
                 (lambda (value)
                   (make-interactive-ready (list (close-decision value))))))))))
 
-  (define (fallback-buffer! service target)
-    (let* ([state (file-service-state service)]
-           [buffers (host-state-buffers state)]
-           [views (host-state-views state)]
-           [surfaces (host-state-surfaces state)]
-           [fallback
-            (let find-surface ([remaining (surface-service-surfaces surfaces)])
-              (and (pair? remaining)
-                   (or
-                     (let find-window ([windows
-                                        (window-leaves
-                                          (surface-root-window (car remaining)))])
-                       (and (pair? windows)
-                            (let ([view
-                                   (view-service-ref views
-                                                     (window-view-id (car windows)) #f)])
-                              (if (and view
-                                       (not (= (buffer-id (view-buffer view))
-                                               (buffer-id target))))
-                                  (view-buffer view)
-                                  (find-window (cdr windows))))))
-                     (find-surface (cdr remaining)))))])
-      (or fallback
-          (buffer-service-create!
-            buffers (file-service-owner service) "*scratch*" (make-document "")
-            (buffer-state-configuration (buffer-state target))))))
-
-  ;; Replacing every placed View before closing the Buffer keeps each Surface
-  ;; structurally valid.  A Buffer may have many Views across surfaces; each
-  ;; replacement receives a new View-local selection and viewport.
   (define (close-buffer! service target-id)
-    (let* ([state (file-service-state service)]
-           [buffers (host-state-buffers state)]
-           [views (host-state-views state)]
-           [surfaces (host-state-surfaces state)]
-           [target (buffer-service-ref buffers target-id #f)])
-      (and target
-           (let ([fallback (fallback-buffer! service target)])
-             (for-each
-               (lambda (surface)
-                 (for-each
-                   (lambda (window)
-                     (let ([view (view-service-ref views (window-view-id window) #f)])
-                       (when (and view (= (buffer-id (view-buffer view)) target-id))
-                         (let ([replacement
-                                (view-service-create!
-                                  views (file-service-owner service) fallback
-                                  (view-state-configuration (view-state view)))])
-                           (unless
-                             (dispatcher-dispatch-host!
-                               (host-state-dispatch state)
-                               (make-replace-window-view-operation
-                                 (surface-id surface) (window-id window)
-                                 (view-id replacement)))
-                             (view-service-close-view! views (view-id replacement))
-                             (assertion-violation
-                               'file.close "unable to replace a Buffer View before close"
-                               target-id))))))
-                   (window-leaves (surface-root-window surface))))
-               (surface-service-surfaces surfaces))
-             (buffer-service-close-buffer! buffers target-id)))))
+    (package-host-close-buffer-with-fallback!
+      (file-service-host service) (file-service-owner service) target-id))
 
-  (define (make-file-service! state owner history)
-    (unless (and (host-state? state) (owner? owner)
+  (define (make-file-service! host owner history)
+    (unless (and (package-host? host) (owner? owner)
                  (or (not history) (history? history)))
       (assertion-violation 'make-file-service! "invalid file service dependencies"
-                           state owner history))
-    (let* ([runtime (host-state-command-runtime state)]
-           [buffers (host-state-buffers state)]
+                           host owner history))
+    (let* ([runtime (package-host-command-runtime host)]
            [keymap (make-keymap 'file)]
-           [service (%make-file-service (make-eqv-hashtable) state owner history keymap)])
+           [service (%make-file-service (make-eqv-hashtable) host owner history keymap)])
       (command-runtime-register-effect-handler!
         runtime 'file.visit owner 'open-file-buffer
         (lambda (ignored invocation effect)
@@ -584,7 +516,7 @@
                    [path (resource-locator resource)]
                    [expected (file-write-expected-version request)]
                    [target
-                    (buffer-service-ref buffers (file-write-buffer-id request) #f)]
+                    (package-host-buffer-ref host (file-write-buffer-id request) #f)]
                    [binding
                     (file-service-binding service (file-write-buffer-id request) #f)]
                    [transfer-lock?
@@ -601,7 +533,7 @@
               ;; Verify ownership of the destination before touching it.  A
               ;; failed Save As must not overwrite an open file Buffer owned
               ;; by another resource identity.
-              (let ([existing (buffer-service-find-key buffers (file-buffer-key resource) #f)])
+              (let ([existing (package-host-find-buffer-key host (file-buffer-key resource) #f)])
                 (when (and existing (not (= (buffer-id existing) (buffer-id target))))
                   (assertion-violation 'file.write
                                        "destination is already visited by another Buffer"
@@ -618,7 +550,7 @@
                                (vfs-file-exists? path))
                       (vfs-write-file (file-backup-path path) (vfs-read-file path)))
                     (vfs-write-file path (file-write-contents request))
-                    (buffer-service-rebind-key! buffers (file-buffer-key resource) target)
+                    (package-host-rebind-buffer-key! host (file-buffer-key resource) target)
                     (set-resource! service (file-write-buffer-id request)
                                    resource (vfs-stat-path path)
                                    (if transfer-lock?
@@ -730,7 +662,7 @@
           (case decision
             [(cancel) (command-handled)]
             [(save)
-             (let* ([target (buffer-service-ref buffers target-id #f)]
+             (let* ([target (package-host-buffer-ref host target-id #f)]
                     [binding (and target (file-service-binding service target-id #f))])
                (if (not target)
                    (command-handled)
@@ -796,8 +728,8 @@
       (keymap-bind! keymap
                     (list (make-key-stroke 'character (char->integer #\B) 2))
                     'file.toggle-backup)
-      (buffer-service-add-close-listener!
-        buffers owner
+      (package-host-add-buffer-close-listener!
+        host owner
         (lambda (buffer)
           (let ([binding (file-service-binding service (buffer-id buffer) #f)])
             (when binding (release-file-lock! (file-binding-lock binding))))
