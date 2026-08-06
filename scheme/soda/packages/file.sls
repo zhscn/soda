@@ -130,6 +130,22 @@
             'file-name prompt #f file-name-completion-source 'free)
           (lambda (value) (make-interactive-ready (list value)))))))
 
+  (define (overwrite-decision value)
+    (cond
+      [(and (string? value) (string-ci=? value "yes")) 'overwrite]
+      [(and (string? value) (string-ci=? value "no")) 'cancel]
+      [else
+       (assertion-violation 'file.write "expected yes or no" value)]))
+
+  (define (make-overwrite-request path)
+    (make-interaction-request
+      'overwrite-decision
+      (string-append "File exists: " path ". Overwrite? (yes/no) ")
+      #f #f 'free
+      (lambda (value ignored)
+        (and (string? value)
+             (or (string-ci=? value "yes") (string-ci=? value "no"))))))
+
   (define (file-service-binding service buffer-id . default)
     (unless (and (file-service? service) (buffer-id? buffer-id))
       (assertion-violation 'file-service-binding "expected a file service and Buffer id"
@@ -142,6 +158,47 @@
       (if binding
           (file-binding-resource binding)
           (if (null? default) #f (car default)))))
+
+  ;; A visited Buffer has no preceding path argument and writes its own
+  ;; resource directly.  For a supplied destination, an existing different
+  ;; file requires explicit confirmation before a file-write effect is made.
+  (define (make-overwrite-reader service)
+    (make-interactive-reader
+      'overwrite-decision
+      (lambda (context arguments)
+        (cond
+          [(null? arguments) (make-interactive-ready (list 'overwrite))]
+          [(and (pair? arguments) (null? (cdr arguments)) (string? (car arguments)))
+           (let* ([resource (canonical-file-resource (car arguments))]
+                  [path (resource-locator resource)]
+                  [exists? (vfs-file-exists? path)]
+                  [binding
+                   (file-service-binding service (command-context-buffer-id context) #f)]
+                  [same-resource?
+                   (and binding
+                        (string=? path
+                                  (resource-locator (file-binding-resource binding))))])
+             (if (or same-resource? (not exists?))
+                 (make-interactive-ready (list 'overwrite))
+                 (make-interactive-suspend
+                   (make-overwrite-request path)
+                   (lambda (value)
+                     (make-interactive-ready (list (overwrite-decision value)))))))]
+          [else
+           (assertion-violation 'file.write
+                                "overwrite decision requires zero or one file name"
+                                arguments)]))))
+
+  (define (make-save-file-name-reader service)
+    (make-interactive-reader
+      'file-name
+      (lambda (context arguments)
+        (if (file-service-binding service (command-context-buffer-id context) #f)
+            (make-interactive-ready '())
+            (make-interactive-suspend
+              (make-interaction-request
+                'file-name "Write file: " #f file-name-completion-source 'free)
+              (lambda (value) (make-interactive-ready (list value))))))))
 
   (define (set-resource! service buffer-id resource version)
     (let ([binding (make-file-binding resource version)])
@@ -494,41 +551,43 @@
                       (make-file-load (command-context-buffer-id context)
                                       resource version #t))))))))
       (install-file-command! runtime owner 'file.save "Write the active Buffer to its visited file."
-        (list
-          (make-interactive-reader
-            'file-name
-            (lambda (context arguments)
-              (if (file-service-binding service (command-context-buffer-id context) #f)
-                  (make-interactive-ready '())
-                  (make-interactive-suspend
-                    (make-interaction-request
-                      'file-name "Write file: " #f file-name-completion-source 'free)
-                    (lambda (value) (make-interactive-ready (list value))))))))
-        (lambda (context . name)
+        (list (make-save-file-name-reader service) (make-overwrite-reader service))
+        (lambda (context . arguments)
           (let ([binding (file-service-binding service (command-context-buffer-id context) #f)])
             (if binding
-                (make-file-write-effect
-                  (command-context-buffer-id context)
-                  (buffer-state-document (command-context-buffer-state context))
-                  (file-binding-resource binding) (file-binding-version binding) #f)
-                (if (null? name)
+                (if (or (null? arguments)
+                        (and (pair? arguments) (eq? (car arguments) 'overwrite)))
+                    (make-file-write-effect
+                      (command-context-buffer-id context)
+                      (buffer-state-document (command-context-buffer-state context))
+                      (file-binding-resource binding) (file-binding-version binding) #f)
+                    (command-handled))
+                (if (or (null? arguments) (not (string? (car arguments)))
+                        (and (pair? (cdr arguments))
+                             (not (eq? (cadr arguments) 'overwrite))))
                     (command-handled)
-                    (let ([resource (canonical-file-resource (car name))])
+                    (let ([resource (canonical-file-resource (car arguments))])
                       (make-file-write-effect
                         (command-context-buffer-id context)
                         (buffer-state-document (command-context-buffer-state context))
                         resource #f #t)))))))
       (install-file-command! runtime owner 'file.save-as "Write the active Buffer to a file and visit it."
-        (list (make-file-name-reader "Write file: "))
-        (lambda (context path)
-          (let ([resource (canonical-file-resource path)])
-            (make-command-effect
-              'file.write
-              (make-file-write
-                (command-context-buffer-id context) resource
-                (snapshot-bytevector
-                  (buffer-state-document (command-context-buffer-state context)))
-                #f #t)))))
+        (list (make-file-name-reader "Write file: ") (make-overwrite-reader service))
+        (lambda (context path . decisions)
+          ;; A direct command invocation is an explicit noninteractive API
+          ;; request.  It keeps the historical one-path calling convention;
+          ;; terminal interaction always supplies an overwrite decision.
+          (let ([decision (if (null? decisions) 'overwrite (car decisions))])
+            (if (eq? decision 'overwrite)
+                (let ([resource (canonical-file-resource path)])
+                  (make-command-effect
+                    'file.write
+                    (make-file-write
+                      (command-context-buffer-id context) resource
+                      (snapshot-bytevector
+                        (buffer-state-document (command-context-buffer-state context)))
+                      #f #t)))
+                (command-handled)))))
       (install-file-command! runtime owner 'file.close "Close the active file Buffer."
         (list (make-buffer-close-target-reader)
               (make-buffer-close-decision-reader service))

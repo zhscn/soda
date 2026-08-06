@@ -1113,6 +1113,58 @@
           (when (file-exists? saved-as) (delete-file saved-as))
           (when (file-exists? scratch-save) (delete-file scratch-save)))))
 
+    ;; Write Out and Save As preserve an explicit overwrite boundary.  A
+    ;; declined confirmation changes neither the resource nor the Buffer's
+    ;; file association.
+    (let* ([path (string-append "/tmp/soda-overwrite-"
+                                (number->string (get-process-id)) ".txt")]
+           [application (make-soda-application)])
+      (dynamic-wind
+        (lambda () (vfs-write-file path (string->utf8 "original")))
+        (lambda ()
+          (let* ([state (soda-application-state application)]
+                 [runtime (host-state-command-runtime state)]
+                 [buffer (soda-application-buffer application)]
+                 [files (soda-application-files application)]
+                 [interaction (soda-application-interaction application)])
+            (command-runtime-start! runtime 'fundamental.insert-text
+                                    (application-command-context application)
+                                    (list (string->utf8 "replacement")))
+            (command-runtime-start-interactive!
+              runtime 'file.save-as (application-command-context application))
+            (interaction-service-submit! interaction path)
+            (host-state-run! state)
+            (let ([request (interaction-session-request
+                             (interaction-service-current interaction))])
+              (unless (and (eq? (interaction-request-kind request) 'overwrite-decision)
+                           (string=? (interaction-request-prompt request)
+                                     (string-append "File exists: " path
+                                                    ". Overwrite? (yes/no) ")))
+                (error 'fundamental-editing-tests
+                       "file.save-as did not request overwrite confirmation")))
+            (interaction-service-submit! interaction "no")
+            (host-state-run! state)
+            (unless (and (string=? (utf8->string (vfs-read-file path)) "original")
+                         (not (file-service-resource files (buffer-id buffer) #f)))
+              (error 'fundamental-editing-tests
+                     "declined file overwrite changed the resource or Buffer binding"))
+            (command-runtime-start-interactive!
+              runtime 'file.save-as (application-command-context application))
+            (interaction-service-submit! interaction path)
+            (host-state-run! state)
+            (interaction-service-submit! interaction "yes")
+            (host-state-run! state)
+            (unless (and (string=? (utf8->string (vfs-read-file path)) "replacement")
+                         (let ([resource
+                                (file-service-resource files (buffer-id buffer) #f)])
+                           (and resource
+                                (string=? (resource-locator resource) path))))
+              (error 'fundamental-editing-tests
+                     "confirmed file overwrite did not write or bind the resource"))))
+        (lambda ()
+          (soda-application-close! application)
+          (guard (condition [else #f]) (delete-file path)))))
+
     (let* ([application (make-soda-application)]
            [state (soda-application-state application)]
            [runtime (host-state-command-runtime state)]
