@@ -512,6 +512,9 @@
       (keymap-bind! keymap
                     (list (make-key-stroke 'character (char->integer #\o) 4))
                     'file.save)
+      (keymap-bind! keymap
+                    (list (make-key-stroke 'character (char->integer #\r) 2))
+                    'file.revert)
       (buffer-service-add-close-listener!
         buffers owner
         (lambda (buffer)

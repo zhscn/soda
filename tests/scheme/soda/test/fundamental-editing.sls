@@ -133,7 +133,11 @@
                    (eq? (keymap-lookup
                           file-map
                           (list (make-key-stroke 'character (char->integer #\o) 4)))
-                         'file.save))
+                         'file.save)
+                   (eq? (keymap-lookup
+                          file-map
+                          (list (make-key-stroke 'character (char->integer #\r) 2)))
+                         'file.revert))
         (error 'fundamental-editing-tests
                "fundamental editing did not produce stable editor state"))
       (soda-application-close! application))
