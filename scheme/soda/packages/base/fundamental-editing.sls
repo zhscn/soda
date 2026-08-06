@@ -943,7 +943,7 @@
         ((list (make-key-stroke 'character (char->integer #\v) 2)) 'fundamental.scroll-up)
         ((list (make-key-stroke 'backspace #f 2)) 'fundamental.backward-kill-word)
         ((list (control-stroke #\d)) 'fundamental.delete-forward)
-        ((list (control-stroke #\g)) 'application.quit)
+        ((list (control-stroke #\g)) 'help.show)
         ((list (control-stroke #\_)) 'fundamental.goto-line)
         ((list (control-stroke #\x) (control-stroke #\c)) 'application.quit)
         ((list (control-stroke #\x) (control-stroke #\h)) 'fundamental.mark-whole-buffer)

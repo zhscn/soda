@@ -57,6 +57,13 @@
   (define (buffer-string buffer)
     (snapshot-string (buffer-state-document (buffer-state buffer))))
 
+  (define (string-contains? value needle)
+    (let ([limit (- (string-length value) (string-length needle))])
+      (let loop ([index 0])
+        (and (<= index limit)
+             (or (string=? (substring value index (+ index (string-length needle))) needle)
+                 (loop (+ index 1)))))))
+
   (define (run-fundamental-editing-tests!)
     (let* ([application (make-soda-application)]
            [state (soda-application-state application)]
@@ -109,6 +116,24 @@
                         'fundamental.delete-backward))
         (error 'fundamental-editing-tests
                "fundamental editing did not produce stable editor state"))
+      (soda-application-close! application))
+
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [runtime (host-state-command-runtime state)])
+      (command-runtime-start! runtime 'help.show (application-command-context application))
+      (let ([help-buffer
+             (buffer-service-ref
+               (host-state-buffers state)
+               (command-context-buffer-id (application-command-context application)))])
+        (unless (and (string=? (buffer-name help-buffer) "*help*")
+                     (string-contains? (buffer-string help-buffer) "C-x C-f"))
+          (error 'fundamental-editing-tests "help.show did not display the Nano help Buffer"))
+        (command-runtime-start! runtime 'fundamental.insert-text
+                                (application-command-context application)
+                                (list (string->utf8 "mutate")))
+        (unless (not (string-contains? (buffer-string help-buffer) "mutate"))
+          (error 'fundamental-editing-tests "help Buffer accepted an ordinary edit")))
       (soda-application-close! application))
 
     (let* ([application (make-soda-application)]

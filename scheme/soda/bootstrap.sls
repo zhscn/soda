@@ -32,6 +32,7 @@
           (soda packages search)
           (soda packages interaction)
           (soda packages buffer-ui)
+          (soda packages help)
           (soda packages minibuffer)
           (soda support cleanup)
           (soda tui clipboard)
@@ -98,6 +99,7 @@
                                (host-state-dispatch state) owner)]
                [files
                 (make-file-service! state owner history)]
+               [_help (make-help-service! state owner)]
                [search
                 (make-search-service! (host-state-command-runtime state) owner)]
                [interaction
