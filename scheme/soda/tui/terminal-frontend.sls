@@ -2,18 +2,21 @@
   (export make-terminal-frontend
           terminal-frontend?
           terminal-frontend-core
+          terminal-frontend-runtime
           terminal-frontend-active?
           terminal-frontend-start!
           terminal-frontend-stop!
           terminal-frontend-step!
           terminal-frontend-run!
           terminal-frontend-write-control!
+          terminal-frontend-add-runtime-listener!
           terminal-frontend-close!)
   (import (rnrs)
           (prefix (soda ffi runtime) native:)
           (soda host render-service)
           (soda host internal state)
           (soda host internal surface)
+          (soda host value)
           (soda support cleanup)
           (soda tui frontend)
           (soda tui presenter-session)
@@ -31,6 +34,8 @@
       (immutable input terminal-frontend-input)
       (immutable presenter terminal-frontend-presenter)
       (immutable owns-native? terminal-frontend-owns-native?)
+      (mutable runtime-listeners terminal-frontend-runtime-listeners
+               terminal-frontend-runtime-listeners-set!)
       (mutable active? terminal-frontend-active? terminal-frontend-active?-set!)
       (mutable closed? terminal-frontend-closed? terminal-frontend-closed?-set!)))
 
@@ -70,7 +75,7 @@
             runtime terminal (surface-id surface) 0
             (lambda (message) (frontend-enqueue! core message))
             (lambda (control) (native:terminal-write! terminal control))))
-        (%make-terminal-frontend core runtime terminal input presenter owns? #f #f))))
+        (%make-terminal-frontend core runtime terminal input presenter owns? '() #f #f))))
 
   (define make-terminal-frontend
     (case-lambda
@@ -129,13 +134,39 @@
     (terminal-presenter-session-write-control!
       (terminal-frontend-presenter value) control))
 
+  ;; Native runtime events belong to the terminal adapter.  Feature packages
+  ;; subscribe through this narrow bridge instead of importing terminal or
+  ;; libuv details into their command implementations.
+  (define (terminal-frontend-add-runtime-listener! value owner procedure)
+    (require-open 'terminal-frontend-add-runtime-listener! value)
+    (unless (and (owner? owner) (procedure? procedure))
+      (assertion-violation 'terminal-frontend-add-runtime-listener!
+                           "expected an owner and runtime listener" owner procedure))
+    (owner-assert-active 'terminal-frontend-add-runtime-listener! owner)
+    (let ([entry (cons owner procedure)])
+      (terminal-frontend-runtime-listeners-set!
+        value (append (terminal-frontend-runtime-listeners value) (list entry)))
+      (make-registration
+        owner
+        (lambda ()
+          (terminal-frontend-runtime-listeners-set!
+            value
+            (filter (lambda (item) (not (eq? item entry)))
+                    (terminal-frontend-runtime-listeners value)))))))
+
+  (define (notify-runtime-listeners! value event)
+    (let loop ([listeners (terminal-frontend-runtime-listeners value)])
+      (and (pair? listeners)
+           (or ((cdr (car listeners)) event)
+               (loop (cdr listeners))))))
+
   (define (terminal-frontend-handle-native-event! value event)
     (cond
       [(terminal-input-session-event? (terminal-frontend-input value) event)
        (terminal-input-session-handle-event! (terminal-frontend-input value) event)]
       [(terminal-presenter-session-event? (terminal-frontend-presenter value) event)
        (terminal-presenter-session-handle-event! (terminal-frontend-presenter value) event)]
-      [else #f]))
+      [else (notify-runtime-listeners! value event)]))
 
   (define (terminal-frontend-step! value)
     (require-open 'terminal-frontend-step! value)

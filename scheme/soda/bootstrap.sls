@@ -8,6 +8,7 @@
           soda-application-editing
           soda-application-history
           soda-application-files
+          soda-application-processes
           soda-application-search
           soda-application-interaction
           soda-application-minibuffer
@@ -29,6 +30,7 @@
           (soda packages base fundamental-editing)
           (soda packages base history)
           (soda packages file)
+          (soda packages process)
           (soda packages search)
           (soda packages interaction)
           (soda packages buffer-ui)
@@ -51,6 +53,7 @@
       (immutable editing soda-application-editing)
       (immutable history soda-application-history)
       (immutable files soda-application-files)
+      (immutable processes soda-application-processes)
       (immutable search soda-application-search)
       (immutable interaction soda-application-interaction)
       (immutable minibuffer soda-application-minibuffer)
@@ -99,6 +102,7 @@
                                (host-state-dispatch state) owner)]
                [files
                 (make-file-service! state owner history)]
+               [processes (make-process-service! state owner)]
                [_help (make-help-service! state owner)]
                [search
                 (make-search-service! (host-state-command-runtime state) owner)]
@@ -111,7 +115,7 @@
           (surface-service-register! (host-state-surfaces state) surface)
           (history-mark-saved! history (buffer-id buffer))
           (%make-soda-application
-            state owner buffer view surface editing history files search interaction minibuffer buffer-item-actions
+            state owner buffer view surface editing history files processes search interaction minibuffer buffer-item-actions
             #f #f #f)))))
 
   (define (require-open who application)
@@ -128,6 +132,10 @@
               (make-input-layer
                 'search
                 (search-keymap (soda-application-search application))
+                #f 'pass)
+              (make-input-layer
+                'process
+                (process-keymap (soda-application-processes application))
                 #f 'pass)
               (make-input-layer
                 'file
@@ -169,7 +177,8 @@
                (list (lambda () (terminal-frontend-close! terminal)))))
            (raise condition)])
         (let ([registration #f]
-              [clipboard-registration #f])
+              [clipboard-registration #f]
+              [process-registration #f])
           (guard
             (condition
               [else
@@ -177,7 +186,9 @@
                (soda-application-effect-registration-set! application #f)
                (guard (ignored [else #f])
                  (run-cleanups!
-                   (list
+                 (list
+                     (lambda () (when process-registration
+                                  (registration-close! process-registration)))
                      (lambda () (when clipboard-registration
                                   (registration-close! clipboard-registration)))
                      (lambda () (when registration (registration-close! registration)))
@@ -198,6 +209,15 @@
                       #t
                       #f)
                   100000)))
+            (process-service-attach-runtime!
+              (soda-application-processes application)
+              (terminal-frontend-runtime terminal))
+            (set! process-registration
+              (terminal-frontend-add-runtime-listener!
+                terminal (soda-application-owner application)
+                (lambda (event)
+                  (process-service-handle-runtime-event!
+                    (soda-application-processes application) event))))
             (soda-application-effect-registration-set! application registration)
             (dynamic-wind
               (lambda () #f)
@@ -207,6 +227,7 @@
                 (soda-application-effect-registration-set! application #f)
                 (run-cleanups!
                   (list
+                    (lambda () (registration-close! process-registration))
                     (lambda () (registration-close! clipboard-registration))
                     (lambda () (registration-close! registration))
                     (lambda () (terminal-frontend-close! terminal)))))))))))

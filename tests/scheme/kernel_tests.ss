@@ -37,6 +37,7 @@
         (soda ffi tree-sitter)
         (soda bootstrap)
         (soda packages base fundamental-editing)
+        (soda packages process)
         (prefix (soda ffi runtime) native:)
         (soda support vfs)
         (soda tui terminal-input)
@@ -2704,6 +2705,49 @@
     (error 'kernel-tests "frontend orchestration did not route input and rendering"))
   (frontend-close! frontend)
   (owner-close! package-owner))
+
+(let* ([application (make-soda-application)]
+       [state (soda-application-state application)]
+       [runtime (host-state-command-runtime state)]
+       [processes (soda-application-processes application)]
+       [native-runtime (native:make-runtime)])
+  (dynamic-wind
+    (lambda () #f)
+    (lambda ()
+      (process-service-attach-runtime! processes native-runtime)
+      (let ([invocation
+             (command-runtime-start!
+               runtime 'process.execute (application-command-context application)
+               (list "printf soda-process-output"))])
+        (unless (eq? (command-invocation-phase invocation) 'completed)
+          (error 'kernel-tests "process command did not complete its effect")))
+      (let poll ([remaining 4])
+        (let* ([events (native:runtime-poll! native-runtime)]
+               [_handled
+                (for-each
+                  (lambda (event)
+                    (process-service-handle-runtime-event! processes event))
+                  events)]
+               [active
+                (surface-active-context (soda-application-surface application)
+                                        (host-state-views state))]
+               [buffer
+                (buffer-service-ref (host-state-buffers state)
+                                    (active-context-buffer-id active) #f)]
+               [output (and buffer (buffer-string buffer))])
+          (cond
+            [(and buffer
+                  (string=? (buffer-name buffer) "*command: printf soda-process-output*")
+                  (string=? output
+                            "soda-process-output\n[Process exited with status 0]\n"))
+             #t]
+            [(zero? remaining)
+             (error 'kernel-tests "process output Buffer did not receive complete process output"
+                    output)]
+            [else (poll (- remaining 1))]))))
+    (lambda ()
+      (native:runtime-close! native-runtime)
+      (soda-application-close! application))))
 
 (run-fundamental-editing-tests!)
 (run-buffer-ui-tests!)
