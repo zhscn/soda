@@ -670,10 +670,6 @@
         runtime owner 'fundamental.yank (context)
         "Insert the newest kill-ring entry at every selection." 'yank
         (yank context editing))
-      (install-command!
-        runtime owner 'application.quit (context)
-        "Request application shutdown." 'application
-        (make-command-effect 'application.quit #f))
       (bind-keys! keymap
         ((list (control-stroke #\b)) 'fundamental.backward-char)
         ((list (control-stroke #\f)) 'fundamental.forward-char)

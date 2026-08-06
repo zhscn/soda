@@ -275,13 +275,15 @@
                                 (number->string (get-process-id)) ".txt")]
            [second-path (string-append path ".second")]
            [new-path (string-append path ".new")]
-           [saved-as (string-append path ".copy")])
+           [saved-as (string-append path ".copy")]
+           [scratch-save (string-append path ".scratch")])
       (dynamic-wind
         (lambda ()
           (when (file-exists? path) (delete-file path))
           (when (file-exists? second-path) (delete-file second-path))
           (when (file-exists? new-path) (delete-file new-path))
           (when (file-exists? saved-as) (delete-file saved-as))
+          (when (file-exists? scratch-save) (delete-file scratch-save))
           (vfs-write-file path (string->utf8 "first"))
           (vfs-write-file second-path (string->utf8 "second")))
         (lambda ()
@@ -292,6 +294,22 @@
                  [history (soda-application-history application)]
                  [files (soda-application-files application)]
                  [interaction (soda-application-interaction application)])
+            (command-runtime-start-interactive!
+              runtime 'file.save (application-command-context application))
+            (let ([request (interaction-session-request
+                             (interaction-service-current interaction))])
+              (unless (and (eq? (interaction-request-kind request) 'file-name)
+                           (string=? (interaction-request-prompt request) "Write file: "))
+                (error 'fundamental-editing-tests
+                       "file.save did not ask an unvisited Buffer for its destination")))
+            (interaction-service-submit! interaction scratch-save)
+            (host-state-run! state)
+            (unless (and (file-exists? scratch-save)
+                         (string=? (resource-locator
+                                    (file-service-resource files (buffer-id scratch)))
+                                   scratch-save))
+              (error 'fundamental-editing-tests
+                     "file.save did not bind an unvisited Buffer to its selected destination"))
             (command-runtime-start-interactive!
               runtime 'file.visit (application-command-context application))
             (let ([request (interaction-session-request
@@ -379,7 +397,74 @@
                                    (application-command-context application)))])
                 (unless (= (buffer-id revisited) (buffer-id buffer))
                   (error 'fundamental-editing-tests
-                         "file.visit did not reuse its canonical file Buffer"))))
+                         "file.visit did not reuse its canonical file Buffer"))
+                (command-runtime-start! runtime 'fundamental.end-of-buffer
+                                        (application-command-context application))
+                (command-runtime-start! runtime 'fundamental.insert-text
+                                        (application-command-context application)
+                                        (list (string->utf8 " discard")))
+                (command-runtime-start-interactive!
+                  runtime 'file.close (application-command-context application))
+                (let ([request (interaction-session-request
+                                 (interaction-service-current interaction))])
+                  (unless (and (eq? (interaction-request-kind request) 'save-decision)
+                               (string=? (interaction-request-prompt request)
+                                         (string-append "Save changes to " (buffer-name revisited)
+                                                        "? (save/discard/cancel) ")))
+                    (error 'fundamental-editing-tests
+                           "file.close did not request a modified-file decision")))
+                (interaction-service-submit! interaction "discard")
+                (host-state-run! state)
+                (unless (and (not (buffer-service-ref
+                                    (host-state-buffers state) (buffer-id revisited) #f))
+                             (not (file-service-resource files (buffer-id revisited) #f))
+                             (not (= (command-context-buffer-id
+                                       (application-command-context application))
+                                     (buffer-id revisited))))
+                  (error 'fundamental-editing-tests
+                         "file.close did not replace every active View before releasing its Buffer"))))
+            (command-runtime-start! runtime 'file.visit
+                                    (application-command-context application) (list second-path))
+            (let ([closable (buffer-service-ref
+                              (host-state-buffers state)
+                              (command-context-buffer-id
+                                (application-command-context application)))])
+              (command-runtime-start! runtime 'fundamental.end-of-buffer
+                                      (application-command-context application))
+              (command-runtime-start! runtime 'fundamental.insert-text
+                                      (application-command-context application)
+                                      (list (string->utf8 " saved")))
+              (command-runtime-start-interactive!
+                runtime 'file.close (application-command-context application))
+              (interaction-service-submit! interaction "save")
+              (host-state-run! state)
+              (unless (and (string=? (utf8->string (vfs-read-file second-path)) "second saved")
+                           (not (buffer-service-ref
+                                  (host-state-buffers state) (buffer-id closable) #f)))
+                (error 'fundamental-editing-tests
+                       "file.close save did not write and release the file Buffer")))
+            (command-runtime-start! runtime 'file.visit
+                                    (application-command-context application) (list new-path))
+            (command-runtime-start! runtime 'fundamental.end-of-buffer
+                                    (application-command-context application))
+            (command-runtime-start! runtime 'fundamental.insert-text
+                                    (application-command-context application)
+                                    (list (string->utf8 " quit")))
+            (command-runtime-start-interactive!
+              runtime 'application.quit (application-command-context application))
+            (let ([request (interaction-session-request
+                             (interaction-service-current interaction))])
+              (unless (and (eq? (interaction-request-kind request) 'save-decision)
+                           (string=? (interaction-request-prompt request)
+                                     "Save 1 modified file buffer? (save/discard/cancel) "))
+                (error 'fundamental-editing-tests
+                       "application.quit did not request a modified-file decision")))
+            (interaction-service-submit! interaction "save")
+            (host-state-run! state)
+            (unless (and (not (interaction-service-current interaction))
+                         (string=? (utf8->string (vfs-read-file new-path)) "new quit"))
+              (error 'fundamental-editing-tests
+                     "application.quit did not save and retire its modified-file interaction"))
             (let* ([secondary-owner (make-owner 'file-close-test)]
                    [secondary-document (make-document "")]
                    [secondary
@@ -404,7 +489,8 @@
           (when (file-exists? path) (delete-file path))
           (when (file-exists? second-path) (delete-file second-path))
           (when (file-exists? new-path) (delete-file new-path))
-          (when (file-exists? saved-as) (delete-file saved-as)))))
+          (when (file-exists? saved-as) (delete-file saved-as))
+          (when (file-exists? scratch-save) (delete-file scratch-save)))))
 
     (let* ([application (make-soda-application)]
            [state (soda-application-state application)]

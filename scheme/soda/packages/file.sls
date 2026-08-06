@@ -1,20 +1,26 @@
 (library (soda packages file)
   (export make-file-service!
           file-service?
-          file-service-resource)
+          file-service-resource
+          file-keymap)
   (import (rnrs)
           (only (chezscheme) current-directory)
           (soda kernel change)
           (soda kernel document)
           (soda kernel selection)
           (soda kernel state)
+          (soda kernel view-state)
           (soda host command)
           (soda host command-runtime)
           (soda host dispatch)
           (soda host internal buffer)
           (soda host internal operation)
           (soda host internal state)
+          (soda host internal surface)
           (soda host internal view)
+          (soda host internal window)
+          (soda host input)
+          (soda host input-event)
           (soda host value)
           (soda packages base history)
           (soda packages interaction)
@@ -31,7 +37,8 @@
       (immutable resources file-service-resources)
       (immutable state file-service-state)
       (immutable owner file-service-owner)
-      (immutable history file-service-history)))
+      (immutable history file-service-history)
+      (immutable keymap file-keymap)))
 
   (define-record-type file-binding
     (fields resource version))
@@ -44,6 +51,9 @@
 
   (define-record-type file-visit
     (fields context resource))
+
+  (define-record-type file-close
+    (fields buffer-id))
 
   (define (buffer-id? value)
     (and (integer? value) (exact? value) (>= value 0)))
@@ -158,6 +168,140 @@
       (make-command-definition
         name procedure owner documentation 'file (make-interactive-plan readers))))
 
+  (define (make-file-write-effect buffer-id document resource version rebind?)
+    (make-command-effect
+      'file.write
+      (make-file-write
+        buffer-id resource (snapshot-bytevector document) version rebind?)))
+
+  (define (modified-file-buffer? service buffer)
+    (and buffer
+         (file-service-binding service (buffer-id buffer) #f)
+         (file-service-history service)
+         (history-modified? (file-service-history service) (buffer-id buffer))))
+
+  (define (modified-file-buffers service)
+    (filter
+      (lambda (buffer) (modified-file-buffer? service buffer))
+      (buffer-service-buffers
+        (host-state-buffers (file-service-state service)))))
+
+  (define (close-decision value)
+    (cond
+      [(and (string? value) (string-ci=? value "save")) 'save]
+      [(and (string? value) (string-ci=? value "discard")) 'discard]
+      [(and (string? value) (string-ci=? value "cancel")) 'cancel]
+      [else
+       (assertion-violation 'file.close
+                            "expected save, discard, or cancel"
+                            value)]))
+
+  (define (make-decision-request prompt)
+    (make-interaction-request
+      'save-decision prompt #f #f 'free
+      (lambda (value ignored)
+        (and (string? value)
+             (or (string-ci=? value "save")
+                 (string-ci=? value "discard")
+                 (string-ci=? value "cancel"))))))
+
+  ;; The reader evaluates dirty state at command invocation time.  The
+  ;; minibuffer is therefore a normal interaction overlay; it does not hold a
+  ;; Buffer close transaction open while the user decides.
+  (define (make-active-buffer-close-reader service)
+    (make-interactive-reader
+      'save-decision
+      (lambda (context arguments)
+        (let ([buffer
+               (buffer-service-ref (host-state-buffers (file-service-state service))
+                                   (command-context-buffer-id context) #f)])
+          (if (modified-file-buffer? service buffer)
+              (make-interactive-suspend
+                (make-decision-request
+                  (string-append "Save changes to " (buffer-name buffer)
+                                 "? (save/discard/cancel) "))
+                (lambda (value)
+                  (make-interactive-ready (list (close-decision value)))))
+              (make-interactive-ready (list 'discard)))))))
+
+  (define (make-quit-reader service)
+    (make-interactive-reader
+      'save-decision
+      (lambda (context arguments)
+        (let ([dirty (modified-file-buffers service)])
+          (if (null? dirty)
+              (make-interactive-ready (list 'discard))
+              (make-interactive-suspend
+                (make-decision-request
+                  (string-append "Save " (number->string (length dirty))
+                                 " modified file buffer"
+                                 (if (= (length dirty) 1) "" "s")
+                                 "? (save/discard/cancel) "))
+                (lambda (value)
+                  (make-interactive-ready (list (close-decision value))))))))))
+
+  (define (fallback-buffer! service target)
+    (let* ([state (file-service-state service)]
+           [buffers (host-state-buffers state)]
+           [views (host-state-views state)]
+           [surfaces (host-state-surfaces state)]
+           [fallback
+            (let find-surface ([remaining (surface-service-surfaces surfaces)])
+              (and (pair? remaining)
+                   (or
+                     (let find-window ([windows
+                                        (window-leaves
+                                          (surface-root-window (car remaining)))])
+                       (and (pair? windows)
+                            (let ([view
+                                   (view-service-ref views
+                                                     (window-view-id (car windows)) #f)])
+                              (if (and view
+                                       (not (= (buffer-id (view-buffer view))
+                                               (buffer-id target))))
+                                  (view-buffer view)
+                                  (find-window (cdr windows))))))
+                     (find-surface (cdr remaining)))))])
+      (or fallback
+          (buffer-service-create!
+            buffers (file-service-owner service) "*scratch*" (make-document "")
+            (buffer-state-configuration (buffer-state target))))))
+
+  ;; Replacing every placed View before closing the Buffer keeps each Surface
+  ;; structurally valid.  A Buffer may have many Views across surfaces; each
+  ;; replacement receives a new View-local selection and viewport.
+  (define (close-buffer! service target-id)
+    (let* ([state (file-service-state service)]
+           [buffers (host-state-buffers state)]
+           [views (host-state-views state)]
+           [surfaces (host-state-surfaces state)]
+           [target (buffer-service-ref buffers target-id #f)])
+      (and target
+           (let ([fallback (fallback-buffer! service target)])
+             (for-each
+               (lambda (surface)
+                 (for-each
+                   (lambda (window)
+                     (let ([view (view-service-ref views (window-view-id window) #f)])
+                       (when (and view (= (buffer-id (view-buffer view)) target-id))
+                         (let ([replacement
+                                (view-service-create!
+                                  views (file-service-owner service) fallback
+                                  (view-state-configuration (view-state view)))])
+                           (unless
+                             (dispatcher-dispatch-host!
+                               (host-state-dispatch state)
+                               (make-replace-window-view-operation
+                                 (surface-id surface) (window-id window)
+                                 (view-id replacement)))
+                             (view-service-close-view! views (view-id replacement))
+                             (assertion-violation
+                               'file.close "unable to replace a Buffer View before close"
+                               target-id))))))
+                   (window-leaves (surface-root-window surface))))
+               (surface-service-surfaces surfaces))
+             (buffer-service-close-buffer! buffers target-id)))))
+
   (define (make-file-service! state owner history)
     (unless (and (host-state? state) (owner? owner)
                  (or (not history) (history? history)))
@@ -165,7 +309,8 @@
                            state owner history))
     (let* ([runtime (host-state-command-runtime state)]
            [buffers (host-state-buffers state)]
-           [service (%make-file-service (make-eqv-hashtable) state owner history)])
+           [keymap (make-keymap 'file)]
+           [service (%make-file-service (make-eqv-hashtable) state owner history keymap)])
       (command-runtime-register-effect-handler!
         runtime 'file.visit owner 'open-file-buffer
         (lambda (ignored invocation effect)
@@ -214,6 +359,13 @@
                              resource (vfs-stat-path path)))
             (when history
               (history-mark-saved! history (file-write-buffer-id request))))))
+      (command-runtime-register-effect-handler!
+        runtime 'file.close owner 'close-file-buffer
+        (lambda (ignored invocation effect)
+          (let ([request (command-effect-payload effect)])
+            (unless (file-close? request)
+              (assertion-violation 'file.close "invalid file close request" request))
+            (close-buffer! service (file-close-buffer-id request)))))
       (install-file-command! runtime owner 'file.visit "Visit a file in the active Window."
         (list (make-interaction-string-reader 'file-name "Visit file: "))
         (lambda (context path)
@@ -232,32 +384,105 @@
                     (make-command-effect 'file.load
                       (make-file-load (command-context-buffer-id context)
                                       resource version #t))))))))
-      (install-file-command! runtime owner 'file.save "Write the active Buffer to its visited file." '()
-        (lambda (context)
+      (install-file-command! runtime owner 'file.save "Write the active Buffer to its visited file."
+        (list
+          (make-interactive-reader
+            'file-name
+            (lambda (context arguments)
+              (if (file-service-binding service (command-context-buffer-id context) #f)
+                  (make-interactive-ready '())
+                  (make-interactive-suspend
+                    (make-interaction-request 'file-name "Write file: " #f #f 'free)
+                    (lambda (value) (make-interactive-ready (list value))))))))
+        (lambda (context . name)
           (let ([binding (file-service-binding service (command-context-buffer-id context) #f)])
-            (if (not binding)
-                (command-handled)
-                (make-command-effect
-                  'file.write
-                  (make-file-write
-                    (command-context-buffer-id context) (file-binding-resource binding)
-                    (snapshot-bytevector
-                      (buffer-state-document (command-context-buffer-state context)))
-                    (file-binding-version binding) #f))))))
+            (if binding
+                (make-file-write-effect
+                  (command-context-buffer-id context)
+                  (buffer-state-document (command-context-buffer-state context))
+                  (file-binding-resource binding) (file-binding-version binding) #f)
+                (if (null? name)
+                    (command-handled)
+                    (let ([resource (canonical-file-resource (car name))])
+                      (make-file-write-effect
+                        (command-context-buffer-id context)
+                        (buffer-state-document (command-context-buffer-state context))
+                        resource #f #t)))))))
       (install-file-command! runtime owner 'file.save-as "Write the active Buffer to a file and visit it."
         (list (make-interaction-string-reader 'file-name "Write file: "))
         (lambda (context path)
           (let ([resource (canonical-file-resource path)])
             (make-command-effect
               'file.write
-                (make-file-write
-                  (command-context-buffer-id context) resource
-                  (snapshot-bytevector
-                    (buffer-state-document (command-context-buffer-state context)))
+              (make-file-write
+                (command-context-buffer-id context) resource
+                (snapshot-bytevector
+                  (buffer-state-document (command-context-buffer-state context)))
                 #f #t)))))
+      (install-file-command! runtime owner 'file.close "Close the active file Buffer."
+        (list (make-active-buffer-close-reader service))
+        (lambda (context decision)
+          (case decision
+            [(cancel) (command-handled)]
+            [(save)
+             (let ([binding (file-service-binding service (command-context-buffer-id context) #f)])
+               (if binding
+                   (list
+                     (make-file-write-effect
+                       (command-context-buffer-id context)
+                       (buffer-state-document (command-context-buffer-state context))
+                       (file-binding-resource binding) (file-binding-version binding) #f)
+                     (make-command-effect 'file.close
+                                          (make-file-close (command-context-buffer-id context))))
+                   (make-command-effect 'file.close
+                                        (make-file-close (command-context-buffer-id context)))))]
+            [else
+             (make-command-effect 'file.close
+                                  (make-file-close (command-context-buffer-id context)))])))
+      ;; Exit is a normal interactive command.  It asks once for all modified
+      ;; visited files, performs writes first, and only then notifies the
+      ;; frontend to terminate.  Unvisited scratch Buffers remain disposable.
+      (command-runtime-register-command!
+        runtime
+        (make-command-definition
+          'application.quit
+          (lambda (context decision)
+            (case decision
+              [(cancel) (command-handled)]
+              [(save)
+               (append
+                 (map
+                   (lambda (buffer)
+                     (let ([binding (file-service-binding service (buffer-id buffer))])
+                       (make-file-write-effect
+                         (buffer-id buffer)
+                         (buffer-state-document (buffer-state buffer))
+                         (file-binding-resource binding) (file-binding-version binding) #f)))
+                   (modified-file-buffers service))
+                 (list (make-command-effect 'application.quit #f)))]
+              [else (make-command-effect 'application.quit #f)]))
+          owner "Request application shutdown, resolving modified file Buffers first."
+          'application (make-interactive-plan (list (make-quit-reader service)))))
+      (keymap-bind! keymap
+                    (list (make-key-stroke 'character (char->integer #\x) 4)
+                          (make-key-stroke 'character (char->integer #\f) 4))
+                    'file.visit)
+      (keymap-bind! keymap
+                    (list (make-key-stroke 'character (char->integer #\x) 4)
+                          (make-key-stroke 'character (char->integer #\s) 4))
+                    'file.save)
+      (keymap-bind! keymap
+                    (list (make-key-stroke 'character (char->integer #\x) 4)
+                          (make-key-stroke 'character (char->integer #\w) 4))
+                    'file.save-as)
+      (keymap-bind! keymap
+                    (list (make-key-stroke 'character (char->integer #\x) 4)
+                          (make-key-stroke 'character (char->integer #\k) 4))
+                    'file.close)
       (buffer-service-add-close-listener!
         buffers owner
         (lambda (buffer)
-          (hashtable-delete! (file-service-resources service) (buffer-id buffer))))
+          (hashtable-delete! (file-service-resources service) (buffer-id buffer))
+          (when history (history-discard-buffer! history (buffer-id buffer)))))
       service))
 )

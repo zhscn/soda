@@ -128,6 +128,10 @@
                 (search-keymap (soda-application-search application))
                 #f 'pass)
               (make-input-layer
+                'file
+                (file-keymap (soda-application-files application))
+                #f 'pass)
+              (make-input-layer
                 'fundamental
                 (fundamental-editing-keymap (soda-application-editing application))
                 #f 'accept))))))
