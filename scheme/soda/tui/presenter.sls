@@ -45,6 +45,15 @@
               (put-string port (frame-cell-grapheme cell)))
             (loop (+ column 1) (frame-cell-face cell)))))))
 
+  (define (frame-spans->ansi spans frame theme cursor-row cursor-column)
+    (let-values ([(port get-output) (open-string-output-port)])
+      (for-each (lambda (span) (write-span port frame span theme)) spans)
+      (put-string port escape)
+      (put-string port "[0m")
+      (when (and cursor-row cursor-column)
+        (put-string port (cursor-address cursor-row cursor-column)))
+      (get-output)))
+
   ;; The returned transaction is complete and can be written partially by a
   ;; presenter queue.  `old` may be #f for the first surface presentation.
   (define frame-diff->ansi
@@ -53,17 +62,9 @@
       [(old new theme)
        (unless (and (frame? new) (theme? theme))
          (assertion-violation 'frame-diff->ansi "expected a new Frame and Theme" new theme))
-       (let-values ([(port get-output) (open-string-output-port)])
-         (for-each (lambda (span) (write-span port new span theme)) (frame-diff old new))
-         (put-string port escape)
-         (put-string port "[0m")
-         (get-output))]
+       (frame-spans->ansi (frame-diff old new) new theme #f #f)]
       [(old new theme cursor-row cursor-column)
-       (let-values ([(port get-output) (open-string-output-port)])
-         (put-string port (frame-diff->ansi old new theme))
-         (when (and cursor-row cursor-column)
-           (put-string port (cursor-address cursor-row cursor-column)))
-         (get-output))]))
+       (frame-spans->ansi (frame-diff old new) new theme cursor-row cursor-column)]))
 
   ;; pending-target is the Frame described by pending-bytes.  It changes only
   ;; after the whole transaction is written, preserving a known terminal state
@@ -117,7 +118,10 @@
                (or (not committed)
                    (not (eq? (presenter-committed-theme presenter)
                               (presenter-desired-theme presenter)))
-                   (pair? (frame-diff committed desired))
+                   ;; Frames are immutable values published by RenderService.
+                   ;; The identity fast path prevents a redundant full diff
+                   ;; before `ensure-pending!` computes the actual spans.
+                   (not (eq? committed desired))
                    (not (and (equal? (presenter-desired-cursor-row presenter)
                                       (presenter-committed-cursor-row presenter))
                              (equal? (presenter-desired-cursor-column presenter)
@@ -158,24 +162,33 @@
             [committed-theme (presenter-committed-theme presenter)]
             [desired-theme (presenter-desired-theme presenter)])
         (when (and desired (frame-presenter-dirty? presenter))
-          (presenter-pending-bytes-set! presenter
-            (string->utf8
-              ;; A terminal only stores resolved ANSI state.  Reusing a
-              ;; semantic Frame after a theme switch therefore requires a
-              ;; complete repaint, even when its cells are unchanged.
-              (frame-diff->ansi (if (eq? committed-theme desired-theme)
-                                    committed
-                                    #f)
-                                desired desired-theme
-                                (presenter-desired-cursor-row presenter)
-                                (presenter-desired-cursor-column presenter))))
-          (presenter-pending-target-set! presenter desired)
-          (presenter-pending-theme-set! presenter desired-theme)
-          (presenter-pending-cursor-row-set! presenter
-            (presenter-desired-cursor-row presenter))
-          (presenter-pending-cursor-column-set! presenter
-            (presenter-desired-cursor-column presenter))
-          (presenter-pending-offset-set! presenter 0)))))
+          (let* ([base (if (eq? committed-theme desired-theme) committed #f)]
+                 [spans (frame-diff base desired)]
+                 [cursor-changed?
+                  (not (and (equal? (presenter-desired-cursor-row presenter)
+                                    (presenter-committed-cursor-row presenter))
+                            (equal? (presenter-desired-cursor-column presenter)
+                                    (presenter-committed-cursor-column presenter))))])
+            (if (and (null? spans) (not cursor-changed?)
+                     (eq? committed-theme desired-theme))
+                ;; A distinct immutable Frame may project to the same cells.
+                ;; Adopt it without emitting an empty ANSI transaction.
+                (begin
+                  (frame-presenter-committed-frame-set! presenter desired)
+                  (presenter-committed-theme-set! presenter desired-theme))
+                (begin
+                  (presenter-pending-bytes-set! presenter
+                    (string->utf8
+                      (frame-spans->ansi spans desired desired-theme
+                                         (presenter-desired-cursor-row presenter)
+                                         (presenter-desired-cursor-column presenter))))
+                  (presenter-pending-target-set! presenter desired)
+                  (presenter-pending-theme-set! presenter desired-theme)
+                  (presenter-pending-cursor-row-set! presenter
+                    (presenter-desired-cursor-row presenter))
+                  (presenter-pending-cursor-column-set! presenter
+                    (presenter-desired-cursor-column presenter))
+                  (presenter-pending-offset-set! presenter 0))))))))
 
   ;; writer receives a bytevector and offset, and returns a positive byte count
   ;; or #f for would-block.  One call never crosses an ANSI transaction.
