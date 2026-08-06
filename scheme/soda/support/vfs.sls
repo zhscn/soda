@@ -31,12 +31,16 @@
                 file-modification-time
                 file-regular?
                 file-symbolic-link?
+                get-mode
                 getenv
+                get-process-id
                 open-file-input-port
                 open-file-output-port
                 path-absolute?
                 path-build
                 path-parent
+                rename-file
+                chmod
                 time-nanosecond
                 time-second))
 
@@ -60,17 +64,75 @@
     (require-path 'vfs-file-exists? path)
     (file-regular? path #t))
 
-  (define (vfs-write-file path data)
-    (require-path 'vfs-write-file path)
-    (unless (bytevector? data)
-      (assertion-violation
-        'vfs-write-file "data must be a bytevector" data))
+  (define atomic-write-serial 0)
+
+  (define (next-atomic-write-path path)
+    (set! atomic-write-serial (+ atomic-write-serial 1))
+    (string-append path ".soda-write-"
+                   (number->string (get-process-id)) "-"
+                   (number->string atomic-write-serial)))
+
+  (define (vfs-path-present? path)
+    (or (file-regular? path #f)
+        (file-directory? path #f)
+        (file-symbolic-link? path)))
+
+  (define (open-atomic-write-port path)
+    ;; The default R6RS output-file behavior refuses an existing temporary
+    ;; name.  Existing temporary names are skipped without opening them for
+    ;; truncation; all other I/O errors retain their original condition.
+    (let loop ()
+      (let ([temporary (next-atomic-write-path path)])
+        (if (vfs-path-present? temporary)
+            (loop)
+            (cons temporary
+                  (open-file-output-port
+                    temporary (file-options) (buffer-mode block) #f))))))
+
+  (define (delete-file-if-present path)
+    (when path
+      (guard (condition [else #f])
+        (delete-file path))))
+
+  (define (write-file-contents path data)
     (call-with-port
       (open-file-output-port
         path (file-options no-fail) (buffer-mode block) #f)
       (lambda (port)
         (put-bytevector port data)
-        (flush-output-port port)))
+        (flush-output-port port))))
+
+  ;; Replacing a regular file uses a same-directory temporary followed by
+  ;; rename.  On the supported Unix targets `rename-file` is an atomic name
+  ;; replacement.  Symbolic links retain the established VFS behavior of
+  ;; writing their referent instead of replacing the link itself.
+  (define (atomic-write-file path data)
+    (if (file-symbolic-link? path)
+        (write-file-contents path data)
+        (let ([temporary #f] [replaced? #f]
+              [mode (and (vfs-file-exists? path) (get-mode path))])
+          (dynamic-wind
+            (lambda () #f)
+            (lambda ()
+              (let ([opened (open-atomic-write-port path)])
+                (set! temporary (car opened))
+                (call-with-port
+                  (cdr opened)
+                  (lambda (port)
+                    (put-bytevector port data)
+                    (flush-output-port port)))
+                (when mode (chmod temporary mode))
+                (rename-file temporary path)
+                (set! replaced? #t)))
+            (lambda ()
+              (unless replaced? (delete-file-if-present temporary)))))))
+
+  (define (vfs-write-file path data)
+    (require-path 'vfs-write-file path)
+    (unless (bytevector? data)
+      (assertion-violation
+        'vfs-write-file "data must be a bytevector" data))
+    (atomic-write-file path data)
     (bytevector-length data))
 
   (define (vfs-path-kind path follow?)

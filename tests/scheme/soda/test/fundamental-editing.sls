@@ -1,7 +1,7 @@
 (library (soda test fundamental-editing)
   (export run-fundamental-editing-tests!)
   (import (rnrs)
-          (only (chezscheme) delete-directory get-process-id mkdir)
+          (only (chezscheme) chmod delete-directory get-mode get-process-id mkdir)
           (soda bootstrap)
           (soda host command)
           (soda host command-runtime)
@@ -75,6 +75,11 @@
         (and (<= index limit)
              (or (string=? (substring value index (+ index (string-length needle))) needle)
                  (loop (+ index 1)))))))
+
+  (define (string-prefix? prefix value)
+    (let ([length (string-length prefix)])
+      (and (<= length (string-length value))
+           (string=? prefix (substring value 0 length)))))
 
   (define (run-fundamental-editing-tests!)
     (let* ([application (make-soda-application)]
@@ -857,6 +862,45 @@
           (error 'fundamental-editing-tests "interaction cancellation did not retire its invocation")))
       (owner-close! owner)
       (soda-application-close! application))
+
+    ;; VFS publishes a complete replacement or leaves the target intact.  It
+    ;; preserves an existing regular file's mode and removes a temporary when
+    ;; replacement fails against a directory target.
+    (let* ([root (string-append "/tmp/soda-atomic-write-"
+                                (number->string (get-process-id)))]
+           [path (string-append root "/document.txt")]
+           [directory-target (string-append root "/directory")]
+           [temporary-prefix "directory.soda-write-"])
+      (dynamic-wind
+        (lambda ()
+          (when (file-exists? root) (delete-directory root))
+          (mkdir root)
+          (mkdir directory-target))
+        (lambda ()
+          (vfs-write-file path (string->utf8 "first"))
+          (chmod path #o640)
+          (vfs-write-file path (string->utf8 "second"))
+          (unless (and (string=? (utf8->string (vfs-read-file path)) "second")
+                       (= (bitwise-and (get-mode path) #o777) #o640))
+            (error 'fundamental-editing-tests
+                   "atomic VFS write did not replace content or preserve mode"))
+          (let ([failed?
+                 (guard (condition [else #t])
+                   (vfs-write-file directory-target (string->utf8 "invalid"))
+                   #f)])
+            (unless (and failed?
+                         (not
+                           (exists
+                             (lambda (entry)
+                               (string-prefix? temporary-prefix
+                                               (vfs-entry-name entry)))
+                             (vfs-list-directory root))))
+              (error 'fundamental-editing-tests
+                     "failed atomic VFS write left a temporary file behind"))))
+        (lambda ()
+          (when (file-exists? path) (delete-file path))
+          (when (file-exists? directory-target) (delete-directory directory-target))
+          (when (file-exists? root) (delete-directory root)))))
 
     (let* ([path (string-append "/tmp/soda-file-package-"
                                 (number->string (get-process-id)) ".txt")]
