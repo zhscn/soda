@@ -420,6 +420,53 @@
         (error 'fundamental-editing-tests "Nano editing aliases are not bound"))
       (soda-application-close! application))
 
+    ;; Case-folded searches retain source byte spans, including a fold that
+    ;; changes length (ß -> ss), so replacement remains a normal transaction.
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [runtime (host-state-command-runtime state)]
+           [buffer (soda-application-buffer application)]
+           [view (soda-application-view application)]
+           [search (soda-application-search application)])
+      (command-runtime-start!
+        runtime 'fundamental.insert-text (application-command-context application)
+        (list (string->utf8 "Alpha ALPHA Straße STRASSE")))
+      (command-runtime-start!
+        runtime 'fundamental.beginning-of-buffer (application-command-context application))
+      (command-runtime-start!
+        runtime 'search.forward (application-command-context application) (list "alpha"))
+      (let ([range (selection-primary-range (view-state-selection (view-state view)))])
+        (unless (and (= (selection-range-from range) 0)
+                     (= (selection-range-to range) 0))
+          (error 'fundamental-editing-tests
+                 "case-sensitive search unexpectedly matched a differently cased string")))
+      (command-runtime-start!
+        runtime 'search.toggle-case-sensitive (application-command-context application))
+      (command-runtime-start!
+        runtime 'search.forward (application-command-context application) (list "alpha"))
+      (let ([range (selection-primary-range (view-state-selection (view-state view)))])
+        (unless (and (= (selection-range-from range) 0)
+                     (= (selection-range-to range) 5))
+          (error 'fundamental-editing-tests
+                 "case-insensitive search did not select the first folded match")))
+      (command-runtime-start! runtime 'search.next (application-command-context application))
+      (let ([range (selection-primary-range (view-state-selection (view-state view)))])
+        (unless (and (= (selection-range-from range) 6)
+                     (= (selection-range-to range) 11))
+          (error 'fundamental-editing-tests
+                 "repeat search did not retain the case policy")))
+      (command-runtime-start!
+        runtime 'search.replace-all (application-command-context application)
+        (list "strasse" "road"))
+      (unless (and (string=? (buffer-string buffer) "Alpha ALPHA road road")
+                   (eq? (keymap-lookup
+                          (search-keymap search)
+                          (list (make-key-stroke 'character (char->integer #\C) 2)))
+                        'search.toggle-case-sensitive))
+        (error 'fundamental-editing-tests
+               "case-folded replacement or its key binding is incorrect"))
+      (soda-application-close! application))
+
     (let* ([application (make-soda-application)]
            [state (soda-application-state application)]
            [runtime (host-state-command-runtime state)]

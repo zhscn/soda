@@ -5,6 +5,7 @@
   (import (rnrs)
           (soda kernel change)
           (soda kernel document)
+          (soda kernel extension)
           (soda kernel selection)
           (soda kernel state)
           (soda kernel view-state)
@@ -13,6 +14,7 @@
           (soda host dispatch)
           (soda host input)
           (soda host input-event)
+          (soda host operation)
           (soda host internal buffer)
           (soda host internal state)
           (soda host internal view)
@@ -26,7 +28,32 @@
     (search-query %make-search-query search-query?)
     (fields (immutable buffer-id search-query-buffer-id)
             (immutable text search-query-text)
-            (immutable direction search-query-direction)))
+            (immutable direction search-query-direction)
+            (immutable case-sensitive? search-query-case-sensitive?)))
+
+  ;; Search policy belongs to the initiating View.  The policy is captured in
+  ;; SearchQuery so repeat and query-replace retain their meaning after later
+  ;; View reconfiguration.
+  (define (first-value values default)
+    (if (null? values) default (car values)))
+
+  (define search-case-sensitive-facet
+    (make-facet 'search-case-sensitive 'view #t
+                (lambda (values) (first-value values #t)) eq? eq?))
+
+  (define search-case-sensitive-compartment
+    (make-compartment 'search-case-sensitive 'view))
+
+  (define (search-case-sensitive? context)
+    (configuration-facet
+      (view-state-configuration (command-context-view-state context))
+      search-case-sensitive-facet 'view))
+
+  (define (make-search-case-sensitive-extension value)
+    (unless (boolean? value)
+      (assertion-violation 'make-search-case-sensitive-extension
+                           "expected a boolean" value))
+    (make-facet-provider search-case-sensitive-facet value))
 
   (define-record-type
     (search-service %make-search-service search-service?)
@@ -117,7 +144,8 @@
   (define (make-query context value direction)
     (unless (and (string? value) (memq direction '(forward backward)))
       (assertion-violation 'search "invalid literal query or direction" value direction))
-    (%make-search-query (command-context-buffer-id context) (string->utf8 value) direction))
+    (%make-search-query (command-context-buffer-id context) (string->utf8 value) direction
+                        (search-case-sensitive? context)))
 
   (define (query-empty? query)
     (zero? (bytevector-length (search-query-text query))))
@@ -130,39 +158,85 @@
                     (bytevector-u8-ref pattern index))
                  (loop (+ index 1)))))))
 
-  ;; Search offsets are byte offsets, matching Document and ChangeSet.  A
-  ;; successful UTF-8 pattern can only match on a scalar boundary; scanning
-  ;; raw starts remains correct for invalid input and does not manufacture a
-  ;; second position representation.
-  (define (find-forward text pattern start stop)
-    (let loop ([position start])
-      (cond [(> position stop) #f]
-            [(bytes-at? text pattern position) position]
-            [else (loop (+ position 1))])))
+  (define (string-prefix? prefix value)
+    (let ([length (string-length prefix)])
+      (and (<= length (string-length value))
+           (string=? prefix (substring value 0 length)))))
 
-  (define (find-backward text pattern start stop)
+  (define (match-start match) (car match))
+  (define (match-end match) (cdr match))
+
+  (define (casefold-match-end text folded-pattern start)
+    (let ([size (text-size text)])
+      (let loop ([position start] [folded ""])
+        (cond
+          [(string=? folded folded-pattern) position]
+          [(or (= position size) (not (string-prefix? folded folded-pattern))) #f]
+          [else
+           (let ([next (text-next-grapheme-offset text position)])
+             (if (<= next position)
+                 #f
+                 (loop next
+                       (string-append
+                         folded
+                         (string-foldcase
+                           (utf8->string (text-subbytevector text position next)))))))]))))
+
+  (define (match-at text query start)
+    (let* ([pattern (search-query-text query)]
+           [size (text-size text)]
+           [width (bytevector-length pattern)])
+      (if (search-query-case-sensitive? query)
+          (and (<= (+ start width) size)
+               (bytes-at? text pattern start)
+               (cons start (+ start width)))
+          (let ([end
+                 (casefold-match-end text
+                                     (string-foldcase (utf8->string pattern)) start)])
+            (and end (cons start end))))))
+
+  ;; Search offsets are byte offsets, matching Document and ChangeSet.  The
+  ;; case-folded path advances on grapheme boundaries, preserving the original
+  ;; byte span for selection and replacement even when folding changes length.
+  (define (find-forward text query start stop)
     (let loop ([position start])
-      (cond [(< position stop) #f]
-            [(bytes-at? text pattern position) position]
-            [else (loop (- position 1))])))
+      (cond [(>= position stop) #f]
+            [else
+             (let ([match (match-at text query position)])
+               (if match
+                   match
+                   (let ([next
+                          (if (search-query-case-sensitive? query)
+                              (+ position 1)
+                              (text-next-grapheme-offset text position))])
+                     (and (> next position) (loop next)))))])))
+
+  (define (find-backward text query start stop)
+    (let loop ([position start] [latest #f])
+      (if (>= position stop)
+          latest
+          (let ([match (match-at text query position)])
+            (let ([next
+                   (if (search-query-case-sensitive? query)
+                       (+ position 1)
+                       (text-next-grapheme-offset text position))])
+              (if (<= next position)
+                  latest
+                  (loop next
+                        (if (and match (<= (match-end match) stop))
+                            match
+                            latest))))))))
 
   (define (find-literal text query point)
-    (let* ([pattern (search-query-text query)]
-           [width (bytevector-length pattern)]
-           [size (text-size text)])
-      (and (positive? width)
-           (<= width size)
+    (let ([size (text-size text)])
+      (and (positive? (bytevector-length (search-query-text query)))
            (case (search-query-direction query)
              [(forward)
-              (or (and (<= point (- size width))
-                       (find-forward text pattern point (- size width)))
-                  (and (> point 0)
-                       (find-forward text pattern 0
-                                     (min (- size width) (- point 1)))))]
+              (or (find-forward text query point size)
+                  (and (> point 0) (find-forward text query 0 point)))]
              [(backward)
-              (or (find-backward text pattern (min (- point width) (- size width)) 0)
-                  (and (< point size)
-                       (find-backward text pattern (- size width) point)))]
+              (or (find-backward text query 0 point)
+                  (and (< point size) (find-backward text query point size)))]
              [else #f]))))
 
   (define (match-selection from width)
@@ -193,31 +267,23 @@
                   (let ([state (command-context-view-state context)])
                     (make-view-transaction-spec
                       (command-context-view-id context) (view-state-generation state)
-                      (match-selection match
-                                       (bytevector-length (search-query-text query)))
+                      (match-selection (match-start match)
+                                       (- (match-end match) (match-start match)))
                       #f #f '() '() #f))))))))
 
-  (define (all-matches text pattern)
-    (let* ([width (bytevector-length pattern)]
-           [last (- (text-size text) width)])
-      (if (or (zero? width) (negative? last))
-          '()
-          (let loop ([start 0] [matches '()])
-            (let ([found (find-forward text pattern start last)])
-              (if (not found)
-                  (reverse matches)
-                  (loop (+ found width) (cons found matches))))))))
+  (define (all-matches text query)
+    (let loop ([start 0] [matches '()])
+      (let ([found (find-forward text query start (text-size text))])
+        (if (not found)
+            (reverse matches)
+            (loop (match-end found) (cons found matches))))))
 
-  (define (all-matches-from text pattern start)
-    (let* ([width (bytevector-length pattern)]
-           [last (- (text-size text) width)])
-      (if (or (zero? width) (negative? last) (> start last))
-          '()
-          (let loop ([position start] [matches '()])
-            (let ([found (find-forward text pattern position last)])
-              (if found
-                  (loop (+ found width) (cons found matches))
-                  (reverse matches)))))))
+  (define (all-matches-from text query start)
+    (let loop ([position start] [matches '()])
+      (let ([found (find-forward text query position (text-size text))])
+        (if found
+            (loop (match-end found) (cons found matches))
+            (reverse matches)))))
 
   (define (select-query-replace-match! service session context)
     (let* ([state (command-context-view-state context)]
@@ -227,7 +293,7 @@
         (host-state-dispatch (search-service-state service))
         (make-view-transaction-spec
           (command-context-view-id context) (view-state-generation state)
-          (match-selection start (bytevector-length (search-query-text query)))
+          (match-selection start (- (query-replace-session-match-end session) start))
           #f #f '() '() #f))))
 
   ;; Find the next match in the latest published Buffer state, select it, and
@@ -242,19 +308,16 @@
               context
               (lambda (text)
                 (let* ([query (query-replace-session-query session)]
-                       [pattern (search-query-text query)]
-                       [width (bytevector-length pattern)]
-                       [last (- (text-size text) width)]
                        [match
-                        (and (positive? width)
-                             (<= (query-replace-session-scan session) last)
-                             (find-forward text pattern
-                                           (query-replace-session-scan session) last))])
+                        (and (not (query-empty? query))
+                             (find-forward text query
+                                           (query-replace-session-scan session)
+                                           (text-size text)))])
                   (if (not match)
                       (finish-query-replace! service session)
                       (begin
-                        (query-replace-session-match-start-set! session match)
-                        (query-replace-session-match-end-set! session (+ match width))
+                        (query-replace-session-match-start-set! session (match-start match))
+                        (query-replace-session-match-end-set! session (match-end match))
                         (select-query-replace-match! service session context)
                         (let ([next-context
                                (query-replace-current-context service session)])
@@ -307,24 +370,23 @@
       context
       (lambda (text)
         (let* ([query (query-replace-session-query session)]
-               [pattern (search-query-text query)]
-               [matches (all-matches-from text pattern (query-replace-session-scan session))])
+               [matches (all-matches-from text query (query-replace-session-scan session))])
           (if (null? matches)
               (command-handled)
               (let* ([replacement (query-replace-session-replacement session)]
-                     [width (bytevector-length pattern)]
                      [state (command-context-buffer-state context)]
                      [change-set
                       (make-change-set
                         (text-size text)
-                        (map (lambda (from)
-                               (make-text-change from (+ from width) replacement))
+                        (map (lambda (match)
+                               (make-text-change (match-start match) (match-end match)
+                                                 replacement))
                              matches))])
                 (make-transaction-spec
                   (command-context-buffer-id context) (command-context-view-id context)
                   (buffer-state-generation state) change-set
                   (match-selection
-                    (change-set-map-offset change-set (car matches) 'before)
+                    (change-set-map-offset change-set (match-start (car matches)) 'before)
                     (bytevector-length replacement))
                   '() '())))))))
 
@@ -334,22 +396,21 @@
         (context-text
           context
           (lambda (text)
-            (let* ([pattern (search-query-text query)]
-                   [matches (all-matches text pattern)]
+            (let* ([matches (all-matches text query)]
                    [replacement-bytes (string->utf8 replacement)])
               (if (null? matches)
                   (command-handled)
-                  (let* ([width (bytevector-length pattern)]
-                         [changes
-                          (map (lambda (from)
-                                 (make-text-change from (+ from width) replacement-bytes))
+                  (let* ([changes
+                          (map (lambda (match)
+                                 (make-text-change (match-start match) (match-end match)
+                                                   replacement-bytes))
                                matches)]
                          [state (command-context-buffer-state context)]
                          [change-set (make-change-set (text-size text) changes)]
                          [first (car matches)]
                          [selection
                           (match-selection
-                            (change-set-map-offset change-set first 'before)
+                            (change-set-map-offset change-set (match-start first) 'before)
                             (bytevector-length replacement-bytes))])
                     (make-transaction-spec
                       (command-context-buffer-id context) (command-context-view-id context)
@@ -365,7 +426,8 @@
                                 (command-context-view-id context) #f)])
       (and query
            (= (search-query-buffer-id query) (command-context-buffer-id context))
-           (%make-search-query (search-query-buffer-id query) (search-query-text query) direction))))
+           (%make-search-query (search-query-buffer-id query) (search-query-text query) direction
+                               (search-query-case-sensitive? query)))))
 
   (define (install-command! runtime owner name documentation readers procedure)
     (command-runtime-register-command!
@@ -403,6 +465,26 @@
              (command-handled)]
             [else
              (make-command-effect 'search.query-replace.advance session)]))))
+
+  (define (toggle-case-sensitive context)
+    (let* ([state (command-context-view-state context)]
+           [enabled? (search-case-sensitive? context)]
+           [effect
+            (make-compartment-reconfigure-effect
+              search-case-sensitive-compartment
+              (make-search-case-sensitive-extension (not enabled?)))]
+           [update
+            (make-view-transaction-spec
+              (command-context-view-id context) (view-state-generation state)
+              #f #f #f (list effect) '() #f)]
+           [surface-id (command-context-surface-id context)])
+      (if (and (integer? surface-id) (exact? surface-id) (>= surface-id 0))
+          (list update
+                (make-set-surface-message-operation
+                  surface-id
+                  (string-append "Search is "
+                                 (if enabled? "case-insensitive" "case-sensitive"))))
+          update)))
 
   (define (make-search-service! state owner)
     (unless (and (host-state? state) (owner? owner))
@@ -446,6 +528,9 @@
         (lambda (context)
           (let ([query (remembered-query service context 'backward)])
             (if query (select-match context query #t) (command-handled)))))
+      (install-command! runtime owner 'search.toggle-case-sensitive
+                        "Toggle case-sensitive matching for new searches in the active View." #f
+        (lambda (context) (toggle-case-sensitive context)))
       (install-command! runtime owner 'search.replace-all "Replace every literal match in the active Buffer."
                         (list forward-reader replace-reader)
         (lambda (context value replacement)
@@ -482,6 +567,7 @@
       (keymap-bind! keymap (list (control-stroke #\w)) 'search.forward)
       (keymap-bind! keymap (list (control-stroke #\\)) 'search.query-replace)
       (keymap-bind! keymap (list (meta-stroke #\w)) 'search.next)
+      (keymap-bind! keymap (list (meta-stroke #\C)) 'search.toggle-case-sensitive)
       (keymap-bind! keymap
                     (list (make-key-stroke 'character (char->integer #\w) 3))
                     'search.previous)
