@@ -8,11 +8,6 @@
           view-projection
           view-occurrences
           view-plugin-instances
-          view-decorations
-          view-merged-decorations
-          view-display-stream
-          view-display-transforms
-          view-transform-display-stream
           view-publish-state!
           view-update-plugins!
           view-close!
@@ -278,36 +273,6 @@
       (when (or output-changed? (render-damage? update view))
         (publish-view-projection! view))
       view))
-
-  (define (view-decorations view)
-    (unless (and (view? view) (not (view-closed? view)))
-      (assertion-violation 'view-decorations "expected a live View" view))
-    (list (view-projection-decorations (view-projection view))))
-
-  (define (view-merged-decorations view)
-    (unless (and (view? view) (not (view-closed? view)))
-      (assertion-violation 'view-merged-decorations "expected a live View" view))
-    (view-projection-decorations (view-projection view)))
-
-  (define (view-display-stream view)
-    (unless (and (view? view) (not (view-closed? view)))
-      (assertion-violation 'view-display-stream "expected a live View" view))
-    (view-projection-display-stream (view-projection view)))
-
-  (define (view-display-transforms view)
-    (unless (and (view? view) (not (view-closed? view)))
-      (assertion-violation 'view-display-transforms "expected a live View" view))
-    (map cdr (view-projection-transforms (view-projection view))))
-
-  ;; A transform is prepared by a plugin update but executed against the
-  ;; current visible base stream.  Rendering is a pure projection: a transform
-  ;; failure returns the last safe stream plus structured failure data.  The
-  ;; dispatcher owns subsequent reporting and plugin retirement.
-  (define (view-transform-display-stream view stream)
-    (unless (and (view? view) (not (view-closed? view)) (display-stream? stream))
-      (assertion-violation 'view-transform-display-stream
-                           "expected a live View and DisplayStream" view stream))
-    (view-projection-transform-display-stream (view-projection view) stream))
 
   (define-record-type
     (view-service %make-view-service view-service?)

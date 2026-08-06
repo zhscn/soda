@@ -54,6 +54,7 @@
         (soda test host-integration)
         (soda test terminal-clipboard)
         (soda view display)
+        (soda view projection)
         (soda view frame)
         (soda view compositor)
         (soda view decoration)
@@ -1312,7 +1313,7 @@
        [leaf (make-leaf-window (view-id view) '(0 0 8 1))]
        [surface (make-surface leaf '(8 . 1))]
        [render (render-surface surface (host-state-views host))])
-  (unless (and (display-stream? (view-display-stream view))
+  (unless (and (display-stream? (view-projection-display-stream (view-projection view)))
                (string=? (frame-cell-grapheme
                            (frame-cell-at (surface-render-frame render) 0 0)) "v")
                (eq? (frame-cell-face
@@ -1359,7 +1360,7 @@
        [leaf (make-leaf-window (view-id view) '(0 0 3 1))]
        [surface (make-surface leaf '(3 . 1))]
        [render (render-surface surface (host-state-views host))])
-  (unless (and (= (length (view-display-transforms view)) 1)
+  (unless (and (= (length (view-projection-transforms (view-projection view))) 1)
                (string=? (frame-cell-grapheme
                            (frame-cell-at (surface-render-frame render) 0 1)) ":")
                (eq? (frame-cell-face

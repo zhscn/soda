@@ -940,7 +940,8 @@
             (error 'fundamental-editing-tests
                    "minibuffer input did not receive its dedicated face")))
         (let-values ([(stream failures)
-                      (view-transform-display-stream prompt-view (make-display-stream '()))])
+                      (view-projection-transform-display-stream
+                        (view-projection prompt-view) (make-display-stream '()))])
           (unless (null? failures)
             (error 'fundamental-editing-tests
                    "minibuffer prompt transform reported a failure" failures))
