@@ -883,6 +883,10 @@
         "Insert a newline and preserve leading indentation at every selection." 'editing
         (insert-newline context))
       (install-command!
+        runtime owner 'fundamental.insert-tab (context)
+        "Insert a tab at every selection." 'editing
+        (replace-selection context (string->utf8 "\t")))
+      (install-command!
         runtime owner 'fundamental.open-line (context)
         "Insert a newline before every caret without moving it." 'editing
         (open-line context))
@@ -1076,6 +1080,7 @@
         ((list (plain-stroke 'end #f)) 'fundamental.end-of-line)
         ((list (plain-stroke 'page-up #f)) 'fundamental.scroll-up)
         ((list (plain-stroke 'page-down #f)) 'fundamental.scroll-down)
+        ((list (plain-stroke 'tab #f)) 'fundamental.insert-tab)
         ;; Non-character keys are normalized without a codepoint by
         ;; key-event->key-stroke. Terminal decoders retain their physical
         ;; codepoint on KeyEvent for inspection, but it is not part of keymap

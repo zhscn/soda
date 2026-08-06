@@ -1448,12 +1448,13 @@
       (send! (make-key-event 'enter 13 #f #f 0 'press (make-bytevector 0)))
       (send! (make-text-input-event 'text (string->utf8 "b")))
       (send! (make-key-event 'backspace 127 #f #f 0 'press (make-bytevector 0)))
-      (unless (and (string=? (buffer-string buffer) "a\n")
+      (send! (make-key-event 'tab 9 #f #f 0 'press (make-bytevector 0)))
+      (unless (and (string=? (buffer-string buffer) "a\n\t")
                    (not (surface-status-message surface))
                    (= (selection-range-head
                         (selection-primary-range (view-state-selection (view-state view))))
-                      2))
+                      3))
         (error 'fundamental-editing-tests
-               "fundamental frontend input did not advance its caret"))
+               "fundamental frontend input did not insert a tab or advance its caret"))
       (frontend-close! frontend)
       (soda-application-close! application))))

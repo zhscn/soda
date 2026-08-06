@@ -27,7 +27,7 @@ Soda 保持自己的 Buffer、View 与 command 抽象。Nano 的命令名称和�
 
 | 能力 | 状态 |
 |---|---|
-| committed text、paste、换行、删除与多 selection 替换 | 已实现 |
+| committed text、paste、tab、换行、删除与多 selection 替换 | 已实现 |
 | region、mark、copy、cut、uncut、kill word/line | 已实现 |
 | undo/redo 与 saved revision | 已实现 |
 | word、logical line、Buffer 边界与匹配分隔符移动 | 已实现 |
