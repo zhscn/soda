@@ -48,9 +48,6 @@
   (define (control-stroke character)
     (make-key-stroke 'character (char->integer character) 4))
 
-  (define (meta-stroke character)
-    (make-key-stroke 'character (char->integer character) 2))
-
   (define (directory-keymap service)
     (unless (directory-service? service)
       (assertion-violation 'directory-keymap "expected a DirectoryService" service))
@@ -233,7 +230,6 @@
             (%make-directory-service
               state owner files actions keymap result-keymap authority (make-eqv-hashtable))])
       (keymap-bind! keymap (list (control-stroke #\x) (control-stroke #\d)) 'directory.browse)
-      (keymap-bind! keymap (list (meta-stroke #\f)) 'directory.browse)
       (keymap-bind! result-keymap (list (make-key-stroke 'enter #f 0)) 'buffer.activate-item)
       (keymap-bind! result-keymap (list (control-stroke #\g)) 'file.close)
       (keymap-bind! result-keymap
