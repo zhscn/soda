@@ -9,6 +9,7 @@
           soda-application-history
           soda-application-files
           soda-application-processes
+          soda-application-spelling
           soda-application-search
           soda-application-interaction
           soda-application-minibuffer
@@ -31,6 +32,7 @@
           (soda packages base history)
           (soda packages file)
           (soda packages process)
+          (soda packages spell)
           (soda packages search)
           (soda packages interaction)
           (soda packages buffer-ui)
@@ -54,6 +56,7 @@
       (immutable history soda-application-history)
       (immutable files soda-application-files)
       (immutable processes soda-application-processes)
+      (immutable spelling soda-application-spelling)
       (immutable search soda-application-search)
       (immutable interaction soda-application-interaction)
       (immutable minibuffer soda-application-minibuffer)
@@ -103,6 +106,7 @@
                [files
                 (make-file-service! state owner history)]
                [processes (make-process-service! state owner)]
+               [spelling (make-spell-service! state owner processes)]
                [_help (make-help-service! state owner)]
                [search
                 (make-search-service! state owner)]
@@ -115,7 +119,7 @@
           (surface-service-register! (host-state-surfaces state) surface)
           (history-mark-saved! history (buffer-id buffer))
           (%make-soda-application
-            state owner buffer view surface editing history files processes search interaction minibuffer buffer-item-actions
+            state owner buffer view surface editing history files processes spelling search interaction minibuffer buffer-item-actions
             #f #f #f)))))
 
   (define (require-open who application)
@@ -132,6 +136,10 @@
               (make-input-layer
                 'search
                 (search-keymap (soda-application-search application))
+                #f 'pass)
+              (make-input-layer
+                'spell
+                (spell-keymap (soda-application-spelling application))
                 #f 'pass)
               (make-input-layer
                 'process

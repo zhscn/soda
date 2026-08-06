@@ -3,6 +3,9 @@
           process-service?
           process-keymap
           process-service-attach-runtime!
+          make-process-job
+          process-job?
+          process-service-run!
           process-service-handle-runtime-event!)
   (import (rnrs)
           (only (chezscheme) current-directory)
@@ -31,11 +34,49 @@
     (fields state owner keymap processes
             (mutable runtime process-service-runtime process-service-runtime-set!)))
 
+  ;; A ProcessJob is the package boundary for a finite, pipe-backed external
+  ;; task.  `input` is written once and stdin is then closed, so jobs cannot
+  ;; accidentally retain a subprocess waiting for terminal input.  Callbacks
+  ;; run on the host runtime turn that delivered the native event.
+  (define-record-type
+    (process-job %make-process-job process-job?)
+    (fields arguments working-directory input on-output on-exit))
+
+  (define (valid-process-arguments? arguments)
+    (and (pair? arguments)
+         (list? arguments)
+         (string? (car arguments))
+         (positive? (string-length (car arguments)))
+         (for-all
+           (lambda (argument)
+             (and (string? argument)
+                  (not (exists (lambda (character) (char=? character #\nul))
+                               (string->list argument)))))
+           arguments)))
+
+  (define (make-process-job arguments working-directory input on-output on-exit)
+    (unless (valid-process-arguments? arguments)
+      (assertion-violation 'make-process-job
+                           "arguments must be a non-empty string list with a non-empty executable"
+                           arguments))
+    (unless (string? working-directory)
+      (assertion-violation 'make-process-job "working directory must be a string"
+                           working-directory))
+    (unless (bytevector? input)
+      (assertion-violation 'make-process-job "input must be a bytevector" input))
+    (unless (or (not on-output) (procedure? on-output))
+      (assertion-violation 'make-process-job "output callback must be a procedure or false"
+                           on-output))
+    (unless (or (not on-exit) (procedure? on-exit))
+      (assertion-violation 'make-process-job "exit callback must be a procedure or false"
+                           on-exit))
+    (%make-process-job (list-copy arguments) working-directory input on-output on-exit))
+
   (define-record-type process-request
     (fields context command))
 
   (define-record-type process-task
-    (fields source buffer-id command))
+    (fields source job))
 
   (define (control-stroke character)
     (make-key-stroke 'character (char->integer character) 4))
@@ -58,11 +99,11 @@
         (buffer-id buffer) (buffer-state-generation state)
         (make-change-set length (list (make-text-change length length data))))))
 
-  (define (append-output! service task bytes)
+  (define (append-output! service buffer-id bytes)
     (let ([buffer
            (buffer-service-ref
              (host-state-buffers (process-service-state service))
-             (process-task-buffer-id task) #f)])
+             buffer-id #f)])
       (if buffer
           (dispatcher-dispatch!
             (host-state-dispatch (process-service-state service))
@@ -95,23 +136,47 @@
                              "origin Window is no longer available" context))
       buffer))
 
+  (define (process-service-run! service job)
+    (unless (and (process-service? service) (process-job? job))
+      (assertion-violation 'process-service-run! "expected a process service and job"
+                           service job))
+    (let ([runtime (process-service-runtime service)])
+      (unless runtime
+        (assertion-violation 'process-service-run!
+                             "no native process runtime is attached" service))
+      (let ([source
+             (native:runtime-spawn-process!
+               runtime (process-job-arguments job) (process-job-working-directory job))])
+        (guard
+          (condition
+            [else
+             (guard (ignored [else #f])
+               (native:runtime-cancel! runtime source))
+             (raise condition)])
+          (native:runtime-write-process! runtime source (process-job-input job))
+          (native:runtime-close-process-input! runtime source)
+          (hashtable-set! (process-service-processes service) source
+                          (make-process-task source job))
+          source))))
+
   (define (start-process! service request)
     (unless (process-request? request)
       (assertion-violation 'process.spawn "invalid process request" request))
-    (let ([runtime (process-service-runtime service)])
-      (unless runtime
-        (assertion-violation 'process.spawn
-                             "no native process runtime is attached" request))
-      (let* ([buffer (open-output-buffer! service request)]
-             [source
-              (native:runtime-spawn-process!
-                runtime
-                (list "/bin/sh" "-c" (process-request-command request))
-                (current-directory))]
-             [task (make-process-task source (buffer-id buffer)
-                                      (process-request-command request))])
-        (hashtable-set! (process-service-processes service) source task)
-        task)))
+    (let* ([buffer (open-output-buffer! service request)]
+           [buffer-id (buffer-id buffer)]
+           [job
+            (make-process-job
+              (list "/bin/sh" "-c" (process-request-command request))
+              (current-directory) (make-bytevector 0)
+              (lambda (event)
+                (append-output! service buffer-id (native:event-data event)))
+              (lambda (status flags)
+                (append-output!
+                  service buffer-id
+                  (string->utf8
+                    (string-append "\n[Process exited with status "
+                                   (number->string status) "]\n")))))])
+      (process-service-run! service job)))
 
   (define (process-service-attach-runtime! service runtime)
     (unless (and (process-service? service) (native:runtime? runtime))
@@ -131,20 +196,24 @@
            (hashtable-ref (process-service-processes service)
                           (native:event-source event) #f)])
       (and task
-           (case (native:event-kind event)
-             [(process-output)
-              (append-output! service task (native:event-data event))
-              #t]
-             [(process-exit)
-              (append-output!
-                service task
-                (string->utf8
-                  (string-append "\n[Process exited with status "
-                                 (number->string (native:event-status event)) "]\n")))
-              (hashtable-delete! (process-service-processes service)
-                                 (process-task-source task))
-              #t]
-             [else #f]))))
+           (let ([job (process-task-job task)])
+             (case (native:event-kind event)
+               [(process-output)
+                (let ([callback (process-job-on-output job)])
+                  (when callback (callback event)))
+                #t]
+               [(process-exit)
+                (dynamic-wind
+                  (lambda () #f)
+                  (lambda ()
+                    (let ([callback (process-job-on-exit job)])
+                      (when callback
+                        (callback (native:event-status event) (native:event-flags event)))))
+                  (lambda ()
+                    (hashtable-delete! (process-service-processes service)
+                                       (process-task-source task))))
+                #t]
+               [else #f])))))
 
   (define (make-process-service! state owner)
     (unless (and (host-state? state) (owner? owner))
@@ -166,5 +235,8 @@
               'process.spawn (make-process-request context command)))
           owner "Execute a shell command and display its output in a Buffer."
           'process (make-interactive-plan (list (make-process-request-reader)))))
-      (keymap-bind! keymap (list (control-stroke #\t)) 'process.execute)
+      (keymap-bind!
+        keymap
+        (list (make-key-stroke 'character (char->integer #\!) 2))
+        'process.execute)
       service)))

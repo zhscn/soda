@@ -38,6 +38,7 @@
         (soda bootstrap)
         (soda packages base fundamental-editing)
         (soda packages process)
+        (soda packages spell)
         (prefix (soda ffi runtime) native:)
         (soda support vfs)
         (soda tui terminal-input)
@@ -78,6 +79,13 @@
 
 (define (buffer-string buffer)
   (snapshot-string (buffer-state-document (buffer-state buffer))))
+
+(define (string-contains? value needle)
+  (let ([limit (- (string-length value) (string-length needle))])
+    (let loop ([index 0])
+      (and (<= index limit)
+           (or (string=? (substring value index (+ index (string-length needle))) needle)
+               (loop (+ index 1)))))))
 
 (define (library-binding-hidden? library-name identifier)
   (guard (condition [else #t])
@@ -2744,6 +2752,83 @@
             [(zero? remaining)
              (error 'kernel-tests "process output Buffer did not receive complete process output"
                     output)]
+            [else (poll (- remaining 1))])))
+      ;; Generic ProcessJob supplies finite stdin and callbacks without making
+      ;; an output Buffer the process package's only consumer.  Tool packages
+      ;; such as spelling and formatting can parse their own protocol here.
+      (let ([output ""]
+            [exit-status #f])
+        (process-service-run!
+          processes
+          (make-process-job
+            (list "/bin/cat") "" (string->utf8 "soda-process-input")
+            (lambda (event)
+              (set! output
+                    (string-append output (utf8->string (native:event-data event)))))
+            (lambda (status flags)
+              (set! exit-status status))))
+        (let poll ([remaining 4])
+          (for-each
+            (lambda (event) (process-service-handle-runtime-event! processes event))
+            (native:runtime-poll! native-runtime))
+          (cond
+            [(and exit-status (zero? exit-status))
+             (unless (string=? output "soda-process-input")
+               (error 'kernel-tests "generic process job did not receive stdout" output))]
+            [(zero? remaining)
+             (error 'kernel-tests "generic process job did not exit" exit-status)]
+            [else (poll (- remaining 1))]))))
+    (lambda ()
+      (native:runtime-close! native-runtime)
+      (soda-application-close! application))))
+
+(let* ([application (make-soda-application)]
+       [state (soda-application-state application)]
+       [runtime (host-state-command-runtime state)]
+       [processes (soda-application-processes application)]
+       [spelling (soda-application-spelling application)]
+       [native-runtime (native:make-runtime)])
+  (dynamic-wind
+    (lambda () #f)
+    (lambda ()
+      (process-service-attach-runtime! processes native-runtime)
+      (command-runtime-start!
+        runtime 'fundamental.insert-text (application-command-context application)
+        (list (string->utf8 "helo\n")))
+      (let ([invocation
+             (command-runtime-start!
+               runtime 'spell.check (application-command-context application))])
+        (unless (eq? (command-invocation-phase invocation) 'completed)
+          (error 'kernel-tests "spell command did not complete its effect")))
+      (let poll ([remaining 4])
+        (for-each
+          (lambda (event) (process-service-handle-runtime-event! processes event))
+          (native:runtime-poll! native-runtime))
+        (let* ([active
+                (surface-active-context (soda-application-surface application)
+                                        (host-state-views state))]
+               [buffer
+                (buffer-service-ref (host-state-buffers state)
+                                    (active-context-buffer-id active) #f)]
+               [output (and buffer (buffer-string buffer))])
+          (cond
+            [(and buffer
+                  (string=? (buffer-name buffer) "*Spelling: *scratch**")
+                  (or (string-contains? output "Line 1: & helo")
+                      (string-contains? output "Hunspell exited with status")))
+             (unless
+               (eq? (keymap-lookup
+                      (spell-keymap spelling)
+                      (list (make-key-stroke 'character (char->integer #\t) 4)))
+                     'spell.check)
+               (error 'kernel-tests "spell keymap did not bind C-t"))
+             (command-runtime-start!
+               runtime 'fundamental.insert-text (application-command-context application)
+               (list (string->utf8 "must-not-edit")))
+             (unless (string=? output (buffer-string buffer))
+               (error 'kernel-tests "spell report Buffer accepted an ordinary edit"))]
+            [(zero? remaining)
+             (error 'kernel-tests "spell check did not display a parsed report" output)]
             [else (poll (- remaining 1))]))))
     (lambda ()
       (native:runtime-close! native-runtime)
