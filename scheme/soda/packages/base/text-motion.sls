@@ -1,6 +1,7 @@
 (library (soda packages base text-motion)
   (export text-forward-word-offset
           text-backward-word-offset
+          text-word-count
           text-line-start-offset
           text-line-end-offset)
   (import (rnrs)
@@ -46,6 +47,19 @@
             (if (word-character-before? text current)
                 (skip-word (text-previous-character-offset text current))
                 current)))))
+
+  ;; Count word runs intersecting [from,to).  This shares the same Unicode
+  ;; character policy as word motion, including identifiers with underscores.
+  (define (text-word-count text from to)
+    (unless (and (integer? from) (exact? from) (>= from 0)
+                 (integer? to) (exact? to) (<= from to) (<= to (text-size text)))
+      (assertion-violation 'text-word-count "invalid text range" text from to))
+    (let loop ([offset from] [inside? #f] [count 0])
+      (if (>= offset to)
+          count
+          (let* ([next (text-next-character-offset text offset)]
+                 [word? (word-character-at? text offset)])
+            (loop next word? (if (and word? (not inside?)) (+ count 1) count))))))
 
   (define (text-line-start-offset text offset)
     (text-line-start text (car (text-position text offset))))

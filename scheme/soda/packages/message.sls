@@ -7,6 +7,7 @@
           (soda kernel state)
           (soda kernel selection)
           (soda kernel view-state)
+          (soda packages base text-motion)
           (soda host command)
           (soda host command-runtime)
           (soda host dispatch)
@@ -60,6 +61,36 @@
                            ", column " (number->string (+ column 1)))))
         (lambda () (text-close! text)))))
 
+  (define (count-range-message context)
+    (let* ([state (command-context-buffer-state context)]
+           [range
+            (selection-primary-range
+              (view-state-selection (command-context-view-state context)))]
+           [from (if (< (selection-range-from range) (selection-range-to range))
+                     (selection-range-from range) 0)]
+           [to (if (< (selection-range-from range) (selection-range-to range))
+                   (selection-range-to range)
+                   (snapshot-byte-size (buffer-state-document state)))]
+           [text (snapshot-text (buffer-state-document state))])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (let ([words (text-word-count text from to)])
+            (let loop ([offset from] [lines (if (= from to) 0 1)] [characters 0])
+              (if (>= offset to)
+                  (string-append
+                    (number->string lines) " line" (if (= lines 1) "" "s") ", "
+                    (number->string words) " word" (if (= words 1) "" "s") ", "
+                    (number->string characters) " character"
+                    (if (= characters 1) "" "s"))
+                  (let ([next (text-next-grapheme-offset text offset)])
+                    (loop next
+                          (if (= (text-byte-at text offset) (char->integer #\newline))
+                              (+ lines 1)
+                              lines)
+                          (+ characters 1)))))))
+        (lambda () (text-close! text)))))
+
   (define (show-message! service request)
     (unless (message-request? request)
       (assertion-violation 'message.show "invalid message request" request))
@@ -88,5 +119,17 @@
               'message.show (make-message-request context (position-message context))))
           owner "Show the active selection's one-based line and grapheme column."
           'message #f))
+      (command-runtime-register-command!
+        runtime
+        (make-command-definition
+          'message.count-words
+          (lambda (context)
+            (make-command-effect
+              'message.show (make-message-request context (count-range-message context))))
+          owner "Show line, Unicode word, and grapheme counts for the region or Buffer."
+          'message #f))
       (keymap-bind! keymap (list (control-stroke #\c)) 'message.show-position)
+      (keymap-bind! keymap
+                    (list (make-key-stroke 'character (char->integer #\d) 3))
+                    'message.count-words)
       service)))

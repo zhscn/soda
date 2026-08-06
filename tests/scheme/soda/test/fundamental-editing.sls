@@ -231,6 +231,19 @@
                      (eq? (frame-cell-face (frame-cell-at frame row 0)) 'message))
           (error 'fundamental-editing-tests
                  "position command did not publish a Surface message chrome")))
+      (command-runtime-start!
+        runtime 'fundamental.insert-text (application-command-context application)
+        (list (string->utf8 "alpha β\ngamma")))
+      (command-runtime-start! runtime 'message.count-words
+                              (application-command-context application))
+      (unless (and (string=? (surface-status-message surface)
+                           "2 lines, 3 words, 13 characters")
+                   (eq? (keymap-lookup
+                          (message-keymap messages)
+                          (list (make-key-stroke 'character (char->integer #\d) 3)))
+                        'message.count-words))
+        (error 'fundamental-editing-tests
+               "word count did not use the active Buffer's Unicode text"))
       (dispatcher-dispatch-host!
         (host-state-dispatch state)
         (make-set-surface-message-operation (surface-id surface) "界"))
