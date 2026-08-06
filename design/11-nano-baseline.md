@@ -43,7 +43,8 @@ Soda 保持自己的 Buffer、View 与 command 抽象。Nano 的命令名称和�
 |---|---|
 | literal search、重复查找与 query replace | 已实现 |
 | Unicode case-sensitive / case-insensitive literal search policy | 已实现 |
-| whole-word 与 regular-expression search policy | 未实现 |
+| Unicode whole-word literal search policy | 已实现 |
+| regular-expression search policy | 未实现 |
 | 拼写检查、替换建议与结果 Buffer | 已实现 |
 | 外部命令的 process Buffer | 已实现 |
 | 位置与词/行/字符统计 | 已实现 |

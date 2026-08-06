@@ -2,6 +2,8 @@
   (export text-forward-word-offset
           text-backward-word-offset
           text-word-count
+          text-word-character-at?
+          text-word-character-before?
           text-line-start-offset
           text-line-end-offset)
   (import (rnrs)
@@ -18,12 +20,12 @@
         (memq (char-general-category character)
               '(Lu Ll Lt Lm Lo Mn Mc Me Nd Nl No Pc))))
 
-  (define (word-character-at? text offset)
+  (define (text-word-character-at? text offset)
     (and (< offset (text-size text))
          (let ([end (text-next-character-offset text offset)])
            (word-character? (character-at text offset end)))))
 
-  (define (word-character-before? text offset)
+  (define (text-word-character-before? text offset)
     (and (positive? offset)
          (let ([start (text-previous-character-offset text offset)])
            (word-character? (character-at text start offset)))))
@@ -31,20 +33,20 @@
   (define (text-forward-word-offset text offset)
     (let skip-separators ([current offset])
       (if (and (< current (text-size text))
-               (not (word-character-at? text current)))
+               (not (text-word-character-at? text current)))
           (skip-separators (text-next-character-offset text current))
           (let skip-word ([current current])
-            (if (word-character-at? text current)
+            (if (text-word-character-at? text current)
                 (skip-word (text-next-character-offset text current))
                 current)))))
 
   (define (text-backward-word-offset text offset)
     (let skip-separators ([current offset])
       (if (and (positive? current)
-               (not (word-character-before? text current)))
+               (not (text-word-character-before? text current)))
           (skip-separators (text-previous-character-offset text current))
           (let skip-word ([current current])
-            (if (word-character-before? text current)
+            (if (text-word-character-before? text current)
                 (skip-word (text-previous-character-offset text current))
                 current)))))
 
@@ -58,7 +60,7 @@
       (if (>= offset to)
           count
           (let* ([next (text-next-character-offset text offset)]
-                 [word? (word-character-at? text offset)])
+                 [word? (text-word-character-at? text offset)])
             (loop next word? (if (and word? (not inside?)) (+ count 1) count))))))
 
   (define (text-line-start-offset text offset)

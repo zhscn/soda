@@ -459,13 +459,36 @@
       (command-runtime-start!
         runtime 'search.replace-all (application-command-context application)
         (list "strasse" "road"))
+      (command-runtime-start!
+        runtime 'fundamental.beginning-of-buffer (application-command-context application))
+      (command-runtime-start!
+        runtime 'search.toggle-whole-word (application-command-context application))
+      (command-runtime-start!
+        runtime 'search.forward (application-command-context application) (list "alp"))
+      (let ([range (selection-primary-range (view-state-selection (view-state view)))])
+        (unless (and (= (selection-range-from range) 0)
+                     (= (selection-range-to range) 0))
+          (error 'fundamental-editing-tests
+                 "whole-word search unexpectedly selected a word prefix")))
+      (command-runtime-start!
+        runtime 'search.forward (application-command-context application) (list "alpha"))
+      (command-runtime-start! runtime 'search.next (application-command-context application))
+      (let ([range (selection-primary-range (view-state-selection (view-state view)))])
+        (unless (and (= (selection-range-from range) 6)
+                     (= (selection-range-to range) 11))
+          (error 'fundamental-editing-tests
+                 "whole-word repeat did not retain its search policy")))
       (unless (and (string=? (buffer-string buffer) "Alpha ALPHA road road")
                    (eq? (keymap-lookup
                           (search-keymap search)
                           (list (make-key-stroke 'character (char->integer #\C) 2)))
-                        'search.toggle-case-sensitive))
+                        'search.toggle-case-sensitive)
+                   (eq? (keymap-lookup
+                          (search-keymap search)
+                          (list (make-key-stroke 'character (char->integer #\`) 2)))
+                        'search.toggle-whole-word))
         (error 'fundamental-editing-tests
-               "case-folded replacement or its key binding is incorrect"))
+               "search policies or their key bindings are incorrect"))
       (soda-application-close! application))
 
     (let* ([application (make-soda-application)]

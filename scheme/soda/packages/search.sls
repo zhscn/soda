@@ -9,6 +9,7 @@
           (soda kernel selection)
           (soda kernel state)
           (soda kernel view-state)
+          (soda packages base text-motion)
           (soda host command)
           (soda host command-runtime)
           (soda host dispatch)
@@ -29,7 +30,8 @@
     (fields (immutable buffer-id search-query-buffer-id)
             (immutable text search-query-text)
             (immutable direction search-query-direction)
-            (immutable case-sensitive? search-query-case-sensitive?)))
+            (immutable case-sensitive? search-query-case-sensitive?)
+            (immutable whole-word? search-query-whole-word?)))
 
   ;; Search policy belongs to the initiating View.  The policy is captured in
   ;; SearchQuery so repeat and query-replace retain their meaning after later
@@ -44,6 +46,13 @@
   (define search-case-sensitive-compartment
     (make-compartment 'search-case-sensitive 'view))
 
+  (define search-whole-word-facet
+    (make-facet 'search-whole-word 'view #f
+                (lambda (values) (first-value values #f)) eq? eq?))
+
+  (define search-whole-word-compartment
+    (make-compartment 'search-whole-word 'view))
+
   (define (search-case-sensitive? context)
     (configuration-facet
       (view-state-configuration (command-context-view-state context))
@@ -54,6 +63,17 @@
       (assertion-violation 'make-search-case-sensitive-extension
                            "expected a boolean" value))
     (make-facet-provider search-case-sensitive-facet value))
+
+  (define (search-whole-word? context)
+    (configuration-facet
+      (view-state-configuration (command-context-view-state context))
+      search-whole-word-facet 'view))
+
+  (define (make-search-whole-word-extension value)
+    (unless (boolean? value)
+      (assertion-violation 'make-search-whole-word-extension
+                           "expected a boolean" value))
+    (make-facet-provider search-whole-word-facet value))
 
   (define-record-type
     (search-service %make-search-service search-service?)
@@ -145,7 +165,7 @@
     (unless (and (string? value) (memq direction '(forward backward)))
       (assertion-violation 'search "invalid literal query or direction" value direction))
     (%make-search-query (command-context-buffer-id context) (string->utf8 value) direction
-                        (search-case-sensitive? context)))
+                        (search-case-sensitive? context) (search-whole-word? context)))
 
   (define (query-empty? query)
     (zero? (bytevector-length (search-query-text query))))
@@ -182,18 +202,27 @@
                          (string-foldcase
                            (utf8->string (text-subbytevector text position next)))))))]))))
 
+  (define (whole-word-match? text query start end)
+    (or (not (search-query-whole-word? query))
+        (and (not (text-word-character-before? text start))
+             (not (text-word-character-at? text end)))))
+
   (define (match-at text query start)
     (let* ([pattern (search-query-text query)]
            [size (text-size text)]
            [width (bytevector-length pattern)])
-      (if (search-query-case-sensitive? query)
-          (and (<= (+ start width) size)
-               (bytes-at? text pattern start)
-               (cons start (+ start width)))
-          (let ([end
-                 (casefold-match-end text
-                                     (string-foldcase (utf8->string pattern)) start)])
-            (and end (cons start end))))))
+      (let ([match
+             (if (search-query-case-sensitive? query)
+                 (and (<= (+ start width) size)
+                      (bytes-at? text pattern start)
+                      (cons start (+ start width)))
+                 (let ([end
+                        (casefold-match-end text
+                                            (string-foldcase (utf8->string pattern)) start)])
+                   (and end (cons start end))))])
+        (and match
+             (whole-word-match? text query (match-start match) (match-end match))
+             match))))
 
   ;; Search offsets are byte offsets, matching Document and ChangeSet.  The
   ;; case-folded path advances on grapheme boundaries, preserving the original
@@ -427,7 +456,8 @@
       (and query
            (= (search-query-buffer-id query) (command-context-buffer-id context))
            (%make-search-query (search-query-buffer-id query) (search-query-text query) direction
-                               (search-query-case-sensitive? query)))))
+                               (search-query-case-sensitive? query)
+                               (search-query-whole-word? query)))))
 
   (define (install-command! runtime owner name documentation readers procedure)
     (command-runtime-register-command!
@@ -486,6 +516,26 @@
                                  (if enabled? "case-insensitive" "case-sensitive"))))
           update)))
 
+  (define (toggle-whole-word context)
+    (let* ([state (command-context-view-state context)]
+           [enabled? (search-whole-word? context)]
+           [effect
+            (make-compartment-reconfigure-effect
+              search-whole-word-compartment
+              (make-search-whole-word-extension (not enabled?)))]
+           [update
+            (make-view-transaction-spec
+              (command-context-view-id context) (view-state-generation state)
+              #f #f #f (list effect) '() #f)]
+           [surface-id (command-context-surface-id context)])
+      (if (and (integer? surface-id) (exact? surface-id) (>= surface-id 0))
+          (list update
+                (make-set-surface-message-operation
+                  surface-id
+                  (string-append "Search whole-word matching "
+                                 (if enabled? "disabled" "enabled"))))
+          update)))
+
   (define (make-search-service! state owner)
     (unless (and (host-state? state) (owner? owner))
       (assertion-violation 'make-search-service! "expected a HostState and owner"
@@ -531,6 +581,9 @@
       (install-command! runtime owner 'search.toggle-case-sensitive
                         "Toggle case-sensitive matching for new searches in the active View." #f
         (lambda (context) (toggle-case-sensitive context)))
+      (install-command! runtime owner 'search.toggle-whole-word
+                        "Toggle whole-word matching for new searches in the active View." #f
+        (lambda (context) (toggle-whole-word context)))
       (install-command! runtime owner 'search.replace-all "Replace every literal match in the active Buffer."
                         (list forward-reader replace-reader)
         (lambda (context value replacement)
@@ -568,6 +621,7 @@
       (keymap-bind! keymap (list (control-stroke #\\)) 'search.query-replace)
       (keymap-bind! keymap (list (meta-stroke #\w)) 'search.next)
       (keymap-bind! keymap (list (meta-stroke #\C)) 'search.toggle-case-sensitive)
+      (keymap-bind! keymap (list (meta-stroke #\`)) 'search.toggle-whole-word)
       (keymap-bind! keymap
                     (list (make-key-stroke 'character (char->integer #\w) 3))
                     'search.previous)
