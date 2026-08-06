@@ -8,6 +8,7 @@
           active-context-interaction-stack
           surface-active-context
           surface-select-view!
+          surface-replace-window-view-context!
           surface-split-view!
           surface-remove-view-window!
           surface-push-interaction-view!
@@ -24,7 +25,8 @@
   (import (rnrs)
           (soda kernel value)
           (soda host internal buffer)
-          (soda host internal surface)
+          (rename (soda host internal surface)
+                  (surface-replace-window-view! surface-replace-window-view-on-surface!))
           (soda host internal view)
           (soda host internal window))
 
@@ -84,6 +86,16 @@
                 (surface-set-selected-window! surface (car leaves))
                 (context-for-window surface views (car leaves))]
                [else (loop (cdr leaves))])))))
+
+  (define (surface-replace-window-view-context! surface views window-id view-id)
+    (unless (and (surface? surface) (view-service? views) (identity? window-id)
+                 (identity? view-id))
+      (assertion-violation 'surface-replace-window-view-context!
+                           "invalid Surface, ViewService, Window, or View identity"
+                           surface views window-id view-id))
+    (and (view-service-ref views view-id #f)
+         (surface-replace-window-view-on-surface! surface window-id view-id)
+         (surface-active-context surface views)))
 
   (define (surface-split-view! surface views axis target-view-id focus-policy)
     (unless (and (surface? surface) (view-service? views) (identity? target-view-id)

@@ -4,6 +4,7 @@
           host-operation-surface-id
           host-operation-value
           make-focus-view-operation
+          make-replace-window-view-operation
           make-split-view-operation
           make-remove-window-operation
           make-push-interaction-operation
@@ -35,6 +36,13 @@
       (assertion-violation 'make-focus-view-operation "invalid target identity"
                            surface-id view-id))
     (%make-host-operation 'focus-view surface-id view-id))
+
+  (define (make-replace-window-view-operation surface-id window-id view-id)
+    (unless (and (identity? surface-id) (identity? window-id) (identity? view-id))
+      (assertion-violation 'make-replace-window-view-operation
+                           "invalid Surface, Window, or View identity"
+                           surface-id window-id view-id))
+    (%make-host-operation 'replace-window-view surface-id (list window-id view-id)))
 
   (define (make-split-view-operation surface-id axis view-id focus-policy)
     (unless (and (identity? surface-id) (identity? view-id)

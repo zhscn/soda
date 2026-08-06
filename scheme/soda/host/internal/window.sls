@@ -9,6 +9,7 @@
           window-children
           window-weights
           window-rectangle
+          window-retarget-view
           window-layout!
           window-selected?
           window-set-selected!
@@ -33,6 +34,20 @@
   (define (make-leaf-window view-id rectangle)
     (%make-window (identity-source-next! window-identities)
                   'leaf view-id #f '() '() rectangle #f))
+
+  ;; Replacing a View does not create a new Window.  Window identity belongs
+  ;; to placement, while View identity belongs to editor-local selection and
+  ;; input state.  Retaining the Window id keeps an ActiveContext meaningful
+  ;; across a same-window buffer switch.
+  (define (window-retarget-view window view-id)
+    (unless (and (window? window) (eq? (window-kind window) 'leaf)
+                 (nonnegative-exact-integer? view-id))
+      (assertion-violation 'window-retarget-view
+                           "expected a leaf Window and View identity" window view-id))
+    (if (= (window-view-id window) view-id)
+        window
+        (%make-window (window-id window) 'leaf view-id #f '() '()
+                      (window-rectangle window) (window-selected? window))))
 
   (define (split-weights? children weights)
     (and (= (length children) (length weights))

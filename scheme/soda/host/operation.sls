@@ -4,6 +4,7 @@
           host-operation-surface-id
           host-operation-value
           make-focus-view-operation
+          make-replace-window-view-operation
           make-split-view-operation
           make-remove-window-operation
           make-push-interaction-operation

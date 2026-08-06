@@ -38,9 +38,11 @@
   (define (application-command-context application)
     (let* ([state (soda-application-state application)]
            [surface (soda-application-surface application)]
-           [view (soda-application-view application)]
-           [buffer (soda-application-buffer application)]
-           [active (surface-active-context surface (host-state-views state))])
+           [active (surface-active-context surface (host-state-views state))]
+           [view (view-service-ref (host-state-views state)
+                                   (active-context-view-id active))]
+           [buffer (buffer-service-ref (host-state-buffers state)
+                                       (active-context-buffer-id active))])
       (make-command-context
         #f
         (active-context-surface-id active)
@@ -221,17 +223,22 @@
 
     (let* ([path (string-append "/tmp/soda-file-package-"
                                 (number->string (get-process-id)) ".txt")]
+           [second-path (string-append path ".second")]
+           [new-path (string-append path ".new")]
            [saved-as (string-append path ".copy")])
       (dynamic-wind
         (lambda ()
           (when (file-exists? path) (delete-file path))
+          (when (file-exists? second-path) (delete-file second-path))
+          (when (file-exists? new-path) (delete-file new-path))
           (when (file-exists? saved-as) (delete-file saved-as))
-          (vfs-write-file path (string->utf8 "first")))
+          (vfs-write-file path (string->utf8 "first"))
+          (vfs-write-file second-path (string->utf8 "second")))
         (lambda ()
           (let* ([application (make-soda-application)]
                  [state (soda-application-state application)]
                  [runtime (host-state-command-runtime state)]
-                 [buffer (soda-application-buffer application)]
+                 [scratch (soda-application-buffer application)]
                  [history (soda-application-history application)]
                  [files (soda-application-files application)]
                  [interaction (soda-application-interaction application)])
@@ -244,43 +251,85 @@
                 (error 'fundamental-editing-tests
                        "file.visit did not declare a reusable file interaction")))
             (interaction-service-cancel! interaction)
+            (host-state-run! state)
             (command-runtime-start! runtime 'file.visit
                                     (application-command-context application) (list path))
-            (unless (and (string=? (buffer-string buffer) "first")
-                         (not (history-modified? history (buffer-id buffer)))
+            (let ([buffer (buffer-service-ref
+                            (host-state-buffers state)
+                            (command-context-buffer-id
+                              (application-command-context application)))])
+              (unless (and (not (= (buffer-id buffer) (buffer-id scratch)))
+                           (string=? (buffer-string buffer) "first")
+                           (not (history-modified? history (buffer-id buffer)))
                          (string=? (resource-locator
-                                    (file-service-resource files (buffer-id buffer))) path))
-              (error 'fundamental-editing-tests
-                     "file.visit did not bind a saved file resource"))
-            (command-runtime-start! runtime 'fundamental.end-of-buffer
-                                    (application-command-context application))
-            (command-runtime-start! runtime 'fundamental.insert-text
-                                    (application-command-context application)
-                                    (list (string->utf8 " value")))
-            (command-runtime-start! runtime 'file.save
-                                    (application-command-context application))
-            (unless (and (string=? (utf8->string (vfs-read-file path)) "first value")
-                         (not (history-modified? history (buffer-id buffer))))
-              (error 'fundamental-editing-tests
-                     "file.save did not synchronize the resource save point"))
-            (command-runtime-start! runtime 'fundamental.insert-text
-                                    (application-command-context application)
-                                    (list (string->utf8 " local")))
-            (vfs-write-file path (string->utf8 "external"))
-            (command-runtime-start! runtime 'file.save
-                                    (application-command-context application))
-            (unless (string=? (utf8->string (vfs-read-file path)) "external")
-              (error 'fundamental-editing-tests
-                     "file.save overwrote an externally modified resource"))
-            (command-runtime-start! runtime 'file.visit
-                                    (application-command-context application) (list path))
-            (command-runtime-start! runtime 'file.save-as
-                                    (application-command-context application) (list saved-as))
-            (unless (and (string=? (utf8->string (vfs-read-file saved-as)) "external")
-                         (string=? (resource-locator
-                                    (file-service-resource files (buffer-id buffer))) saved-as))
-              (error 'fundamental-editing-tests
-                     "file.save-as did not rebind the file resource"))
+                           (file-service-resource files (buffer-id buffer))) path))
+                (error 'fundamental-editing-tests
+                       "file.visit did not create and select a file Buffer"))
+              (command-runtime-start! runtime 'fundamental.end-of-buffer
+                                      (application-command-context application))
+              (command-runtime-start! runtime 'fundamental.insert-text
+                                      (application-command-context application)
+                                      (list (string->utf8 " value")))
+              (command-runtime-start! runtime 'file.save
+                                      (application-command-context application))
+              (unless (and (string=? (utf8->string (vfs-read-file path)) "first value")
+                           (not (history-modified? history (buffer-id buffer))))
+                (error 'fundamental-editing-tests
+                       "file.save did not synchronize the resource save point"))
+              (command-runtime-start! runtime 'fundamental.insert-text
+                                      (application-command-context application)
+                                      (list (string->utf8 " local")))
+              (vfs-write-file path (string->utf8 "external"))
+              (command-runtime-start! runtime 'file.save
+                                      (application-command-context application))
+              (unless (string=? (utf8->string (vfs-read-file path)) "external")
+                (error 'fundamental-editing-tests
+                       "file.save overwrote an externally modified resource"))
+              (command-runtime-start! runtime 'file.save-as
+                                      (application-command-context application) (list saved-as))
+              (unless (and (string=? (utf8->string (vfs-read-file saved-as)) "first value local")
+                           (string=? (resource-locator
+                                      (file-service-resource files (buffer-id buffer))) saved-as))
+                (error 'fundamental-editing-tests
+                       "file.save-as did not rebind the file resource"))
+              (command-runtime-start! runtime 'file.visit
+                                      (application-command-context application) (list second-path))
+              (let ([second (buffer-service-ref
+                              (host-state-buffers state)
+                              (command-context-buffer-id
+                                (application-command-context application)))])
+                (unless (and (not (= (buffer-id second) (buffer-id buffer)))
+                             (string=? (buffer-string second) "second"))
+                  (error 'fundamental-editing-tests
+                         "file.visit did not preserve the existing file Buffer")))
+              (command-runtime-start! runtime 'file.visit
+                                      (application-command-context application) (list new-path))
+              (let ([new-file (buffer-service-ref
+                                (host-state-buffers state)
+                                (command-context-buffer-id
+                                  (application-command-context application)))])
+                (unless (and (string=? (buffer-string new-file) "")
+                             (string=? (resource-locator
+                                        (file-service-resource files (buffer-id new-file))) new-path))
+                  (error 'fundamental-editing-tests
+                         "file.visit did not create a Buffer for a new file"))
+                (command-runtime-start! runtime 'fundamental.insert-text
+                                        (application-command-context application)
+                                        (list (string->utf8 "new")))
+                (command-runtime-start! runtime 'file.save
+                                        (application-command-context application))
+                (unless (string=? (utf8->string (vfs-read-file new-path)) "new")
+                  (error 'fundamental-editing-tests
+                         "file.save did not create the visited new file")))
+              (command-runtime-start! runtime 'file.visit
+                                      (application-command-context application) (list saved-as))
+              (let ([revisited (buffer-service-ref
+                                 (host-state-buffers state)
+                                 (command-context-buffer-id
+                                   (application-command-context application)))])
+                (unless (= (buffer-id revisited) (buffer-id buffer))
+                  (error 'fundamental-editing-tests
+                         "file.visit did not reuse its canonical file Buffer"))))
             (let* ([secondary-owner (make-owner 'file-close-test)]
                    [secondary-document (make-document "")]
                    [secondary
@@ -303,6 +352,8 @@
             (soda-application-close! application)))
         (lambda ()
           (when (file-exists? path) (delete-file path))
+          (when (file-exists? second-path) (delete-file second-path))
+          (when (file-exists? new-path) (delete-file new-path))
           (when (file-exists? saved-as) (delete-file saved-as)))))
 
     (let* ([application (make-soda-application)]

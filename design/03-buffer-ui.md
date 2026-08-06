@@ -94,6 +94,11 @@ Buffer 创建和 Buffer 显示是两个操作。package 先 open-or-create Buffe
 `DisplayRequest`；当前窗口、其他窗口、弹出区域和后台创建由 placement policy 决定。
 Buffer 不保存 selected window 或最近显示 rectangle。
 
+同窗口切换时，package 为目标 Buffer 创建 View，并提交 `replace-window-view` host
+operation。operation 保持 Window identity、分割结构、geometry 和焦点策略，只替换该
+Window 的 View。没有其他 Surface placement 的旧 View 随 operation 关闭；旧 Buffer
+继续由 Buffer catalog 管理并可由后续访问复用。
+
 ## Buffer identity 与复用
 
 需要稳定复用的 Buffer 使用 canonical `BufferKey`：

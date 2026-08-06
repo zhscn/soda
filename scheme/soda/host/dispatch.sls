@@ -217,6 +217,11 @@
                        [(focus-view)
                         (surface-select-view! surface (dispatcher-views dispatcher)
                                               (host-operation-value operation))]
+                       [(replace-window-view)
+                        (let ([value (host-operation-value operation)])
+                          (surface-replace-window-view-context!
+                            surface (dispatcher-views dispatcher)
+                            (car value) (cadr value)))]
                        [(split-view)
                         (let ([value (host-operation-value operation)])
                           (surface-split-view! surface (dispatcher-views dispatcher)
@@ -240,6 +245,14 @@
                        [else
                         (assertion-violation 'dispatcher-dispatch-host!
                                              "unsupported HostOperation" operation)])]
+                    [_retired
+                     (when (and old-context
+                                (eq? (host-operation-kind operation) 'replace-window-view)
+                                (not (surface-service-view-placed?
+                                       surfaces (active-context-view-id old-context))))
+                       (view-service-close-view!
+                         (dispatcher-views dispatcher)
+                         (active-context-view-id old-context)))]
                     [new-context (surface-active-context surface (dispatcher-views dispatcher))])
                (and resolution
                     (let ([update

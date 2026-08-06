@@ -11,6 +11,7 @@
           surface-active-window
           surface-windows
           surface-set-selected-window!
+          surface-replace-window-view!
           surface-split-selected-window!
           surface-remove-window!
           surface-push-interaction!
@@ -22,6 +23,7 @@
           surface-service-register!
           surface-service-ref
           surface-service-surfaces
+          surface-service-view-placed?
           surface-service-remove!
           surface-service-prune-view!
           make-surface-input-message
@@ -124,6 +126,28 @@
           (surface-selected-window-set! surface window)
           (surface-generation-set! surface (+ 1 (surface-generation surface)))
           window)))
+
+  ;; Switch the View shown by an existing root Window without changing the
+  ;; Window's placement identity, geometry, split weights, or focus policy.
+  ;; A Buffer switch is therefore distinct from splitting or removing a
+  ;; Window, and callers can keep using the original window id.
+  (define (surface-replace-window-view! surface window-id view-id)
+    (unless (and (surface? surface) (view-id? window-id) (view-id? view-id))
+      (assertion-violation 'surface-replace-window-view!
+                           "invalid Surface, Window, or View identity"
+                           surface window-id view-id))
+    (let* ([root (surface-root-window surface)]
+           [target (leaf-by-id root window-id)])
+      (and target
+           (let ([replacement (window-retarget-view target view-id)])
+             (if (eq? target replacement)
+                 target
+                 (surface-rebuild-window!
+                   surface
+                   (replace-window root target replacement)
+                   (if (eq? target (surface-selected-window surface))
+                       replacement
+                       (surface-selected-window surface))))))))
 
   (define view-id? nonnegative-exact-integer?)
 
@@ -307,6 +331,16 @@
     (call-with-values
       (lambda () (hashtable-entries (surface-service-table service)))
       (lambda (ids values) (vector->list values))))
+
+  (define (surface-service-view-placed? service view-id)
+    (unless (and (surface-service? service) (view-id? view-id))
+      (assertion-violation 'surface-service-view-placed?
+                           "invalid SurfaceService or View identity" service view-id))
+    (exists
+      (lambda (surface)
+        (exists (lambda (window) (= (window-view-id window) view-id))
+                (surface-windows surface)))
+      (surface-service-surfaces service)))
 
   (define (surface-service-remove! service id)
     (unless (and (surface-service? service) (nonnegative-exact-integer? id))

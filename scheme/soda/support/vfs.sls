@@ -4,6 +4,7 @@
           vfs-entry-kind
           vfs-read-file
           vfs-write-file
+          vfs-file-exists?
           vfs-list-directory
           vfs-path-separator?
           vfs-directory-path
@@ -54,6 +55,10 @@
     (call-with-port
       (open-file-input-port path (file-options) (buffer-mode block) #f)
       get-bytevector-all))
+
+  (define (vfs-file-exists? path)
+    (require-path 'vfs-file-exists? path)
+    (file-regular? path #t))
 
   (define (vfs-write-file path data)
     (require-path 'vfs-write-file path)

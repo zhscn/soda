@@ -94,8 +94,7 @@
                 (make-history! (host-state-command-runtime state)
                                (host-state-dispatch state) owner)]
                [files
-                (make-file-service! (host-state-command-runtime state)
-                                    (host-state-buffers state) owner history)]
+                (make-file-service! state owner history)]
                [interaction
                 (make-interaction-service! (host-state-command-runtime state) owner)]
                [minibuffer (make-minibuffer-service! state interaction owner)]

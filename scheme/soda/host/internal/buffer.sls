@@ -19,6 +19,7 @@
           buffer-service-find-key
           buffer-service-open-or-create!
           buffer-service-bind-key!
+          buffer-service-rebind-key!
           buffer-service-ref
           buffer-service-buffers
           buffer-service-set-close-query-handler!
@@ -237,6 +238,34 @@
                              "Buffer is already bound to a different BufferKey" buffer key))
       (hashtable-set! (buffer-service-catalog service) token (buffer-id buffer))
       (hashtable-set! (buffer-service-reverse-catalog service) (buffer-id buffer) token)
+      buffer))
+
+  ;; A resource rename (for example Save As) preserves the Buffer identity but
+  ;; changes its catalog identity.  Rebinding is atomic with respect to the
+  ;; catalog and rejects stealing a live key from another Buffer.
+  (define (buffer-service-rebind-key! service key buffer)
+    (unless (and (buffer-service? service) (buffer-key? key) (buffer-live? buffer))
+      (assertion-violation 'buffer-service-rebind-key!
+                           "expected a live BufferService, BufferKey, and Buffer"
+                           service key buffer))
+    (let* ([id (buffer-id buffer)]
+           [token (buffer-key-token key)]
+           [existing-id (hashtable-ref (buffer-service-catalog service) token #f)]
+           [existing (and existing-id (buffer-service-ref service existing-id #f))]
+           [previous (hashtable-ref (buffer-service-reverse-catalog service) id #f)])
+      (unless (eq? (hashtable-ref (buffer-service-table service) id #f) buffer)
+        (assertion-violation 'buffer-service-rebind-key!
+                             "Buffer does not belong to this BufferService" buffer))
+      (when (and existing (not (= (buffer-id existing) id)))
+        (assertion-violation 'buffer-service-rebind-key!
+                             "BufferKey is already bound to a live Buffer" key existing))
+      (unless (equal? previous token)
+        (when previous
+          (let ([previous-id (hashtable-ref (buffer-service-catalog service) previous #f)])
+            (when (and previous-id (= previous-id id))
+              (hashtable-delete! (buffer-service-catalog service) previous))))
+        (hashtable-set! (buffer-service-catalog service) token id)
+        (hashtable-set! (buffer-service-reverse-catalog service) id token))
       buffer))
 
   ;; Builders are only evaluated on a catalog miss.  In Soda's single host
