@@ -193,10 +193,22 @@
   (define (minibuffer-input-context service active view)
     (let ([session (minibuffer-service-current service)])
       (and session (= (minibuffer-session-view-id session) (view-id view))
-           (make-input-context
-             (active-context-view-id active) (active-context-buffer-id active)
-             (list (make-input-layer 'minibuffer (minibuffer-service-keymap service) #f 'accept))
-             (view-state-input-state (view-state view))))))
+           (let* ([request
+                   (interaction-session-request
+                     (minibuffer-session-interaction session))]
+                  [request-keymap (interaction-request-keymap request)]
+                  [layers
+                   (append
+                     (if request-keymap
+                         (list (make-input-layer 'transient request-keymap #f 'ignore))
+                         '())
+                     (list
+                       (make-input-layer
+                         'minibuffer (minibuffer-service-keymap service) #f 'accept)))])
+             (make-input-context
+               (active-context-view-id active) (active-context-buffer-id active)
+               (input-layer-compose layers)
+               (view-state-input-state (view-state view)))))))
   (define (origin-surface service interaction)
     (surface-service-ref
       (host-state-surfaces (minibuffer-service-state service))
@@ -370,6 +382,28 @@
           'minibuffer.accept
           (lambda (context) (minibuffer-service-submit! service) (command-handled))
           owner "Accept the current minibuffer input." 'minibuffer #f))
+      (command-runtime-register-command!
+        (host-state-command-runtime state)
+        (make-command-definition
+          'minibuffer.accept-key
+          (lambda (context)
+            (let* ([session (minibuffer-service-current service)]
+                   [event (command-context-event context)]
+                   [request
+                    (and session
+                         (interaction-session-request
+                           (minibuffer-session-interaction session)))]
+                   [codepoint
+                    (and (key-event? event)
+                         (or (key-event-codepoint event)
+                             (key-event-shifted-codepoint event)))])
+              (when (and request (interaction-request-keymap request) codepoint)
+                (interaction-service-submit!
+                  (minibuffer-service-interactions service)
+                  (string (integer->char codepoint))))
+              (command-handled)))
+          owner "Accept a discrete answer supplied by the current prompt keymap."
+          'minibuffer #f))
       (command-runtime-register-command!
         (host-state-command-runtime state)
         (make-command-definition

@@ -315,6 +315,97 @@
     (let* ([application (make-soda-application)]
            [state (soda-application-state application)]
            [runtime (host-state-command-runtime state)]
+           [buffer (soda-application-buffer application)]
+           [view (soda-application-view application)]
+           [interaction (soda-application-interaction application)]
+           [minibuffer (soda-application-minibuffer application)])
+      (command-runtime-start!
+        runtime 'fundamental.insert-text (application-command-context application)
+        (list (string->utf8 "one one one")))
+      (command-runtime-start!
+        runtime 'fundamental.beginning-of-buffer (application-command-context application))
+      (command-runtime-start!
+        runtime 'search.query-replace (application-command-context application)
+        (list "one" "1"))
+      (host-state-run! state)
+      (unless (and (interaction-service-current interaction)
+                   (eq? (interaction-request-kind
+                          (interaction-session-request
+                            (interaction-service-current interaction)))
+                        'query-replace-decision)
+                   (let ([range (selection-primary-range
+                                  (view-state-selection (view-state view)))])
+                     (and (= (selection-range-from range) 0)
+                          (= (selection-range-to range) 3))))
+        (error 'fundamental-editing-tests "query replace did not prompt for its first match"))
+      (let* ([session (minibuffer-service-current minibuffer)]
+             [prompt-view
+              (view-service-ref (host-state-views state)
+                                (minibuffer-session-view-id session))]
+             [prompt-buffer
+              (buffer-service-ref (host-state-buffers state)
+                                  (minibuffer-session-buffer-id session))]
+             [active
+              (surface-active-context (soda-application-surface application)
+                                      (host-state-views state))]
+             [event
+              (make-key-event 'character (char->integer #\y) #f #f 0 'press
+                              (make-bytevector 0))]
+             [input-context
+              (minibuffer-input-context minibuffer active prompt-view)]
+             [disposition (input-dispatch input-context event)]
+             [context
+              (make-command-context
+                #f
+                (active-context-surface-id active)
+                (active-context-window-id active)
+                (view-id prompt-view)
+                (buffer-id prompt-buffer)
+                (buffer-state prompt-buffer)
+                (view-state prompt-view)
+                event '() #f active 'query-replace-test)])
+        (unless (and (eq? (input-disposition-kind disposition) 'command)
+                     (eq? (input-disposition-value disposition) 'minibuffer.accept-key))
+          (error 'fundamental-editing-tests
+                 "query replace prompt did not install its discrete answer keymap"))
+        (command-runtime-start! runtime 'minibuffer.accept-key context))
+      (host-state-run! state)
+      (unless (and (string=? (buffer-string buffer) "1 one one")
+                   (interaction-service-current interaction)
+                   (let ([range (selection-primary-range
+                                  (view-state-selection (view-state view)))])
+                     (and (= (selection-range-from range) 2)
+                          (= (selection-range-to range) 5))))
+        (error 'fundamental-editing-tests "query replace did not advance after replace"))
+      (interaction-service-submit! interaction "n")
+      (host-state-run! state)
+      (unless (and (string=? (buffer-string buffer) "1 one one")
+                   (interaction-service-current interaction)
+                   (let ([range (selection-primary-range
+                                  (view-state-selection (view-state view)))])
+                     (and (= (selection-range-from range) 6)
+                          (= (selection-range-to range) 9))))
+        (error 'fundamental-editing-tests "query replace did not advance after skip"))
+      (interaction-service-submit! interaction "!")
+      (host-state-run! state)
+      (unless (and (string=? (buffer-string buffer) "1 one 1")
+                   (not (interaction-service-current interaction)))
+        (error 'fundamental-editing-tests "query replace all did not finish remaining matches"))
+      (command-runtime-start!
+        runtime 'fundamental.beginning-of-buffer (application-command-context application))
+      (command-runtime-start!
+        runtime 'search.query-replace (application-command-context application)
+        (list "one" "x"))
+      (host-state-run! state)
+      (interaction-service-cancel! interaction)
+      (host-state-run! state)
+      (unless (not (interaction-service-current interaction))
+        (error 'fundamental-editing-tests "query replace cancellation left a prompt session live"))
+      (soda-application-close! application))
+
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [runtime (host-state-command-runtime state)]
            [interaction (soda-application-interaction application)]
            [minibuffer (soda-application-minibuffer application)]
            [owner (make-owner 'interaction-package-test)]

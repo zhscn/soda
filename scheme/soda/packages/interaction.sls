@@ -22,10 +22,12 @@
           interaction-request-completion-source
           interaction-request-selection-policy
           interaction-request-validator
+          interaction-request-keymap
           make-interaction-string-reader)
   (import (rnrs)
           (soda host command)
           (soda host command-runtime)
+          (soda host input)
           (soda host value))
 
   ;; InteractionSession is the frontend-neutral representation of one
@@ -132,22 +134,29 @@
       (immutable initial-value interaction-request-initial-value)
       (immutable completion-source interaction-request-completion-source)
       (immutable selection-policy interaction-request-selection-policy)
-      (immutable validator interaction-request-validator)))
+      (immutable validator interaction-request-validator)
+      ;; A request-specific keymap adds discrete answers without giving the
+      ;; interaction service any knowledge of a particular command.  The
+      ;; minibuffer places it above its ordinary editing keymap.
+      (immutable keymap interaction-request-keymap)))
 
   (define make-interaction-request
     (case-lambda
       [(kind prompt)
-       (make-interaction-request kind prompt #f #f 'free #f)]
+       (make-interaction-request kind prompt #f #f 'free #f #f)]
       [(kind prompt initial-value completion-source selection-policy)
-       (make-interaction-request kind prompt initial-value completion-source selection-policy #f)]
+       (make-interaction-request kind prompt initial-value completion-source selection-policy #f #f)]
       [(kind prompt initial-value completion-source selection-policy validator)
+       (make-interaction-request kind prompt initial-value completion-source selection-policy validator #f)]
+      [(kind prompt initial-value completion-source selection-policy validator keymap)
        (unless (and (symbol? kind) (string? prompt)
                     (memq selection-policy '(free must-match))
-                    (or (not validator) (procedure? validator)))
+                    (or (not validator) (procedure? validator))
+                    (or (not keymap) (keymap? keymap)))
          (assertion-violation 'make-interaction-request "invalid interaction request"
                               kind prompt selection-policy))
        (%make-interaction-request kind prompt initial-value completion-source selection-policy
-                                  validator)]))
+                                  validator keymap)]))
 
   ;; The basic string reader provides the common bridge from an ordinary
   ;; command parameter to a frontend request.  Typed readers can use the same

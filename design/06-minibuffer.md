@@ -55,6 +55,7 @@ PromptRequest {
   accept-policy,
   validator?,
   completion-source?,
+  keymap?,
   accept-command,
   abort-command?,
   data?,
@@ -68,6 +69,8 @@ PromptRequest {
 - `history-id` 选择 Editor 持有的 history collection。
 - `accept-policy` 为 `free` 或 `must-match`；`must-match` 使用 validator 检查最终值。
 - `completion-source` 为读取附加结构化 choice completion。
+- `keymap` 为离散回答提供位于普通 prompt 编辑 keymap 之前的临时键绑定。绑定仍以
+  command disposition 进入 command loop，由通用接受命令把当前按键转换为 responder 值。
 - `data` 是 responder 的不透明 continuation data，在接受和取消时原样进入结果。
 - `change-command` 在 transient input Buffer revision 改变后产生
   `command.invoke` effect；payload 是 prompt session id。同一个 revision 内的

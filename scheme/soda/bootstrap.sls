@@ -105,7 +105,7 @@
                [processes (make-process-service! state owner)]
                [_help (make-help-service! state owner)]
                [search
-                (make-search-service! (host-state-command-runtime state) owner)]
+                (make-search-service! state owner)]
                [interaction
                 (make-interaction-service! (host-state-command-runtime state) owner)]
                [minibuffer (make-minibuffer-service! state interaction owner)]
