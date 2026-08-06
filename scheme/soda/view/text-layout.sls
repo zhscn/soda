@@ -34,6 +34,10 @@
           guide-column-compartment
           guide-column
           make-guide-column-extension
+          constant-position-facet
+          constant-position-compartment
+          constant-position-enabled?
+          make-constant-position-extension
           snapshot-display-stream
           layout-snapshot-display-stream
           layout-display-stream
@@ -125,6 +129,21 @@
       (assertion-violation 'make-guide-column-extension
                            "expected #f or a positive guide column" column))
     (make-facet-provider guide-column-facet column))
+
+  (define constant-position-facet
+    (make-facet 'constant-position 'view #f
+                (lambda (values) (first-option values #f)) eq? eq?))
+
+  (define constant-position-compartment
+    (make-compartment 'constant-position 'view))
+
+  (define (constant-position-enabled? configuration)
+    (configuration-facet configuration constant-position-facet 'view))
+
+  (define (make-constant-position-extension enabled?)
+    (unless (boolean? enabled?)
+      (assertion-violation 'make-constant-position-extension "expected a boolean" enabled?))
+    (make-facet-provider constant-position-facet enabled?))
 
   ;; VisualPosition identifies a raw-document visual row under the same
   ;; grapheme, tab, and wrapping policy used by TextLayout.  It deliberately

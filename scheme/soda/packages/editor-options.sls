@@ -185,6 +185,20 @@
         context
         (if column "Guide column disabled" "Guide column set to 80"))))
 
+  (define (toggle-constant-position context)
+    (let* ([state (command-context-view-state context)]
+           [configuration (view-state-configuration state)]
+           [enabled? (constant-position-enabled? configuration)]
+           [effect (make-compartment-reconfigure-effect
+                     constant-position-compartment
+                     (make-constant-position-extension (not enabled?)))])
+      (result-with-message
+        (make-view-transaction-spec (command-context-view-id context)
+                                    (view-state-generation state)
+                                    #f #f #f (list effect) '() #f)
+        context
+        (string-append "Constant position display " (if enabled? "disabled" "enabled")))))
+
   (define (set-tab-width context width)
     (unless (and (integer? width) (exact? width) (> width 0))
       (assertion-violation 'editor.set-tab-width "expected a positive tab width" width))
@@ -274,6 +288,9 @@
         runtime owner 'editor.toggle-guide-column
         "Toggle an 80-column guide for the active View."
         (lambda (context) (toggle-guide-column context)))
+      (install-command! runtime owner 'editor.toggle-constant-position
+        "Toggle persistent line and column display for the active View."
+        (lambda (context) (toggle-constant-position context)))
       (install-command!
         runtime owner 'editor.toggle-tab-to-spaces
         "Toggle whether Tab inserts spaces or a tab in the active Buffer."

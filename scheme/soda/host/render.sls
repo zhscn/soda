@@ -31,6 +31,7 @@
           (soda kernel document)
           (soda kernel state)
           (soda kernel extension)
+          (soda kernel selection)
           (soda kernel value)
           (soda kernel view-state)
           (soda kernel viewport)
@@ -151,6 +152,23 @@
                                               (status-frame width message))))
           placements)))
 
+  (define (surface-position-message surface views)
+    (let* ([leaf (surface-active-window surface)]
+           [view (and leaf (view-service-ref views (window-view-id leaf) #f))])
+      (and view
+           (constant-position-enabled? (view-state-configuration (view-state view)))
+           (let ([text (snapshot-text (buffer-state-document (buffer-state (view-buffer view))))])
+             (dynamic-wind
+               (lambda () #f)
+               (lambda ()
+                 (let* ([offset (selection-range-head
+                                  (selection-primary-range
+                                    (view-state-selection (view-state view))))]
+                        [position (text-position text offset)])
+                   (string-append "Line " (number->string (+ (car position) 1))
+                                  ", column " (number->string (+ (cdr position) 1)))))
+               (lambda () (text-close! text)))))))
+
   ;; RenderedView retains the pure layout projection needed for coordinate
   ;; routing.  It is part of a rendered Surface, not mutable View state.
   (define-record-type
@@ -263,7 +281,8 @@
       (let loop ([leaves (surface-windows surface)]
                  [placements '()] [rendered-views '()] [cursor-row #f] [cursor-column #f])
           (if (null? leaves)
-              (let ([message (surface-status-message surface)])
+              (let ([message (or (surface-status-message surface)
+                                 (surface-position-message surface views))])
                 (make-surface-render
                   (compose-surface-frame width height (reverse placements) message)
                   (if (and message cursor-row (= cursor-row (- height 1))) #f cursor-row)
