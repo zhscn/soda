@@ -133,6 +133,25 @@
     (let* ([application (make-soda-application)]
            [state (soda-application-state application)]
            [runtime (host-state-command-runtime state)]
+           [buffer (soda-application-buffer application)])
+      (command-runtime-start! runtime 'fundamental.insert-text
+                              (application-command-context application)
+                              (list (string->utf8 "a\n  b\nc")))
+      (command-runtime-start! runtime 'fundamental.mark-whole-buffer
+                              (application-command-context application))
+      (command-runtime-start! runtime 'fundamental.indent-lines
+                              (application-command-context application))
+      (unless (string=? (buffer-string buffer) "\ta\n\t  b\n\tc")
+        (error 'fundamental-editing-tests "indent-lines did not transform each selected line once"))
+      (command-runtime-start! runtime 'fundamental.unindent-lines
+                              (application-command-context application))
+      (unless (string=? (buffer-string buffer) "a\n  b\nc")
+        (error 'fundamental-editing-tests "unindent-lines did not restore tabs and space indentation"))
+      (soda-application-close! application))
+
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [runtime (host-state-command-runtime state)]
            [buffer (soda-application-buffer application)]
            [view (soda-application-view application)])
       (command-runtime-start! runtime 'fundamental.insert-text

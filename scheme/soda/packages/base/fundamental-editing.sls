@@ -330,6 +330,94 @@
           (lambda (value)
             (make-interactive-ready (parse-goto-position value)))))))
 
+  (define (range-lines text range)
+    (let* ([from (selection-range-from range)]
+           [to (selection-range-to range)]
+           [first (car (text-position text from))]
+           ;; A nonempty region ending at a line boundary owns the preceding
+           ;; line, not the following untouched one.
+           [last (car (text-position text (if (= from to) to (- to 1))))])
+      (let loop ([line first] [result '()])
+        (if (> line last)
+            (reverse result)
+            (loop (+ line 1) (cons line result))))))
+
+  (define (selected-lines text selection)
+    (let ([ordered
+           (list-sort
+             <
+             (apply append
+                    (map (lambda (range) (range-lines text range))
+                         (selection-ranges selection))))])
+      (let loop ([items ordered] [previous #f] [result '()])
+        (cond [(null? items) (reverse result)]
+              [(and previous (= previous (car items)))
+               (loop (cdr items) previous result)]
+              [else (loop (cdr items) (car items) (cons (car items) result))]))))
+
+  (define (map-selection-through-changes selection changes)
+    (make-selection
+      (map
+        (lambda (range)
+          (make-selection-range
+            (change-set-map-offset changes (selection-range-anchor range) 'after)
+            (change-set-map-offset changes (selection-range-head range) 'after)
+            (selection-range-affinity range)
+            (selection-range-granularity range)
+            (selection-range-metadata range)))
+        (selection-ranges selection))
+      (selection-primary selection)))
+
+  (define (leading-space-count text start end)
+    (let loop ([position start] [count 0])
+      (if (or (= position end) (= count 4)
+              (not (= (text-byte-at text position) (char->integer #\space))))
+          count
+          (loop (+ position 1) (+ count 1)))))
+
+  (define (unindent-line-change text start end)
+    (cond
+      [(and (< start end)
+            (= (text-byte-at text start) (char->integer #\tab)))
+       (make-text-change start (+ start 1) (make-bytevector 0))]
+      [else
+       (let ([count (leading-space-count text start end)])
+         (and (positive? count)
+              (make-text-change start (+ start count) (make-bytevector 0))))]))
+
+  ;; Indentation is a line-oriented editing primitive.  Language packages can
+  ;; replace its tab policy with a syntax-aware command, while region and
+  ;; multi-selection mapping remains the same transaction contract.
+  (define (shift-selected-lines context direction)
+    (unless (memq direction '(indent unindent))
+      (assertion-violation 'fundamental.shift-lines "invalid indentation direction" direction))
+    (with-context-text
+      context
+      (lambda (text)
+        (let* ([selection (context-selection context)]
+               [lines (selected-lines text selection)]
+               [changes
+                (filter
+                  (lambda (change) change)
+                  (map
+                    (lambda (line)
+                      (let* ([start (text-line-start text line)]
+                             [end (text-line-content-end text line)])
+                        (if (eq? direction 'indent)
+                            (make-text-change start start (string->utf8 "\t"))
+                            (unindent-line-change text start end))))
+                    lines))])
+          (if (null? changes)
+              (command-handled)
+              (let ([change-set (make-change-set (text-size text) changes)])
+                (make-transaction-spec
+                  (command-context-buffer-id context)
+                  (command-context-view-id context)
+                  (buffer-state-generation (command-context-buffer-state context))
+                  change-set
+                  (map-selection-through-changes selection change-set)
+                  '() '())))))))
+
   (define (scroll-lines context delta)
     (with-context-text
       context
@@ -619,6 +707,14 @@
           owner "Move every selection to one-based LINE and optional COLUMN." 'motion
           (make-interactive-plan (list (make-goto-reader)))))
       (install-command!
+        runtime owner 'fundamental.indent-lines (context)
+        "Indent each logical line selected by the active regions." 'editing
+        (shift-selected-lines context 'indent))
+      (install-command!
+        runtime owner 'fundamental.unindent-lines (context)
+        "Remove one tab or up to four leading spaces from selected logical lines." 'editing
+        (shift-selected-lines context 'unindent))
+      (install-command!
         runtime owner 'fundamental.transpose-characters (context)
         "Transpose the graphemes around point." 'editing
         (transpose-characters context))
@@ -696,6 +792,10 @@
         ((list (control-stroke #\x) (control-stroke #\c)) 'application.quit)
         ((list (control-stroke #\x) (control-stroke #\h)) 'fundamental.mark-whole-buffer)
         ((list (control-stroke #\x) (control-stroke #\x)) 'fundamental.exchange-point-and-mark)
+        ((list (control-stroke #\x) (plain-stroke 'character (char->integer #\>)))
+         'fundamental.indent-lines)
+        ((list (control-stroke #\x) (plain-stroke 'character (char->integer #\<)))
+         'fundamental.unindent-lines)
         ((list (plain-stroke 'left #f)) 'fundamental.backward-char)
         ((list (plain-stroke 'right #f)) 'fundamental.forward-char)
         ((list (plain-stroke 'home #f)) 'fundamental.beginning-of-line)
