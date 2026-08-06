@@ -455,6 +455,9 @@
       [(terminal) (terminal-read terminal 4096)]
       [(terminal capacity)
        (require-terminal 'terminal-read terminal)
+       (unless (and (integer? capacity) (exact? capacity) (> capacity 0))
+         (assertion-violation 'terminal-read
+                              "expected a positive read capacity" capacity))
        (let* ([buffer (make-bytevector capacity)]
               [size
                 (%terminal-read
@@ -464,6 +467,7 @@
          (cond
            [(= size -2) #f]
            [(negative? size) (terminal-error 'terminal-read terminal)]
+           [(zero? size) (eof-object)]
            [(= size capacity) buffer]
            [else
             (let ([output (make-bytevector size)])

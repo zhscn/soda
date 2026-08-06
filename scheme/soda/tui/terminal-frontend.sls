@@ -161,12 +161,19 @@
                (loop (cdr listeners))))))
 
   (define (terminal-frontend-handle-native-event! value event)
-    (cond
-      [(terminal-input-session-event? (terminal-frontend-input value) event)
-       (terminal-input-session-handle-event! (terminal-frontend-input value) event)]
-      [(terminal-presenter-session-event? (terminal-frontend-presenter value) event)
-       (terminal-presenter-session-handle-event! (terminal-frontend-presenter value) event)]
-      [else (notify-runtime-listeners! value event)]))
+    (let ([result
+           (cond
+             [(terminal-input-session-event? (terminal-frontend-input value) event)
+              (terminal-input-session-handle-event! (terminal-frontend-input value) event)]
+             [(terminal-presenter-session-event? (terminal-frontend-presenter value) event)
+              (terminal-presenter-session-handle-event! (terminal-frontend-presenter value) event)]
+             [else (notify-runtime-listeners! value event)])])
+      ;; EOF is a terminal lifecycle transition, not an empty committed input.
+      ;; Stopping the loop lets its owner perform the normal ordered frontend,
+      ;; input-protocol, alternate-screen, and raw-mode cleanup.
+      (when (eq? result 'eof)
+        (terminal-frontend-stop! value))
+      result))
 
   (define (terminal-frontend-step! value)
     (require-open 'terminal-frontend-step! value)

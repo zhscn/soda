@@ -170,15 +170,17 @@
             (= (native:event-source event) (session-input-source session))
             (eq? (native:event-kind event) 'fd-ready))
        (let ([bytes (native:terminal-read (session-terminal session))])
-         (if (not bytes)
-             0
-             (let ([count
-                     (publish-events!
-                       session
-                       (terminal-input-decoder-feed!
-                         (session-decoder session) bytes))])
-               (arm-escape-timer! session)
-               count)))]
+         (cond
+           [(eof-object? bytes) 'eof]
+           [(not bytes) 0]
+           [else
+            (let ([count
+                   (publish-events!
+                     session
+                     (terminal-input-decoder-feed!
+                       (session-decoder session) bytes))])
+              (arm-escape-timer! session)
+              count)]))]
       [(and (session-escape-timer session)
             (= (native:event-source event) (session-escape-timer session))
             (eq? (native:event-kind event) 'timer))

@@ -106,6 +106,8 @@ SODA_RUNTIME_API soda_terminal* soda_terminal_create(int input_fd, int output_fd
 SODA_RUNTIME_API void soda_terminal_destroy(soda_terminal* terminal);
 SODA_RUNTIME_API int soda_terminal_enter_raw(soda_terminal* terminal);
 SODA_RUNTIME_API int soda_terminal_leave_raw(soda_terminal* terminal);
+// Returns a positive byte count, zero on input EOF, SODA_TERMINAL_WOULD_BLOCK
+// when a nonblocking descriptor has no input, or a negative error status.
 SODA_RUNTIME_API int64_t soda_terminal_read(soda_terminal* terminal, uint8_t* destination,
                                             size_t capacity);
 SODA_RUNTIME_API int64_t soda_terminal_write_some(soda_terminal* terminal, const uint8_t* data,

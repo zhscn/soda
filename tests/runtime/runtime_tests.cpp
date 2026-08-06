@@ -426,6 +426,20 @@ TEST_CASE("terminal read reports a nonblocking descriptor would block") {
     CHECK(::close(pipe_fds[0]) == 0);
     CHECK(::close(pipe_fds[1]) == 0);
 }
+
+TEST_CASE("terminal read distinguishes input EOF from would-block") {
+    std::array<int, 2> pipe_fds{};
+    REQUIRE(::pipe(pipe_fds.data()) == 0);
+
+    soda_terminal* terminal = soda_terminal_create(pipe_fds[0], pipe_fds[1]);
+    REQUIRE(terminal != nullptr);
+    REQUIRE(::close(pipe_fds[1]) == 0);
+    std::uint8_t byte = 0;
+    CHECK(soda_terminal_read(terminal, &byte, 1) == 0);
+
+    soda_terminal_destroy(terminal);
+    CHECK(::close(pipe_fds[0]) == 0);
+}
 #endif
 
 TEST_CASE("C ABI exposes an event without native callbacks into its caller") {
