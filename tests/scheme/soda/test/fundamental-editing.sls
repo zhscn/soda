@@ -86,6 +86,22 @@
       (and (<= length (string-length value))
            (string=? prefix (substring value 0 length)))))
 
+  (define (frame-row-string frame row)
+    (let loop ([column 0] [pieces '()])
+      (if (= column (frame-width frame))
+          (apply string-append (reverse pieces))
+          (let ([cell (frame-cell-at frame row column)])
+            (loop (+ column 1)
+                  (if (frame-cell-continuation? cell)
+                      pieces
+                      (cons (frame-cell-grapheme cell) pieces)))))))
+
+  (define (frame-cell-has-face? cell face)
+    (let ([value (frame-cell-face cell)])
+      (if (list? value)
+          (memq face value)
+          (eq? face value))))
+
   (define (run-fundamental-editing-tests!)
     (let* ([application (make-soda-application)]
            [state (soda-application-state application)]
@@ -1724,6 +1740,52 @@
                    (string=? (buffer-string buffer) "\talpha\n\t\n  editable"))
         (error 'fundamental-editing-tests
                "read-only option did not restore normal editing"))
+      (soda-application-close! application))
+
+    ;; Display options are rendered overlays rather than only configuration
+    ;; values: the guide composes with text faces, and the persistent location
+    ;; uses status chrome only when transient package feedback is absent.
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [runtime (host-state-command-runtime state)]
+           [surface (soda-application-surface application)])
+      (command-runtime-start!
+        runtime 'fundamental.insert-text (application-command-context application)
+        (list (string->utf8 (make-string 80 #\x))))
+      (command-runtime-start!
+        runtime 'editor.toggle-guide-column (application-command-context application))
+      (dispatcher-dispatch-host!
+        (host-state-dispatch state)
+        (make-set-surface-message-operation (surface-id surface) #f))
+      (let ([frame (surface-render-frame
+                     (render-surface surface (host-state-views state)))])
+        (unless (frame-cell-has-face? (frame-cell-at frame 0 79) 'guide-column)
+          (error 'fundamental-editing-tests
+                 "guide column did not compose into the rendered text cell")))
+      (command-runtime-start!
+        runtime 'editor.toggle-constant-position
+        (application-command-context application))
+      (dispatcher-dispatch-host!
+        (host-state-dispatch state)
+        (make-set-surface-message-operation (surface-id surface) #f))
+      (command-runtime-start!
+        runtime 'fundamental.goto-line
+        (application-command-context application) (list 1 41))
+      (let* ([frame (surface-render-frame
+                      (render-surface surface (host-state-views state)))]
+             [row (- (frame-height frame) 1)])
+        (unless (string-prefix? "Line 1, column 41" (frame-row-string frame row))
+          (error 'fundamental-editing-tests
+                 "constant position did not reflect the active View selection")))
+      (dispatcher-dispatch-host!
+        (host-state-dispatch state)
+        (make-set-surface-message-operation (surface-id surface) "temporary feedback"))
+      (let* ([frame (surface-render-frame
+                      (render-surface surface (host-state-views state)))]
+             [row (- (frame-height frame) 1)])
+        (unless (string-prefix? "temporary feedback" (frame-row-string frame row))
+          (error 'fundamental-editing-tests
+                 "transient Surface feedback did not take precedence over position chrome")))
       (soda-application-close! application))
 
     (let ([text (string->text "alpha _β gamma\nline")])
