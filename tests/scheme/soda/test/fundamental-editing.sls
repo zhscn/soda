@@ -31,6 +31,7 @@
           (soda packages completion)
           (soda packages file)
           (soda packages directory)
+          (soda packages buffer-list)
           (soda packages search)
           (soda packages message)
           (soda packages interaction)
@@ -253,6 +254,64 @@
           (guard (condition [else #f]) (delete-file note))
           (delete-directory nested #f)
           (delete-directory root #f))))
+
+    ;; A Buffer List is a generated projection over the live Buffer catalog.
+    ;; Its rows activate ordinary Buffers, so visiting a row does not copy
+    ;; text or transfer any View-local selection into the target Buffer.
+    (let* ([path (string-append "/tmp/soda-buffer-list-"
+                                (number->string (get-process-id)) ".txt")]
+           [application (make-soda-application)])
+      (dynamic-wind
+        (lambda () (vfs-write-file path (string->utf8 "listed")))
+        (lambda ()
+          (let* ([state (soda-application-state application)]
+                 [runtime (host-state-command-runtime state)]
+                 [scratch (soda-application-buffer application)])
+            (command-runtime-start! runtime 'file.visit
+                                    (application-command-context application) (list path))
+            (let* ([file-context (application-command-context application)]
+                   [file-id (command-context-buffer-id file-context)])
+              (command-runtime-start! runtime 'fundamental.end-of-buffer file-context)
+              (command-runtime-start! runtime 'fundamental.insert-text
+                                      (application-command-context application)
+                                      (list (string->utf8 " changed")))
+              (command-runtime-start! runtime 'buffer.list
+                                      (application-command-context application))
+              (let* ([list-context (application-command-context application)]
+                     [list-id (command-context-buffer-id list-context)]
+                     [list-buffer
+                      (buffer-service-ref (host-state-buffers state) list-id)]
+                     [content (buffer-string list-buffer)])
+                (unless (and (string-contains? content (buffer-name scratch))
+                             (string-contains? content path)
+                             (string-contains?
+                               content (string-append "* " (number->string file-id))))
+                  (error 'fundamental-editing-tests
+                         "buffer.list did not project live Buffer metadata" content))
+                ;; IDs increase with creation: scratch is the first row and
+                ;; the visited file is the second.  Item activation must
+                ;; replace the list View with the actual target Buffer.
+                (command-runtime-start! runtime 'buffer.next-item
+                                        (application-command-context application))
+                (command-runtime-start! runtime 'buffer.next-item
+                                        (application-command-context application))
+                (command-runtime-start! runtime 'buffer.activate-item
+                                        (application-command-context application))
+                (unless (= (command-context-buffer-id
+                             (application-command-context application))
+                           file-id)
+                  (error 'fundamental-editing-tests
+                         "buffer.list activation did not select its BufferItem target"))
+                (command-runtime-start! runtime 'buffer.list
+                                        (application-command-context application))
+                (unless (= (command-context-buffer-id
+                             (application-command-context application))
+                           list-id)
+                  (error 'fundamental-editing-tests
+                         "buffer.list did not reuse its canonical generated Buffer"))))))
+        (lambda ()
+          (soda-application-close! application)
+          (guard (condition [else #f]) (delete-file path)))))
 
     ;; Scheme startup supplies remaining argv entries to `scheme-start`.
     ;; Opening them here follows the same file.visit command path as C-x C-f.

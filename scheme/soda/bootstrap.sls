@@ -16,6 +16,7 @@
           soda-application-interaction
           soda-application-minibuffer
           soda-application-buffer-item-actions
+          soda-application-buffer-lists
           soda-application-open-files!
           soda-application-run!
           soda-application-close!)
@@ -36,6 +37,7 @@
           (soda packages base history)
           (soda packages file)
           (soda packages directory)
+          (soda packages buffer-list)
           (soda packages process)
           (soda packages spell)
           (soda packages message)
@@ -69,6 +71,7 @@
       (immutable interaction soda-application-interaction)
       (immutable minibuffer soda-application-minibuffer)
       (immutable buffer-item-actions soda-application-buffer-item-actions)
+      (immutable buffer-lists soda-application-buffer-lists)
       (mutable terminal soda-application-terminal soda-application-terminal-set!)
       (mutable effect-registration soda-application-effect-registration
                soda-application-effect-registration-set!)
@@ -116,6 +119,7 @@
                [processes (make-process-service! state owner)]
                [buffer-item-actions (make-buffer-item-action-service)]
                [directories (make-directory-service! state owner files buffer-item-actions)]
+               [buffer-lists (make-buffer-list-service! state owner history buffer-item-actions)]
                [spelling (make-spell-service! state owner processes buffer-item-actions)]
                [messages (make-message-service! state owner)]
                [_help (make-help-service! state owner)]
@@ -129,7 +133,7 @@
           (surface-service-register! (host-state-surfaces state) surface)
           (history-mark-saved! history (buffer-id buffer))
           (%make-soda-application
-            state owner buffer view surface editing history files directories processes spelling messages search interaction minibuffer buffer-item-actions
+            state owner buffer view surface editing history files directories processes spelling messages search interaction minibuffer buffer-item-actions buffer-lists
             #f #f #f)))))
 
   (define (require-open who application)
@@ -202,6 +206,10 @@
               (make-input-layer
                 'directory
                 (directory-keymap (soda-application-directories application))
+                #f 'pass)
+              (make-input-layer
+                'buffer-list
+                (buffer-list-keymap (soda-application-buffer-lists application))
                 #f 'pass)
               (make-input-layer
                 'fundamental

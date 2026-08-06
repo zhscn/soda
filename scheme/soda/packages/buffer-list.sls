@@ -1,0 +1,234 @@
+(library (soda packages buffer-list)
+  (export make-buffer-list-service!
+          buffer-list-service?
+          buffer-list-keymap)
+  (import (rnrs)
+          (soda kernel document)
+          (soda kernel extension)
+          (soda kernel range-set)
+          (soda kernel state)
+          (soda host command)
+          (soda host command-runtime)
+          (soda host dispatch)
+          (soda host internal buffer)
+          (soda host internal operation)
+          (soda host internal state)
+          (soda host internal view)
+          (soda host input)
+          (soda host input-event)
+          (soda host value)
+          (soda packages base history)
+          (soda packages buffer-ui))
+
+  ;; BufferListService is a generated Buffer producer.  It has no special
+  ;; rendering or navigation path: rows are BufferItems and activation uses
+  ;; the normal Window replacement operation shared by file and directory
+  ;; packages.
+  (define-record-type
+    (buffer-list-service %make-buffer-list-service buffer-list-service?)
+    (fields state owner history keymap result-keymap authority lists))
+
+  (define-record-type buffer-list-state
+    (fields (mutable generation buffer-list-state-generation
+                     buffer-list-state-generation-set!)))
+
+  (define-record-type buffer-list-open-request
+    (fields context))
+
+  (define-record-type buffer-list-refresh-request
+    (fields context))
+
+  (define (control-stroke character)
+    (make-key-stroke 'character (char->integer character) 4))
+
+  (define (buffer-list-keymap service)
+    (unless (buffer-list-service? service)
+      (assertion-violation 'buffer-list-keymap "expected a BufferListService" service))
+    (buffer-list-service-keymap service))
+
+  (define (generated-buffer? buffer)
+    (buffer-state-field (buffer-state buffer) generated-projection-field #f))
+
+  ;; Deterministic ordering keeps a refreshed list stable for keyboard and
+  ;; programmatic navigation.
+  (define (listed-buffers service)
+    (list-sort
+      (lambda (left right) (< (buffer-id left) (buffer-id right)))
+      (filter
+        (lambda (buffer)
+          (not (hashtable-contains? (buffer-list-service-lists service)
+                                    (buffer-id buffer))))
+        (buffer-service-buffers
+          (host-state-buffers (buffer-list-service-state service))))))
+
+  (define (modified-marker service buffer)
+    (if (and (not (generated-buffer? buffer))
+             (history-modified? (buffer-list-service-history service) (buffer-id buffer)))
+        "*"
+        " "))
+
+  (define (buffer-list-layout service)
+    (let loop ([buffers (listed-buffers service)]
+               [text "Buffers:\n\n"]
+               [ranges '()])
+      (if (null? buffers)
+          (cons text (make-range-set (reverse ranges)))
+          (let* ([buffer (car buffers)]
+                 [row
+                  (string-append
+                    (modified-marker service buffer) " "
+                    (number->string (buffer-id buffer)) "  "
+                    (buffer-name buffer) "\n")]
+                 [start (bytevector-length (string->utf8 text))]
+                 [end (+ start (bytevector-length (string->utf8 row)))]
+                 [item
+                  (make-buffer-item
+                    'buffer-list (buffer-id buffer) 'buffer (buffer-id buffer) '(visit) 'visit)])
+            (loop (cdr buffers) (string-append text row)
+                  (cons (make-range-value start end item) ranges))))))
+
+  (define (buffer-list-configuration service)
+    (make-configuration
+      (append
+        (generated-projection-extension)
+        (list
+          (make-buffer-input-layer-extension
+            (list (make-input-layer
+                    'buffer (buffer-list-service-result-keymap service) #f 'ignore)))
+          (make-buffer-edit-policy-extension
+            (make-buffer-edit-policy 'reject #f (buffer-list-service-authority service)))))))
+
+  (define (publish-buffer-list! service buffer)
+    (let ([list-state
+           (hashtable-ref (buffer-list-service-lists service) (buffer-id buffer) #f)])
+      (and list-state
+           (let* ([generation (+ (buffer-list-state-generation list-state) 1)]
+                  [layout (buffer-list-layout service)]
+                  [update
+                   (make-projection-update generation (car layout) (cdr layout) '() '())]
+                  [published
+                   (dispatcher-dispatch!
+                     (host-state-dispatch (buffer-list-service-state service))
+                     (make-projection-transaction-spec
+                       (buffer-id buffer) #f (buffer-state buffer) update
+                       (list (make-edit-authority-annotation
+                               (buffer-list-service-authority service)))))])
+             (and published
+                  (begin
+                    (buffer-list-state-generation-set! list-state generation)
+                    published))))))
+
+  (define (show-buffer-list! service request)
+    (let* ([context (buffer-list-open-request-context request)]
+           [state (buffer-list-service-state service)]
+           [buffers (host-state-buffers state)]
+           [views (host-state-views state)]
+           [key (make-buffer-key 'buffer-list 'default)]
+           [buffer
+            (buffer-service-open-or-create!
+              buffers (buffer-list-service-owner service) key
+              (lambda ()
+                (buffer-service-create!
+                  buffers (buffer-list-service-owner service) "*Buffer List*"
+                  (make-document "") (buffer-list-configuration service))))])
+      (unless (hashtable-ref (buffer-list-service-lists service) (buffer-id buffer) #f)
+        (hashtable-set! (buffer-list-service-lists service) (buffer-id buffer)
+                        (make-buffer-list-state 0)))
+      (publish-buffer-list! service buffer)
+      (if (= (buffer-id buffer) (command-context-buffer-id context))
+          buffer
+          (let ([view
+                 (view-service-create!
+                   views (buffer-list-service-owner service) buffer
+                   (buffer-state-configuration (buffer-state buffer)))])
+            (unless
+              (dispatcher-dispatch-host!
+                (host-state-dispatch state)
+                (make-replace-window-view-operation
+                  (command-context-surface-id context)
+                  (command-context-window-id context) (view-id view)))
+              (view-service-close-view! views (view-id view))
+              (assertion-violation 'buffer.list
+                                   "origin Window is no longer available" context))
+            buffer))))
+
+  (define (refresh-buffer-list! service request)
+    (let* ([context (buffer-list-refresh-request-context request)]
+           [buffer
+            (buffer-service-ref (host-state-buffers (buffer-list-service-state service))
+                                (command-context-buffer-id context) #f)])
+      (and buffer (publish-buffer-list! service buffer))))
+
+  (define (visit-buffer! service item context ignored)
+    (let* ([target-id (buffer-item-payload item)]
+           [state (buffer-list-service-state service)]
+           [target (buffer-service-ref (host-state-buffers state) target-id #f)])
+      (if (or (not target) (= target-id (command-context-buffer-id context)))
+          (command-handled)
+          (let* ([views (host-state-views state)]
+                 [view
+                  (view-service-create!
+                    views (buffer-list-service-owner service) target
+                    (buffer-state-configuration (buffer-state target)))])
+            (unless
+              (dispatcher-dispatch-host!
+                (host-state-dispatch state)
+                (make-replace-window-view-operation
+                  (command-context-surface-id context)
+                  (command-context-window-id context) (view-id view)))
+              (view-service-close-view! views (view-id view))
+              (assertion-violation 'buffer-list.visit
+                                   "origin Window is no longer available" context))
+            (command-handled)))))
+
+  (define (make-buffer-list-service! state owner history actions)
+    (unless (and (host-state? state) (owner? owner) (history? history)
+                 (buffer-item-action-service? actions))
+      (assertion-violation 'make-buffer-list-service!
+                           "expected HostState, owner, History, and BufferItem actions"
+                           state owner history actions))
+    (let* ([runtime (host-state-command-runtime state)]
+           [keymap (make-keymap 'buffer-list)]
+           [result-keymap (make-keymap 'buffer-list-result)]
+           [authority (make-edit-authority owner 'buffer-list-refresh)]
+           [service
+            (%make-buffer-list-service
+              state owner history keymap result-keymap authority (make-eqv-hashtable))])
+      (keymap-bind! keymap (list (control-stroke #\x) (control-stroke #\b)) 'buffer.list)
+      (keymap-bind! result-keymap (list (make-key-stroke 'enter #f 0)) 'buffer.activate-item)
+      (keymap-bind! result-keymap (list (make-key-stroke 'character (char->integer #\g) 0))
+                    'buffer-list.refresh)
+      (keymap-bind! result-keymap (list (control-stroke #\g)) 'file.close)
+      (buffer-item-action-register!
+        actions owner 'buffer-list 'visit
+        (lambda (item context generation)
+          (visit-buffer! service item context generation)))
+      (command-runtime-register-effect-handler!
+        runtime 'buffer-list.open owner 'open-buffer-list
+        (lambda (ignored invocation effect)
+          (show-buffer-list! service (command-effect-payload effect))))
+      (command-runtime-register-effect-handler!
+        runtime 'buffer-list.refresh owner 'refresh-buffer-list
+        (lambda (ignored invocation effect)
+          (refresh-buffer-list! service (command-effect-payload effect))))
+      (command-runtime-register-command!
+        runtime
+        (make-command-definition
+          'buffer.list
+          (lambda (context)
+            (make-command-effect 'buffer-list.open (make-buffer-list-open-request context)))
+          owner "Show live Buffers in a generated Buffer List." 'buffer #f))
+      (command-runtime-register-command!
+        runtime
+        (make-command-definition
+          'buffer-list.refresh
+          (lambda (context)
+            (make-command-effect
+              'buffer-list.refresh (make-buffer-list-refresh-request context)))
+          owner "Refresh the generated Buffer List." 'buffer #f))
+      (buffer-service-add-close-listener!
+        (host-state-buffers state) owner
+        (lambda (buffer)
+          (hashtable-delete! (buffer-list-service-lists service) (buffer-id buffer))))
+      service))
+)
