@@ -16,6 +16,7 @@
           soda-application-interaction
           soda-application-minibuffer
           soda-application-buffer-item-actions
+          soda-application-open-files!
           soda-application-run!
           soda-application-close!)
   (import (rnrs)
@@ -25,6 +26,7 @@
           (soda host command-runtime)
           (soda host input)
           (soda host internal buffer)
+          (soda host internal context)
           (soda host internal state)
           (soda host internal surface)
           (soda host internal view)
@@ -134,6 +136,42 @@
     (unless (and (soda-application? application)
                  (not (soda-application-closed? application)))
       (assertion-violation who "Soda application is closed" application)))
+
+  ;; Startup paths use the same command runtime as interactive file visits.
+  ;; Each visit snapshots the currently active Window after the preceding
+  ;; visit, so the final path is visible while earlier paths remain normal
+  ;; reusable file Buffers.
+  (define (application-command-context application source)
+    (let* ([state (soda-application-state application)]
+           [surface (soda-application-surface application)]
+           [active (surface-active-context surface (host-state-views state))]
+           [view (view-service-ref (host-state-views state)
+                                   (active-context-view-id active))]
+           [buffer (view-buffer view)])
+      (make-command-context
+        #f
+        (active-context-surface-id active)
+        (active-context-window-id active)
+        (view-id view)
+        (buffer-id buffer)
+        (buffer-state buffer)
+        (view-state view)
+        #f '() #f active source)))
+
+  (define (soda-application-open-files! application paths)
+    (require-open 'soda-application-open-files! application)
+    (unless (and (list? paths)
+                 (for-all (lambda (path) (and (string? path) (positive? (string-length path))))
+                          paths))
+      (assertion-violation 'soda-application-open-files!
+                           "expected a list of non-empty file names" paths))
+    (let ([runtime (host-state-command-runtime (soda-application-state application))])
+      (for-each
+        (lambda (path)
+          (command-runtime-start!
+            runtime 'file.visit (application-command-context application 'startup) (list path)))
+        paths))
+    application)
 
   (define (make-resolver application)
     (lambda (active view)

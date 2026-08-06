@@ -8,6 +8,7 @@
     (dynamic-wind
       (lambda () #f)
       (lambda ()
+        (soda-application-open-files! application arguments)
         (soda-application-run! application)
         0)
       (lambda ()

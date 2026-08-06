@@ -254,6 +254,26 @@
           (delete-directory nested #f)
           (delete-directory root #f))))
 
+    ;; Scheme startup supplies remaining argv entries to `scheme-start`.
+    ;; Opening them here follows the same file.visit command path as C-x C-f.
+    (let* ([path (string-append "/tmp/soda-startup-file-"
+                                (number->string (get-process-id)) ".txt")]
+           [application (make-soda-application)])
+      (dynamic-wind
+        (lambda () (vfs-write-file path (string->utf8 "startup contents")))
+        (lambda ()
+          (soda-application-open-files! application (list path))
+          (let* ([state (soda-application-state application)]
+                 [surface (soda-application-surface application)]
+                 [active (surface-active-context surface (host-state-views state))]
+                 [buffer (buffer-service-ref (host-state-buffers state)
+                                             (active-context-buffer-id active))])
+            (unless (string=? (buffer-string buffer) "startup contents")
+              (error 'fundamental-editing-tests "startup file visit did not open argv file"))))
+        (lambda ()
+          (soda-application-close! application)
+          (guard (condition [else #f]) (delete-file path)))))
+
     ;; Nano aliases are declarative entries in the fundamental keymap.  They
     ;; reuse the same command implementations as their primary bindings.
     (let* ([application (make-soda-application)]
