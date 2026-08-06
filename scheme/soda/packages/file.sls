@@ -55,6 +55,9 @@
   (define-record-type file-close
     (fields buffer-id))
 
+  (define-record-type file-insert
+    (fields context resource))
+
   (define (buffer-id? value)
     (and (integer? value) (exact? value) (>= value 0)))
 
@@ -366,11 +369,35 @@
             (unless (file-close? request)
               (assertion-violation 'file.close "invalid file close request" request))
             (close-buffer! service (file-close-buffer-id request)))))
+      (command-runtime-register-effect-handler!
+        runtime 'file.insert owner 'insert-file-contents
+        (lambda (runtime invocation effect)
+          (let ([request (command-effect-payload effect)])
+            (unless (file-insert? request)
+              (assertion-violation 'file.insert "invalid file insert request" request))
+            ;; Reading is an external effect.  The actual edit returns through
+            ;; the ordinary fundamental command, retaining its multi-selection
+            ;; mapping, History integration, and transaction boundary.
+            (command-runtime-enqueue!
+              runtime
+              (make-command-invoke-message
+                'fundamental.insert-text
+                (file-insert-context request)
+                (list (vfs-read-file
+                        (resource-locator (file-insert-resource request))))
+                #f)))))
       (install-file-command! runtime owner 'file.visit "Visit a file in the active Window."
         (list (make-interaction-string-reader 'file-name "Visit file: "))
         (lambda (context path)
           (make-command-effect 'file.visit
             (make-file-visit context (canonical-file-resource path)))))
+      (install-file-command! runtime owner 'file.insert
+        "Insert a file's contents at every active selection."
+        (list (make-interaction-string-reader 'file-name "Insert file: "))
+        (lambda (context path)
+          (make-command-effect
+            'file.insert
+            (make-file-insert context (canonical-file-resource path)))))
       (install-file-command! runtime owner 'file.revert "Reload the active Buffer's visited file." '()
         (lambda (context)
           (let ([binding (file-service-binding service (command-context-buffer-id context) #f)])
@@ -479,6 +506,9 @@
                     (list (make-key-stroke 'character (char->integer #\x) 4)
                           (make-key-stroke 'character (char->integer #\k) 4))
                     'file.close)
+      (keymap-bind! keymap
+                    (list (make-key-stroke 'character (char->integer #\r) 4))
+                    'file.insert)
       (buffer-service-add-close-listener!
         buffers owner
         (lambda (buffer)

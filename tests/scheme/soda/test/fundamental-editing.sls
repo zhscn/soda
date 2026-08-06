@@ -310,6 +310,17 @@
                                    scratch-save))
               (error 'fundamental-editing-tests
                      "file.save did not bind an unvisited Buffer to its selected destination"))
+            (command-runtime-start! runtime 'file.insert
+                                    (application-command-context application) (list path))
+            (host-state-run! state)
+            (unless (string=? (buffer-string scratch) "first")
+              (error 'fundamental-editing-tests
+                     "file.insert did not enqueue a normal Buffer transaction"))
+            (command-runtime-start! runtime 'file.save
+                                    (application-command-context application))
+            (unless (string=? (utf8->string (vfs-read-file scratch-save)) "first")
+              (error 'fundamental-editing-tests
+                     "file.insert did not preserve normal save semantics"))
             (command-runtime-start-interactive!
               runtime 'file.visit (application-command-context application))
             (let ([request (interaction-session-request
