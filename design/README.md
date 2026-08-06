@@ -46,7 +46,7 @@
 | 文档 | 边界 | 状态 |
 |---|---|---|
 | [10-project-lsp.md](10-project-lsp.md) | Resource、Project resolution 与 LSP workspace routing | 未实现 |
-| [11-nano-baseline.md](11-nano-baseline.md) | 单终端文本编辑工作流与验收边界 | 部分实现 |
+| [11-nano-baseline.md](11-nano-baseline.md) | 单终端文本编辑工作流与验收边界 | 已实现 |
 
 语言模式、document completion、xref/result、directory UI、REPL/debugger 和 dashboard 在对应
 package 开始实现时，以 `01` 和 `03` 的 extension/attachment/projection contract 编写独立
