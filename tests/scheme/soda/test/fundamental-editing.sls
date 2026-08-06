@@ -1742,6 +1742,44 @@
                "read-only option did not restore normal editing"))
       (soda-application-close! application))
 
+    ;; View-scoped configuration must not leak through the shared Buffer to a
+    ;; sibling View.  A split can therefore choose independent chrome and
+    ;; layout without duplicating document state.
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [views (host-state-views state)]
+           [dispatcher (host-state-dispatch state)]
+           [buffer (soda-application-buffer application)]
+           [primary (soda-application-view application)]
+           [owner (make-owner 'fundamental-view-scope-test)]
+           [sibling
+            (view-service-create!
+              views owner buffer (view-state-configuration (view-state primary)))])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (dispatcher-dispatch-view!
+            dispatcher
+            (make-view-transaction-spec
+              (view-id primary) (view-state-generation (view-state primary))
+              #f #f #f
+              (list
+                (make-compartment-reconfigure-effect
+                  line-number-compartment (make-line-number-extension #t)))
+              '() #f))
+          (unless (and (line-numbers-enabled?
+                         (view-state-configuration (view-state primary)))
+                       (not (line-numbers-enabled?
+                              (view-state-configuration (view-state sibling))))
+                       (not (line-numbers-enabled?
+                              (buffer-state-configuration (buffer-state buffer)))))
+            (error 'fundamental-editing-tests
+                   "View-local option escaped the target View configuration")))
+        (lambda ()
+          (view-service-close-view! views (view-id sibling))
+          (owner-close! owner)
+          (soda-application-close! application))))
+
     ;; Display options are rendered overlays rather than only configuration
     ;; values: the guide composes with text faces, and the persistent location
     ;; uses status chrome only when transient package feedback is absent.
