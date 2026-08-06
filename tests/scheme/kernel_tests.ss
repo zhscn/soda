@@ -1652,12 +1652,22 @@
 (let* ([directory
          (string-append
            "/tmp/soda-vfs-kernel-" (number->string (get-process-id)))]
-       [path (vfs-path-join directory "content.bin")])
+       [path (vfs-path-join directory "content.bin")]
+       [lock (vfs-path-join directory "content.bin.soda-lock")]
+       [token (string->utf8 "soda-lock-token")])
   (dynamic-wind
     (lambda () (mkdir directory))
     (lambda ()
       (unless (= (vfs-write-file path (string->utf8 "first value")) 11)
         (error 'kernel-tests "synchronous VFS write size differs"))
+      (unless (and (vfs-create-exclusive-file! lock token)
+                   (not (vfs-create-exclusive-file! lock token))
+                   (bytevector=? (vfs-read-file lock) token)
+                   (not (vfs-delete-file-if-matches! lock (string->utf8 "other")))
+                   (vfs-file-exists? lock)
+                   (vfs-delete-file-if-matches! lock token)
+                   (not (vfs-file-exists? lock)))
+        (error 'kernel-tests "exclusive VFS file lifecycle differs"))
       (vfs-write-file path (string->utf8 "next"))
       (unless (bytevector=? (vfs-read-file path) (string->utf8 "next"))
         (error 'kernel-tests "synchronous VFS read/write differs"))
@@ -1672,6 +1682,7 @@
           (error 'kernel-tests "synchronous VFS metadata differs" entries stat))))
     (lambda ()
       (when (file-exists? path) (delete-file path))
+      (when (file-exists? lock) (delete-file lock))
       (delete-directory directory #t))))
 
 (let* ([secondary

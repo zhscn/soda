@@ -4,6 +4,8 @@
           vfs-entry-kind
           vfs-read-file
           vfs-write-file
+          vfs-create-exclusive-file!
+          vfs-delete-file-if-matches!
           vfs-file-exists?
           vfs-list-directory
           vfs-path-separator?
@@ -134,6 +136,41 @@
         'vfs-write-file "data must be a bytevector" data))
     (atomic-write-file path data)
     (bytevector-length data))
+
+  ;; Claim a path without a check-then-create race.  The default R6RS output
+  ;; port mode creates a missing file and fails when a name already exists;
+  ;; Chez implements this operation atomically on the supported file systems.
+  ;; A preexisting path is reported as #f while unrelated I/O failures retain
+  ;; their original condition.
+  (define (vfs-create-exclusive-file! path data)
+    (require-path 'vfs-create-exclusive-file! path)
+    (unless (bytevector? data)
+      (assertion-violation 'vfs-create-exclusive-file!
+                           "data must be a bytevector" data))
+    (guard (condition
+            [else
+             (if (vfs-path-present? path)
+                 #f
+                 (raise condition))])
+      (call-with-port
+        (open-file-output-port path (file-options) (buffer-mode block) #f)
+        (lambda (port)
+          (put-bytevector port data)
+          (flush-output-port port)))
+      #t))
+
+  ;; Lock owners release only a file whose token is still theirs.  This is a
+  ;; cooperative lock-file protocol: replacing a lock externally leaves the
+  ;; replacement in place rather than deleting a lock another owner created.
+  (define (vfs-delete-file-if-matches! path expected)
+    (require-path 'vfs-delete-file-if-matches! path)
+    (unless (bytevector? expected)
+      (assertion-violation 'vfs-delete-file-if-matches!
+                           "expected contents must be a bytevector" expected))
+    (guard (condition [else #f])
+      (and (vfs-file-exists? path)
+           (bytevector=? (vfs-read-file path) expected)
+           (begin (delete-file path) #t))))
 
   (define (vfs-path-kind path follow?)
     (cond
