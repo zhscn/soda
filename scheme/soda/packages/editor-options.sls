@@ -49,15 +49,47 @@
             (make-compartment-reconfigure-effect
               auto-indent-compartment
               (make-auto-indent-extension (not enabled?)))])
-      (result-with-message
-        (make-transaction-spec
-          (command-context-buffer-id context)
-          (command-context-view-id context)
-          (buffer-state-generation (command-context-buffer-state context))
-          (make-change-set (context-document-length context) '())
-          #f (list effect) '())
-        context
+      (reconfigure-buffer-option
+        context effect
         (string-append "Auto-indent " (if enabled? "disabled" "enabled")))))
+
+  (define (reconfigure-buffer-option context effect message)
+    (result-with-message
+      (make-transaction-spec
+        (command-context-buffer-id context)
+        (command-context-view-id context)
+        (buffer-state-generation (command-context-buffer-state context))
+        (make-change-set (context-document-length context) '())
+        #f (list effect) '())
+      context message))
+
+  (define (current-indent-options context)
+    (configuration-indent-options
+      (buffer-state-configuration (command-context-buffer-state context))))
+
+  (define (reconfigure-indent context width insert-tabs? message)
+    (reconfigure-buffer-option
+      context
+      (make-compartment-reconfigure-effect
+        indent-options-compartment
+        (make-indent-options-extension width insert-tabs?))
+      message))
+
+  (define (toggle-tab-to-spaces context)
+    (let* ([options (current-indent-options context)]
+           [tabs? (indent-options-insert-tabs? options)])
+      (reconfigure-indent
+        context (indent-options-width options) (not tabs?)
+        (string-append "Tab insertion " (if tabs? "uses spaces" "uses tabs")))))
+
+  (define (set-indent-width context width)
+    (unless (and (integer? width) (exact? width) (> width 0))
+      (assertion-violation 'editor.set-indent-width
+                           "expected a positive indentation width" width))
+    (let ([options (current-indent-options context)])
+      (reconfigure-indent
+        context width (indent-options-insert-tabs? options)
+        (string-append "Indent width set to " (number->string width)))))
 
   (define (current-layout-options context)
     (configuration-facet
@@ -98,6 +130,13 @@
                              "expected a positive tab width" value))
       width))
 
+  (define (parse-indent-width value)
+    (let ([width (and (string? value) (string->number value))])
+      (unless (and (integer? width) (exact? width) (> width 0))
+        (assertion-violation 'editor.set-indent-width
+                             "expected a positive indentation width" value))
+      width))
+
   (define (make-tab-width-reader)
     (make-interactive-reader
       'tab-width
@@ -106,6 +145,15 @@
           (make-interaction-request 'tab-width "Tab width: " #f #f 'free)
           (lambda (value)
             (make-interactive-ready (list (parse-tab-width value))))))))
+
+  (define (make-indent-width-reader)
+    (make-interactive-reader
+      'indent-width
+      (lambda (context arguments)
+        (make-interactive-suspend
+          (make-interaction-request 'indent-width "Indent width: " #f #f 'free)
+          (lambda (value)
+            (make-interactive-ready (list (parse-indent-width value))))))))
 
   (define (install-command! runtime owner name documentation procedure . readers)
     (command-runtime-register-command!
@@ -129,11 +177,22 @@
         "Toggle visual line wrapping for the active View."
         (lambda (context) (toggle-soft-wrap context)))
       (install-command!
+        runtime owner 'editor.toggle-tab-to-spaces
+        "Toggle whether Tab inserts spaces or a tab in the active Buffer."
+        (lambda (context) (toggle-tab-to-spaces context)))
+      (install-command!
+        runtime owner 'editor.set-indent-width
+        "Set the space indentation width for the active Buffer."
+        (lambda (context width) (set-indent-width context width))
+        (list (make-indent-width-reader)))
+      (install-command!
         runtime owner 'editor.set-tab-width
         "Set the visual tab width for the active View."
         (lambda (context width) (set-tab-width context width))
         (list (make-tab-width-reader)))
       (keymap-bind! keymap (list (meta-stroke #\i)) 'editor.toggle-auto-indent)
+      (keymap-bind! keymap (list (meta-stroke #\E)) 'editor.toggle-tab-to-spaces)
+      (keymap-bind! keymap (list (meta-stroke #\T)) 'editor.set-indent-width)
       (keymap-bind! keymap (list (meta-stroke #\$)) 'editor.toggle-soft-wrap)
       service))
 )

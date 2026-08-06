@@ -539,9 +539,13 @@
                               (list (string->utf8 "a\n  b\nc")))
       (command-runtime-start! runtime 'fundamental.mark-whole-buffer
                               (application-command-context application))
+      (command-runtime-start! runtime 'editor.set-indent-width
+                              (application-command-context application) (list 2))
+      (command-runtime-start! runtime 'editor.toggle-tab-to-spaces
+                              (application-command-context application))
       (command-runtime-start! runtime 'fundamental.indent-lines
                               (application-command-context application))
-      (unless (string=? (buffer-string buffer) "\ta\n\t  b\n\tc")
+      (unless (string=? (buffer-string buffer) "  a\n    b\n  c")
         (error 'fundamental-editing-tests "indent-lines did not transform each selected line once"))
       (command-runtime-start! runtime 'fundamental.unindent-lines
                               (application-command-context application))
@@ -1408,18 +1412,33 @@
         runtime 'editor.toggle-soft-wrap (application-command-context application))
       (command-runtime-start!
         runtime 'editor.set-tab-width (application-command-context application) (list 4))
+      (command-runtime-start!
+        runtime 'editor.set-indent-width (application-command-context application) (list 2))
+      (command-runtime-start!
+        runtime 'editor.toggle-tab-to-spaces (application-command-context application))
+      (command-runtime-start!
+        runtime 'fundamental.insert-tab (application-command-context application))
       (let ([layout
              (configuration-facet (view-state-configuration (view-state view))
-                                  text-layout-options-facet 'view)])
-        (unless (and (string=? (buffer-string buffer) "\talpha\n\t\n")
+                                  text-layout-options-facet 'view)]
+            [indent-options
+             (configuration-indent-options
+               (buffer-state-configuration (buffer-state buffer)))])
+        (unless (and (string=? (buffer-string buffer) "\talpha\n\t\n  ")
                      (not (auto-indent-enabled?
                             (buffer-state-configuration (buffer-state buffer))))
+                     (= (indent-options-width indent-options) 2)
+                     (not (indent-options-insert-tabs? indent-options))
                      (not (text-layout-options-wrap? layout))
                      (= (text-layout-options-tab-width layout) 4)
                      (eq? (keymap-lookup
                             (editor-options-keymap options)
                             (list (make-key-stroke 'character (char->integer #\i) 2)))
-                          'editor.toggle-auto-indent))
+                          'editor.toggle-auto-indent)
+                     (eq? (keymap-lookup
+                            (editor-options-keymap options)
+                            (list (make-key-stroke 'character (char->integer #\E) 2)))
+                          'editor.toggle-tab-to-spaces))
           (error 'fundamental-editing-tests
                  "editing option scope or reconfiguration is incorrect")))
       (soda-application-close! application))

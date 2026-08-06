@@ -139,6 +139,18 @@
       (bytevector-copy! right 0 result left-length right-length)
       result))
 
+  (define (indentation-bytes options)
+    (unless (indent-options? options)
+      (assertion-violation 'indentation-bytes "expected indent options" options))
+    (if (indent-options-insert-tabs? options)
+        (string->utf8 "\t")
+        (string->utf8
+          (make-string (indent-options-width options) #\space))))
+
+  (define (context-indent-options context)
+    (configuration-indent-options
+      (buffer-state-configuration (command-context-buffer-state context))))
+
   (define (line-indentation text point)
     (let* ([line (car (text-position text point))]
            [start (text-line-start text line)]
@@ -431,20 +443,21 @@
         (selection-ranges selection))
       (selection-primary selection)))
 
-  (define (leading-space-count text start end)
+  (define (leading-space-count text start end limit)
     (let loop ([position start] [count 0])
-      (if (or (= position end) (= count 4)
+      (if (or (= position end) (= count limit)
               (not (= (text-byte-at text position) (char->integer #\space))))
           count
           (loop (+ position 1) (+ count 1)))))
 
-  (define (unindent-line-change text start end)
+  (define (unindent-line-change text start end options)
     (cond
       [(and (< start end)
             (= (text-byte-at text start) (char->integer #\tab)))
        (make-text-change start (+ start 1) (make-bytevector 0))]
       [else
-       (let ([count (leading-space-count text start end)])
+       (let ([count (leading-space-count text start end
+                                         (indent-options-width options))])
          (and (positive? count)
               (make-text-change start (+ start count) (make-bytevector 0))))]))
 
@@ -458,6 +471,7 @@
       context
       (lambda (text)
         (let* ([selection (context-selection context)]
+               [options (context-indent-options context)]
                [lines (selected-lines text selection)]
                [changes
                 (filter
@@ -467,8 +481,8 @@
                       (let* ([start (text-line-start text line)]
                              [end (text-line-content-end text line)])
                         (if (eq? direction 'indent)
-                            (make-text-change start start (string->utf8 "\t"))
-                            (unindent-line-change text start end))))
+                            (make-text-change start start (indentation-bytes options))
+                            (unindent-line-change text start end options))))
                     lines))])
           (if (null? changes)
               (command-handled)
@@ -884,8 +898,8 @@
         (insert-newline context))
       (install-command!
         runtime owner 'fundamental.insert-tab (context)
-        "Insert a tab at every selection." 'editing
-        (replace-selection context (string->utf8 "\t")))
+        "Insert the configured indentation unit at every selection." 'editing
+        (replace-selection context (indentation-bytes (context-indent-options context))))
       (install-command!
         runtime owner 'fundamental.open-line (context)
         "Insert a newline before every caret without moving it." 'editing
@@ -951,7 +965,7 @@
         (shift-selected-lines context 'indent))
       (install-command!
         runtime owner 'fundamental.unindent-lines (context)
-        "Remove one tab or up to four leading spaces from selected logical lines." 'editing
+        "Remove one tab or one configured space indentation from selected lines." 'editing
         (shift-selected-lines context 'unindent))
       (install-command!
         runtime owner 'fundamental.matching-delimiter (context)

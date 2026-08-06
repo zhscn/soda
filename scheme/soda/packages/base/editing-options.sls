@@ -3,6 +3,15 @@
           auto-indent-compartment
           auto-indent-enabled?
           make-auto-indent-extension
+          indent-options?
+          make-indent-options
+          indent-options-width
+          indent-options-insert-tabs?
+          default-indent-options
+          indent-options-facet
+          indent-options-compartment
+          configuration-indent-options
+          make-indent-options-extension
           layout-options-compartment
           make-layout-options-extension)
   (import (rnrs)
@@ -30,6 +39,38 @@
 
   (define (auto-indent-enabled? configuration)
     (configuration-facet configuration auto-indent-facet 'buffer))
+
+  ;; Indent insertion is a Buffer policy because it changes Document text.
+  ;; Its width is intentionally separate from View-local tab rendering: two
+  ;; Views may display a tab differently without creating different content.
+  (define-record-type
+    (indent-options %make-indent-options indent-options?)
+    (fields (immutable width indent-options-width)
+            (immutable insert-tabs? indent-options-insert-tabs?)))
+
+  (define (make-indent-options width insert-tabs?)
+    (unless (and (integer? width) (exact? width) (> width 0)
+                 (boolean? insert-tabs?))
+      (assertion-violation 'make-indent-options
+                           "expected a positive width and tab insertion flag"
+                           width insert-tabs?))
+    (%make-indent-options width insert-tabs?))
+
+  (define default-indent-options (make-indent-options 4 #t))
+
+  (define indent-options-facet
+    (make-facet 'indent-options 'buffer default-indent-options
+                (lambda (values) (first-option values default-indent-options))
+                eq? eq?))
+
+  (define indent-options-compartment (make-compartment 'indent-options 'buffer))
+
+  (define (configuration-indent-options configuration)
+    (configuration-facet configuration indent-options-facet 'buffer))
+
+  (define (make-indent-options-extension width insert-tabs?)
+    (make-facet-provider
+      indent-options-facet (make-indent-options width insert-tabs?)))
 
   (define layout-options-compartment
     (make-compartment 'text-layout-options 'view))
