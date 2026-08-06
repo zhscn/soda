@@ -8,6 +8,7 @@
           soda-application-editing
           soda-application-history
           soda-application-files
+          soda-application-directories
           soda-application-processes
           soda-application-spelling
           soda-application-messages
@@ -32,6 +33,7 @@
           (soda packages base fundamental-editing)
           (soda packages base history)
           (soda packages file)
+          (soda packages directory)
           (soda packages process)
           (soda packages spell)
           (soda packages message)
@@ -57,6 +59,7 @@
       (immutable editing soda-application-editing)
       (immutable history soda-application-history)
       (immutable files soda-application-files)
+      (immutable directories soda-application-directories)
       (immutable processes soda-application-processes)
       (immutable spelling soda-application-spelling)
       (immutable messages soda-application-messages)
@@ -110,6 +113,7 @@
                 (make-file-service! state owner history)]
                [processes (make-process-service! state owner)]
                [buffer-item-actions (make-buffer-item-action-service)]
+               [directories (make-directory-service! state owner files buffer-item-actions)]
                [spelling (make-spell-service! state owner processes buffer-item-actions)]
                [messages (make-message-service! state owner)]
                [_help (make-help-service! state owner)]
@@ -123,7 +127,7 @@
           (surface-service-register! (host-state-surfaces state) surface)
           (history-mark-saved! history (buffer-id buffer))
           (%make-soda-application
-            state owner buffer view surface editing history files processes spelling messages search interaction minibuffer buffer-item-actions
+            state owner buffer view surface editing history files directories processes spelling messages search interaction minibuffer buffer-item-actions
             #f #f #f)))))
 
   (define (require-open who application)
@@ -156,6 +160,10 @@
               (make-input-layer
                 'file
                 (file-keymap (soda-application-files application))
+                #f 'pass)
+              (make-input-layer
+                'directory
+                (directory-keymap (soda-application-directories application))
                 #f 'pass)
               (make-input-layer
                 'fundamental

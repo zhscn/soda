@@ -1,7 +1,7 @@
 (library (soda test fundamental-editing)
   (export run-fundamental-editing-tests!)
   (import (rnrs)
-          (only (chezscheme) get-process-id)
+          (only (chezscheme) delete-directory get-process-id mkdir)
           (soda bootstrap)
           (soda host command)
           (soda host command-runtime)
@@ -30,6 +30,7 @@
           (soda packages base text-motion)
           (soda packages completion)
           (soda packages file)
+          (soda packages directory)
           (soda packages search)
           (soda packages message)
           (soda packages interaction)
@@ -175,6 +176,83 @@
         (error 'fundamental-editing-tests
                "fundamental editing did not produce stable editor state"))
       (soda-application-close! application))
+
+    ;; A directory is a generated Buffer: item activation queues the next
+    ;; ordinary file/directory command instead of giving the browser a custom
+    ;; event loop.  Refresh republishes the same Buffer projection.
+    (let* ([root (string-append "/tmp/soda-directory-browser-"
+                                (number->string (get-process-id)))]
+           [nested (string-append root "/nested")]
+           [note (string-append root "/note.txt")]
+           [new-note (string-append root "/new.txt")]
+           [application (make-soda-application)]
+           [state (soda-application-state application)]
+           [runtime (host-state-command-runtime state)])
+      (dynamic-wind
+        (lambda ()
+          (mkdir root)
+          (mkdir nested)
+          (vfs-write-file note (string->utf8 "note")))
+        (lambda ()
+          (let ([opened
+                 (command-runtime-start!
+                   runtime 'directory.browse (application-command-context application)
+                   (list root))])
+            (unless (eq? (command-invocation-phase opened) 'completed)
+              (error 'fundamental-editing-tests "directory browse command did not complete")))
+          (let* ([surface (soda-application-surface application)]
+                 [active (surface-active-context surface (host-state-views state))]
+                 [browser-view
+                  (view-service-ref (host-state-views state) (active-context-view-id active))]
+                 [browser (view-buffer browser-view)]
+                 [content (buffer-string browser)])
+            (unless (and (string-contains? content "Directory: ")
+                         (string-contains? content "nested/")
+                         (string-contains? content "note.txt")
+                         (string=?
+                           (directory-service-path
+                             (soda-application-directories application) (buffer-id browser))
+                           (vfs-directory-path root)))
+              (error 'fundamental-editing-tests "directory Buffer projection differs" content))
+            ;; Header is not an item.  The first two item motions reach the
+            ;; parent entry and then the known child directory.
+            (command-runtime-start! runtime 'buffer.next-item
+                                    (application-command-context application))
+            (command-runtime-start! runtime 'buffer.next-item
+                                    (application-command-context application))
+            (command-runtime-start! runtime 'buffer.activate-item
+                                    (application-command-context application))
+            (host-state-run! state)
+            (let* ([nested-active
+                    (surface-active-context surface (host-state-views state))]
+                   [nested-buffer
+                    (buffer-service-ref (host-state-buffers state)
+                                        (active-context-buffer-id nested-active))])
+              (unless (string=?
+                        (directory-service-path
+                          (soda-application-directories application) (buffer-id nested-buffer))
+                        (vfs-directory-path nested))
+                (error 'fundamental-editing-tests "directory item did not open child directory")))
+            ;; Return to the root Buffer through its ordinary stable key, add
+            ;; an entry, and refresh its generated projection in place.
+            (command-runtime-start! runtime 'directory.browse
+                                    (application-command-context application) (list root))
+            (vfs-write-file new-note (string->utf8 "new"))
+            (command-runtime-start! runtime 'directory.refresh
+                                    (application-command-context application))
+            (let* ([refreshed-active
+                    (surface-active-context surface (host-state-views state))]
+                   [refreshed-buffer
+                    (buffer-service-ref (host-state-buffers state)
+                                        (active-context-buffer-id refreshed-active))])
+              (unless (string-contains? (buffer-string refreshed-buffer) "new.txt")
+                (error 'fundamental-editing-tests "directory refresh did not republish entries")))))
+        (lambda ()
+          (soda-application-close! application)
+          (guard (condition [else #f]) (delete-file new-note))
+          (guard (condition [else #f]) (delete-file note))
+          (delete-directory nested #f)
+          (delete-directory root #f))))
 
     ;; Nano aliases are declarative entries in the fundamental keymap.  They
     ;; reuse the same command implementations as their primary bindings.
