@@ -12,6 +12,15 @@
           indent-options-compartment
           configuration-indent-options
           make-indent-options-extension
+          fill-options?
+          make-fill-options
+          fill-options-column
+          fill-options-auto-fill?
+          default-fill-options
+          fill-options-facet
+          fill-options-compartment
+          configuration-fill-options
+          make-fill-options-extension
           layout-options-compartment
           make-layout-options-extension)
   (import (rnrs)
@@ -71,6 +80,38 @@
   (define (make-indent-options-extension width insert-tabs?)
     (make-facet-provider
       indent-options-facet (make-indent-options width insert-tabs?)))
+
+  ;; Paragraph fill and automatic hard wrap share one Buffer-local text
+  ;; policy.  It describes source text rather than terminal geometry, so two
+  ;; Views may render the same line at different widths without changing when
+  ;; an edit wraps it.
+  (define-record-type
+    (fill-options %make-fill-options fill-options?)
+    (fields (immutable column fill-options-column)
+            (immutable auto-fill? fill-options-auto-fill?)))
+
+  (define (make-fill-options column auto-fill?)
+    (unless (and (integer? column) (exact? column) (> column 0)
+                 (boolean? auto-fill?))
+      (assertion-violation 'make-fill-options
+                           "expected a positive fill column and boolean auto-fill policy"
+                           column auto-fill?))
+    (%make-fill-options column auto-fill?))
+
+  (define default-fill-options (make-fill-options 80 #f))
+
+  (define fill-options-facet
+    (make-facet 'fill-options 'buffer default-fill-options
+                (lambda (values) (first-option values default-fill-options))
+                eq? eq?))
+
+  (define fill-options-compartment (make-compartment 'fill-options 'buffer))
+
+  (define (configuration-fill-options configuration)
+    (configuration-facet configuration fill-options-facet 'buffer))
+
+  (define (make-fill-options-extension column auto-fill?)
+    (make-facet-provider fill-options-facet (make-fill-options column auto-fill?)))
 
   (define layout-options-compartment
     (make-compartment 'text-layout-options 'view))

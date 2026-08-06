@@ -1489,6 +1489,10 @@
       (command-runtime-start!
         runtime 'editor.set-indent-width (application-command-context application) (list 2))
       (command-runtime-start!
+        runtime 'editor.set-fill-column (application-command-context application) (list 12))
+      (command-runtime-start!
+        runtime 'editor.toggle-auto-fill (application-command-context application))
+      (command-runtime-start!
         runtime 'editor.toggle-tab-to-spaces (application-command-context application))
       (command-runtime-start!
         runtime 'fundamental.insert-tab (application-command-context application))
@@ -1497,12 +1501,17 @@
                                   text-layout-options-facet 'view)]
             [indent-options
              (configuration-indent-options
+               (buffer-state-configuration (buffer-state buffer)))]
+            [fill-options
+             (configuration-fill-options
                (buffer-state-configuration (buffer-state buffer)))])
         (unless (and (string=? (buffer-string buffer) "\talpha\n\t\n  ")
                      (not (auto-indent-enabled?
                             (buffer-state-configuration (buffer-state buffer))))
                      (= (indent-options-width indent-options) 2)
                      (not (indent-options-insert-tabs? indent-options))
+                     (= (fill-options-column fill-options) 12)
+                     (fill-options-auto-fill? fill-options)
                      (not (text-layout-options-wrap? layout))
                      (= (text-layout-options-tab-width layout) 4)
                      (eq? (keymap-lookup
@@ -1516,7 +1525,11 @@
                      (eq? (keymap-lookup
                             (editor-options-keymap options)
                             (list (make-key-stroke 'character (char->integer #\R) 2)))
-                          'editor.toggle-read-only))
+                          'editor.toggle-read-only)
+                     (eq? (keymap-lookup
+                            (editor-options-keymap options)
+                            (list (make-key-stroke 'character (char->integer #\F) 2)))
+                          'editor.toggle-auto-fill))
           (error 'fundamental-editing-tests
                  "editing option scope or reconfiguration is incorrect")))
       (command-runtime-start!

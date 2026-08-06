@@ -631,6 +631,9 @@
       (lambda (text)
         (let* ([selection (context-selection context)]
                [range (selection-primary-range selection)]
+               [options
+                (configuration-fill-options
+                  (buffer-state-configuration (command-context-buffer-state context)))]
                [bounds (if (selection-range-empty? range)
                            (paragraph-bounds text (selection-range-head range))
                            (cons (selection-range-from range) (selection-range-to range)))]
@@ -640,7 +643,8 @@
           (if (null? words)
               (command-handled)
               (let* ([prefix (leading-whitespace value)]
-                     [replacement (string->utf8 (fill-words words prefix 80))]
+                     [replacement
+                      (string->utf8 (fill-words words prefix (fill-options-column options)))]
                      [change-set
                       (make-change-set
                         (text-size text) (list (make-text-change start end replacement)))]

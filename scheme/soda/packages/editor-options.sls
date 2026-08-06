@@ -80,6 +80,10 @@
     (configuration-indent-options
       (buffer-state-configuration (command-context-buffer-state context))))
 
+  (define (current-fill-options context)
+    (configuration-fill-options
+      (buffer-state-configuration (command-context-buffer-state context))))
+
   (define (reconfigure-indent context width insert-tabs? message)
     (reconfigure-buffer-option
       context
@@ -103,6 +107,30 @@
       (reconfigure-indent
         context width (indent-options-insert-tabs? options)
         (string-append "Indent width set to " (number->string width)))))
+
+  (define (reconfigure-fill context column auto-fill? message)
+    (reconfigure-buffer-option
+      context
+      (make-compartment-reconfigure-effect
+        fill-options-compartment
+        (make-fill-options-extension column auto-fill?))
+      message))
+
+  (define (toggle-auto-fill context)
+    (let* ([options (current-fill-options context)]
+           [enabled? (fill-options-auto-fill? options)])
+      (reconfigure-fill
+        context (fill-options-column options) (not enabled?)
+        (string-append "Auto-fill " (if enabled? "disabled" "enabled")))))
+
+  (define (set-fill-column context column)
+    (unless (and (integer? column) (exact? column) (> column 0))
+      (assertion-violation 'editor.set-fill-column
+                           "expected a positive fill column" column))
+    (let ([options (current-fill-options context)])
+      (reconfigure-fill
+        context column (fill-options-auto-fill? options)
+        (string-append "Fill column set to " (number->string column)))))
 
   (define (current-layout-options context)
     (configuration-facet
@@ -150,6 +178,13 @@
                              "expected a positive indentation width" value))
       width))
 
+  (define (parse-fill-column value)
+    (let ([column (and (string? value) (string->number value))])
+      (unless (and (integer? column) (exact? column) (> column 0))
+        (assertion-violation 'editor.set-fill-column
+                             "expected a positive fill column" value))
+      column))
+
   (define (make-tab-width-reader)
     (make-interactive-reader
       'tab-width
@@ -167,6 +202,15 @@
           (make-interaction-request 'indent-width "Indent width: " #f #f 'free)
           (lambda (value)
             (make-interactive-ready (list (parse-indent-width value))))))))
+
+  (define (make-fill-column-reader)
+    (make-interactive-reader
+      'fill-column
+      (lambda (context arguments)
+        (make-interactive-suspend
+          (make-interaction-request 'fill-column "Fill column: " #f #f 'free)
+          (lambda (value)
+            (make-interactive-ready (list (parse-fill-column value))))))))
 
   (define (install-command! runtime owner name documentation procedure . readers)
     (command-runtime-register-command!
@@ -203,6 +247,15 @@
         (lambda (context width) (set-indent-width context width))
         (list (make-indent-width-reader)))
       (install-command!
+        runtime owner 'editor.toggle-auto-fill
+        "Toggle automatic hard wrapping for the active Buffer."
+        (lambda (context) (toggle-auto-fill context)))
+      (install-command!
+        runtime owner 'editor.set-fill-column
+        "Set the automatic wrapping and paragraph fill column for the active Buffer."
+        (lambda (context column) (set-fill-column context column))
+        (list (make-fill-column-reader)))
+      (install-command!
         runtime owner 'editor.set-tab-width
         "Set the visual tab width for the active View."
         (lambda (context width) (set-tab-width context width))
@@ -211,6 +264,7 @@
       (keymap-bind! keymap (list (meta-stroke #\R)) 'editor.toggle-read-only)
       (keymap-bind! keymap (list (meta-stroke #\E)) 'editor.toggle-tab-to-spaces)
       (keymap-bind! keymap (list (meta-stroke #\T)) 'editor.set-indent-width)
+      (keymap-bind! keymap (list (meta-stroke #\F)) 'editor.toggle-auto-fill)
       (keymap-bind! keymap (list (meta-stroke #\$)) 'editor.toggle-soft-wrap)
       service))
 )
