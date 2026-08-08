@@ -2,6 +2,7 @@
   (export make-fundamental-editing!
           fundamental-editing?
           fundamental-editing-keymap
+          fundamental-editing-mode
           fundamental-input-context
           fundamental-input-disposition)
   (import (rnrs)
@@ -14,6 +15,7 @@
           (soda kernel viewport)
           (soda packages base text-motion)
           (soda packages base editing-options)
+          (soda packages buffer-ui)
           (soda host command)
           (soda host command-runtime)
           (soda host context)
@@ -33,6 +35,7 @@
   (define-record-type
     (fundamental-editing %make-fundamental-editing fundamental-editing?)
     (fields (immutable keymap fundamental-editing-keymap)
+            (immutable mode fundamental-editing-mode)
             (mutable kill-ring fundamental-editing-kill-ring
                      fundamental-editing-kill-ring-set!)))
 
@@ -1182,7 +1185,15 @@
     (unless (and (command-runtime? runtime) (owner? owner))
       (assertion-violation 'make-fundamental-editing! "expected a runtime and owner" runtime owner))
     (let* ([keymap (make-keymap 'fundamental)]
-           [editing (%make-fundamental-editing keymap '())])
+           [mode
+            (make-mode-spec
+              'fundamental-mode 'major "Fundamental" #f
+              (list
+                (make-buffer-input-layer-extension
+                  (list (make-input-layer 'major keymap #f 'accept))))
+              '(editing motion selection kill yank viewport interface)
+              "Fund")]
+           [editing (%make-fundamental-editing keymap mode '())])
       (command-runtime-register-effect-handler!
         runtime 'fundamental.record-kill owner 'fundamental-kill-ring
         (lambda (service invocation effect)

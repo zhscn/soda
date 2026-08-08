@@ -2719,6 +2719,66 @@
     (error 'kernel-tests "command exception was not captured as an editor condition"))
   (owner-close! package-owner))
 
+;; ModeSpec composes inherited major-mode extensions before ordered minor
+;; modes, and both mode sets can be replaced through Buffer transactions.
+(let* ([contributions
+        (make-facet 'mode-test-contributions 'buffer '()
+                    (lambda (values) (fold-left append '() values)) equal? equal?)]
+       [base
+        (make-mode-spec
+          'base-mode 'major "Base" #f
+          (list (make-facet-provider contributions '(base))) '(base) "Base")]
+       [derived
+        (make-mode-spec
+          'derived-mode 'major "Derived" base
+          (list (make-facet-provider contributions '(derived))) '(derived) "Derived")]
+       [alternate
+        (make-mode-spec
+          'alternate-mode 'major "Alternate" #f
+          (list (make-facet-provider contributions '(alternate))) '() "Alternate")]
+       [first-minor
+        (make-mode-spec
+          'first-minor 'minor "First minor" #f
+          (list (make-facet-provider contributions '(first-minor))) '() #f)]
+       [second-minor
+        (make-mode-spec
+          'second-minor 'minor "Second minor" #f
+          (list (make-facet-provider contributions '(second-minor))) '() #f)]
+       [configuration
+        (make-configuration
+          (make-buffer-modes-extension derived (list first-minor second-minor)))]
+       [changed
+        (configuration-apply-effects
+          configuration
+          (list (set-buffer-major-mode-effect alternate)
+                (set-buffer-minor-modes-effect (list second-minor)))
+          'buffer)])
+  (unless (and (eq? (configuration-facet configuration buffer-mode-facet 'buffer) derived)
+               (equal? (configuration-facet configuration buffer-minor-modes-facet 'buffer)
+                       (list first-minor second-minor))
+               (equal? (configuration-facet configuration contributions 'buffer)
+                       '(base derived first-minor second-minor))
+               (eq? (configuration-facet changed buffer-mode-facet 'buffer) alternate)
+               (equal? (configuration-facet changed buffer-minor-modes-facet 'buffer)
+                       (list second-minor))
+               (equal? (configuration-facet changed contributions 'buffer)
+                       '(alternate second-minor)))
+    (error 'kernel-tests "ModeSpec configuration composition is not deterministic")))
+
+(let* ([application (make-soda-application)]
+       [buffer (soda-application-buffer application)]
+       [configuration (buffer-state-configuration (buffer-state buffer))]
+       [mode (configuration-facet configuration buffer-mode-facet 'buffer)]
+       [layers (configuration-facet configuration buffer-input-layers-facet 'buffer)])
+  (unless (and (mode-spec? mode)
+               (eq? (mode-spec-id mode) 'fundamental-mode)
+               (= (length layers) 1)
+               (eq? (input-layer-kind (car layers)) 'major)
+               (eq? (input-layer-keymap (car layers))
+                    (fundamental-editing-keymap (soda-application-editing application))))
+    (error 'kernel-tests "fundamental-mode is not the Buffer major mode"))
+  (soda-application-close! application))
+
 ;; Frontend orchestration converts queued Surface input into a published
 ;; InputState and a command-runtime message, then redraws only after the
 ;; dispatcher reports a changed View or Surface.

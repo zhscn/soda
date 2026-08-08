@@ -1,13 +1,17 @@
 (library (soda packages buffer-ui)
-  (export make-mode-descriptor
-          mode-descriptor?
-          mode-descriptor-id
-          mode-descriptor-display-name
-          mode-descriptor-parent
-          mode-descriptor-extensions
-          mode-descriptor-command-categories
-          mode-descriptor-modeline-contribution
+  (export make-mode-spec
+          mode-spec?
+          mode-spec-id
+          mode-spec-kind
+          mode-spec-display-name
+          mode-spec-parent
+          mode-spec-extensions
+          mode-spec-command-categories
+          mode-spec-modeline-contribution
           buffer-mode-facet
+          buffer-minor-modes-facet
+          buffer-major-mode-compartment
+          buffer-minor-modes-compartment
           buffer-input-layers-facet
           buffer-edit-policies-facet
           buffer-read-only-facet
@@ -17,6 +21,9 @@
           buffer-item-ranges-facet
           buffer-update-listeners-facet
           make-buffer-mode-extension
+          make-buffer-modes-extension
+          set-buffer-major-mode-effect
+          set-buffer-minor-modes-effect
           make-buffer-input-layer-extension
           buffer-input-context
           make-buffer-display-profile-extension
@@ -94,6 +101,12 @@
 
   (define buffer-mode-facet
     (make-facet 'buffer-mode 'buffer #f first-value eq? eq?))
+  (define buffer-minor-modes-facet
+    (make-facet 'buffer-minor-modes 'buffer '() append-values equal? equal?))
+  (define buffer-major-mode-compartment
+    (make-compartment 'buffer-major-mode 'buffer))
+  (define buffer-minor-modes-compartment
+    (make-compartment 'buffer-minor-modes 'buffer))
   (define buffer-input-layers-facet
     (make-facet 'buffer-input-layers 'buffer '() append-values equal? equal?))
   (define buffer-edit-policies-facet
@@ -115,35 +128,66 @@
   (define buffer-update-listeners-facet update-listeners-facet)
 
   (define-record-type
-    (mode-descriptor %make-mode-descriptor mode-descriptor?)
-    (fields (immutable id mode-descriptor-id)
-            (immutable display-name mode-descriptor-display-name)
-            (immutable parent mode-descriptor-parent)
-            (immutable extensions mode-descriptor-extensions)
-            (immutable command-categories mode-descriptor-command-categories)
-            (immutable modeline-contribution mode-descriptor-modeline-contribution)))
+    (mode-spec %make-mode-spec mode-spec?)
+    (fields (immutable id mode-spec-id)
+            (immutable kind mode-spec-kind)
+            (immutable display-name mode-spec-display-name)
+            (immutable parent mode-spec-parent)
+            (immutable extensions mode-spec-extensions)
+            (immutable command-categories mode-spec-command-categories)
+            (immutable modeline-contribution mode-spec-modeline-contribution)))
 
-  (define (make-mode-descriptor id display-name parent extensions categories modeline)
-    (unless (and (symbol? id) (string? display-name)
-                 (or (not parent) (mode-descriptor? parent))
+  (define (make-mode-spec id kind display-name parent extensions categories modeline)
+    (unless (and (symbol? id) (memq kind '(major minor)) (string? display-name)
+                 (or (not parent)
+                     (and (mode-spec? parent) (eq? kind (mode-spec-kind parent))))
                  (list? extensions) (list? categories)
                  (for-all symbol? categories)
                  (or (not modeline) (procedure? modeline) (string? modeline)))
-      (assertion-violation 'make-mode-descriptor "invalid mode descriptor" id display-name))
-    (%make-mode-descriptor id display-name parent (list-copy extensions)
-                           (list-copy categories) modeline))
+      (assertion-violation 'make-mode-spec "invalid mode specification"
+                           id kind display-name))
+    (%make-mode-spec id kind display-name parent (list-copy extensions)
+                     (list-copy categories) modeline))
 
-  (define (mode-extension-list descriptor)
-    (append (if (mode-descriptor-parent descriptor)
-                (mode-extension-list (mode-descriptor-parent descriptor))
+  (define (mode-extension-list spec)
+    (append (if (mode-spec-parent spec)
+                (mode-extension-list (mode-spec-parent spec))
                 '())
-            (mode-descriptor-extensions descriptor)))
+            (mode-spec-extensions spec)))
 
-  (define (make-buffer-mode-extension descriptor)
-    (unless (mode-descriptor? descriptor)
-      (assertion-violation 'make-buffer-mode-extension "expected a ModeDescriptor" descriptor))
-    (append (list (make-facet-provider buffer-mode-facet descriptor))
-            (mode-extension-list descriptor)))
+  (define (make-buffer-mode-extension spec)
+    (unless (and (mode-spec? spec) (eq? (mode-spec-kind spec) 'major))
+      (assertion-violation 'make-buffer-mode-extension "expected a major ModeSpec" spec))
+    (append (list (make-facet-provider buffer-mode-facet spec))
+            (mode-extension-list spec)))
+
+  (define (make-buffer-minor-modes-extension specs)
+    (unless (and (list? specs)
+                 (for-all (lambda (spec)
+                            (and (mode-spec? spec) (eq? (mode-spec-kind spec) 'minor)))
+                          specs))
+      (assertion-violation 'make-buffer-minor-modes-extension
+                           "expected minor ModeSpec values" specs))
+    (append
+      (list (make-facet-provider buffer-minor-modes-facet (list-copy specs)))
+      (map mode-extension-list specs)))
+
+  (define (make-buffer-modes-extension major minor-modes)
+    (unless (and (mode-spec? major) (eq? (mode-spec-kind major) 'major))
+      (assertion-violation 'make-buffer-modes-extension "expected a major ModeSpec" major))
+    (list
+      (compartment-of buffer-major-mode-compartment
+                      (make-buffer-mode-extension major))
+      (compartment-of buffer-minor-modes-compartment
+                      (make-buffer-minor-modes-extension minor-modes))))
+
+  (define (set-buffer-major-mode-effect spec)
+    (make-compartment-reconfigure-effect
+      buffer-major-mode-compartment (make-buffer-mode-extension spec)))
+
+  (define (set-buffer-minor-modes-effect specs)
+    (make-compartment-reconfigure-effect
+      buffer-minor-modes-compartment (make-buffer-minor-modes-extension specs)))
 
   (define (make-buffer-input-layer-extension layers)
     (unless (and (list? layers) (for-all input-layer? layers))

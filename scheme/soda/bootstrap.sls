@@ -100,7 +100,14 @@
                  (lambda () (when (owner-active? owner) (owner-close! owner)))
                  (lambda () (host-state-close! state)))))
            (raise condition)])
-        (let* ([configuration (make-configuration (buffer-item-field-extension))]
+        (let* ([editing
+                (make-fundamental-editing!
+                  (host-state-command-runtime state) owner)]
+               [configuration
+                (make-configuration
+                  (list (buffer-item-field-extension)
+                        (make-buffer-modes-extension
+                          (fundamental-editing-mode editing) '())))]
                [next-document (make-document "")]
                [_document (set! document next-document)]
                [buffer
@@ -115,9 +122,6 @@
                   'terminal '(kitty color-256 osc52)
                   (make-leaf-window (view-id view) '(0 0 80 24))
                   '(80 . 24))]
-               [editing
-                (make-fundamental-editing!
-                  (host-state-command-runtime state) owner)]
                [options
                 (make-editor-options-service!
                   (host-state-command-runtime state) owner)]
@@ -308,11 +312,7 @@
               (make-input-layer
                 'application
                 (soda-application-default-keymap application)
-                #f 'pass)
-              (make-input-layer
-                'fundamental
-                (fundamental-editing-keymap (soda-application-editing application))
-                #f 'accept))))))
+                #f 'pass))))))
 
   (define (make-disposition-handler application)
     (lambda (context disposition)
