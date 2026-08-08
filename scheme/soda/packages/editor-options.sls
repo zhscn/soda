@@ -6,6 +6,7 @@
           (soda kernel change)
           (soda kernel document)
           (soda kernel extension)
+          (soda kernel option)
           (soda kernel state)
           (soda kernel view-state)
           (soda packages base editing-options)
@@ -46,10 +47,7 @@
     (let* ([configuration
             (buffer-state-configuration (command-context-buffer-state context))]
            [enabled? (auto-indent-enabled? configuration)]
-           [effect
-            (make-compartment-reconfigure-effect
-              auto-indent-compartment
-              (make-auto-indent-extension (not enabled?)))])
+           [effect (set-buffer-local-option-effect auto-indent-option (not enabled?))])
       (reconfigure-buffer-option
         context effect
         (string-append "Auto-indent " (if enabled? "disabled" "enabled")))))
@@ -87,9 +85,8 @@
   (define (reconfigure-indent context width insert-tabs? message)
     (reconfigure-buffer-option
       context
-      (make-compartment-reconfigure-effect
-        indent-options-compartment
-        (make-indent-options-extension width insert-tabs?))
+      (set-buffer-local-option-effect
+        indent-options-option (make-indent-options width insert-tabs?))
       message))
 
   (define (toggle-tab-to-spaces context)
@@ -111,9 +108,8 @@
   (define (reconfigure-fill context column auto-fill? message)
     (reconfigure-buffer-option
       context
-      (make-compartment-reconfigure-effect
-        fill-options-compartment
-        (make-fill-options-extension column auto-fill?))
+      (set-buffer-local-option-effect
+        fill-options-option (make-fill-options column auto-fill?))
       message))
 
   (define (toggle-auto-fill context)

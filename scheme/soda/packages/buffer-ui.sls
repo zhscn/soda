@@ -14,6 +14,7 @@
           buffer-minor-modes-compartment
           buffer-input-layers-facet
           buffer-edit-policies-facet
+          buffer-read-only-option
           buffer-read-only-facet
           buffer-read-only-compartment
           buffer-read-only?
@@ -81,6 +82,7 @@
           (soda kernel change)
           (soda kernel document)
           (soda kernel extension)
+          (soda kernel option)
           (soda kernel range-set)
           (soda kernel selection)
           (soda kernel state)
@@ -117,10 +119,13 @@
   ;; Generated packages can install their own policy independently, so turning
   ;; this user-facing option off never grants write access to a Dired/result
   ;; Buffer.
-  (define buffer-read-only-facet
-    (make-facet 'buffer-read-only 'buffer #f first-value eq? eq?))
+  (define buffer-read-only-option
+    (make-option-spec
+      'buffer-read-only #f boolean? eq?
+      "Whether ordinary editing commands may change the Buffer."))
+  (define buffer-read-only-facet (option-spec-facet buffer-read-only-option))
   (define buffer-read-only-compartment
-    (make-compartment 'buffer-read-only 'buffer))
+    (option-spec-compartment buffer-read-only-option))
   (define buffer-display-profile-facet
     (make-facet 'buffer-display-profile 'buffer '() append-values equal? equal?))
   (define buffer-item-ranges-facet
@@ -230,7 +235,7 @@
     (make-facet-provider buffer-display-profile-facet (list-copy contributions)))
 
   (define (buffer-read-only? configuration)
-    (configuration-facet configuration buffer-read-only-facet 'buffer))
+    (option-ref configuration buffer-read-only-option))
 
   ;; Edit authority is an owner-scoped capability carried in an annotation.
   ;; It lets a producer refresh a protected/generated Buffer without granting
@@ -301,7 +306,7 @@
       (assertion-violation 'make-buffer-read-only-extension
                            "expected a read-only boolean" enabled?))
     (append
-      (list (make-facet-provider buffer-read-only-facet enabled?))
+      (list (make-buffer-local-option-extension buffer-read-only-option enabled?))
       (if enabled?
           (make-buffer-edit-policy-extension (make-buffer-edit-policy 'reject))
           '())))

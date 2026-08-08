@@ -1,8 +1,10 @@
 (library (soda packages base editing-options)
-  (export auto-indent-facet
+  (export auto-indent-option
+          auto-indent-facet
           auto-indent-compartment
           auto-indent-enabled?
           make-auto-indent-extension
+          indent-options-option
           indent-options?
           make-indent-options
           indent-options-width
@@ -12,6 +14,7 @@
           indent-options-compartment
           configuration-indent-options
           make-indent-options-extension
+          fill-options-option
           fill-options?
           make-fill-options
           fill-options-column
@@ -25,29 +28,27 @@
           make-layout-options-extension)
   (import (rnrs)
           (soda kernel extension)
+          (soda kernel option)
           (soda view text-layout))
 
   ;; Options remain ordinary configuration contributions.  These stable
   ;; compartments let a command, mode, or user configuration replace just one
   ;; option group without owning a mutable global settings table.
-  (define (first-option values default)
-    (if (null? values) default (car values)))
-
-  (define auto-indent-facet
-    (make-facet 'auto-indent 'buffer #t
-                (lambda (values) (first-option values #t))
-                eq? eq?))
-
-  (define auto-indent-compartment (make-compartment 'auto-indent 'buffer))
+  (define auto-indent-option
+    (make-option-spec
+      'auto-indent #t boolean? eq?
+      "Whether newline commands preserve leading indentation."))
+  (define auto-indent-facet (option-spec-facet auto-indent-option))
+  (define auto-indent-compartment (option-spec-compartment auto-indent-option))
 
   (define (make-auto-indent-extension enabled?)
     (unless (boolean? enabled?)
       (assertion-violation 'make-auto-indent-extension
                            "expected an auto-indent boolean" enabled?))
-    (make-facet-provider auto-indent-facet enabled?))
+    (make-buffer-local-option-extension auto-indent-option enabled?))
 
   (define (auto-indent-enabled? configuration)
-    (configuration-facet configuration auto-indent-facet 'buffer))
+    (option-ref configuration auto-indent-option))
 
   ;; Indent insertion is a Buffer policy because it changes Document text.
   ;; Its width is intentionally separate from View-local tab rendering: two
@@ -67,19 +68,19 @@
 
   (define default-indent-options (make-indent-options 4 #t))
 
-  (define indent-options-facet
-    (make-facet 'indent-options 'buffer default-indent-options
-                (lambda (values) (first-option values default-indent-options))
-                eq? eq?))
-
-  (define indent-options-compartment (make-compartment 'indent-options 'buffer))
+  (define indent-options-option
+    (make-option-spec
+      'indent-options default-indent-options indent-options? eq?
+      "Indentation width and tab insertion policy for the Buffer."))
+  (define indent-options-facet (option-spec-facet indent-options-option))
+  (define indent-options-compartment (option-spec-compartment indent-options-option))
 
   (define (configuration-indent-options configuration)
-    (configuration-facet configuration indent-options-facet 'buffer))
+    (option-ref configuration indent-options-option))
 
   (define (make-indent-options-extension width insert-tabs?)
-    (make-facet-provider
-      indent-options-facet (make-indent-options width insert-tabs?)))
+    (make-buffer-local-option-extension
+      indent-options-option (make-indent-options width insert-tabs?)))
 
   ;; Paragraph fill and automatic hard wrap share one Buffer-local text
   ;; policy.  It describes source text rather than terminal geometry, so two
@@ -100,18 +101,19 @@
 
   (define default-fill-options (make-fill-options 80 #f))
 
-  (define fill-options-facet
-    (make-facet 'fill-options 'buffer default-fill-options
-                (lambda (values) (first-option values default-fill-options))
-                eq? eq?))
-
-  (define fill-options-compartment (make-compartment 'fill-options 'buffer))
+  (define fill-options-option
+    (make-option-spec
+      'fill-options default-fill-options fill-options? eq?
+      "Paragraph fill column and automatic hard-wrapping policy."))
+  (define fill-options-facet (option-spec-facet fill-options-option))
+  (define fill-options-compartment (option-spec-compartment fill-options-option))
 
   (define (configuration-fill-options configuration)
-    (configuration-facet configuration fill-options-facet 'buffer))
+    (option-ref configuration fill-options-option))
 
   (define (make-fill-options-extension column auto-fill?)
-    (make-facet-provider fill-options-facet (make-fill-options column auto-fill?)))
+    (make-buffer-local-option-extension
+      fill-options-option (make-fill-options column auto-fill?)))
 
   (define layout-options-compartment
     (make-compartment 'text-layout-options 'view))

@@ -7,6 +7,7 @@
               mkdir)
         (soda kernel change)
         (soda kernel extension)
+        (soda kernel option)
         (soda kernel range-set)
         (soda kernel selection)
         (soda kernel state)
@@ -2718,6 +2719,38 @@
                   (+ before 1)))
     (error 'kernel-tests "command exception was not captured as an editor condition"))
   (owner-close! package-owner))
+
+;; OptionSpec resolves defaults, mode contributions, and explicit Buffer-local
+;; overrides by precedence. Clearing the local compartment reveals the mode
+;; default without rebuilding the rest of the Configuration.
+(let* ([positive-option
+        (make-option-spec
+          'test-width 4
+          (lambda (value) (and (integer? value) (exact? value) (> value 0)))
+          = "Positive test width.")]
+       [configuration
+        (make-configuration
+          (list
+            (make-option-default-extension positive-option 8)
+            (compartment-of
+              (option-spec-compartment positive-option)
+              (make-buffer-local-option-extension positive-option 2))))]
+       [cleared
+        (configuration-apply-effects
+          configuration (list (clear-buffer-local-option-effect positive-option)) 'buffer)]
+       [overridden
+        (configuration-apply-effects
+          cleared (list (set-buffer-local-option-effect positive-option 6)) 'buffer)]
+       [invalid-rejected?
+        (guard (condition [else #t])
+          (make-buffer-local-option-extension positive-option 0)
+          #f)])
+  (unless (and (= (option-ref (make-configuration '()) positive-option) 4)
+               (= (option-ref configuration positive-option) 2)
+               (= (option-ref cleared positive-option) 8)
+               (= (option-ref overridden positive-option) 6)
+               invalid-rejected?)
+    (error 'kernel-tests "Buffer-local OptionSpec precedence or validation failed")))
 
 ;; ModeSpec composes inherited major-mode extensions before ordered minor
 ;; modes, and both mode sets can be replaced through Buffer transactions.
