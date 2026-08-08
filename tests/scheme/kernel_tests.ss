@@ -2728,6 +2728,9 @@
        [key (make-key-stroke 'character (char->integer #\f) 4)]
        [observed #f]
        [renders 0]
+       [presented-theme #f]
+       [alternate-theme
+        (make-theme '() (make-face-style 2 #f '()))]
        [definition
         (make-command-definition
           'command.frontend-test
@@ -2753,7 +2756,9 @@
               (list (make-input-layer 'frontend keymap #f 'ignore))
               (view-state-input-state (view-state active-view))))
           (lambda (context disposition) #f)
-          (lambda (render theme) (set! renders (+ renders 1)))
+          (lambda (render theme)
+            (set! renders (+ renders 1))
+            (set! presented-theme theme))
           (make-render-service)
           default-theme)]
        [event
@@ -2766,6 +2771,8 @@
   (frontend-step! frontend)
   (frontend-resize! frontend '(60 . 20))
   (frontend-step! frontend)
+  (frontend-set-theme! frontend alternate-theme)
+  (frontend-render! frontend)
   (unless (and observed
                (let ([context (car observed)])
                  (and (= (command-context-surface-id context) (surface-id surface))
@@ -2775,6 +2782,7 @@
                       (key-event? (command-context-event context))))
                (eq? (cdr observed) 'frontend)
                (equal? (surface-size surface) '(60 . 20))
+               (eq? presented-theme alternate-theme)
                (>= renders 3))
     (error 'kernel-tests "frontend orchestration did not route input and rendering"))
   (frontend-close! frontend)

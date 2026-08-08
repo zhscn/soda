@@ -11,26 +11,25 @@
           frontend-render!
           frontend-step!
           frontend-resize!
+          frontend-set-theme!
           frontend-close!)
   (import (rnrs)
           (soda kernel state)
           (soda kernel view-state)
-          (soda host command)
           (soda host command-runtime)
-          (soda host condition)
+          (soda host buffer)
+          (soda host context)
           (soda host dispatch)
+          (soda host frontend)
           (soda host input)
           (soda host input-event)
           (soda host operation)
           (soda host render)
           (soda host render-service)
-          (soda host internal buffer)
-          (soda host internal context)
-          (soda host internal state)
-          (soda host internal surface)
-          (soda host internal view)
-          (soda host runtime)
+          (soda host state)
+          (soda host surface)
           (soda host value)
+          (soda host view)
           (soda view theme))
 
   ;; Frontend owns the control-flow boundary between a Surface's normalized
@@ -45,7 +44,7 @@
       (immutable handle-disposition frontend-handle-disposition)
       (immutable present! frontend-present!)
       (immutable render-service frontend-render-service)
-      (immutable theme frontend-theme)
+      (mutable theme frontend-theme frontend-theme-set!)
       (mutable dirty? frontend-dirty? frontend-dirty?-set!)
       (mutable update-registration frontend-update-registration
                                    frontend-update-registration-set!)
@@ -60,9 +59,7 @@
       (assertion-violation who "frontend is closed" value)))
 
   (define (registered-surface? state surface)
-    (eq? surface
-         (surface-service-ref
-           (host-state-surfaces state) (surface-id surface) #f)))
+    (host-frontend-surface-registered? state surface))
 
   (define (make-frontend state surface resolve-input-context handle-disposition
                          present! render-service theme)
@@ -74,33 +71,26 @@
                  (render-service? render-service)
                  (theme? theme))
       (assertion-violation 'make-frontend "invalid frontend dependencies"))
-    (let* ([dispatcher (host-state-dispatch state)]
-           [owner (host-state-owner state)]
-           [value
+    (let ([value
             (%make-frontend state surface resolve-input-context handle-disposition
                             present! render-service theme #t #f #f #f)])
       (frontend-update-registration-set!
         value
-        (dispatcher-add-listener!
-          dispatcher owner (lambda (update) (frontend-dirty?-set! value #t))))
+        (host-frontend-add-update-listener!
+          state (lambda (update) (frontend-dirty?-set! value #t))))
       (frontend-host-update-registration-set!
         value
-        (dispatcher-add-host-listener!
-          dispatcher owner (lambda (update) (frontend-dirty?-set! value #t))))
+        (host-frontend-add-host-listener!
+          state (lambda (update) (frontend-dirty?-set! value #t))))
       value))
 
   (define (frontend-enqueue! value message)
     (require-open 'frontend-enqueue! value)
-    (runtime-enqueue! (host-state-runtime (frontend-host-state value)) message))
+    (host-frontend-enqueue! (frontend-host-state value) message))
 
   (define (active-view value)
-    (let* ([state (frontend-host-state value)]
-           [surface (frontend-surface value)]
-           [context (surface-active-context surface (host-state-views state))]
-           [view (and context
-                      (view-service-ref
-                        (host-state-views state) (active-context-view-id context) #f))])
-      (and context view (cons context view))))
+    (host-frontend-active-view
+      (frontend-host-state value) (frontend-surface value)))
 
   (define (validate-input-context! context active view)
     (unless (and (input-context? context)
@@ -143,27 +133,9 @@
                         (find (cdr rendered)))))))))
 
   (define (make-active-command-context value active view event sequence prefix-argument)
-    (let* ([state (frontend-host-state value)]
-           [current-view
-            (or (view-service-ref
-                  (host-state-views state) (active-context-view-id active) #f)
-                (assertion-violation 'frontend-dispatch-input!
-                                     "active View closed during input dispatch" active))]
-           [buffer (view-buffer current-view)])
-      (make-command-context
-        #f
-        (active-context-surface-id active)
-        (active-context-window-id active)
-        (view-id current-view)
-        (buffer-id buffer)
-        (buffer-state buffer)
-        (view-state current-view)
-        event
-        sequence
-        prefix-argument
-        active
-        'tui-frontend
-        (active-command-layout value active current-view))))
+    (host-frontend-make-command-context
+      (frontend-host-state value) active event sequence prefix-argument
+      'tui-frontend (active-command-layout value active view)))
 
   (define (enqueue-disposition-result! value result)
     (when result
@@ -183,9 +155,10 @@
     ;; Surface messages are echo-area feedback.  The next user input clears a
     ;; previous message before dispatching its command, while a command that
     ;; emits a new message publishes it again at the same boundary.
-    (when (surface-status-message (frontend-surface value))
-      (dispatcher-dispatch-host!
-        (host-state-dispatch (frontend-host-state value))
+    (when (host-frontend-surface-message
+            (frontend-host-state value) (frontend-surface value))
+      (host-frontend-dispatch-host!
+        (frontend-host-state value)
         (make-set-surface-message-operation
           (surface-id (frontend-surface value)) #f)))
     (let ([current (active-view value)])
@@ -201,8 +174,8 @@
              ;; snapshot is made. The command therefore observes the reset
              ;; prefix/session state that the next event will observe too.
              (unless (eq? next-input (view-state-input-state (view-state view)))
-               (dispatcher-dispatch-view!
-                 (host-state-dispatch (frontend-host-state value))
+               (host-frontend-dispatch-view!
+                 (frontend-host-state value)
                  (make-view-transaction-spec
                    (view-id view) (view-state-generation (view-state view))
                    #f #f next-input '() '() #f)))
@@ -246,12 +219,8 @@
     (guard
       (condition
         [else
-         (condition-service-capture
-           (host-state-conditions (frontend-host-state value))
-           (host-state-owner (frontend-host-state value))
-           (list 'tui-frontend message condition)
-           (lambda arguments #f)
-           '(dismiss))
+         (host-frontend-capture-condition!
+           (frontend-host-state value) (list 'tui-frontend message condition))
          #t])
       (frontend-handle-message! value message)))
 
@@ -262,62 +231,26 @@
       [(value limit)
        (require-open 'frontend-drain! value)
        (if limit
-           (host-state-run!
+           (host-frontend-run!
              (frontend-host-state value)
              (lambda (message) (frontend-handle-queued-message! value message))
              limit)
-           (host-state-run!
+           (host-frontend-run!
              (frontend-host-state value)
              (lambda (message) (frontend-handle-queued-message! value message))))]))
-
-  (define (add-render-occurrence groups id occurrence)
-    (let loop ([remaining groups])
-      (cond [(null? remaining) (list (cons id (list occurrence)))]
-            [(= id (caar remaining))
-             (cons (cons id (cons occurrence (cdar remaining))) (cdr remaining))]
-            [else (cons (car remaining) (loop (cdr remaining)))])))
 
   (define (frontend-render! value)
     (require-open 'frontend-render! value)
     (if (not (frontend-dirty? value))
         #f
         (let ([render
-               (render-service-render!
-                 (frontend-render-service value)
-                 (frontend-surface value)
-                 (host-state-views (frontend-host-state value)))])
+               (host-frontend-render!
+                 (frontend-host-state value) (frontend-render-service value)
+                 (frontend-surface value))])
           ((frontend-present! value) render (frontend-theme value))
-          (let loop ([rendered (surface-render-rendered-views render)] [groups '()])
-            (if (null? rendered)
-                (for-each
-                  (lambda (group)
-                    (frontend-enqueue!
-                      value
-                      (lambda ()
-                        (when (view-service-publish-occurrences!
-                                (host-state-views (frontend-host-state value))
-                                (car group) (reverse (cdr group)))
-                          (frontend-dirty?-set! value #t)))))
-                  groups)
-                (let ([item (car rendered)])
-                  (loop (cdr rendered)
-                        (add-render-occurrence groups (rendered-view-view-id item)
-                                        (rendered-view-occurrence item))))))
-          (for-each
-            (lambda (rendered)
-              (for-each
-                (lambda (failure)
-                  (frontend-enqueue!
-                    value
-                    (lambda ()
-                      (when (view-service-retire-projection-failure!
-                              (host-state-views (frontend-host-state value))
-                              (rendered-view-view-id rendered)
-                              (rendered-view-projection-generation rendered)
-                              (car failure) (cadr failure))
-                        (frontend-dirty?-set! value #t)))))
-                (rendered-view-transform-failures rendered)))
-            (surface-render-rendered-views render))
+          (host-frontend-publish-render-feedback!
+            (frontend-host-state value) render
+            (lambda () (frontend-dirty?-set! value #t)))
           (frontend-dirty?-set! value #f)
           render)))
 
@@ -332,9 +265,18 @@
 
   (define (frontend-resize! value size)
     (require-open 'frontend-resize! value)
-    (dispatcher-dispatch-host!
-      (host-state-dispatch (frontend-host-state value))
+    (host-frontend-dispatch-host!
+      (frontend-host-state value)
       (make-resize-surface-operation (surface-id (frontend-surface value)) size)))
+
+  (define (frontend-set-theme! value theme)
+    (require-open 'frontend-set-theme! value)
+    (unless (theme? theme)
+      (assertion-violation 'frontend-set-theme! "expected a Theme" theme))
+    (unless (eq? theme (frontend-theme value))
+      (frontend-theme-set! value theme)
+      (frontend-dirty?-set! value #t))
+    theme)
 
   (define (frontend-close! value)
     (unless (frontend? value)
