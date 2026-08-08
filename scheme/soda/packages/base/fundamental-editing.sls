@@ -2,7 +2,7 @@
   (export make-fundamental-editing!
           fundamental-editing?
           fundamental-editing-keymap
-          fundamental-editing-mode
+          fundamental-mode
           fundamental-input-context
           fundamental-input-disposition)
   (import (rnrs)
@@ -35,7 +35,7 @@
   (define-record-type
     (fundamental-editing %make-fundamental-editing fundamental-editing?)
     (fields (immutable keymap fundamental-editing-keymap)
-            (immutable mode fundamental-editing-mode)
+            (immutable mode fundamental-mode)
             (mutable kill-ring fundamental-editing-kill-ring
                      fundamental-editing-kill-ring-set!)))
 

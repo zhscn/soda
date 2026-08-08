@@ -107,7 +107,7 @@
                 (make-configuration
                   (list (buffer-item-field-extension)
                         (make-buffer-modes-extension
-                          (fundamental-editing-mode editing) '())))]
+                          (fundamental-mode editing) '())))]
                [next-document (make-document "")]
                [_document (set! document next-document)]
                [buffer
