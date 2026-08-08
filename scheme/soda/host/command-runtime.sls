@@ -1,7 +1,11 @@
 (library (soda host command-runtime)
   (export make-command-runtime
           command-runtime?
+          define-command
           command-runtime-register-command!
+          command-runtime-command-definition
+          command-runtime-command-names
+          command-runtime-command-definitions
           command-runtime-command-interactive?
           command-runtime-start!
           command-runtime-start-interactive!
@@ -76,6 +80,48 @@
                            "expected a command runtime and definition"
                            service definition))
     (command-register! (command-runtime-registry service) definition))
+
+  ;; Command declarations expand to an owner-scoped registry operation.  The
+  ;; interactive clause is explicit so ordinary command bodies remain
+  ;; unrestricted Scheme expressions.
+  (define-syntax define-command
+    (syntax-rules (interactive)
+      [(_ runtime owner name (context . arguments) documentation class
+          (interactive interaction-spec) body ...)
+       (command-runtime-register-command!
+         runtime
+         (make-command-definition
+           name (lambda (context . arguments) body ...) owner
+           documentation class interaction-spec))]
+      [(_ runtime owner name (context . arguments) documentation class body ...)
+       (command-runtime-register-command!
+         runtime
+         (make-command-definition
+           name (lambda (context . arguments) body ...) owner
+           documentation class #f))]))
+
+  (define command-runtime-command-definition
+    (case-lambda
+      [(service name)
+       (command-runtime-command-definition service name #f)]
+      [(service name default)
+       (unless (and (command-runtime? service) (symbol? name))
+         (assertion-violation 'command-runtime-command-definition
+                              "expected a command runtime and name" service name))
+       (command-lookup (command-runtime-registry service) name default)]))
+
+  (define (command-runtime-command-names service)
+    (unless (command-runtime? service)
+      (assertion-violation 'command-runtime-command-names
+                           "expected a command runtime" service))
+    (list-sort
+      (lambda (left right)
+        (string<? (symbol->string left) (symbol->string right)))
+      (command-names (command-runtime-registry service))))
+
+  (define (command-runtime-command-definitions service)
+    (map (lambda (name) (command-runtime-command-definition service name))
+         (command-runtime-command-names service)))
 
   (define-record-type
     (runtime-advice %make-runtime-advice runtime-advice?)
@@ -379,8 +425,7 @@
     (unless (command-runtime? service)
       (assertion-violation 'command-runtime-command-interactive?
                            "expected a command runtime" service))
-    (interactive-plan?
-      (command-definition-interaction-spec (lookup-definition service name))))
+    (command-definition-interactive? (lookup-definition service name)))
 
   (define (start! service name context interactive? arguments)
     (unless (and (command-runtime? service) (command-context? context) (list? arguments))

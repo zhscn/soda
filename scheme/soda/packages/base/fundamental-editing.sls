@@ -1169,12 +1169,8 @@
   (define-syntax install-command!
     (syntax-rules ()
       [(_ runtime owner name (context . arguments) documentation class body ...)
-       (command-runtime-register-command!
-         runtime
-         (make-command-definition
-           name
-           (lambda (context . arguments) body ...)
-           owner documentation class #f))]))
+       (define-command
+         runtime owner name (context . arguments) documentation class body ...)]))
 
   (define-syntax bind-keys!
     (syntax-rules ()
@@ -1262,13 +1258,11 @@
         runtime owner 'fundamental.end-of-buffer (context)
         "Move every selection to the end of the Buffer." 'motion
         (move-buffer-boundary context #t))
-      (command-runtime-register-command!
-        runtime
-        (make-command-definition
-          'fundamental.goto-line
-          (lambda (context line column) (goto-line-column context line column))
-          owner "Move every selection to one-based LINE and optional COLUMN." 'motion
-          (make-interactive-plan (list (make-goto-reader)))))
+      (define-command
+        runtime owner 'fundamental.goto-line (context line column)
+        "Move every selection to one-based LINE and optional COLUMN." 'motion
+        (interactive (make-interactive-plan (list (make-goto-reader))))
+        (goto-line-column context line column))
       (install-command!
         runtime owner 'fundamental.indent-lines (context)
         "Indent each logical line selected by the active regions." 'editing

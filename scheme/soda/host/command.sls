@@ -6,6 +6,7 @@
           command-definition-documentation
           command-definition-class
           command-definition-interaction-spec
+          command-definition-interactive?
           command-definition-owner
           make-command-registry
           command-registry?
@@ -105,6 +106,12 @@
                               name invoke documentation class))
        (%make-command-definition
          name invoke documentation class interaction-spec owner)]))
+
+  (define (command-definition-interactive? definition)
+    (unless (command-definition? definition)
+      (assertion-violation 'command-definition-interactive?
+                           "expected a command definition" definition))
+    (interactive-plan? (command-definition-interaction-spec definition)))
 
   (define-record-type
     (command-registry %make-command-registry command-registry?)

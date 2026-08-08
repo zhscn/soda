@@ -9,6 +9,7 @@
 | owner-scoped Buffer close listener | 已实现 |
 | canonical BufferKey 与 open-or-reuse registry | 已实现 |
 | 标准 mode、input、edit policy 与 display Facet | 已实现 |
+| ModeSpec、major/minor mode 组合与 Buffer-local OptionSpec | 已实现 |
 | BufferAttachment 生命周期与 close query | 部分实现 |
 | generated projection、semantic item 与 action registry | 部分实现 |
 | identity-preserving refresh 与多 View 位置恢复 | 部分实现 |
@@ -162,10 +163,11 @@ buffer-update-listeners  post-publication observers
 Facet output 是由 configuration 派生的只读结果。命令和 presenter 查询 Facet，不根据
 buffer name、package type 或 major mode symbol 分支。
 
-编辑选项使用与 mode 相同的声明式边界。自动缩进是 Buffer scope `auto-indent` Facet，因而
-新建的 file Buffer 可以继承来源 Buffer 的行为；soft wrap 与 tab width 是 View scope
-`text-layout-options` Facet，同一 Buffer 的不同 View 可以采用不同布局。选项的交互命令只
-提交对应 Compartment 的重配置 effect，不维护平行的全局可变设置表。
+Buffer-local 编辑选项由 `OptionSpec` 声明名称、默认值、validator、比较器、文档、Facet 和
+独立 Compartment。mode 使用低优先级 provider 提供默认值，显式 Buffer-local override 使用
+最高优先级 provider；清除 override 后重新显露当前 mode 默认值。自动缩进、缩进宽度、tab
+插入、段落填充和 read-only 描述值使用这一合同。soft wrap 与 tab width 是 View scope
+`text-layout-options` Facet，同一 Buffer 的不同 View可以采用不同布局。
 
 ### Compartment
 
@@ -185,11 +187,12 @@ Facet 重算和 ViewPlugin reconciliation 在同一 publication boundary 发生�
 
 ## Mode 与输入贡献
 
-`ModeDescriptor` 是 package 声明的数据：
+`ModeSpec` 是 package 声明的不可变数据：
 
 ```text
-ModeDescriptor {
+ModeSpec {
   id,
+  kind: major | minor,
   display_name,
   parent?,
   extensions,
@@ -198,11 +201,13 @@ ModeDescriptor {
 }
 ```
 
-major mode compartment 至多包含一个 descriptor。minor mode 是独立、可组合的 extension
-compartment，不写入 Buffer 固定字段。派生 mode 组合 parent extension，不依赖运行时
+major mode compartment 包含一个 major ModeSpec；minor mode compartment 包含有序的 minor
+ModeSpec 集合，不写入 Buffer 固定字段。派生 mode 先组合 parent extension，再组合自己的
+extension。major/minor mode 可在同一 configuration transaction 中替换，不依赖运行时
 `derived-mode-p` 式全局变量查询。
 
-mode 通过 `buffer-input-layers` 提供 keymap。frontend 的 input resolver 按 transient layer、
+mode 通过 `buffer-input-layers` 提供 keymap。`fundamental-mode` 使用同一 ModeSpec 合同提供
+基础编辑 keymap 和 text policy。frontend 的 input resolver 按 transient layer、
 View layer、Buffer mode/minor-mode layer和全局 layer 组合输入上下文。命令仍通过统一
 CommandRuntime 执行。
 

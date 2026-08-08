@@ -9,7 +9,7 @@
 | command runtime、input resolver、condition boundary 与 host queue | 已实现 |
 | View projection、Frame、compositor 与 terminal presenter | 部分实现 |
 | 标准编辑、file、history、interaction 与 minibuffer package | 部分实现 |
-| Buffer-local mode、generated UI 与高级功能 package | 未实现 |
+| Buffer-local mode 与 option 机制、generated UI 与高级功能 package | 部分实现 |
 
 ## 定位
 

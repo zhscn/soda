@@ -2720,6 +2720,47 @@
     (error 'kernel-tests "command exception was not captured as an editor condition"))
   (owner-close! package-owner))
 
+;; define-command publishes complete metadata through runtime-owned
+;; introspection without exposing the mutable CommandRegistry.
+(let* ([command-owner (make-owner 'command-introspection-test)]
+       [runtime (host-state-command-runtime host)]
+       [registration
+        (define-command
+          runtime command-owner 'command.introspection-test (context value)
+          "Inspect this command." 'inspection
+          (interactive
+            (make-interactive-plan
+              (list
+                (make-interactive-reader
+                  'value
+                  (lambda (context arguments)
+                    (make-interactive-ready (list 'ready)))))))
+          (if (eq? value 'ready) (command-handled) (command-handled)))]
+       [definition
+        (command-runtime-command-definition runtime 'command.introspection-test)]
+       [names (command-runtime-command-names runtime)]
+       [definitions (command-runtime-command-definitions runtime)])
+  (define (sorted-symbols? values)
+    (or (null? values) (null? (cdr values))
+        (and (string<? (symbol->string (car values))
+                       (symbol->string (cadr values)))
+             (sorted-symbols? (cdr values)))))
+  (unless (and (registration? registration)
+               (command-definition? definition)
+               (string=? (command-definition-documentation definition)
+                         "Inspect this command.")
+               (eq? (command-definition-class definition) 'inspection)
+               (eq? (command-definition-owner definition) command-owner)
+               (command-definition-interactive? definition)
+               (memq 'command.introspection-test names)
+               (memq definition definitions)
+               (sorted-symbols? names))
+    (error 'kernel-tests "define-command metadata is not introspectable"))
+  (owner-close! command-owner)
+  (unless (not (command-runtime-command-definition
+                 runtime 'command.introspection-test #f))
+    (error 'kernel-tests "owner cleanup did not retire the declared command")))
+
 ;; OptionSpec resolves defaults, mode contributions, and explicit Buffer-local
 ;; overrides by precedence. Clearing the local compartment reveals the mode
 ;; default without rebuilding the rest of the Configuration.
@@ -2799,17 +2840,45 @@
     (error 'kernel-tests "ModeSpec configuration composition is not deterministic")))
 
 (let* ([application (make-soda-application)]
+       [state (soda-application-state application)]
        [buffer (soda-application-buffer application)]
+       [view (soda-application-view application)]
+       [secondary-owner (make-owner 'mode-secondary-view)]
+       [secondary-view
+        (view-service-create!
+          (host-state-views state) secondary-owner buffer
+          (view-state-configuration (view-state view)))]
        [configuration (buffer-state-configuration (buffer-state buffer))]
        [mode (configuration-facet configuration buffer-mode-facet 'buffer)]
-       [layers (configuration-facet configuration buffer-input-layers-facet 'buffer)])
+       [layers (configuration-facet configuration buffer-input-layers-facet 'buffer)]
+       [minor
+        (make-mode-spec 'transaction-minor 'minor "Transaction minor" #f '() '() #f)]
+       [document-length
+        (snapshot-byte-size (buffer-state-document (buffer-state buffer)))]
+       [_update
+        (dispatcher-dispatch!
+          (host-state-dispatch state)
+          (make-transaction-spec
+            (buffer-id buffer) (view-id view)
+            (buffer-state-generation (buffer-state buffer))
+            (make-change-set document-length '()) #f
+            (list (set-buffer-minor-modes-effect (list minor))) '()))]
+       [published-configuration (buffer-state-configuration (buffer-state buffer))])
   (unless (and (mode-spec? mode)
                (eq? (mode-spec-id mode) 'fundamental-mode)
                (= (length layers) 1)
                (eq? (input-layer-kind (car layers)) 'major)
                (eq? (input-layer-keymap (car layers))
-                    (fundamental-editing-keymap (soda-application-editing application))))
+                    (fundamental-editing-keymap (soda-application-editing application)))
+               (equal? (configuration-facet
+                         published-configuration buffer-minor-modes-facet 'buffer)
+                       (list minor))
+               (= (view-state-buffer-generation (view-state view))
+                  (buffer-state-generation (buffer-state buffer)))
+               (= (view-state-buffer-generation (view-state secondary-view))
+                  (buffer-state-generation (buffer-state buffer))))
     (error 'kernel-tests "fundamental-mode is not the Buffer major mode"))
+  (owner-close! secondary-owner)
   (soda-application-close! application))
 
 ;; Frontend orchestration converts queued Surface input into a published

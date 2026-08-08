@@ -9,8 +9,9 @@
 | interactive plan、typed reader、suspend/resume/cancel | 已实现 |
 | lifecycle hook 与 advice | 已实现 |
 | prefix argument 与稳定 target | 部分实现 |
-| `define-command` 声明宏与命令内省 UI | 未实现 |
-| major/minor mode package | 未实现 |
+| `define-command` 声明宏与命令内省 API | 已实现 |
+| 命令内省 UI | 未实现 |
+| major/minor ModeSpec 机制与 fundamental-mode | 已实现 |
 
 ## Command protocol
 
@@ -144,18 +145,21 @@ minor mode 是可卸载的 Buffer Compartment contribution，不是 command runt
 
 ## 声明接口
 
-公开 constructor 是稳定底层接口。未来 `define-command` 宏只展开为普通 procedure、
-CommandDefinition metadata 和显式安装入口，不创建隐藏全局 registry，也不改变调用语义。
+公开 constructor 是稳定底层接口。`define-command` 展开为 CommandDefinition metadata 和
+显式的 owner-scoped runtime 安装，不创建隐藏全局 registry，也不改变调用语义。普通命令
+省略 interactive clause；交互命令显式提供 InteractivePlan。
 
 ```scheme
-(define-command (goto-line context line)
-  (documentation "Move point to LINE.")
-  (class motion)
-  (interactive (number-reader "Goto line: "))
-  ...)
+(define-command
+  runtime owner 'goto-line (context line)
+  "Move point to LINE." 'motion
+  (interactive (make-interactive-plan (list line-reader)))
+  (goto-line-result context line))
 ```
 
-宏生成的 procedure 仍可直接以 `(goto-line context 42)` 调用；安装时必须提供 runtime 和 owner。
+`command-runtime-command-definition`、`command-runtime-command-names` 和
+`command-runtime-command-definitions` 提供稳定、按名称排序的发现接口。内省调用方读取公开的
+CommandDefinition metadata，不访问或修改 registry。
 
 ## Contract tests
 
