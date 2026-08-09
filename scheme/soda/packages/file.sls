@@ -9,6 +9,8 @@
           (soda kernel change)
           (soda kernel document)
           (soda kernel extension)
+          (soda kernel location)
+          (soda kernel resource)
           (soda kernel selection)
           (soda kernel state)
           (soda kernel view-state)
@@ -19,6 +21,7 @@
           (soda host package)
           (soda host input)
           (soda host input-event)
+          (soda host location)
           (soda host operation)
           (soda host value)
           (soda host view)
@@ -105,6 +108,9 @@
 
   (define-record-type file-visit
     (fields context resource))
+
+  (define-record-type file-location-open
+    (fields location))
 
   (define-record-type file-close
     (fields buffer-id))
@@ -352,39 +358,45 @@
           (values (vfs-read-file path) (vfs-stat-path path))
           (values (empty-bytes) #f))))
 
+  ;; Loading a Resource and displaying it are separate lifecycle actions.
+  ;; Location resolution uses this operation without changing any Window;
+  ;; an explicit file visit adds placement after the Buffer is available.
+  (define (ensure-file-buffer! service context resource)
+    (let* ([host (file-service-host service)]
+           [key (file-buffer-key resource)])
+      (package-host-open-or-create-buffer!
+        host (file-service-owner service) key
+        (lambda ()
+          (let ([lock (acquire-file-lock resource)] [created? #f])
+            (dynamic-wind
+              (lambda () #f)
+              (lambda ()
+                (call-with-values
+                  (lambda () (resource-contents resource))
+                  (lambda (contents version)
+                    (let ([created
+                           (package-host-create-buffer!
+                             host (file-service-owner service)
+                             (resource-locator resource)
+                             (make-document contents)
+                             (file-buffer-configuration
+                               service resource context (not lock)))])
+                      (set-resource! service (buffer-id created) resource version lock)
+                      (when (file-service-history service)
+                        (history-mark-saved! (file-service-history service)
+                                             (buffer-id created)))
+                      (set! created? #t)
+                      created))))
+              (lambda ()
+                (unless created? (release-file-lock! lock)))))))))
+
   (define (open-file-buffer! service request)
     (unless (file-visit? request)
       (assertion-violation 'file.visit "invalid file visit request" request))
     (let* ([context (file-visit-context request)]
            [resource (file-visit-resource request)]
            [host (file-service-host service)]
-           [key (file-buffer-key resource)]
-           [buffer
-            (package-host-open-or-create-buffer!
-              host (file-service-owner service) key
-              (lambda ()
-                (let ([lock (acquire-file-lock resource)] [created? #f])
-                  (dynamic-wind
-                    (lambda () #f)
-                    (lambda ()
-                      (call-with-values
-                        (lambda () (resource-contents resource))
-                        (lambda (contents version)
-                          (let ([created
-                                 (package-host-create-buffer!
-                                   host (file-service-owner service)
-                                   (resource-locator resource)
-                                   (make-document contents)
-                                   (file-buffer-configuration
-                                     service resource context (not lock)))])
-                            (set-resource! service (buffer-id created) resource version lock)
-                            (when (file-service-history service)
-                              (history-mark-saved! (file-service-history service)
-                                                   (buffer-id created)))
-                            (set! created? #t)
-                            created))))
-                    (lambda ()
-                      (unless created? (release-file-lock! lock)))))))]
+           [buffer (ensure-file-buffer! service context resource)]
            [current-id (command-context-buffer-id context)])
       (if (= (buffer-id buffer) current-id)
           buffer
@@ -554,6 +566,34 @@
         runtime 'file.visit owner 'open-file-buffer
         (lambda (ignored invocation effect)
           (open-file-buffer! service (command-effect-payload effect))))
+      (command-runtime-register-effect-handler!
+        runtime 'file.location-open owner 'open-file-location
+        (lambda (ignored invocation effect)
+          (let ([request (command-effect-payload effect)])
+            (unless (file-location-open? request)
+              (assertion-violation
+                'file.location-open "invalid Location open request" request))
+            (ensure-file-buffer!
+              service
+              (command-invocation-context invocation)
+              (location-resource (file-location-open-location request))))))
+      (package-host-register-location-provider!
+        host owner
+        (make-location-provider
+          'file
+          (lambda (resource)
+            (let ([buffer
+                   (package-host-find-buffer-key
+                     host (file-buffer-key resource) #f)])
+              (and buffer
+                   (let ([binding
+                          (file-service-binding service (buffer-id buffer) #f)])
+                     (and binding
+                          (resource=? resource (file-binding-resource binding))
+                          (buffer-id buffer))))))
+          (lambda (location)
+            (make-command-effect
+              'file.location-open (make-file-location-open location)))))
       (command-runtime-register-effect-handler!
         runtime 'file.load owner 'bind-loaded-file
         (lambda (ignored invocation effect)

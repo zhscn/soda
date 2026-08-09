@@ -10,6 +10,8 @@
           (soda host frontend)
           (soda host input)
           (soda host input-event)
+          (soda host location)
+          (soda host package)
           (soda host internal buffer)
           (soda host internal context)
           (soda host internal mode)
@@ -23,6 +25,7 @@
           (soda kernel change)
           (soda kernel document)
           (soda kernel extension)
+          (soda kernel location)
           (soda kernel range-set)
           (soda kernel regex)
           (soda kernel selection)
@@ -1243,6 +1246,44 @@
                  [history (soda-application-history application)]
                  [files (soda-application-files application)]
                  [interaction (soda-application-interaction application)])
+            (let* ([host (make-package-host state)]
+                   [location
+                    (make-location
+                      (make-resource 'file second-path)
+                      (make-byte-position 1) (make-byte-position 4)
+                      #f 'after '())]
+                   [pending (package-host-resolve-location host location)]
+                   [active-before
+                    (command-context-buffer-id
+                      (application-command-context application))])
+              (unless (and (eq? (location-resolution-status pending) 'needs-open)
+                           (command-effect?
+                             (location-resolution-request pending)))
+                (error 'fundamental-editing-tests
+                       "unopened file Location did not produce a load effect"))
+              (command-runtime-register-command!
+                runtime
+                (make-command-definition
+                  'test.open-file-location
+                  (lambda (context) (location-resolution-request pending))
+                  (host-state-owner state)))
+              (command-runtime-start!
+                runtime 'test.open-file-location
+                (application-command-context application))
+              (let ([resolved (package-host-resolve-location host location)])
+                (unless (and (eq? (location-resolution-status resolved) 'resolved)
+                             (= (location-resolution-from resolved) 1)
+                             (= (location-resolution-to resolved) 4)
+                             (= (command-context-buffer-id
+                                  (application-command-context application))
+                                active-before)
+                             (string=?
+                               (buffer-string
+                                 (package-host-buffer-ref
+                                   host (location-resolution-buffer-id resolved)))
+                               "second"))
+                  (error 'fundamental-editing-tests
+                         "file Location loading changed placement or failed to resolve"))))
             (command-runtime-start-interactive!
               runtime 'file.save (application-command-context application))
             (let ([request (interaction-session-request
