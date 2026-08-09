@@ -2275,6 +2275,26 @@
                (contains-string? (car writes) "[0;38;5;6m"))
     (error 'kernel-tests "Frame presenter theme invalidation differs" writes)))
 
+;; Cursor-only state changes encode terminal cursor state without repainting
+;; immutable Frame cells.
+(let* ([presenter (make-frame-presenter)]
+       [frame (frame-with-cell (make-frame 1 1) 0 0
+                               (make-frame-cell "x" 1 #f 'text #f))]
+       [writes '()]
+       [writer (lambda (bytes offset)
+                 (set! writes (cons (utf8->string bytes) writes))
+                 (- (bytevector-length bytes) offset))])
+  (frame-presenter-present! presenter frame)
+  (frame-presenter-drain! presenter writer)
+  (set! writes '())
+  (frame-presenter-present! presenter frame default-theme 0 0)
+  (unless (and (eq? (frame-presenter-drain! presenter writer) 'committed)
+               (= (length writes) 1)
+               (contains-string? (car writes) "[1;1H")
+               (contains-string? (car writes) "[?25h")
+               (not (contains-string? (car writes) "x")))
+    (error 'kernel-tests "cursor-only presentation repainted Frame cells" writes)))
+
 (let ([wide (make-frame-cell "界" 2 #f 'default 'wide)]
       [continuation (make-frame-cell "" 0 #t 'default 'wide)])
   (unless (and (frame? (make-frame 2 1 (vector wide continuation)))
