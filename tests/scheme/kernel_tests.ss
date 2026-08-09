@@ -1094,6 +1094,109 @@
 (define view
   (view-service-create!
     (host-state-views host) owner buffer configuration))
+
+(let* ([package-host (make-package-host host)]
+       [provider-owner (make-owner 'analysis-service-test)]
+       [decoration-publications 0]
+       [analysis-buffer
+        (buffer-service-create!
+          (host-state-buffers host) provider-owner "*analysis*"
+          (make-document "hello") configuration)]
+       [analysis-view
+        (view-service-create!
+          (host-state-views host) provider-owner analysis-buffer configuration)]
+       [_observer
+        (dispatcher-add-listener!
+          (host-state-dispatch host) provider-owner
+          (lambda (update)
+            (when (and (= (editor-update-buffer-id update)
+                          (buffer-id analysis-buffer))
+                       (memq 'decoration (editor-update-damage update)))
+              (set! decoration-publications (+ decoration-publications 1)))))]
+       [starts '()]
+       [cancel-count 0]
+       [provider
+        (make-analysis-provider
+          'test.service
+          (lambda (request publish!)
+            (set! starts (cons (cons request publish!) starts))
+            (lambda () (set! cancel-count (+ cancel-count 1)))))]
+       [registration
+        (package-host-register-analysis-provider!
+          package-host provider-owner provider)])
+  (package-host-request-analysis!
+    package-host (buffer-id analysis-buffer) 'test.service)
+  (let ([first (car starts)]
+        [state (buffer-state analysis-buffer)])
+    (package-host-dispatch!
+      package-host
+      (make-transaction-spec
+        (buffer-id analysis-buffer) (view-id analysis-view)
+        (buffer-state-generation state)
+        (make-change-set
+          (snapshot-byte-size (buffer-state-document state))
+          (list (make-text-change 5 5 "!")))
+        #f '() '()))
+    (unless (and (= (length starts) 2) (= cancel-count 1))
+      (error 'kernel-tests
+             "AnalysisService did not cancel and replace an older revision"))
+    (let* ([second (car starts)]
+           [first-request (car first)]
+           [second-request (car second)])
+      (let ([changed
+             (range-set-ranges
+               (analysis-request-changed-ranges second-request))])
+        (unless (and (= (length changed) 1)
+                     (= (range-value-from (car changed)) 5)
+                     (= (range-value-to (car changed)) 6))
+          (error 'kernel-tests
+                 "AnalysisService did not publish new-revision changed ranges")))
+      ((cdr first)
+       (make-analysis-result
+         'test.service (buffer-id analysis-buffer)
+         (analysis-request-revision first-request)
+         (make-range-set (list (make-range-value 0 1 'old))) '()))
+      ((cdr second)
+       (make-analysis-result
+         'test.service (buffer-id analysis-buffer)
+         (analysis-request-revision second-request)
+         (make-range-set (list (make-range-value 0 2 'current))) '()))
+      (host-state-run! host)
+      (let ([result
+             (package-host-analysis-result
+               package-host (buffer-id analysis-buffer) 'test.service #f)])
+        (unless (and result
+                     (= (analysis-result-revision result)
+                        (snapshot-revision
+                          (buffer-state-document (buffer-state analysis-buffer))))
+                     (equal?
+                       (map range-value-value (analysis-result-query result 0 2))
+                       '(current))
+                     (= decoration-publications 1))
+          (error 'kernel-tests
+                 "stale AnalysisResult replaced the current revision"))))
+    (unless (= cancel-count 1)
+      (error 'kernel-tests "completed analysis task was cancelled")))
+  (package-host-request-analysis!
+    package-host (buffer-id analysis-buffer) 'test.service)
+  (let* ([pending (car starts)]
+         [request (car pending)]
+         [buffer-id (buffer-id analysis-buffer)])
+    (unless (package-host-close-buffer! package-host buffer-id)
+      (error 'kernel-tests "analysis Buffer did not close"))
+    ((cdr pending)
+     (make-analysis-result
+       'test.service buffer-id (analysis-request-revision request)
+       (make-range-set '()) '()))
+    (host-state-run! host)
+    (unless (and (= cancel-count 2)
+                 (not (package-host-analysis-result
+                        package-host buffer-id 'test.service #f)))
+      (error 'kernel-tests
+             "closed Buffer accepted a late AnalysisResult")))
+  (registration-close! registration)
+  (owner-close! provider-owner))
+
 (define leaf (make-leaf-window (view-id view) '(0 0 80 24)))
 (define surface (make-surface 'terminal '(kitty color-256) leaf '(80 . 24)))
 

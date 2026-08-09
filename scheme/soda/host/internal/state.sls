@@ -5,6 +5,7 @@
           host-state-runtime
           host-state-buffers
           host-state-buffer-attachments
+          host-state-analyses
           host-state-modes
           host-state-locations
           host-state-navigation
@@ -20,6 +21,7 @@
   (import (rnrs)
           (soda host internal buffer)
           (soda host internal buffer-attachment)
+          (soda host internal analysis)
           (soda kernel state)
           (soda host command)
           (soda host command-runtime)
@@ -40,6 +42,7 @@
       (immutable runtime host-state-runtime)
       (immutable buffers host-state-buffers)
       (immutable buffer-attachments host-state-buffer-attachments)
+      (immutable analyses host-state-analyses)
       (immutable modes host-state-modes)
       (immutable locations host-state-locations)
       (immutable navigation host-state-navigation)
@@ -69,7 +72,9 @@
            [locations (make-location-service buffers)]
            [navigation (make-navigation-history)]
            [command-runtime
-             (make-command-runtime owner commands dispatch runtime conditions)])
+             (make-command-runtime owner commands dispatch runtime conditions)]
+           [analyses
+            (make-analysis-service buffers runtime conditions dispatch)])
       (view-service-set-plugin-error-handler!
         views
         (lambda (view phase condition)
@@ -102,7 +107,8 @@
                   (buffer-state-configuration (editor-update-new-buffer-state update))])
             (when (and buffer (not (eq? old-configuration new-configuration)))
               (mode-service-reconcile!
-                modes buffer old-configuration new-configuration)))))
+                modes buffer old-configuration new-configuration))
+            (analysis-service-refresh! analyses update))))
       (view-service-set-close-handler!
         views
         (lambda (view)
@@ -115,10 +121,11 @@
         buffers
         (lambda (buffer)
           (and (mode-service-close-buffer! modes buffer)
+               (analysis-service-close-buffer! analyses (buffer-id buffer))
                (view-service-close-buffer-views! views (buffer-id buffer))
                (buffer-attachment-service-destroy-buffer! buffer-attachments buffer))))
       (%make-host-state
-        owner runtime buffers buffer-attachments modes locations navigation views surfaces commands
+        owner runtime buffers buffer-attachments analyses modes locations navigation views surfaces commands
         command-runtime conditions dispatch #f)))
 
   (define (host-state-close! state)
@@ -159,8 +166,10 @@
         (host-state-runtime state)
         (lambda (message)
           (unless
-            (command-runtime-handle-message!
-              (host-state-command-runtime state) message)
+            (or (analysis-service-handle-message!
+                  (host-state-analyses state) message)
+                (command-runtime-handle-message!
+                  (host-state-command-runtime state) message))
             (handler message)))
         limit)))
 )

@@ -19,6 +19,7 @@
           dispatcher-dispatch-specs!
           dispatcher-dispatch-view!
           dispatcher-dispatch-host!
+          dispatcher-publish-buffer-damage!
           dispatcher-set-error-reporter!
           dispatcher-set-listener!
           dispatcher-set-host-listener!
@@ -332,6 +333,34 @@
             (dispatcher-notify-one! dispatcher '(editor update-listener) listener update))
           (configuration-facet configuration update-listeners-facet 'buffer))))
     update)
+
+  ;; Publish non-document state owned by a Host service through the same
+  ;; observer and ViewPlugin boundary as an editor transaction.  Buffer and
+  ;; View generations remain unchanged because no editor state was mutated.
+  (define (dispatcher-publish-buffer-damage! dispatcher buffer-id damage annotations)
+    (unless (and (dispatcher? dispatcher)
+                 (integer? buffer-id) (exact? buffer-id) (>= buffer-id 0)
+                 (list? damage) (for-all symbol? damage)
+                 (list? annotations))
+      (assertion-violation
+        'dispatcher-publish-buffer-damage! "invalid Buffer damage publication"
+        buffer-id damage annotations))
+    (let ([buffer (buffer-service-ref (dispatcher-buffers dispatcher) buffer-id #f)])
+      (and buffer
+           (let* ([state (buffer-state buffer)]
+                  [length (snapshot-byte-size (buffer-state-document state))]
+                  [update
+                   (make-editor-update
+                     buffer-id state state
+                     (map
+                       (lambda (view)
+                         (%make-view-state-update
+                           (view-id view) (view-state view) (view-state view)))
+                       (views-for-buffer (dispatcher-views dispatcher) buffer-id))
+                     (make-change-set length '()) annotations #f damage)])
+             (dispatcher-notify-editor-update!
+               dispatcher update (buffer-state-configuration state))
+             update))))
 
   (define (prepare-native-change! document changes)
     (if (change-set-empty? changes)

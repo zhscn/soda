@@ -2,6 +2,10 @@
   (export make-package-host
           package-host?
           package-host-command-runtime
+          package-host-register-analysis-provider!
+          package-host-request-analysis!
+          package-host-stop-analysis!
+          package-host-analysis-result
           package-host-register-location-provider!
           package-host-resolve-location
           package-host-begin-navigation!
@@ -33,8 +37,10 @@
           (soda kernel state)
           (soda kernel view-state)
           (soda host command-runtime)
+          (soda host analysis)
           (soda host dispatch)
           (soda host internal buffer)
+          (soda host internal analysis)
           (soda host internal location)
           (soda host internal navigation)
           (soda host internal state)
@@ -58,6 +64,29 @@
 
   (define (package-host-command-runtime host)
     (host-state-command-runtime (package-host-state host)))
+
+  (define (package-host-register-analysis-provider! host owner provider)
+    (analysis-service-register!
+      (host-state-analyses (package-host-state host)) owner provider))
+
+  (define package-host-request-analysis!
+    (case-lambda
+      [(host buffer-id key)
+       (analysis-service-request!
+         (host-state-analyses (package-host-state host)) buffer-id key)]
+      [(host buffer-id key changed-ranges)
+       (analysis-service-request!
+         (host-state-analyses (package-host-state host))
+         buffer-id key changed-ranges)]))
+
+  (define (package-host-stop-analysis! host buffer-id key)
+    (analysis-service-stop!
+      (host-state-analyses (package-host-state host)) buffer-id key))
+
+  (define (package-host-analysis-result host buffer-id key . default)
+    (apply analysis-service-result
+           (host-state-analyses (package-host-state host))
+           buffer-id key default))
 
   (define (package-host-register-location-provider! host owner provider)
     (location-service-register!
