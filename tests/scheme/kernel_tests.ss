@@ -3093,11 +3093,16 @@
                       (list (make-key-stroke 'character (char->integer #\t) 4)))
                      'spell.check)
                (error 'kernel-tests "spell keymap did not bind C-t"))
-             (command-runtime-start!
-               runtime 'fundamental.insert-text (application-command-context application)
-               (list (string->utf8 "must-not-edit")))
-             (unless (string=? output (buffer-string buffer))
-               (error 'kernel-tests "spell report Buffer accepted an ordinary edit"))
+             (let ([rejected?
+                    (guard (condition [else #t])
+                      (command-runtime-start!
+                        runtime 'fundamental.insert-text
+                        (application-command-context application)
+                        (list (string->utf8 "must-not-edit")))
+                      #f)])
+               (unless (and rejected? (string=? output (buffer-string buffer)))
+                 (error 'kernel-tests
+                        "spell result mode exposed an editing command")))
              (when (string-contains? output "Line 1: & helo")
                (let* ([item-ranges (buffer-item-ranges (buffer-state buffer))]
                       [item-range (and (pair? item-ranges)

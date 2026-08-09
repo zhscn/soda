@@ -155,6 +155,12 @@
               (map mode-spec-command-category-list
                    (append (if major (list major) '()) minor)))))))
 
+  (define (context-major-mode context)
+    (let ([state (command-context-buffer-state context)])
+      (and state
+           (configuration-facet
+             (buffer-state-configuration state) buffer-mode-facet 'buffer))))
+
   (define (command-runtime-command-available? service definition-or-name context)
     (unless (and (command-runtime? service) (command-context? context))
       (assertion-violation 'command-runtime-command-available?
@@ -487,6 +493,15 @@
     (unless (and (command-runtime? service) (command-context? context) (list? arguments))
       (assertion-violation 'command-runtime-start! "invalid command start" name context arguments))
     (let* ([definition (lookup-definition service name)]
+           [_available
+            (when (and (eq? (command-definition-scope definition) 'mode)
+                       (context-major-mode context)
+                       (not (command-runtime-command-available?
+                              service definition context)))
+              (assertion-violation 'command-runtime-start!
+                                   "command is unavailable in the active Buffer mode"
+                                   name
+                                   (mode-spec-id (context-major-mode context))))]
            [invocation
              (if (and interactive? (command-definition-interactive? definition))
                  (make-interactive-command-invocation definition context arguments)

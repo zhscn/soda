@@ -5,6 +5,7 @@
   (import (rnrs)
           (soda kernel document)
           (soda kernel extension)
+          (soda kernel mode)
           (soda kernel range-set)
           (soda kernel selection)
           (soda kernel state)
@@ -26,7 +27,7 @@
   ;; packages.
   (define-record-type
     (buffer-list-service %make-buffer-list-service buffer-list-service?)
-    (fields host owner history actions keymap result-keymap authority lists))
+    (fields host owner history actions keymap result-keymap authority mode lists))
 
   (define-record-type buffer-list-state
     (fields (mutable generation buffer-list-state-generation
@@ -89,14 +90,7 @@
 
   (define (buffer-list-configuration service)
     (make-configuration
-      (append
-        (generated-projection-extension)
-        (list
-          (make-buffer-input-layer-extension
-            (list (make-input-layer
-                    'buffer (buffer-list-service-result-keymap service) #f 'ignore)))
-          (make-buffer-edit-policy-extension
-            (make-buffer-edit-policy 'reject #f (buffer-list-service-authority service)))))))
+      (make-buffer-modes-extension (buffer-list-service-mode service) '())))
 
   (define (publish-buffer-list! service buffer)
     (let ([list-state
@@ -208,9 +202,21 @@
            [keymap (make-keymap 'buffer-list)]
            [result-keymap (make-keymap 'buffer-list-result)]
            [authority (make-edit-authority owner 'buffer-list-refresh)]
+           [mode
+            (make-mode-spec
+              'buffer-list-mode 'major "Buffer List" #f
+              (append
+                (generated-projection-extension)
+                (list
+                  (make-buffer-input-layer-extension
+                    (list (make-input-layer 'buffer result-keymap #f 'ignore)))
+                  (make-buffer-edit-policy-extension
+                    (make-buffer-edit-policy 'reject #f authority))))
+              '(buffer-list buffer-item) "Buffers")]
            [service
             (%make-buffer-list-service
-              host owner history actions keymap result-keymap authority (make-eqv-hashtable))])
+              host owner history actions keymap result-keymap authority mode
+              (make-eqv-hashtable))])
       (keymap-bind! keymap (list (control-stroke #\x) (control-stroke #\b)) 'buffer.list)
       (keymap-bind! result-keymap (list (make-key-stroke 'enter #f 0)) 'buffer.activate-item)
       (keymap-bind! result-keymap (list (make-key-stroke 'character (char->integer #\g) 0))

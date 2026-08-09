@@ -7,6 +7,7 @@
           (only (chezscheme) current-directory)
           (soda kernel document)
           (soda kernel extension)
+          (soda kernel mode)
           (soda kernel range-set)
           (soda kernel state)
           (soda host command)
@@ -29,7 +30,7 @@
   ;; input loop.
   (define-record-type
     (directory-service %make-directory-service directory-service?)
-    (fields host owner files actions keymap result-keymap authority directories))
+    (fields host owner files actions keymap result-keymap authority mode directories))
 
   (define-record-type directory-state
     (fields path (mutable generation directory-state-generation directory-state-generation-set!)))
@@ -116,14 +117,7 @@
 
   (define (directory-configuration service)
     (make-configuration
-      (append
-        (generated-projection-extension)
-        (list
-          (make-buffer-input-layer-extension
-            (list (make-input-layer
-                    'buffer (directory-service-result-keymap service) #f 'ignore)))
-          (make-buffer-edit-policy-extension
-            (make-buffer-edit-policy 'reject #f (directory-service-authority service)))))))
+      (make-buffer-modes-extension (directory-service-mode service) '())))
 
   (define (publish-directory! service buffer)
     (let* ([state (hashtable-ref (directory-service-directories service) (buffer-id buffer) #f)]
@@ -217,9 +211,21 @@
            [keymap (make-keymap 'directory)]
            [result-keymap (make-keymap 'directory-result)]
            [authority (make-edit-authority owner 'directory-refresh)]
+           [mode
+            (make-mode-spec
+              'directory-mode 'major "Directory" #f
+              (append
+                (generated-projection-extension)
+                (list
+                  (make-buffer-input-layer-extension
+                    (list (make-input-layer 'buffer result-keymap #f 'ignore)))
+                  (make-buffer-edit-policy-extension
+                    (make-buffer-edit-policy 'reject #f authority))))
+              '(directory buffer-item) "Directory")]
            [service
             (%make-directory-service
-              host owner files actions keymap result-keymap authority (make-eqv-hashtable))])
+              host owner files actions keymap result-keymap authority mode
+              (make-eqv-hashtable))])
       (keymap-bind! keymap (list (control-stroke #\x) (control-stroke #\d)) 'directory.browse)
       (keymap-bind! result-keymap (list (make-key-stroke 'enter #f 0)) 'buffer.activate-item)
       (keymap-bind! result-keymap (list (control-stroke #\g)) 'file.close)

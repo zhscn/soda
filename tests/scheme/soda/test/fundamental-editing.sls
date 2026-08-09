@@ -601,11 +601,17 @@
         (unless (and (string=? (buffer-name help-buffer) "*help*")
                      (string-contains? (buffer-string help-buffer) "C-x C-f"))
           (error 'fundamental-editing-tests "help.show did not display the Nano help Buffer"))
-        (command-runtime-start! runtime 'fundamental.insert-text
-                                (application-command-context application)
-                                (list (string->utf8 "mutate")))
-        (unless (not (string-contains? (buffer-string help-buffer) "mutate"))
-          (error 'fundamental-editing-tests "help Buffer accepted an ordinary edit")))
+        (let ([rejected?
+               (guard (condition [else #t])
+                 (command-runtime-start!
+                   runtime 'fundamental.insert-text
+                   (application-command-context application)
+                   (list (string->utf8 "mutate")))
+                 #f)])
+          (unless (and rejected?
+                       (not (string-contains? (buffer-string help-buffer) "mutate")))
+            (error 'fundamental-editing-tests
+                   "help mode exposed an ordinary editing command"))))
       (soda-application-close! application))
 
     (let* ([application (make-soda-application)]

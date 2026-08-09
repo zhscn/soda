@@ -11,6 +11,7 @@
           (soda kernel range-set)
           (soda kernel selection)
           (soda kernel state)
+          (soda kernel mode)
           (soda kernel view-state)
           (soda host command)
           (soda host command-runtime)
@@ -30,7 +31,7 @@
   ;; process lifetime, stdin and event delivery.
   (define-record-type
     (spell-service %make-spell-service spell-service?)
-    (fields host owner processes keymap result-keymap))
+    (fields host owner processes keymap result-keymap result-mode))
 
   (define-record-type spell-request
     (fields context buffer-id buffer-name buffer-generation source input))
@@ -224,12 +225,7 @@
 
   (define (spell-result-configuration service)
     (make-configuration
-      (list
-        (buffer-item-field-extension)
-        (make-buffer-input-layer-extension
-          (list (make-input-layer 'buffer (spell-service-result-keymap service) #f 'ignore)))
-        (make-buffer-edit-policy-extension
-          (make-buffer-edit-policy 'reject)))))
+      (make-buffer-modes-extension (spell-service-result-mode service) '())))
 
   (define (source-selection offset)
     (make-selection (list (make-selection-range offset offset))))
@@ -367,7 +363,19 @@
     (let* ([runtime (package-host-command-runtime host)]
            [keymap (make-keymap 'spell)]
            [result-keymap (make-keymap 'spell-result)]
-           [service (%make-spell-service host owner processes keymap result-keymap)])
+           [result-mode
+            (make-mode-spec
+              'spell-result-mode 'major "Spell Results" #f
+              (list
+                (buffer-item-field-extension)
+                (make-buffer-input-layer-extension
+                  (list (make-input-layer 'buffer result-keymap #f 'ignore)))
+                (make-buffer-edit-policy-extension
+                  (make-buffer-edit-policy 'reject)))
+              '(spell buffer-item) "Spell")]
+           [service
+            (%make-spell-service
+              host owner processes keymap result-keymap result-mode)])
       (keymap-bind! result-keymap
                     (list (make-key-stroke 'enter #f 0)) 'buffer.activate-item)
       (keymap-bind! result-keymap (list (control-stroke #\r)) 'spell.correct-item)

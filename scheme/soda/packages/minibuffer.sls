@@ -26,9 +26,11 @@
           (soda kernel document)
           (soda kernel change)
           (soda kernel extension)
+          (soda kernel mode)
           (soda kernel range-set)
           (soda kernel selection)
           (soda kernel state)
+          (soda kernel syntax-profile)
           (soda kernel view-state)
           (soda host command)
           (soda host command-runtime)
@@ -41,6 +43,7 @@
           (soda host value)
           (soda packages interaction)
           (soda packages completion)
+          (soda packages buffer-ui)
           (soda view decoration)
           (soda view display)
           (soda view plugin))
@@ -55,7 +58,7 @@
     (fields owner procedure))
   (define-record-type
     (minibuffer-service %make-minibuffer-service minibuffer-service?)
-    (fields host interactions owner keymap
+    (fields host interactions owner keymap mode
             (mutable sessions minibuffer-service-sessions minibuffer-service-sessions-set!)
             (mutable setup-hooks minibuffer-service-setup-hooks minibuffer-service-setup-hooks-set!)
             (mutable exit-hooks minibuffer-service-exit-hooks minibuffer-service-exit-hooks-set!)
@@ -92,9 +95,12 @@
               (make-display-text (cdr value) 0 0 'minibuffer.prompt
                                  (list 'minibuffer 'prompt))))))))
 
-  (define (minibuffer-configuration base request)
+  (define (minibuffer-configuration service base request)
     (configuration-reconfigure
-      base minibuffer-view-compartment
+      (configuration-reconfigure
+        base buffer-major-mode-compartment
+        (make-buffer-mode-extension (minibuffer-service-mode service)))
+      minibuffer-view-compartment
       (make-facet-provider
         view-plugins-facet
         (list (make-minibuffer-prompt-plugin
@@ -214,7 +220,7 @@
       (when (and origin size)
         (let* ([request (interaction-session-request interaction)]
                [configuration
-                (minibuffer-configuration
+                (minibuffer-configuration service
                   (view-state-configuration (view-state origin)) request)]
                [document (make-document (or (interaction-request-initial-value request) ""))]
                [buffer (package-host-create-buffer! host (minibuffer-service-owner service)
@@ -368,7 +374,17 @@
       (keymap-bind! keymap (list (make-key-stroke 'tab #f 0)) 'minibuffer.complete)
       (keymap-bind! keymap (list (control-stroke #\g)) 'minibuffer.cancel)
       (keymap-bind! keymap (list (make-key-stroke 'escape #f 0)) 'minibuffer.cancel)
-      (let ([service (%make-minibuffer-service host interactions owner keymap '() '() '() #f)])
+      (let* ([mode
+              (make-mode-spec
+                'minibuffer-mode 'major "Minibuffer" #f
+                (list
+                  (make-buffer-syntax-profile-extension
+                    (make-plain-text-syntax-profile)))
+                '(editing motion selection kill yank viewport interface minibuffer)
+                "Mini")]
+             [service
+              (%make-minibuffer-service
+                host interactions owner keymap mode '() '() '() #f)])
       (command-runtime-register-command!
         (package-host-command-runtime host)
         (make-command-definition
