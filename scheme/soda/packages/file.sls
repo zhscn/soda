@@ -12,6 +12,8 @@
           file-service-handle-state-event!
           file-service-add-state-listener!
           file-service-register-mode!
+          file-service-modified-count
+          file-service-shutdown-effects
           file-service-rename-resource!
           file-service-delete-resource!
           file-conflict?
@@ -886,6 +888,31 @@
       (lambda (buffer) (modified-file-buffer? service buffer))
       (package-host-buffers (file-service-host service))))
 
+  (define (file-service-modified-count service)
+    (unless (file-service? service)
+      (assertion-violation 'file-service-modified-count
+                           "expected a FileService" service))
+    (length (modified-file-buffers service)))
+
+  ;; Application composition owns the shutdown command and decision.  The
+  ;; FileService contributes only the file-save effects required by that
+  ;; decision, preserving binding/version policy inside its capability.
+  (define (file-service-shutdown-effects service decision)
+    (unless (and (file-service? service)
+                 (memq decision '(save discard cancel)))
+      (assertion-violation 'file-service-shutdown-effects
+                           "expected a FileService and shutdown decision"
+                           service decision))
+    (if (eq? decision 'save)
+        (map
+          (lambda (buffer)
+            (let ([binding (file-service-binding service (buffer-id buffer))])
+              (make-file-write-effect
+                service (buffer-id buffer) (buffer-state buffer)
+                (file-binding-resource binding) (file-binding-version binding) #f)))
+          (modified-file-buffers service))
+        '()))
+
   (define (close-decision value)
     (cond
       [(and (string? value) (string-ci=? value "save")) 'save]
@@ -945,22 +972,6 @@
                 (lambda (value)
                   (make-interactive-ready (list (close-decision value)))))
               (make-interactive-ready (list 'discard)))))))
-
-  (define (make-quit-reader service)
-    (make-interactive-reader
-      'save-decision
-      (lambda (context arguments)
-        (let ([dirty (modified-file-buffers service)])
-          (if (null? dirty)
-              (make-interactive-ready (list 'discard))
-              (make-interactive-suspend
-                (make-decision-request
-                  (string-append "Save " (number->string (length dirty))
-                                 " modified file buffer"
-                                 (if (= (length dirty) 1) "" "s")
-                                 "? (save/discard/cancel) "))
-                (lambda (value)
-                  (make-interactive-ready (list (close-decision value))))))))))
 
   (define (close-buffer! service target-id)
     (package-host-close-buffer-with-fallback!
@@ -1507,31 +1518,6 @@
                        (make-command-effect 'file.close (make-file-close target-id)))))]
             [else
              (make-command-effect 'file.close (make-file-close target-id))])))
-      ;; Exit is a normal interactive command.  It asks once for all modified
-      ;; visited files, performs writes first, and only then notifies the
-      ;; frontend to terminate.  Unvisited scratch Buffers remain disposable.
-      (command-runtime-register-command!
-        runtime
-        (make-command-definition
-          'application.quit
-          (lambda (context decision)
-            (case decision
-              [(cancel) (command-handled)]
-              [(save)
-               (append
-                 (map
-                   (lambda (buffer)
-                     (let ([binding (file-service-binding service (buffer-id buffer))])
-                       (make-file-write-effect
-                         service
-                         (buffer-id buffer)
-                         (buffer-state buffer)
-                         (file-binding-resource binding) (file-binding-version binding) #f)))
-                   (modified-file-buffers service))
-                 (list (make-command-effect 'application.quit #f)))]
-              [else (make-command-effect 'application.quit #f)]))
-          owner "Request application shutdown, resolving modified file Buffers first."
-          'application (make-interactive-plan (list (make-quit-reader service)))))
       (keymap-bind! keymap
                     (list (make-key-stroke 'character (char->integer #\x) 4)
                           (make-key-stroke 'character (char->integer #\f) 4))

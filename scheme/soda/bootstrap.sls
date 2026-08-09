@@ -164,6 +164,9 @@
                 (make-word-completion-service! host owner)]
                [interaction
                 (make-interaction-service! (host-state-command-runtime state) owner)]
+               [_quit-command
+                (install-application-quit-command!
+                  (host-state-command-runtime state) owner files)]
                [minibuffer (make-minibuffer-service! host interaction owner)]
                [default-keymap (make-default-keymap)]
                [_command-ui
@@ -217,6 +220,54 @@
                           (make-key-stroke 'character (char->integer #\w) 0))
                     'command.where-is)
       keymap))
+
+  (define (shutdown-decision value)
+    (cond
+      [(and (string? value) (string-ci=? value "save")) 'save]
+      [(and (string? value) (string-ci=? value "discard")) 'discard]
+      [(and (string? value) (string-ci=? value "cancel")) 'cancel]
+      [else
+       (assertion-violation 'application.quit
+                            "expected save, discard, or cancel" value)]))
+
+  (define (make-application-quit-reader files)
+    (make-interactive-reader
+      'save-decision
+      (lambda (context arguments)
+        (let ([count (file-service-modified-count files)])
+          (if (zero? count)
+              (make-interactive-ready (list 'discard))
+              (make-interactive-suspend
+                (make-interaction-request
+                  'save-decision
+                  (string-append "Save " (number->string count)
+                                 " modified file buffer"
+                                 (if (= count 1) "" "s")
+                                 "? (save/discard/cancel) ")
+                  #f #f 'free
+                  (lambda (value ignored)
+                    (and (string? value)
+                         (or (string-ci=? value "save")
+                             (string-ci=? value "discard")
+                             (string-ci=? value "cancel")))))
+                (lambda (value)
+                  (make-interactive-ready (list (shutdown-decision value))))))))))
+
+  (define (install-application-quit-command! runtime owner files)
+    (command-runtime-register-command!
+      runtime
+      (make-command-definition
+        'application.quit
+        (lambda (context decision)
+          (case decision
+            [(cancel) (command-handled)]
+            [else
+             (append
+               (file-service-shutdown-effects files decision)
+               (list (make-command-effect 'application.quit #f)))]))
+        owner "Request application shutdown after resolving modified files."
+        'application
+        (make-interactive-plan (list (make-application-quit-reader files))))))
 
   (define (require-open who application)
     (unless (and (soda-application? application)
