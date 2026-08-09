@@ -2082,6 +2082,29 @@
                       1))
         (error 'fundamental-editing-tests
                "vertical arrow motion did not resolve point reveal requests"))
+      (frontend-enqueue!
+        frontend
+        (make-surface-input-message
+          (surface-id surface)
+          (make-key-event 'character (char->integer #\v) #f #f 4 'press
+                          (make-bytevector 0))))
+      (frontend-step! frontend)
+      (let ([render
+             (render-surface
+               surface (host-state-views state))])
+        (unless (and (= (viewport-visual-row
+                          (view-state-viewport (view-state view)))
+                        1)
+                     (string=?
+                       (frame-cell-grapheme
+                         (frame-cell-at (surface-render-frame render) 0 0))
+                       "e")
+                     (string=?
+                       (frame-cell-grapheme
+                         (frame-cell-at (surface-render-frame render) 1 0))
+                       "i"))
+          (error 'fundamental-editing-tests
+                 "C-v left blank rows at the document end")))
       (frontend-close! frontend)
       (soda-application-close! application))
 
@@ -2147,7 +2170,10 @@
            [tab-text (string->text "a\tbc")]
            [tab-position (text-layout-document-visual-position tab-text options 4 2)]
            [wide-text (string->text "a界b")]
-           [wide-position (text-layout-document-visual-position wide-text options 3 4)])
+           [wide-position (text-layout-document-visual-position wide-text options 3 4)]
+           [last-page
+            (text-layout-page-start
+              text options 4 2 (make-viewport 0 0) 1)])
       (unless (and (= (visual-position-line position) 0)
                    (= (visual-position-row position) 1)
                    (= (visual-position-offset next) 7)
@@ -2155,7 +2181,9 @@
                    (= (visual-position-row next) 0)
                    (= (visual-position-offset previous) 4)
                    (= (visual-position-row tab-position) 1)
-                   (= (visual-position-row wide-position) 1))
+                   (= (visual-position-row wide-position) 1)
+                   (= (visual-position-line last-page) 0)
+                   (= (visual-position-row last-page) 1))
         (error 'fundamental-editing-tests
                "unbounded visual row measurement is incorrect"))
       (text-close! text)
@@ -2230,26 +2258,27 @@
                (make-decoration-set '()) #f options)])
         (command-runtime-start!
           runtime 'fundamental.scroll-down (application-command-context application layout)))
-      (unless (and (= (viewport-visual-row (view-state-viewport (view-state view))) 2)
+      (unless (and (= (viewport-visual-row (view-state-viewport (view-state view))) 1)
                    (= (selection-range-head
                         (selection-primary-range
                           (view-state-selection (view-state view))))
-                      8))
+                      4))
         (error 'fundamental-editing-tests
                "page down did not move an off-screen point into the new viewport"))
       (let ([layout
              (layout-snapshot-display-stream
                (buffer-state-document (buffer-state buffer))
-               (view-state-selection (view-state view)) 0 2 4 2
+               (view-state-selection (view-state view)) 0 1 4 2
                (make-decoration-set '()) #f options)])
         (command-runtime-start!
           runtime 'fundamental.scroll-down (application-command-context application layout)))
-      (unless (= (viewport-visual-row (view-state-viewport (view-state view))) 2)
-        (error 'fundamental-editing-tests "page down did not clamp at the final visual row"))
+      (unless (= (viewport-visual-row (view-state-viewport (view-state view))) 1)
+        (error 'fundamental-editing-tests
+               "page down did not retain content on the final page"))
       (let ([layout
              (layout-snapshot-display-stream
                (buffer-state-document (buffer-state buffer))
-               (view-state-selection (view-state view)) 0 2 4 2
+               (view-state-selection (view-state view)) 0 1 4 2
                (make-decoration-set '()) #f options)])
         (command-runtime-start!
           runtime 'fundamental.scroll-up (application-command-context application layout)))

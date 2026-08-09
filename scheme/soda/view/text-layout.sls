@@ -20,6 +20,7 @@
           text-layout-document-visual-position
           text-layout-visual-position-at
           text-layout-visual-step
+          text-layout-page-start
           text-layout-reveal-viewport
           make-text-layout-options
           text-layout-options?
@@ -310,6 +311,44 @@
             (let ([next (text-layout-visual-adjacent-position
                           text options width current (if (negative? delta) -1 1) goal)])
               (loop (or next current) (- remaining 1)))))))
+
+  (define (visual-position-before? left right)
+    (or (< (visual-position-line left) (visual-position-line right))
+        (and (= (visual-position-line left) (visual-position-line right))
+             (< (visual-position-row left) (visual-position-row right)))))
+
+  ;; Compute a page-scroll origin while retaining as much document content as
+  ;; the viewport can display.  The final page begins at most HEIGHT-1 visual
+  ;; rows before the document end instead of placing the final row at the top.
+  (define (text-layout-page-start text options width height viewport direction)
+    (unless (and (text? text) (text-layout-options? options)
+                 (offset? width) (> width 0) (offset? height) (> height 0)
+                 (viewport? viewport) (memv direction '(-1 1)))
+      (assertion-violation 'text-layout-page-start
+                           "invalid visual page request"
+                           text options width height viewport direction))
+    (let* ([top
+            (text-layout-visual-position-at
+              text options width
+              (min (viewport-first-line viewport) (- (text-line-count text) 1))
+              (viewport-visual-row viewport))]
+           [requested
+            (text-layout-visual-step text options width top (* direction height))])
+      (if (negative? direction)
+          requested
+          (let* ([end
+                  (text-layout-document-visual-position
+                    text options width (text-size text))]
+                 [last-position
+                  (text-layout-visual-step text options width end (- 1 height))]
+                 [last-page
+                  (text-layout-visual-position-at
+                    text options width
+                    (visual-position-line last-position)
+                    (visual-position-row last-position))])
+            (if (visual-position-before? last-page requested)
+                last-page
+                requested)))))
 
   ;; Return the nearest Viewport which contains OFFSET.  Commands describe
   ;; point motion in document coordinates; this pure projection translates

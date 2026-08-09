@@ -979,14 +979,12 @@
               (let* ([state (command-context-view-state context)]
                      [current (view-state-viewport state)]
                      [options (context-layout-options context)]
-                     [top
-                      (text-layout-visual-position-at
-                        text options (frame-width (text-layout-frame layout))
-                        (viewport-first-line current) (viewport-visual-row current))]
                      [target
-                      (text-layout-visual-step
-                        text options (frame-width (text-layout-frame layout)) top
-                        (* direction (frame-height (text-layout-frame layout))))]
+                      (text-layout-page-start
+                        text options
+                        (frame-width (text-layout-frame layout))
+                        (frame-height (text-layout-frame layout))
+                        current direction)]
                      [height (frame-height (text-layout-frame layout))])
                 (if target
                     (let* ([next-viewport
