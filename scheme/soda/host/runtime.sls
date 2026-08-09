@@ -14,6 +14,7 @@
           runtime-request-cancel!
           runtime-request-live?
           runtime-enqueue-request!
+          runtime-pending?
           runtime-drain!
           runtime-close!)
   (import (rnrs)
@@ -84,6 +85,11 @@
       (runtime-next-id-set! runtime id)
       (runtime-enqueue-item! runtime request)
       request))
+
+  (define (runtime-pending? runtime)
+    (unless (runtime? runtime)
+      (assertion-violation 'runtime-pending? "expected a runtime" runtime))
+    (or (pair? (runtime-front runtime)) (pair? (runtime-back runtime))))
 
   (define (runtime-next-item! runtime)
     (when (null? (runtime-front runtime))

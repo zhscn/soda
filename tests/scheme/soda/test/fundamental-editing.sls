@@ -2482,6 +2482,7 @@
            [surface (soda-application-surface application)]
            [view (soda-application-view application)]
            [editing (soda-application-editing application)]
+           [presented-rows '()]
            [frontend
             (make-frontend
               state surface
@@ -2491,7 +2492,9 @@
                   (list (fundamental-fallback-input-layer editing))))
               (lambda (context disposition)
                 (fundamental-input-disposition context disposition))
-              (lambda (render theme) #f)
+              (lambda (render theme)
+                (let ([row (surface-render-cursor-row render)])
+                  (when row (set! presented-rows (cons row presented-rows)))))
               (make-render-service) default-theme)])
       (frontend-resize! frontend '(20 . 6))
       (frontend-step! frontend)
@@ -2500,6 +2503,7 @@
         (make-surface-input-message
           (surface-id surface) (make-text-input-event 'text (string->utf8 "a\nb\nc\nd"))))
       (frontend-step! frontend)
+      (set! presented-rows '())
       (do ([index 0 (+ index 1)])
           ((= index 3))
         (frontend-enqueue!
@@ -2508,11 +2512,21 @@
             (surface-id surface)
             (make-key-event 'up #f #f #f 0 'press (make-bytevector 0)))))
       (frontend-step! frontend)
-      (unless (= (selection-range-head
-                   (selection-primary-range (view-state-selection (view-state view))))
-                 1)
-        (error 'fundamental-editing-tests
-               "a burst of vertical input did not execute in command-loop order"))
+      (let ([rows
+             (let compress ([remaining (reverse presented-rows)] [last #f] [result '()])
+               (cond
+                 [(null? remaining) (reverse result)]
+                 [(and last (= (car remaining) last))
+                  (compress (cdr remaining) last result)]
+                 [else
+                  (compress (cdr remaining) (car remaining)
+                            (cons (car remaining) result))]))])
+        (unless (and (= (selection-range-head
+                          (selection-primary-range (view-state-selection (view-state view))))
+                        1)
+                     (equal? rows '(3 2 1 0)))
+          (error 'fundamental-editing-tests
+                 "a burst of vertical input did not preserve visible motion feedback" rows)))
       (frontend-close! frontend)
       (soda-application-close! application))
 

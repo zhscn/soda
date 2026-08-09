@@ -5,6 +5,7 @@
           frontend-surface
           frontend-dirty?
           frontend-enqueue!
+          frontend-pending?
           frontend-dispatch-input!
           frontend-handle-message!
           frontend-drain!
@@ -95,6 +96,10 @@
   (define (frontend-enqueue! value message)
     (require-open 'frontend-enqueue! value)
     (host-frontend-enqueue! (frontend-host-state value) message))
+
+  (define (frontend-pending? value)
+    (require-open 'frontend-pending? value)
+    (host-frontend-pending? (frontend-host-state value)))
 
   (define (active-view value)
     (host-frontend-active-view
@@ -287,11 +292,24 @@
   (define frontend-step!
     (case-lambda
       [(value)
-       (frontend-step! value #f)]
+       (frontend-step! value 32)]
       [(value limit)
-       (let ([processed (frontend-drain! value limit)])
-         (frontend-render! value)
-         processed)]))
+       (require-open 'frontend-step! value)
+       (unless (and (integer? limit) (exact? limit) (> limit 0))
+         (assertion-violation 'frontend-step! "limit must be a positive exact integer" limit))
+       ;; One queued message is the smallest causal scheduling unit.  Input
+       ;; messages enqueue their command at priority, so rendering after every
+       ;; unit gives that command a presentation opportunity before the next
+       ;; repeated input is interpreted.  Clean units are cheap because
+       ;; frontend-render! returns without constructing a Frame.
+       (let loop ([processed 0])
+         (if (or (>= processed limit) (not (frontend-pending? value)))
+             (begin
+               (frontend-render! value)
+               processed)
+             (let ([count (frontend-drain! value 1)])
+               (frontend-render! value)
+               (loop (+ processed count)))))]))
 
   (define (frontend-resize! value size)
     (require-open 'frontend-resize! value)

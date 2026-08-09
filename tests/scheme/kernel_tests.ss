@@ -1832,12 +1832,14 @@
 
 (define runtime (make-runtime))
 (define request (runtime-enqueue-request! runtime owner 'buffer 0 'payload))
-(unless (and (runtime-request? request) (= (runtime-request-id request) 1))
+(unless (and (runtime-request? request) (= (runtime-request-id request) 1)
+             (runtime-pending? runtime))
   (error 'kernel-tests "runtime request identity differs"))
 (define drained '())
 (runtime-drain! runtime (lambda (message) (set! drained (cons message drained))))
 (unless (and (= (length drained) 1)
-             (eq? (runtime-request-payload (car drained)) 'payload))
+             (eq? (runtime-request-payload (car drained)) 'payload)
+             (not (runtime-pending? runtime)))
   (error 'kernel-tests "runtime queue order differs"))
 
 ;; Dispatch is the only host publication path.  It applies the kernel change

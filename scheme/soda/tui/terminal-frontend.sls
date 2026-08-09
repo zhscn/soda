@@ -192,7 +192,10 @@
       (when (terminal-frontend-active? value)
         (for-each
           (lambda (event) (terminal-frontend-handle-native-event! value event))
-          (native:runtime-poll! (terminal-frontend-runtime value)))
+          ((if (frontend-pending? (terminal-frontend-core value))
+               native:runtime-poll-nowait!
+               native:runtime-poll!)
+           (terminal-frontend-runtime value)))
         (terminal-frontend-sync-size! value)
         (frontend-step! (terminal-frontend-core value))
         (loop))))

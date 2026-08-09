@@ -5,6 +5,7 @@
           host-frontend-make-command-context
           host-frontend-resolve-scroll-request!
           host-frontend-enqueue!
+          host-frontend-pending?
           host-frontend-run!
           host-frontend-dispatch-view!
           host-frontend-dispatch-host!
@@ -273,6 +274,9 @@
 
   (define (host-frontend-enqueue! state message)
     (runtime-enqueue! (host-state-runtime state) message))
+
+  (define (host-frontend-pending? state)
+    (runtime-pending? (host-state-runtime state)))
 
   (define (host-frontend-run! state handler . limit)
     (if (null? limit)
