@@ -19,6 +19,7 @@
         (soda kernel view-state)
         (soda host command)
         (soda host command-runtime)
+        (soda host analysis)
         (soda host condition)
         (soda host internal context)
         (soda host dispatch)
@@ -1044,6 +1045,49 @@
     (error 'kernel-tests "Location coordinate or revision mapping differs")))
 
 (define document (make-document "hello"))
+
+(let* ([snapshot (document-snapshot document)]
+       [changed
+        (make-range-set
+          (list (make-range-value 1 2 'changed)))]
+       [request (make-analysis-request 7 snapshot changed)]
+       [published '()]
+       [deferred-publish! #f]
+       [cancelled? #f]
+       [provider
+        (make-analysis-provider
+          'test.syntax
+          (lambda (received publish!)
+            (unless (eq? received request)
+              (error 'kernel-tests "AnalysisProvider request identity changed"))
+            (set! deferred-publish! publish!)
+            (lambda () (set! cancelled? #t))))]
+       [cancel
+        (analysis-provider-start!
+          provider request (lambda (result) (set! published (cons result published))))]
+       [result
+        (make-analysis-result
+          'test.syntax 7 (snapshot-revision snapshot)
+          (make-range-set
+            (list (make-range-value 1 4 'identifier)))
+          '((language . scheme)))])
+  (deferred-publish! result)
+  (cancel)
+  (unless (and cancelled?
+               (= (analysis-request-revision request) (snapshot-revision snapshot))
+               (eq? (car published) result)
+               (equal? (map range-value-value
+                            (analysis-result-query result 2 3))
+                       '(identifier))
+               (guard (condition [else #t])
+                 (deferred-publish!
+                   (make-analysis-result
+                     'test.syntax 7 (+ 1 (snapshot-revision snapshot))
+                     (make-range-set '()) '()))
+                 #f))
+    (error 'kernel-tests "AnalysisProvider publication contract differs"))
+  (snapshot-close! snapshot))
+
 (define buffer
   (buffer-service-create!
     (host-state-buffers host) owner "*kernel*" document configuration))
