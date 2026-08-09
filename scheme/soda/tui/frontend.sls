@@ -154,6 +154,11 @@
                (key-stroke=? (car left) (car right))
                (loop (cdr left) (cdr right))))))
 
+  (define (sequence-take sequence count)
+    (if (zero? count)
+        '()
+        (cons (car sequence) (sequence-take (cdr sequence) (- count 1)))))
+
   (define (remapped-command layers name)
     (let loop ([remaining layers])
       (if (null? remaining)
@@ -186,27 +191,46 @@
            [candidates
             (fold-left
               (lambda (result sequence)
-                (let ([resolved (resolve-key-sequence layers sequence)])
+                (let* ([resolved (resolve-key-sequence layers sequence)]
+                       [shown
+                        (if (and (pair? pending)
+                                 (sequence-prefix? pending sequence)
+                                 (> (length sequence) (length pending)))
+                            (sequence-take sequence (+ 1 (length pending)))
+                            sequence)]
+                       [shown-resolution (resolve-key-sequence layers shown)])
                   (if (and (eq? (car resolved) 'command)
                            (or (null? pending)
-                               (and (= (length sequence) (+ 1 (length pending)))
+                               (and (> (length sequence) (length pending))
                                     (sequence-prefix? pending sequence)))
                            (not (exists
                                   (lambda (hint)
                                     (string=? (car hint)
-                                              (key-sequence-label sequence)))
+                                              (key-sequence-label shown)))
                                   result)))
-                      (let* ([name (remapped-command layers (cadr resolved))]
+                      (let* ([full-name
+                              (remapped-command layers (cadr resolved))]
+                             [full-definition
+                              (command-runtime-command-definition
+                                runtime full-name #f)]
+                             [name
+                              (and (eq? (car shown-resolution) 'command)
+                                   (remapped-command
+                                     layers (cadr shown-resolution)))]
                              [definition
                               (and (symbol? name)
                                    (command-runtime-command-definition
                                      runtime name #f))])
-                        (if (and definition
+                        (if (and full-definition
                                  (command-runtime-command-available?
-                                   runtime definition command-context))
+                                   runtime full-definition command-context)
+                                 (or (eq? (car shown-resolution) 'prefix)
+                                     (and definition
+                                          (command-runtime-command-available?
+                                            runtime definition command-context))))
                             (cons
-                              (cons (key-sequence-label sequence)
-                                    (symbol->string name))
+                              (cons (key-sequence-label shown)
+                                    (if name (symbol->string name) "prefix"))
                               result)
                             result))
                       result)))
