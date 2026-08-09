@@ -11,6 +11,7 @@
           mode-spec-activate
           mode-spec-deactivate
           mode-spec-extension-list
+          mode-spec-command-category-list
           buffer-mode-facet
           buffer-minor-modes-facet
           buffer-major-mode-compartment
@@ -68,6 +69,12 @@
                 (mode-spec-extension-list (mode-spec-parent spec))
                 '())
             (mode-spec-extensions spec)))
+
+  (define (mode-spec-command-category-list spec)
+    (append (if (mode-spec-parent spec)
+                (mode-spec-command-category-list (mode-spec-parent spec))
+                '())
+            (mode-spec-command-categories spec)))
 
   (define (first-value values) (if (null? values) #f (car values)))
   (define (append-values values) (fold-left append '() values))

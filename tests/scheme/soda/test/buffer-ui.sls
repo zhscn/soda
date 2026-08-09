@@ -12,6 +12,7 @@
           (soda kernel selection)
           (soda kernel view-state)
           (soda host command)
+          (soda host command-runtime)
           (soda host dispatch)
           (soda host internal buffer)
           (soda host internal buffer-attachment)
@@ -207,7 +208,7 @@
               (list (make-buffer-hook-extension
                       (list (hook 'first-before 'before-major-mode-change 0)
                             (hook 'first-close 'buffer-close 0))))
-              '() #f
+              '(first) #f
               (lambda (buffer instance-owner)
                 (record! 'first-activate)
                 (owner-add-cleanup! instance-owner
@@ -223,7 +224,7 @@
                             (hook 'second-configuration
                                   'buffer-configuration-changed 0)
                             (hook 'second-close 'buffer-close 0))))
-              '() #f
+              '(second) #f
               (lambda (buffer instance-owner)
                 (record! 'second-activate)
                 (owner-add-cleanup! instance-owner
@@ -237,6 +238,36 @@
               configuration)]
            [first-instance
             (car (mode-service-instances (host-state-modes state) (buffer-id buffer)))])
+      (command-runtime-register-command!
+        (host-state-command-runtime state)
+        (make-command-definition
+          'test.global (lambda (context) (command-handled)) owner
+          "Global test command." 'test #f 'global))
+      (command-runtime-register-command!
+        (host-state-command-runtime state)
+        (make-command-definition
+          'test.first-mode (lambda (context) (command-handled)) owner
+          "First-mode test command." 'first #f 'mode))
+      (command-runtime-register-command!
+        (host-state-command-runtime state)
+        (make-command-definition
+          'test.second-mode (lambda (context) (command-handled)) owner
+          "Second-mode test command." 'second #f 'mode))
+      (let ([context (make-command-context #f (buffer-id buffer) 'mode-test)])
+        ;; A query context carries the immutable published BufferState just as
+        ;; an ordinary frontend command context does.
+        (set! context
+              (make-command-context
+                #f #f #f #f (buffer-id buffer) (buffer-state buffer) #f #f
+                '() #f #f 'mode-test))
+        (unless (and (command-runtime-command-available?
+                       (host-state-command-runtime state) 'test.global context)
+                     (command-runtime-command-available?
+                       (host-state-command-runtime state) 'test.first-mode context)
+                     (not (command-runtime-command-available?
+                            (host-state-command-runtime state)
+                            'test.second-mode context)))
+          (error 'buffer-ui-tests "command availability ignored the active mode")))
       (unless (and (mode-instance? first-instance)
                    (eq? (mode-instance-spec first-instance) first)
                    (owner-active? (mode-instance-owner first-instance)))
@@ -258,6 +289,18 @@
                                second-major second-configuration)))
           (error 'buffer-ui-tests "major-mode transition order or ownership differs"
                  events))
+        (let ([context
+               (make-command-context
+                 #f #f #f #f (buffer-id buffer) (buffer-state buffer) #f #f
+                 '() #f #f 'mode-test)])
+          (unless (and (command-runtime-command-available?
+                         (host-state-command-runtime state)
+                         'test.second-mode context)
+                       (not (command-runtime-command-available?
+                              (host-state-command-runtime state)
+                              'test.first-mode context)))
+            (error 'buffer-ui-tests
+                   "command availability retained the previous major mode")))
         (set! events '())
         (dispatcher-dispatch!
           (host-state-dispatch state)

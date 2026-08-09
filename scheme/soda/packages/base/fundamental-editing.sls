@@ -1170,7 +1170,8 @@
     (syntax-rules ()
       [(_ runtime owner name (context . arguments) documentation class body ...)
        (define-command
-         runtime owner name (context . arguments) documentation class body ...)]))
+         runtime owner name (context . arguments) documentation class
+         (scope 'mode) body ...)]))
 
   (define-syntax bind-keys!
     (syntax-rules ()
@@ -1261,6 +1262,7 @@
       (define-command
         runtime owner 'fundamental.goto-line (context line column)
         "Move every selection to one-based LINE and optional COLUMN." 'motion
+        (scope 'mode)
         (interactive (make-interactive-plan (list (make-goto-reader))))
         (goto-line-column context line column))
       (install-command!

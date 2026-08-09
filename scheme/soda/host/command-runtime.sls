@@ -6,6 +6,9 @@
           command-runtime-command-definition
           command-runtime-command-names
           command-runtime-command-definitions
+          command-runtime-command-available?
+          command-runtime-available-command-names
+          command-runtime-available-command-definitions
           command-runtime-command-interactive?
           command-runtime-start!
           command-runtime-start-interactive!
@@ -32,6 +35,8 @@
           command-runtime-enqueue!
           command-runtime-handle-message!)
   (import (rnrs)
+          (soda kernel extension)
+          (soda kernel mode)
           (soda kernel state)
           (soda kernel view-state)
           (soda host command)
@@ -85,7 +90,21 @@
   ;; interactive clause is explicit so ordinary command bodies remain
   ;; unrestricted Scheme expressions.
   (define-syntax define-command
-    (syntax-rules (interactive)
+    (syntax-rules (interactive scope)
+      [(_ runtime owner name (context . arguments) documentation class
+          (scope command-scope) (interactive interaction-spec) body ...)
+       (command-runtime-register-command!
+         runtime
+         (make-command-definition
+           name (lambda (context . arguments) body ...) owner
+           documentation class interaction-spec command-scope))]
+      [(_ runtime owner name (context . arguments) documentation class
+          (scope command-scope) body ...)
+       (command-runtime-register-command!
+         runtime
+         (make-command-definition
+           name (lambda (context . arguments) body ...) owner
+           documentation class #f command-scope))]
       [(_ runtime owner name (context . arguments) documentation class
           (interactive interaction-spec) body ...)
        (command-runtime-register-command!
@@ -122,6 +141,43 @@
   (define (command-runtime-command-definitions service)
     (map (lambda (name) (command-runtime-command-definition service name))
          (command-runtime-command-names service)))
+
+  (define (context-command-categories context)
+    (let ([state (command-context-buffer-state context)])
+      (if (not state)
+          '()
+          (let* ([configuration (buffer-state-configuration state)]
+                 [major (configuration-facet configuration buffer-mode-facet 'buffer)]
+                 [minor (configuration-facet
+                          configuration buffer-minor-modes-facet 'buffer)])
+            (fold-left
+              append '()
+              (map mode-spec-command-category-list
+                   (append (if major (list major) '()) minor)))))))
+
+  (define (command-runtime-command-available? service definition-or-name context)
+    (unless (and (command-runtime? service) (command-context? context))
+      (assertion-violation 'command-runtime-command-available?
+                           "expected a command runtime and context" service context))
+    (let ([definition
+           (if (command-definition? definition-or-name)
+               definition-or-name
+               (command-runtime-command-definition service definition-or-name #f))])
+      (and definition
+           (or (eq? (command-definition-scope definition) 'global)
+               (and (command-definition-class definition)
+                    (memq (command-definition-class definition)
+                          (context-command-categories context)))))))
+
+  (define (command-runtime-available-command-definitions service context)
+    (filter
+      (lambda (definition)
+        (command-runtime-command-available? service definition context))
+      (command-runtime-command-definitions service)))
+
+  (define (command-runtime-available-command-names service context)
+    (map command-definition-name
+         (command-runtime-available-command-definitions service context)))
 
   (define-record-type
     (runtime-advice %make-runtime-advice runtime-advice?)

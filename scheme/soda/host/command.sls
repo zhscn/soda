@@ -5,6 +5,7 @@
           command-definition-invoke
           command-definition-documentation
           command-definition-class
+          command-definition-scope
           command-definition-interaction-spec
           command-definition-interactive?
           command-definition-owner
@@ -85,6 +86,7 @@
       (immutable invoke command-definition-invoke)
       (immutable documentation command-definition-documentation)
       (immutable class command-definition-class)
+      (immutable scope command-definition-scope)
       (immutable interaction-spec command-definition-interaction-spec)
       (immutable owner command-definition-owner)))
 
@@ -98,14 +100,18 @@
       [(name invoke owner interaction-spec)
        (make-command-definition name invoke owner #f #f interaction-spec)]
       [(name invoke owner documentation class interaction-spec)
+       (make-command-definition
+         name invoke owner documentation class interaction-spec 'global)]
+      [(name invoke owner documentation class interaction-spec scope)
        (owner-assert-active 'make-command-definition owner)
        (unless (and (symbol? name) (procedure? invoke)
                     (or (not documentation) (string? documentation))
-                    (or (not class) (symbol? class)))
+                    (or (not class) (symbol? class))
+                    (memq scope '(global mode)))
          (assertion-violation 'make-command-definition "invalid command definition"
-                              name invoke documentation class))
+                              name invoke documentation class scope))
        (%make-command-definition
-         name invoke documentation class interaction-spec owner)]))
+         name invoke documentation class scope interaction-spec owner)]))
 
   (define (command-definition-interactive? definition)
     (unless (command-definition? definition)
