@@ -24,6 +24,7 @@
           package-host-cancel-navigation!
           package-host-dispatch!
           package-host-dispatch-view!
+          package-host-add-update-listener!
           package-host-buffer-ref
           package-host-buffers
           package-host-open-or-create-buffer!
@@ -178,6 +179,14 @@
 
   (define (package-host-dispatch-view! host specification)
     (dispatcher-dispatch-view! (host-state-dispatch (package-host-state host)) specification))
+
+  (define (package-host-add-update-listener! host owner procedure)
+    (unless (and (package-host? host) (owner? owner) (procedure? procedure))
+      (assertion-violation 'package-host-add-update-listener!
+                           "expected a PackageHost, Owner, and update listener"
+                           host owner procedure))
+    (dispatcher-add-listener!
+      (host-state-dispatch (package-host-state host)) owner procedure))
 
   (define (package-host-buffer-ref host id . default)
     (apply buffer-service-ref (host-state-buffers (package-host-state host)) id default))

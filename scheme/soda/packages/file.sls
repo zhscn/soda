@@ -3,6 +3,8 @@
           file-service?
           file-service-resource
           file-service-conflict
+          file-service-recovery
+          file-service-start-recovery!
           file-service-watch-service
           file-service-attach-runtime!
           file-service-handle-runtime-event!
@@ -44,6 +46,7 @@
           (soda packages completion)
           (soda packages file-watch)
           (soda packages interaction)
+          (soda packages recovery)
           (soda packages resource)
           (soda support vfs))
 
@@ -61,6 +64,7 @@
       (immutable keymap file-keymap)
       (immutable watch-service file-service-watch-service)
       (immutable conflicts file-service-conflicts)
+      (mutable recovery file-service-recovery file-service-recovery-set!)
       (mutable mode-associations file-service-mode-associations
                                  file-service-mode-associations-set!)))
 
@@ -560,6 +564,13 @@
     (file-watch-service-add-listener!
       (file-service-watch-service service) owner procedure))
 
+  (define (file-service-start-recovery! service context)
+    (unless (file-service? service)
+      (assertion-violation 'file-service-start-recovery!
+                           "expected a FileService" service))
+    (let ([recovery (file-service-recovery service)])
+      (and recovery (recovery-service-start! recovery context))))
+
   (define (file-buffer-configuration service resource context lock-conflict?)
     ;; New file Buffers inherit ordinary editing configuration from the active
     ;; Buffer.  The lock compartment is replaced at this boundary so a prior
@@ -826,6 +837,10 @@
   (define (clear-conflict! service buffer-id)
     (hashtable-delete! (file-service-conflicts service) buffer-id))
 
+  (define (clear-recovery! service buffer-id)
+    (let ([recovery (file-service-recovery service)])
+      (when recovery (recovery-service-clear-buffer! recovery buffer-id))))
+
   (define (replace-live-buffer-contents! service buffer contents version)
     (let* ([state (buffer-state buffer)]
            [length (snapshot-byte-size (buffer-state-document state))])
@@ -840,7 +855,8 @@
                        (file-binding-lock binding) #f))
       (when (file-service-history service)
         (history-discard-buffer! (file-service-history service) (buffer-id buffer))
-        (history-mark-saved! (file-service-history service) (buffer-id buffer)))))
+        (history-mark-saved! (file-service-history service) (buffer-id buffer)))
+      (clear-recovery! service (buffer-id buffer))))
 
   (define (reload-conflicted-buffer! service conflict)
     (let* ([resource (file-conflict-resource conflict)]
@@ -888,6 +904,7 @@
                          (file-binding-lock binding) #t)
           (when (file-service-history service)
             (history-mark-saved! (file-service-history service) (buffer-id buffer)))
+          (clear-recovery! service (buffer-id buffer))
           (clear-conflict! service (buffer-id buffer))))))
 
   (define (save-conflicted-buffer-as! service conflict destination expected-destination)
@@ -939,6 +956,7 @@
               (release-file-lock! (file-binding-lock old-binding)))
             (when (file-service-history service)
               (history-mark-saved! (file-service-history service) (buffer-id buffer)))
+            (clear-recovery! service (buffer-id buffer))
             (clear-conflict! service (buffer-id buffer)))
           (lambda ()
             (when (and new-lock (not written?)) (release-file-lock! new-lock)))))))
@@ -1027,7 +1045,13 @@
            [service
             (%make-file-service
               (make-eqv-hashtable) host owner history keymap watch-service
-              (make-eqv-hashtable) '())])
+              (make-eqv-hashtable) #f '())])
+      (file-service-recovery-set!
+        service
+        (and history
+             (make-recovery-service!
+               host owner history
+               (lambda (buffer-id) (file-service-resource service buffer-id #f)))))
       (register-file-settings! host owner)
       (command-runtime-register-effect-handler!
         runtime 'file.external-resolution owner 'resolve-external-file
@@ -1127,7 +1151,8 @@
                              (and binding (file-binding-lock binding))))
             (clear-conflict! service (file-load-buffer-id request))
             (when (and (file-load-discard-history? request) history)
-              (history-discard-buffer! history (file-load-buffer-id request))))))
+              (history-discard-buffer! history (file-load-buffer-id request)))
+            (clear-recovery! service (file-load-buffer-id request)))))
       (command-runtime-register-effect-handler!
         runtime 'file.write owner 'write-file
         (lambda (ignored invocation effect)
@@ -1187,7 +1212,8 @@
                     (when (and transfer-lock? (not written?))
                       (release-file-lock! new-lock))))))
             (when history
-              (history-mark-saved! history (file-write-buffer-id request))))))
+              (history-mark-saved! history (file-write-buffer-id request)))
+            (clear-recovery! service (file-write-buffer-id request)))))
       (command-runtime-register-effect-handler!
         runtime 'file.close owner 'close-file-buffer
         (lambda (ignored invocation effect)
@@ -1361,6 +1387,7 @@
             (file-service-watch-service service) (buffer-id buffer))
           (hashtable-delete! (file-service-resources service) (buffer-id buffer))
           (clear-conflict! service (buffer-id buffer))
+          (clear-recovery! service (buffer-id buffer))
           (when history (history-discard-buffer! history (buffer-id buffer)))))
       service))
 )

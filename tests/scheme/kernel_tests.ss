@@ -3,6 +3,7 @@
         (rnrs eval)
         (only (chezscheme)
               delete-directory
+              get-mode
               get-process-id
               mkdir)
         (soda kernel change)
@@ -49,11 +50,13 @@
         (soda bootstrap)
         (soda packages base fundamental-editing)
         (soda packages base editing-options)
+        (soda packages base history)
         (soda packages analysis-ui)
         (soda packages buffer-ui)
         (soda packages interaction)
         (soda packages file)
         (soda packages file-watch)
+        (soda packages recovery)
         (soda packages process)
         (soda packages spell)
         (prefix (soda ffi runtime) native:)
@@ -2593,6 +2596,139 @@
       (when (file-exists? path) (delete-file path))
       (when (file-exists? lock) (delete-file lock))
       (delete-directory directory #t))))
+
+;; Recovery snapshots are written from a queued command effect, coalesce to
+;; the latest published Buffer generation, survive service shutdown, and are
+;; restored into an unbound Buffer without changing the original resource.
+(let* ([directory
+         (string-append
+           "/tmp/soda-recovery-test-" (number->string (get-process-id)))]
+       [resource
+         (make-resource
+           'file
+           (string-append directory "/original.txt"))]
+       [state (make-host-state)]
+       [host-capability (make-package-host state)]
+       [owner (make-owner 'recovery-writer-test)]
+       [history
+        (make-history!
+          (host-state-command-runtime state) (host-state-dispatch state) owner)]
+       [buffer
+        (buffer-service-create!
+          (host-state-buffers state) owner "recovery-source"
+          (make-document "base") (make-configuration '()))]
+       [service
+        (make-recovery-service!
+          host-capability owner history
+          (lambda (id)
+            (and (= id (buffer-id buffer)) resource))
+          directory)])
+  (define (replace-recovery-buffer! text)
+    (let* ([state-before (buffer-state buffer)]
+           [length
+            (snapshot-byte-size (buffer-state-document state-before))])
+      (dispatcher-dispatch!
+        (host-state-dispatch state)
+        (make-transaction-spec
+          (buffer-id buffer) (buffer-state-generation state-before)
+          (make-change-set
+            length (list (make-text-change 0 length (string->utf8 text))))))))
+  (dynamic-wind
+    (lambda ()
+      (when (file-exists? directory) (delete-directory directory #t)))
+    (lambda ()
+      (history-mark-saved! history (buffer-id buffer))
+      (replace-recovery-buffer! "first")
+      (replace-recovery-buffer! "latest")
+      (host-state-run! state)
+      (unless (and (= (length (vfs-list-directory directory)) 1)
+                   (zero?
+                     (bitwise-and
+                       (get-mode
+                         (vfs-path-join
+                           directory
+                           (vfs-entry-name (car (vfs-list-directory directory)))))
+                       #o077)))
+        (error 'kernel-tests "recovery snapshot was not coalesced"))
+      (recovery-service-clear-buffer! service (buffer-id buffer))
+      (host-state-run! state)
+      (unless (null? (vfs-list-directory directory))
+        (error 'kernel-tests "successful recovery cleanup retained an artifact"))
+      (replace-recovery-buffer! "crash contents")
+      (host-state-run! state)
+      (unless (= (length (vfs-list-directory directory)) 1)
+        (error 'kernel-tests "modified Buffer did not produce a recovery artifact"))
+      (owner-close! owner)
+      (host-state-close! state)
+      (unless (= (length (vfs-list-directory directory)) 1)
+        (error 'kernel-tests "service shutdown removed crash recovery state"))
+
+      (let* ([next-state (make-host-state)]
+             [next-host (make-package-host next-state)]
+             [next-owner (make-owner 'recovery-reader-test)]
+             [next-history
+              (make-history!
+                (host-state-command-runtime next-state)
+                (host-state-dispatch next-state) next-owner)]
+             [base
+              (buffer-service-create!
+                (host-state-buffers next-state) next-owner "recovery-target"
+                (make-document "") (make-configuration '()))]
+             [base-view
+              (view-service-create!
+                (host-state-views next-state) next-owner base
+                (make-configuration '()))]
+             [surface
+              (make-surface
+                'recovery-test '()
+                (make-leaf-window (view-id base-view) '(0 0 40 8)) '(40 . 8))]
+             [_surface
+              (surface-service-register! (host-state-surfaces next-state) surface)]
+             [reader
+              (make-recovery-service!
+                next-host next-owner next-history (lambda (buffer-id) #f) directory)]
+             [interactions
+              (make-interaction-service!
+                (host-state-command-runtime next-state) next-owner)]
+             [context
+              (make-command-context
+                #f (surface-id surface) (window-id (surface-active-window surface))
+                (view-id base-view) (buffer-id base)
+                (buffer-state base) (view-state base-view)
+                #f '() #f #f 'recovery-test)])
+        (unless (and (= (length (recovery-service-pending-artifacts reader)) 1)
+                     (string=?
+                       (utf8->string
+                         (recovery-artifact-contents
+                           (car (recovery-service-pending-artifacts reader))))
+                       "crash contents"))
+          (error 'kernel-tests "startup recovery discovery differs"))
+        (recovery-service-start! reader context)
+        (host-state-run! next-state)
+        (unless (eq? (interaction-request-kind
+                       (interaction-session-request
+                         (interaction-service-current interactions)))
+                     'recovery-decision)
+          (error 'kernel-tests "startup recovery did not request a decision"))
+        (interaction-service-submit! interactions "recover")
+        (host-state-run! next-state)
+        (let* ([active
+                (surface-active-context surface (host-state-views next-state))]
+               [restored-view
+                (view-service-ref
+                  (host-state-views next-state) (active-context-view-id active))]
+               [restored (view-buffer restored-view)])
+          (unless (and (string=? (buffer-string restored) "crash contents")
+                       (not (= (buffer-id restored) (buffer-id base)))
+                       (null? (vfs-list-directory directory)))
+            (error 'kernel-tests
+                   "recovery restore changed the original resource or retained its artifact")))
+        (owner-close! next-owner)
+        (host-state-close! next-state)))
+    (lambda ()
+      (when (owner-active? owner) (owner-close! owner))
+      (unless (host-state-closed? state) (host-state-close! state))
+      (when (file-exists? directory) (delete-directory directory #t)))))
 
 ;; FileWatchService shares a parent-directory source while preserving Buffer
 ;; identity, distinguishes acknowledged local writes, and retires bindings as

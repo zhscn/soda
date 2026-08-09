@@ -7,6 +7,8 @@
           vfs-create-exclusive-file!
           vfs-delete-file-if-matches!
           vfs-file-exists?
+          vfs-directory-exists?
+          vfs-create-directory!
           vfs-list-directory
           vfs-path-separator?
           vfs-directory-path
@@ -36,6 +38,7 @@
                 get-mode
                 getenv
                 get-process-id
+                mkdir
                 open-file-input-port
                 open-file-output-port
                 path-absolute?
@@ -65,6 +68,29 @@
   (define (vfs-file-exists? path)
     (require-path 'vfs-file-exists? path)
     (file-regular? path #t))
+
+  (define (vfs-directory-exists? path)
+    (require-path 'vfs-directory-exists? path)
+    (file-directory? path #t))
+
+  (define vfs-create-directory!
+    (case-lambda
+      [(path) (vfs-create-directory! path #f)]
+      [(path parents?)
+       (require-path 'vfs-create-directory! path)
+       (unless (boolean? parents?)
+         (assertion-violation 'vfs-create-directory!
+                              "parents flag must be a boolean" parents?))
+       (let ([resolved
+              (vfs-resolve-path (vfs-directory-path (current-directory)) path)])
+         (define (create! target)
+           (unless (vfs-directory-exists? target)
+             (when parents?
+               (let ([parent (path-parent target)])
+                 (unless (string=? parent target) (create! parent))))
+             (mkdir target)))
+         (create! resolved)
+         resolved)]))
 
   (define atomic-write-serial 0)
 

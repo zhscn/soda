@@ -429,6 +429,9 @@
                     (process-service-handle-runtime-event!
                       (soda-application-processes application) event)))))
             (soda-application-effect-registration-set! application registration)
+            (file-service-start-recovery!
+              (soda-application-files application)
+              (application-command-context application 'startup-recovery))
             (dynamic-wind
               (lambda () #f)
               (lambda () (terminal-frontend-run! terminal))
