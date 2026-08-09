@@ -415,12 +415,18 @@
             (process-service-attach-runtime!
               (soda-application-processes application)
               (terminal-frontend-runtime terminal))
+            (file-service-attach-runtime!
+              (soda-application-files application)
+              (terminal-frontend-runtime terminal))
             (set! process-registration
               (terminal-frontend-add-runtime-listener!
                 terminal (soda-application-owner application)
                 (lambda (event)
-                  (process-service-handle-runtime-event!
-                    (soda-application-processes application) event))))
+                  (or
+                    (file-service-handle-runtime-event!
+                      (soda-application-files application) event)
+                    (process-service-handle-runtime-event!
+                      (soda-application-processes application) event)))))
             (soda-application-effect-registration-set! application registration)
             (dynamic-wind
               (lambda () #f)

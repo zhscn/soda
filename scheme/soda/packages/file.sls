@@ -2,6 +2,10 @@
   (export make-file-service!
           file-service?
           file-service-resource
+          file-service-watch-service
+          file-service-attach-runtime!
+          file-service-handle-runtime-event!
+          file-service-add-state-listener!
           file-service-register-mode!
           file-backup-enabled?
           file-keymap)
@@ -30,6 +34,7 @@
           (soda packages base history)
           (soda packages buffer-ui)
           (soda packages completion)
+          (soda packages file-watch)
           (soda packages interaction)
           (soda packages resource)
           (soda support vfs))
@@ -46,6 +51,7 @@
       (immutable owner file-service-owner)
       (immutable history file-service-history)
       (immutable keymap file-keymap)
+      (immutable watch-service file-service-watch-service)
       (mutable mode-associations file-service-mode-associations
                                  file-service-mode-associations-set!)))
 
@@ -331,11 +337,38 @@
   (define set-resource!
     (case-lambda
       [(service buffer-id resource version)
-       (set-resource! service buffer-id resource version #f)]
+       (set-resource! service buffer-id resource version #f #f)]
       [(service buffer-id resource version lock)
+       (set-resource! service buffer-id resource version lock #f)]
+      [(service buffer-id resource version lock local?)
        (let ([binding (make-file-binding resource version lock)])
          (hashtable-set! (file-service-resources service) buffer-id binding)
+         (file-watch-service-update!
+           (file-service-watch-service service) buffer-id
+           (resource-locator resource) version local?)
          binding)]))
+
+  (define (file-service-attach-runtime! service runtime)
+    (unless (file-service? service)
+      (assertion-violation 'file-service-attach-runtime!
+                           "expected a FileService" service))
+    (file-watch-service-attach-runtime!
+      (file-service-watch-service service) runtime)
+    service)
+
+  (define (file-service-handle-runtime-event! service event)
+    (unless (file-service? service)
+      (assertion-violation 'file-service-handle-runtime-event!
+                           "expected a FileService" service))
+    (file-watch-service-handle-runtime-event!
+      (file-service-watch-service service) event))
+
+  (define (file-service-add-state-listener! service owner procedure)
+    (unless (file-service? service)
+      (assertion-violation 'file-service-add-state-listener!
+                           "expected a FileService" service))
+    (file-watch-service-add-listener!
+      (file-service-watch-service service) owner procedure))
 
   (define (file-buffer-configuration service resource context lock-conflict?)
     ;; New file Buffers inherit ordinary editing configuration from the active
@@ -579,8 +612,10 @@
                            host owner history))
     (let* ([runtime (package-host-command-runtime host)]
            [keymap (make-keymap 'file)]
+           [watch-service (make-file-watch-service owner)]
            [service
-            (%make-file-service (make-eqv-hashtable) host owner history keymap '())])
+            (%make-file-service
+              (make-eqv-hashtable) host owner history keymap watch-service '())])
       (register-file-settings! host owner)
       (command-runtime-register-effect-handler!
         runtime 'file.visit owner 'open-file-buffer
@@ -675,7 +710,8 @@
                                    resource (vfs-stat-path path)
                                    (if transfer-lock?
                                        new-lock
-                                       (and binding (file-binding-lock binding))))
+                                       (and binding (file-binding-lock binding)))
+                                   #t)
                     (set! written? #t)
                     (when transfer-lock?
                       (release-file-lock! (and binding (file-binding-lock binding)))))
@@ -853,6 +889,8 @@
         (lambda (buffer)
           (let ([binding (file-service-binding service (buffer-id buffer) #f)])
             (when binding (release-file-lock! (file-binding-lock binding))))
+          (file-watch-service-unregister!
+            (file-service-watch-service service) (buffer-id buffer))
           (hashtable-delete! (file-service-resources service) (buffer-id buffer))
           (when history (history-discard-buffer! history (buffer-id buffer)))))
       service))

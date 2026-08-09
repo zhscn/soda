@@ -53,6 +53,7 @@
         (soda packages buffer-ui)
         (soda packages interaction)
         (soda packages file)
+        (soda packages file-watch)
         (soda packages process)
         (soda packages spell)
         (prefix (soda ffi runtime) native:)
@@ -2591,6 +2592,85 @@
     (lambda ()
       (when (file-exists? path) (delete-file path))
       (when (file-exists? lock) (delete-file lock))
+      (delete-directory directory #t))))
+
+;; FileWatchService shares a parent-directory source while preserving Buffer
+;; identity, distinguishes acknowledged local writes, and retires bindings as
+;; their Buffer or Owner lifecycle ends.
+(let* ([directory
+         (string-append
+           "/tmp/soda-file-watch-" (number->string (get-process-id)))]
+       [first (vfs-path-join directory "first.txt")]
+       [second (vfs-path-join directory "second.txt")]
+       [owner (make-owner 'file-watch-test)]
+       [runtime (native:make-runtime)]
+       [service (make-file-watch-service owner)]
+       [observed '()])
+  (define (next-state-event predicate)
+    (let loop ()
+      (let scan ([events (native:runtime-poll! runtime)])
+        (cond
+          [(null? events) (loop)]
+          [else
+           (let ([handled
+                  (file-watch-service-handle-runtime-event!
+                    service (car events))])
+             (let ([match (and handled (find predicate handled))])
+               (or match (scan (cdr events)))))]))))
+  (dynamic-wind
+    (lambda ()
+      (mkdir directory)
+      (vfs-write-file first (string->utf8 "one"))
+      (vfs-write-file second (string->utf8 "two")))
+    (lambda ()
+      (file-watch-service-add-listener!
+        service owner (lambda (event) (set! observed (cons event observed))))
+      (file-watch-service-register! service 101 first (vfs-stat-path first))
+      (file-watch-service-register! service 102 second (vfs-stat-path second))
+      (file-watch-service-attach-runtime! service runtime)
+      (unless (and (= (file-watch-service-binding-count service) 2)
+                   (= (file-watch-service-directory-count service) 1))
+        (error 'kernel-tests "FileWatchService did not share its directory watch"))
+      (vfs-write-file first (string->utf8 "external-change"))
+      (let ([event
+             (next-state-event
+               (lambda (candidate)
+                 (and (= (file-state-event-buffer-id candidate) 101)
+                      (memq (file-state-event-kind candidate)
+                            '(modified replaced)))))])
+        (unless (and (eq? (file-state-event-origin event) 'external)
+                     (exists
+                       (lambda (cause) (memq cause '(rename change)))
+                       (file-state-event-causes event)))
+          (error 'kernel-tests "external file modification was not normalized" event)))
+      (vfs-write-file second (string->utf8 "local-write"))
+      (file-watch-service-update!
+        service 102 second (vfs-stat-path second) #t)
+      (let ([event
+             (next-state-event
+               (lambda (candidate)
+                 (and (= (file-state-event-buffer-id candidate) 102)
+                      (eq? (file-state-event-origin candidate) 'local))))])
+        (unless (memq (file-state-event-kind event) '(metadata replaced))
+          (error 'kernel-tests "local file notification was not acknowledged" event)))
+      (delete-file first)
+      (let ([event
+             (next-state-event
+               (lambda (candidate)
+                 (and (= (file-state-event-buffer-id candidate) 101)
+                      (eq? (file-state-event-kind candidate) 'deleted))))])
+        (unless (eq? (file-state-event-origin event) 'external)
+          (error 'kernel-tests "file deletion origin differs" event)))
+      (file-watch-service-unregister! service 101)
+      (file-watch-service-unregister! service 102)
+      (unless (and (zero? (file-watch-service-binding-count service))
+                   (zero? (file-watch-service-directory-count service)))
+        (error 'kernel-tests "FileWatchService retained an empty directory watch")))
+    (lambda ()
+      (when (owner-active? owner) (owner-close! owner))
+      (native:runtime-close! runtime)
+      (when (file-exists? first) (delete-file first))
+      (when (file-exists? second) (delete-file second))
       (delete-directory directory #t))))
 
 (let* ([secondary

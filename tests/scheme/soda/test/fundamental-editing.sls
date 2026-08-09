@@ -40,6 +40,7 @@
           (soda packages base text-motion)
           (soda packages completion)
           (soda packages file)
+          (soda packages file-watch)
           (soda packages directory)
           (soda packages editor-options)
           (soda packages buffer-ui)
@@ -1370,9 +1371,12 @@
             (unless (and (file-exists? scratch-save)
                          (string=? (resource-locator
                                     (file-service-resource files (buffer-id scratch)))
-                                   scratch-save))
+                                   scratch-save)
+                         (positive?
+                           (file-watch-service-binding-count
+                             (file-service-watch-service files))))
               (error 'fundamental-editing-tests
-                     "file.save did not bind an unvisited Buffer to its selected destination"))
+                     "file.save did not bind and watch its selected destination"))
             (command-runtime-start! runtime 'file.insert
                                     (application-command-context application) (list path))
             (host-state-run! state)
@@ -1493,7 +1497,10 @@
               (let ([revisited (buffer-service-ref
                                  (host-state-buffers state)
                                  (command-context-buffer-id
-                                   (application-command-context application)))])
+                                   (application-command-context application)))]
+                    [watch-count-before-close
+                     (file-watch-service-binding-count
+                       (file-service-watch-service files))])
                 (unless (= (buffer-id revisited) (buffer-id buffer))
                   (error 'fundamental-editing-tests
                          "file.visit did not reuse its canonical file Buffer"))
@@ -1517,6 +1524,9 @@
                 (unless (and (not (buffer-service-ref
                                     (host-state-buffers state) (buffer-id revisited) #f))
                              (not (file-service-resource files (buffer-id revisited) #f))
+                             (= (file-watch-service-binding-count
+                                  (file-service-watch-service files))
+                                (- watch-count-before-close 1))
                              (not (= (command-context-buffer-id
                                        (application-command-context application))
                                      (buffer-id revisited))))
