@@ -3241,9 +3241,16 @@
                   (frame-row-string
                     (surface-render-frame presented)
                     (- (frame-height (surface-render-frame presented)) 1))
-                  "C-x"))
+                  "C-x")
+                (let ([rendered
+                       (find
+                         (lambda (candidate)
+                           (= (rendered-view-view-id candidate) (view-id view)))
+                         (surface-render-rendered-views presented))])
+                  (and rendered
+                       (= (cadddr (rendered-view-rectangle rendered)) 3))))
         (error 'fundamental-editing-tests
-               "shortcut hints were not derived from the pending InputLayer prefix"))
+               "shortcut chrome did not reserve layout or reflect the pending prefix"))
       (send! (make-text-input-event 'text (string->utf8 "abcdefghijk")))
       (send! (make-key-event 'character (char->integer #\a) #f #f 4 'press
                              (make-bytevector 0)))

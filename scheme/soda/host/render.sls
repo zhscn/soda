@@ -37,6 +37,7 @@
           surface-hit-source
           surface-render-hit-test
           surface-render-hit-test-window
+          surface-window-content-rectangle
           render-surface
           render-surface-frame)
   (import (rnrs)
@@ -174,6 +175,33 @@
                   (list (make-frame-placement (- height 1) 0
                                               (status-frame width message))))
           placements)))
+
+  (define (content-rectangle surface leaf content-height)
+    (let* ([rectangle (window-rectangle leaf)]
+           [row (car rectangle)]
+           [column (cadr rectangle)]
+           [width (caddr rectangle)]
+           [requested-height (cadddr rectangle)]
+           [interaction?
+            (memq leaf (surface-interaction-windows surface))]
+           [next-row
+            (if interaction?
+                (min row (max 0 (- content-height requested-height)))
+                row)]
+           [height
+            (max 0 (min requested-height (- content-height next-row)))])
+      (list next-row column width height)))
+
+  (define (surface-window-content-rectangle surface views leaf)
+    (let* ([height (cdr (surface-size surface))]
+           [position-message (surface-position-message surface views)]
+           [hint-message
+            (and (>= height 3) (pair? (surface-shortcut-hints surface)))]
+           [content-height
+            (if (and (or position-message hint-message) (positive? height))
+                (- height 1)
+                height)])
+      (content-rectangle surface leaf content-height)))
 
   (define (surface-position-message surface views)
     (let* ([leaf (surface-active-window surface)]
@@ -389,32 +417,33 @@
       (assertion-violation 'render-surface-frame "expected a Surface and ViewService"))
     (let* ([size (surface-size surface)]
            [width (car size)]
-           [height (cdr size)])
+           [height (cdr size)]
+           [position-message (surface-position-message surface views)]
+           [hint-message
+            (and (>= height 3)
+                 (pair? (surface-shortcut-hints surface))
+                 (shortcut-hint-text (surface-shortcut-hints surface)))]
+           [message
+            (or (surface-status-message surface) position-message hint-message)])
       (unless (and (nonnegative-exact-integer? width)
                    (nonnegative-exact-integer? height))
         (assertion-violation 'render-surface "invalid Surface size" size))
       (let loop ([leaves (surface-windows surface)]
                  [placements '()] [rendered-views '()] [cursor-row #f] [cursor-column #f])
           (if (null? leaves)
-              (let ([message
-                     (or (surface-status-message surface)
-                         (surface-position-message surface views)
-                         (and (>= height 3)
-                              (pair? (surface-shortcut-hints surface))
-                              (shortcut-hint-text
-                                (surface-shortcut-hints surface))))])
-                (make-surface-render
+              (make-surface-render
                   (surface-id surface)
                   (surface-generation surface)
                   (compose-surface-frame width height (reverse placements) message)
                   (if (and message cursor-row (= cursor-row (- height 1))) #f cursor-row)
                   (if (and message cursor-row (= cursor-row (- height 1))) #f cursor-column)
-                  (reverse rendered-views)))
+                  (reverse rendered-views))
               (let* ([leaf (car leaves)]
                      [view (view-service-ref views (window-view-id leaf) #f)])
                 (if (not view)
                     (loop (cdr leaves) placements rendered-views cursor-row cursor-column)
-                    (let* ([rectangle (window-rectangle leaf)]
+                    (let* ([rectangle
+                            (surface-window-content-rectangle surface views leaf)]
                            [row (car rectangle)]
                            [column (cadr rectangle)]
                            [view-width (caddr rectangle)]

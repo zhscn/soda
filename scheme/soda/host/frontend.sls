@@ -129,7 +129,8 @@
                       (view-service-ref
                         (host-state-views state) (surface-hit-view-id hit) #f))])
            (and view
-                (equal? (window-rectangle window)
+                (equal? (surface-window-content-rectangle
+                          surface (host-state-views state) window)
                         (surface-hit-window-rectangle hit))
                 (= (buffer-state-generation (buffer-state (view-buffer view)))
                    (surface-hit-buffer-generation hit))
@@ -157,7 +158,8 @@
                   (surface-windows surface))])
            (and window
                 (= (window-view-id window) (surface-hit-view-id hit))
-                (equal? (window-rectangle window)
+                (equal? (surface-window-content-rectangle
+                          surface (host-state-views state) window)
                         (surface-hit-window-rectangle hit))
                 (view-service-ref
                   (host-state-views state) (surface-hit-view-id hit) #f)
