@@ -33,7 +33,61 @@
           (soda host runtime)
           (soda host value)
           (soda view frame)
+          (soda view display)
+          (soda view projection)
           (soda view text-layout))
+
+  (define (full-display-layout view selection width options)
+    (let* ([projection (view-projection view)]
+           [snapshot (buffer-state-document (buffer-state (view-buffer view)))]
+           [base
+            (or (view-projection-display-stream projection)
+                (let ([text (snapshot-text snapshot)])
+                  (dynamic-wind
+                    (lambda () #f)
+                    (lambda ()
+                      (snapshot-display-stream
+                        snapshot 0 (text-line-count text)
+                        (view-projection-decorations projection)))
+                    (lambda () (text-close! text)))))]
+           [stream
+            (let-values ([(value failures)
+                          (view-projection-transform-display-stream projection base)])
+              value)]
+           [height
+            (max 1
+                 (fold-left
+                   (lambda (total fragment)
+                     (+ total
+                        (cond
+                          [(display-widget? fragment)
+                           (max 1 (display-widget-height fragment))]
+                          [(display-text? fragment)
+                           (max 1 (string-length (display-text-text fragment)))]
+                          [else 1])))
+                   0 (display-stream-fragments stream)))])
+      (layout-display-stream stream selection width height options)))
+
+  (define (layout-row-for-document layout offset)
+    (let ([point (text-layout-document->point layout offset)])
+      (and point (car point))))
+
+  (define (layout-document-at-row layout row column)
+    (let* ([frame (text-layout-frame layout)]
+           [width (frame-width frame)]
+           [target-column (if (zero? width) 0 (min column (- width 1)))])
+      (and (> width 0)
+           (let loop ([distance 0])
+             (and (< distance width)
+                  (let* ([left (- target-column distance)]
+                         [right (+ target-column distance)]
+                         [left-value
+                          (and (>= left 0)
+                               (text-layout-point->document layout row left))]
+                         [right-value
+                          (and (> distance 0) (< right width)
+                               (text-layout-point->document layout row right))])
+                    (or left-value right-value (loop (+ distance 1)))))))))
 
   ;; Host-owned adapter for presentation loops. Registry traversal and render
   ;; feedback remain host policy rather than becoming frontend policy.
@@ -83,11 +137,12 @@
         'host-frontend-resolve-scroll-request!
         "invalid scroll request resolution input"
         state active layout request))
-    (if (not (and (eq? (scroll-request-kind request) 'reveal-point)
-                  (equal? (scroll-request-surface-id request)
-                          (active-context-surface-id active))
-                  (equal? (scroll-request-window-id request)
-                          (active-context-window-id active))
+    (if (not (and (or (not (scroll-request-surface-id request))
+                      (equal? (scroll-request-surface-id request)
+                              (active-context-surface-id active)))
+                  (or (not (scroll-request-window-id request))
+                      (equal? (scroll-request-window-id request)
+                              (active-context-window-id active)))
                   (= (scroll-request-view-id request)
                      (active-context-view-id active))))
         #f
@@ -99,32 +154,122 @@
                [width (frame-width frame)]
                [height (frame-height frame)])
           (and view-state (> width 0) (> height 0)
-               (let* ([snapshot
-                       (buffer-state-document (buffer-state (view-buffer view)))]
-                      [text (snapshot-text snapshot)])
-                 (dynamic-wind
-                   (lambda () #f)
-                   (lambda ()
-                     (let* ([options
-                             (configuration-facet
-                               (view-state-configuration view-state)
-                               text-layout-options-facet 'view)]
-                            [point
-                             (selection-range-head
-                               (selection-primary-range
-                                 (view-state-selection view-state)))]
-                            [viewport
-                             (text-layout-reveal-viewport
-                               text options width height
-                               (view-state-viewport view-state) point)])
-                       (and (not (equal? viewport
-                                         (view-state-viewport view-state)))
-                            (dispatcher-dispatch-view!
-                              (host-state-dispatch state)
-                              (make-view-transaction-spec
-                                (view-id view) (view-state-generation view-state)
-                                #f viewport #f '() '() #f)))))
-                   (lambda () (text-close! text))))))))
+               (let* ([options
+                       (configuration-facet
+                         (view-state-configuration view-state)
+                         text-layout-options-facet 'view)]
+                      [selection (view-state-selection view-state)]
+                      [geometry (full-display-layout view selection width options)]
+                      [content-height (text-layout-content-height geometry)]
+                      [last-top (max 0 (- content-height height))]
+                      [current (view-state-viewport view-state)]
+                      [line-offset
+                       (let* ([snapshot
+                               (buffer-state-document (buffer-state (view-buffer view)))]
+                              [text (snapshot-text snapshot)])
+                         (dynamic-wind
+                           (lambda () #f)
+                           (lambda ()
+                             (text-line-start
+                               text
+                               (min (viewport-first-line current)
+                                    (- (text-line-count text) 1))))
+                           (lambda () (text-close! text))))]
+                      [current-base (or (layout-row-for-document geometry line-offset) 0)]
+                      [current-top
+                       (min last-top
+                            (+ current-base (viewport-visual-row current)))]
+                      [point
+                       (selection-range-head (selection-primary-range selection))]
+                      [point-position
+                       (text-layout-document->point geometry point)]
+                      [point-row (if point-position (car point-position) current-top)]
+                      [point-column (if point-position (cdr point-position) 0)]
+                      [argument (scroll-request-argument request)]
+                      [kind (scroll-request-kind request)]
+                      [screen-row
+                       (lambda (placement)
+                         (case placement
+                           [(top) 0]
+                           [(center) (div (- height 1) 2)]
+                           [(bottom) (- height 1)]))]
+                      [requested-top
+                       (case kind
+                         [(reveal-point)
+                          (cond [(< point-row current-top) point-row]
+                                [(>= point-row (+ current-top height))
+                                 (- point-row (- height 1))]
+                                [else current-top])]
+                         [(scroll-rows) (+ current-top argument)]
+                         [(scroll-pages) (+ current-top (* argument height))]
+                         [(recenter) (- point-row (screen-row argument))]
+                         [(move-point-to-window-row) current-top])]
+                      [target-top (min last-top (max 0 requested-top))]
+                      [target (make-viewport 0 target-top)]
+                      [next-selection
+                       (cond
+                         [(eq? kind 'move-point-to-window-row)
+                          (let ([target-point
+                                 (layout-document-at-row
+                                   geometry
+                                   (min (- content-height 1)
+                                        (+ target-top (screen-row argument)))
+                                   point-column)])
+                            (and target-point
+                                 (make-selection
+                                   (map
+                                     (lambda (range)
+                                       (make-selection-range
+                                         target-point target-point
+                                         (selection-range-affinity range)
+                                         (selection-range-granularity range)
+                                         (selection-range-metadata range)))
+                                     (selection-ranges selection))
+                                   (selection-primary selection))))]
+                         [(memq kind '(scroll-rows scroll-pages))
+                          (let ([bottom
+                                 (min (- content-height 1)
+                                      (+ target-top (- height 1)))])
+                            (make-selection
+                              (map
+                                (lambda (range)
+                                  (let* ([head (selection-range-head range)]
+                                         [position
+                                          (text-layout-document->point geometry head)]
+                                         [row (and position (car position))]
+                                         [column (if position (cdr position) 0)]
+                                         [next-point
+                                          (cond
+                                            [(and row (< row target-top))
+                                             (layout-document-at-row
+                                               geometry target-top column)]
+                                            [(and row (> row bottom))
+                                             (layout-document-at-row
+                                               geometry bottom column)]
+                                            [else head])])
+                                    (if (or (not next-point) (= next-point head))
+                                        range
+                                        (make-selection-range
+                                          next-point next-point
+                                          (selection-range-affinity range)
+                                          (selection-range-granularity range)
+                                          (selection-range-metadata range)))))
+                                (selection-ranges selection))
+                              (selection-primary selection)))]
+                         [else selection])])
+                 (unless (and (viewport=? target current)
+                              (or (not next-selection)
+                                  (equal? next-selection selection)))
+                   (dispatcher-dispatch-view!
+                     (host-state-dispatch state)
+                     (make-view-transaction-spec
+                       (view-id view) (view-state-generation view-state)
+                       (and next-selection
+                            (not (equal? next-selection selection))
+                            next-selection)
+                       (and (not (viewport=? target current)) target)
+                       #f '() '() #f)))
+                 #t)))))
 
   (define (host-frontend-enqueue! state message)
     (runtime-enqueue! (host-state-runtime state) message))

@@ -952,166 +952,26 @@
                   (make-selection (list (collapse-range range point)) 0)
                   '() '())))))))
 
-  (define (scroll-lines context delta)
-    (with-context-text
-      context
-      (lambda (text)
-        (let* ([state (command-context-view-state context)]
-               [viewport (view-state-viewport state)]
-               [last-line (- (text-line-count text) 1)]
-               [first-line (min last-line
-                                (max 0 (+ (viewport-first-line viewport) delta)))])
-          (make-view-transaction-spec
-            (command-context-view-id context) (view-state-generation state)
-            #f (make-viewport first-line 0) #f '() '() #f)))))
-
-  (define (viewport-screen-row height placement)
-    (case placement
-      [(top) 0]
-      [(center) (div (- height 1) 2)]
-      [(bottom) (- height 1)]
-      [else
-       (assertion-violation 'viewport-screen-row
-                            "unknown viewport placement" placement)]))
+  (define (viewport-intent context kind argument)
+    (let ([state (command-context-view-state context)])
+      (make-view-transaction-spec
+        (command-context-view-id context) (view-state-generation state)
+        #f #f #f '() '()
+        (make-scroll-request
+          kind
+          (command-context-surface-id context)
+          (command-context-window-id context)
+          (command-context-view-id context)
+          argument))))
 
   (define (scroll-visual context amount page?)
-    ;; A TextLayout supplies the presented frame height, so page movement is
-    ;; expressed in visual rows rather than a hard-coded logical-line count.
-    ;; Headless callers retain the bounded logical fallback.
-    (let ([layout (command-context-layout context)])
-      (if (and (text-layout? layout)
-               (> (frame-width (text-layout-frame layout)) 0)
-               (> (frame-height (text-layout-frame layout)) 0))
-          (with-context-text
-            context
-            (lambda (text)
-              (let* ([state (command-context-view-state context)]
-                     [current (view-state-viewport state)]
-                     [options (context-layout-options context)]
-                     [target
-                      (if page?
-                          (text-layout-page-start
-                            text options
-                            (frame-width (text-layout-frame layout))
-                            (frame-height (text-layout-frame layout))
-                            current amount)
-                          (text-layout-scroll-start
-                            text options
-                            (frame-width (text-layout-frame layout))
-                            (frame-height (text-layout-frame layout))
-                            current amount))]
-                     [height (frame-height (text-layout-frame layout))])
-                (if target
-                    (let* ([next-viewport
-                            (make-viewport (visual-position-line target)
-                                           (visual-position-row target))]
-                           [bottom
-                            (text-layout-visual-step
-                              text options (frame-width (text-layout-frame layout))
-                              target (- height 1))]
-                           [selection (context-selection context)]
-                           [next-selection
-                            (make-selection
-                              (map
-                                (lambda (range)
-                                  (let* ([point
-                                          (text-layout-document-visual-position
-                                            text options
-                                            (frame-width (text-layout-frame layout))
-                                            (selection-range-head range))]
-                                         [before?
-                                          (or (< (visual-position-line point)
-                                                 (visual-position-line target))
-                                              (and (= (visual-position-line point)
-                                                      (visual-position-line target))
-                                                   (< (visual-position-row point)
-                                                      (visual-position-row target))))]
-                                         [after?
-                                          (or (> (visual-position-line point)
-                                                 (visual-position-line bottom))
-                                              (and (= (visual-position-line point)
-                                                      (visual-position-line bottom))
-                                                   (> (visual-position-row point)
-                                                      (visual-position-row bottom))))])
-                                    (cond
-                                      [before?
-                                       (motion-range range
-                                         (visual-position-offset target))]
-                                      [after?
-                                       (motion-range range
-                                         (visual-position-offset bottom))]
-                                      [else range])))
-                                (selection-ranges selection))
-                              (selection-primary selection))])
-                      (make-view-transaction-spec
-                        (command-context-view-id context) (view-state-generation state)
-                        next-selection next-viewport #f '() '() #f))
-                    (command-handled)))))
-          (scroll-lines context (* amount (if page? 10 1))))))
+    (viewport-intent context (if page? 'scroll-pages 'scroll-rows) amount))
 
   (define (recenter-viewport context placement)
-    (let ([layout (command-context-layout context)])
-      (if (and (text-layout? layout)
-               (> (frame-width (text-layout-frame layout)) 0)
-               (> (frame-height (text-layout-frame layout)) 0))
-          (with-context-text
-            context
-            (lambda (text)
-              (let* ([state (command-context-view-state context)]
-                     [frame (text-layout-frame layout)]
-                     [height (frame-height frame)]
-                     [point
-                      (selection-range-head
-                        (selection-primary-range (context-selection context)))]
-                     [target
-                      (text-layout-recenter-start
-                        text (context-layout-options context)
-                        (frame-width frame) height point
-                        (viewport-screen-row height placement))])
-                (make-view-transaction-spec
-                  (command-context-view-id context) (view-state-generation state)
-                  #f
-                  (make-viewport
-                    (visual-position-line target) (visual-position-row target))
-                  #f '() '() #f))))
-          (command-handled))))
+    (viewport-intent context 'recenter placement))
 
   (define (move-to-viewport-row context placement)
-    (let ([layout (command-context-layout context)])
-      (if (and (text-layout? layout)
-               (> (frame-width (text-layout-frame layout)) 0)
-               (> (frame-height (text-layout-frame layout)) 0))
-          (with-context-text
-            context
-            (lambda (text)
-              (let* ([state (command-context-view-state context)]
-                     [selection (context-selection context)]
-                     [frame (text-layout-frame layout)]
-                     [width (frame-width frame)]
-                     [height (frame-height frame)]
-                     [options (context-layout-options context)]
-                     [row (viewport-screen-row height placement)]
-                     [viewport (view-state-viewport state)]
-                     [next
-                      (make-selection
-                        (map
-                          (lambda (range)
-                            (let* ([goal
-                                    (vertical-goal-column
-                                      text layout options range)]
-                                   [position
-                                    (text-layout-viewport-row-position
-                                      text options width height viewport row goal)])
-                              (with-selection-vertical-goal
-                                (motion-range range
-                                  (visual-position-offset position))
-                                goal)))
-                          (selection-ranges selection))
-                        (selection-primary selection))])
-                (make-view-transaction-spec
-                  (command-context-view-id context) (view-state-generation state)
-                  next #f #f '() '() #f))))
-          (command-handled))))
+    (viewport-intent context 'move-point-to-window-row placement))
 
   (define (transpose-characters context)
     (let ([range (selection-primary-range (context-selection context))])

@@ -7,6 +7,7 @@
           (soda host command-runtime)
           (soda host condition)
           (soda host dispatch)
+          (soda host frontend)
           (soda host input)
           (soda host input-event)
           (soda host internal buffer)
@@ -77,6 +78,26 @@
 
   (define (buffer-string buffer)
     (snapshot-string (buffer-state-document (buffer-state buffer))))
+
+  (define (invoke-viewport-command! application name layout)
+    (let* ([state (soda-application-state application)]
+           [surface (soda-application-surface application)]
+           [active (surface-active-context surface (host-state-views state))]
+           [request #f]
+           [registration
+            (dispatcher-add-listener!
+              (host-state-dispatch state) (host-state-owner state)
+              (lambda (update)
+                (when (editor-update-scroll-request update)
+                  (set! request (editor-update-scroll-request update)))))])
+      (command-runtime-start!
+        (host-state-command-runtime state) name
+        (application-command-context application layout))
+      (registration-close! registration)
+      (unless (and request
+                   (host-frontend-resolve-scroll-request! state active layout request))
+        (error 'fundamental-editing-tests
+               "viewport command did not publish a resolvable display intent" name))))
 
   (define (string-contains? value needle)
     (let ([limit (- (string-length value) (string-length needle))])
@@ -669,6 +690,7 @@
     (let* ([application (make-soda-application)]
            [state (soda-application-state application)]
            [runtime (host-state-command-runtime state)]
+           [buffer (soda-application-buffer application)]
            [view (soda-application-view application)])
       (command-runtime-start! runtime 'fundamental.insert-text
                               (application-command-context application)
@@ -1725,16 +1747,24 @@
     (let* ([application (make-soda-application)]
            [state (soda-application-state application)]
            [runtime (host-state-command-runtime state)]
+           [buffer (soda-application-buffer application)]
            [view (soda-application-view application)])
       (command-runtime-start!
         runtime 'fundamental.insert-text (application-command-context application)
         (list (string->utf8 "0\n1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11")))
-      (command-runtime-start!
-        runtime 'fundamental.scroll-down (application-command-context application))
-      (unless (= (viewport-first-line (view-state-viewport (view-state view))) 10)
+      (let ([layout
+             (layout-text-snapshot
+               (buffer-state-document (buffer-state buffer))
+               (view-state-selection (view-state view)) 0 20 10)])
+        (invoke-viewport-command! application 'fundamental.scroll-down layout))
+      (unless (and (= (viewport-first-line (view-state-viewport (view-state view))) 0)
+                   (= (viewport-visual-row (view-state-viewport (view-state view))) 2))
         (error 'fundamental-editing-tests "scroll-down did not advance the Viewport"))
-      (command-runtime-start!
-        runtime 'fundamental.scroll-up (application-command-context application))
+      (let ([layout
+             (layout-text-snapshot
+               (buffer-state-document (buffer-state buffer))
+               (view-state-selection (view-state view)) 2 20 10)])
+        (invoke-viewport-command! application 'fundamental.scroll-up layout))
       (unless (= (viewport-first-line (view-state-viewport (view-state view))) 0)
         (error 'fundamental-editing-tests "scroll-up did not restore the Viewport"))
       (soda-application-close! application))
@@ -2260,8 +2290,7 @@
                (buffer-state-document (buffer-state buffer))
                (view-state-selection (view-state view)) 0 0 4 2
                (make-decoration-set '()) #f options)])
-        (command-runtime-start!
-          runtime 'fundamental.scroll-down (application-command-context application layout)))
+        (invoke-viewport-command! application 'fundamental.scroll-down layout))
       (unless (and (= (viewport-visual-row (view-state-viewport (view-state view))) 1)
                    (= (selection-range-head
                         (selection-primary-range
@@ -2274,8 +2303,7 @@
                (buffer-state-document (buffer-state buffer))
                (view-state-selection (view-state view)) 0 1 4 2
                (make-decoration-set '()) #f options)])
-        (command-runtime-start!
-          runtime 'fundamental.scroll-down (application-command-context application layout)))
+        (invoke-viewport-command! application 'fundamental.scroll-down layout))
       (unless (= (viewport-visual-row (view-state-viewport (view-state view))) 1)
         (error 'fundamental-editing-tests
                "page down did not retain content on the final page"))
@@ -2284,8 +2312,7 @@
                (buffer-state-document (buffer-state buffer))
                (view-state-selection (view-state view)) 0 1 4 2
                (make-decoration-set '()) #f options)])
-        (command-runtime-start!
-          runtime 'fundamental.scroll-up (application-command-context application layout)))
+        (invoke-viewport-command! application 'fundamental.scroll-up layout))
       (unless (and (= (viewport-visual-row (view-state-viewport (view-state view))) 0)
                    (= (selection-range-head
                         (selection-primary-range
@@ -2298,9 +2325,8 @@
                (buffer-state-document (buffer-state buffer))
                (view-state-selection (view-state view)) 0 0 4 2
                (make-decoration-set '()) #f options)])
-        (command-runtime-start!
-          runtime 'fundamental.scroll-forward-line
-          (application-command-context application layout)))
+        (invoke-viewport-command!
+          application 'fundamental.scroll-forward-line layout))
       (unless (= (viewport-visual-row (view-state-viewport (view-state view))) 1)
         (error 'fundamental-editing-tests
                "visual-line scroll did not advance the viewport"))
@@ -2309,9 +2335,8 @@
                (buffer-state-document (buffer-state buffer))
                (view-state-selection (view-state view)) 0 1 4 2
                (make-decoration-set '()) #f options)])
-        (command-runtime-start!
-          runtime 'fundamental.scroll-backward-line
-          (application-command-context application layout)))
+        (invoke-viewport-command!
+          application 'fundamental.scroll-backward-line layout))
       (unless (= (viewport-visual-row (view-state-viewport (view-state view))) 0)
         (error 'fundamental-editing-tests
                "visual-line scroll did not restore the viewport"))
@@ -2320,9 +2345,7 @@
                (buffer-state-document (buffer-state buffer))
                (view-state-selection (view-state view)) 0 0 4 2
                (make-decoration-set '()) #f options)])
-        (command-runtime-start!
-          runtime 'fundamental.recenter
-          (application-command-context application layout)))
+        (invoke-viewport-command! application 'fundamental.recenter layout))
       (unless (= (viewport-visual-row (view-state-viewport (view-state view))) 1)
         (error 'fundamental-editing-tests "recenter did not place point at window center"))
       (let ([layout
@@ -2330,9 +2353,8 @@
                (buffer-state-document (buffer-state buffer))
                (view-state-selection (view-state view)) 0 1 4 2
                (make-decoration-set '()) #f options)])
-        (command-runtime-start!
-          runtime 'fundamental.recenter-bottom
-          (application-command-context application layout)))
+        (invoke-viewport-command!
+          application 'fundamental.recenter-bottom layout))
       (unless (= (viewport-visual-row (view-state-viewport (view-state view))) 0)
         (error 'fundamental-editing-tests
                "recenter-bottom did not place point at window bottom"))
@@ -2341,9 +2363,8 @@
                (buffer-state-document (buffer-state buffer))
                (view-state-selection (view-state view)) 0 0 4 2
                (make-decoration-set '()) #f options)])
-        (command-runtime-start!
-          runtime 'fundamental.move-to-window-bottom
-          (application-command-context application layout)))
+        (invoke-viewport-command!
+          application 'fundamental.move-to-window-bottom layout))
       (unless (= (selection-range-head
                    (selection-primary-range
                      (view-state-selection (view-state view))))
@@ -2416,6 +2437,46 @@
                       3))
         (error 'fundamental-editing-tests
                "fundamental frontend input did not insert a tab or advance its caret"))
+      (frontend-close! frontend)
+      (soda-application-close! application))
+
+    ;; A terminal read may enqueue several key events before the frontend gets
+    ;; a chance to drain.  Each resulting command must run before the following
+    ;; input snapshots its ViewState.
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [surface (soda-application-surface application)]
+           [view (soda-application-view application)]
+           [editing (soda-application-editing application)]
+           [frontend
+            (make-frontend
+              state surface
+              (lambda (active current-view)
+                (fundamental-input-context editing active current-view))
+              (lambda (context disposition)
+                (fundamental-input-disposition context disposition))
+              (lambda (render theme) #f)
+              (make-render-service) default-theme)])
+      (frontend-resize! frontend '(20 . 6))
+      (frontend-step! frontend)
+      (frontend-enqueue!
+        frontend
+        (make-surface-input-message
+          (surface-id surface) (make-text-input-event 'text (string->utf8 "a\nb\nc\nd"))))
+      (frontend-step! frontend)
+      (do ([index 0 (+ index 1)])
+          ((= index 3))
+        (frontend-enqueue!
+          frontend
+          (make-surface-input-message
+            (surface-id surface)
+            (make-key-event 'up #f #f #f 0 'press (make-bytevector 0)))))
+      (frontend-step! frontend)
+      (unless (= (selection-range-head
+                   (selection-primary-range (view-state-selection (view-state view))))
+                 1)
+        (error 'fundamental-editing-tests
+               "a burst of vertical input did not execute in command-loop order"))
       (frontend-close! frontend)
       (soda-application-close! application))
 

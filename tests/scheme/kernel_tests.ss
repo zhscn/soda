@@ -20,6 +20,7 @@
         (soda host condition)
         (soda host internal context)
         (soda host dispatch)
+        (soda host frontend)
         (soda host internal buffer)
         (soda host input)
         (soda host input-event)
@@ -1259,8 +1260,8 @@
        [buffer (buffer-service-create! (host-state-buffers host) owner "*cache*"
                                        document configuration)]
        [view (view-service-create! (host-state-views host) owner buffer configuration)]
-       [leaf (make-leaf-window (view-id view) '(0 0 8 1))]
-       [surface (make-surface leaf '(8 . 1))]
+       [leaf (make-leaf-window (view-id view) '(0 0 3 1))]
+       [surface (make-surface leaf '(3 . 1))]
        [service (make-render-service)]
        [initial (render-service-render! service surface (host-state-views host))]
        [state (view-state view)]
@@ -1342,15 +1343,34 @@
         (buffer-service-create! (host-state-buffers host) owner "*display*"
                                 document configuration)]
        [view (view-service-create! (host-state-views host) owner buffer configuration)]
-       [leaf (make-leaf-window (view-id view) '(0 0 8 1))]
-       [surface (make-surface leaf '(8 . 1))]
+       [leaf (make-leaf-window (view-id view) '(0 0 3 1))]
+       [surface (make-surface leaf '(3 . 1))]
        [render (render-surface surface (host-state-views host))])
   (unless (and (display-stream? (view-projection-display-stream (view-projection view)))
                (string=? (frame-cell-grapheme
                            (frame-cell-at (surface-render-frame render) 0 0)) "v")
                (eq? (frame-cell-face
                      (frame-cell-at (surface-render-frame render) 0 0)) 'virtual))
-    (error 'kernel-tests "cached View display stream differs")))
+    (error 'kernel-tests "cached View display stream differs"))
+  (unless (= (text-layout-content-height
+               (layout-display-stream
+                 (view-projection-display-stream (view-projection view))
+                 (view-state-selection (view-state view)) 3 7))
+             3)
+    (error 'kernel-tests "transformed DisplayStream geometry height differs"))
+  (let* ([rendered (car (surface-render-rendered-views render))]
+         [active (make-active-context
+                   (surface-id surface) (window-id leaf) (view-id view) (buffer-id buffer) '())])
+    (host-frontend-resolve-scroll-request!
+      host active (rendered-view-layout rendered)
+      (make-scroll-request
+        'scroll-rows (surface-id surface) (window-id leaf) (view-id view) 1))
+    (let ([next (render-surface surface (host-state-views host))])
+      (unless (string=?
+                (frame-cell-grapheme (frame-cell-at (surface-render-frame next) 0 0))
+                "t")
+        (error 'kernel-tests
+               "viewport intent did not use transformed DisplayStream geometry")))))
 
 (let* ([first
         (make-view-plugin

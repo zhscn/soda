@@ -35,7 +35,7 @@
          (= (view-occurrence-window-id left) (view-occurrence-window-id right))
          (= (view-occurrence-view-id left) (view-occurrence-view-id right))
          (equal? (view-occurrence-rectangle left) (view-occurrence-rectangle right))
-         (equal? (view-occurrence-viewport left) (view-occurrence-viewport right))
+         (viewport=? (view-occurrence-viewport left) (view-occurrence-viewport right))
          (equal? (view-occurrence-visible-ranges left) (view-occurrence-visible-ranges right))
          (= (view-occurrence-projection-generation left)
             (view-occurrence-projection-generation right))))

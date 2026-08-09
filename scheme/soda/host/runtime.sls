@@ -2,6 +2,7 @@
   (export make-runtime
           runtime?
           runtime-enqueue!
+          runtime-enqueue-priority!
           make-runtime-request
           runtime-request?
           runtime-request-id
@@ -64,6 +65,16 @@
     (unless (and (runtime? runtime) (not (runtime-closed? runtime)))
       (assertion-violation 'runtime-enqueue! "runtime is closed" runtime))
     (runtime-enqueue-item! runtime message))
+
+  ;; Priority messages run after the message currently being handled and
+  ;; before older queued input.  Command messages use this path so an input
+  ;; event observes the editor state published by the preceding event instead
+  ;; of snapshotting a whole terminal-input burst before any command runs.
+  (define (runtime-enqueue-priority! runtime message)
+    (unless (and (runtime? runtime) (not (runtime-closed? runtime)))
+      (assertion-violation 'runtime-enqueue-priority! "runtime is closed" runtime))
+    (runtime-front-set! runtime (cons message (runtime-front runtime)))
+    message)
 
   (define (runtime-enqueue-request! runtime owner scope generation payload)
     (unless (and (runtime? runtime) (not (runtime-closed? runtime)))

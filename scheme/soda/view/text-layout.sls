@@ -7,6 +7,7 @@
           text-layout-cursor-column
           text-layout-complete?
           text-layout-visible-ranges
+          text-layout-content-height
           text-layout-document->point
           text-layout-point->document
           text-layout-point->display-entry
@@ -83,6 +84,27 @@
     (unless (text-layout? layout)
       (assertion-violation 'text-layout-visible-ranges "expected a TextLayout" layout))
     (display-map-visible-ranges (text-layout-display-map layout)))
+
+  (define (text-layout-content-height layout)
+    (unless (text-layout? layout)
+      (assertion-violation 'text-layout-content-height "expected a TextLayout" layout))
+    (let* ([frame (text-layout-frame layout)]
+           [width (frame-width frame)])
+      (if (zero? width)
+          0
+          (let ([last-cell
+                 (fold-left
+                   (lambda (current entry)
+                     (let ([from (display-map-entry-cell-from entry)]
+                           [to (display-map-entry-cell-to entry)])
+                       (max current (if (> to from) (- to 1) from))))
+                   0
+                   (display-map-entries (text-layout-display-map layout)))])
+            (max 1
+                 (+ 1 (div last-cell width))
+                 (if (text-layout-cursor-row layout)
+                     (+ 1 (text-layout-cursor-row layout))
+                     0))))))
 
   ;; Layout policy is explicit rather than inherited from a terminal frontend.
   ;; A View later supplies this from its configuration facets.

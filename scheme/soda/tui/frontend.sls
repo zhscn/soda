@@ -47,6 +47,7 @@
       (immutable render-service frontend-render-service)
       (mutable theme frontend-theme frontend-theme-set!)
       (mutable dirty? frontend-dirty? frontend-dirty?-set!)
+      (mutable pending-scroll frontend-pending-scroll frontend-pending-scroll-set!)
       (mutable update-registration frontend-update-registration
                                    frontend-update-registration-set!)
       (mutable host-update-registration frontend-host-update-registration
@@ -74,14 +75,17 @@
       (assertion-violation 'make-frontend "invalid frontend dependencies"))
     (let ([value
             (%make-frontend state surface resolve-input-context handle-disposition
-                            present! render-service theme #t #f #f #f)])
+                            present! render-service theme #t #f #f #f #f)])
       (frontend-update-registration-set!
         value
         (host-frontend-add-update-listener!
           state
           (lambda (update)
             (frontend-dirty?-set! value #t)
-            (frontend-resolve-scroll-request! value update))))
+            (let ([request (editor-update-scroll-request update)])
+              (when (scroll-request? request)
+                (frontend-pending-scroll-set! value request)))
+            (frontend-resolve-scroll-request! value))))
       (frontend-host-update-registration-set!
         value
         (host-frontend-add-host-listener!
@@ -129,8 +133,8 @@
                                 (active-context-window-id active))
                              (= (rendered-view-buffer-generation candidate)
                                 (buffer-state-generation buffer-state))
-                             (equal? (rendered-view-viewport candidate)
-                                     (view-state-viewport state))
+                             (viewport=? (rendered-view-viewport candidate)
+                                         (view-state-viewport state))
                              (eq? (rendered-view-configuration candidate)
                                   (view-state-configuration state)))
                         (rendered-view-layout candidate)
@@ -140,17 +144,18 @@
   ;; state and before the next presentation.  This boundary has both the
   ;; command's window identity and the last compatible TextLayout, while
   ;; command packages remain independent of viewport measurement.
-  (define (frontend-resolve-scroll-request! value update)
-    (let ([request (editor-update-scroll-request update)])
-      (when (scroll-request? request)
+  (define (frontend-resolve-scroll-request! value)
+    (let ([request (frontend-pending-scroll value)])
+      (when request
         (let ([current (active-view value)])
           (when current
             (let* ([active (car current)]
                    [view (cdr current)]
                    [layout (active-command-layout value active view)])
-              (when layout
-                (host-frontend-resolve-scroll-request!
-                  (frontend-host-state value) active layout request))))))))
+              (when (and layout
+                         (host-frontend-resolve-scroll-request!
+                           (frontend-host-state value) active layout request))
+                (frontend-pending-scroll-set! value #f))))))))
 
   (define (make-active-command-context value active view event sequence prefix-argument)
     (host-frontend-make-command-context
@@ -263,7 +268,12 @@
     (require-open 'frontend-render! value)
     (if (not (frontend-dirty? value))
         #f
-        (let ([render
+        (begin
+          ;; A scroll intent resolved from this render may publish a newer
+          ;; viewport and set dirty again.  Clear the old damage first so that
+          ;; notification is retained for the follow-up render.
+          (frontend-dirty?-set! value #f)
+          (let ([render
                (host-frontend-render!
                  (frontend-host-state value) (frontend-render-service value)
                  (frontend-surface value))])
@@ -271,8 +281,8 @@
           (host-frontend-publish-render-feedback!
             (frontend-host-state value) render
             (lambda () (frontend-dirty?-set! value #t)))
-          (frontend-dirty?-set! value #f)
-          render)))
+          (frontend-resolve-scroll-request! value)
+          render))))
 
   (define frontend-step!
     (case-lambda

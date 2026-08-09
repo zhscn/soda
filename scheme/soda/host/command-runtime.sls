@@ -590,7 +590,7 @@
                      (command-resume-message? message)
                      (command-cancel-message? message)))
       (assertion-violation 'command-runtime-enqueue! "invalid command message" message))
-    (runtime-enqueue! (command-runtime-queue service) message))
+    (runtime-enqueue-priority! (command-runtime-queue service) message))
 
   (define (capture-runtime-condition! service message condition)
     (condition-service-capture

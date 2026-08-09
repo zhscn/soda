@@ -31,6 +31,7 @@
           (soda kernel extension)
           (soda kernel state)
           (soda kernel view-state)
+          (soda kernel viewport)
           (soda host internal buffer)
           (soda host internal view)
           (soda host internal context)
@@ -512,7 +513,10 @@
                       pending-views)
                     changes
                     (transaction-annotations transaction)
-                    (resolved-transaction-scroll-request resolved)
+                    (or (resolved-transaction-scroll-request resolved)
+                        (and origin (transaction-selection transaction)
+                             (make-scroll-request
+                               'reveal-point #f #f (view-id origin))))
                     (if (change-set-empty? changes) '(selection) '(document selection)))])
             (dispatcher-notify-editor-update!
               dispatcher update (buffer-state-configuration new-buffer-state)))))))))
@@ -690,7 +694,11 @@
                           (view-id view) old-state new-state))
                   (make-change-set document-length '())
                   (view-transaction-spec-annotations spec)
-                  (view-transaction-spec-scroll-request spec)
+                  (or (view-transaction-spec-scroll-request spec)
+                      (and (view-transaction-spec-selection spec)
+                           (not (view-transaction-spec-viewport spec))
+                           (make-scroll-request
+                             'reveal-point #f #f (view-id view))))
                   damage)])
           (view-publish-state! view new-state)
           (dispatcher-notify-editor-update!
