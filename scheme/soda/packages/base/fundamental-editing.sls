@@ -11,6 +11,7 @@
           (soda kernel extension)
           (soda kernel selection)
           (soda kernel state)
+          (soda kernel syntax-profile)
           (soda kernel view-state)
           (soda kernel viewport)
           (soda packages base text-motion)
@@ -500,17 +501,60 @@
             (command-context-view-id context) (view-state-generation state)
             next #f #f '() '() #f)))))
 
+  (define (text-character-at text offset)
+    (let* ([next (text-next-grapheme-offset text offset)]
+           [value (utf8->string (text-subbytevector text offset next))])
+      (string-ref value 0)))
+
+  (define (profile-word-offset profile text offset direction)
+    (if (eq? direction 'forward)
+        (let ([size (text-size text)])
+          (let skip ([position offset])
+            (cond
+              [(>= position size) size]
+              [(syntax-profile-word-constituent?
+                 profile (text-character-at text position))
+               (let consume ([position position])
+                 (if (>= position size)
+                     size
+                     (if (syntax-profile-word-constituent?
+                           profile (text-character-at text position))
+                         (consume (text-next-grapheme-offset text position))
+                         position)))]
+              [else (skip (text-next-grapheme-offset text position))])))
+        (let skip ([position offset])
+          (if (<= position 0)
+              0
+              (let ([previous (text-previous-grapheme-offset text position)])
+                (if (syntax-profile-word-constituent?
+                      profile (text-character-at text previous))
+                    (let consume ([position previous])
+                      (if (<= position 0)
+                          0
+                          (let ([before (text-previous-grapheme-offset text position)])
+                            (if (syntax-profile-word-constituent?
+                                  profile (text-character-at text before))
+                                (consume before)
+                                position))))
+                    (skip previous)))))))
+
+  (define (context-syntax-profile context)
+    (or (configuration-facet
+          (buffer-state-configuration (command-context-buffer-state context))
+          buffer-syntax-profile-facet 'buffer)
+        (make-plain-text-syntax-profile)))
+
   (define (move-word context direction)
-    (move-selection-by
-      context
-      (lambda (text range)
-        ((if (eq? direction 'backward)
-             text-backward-word-offset
-             text-forward-word-offset)
-         text
-         (if (eq? direction 'backward)
-             (selection-range-from range)
-             (selection-range-to range))))))
+    (let ([profile (context-syntax-profile context)])
+      (move-selection-by
+        context
+        (lambda (text range)
+          (profile-word-offset
+            profile text
+            (if (eq? direction 'backward)
+                (selection-range-from range)
+                (selection-range-to range))
+            direction)))))
 
   (define (move-line-boundary context boundary)
     (move-selection-by
@@ -766,60 +810,60 @@
                   (map-selection-through-changes selection change-set)
                   '() '())))))))
 
-  (define (delimiter-pair byte)
-    (case byte
-      [(40) (cons 40 41)]
-      [(91) (cons 91 93)]
-      [(123) (cons 123 125)]
-      [(41) (cons 40 41)]
-      [(93) (cons 91 93)]
-      [(125) (cons 123 125)]
-      [else #f]))
-
-  (define (matching-delimiter-offset text point)
+  (define (matching-delimiter-offset profile text point)
     (let ([size (text-size text)])
       (and (< point size)
-           (let* ([byte (text-byte-at text point)]
-                  [pair (delimiter-pair byte)])
+           (let* ([character (text-character-at text point)]
+                  [pair (syntax-profile-delimiter-pair profile character)])
              (and pair
                   (let ([open (car pair)] [close (cdr pair)])
                     (cond
-                      [(= byte open)
-                       (let scan ([position (+ point 1)] [depth 1])
+                      [(char=? character open)
+                       (let scan ([position (text-next-grapheme-offset text point)] [depth 1])
                          (cond [(= position size) #f]
-                               [(= (text-byte-at text position) open)
-                                (scan (+ position 1) (+ depth 1))]
-                               [(= (text-byte-at text position) close)
+                               [(char=? (text-character-at text position) open)
+                                (scan (text-next-grapheme-offset text position) (+ depth 1))]
+                               [(char=? (text-character-at text position) close)
                                 (if (= depth 1) position
-                                    (scan (+ position 1) (- depth 1)))]
-                               [else (scan (+ position 1) depth)]))]
-                      [(= byte close)
-                       (let scan ([position (- point 1)] [depth 1])
+                                    (scan (text-next-grapheme-offset text position)
+                                          (- depth 1)))]
+                               [else
+                                (scan (text-next-grapheme-offset text position) depth)]))]
+                      [(char=? character close)
+                       (let scan ([position (text-previous-grapheme-offset text point)] [depth 1])
                          (cond [(< position 0) #f]
-                               [(= (text-byte-at text position) close)
-                                (scan (- position 1) (+ depth 1))]
-                               [(= (text-byte-at text position) open)
+                               [(char=? (text-character-at text position) close)
+                                (scan (if (= position 0) -1
+                                          (text-previous-grapheme-offset text position))
+                                      (+ depth 1))]
+                               [(char=? (text-character-at text position) open)
                                 (if (= depth 1) position
-                                    (scan (- position 1) (- depth 1)))]
-                               [else (scan (- position 1) depth)]))]
+                                    (scan (if (= position 0) -1
+                                              (text-previous-grapheme-offset text position))
+                                          (- depth 1)))]
+                               [else
+                                (scan (if (= position 0) -1
+                                          (text-previous-grapheme-offset text position))
+                                      depth)]))]
                       [else #f])))))))
 
   (define (move-matching-delimiter context)
-    (with-context-text
-      context
-      (lambda (text)
+    (let ([profile (context-syntax-profile context)])
+      (with-context-text
+        context
+        (lambda (text)
         (let* ([selection (context-selection context)]
                [ranges
                 (map
                   (lambda (range)
                     (let ([match (matching-delimiter-offset
-                                   text (selection-range-head range))])
+                                   profile text (selection-range-head range))])
                       (if match (motion-range range match) range)))
                   (selection-ranges selection))])
           (if (for-all eq? ranges (selection-ranges selection))
               (command-handled)
               (view-selection-transaction
-                context (make-selection ranges (selection-primary selection))))))))
+                context (make-selection ranges (selection-primary selection)))))))))
 
   (define (paragraph-line-blank? text line)
     (let loop ([offset (text-line-start text line)]
@@ -1186,6 +1230,8 @@
             (make-mode-spec
               'fundamental-mode 'major "Fundamental" #f
               (list
+                (make-buffer-syntax-profile-extension
+                  (make-plain-text-syntax-profile))
                 (make-buffer-input-layer-extension
                   (list (make-input-layer 'major keymap #f 'accept))))
               '(editing motion selection kill yank viewport interface)

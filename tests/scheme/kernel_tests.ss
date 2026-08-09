@@ -11,6 +11,7 @@
         (soda kernel range-set)
         (soda kernel selection)
         (soda kernel state)
+        (soda kernel syntax-profile)
         (soda kernel value)
         (soda kernel viewport)
         (soda kernel view-state)
@@ -102,6 +103,28 @@
              (not (nonnegative-exact-integer? -1))
              (not (nonnegative-exact-integer? 1.5)))
   (error 'kernel-tests "nonnegative exact integer predicate differs"))
+
+(let* ([profile
+        (make-syntax-profile
+          'scheme-test
+          (lambda (character)
+            (cond [(char-whitespace? character) 'whitespace]
+                  [(or (char-alphabetic? character) (char-numeric? character)) 'word]
+                  [(memv character '(#\- #\?)) 'symbol]
+                  [else 'punctuation]))
+          (list (cons #\( #\)) (cons #\[ #\]))
+          (list ";") (list (cons "#|" "|#")) (list #\") #\\)]
+       [configuration
+        (make-configuration (list (make-buffer-syntax-profile-extension profile)))])
+  (unless (and (eq? (configuration-facet
+                      configuration buffer-syntax-profile-facet 'buffer)
+                    profile)
+               (syntax-profile-word-constituent? profile #\?)
+               (equal? (syntax-profile-delimiter-pair profile #\])
+                       (cons #\[ #\]))
+               (syntax-profile-open-delimiter? profile #\()
+               (syntax-profile-close-delimiter? profile #\)))
+    (error 'kernel-tests "SyntaxProfile classification or configuration differs")))
 
 (unless (and
           (library-binding-hidden? '(soda host buffer) 'buffer-document)
