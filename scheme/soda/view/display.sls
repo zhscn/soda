@@ -1,6 +1,7 @@
 (library (soda view display)
-  (export make-display-text display-text? display-text-text display-text-from
+  (export make-display-text make-display-grapheme display-text? display-text-text display-text-from
           display-text-to display-text-face display-text-source make-display-break
+          display-text-atomic? display-text-width
           display-break? display-break-source make-display-widget display-widget?
           display-widget-width display-widget-height display-widget-anchor
           display-widget-face display-widget-source make-display-stream display-stream?
@@ -16,11 +17,22 @@
 
   (define offset? nonnegative-exact-integer?)
   (define-record-type (display-text %make-display-text display-text?)
-    (fields text from to face source))
+    (fields text from to face source atomic? width))
   (define (make-display-text text from to face source)
     (unless (and (string? text) (offset? from) (offset? to) (<= from to))
       (assertion-violation 'make-display-text "invalid text display fragment" text from to))
-    (%make-display-text text from to face source))
+    (%make-display-text text from to face source #f #f))
+  ;; Document providers already walk canonical grapheme boundaries.  This
+  ;; constructor preserves that normalization and its measured terminal
+  ;; width so layout does not encode and segment the same text again.  Tabs
+  ;; use #f because their width depends on the target column.
+  (define (make-display-grapheme text from to face source width)
+    (unless (and (string? text) (not (string=? text ""))
+                 (offset? from) (offset? to) (<= from to)
+                 (or (not width) (and (offset? width) (> width 0))))
+      (assertion-violation 'make-display-grapheme
+                           "invalid atomic display grapheme" text from to width))
+    (%make-display-text text from to face source #t width))
   (define-record-type (display-break %make-display-break display-break?) (fields source))
   (define (make-display-break source) (%make-display-break source))
   (define-record-type (display-widget %make-display-widget display-widget?)

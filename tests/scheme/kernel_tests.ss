@@ -2399,11 +2399,14 @@
         (make-decoration-set
           (list (make-range-value 2 3 (make-face-decoration 'keyword 1))))]
        [stream (snapshot-display-stream snapshot 0 2 decorations)]
+       [fragments (display-stream-fragments stream)]
        [layout (layout-display-stream stream
                                       (make-selection (list (make-selection-range 0 0)))
                                       2 2)])
-  (unless (and (= (length (display-stream-fragments stream)) 3)
-               (display-break? (cadr (display-stream-fragments stream)))
+  (unless (and (= (length fragments) 3)
+               (display-text-atomic? (car fragments))
+               (= (display-text-width (car fragments)) 1)
+               (display-break? (cadr fragments))
                (eq? (frame-cell-face
                      (frame-cell-at (text-layout-frame layout) 1 0)) 'keyword)
                (eq? (display-map-entry-kind

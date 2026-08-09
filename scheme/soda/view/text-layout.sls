@@ -652,12 +652,15 @@
                 (if (= offset end)
                     (loop-line (+ line 1)
                                (if (< line last) (cons (make-display-break end) result) result))
-                    (let ([next (text-next-grapheme-offset text offset)])
+                    (let* ([next (text-next-grapheme-offset text offset)]
+                           [bytes (text-subbytevector text offset next)]
+                           [glyph (utf8->string bytes)])
                       (loop-grapheme
                         next
-                        (cons (make-display-text
-                                (utf8->string (text-subbytevector text offset next))
-                                offset next (face-at offset) offset)
+                        (cons (make-display-grapheme
+                                glyph offset next (face-at offset) offset
+                                (and (not (string=? glyph "\t"))
+                                     (max 1 (unicode-grapheme-width bytes))))
                               result))))))))))
 
   (define snapshot-display-stream
@@ -809,7 +812,25 @@
               #t]))
          (define (emit-text! fragment)
            (set! trailing-break-caret #f)
-           (let* ((string (display-text-text fragment))
+           (if (display-text-atomic? fragment)
+               (let* ([glyph (display-text-text fragment)]
+                      [from (display-text-from fragment)]
+                      [to (display-text-to fragment)]
+                      [face (display-text-face fragment)]
+                      [source (display-text-source fragment)]
+                      [selected-face
+                       (if (selected? selection from to)
+                           (if (list? face) (append face (list 'selection))
+                               (list face 'selection))
+                           face)])
+                 (if (string=? glyph "\t")
+                     (emit-tab!
+                       (- (text-layout-options-tab-width options)
+                          (mod column (text-layout-options-tab-width options)))
+                       from to 'text selected-face source)
+                     (emit! glyph (display-text-width fragment)
+                            from to 'text selected-face source)))
+               (let* ((string (display-text-text fragment))
                   (bytes (string->utf8 string))
                   (size (bytevector-length bytes))
                   (from (display-text-from fragment))
@@ -848,7 +869,7 @@
                                     (if identity? 'text 'virtual)
                                     (selected-face face)
                                     source))))
-                   (loop next))))))
+                   (loop next)))))))
          (define (emit-widget! fragment)
            (let loop-row ([remaining (display-widget-height fragment)])
              (cond
