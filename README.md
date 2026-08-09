@@ -34,7 +34,8 @@ transaction 扩展这些稳定边界。
 | owner-scoped package、service 与资源清理 | 部分实现 |
 | core boot image 与 native launcher | 部分实现 |
 | 基础编辑、文件、history、interaction、minibuffer 与 completion package | 部分实现 |
-| major mode、语言服务、Project/LSP、REPL 与 debugger package | 未实现 |
+| ModeInstance、Buffer-local hook、SyntaxProfile 与 Scheme major mode | 已实现 |
+| language service、Project/LSP、REPL 与 debugger package | 未实现 |
 
 细分契约和 package 边界见[设计文档索引](design/README.md)，core 模型见
 [01-editor-core.md](design/01-editor-core.md)。

@@ -10,7 +10,7 @@
 | lifecycle hook 与 advice | 已实现 |
 | prefix argument 与稳定 target | 部分实现 |
 | `define-command` 声明宏与命令内省 API | 已实现 |
-| 命令内省 UI | 未实现 |
+| mode-aware availability、M-x、describe-command 与 where-is | 已实现 |
 | major/minor ModeSpec 机制与 fundamental-mode | 已实现 |
 
 ## Command protocol
@@ -138,8 +138,15 @@ registry definition，也不把 transient wrapper 写回 keymap。
 ## Mode 与命令可用性
 
 mode 不属于 CommandRuntime。Buffer mode extension 通过 [03-buffer-ui.md](03-buffer-ui.md) 的
-Facet 提供 local keymap、command category 和 enablement predicate。registry 保存全局可发现的
-definition；输入层和 M-x presenter 根据 active context 过滤候选。
+Facet 提供 local keymap 和 command category。CommandDefinition 声明 `global` 或 `mode` scope；
+mode-scoped definition 的 class 必须出现在活动 major/minor mode 的有效 category 集合中。
+registry 保存全局可发现的 definition；执行入口、M-x、describe-command 和 where-is 使用同一
+active-context availability 查询。
+
+M-x 的 command reader 产生 must-match completion request，接受后把选择排入 runtime queue，
+不递归调用另一条 command。describe-command 读取 CommandDefinition metadata。where-is 对当前
+Buffer input layer 和 application keymap 做只读反向查询，并遵守 layer precedence 与 command
+remap；它不暴露 keymap 的可变 binding table。
 
 minor mode 是可卸载的 Buffer Compartment contribution，不是 command runtime 中的布尔变量。
 

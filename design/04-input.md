@@ -9,8 +9,8 @@
 | keymap、prefix、remap 与 tombstone | 已实现 |
 | per-View InputState、layer composition 与 text policy | 已实现 |
 | terminal session、alternate screen 与 host message queue | 已实现 |
-| Buffer mode/minor-mode input Facet | 未实现 |
-| prefix argument、read-key 与输入内省 UI | 部分实现 |
+| Buffer mode/minor-mode input Facet | 已实现 |
+| prefix argument、M-x、where-is 与输入内省 UI | 部分实现 |
 
 ## 边界
 

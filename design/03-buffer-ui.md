@@ -10,6 +10,8 @@
 | canonical BufferKey 与 open-or-reuse registry | 已实现 |
 | 标准 mode、input、edit policy 与 display Facet | 已实现 |
 | ModeSpec、major/minor mode 组合与 Buffer-local OptionSpec | 已实现 |
+| ModeInstance/Owner、Buffer-local HookSpec 与 SyntaxProfile | 已实现 |
+| Fundamental 与 Scheme major mode | 已实现 |
 | BufferAttachment 生命周期与 close query | 部分实现 |
 | generated projection、semantic item 与 action registry | 部分实现 |
 | identity-preserving refresh 与多 View 位置恢复 | 部分实现 |
@@ -197,7 +199,9 @@ ModeSpec {
   parent?,
   extensions,
   command_categories,
-  modeline_contribution?
+  modeline_contribution?,
+  activate?,
+  deactivate?
 }
 ```
 
@@ -210,6 +214,31 @@ mode 通过 `buffer-input-layers` 提供 keymap。`fundamental-mode` 使用同�
 基础编辑 keymap 和 text policy。frontend 的 input resolver 按 transient layer、
 View layer、Buffer mode/minor-mode layer和全局 layer 组合输入上下文。命令仍通过统一
 CommandRuntime 执行。
+
+host 为每个活动 major/minor ModeSpec 建立一个 `ModeInstance`。实例持有独立 Owner；activate
+回调安装的 registration、listener 和 package resource 都挂在该 Owner 上。configuration
+transaction 发布后，host 先按旧配置执行切换前 hook，再逆序清理离开的实例，随后按新配置建立
+实例并执行切换后 hook。未变化的 ModeSpec 复用同一个实例。Buffer 关闭时，mode hook 和 Owner
+cleanup 在 View、attachment 与 Document 释放之前完成。
+
+Buffer-local hook 是 configuration contribution：
+
+```text
+HookSpec {
+  name,
+  phase,
+  order,
+  procedure
+}
+```
+
+hook 在 Dispatcher notification boundary 执行；hook 发起的 transaction 进入 Dispatcher 的延迟
+队列。相同 order 保留声明顺序，单个 hook 的 condition 被隔离并交给 ConditionService。
+
+`SyntaxProfile` 描述字符类别、成对 delimiter、行/块注释、字符串 delimiter 与 escape 字符。
+major mode 通过 `buffer-syntax-profile` Facet 提供 profile。word motion 与 delimiter matching
+读取当前 Buffer 配置；消费者不按 mode id 或文件后缀分支。Scheme mode 从 Fundamental 派生，
+为 `.scm`、`.ss` 和 `.sls` 文件提供 Scheme profile、major keymap 和 mode-local command。
 
 ## EditPolicy
 
