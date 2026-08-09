@@ -16,7 +16,7 @@
           (soda kernel viewport)
           (soda packages base text-motion)
           (soda packages base editing-options)
-          (soda packages buffer-ui)
+          (soda packages buffer-mode)
           (soda host command)
           (soda host command-runtime)
           (soda host context)

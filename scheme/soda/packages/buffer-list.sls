@@ -19,7 +19,10 @@
           (soda host value)
           (soda host view)
           (soda packages base history)
-          (soda packages buffer-ui))
+          (soda packages buffer-mode)
+          (soda packages edit-policy)
+          (soda packages generated-buffer)
+          (soda packages buffer-item))
 
   ;; BufferListService is a generated Buffer producer.  It has no special
   ;; rendering or navigation path: rows are BufferItems and activation uses

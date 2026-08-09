@@ -12,7 +12,10 @@
           (soda host package)
           (soda host value)
           (soda host view)
-          (soda packages buffer-ui))
+          (soda packages buffer-mode)
+          (soda packages edit-policy)
+          (soda packages generated-buffer)
+          (soda packages buffer-item))
 
   (define help-text
     "Soda Nano Help\n\nM-x      Execute named command\nC-h f    Describe command\nC-h w    Show command bindings\nC-x C-f  Visit file\nC-x C-d  Browse directory\nC-x C-b  List buffers (RET visit, d close)\nC-o      Write out\nC-x C-s  Save file\nC-x C-w  Save file as\nC-r      Insert file\nM-B      Toggle file backups\nTAB      Insert indentation (complete prompt input)\nC-c      Current position\nC-l      Refresh screen\nC-t      Check spelling\nM-D      Count words, lines, characters\nM-!      Execute shell command\nM-r      Revert file\nC-w      Search\nM-w/M-W  Repeat search forward/backward\nM-C      Toggle search case\nM-`      Toggle whole-word search\nC-\\      Query replace\nC-k      Cut text or line\nC-u      Uncut text\nM-6      Copy region\nM-a/C-6  Set mark\nC-j      Justify paragraph\nM-g/C-_  Go to line\nC-y/C-v  Previous/next page\nM-\\/M-/ First/last line\nM-u      Undo\nM-e      Redo\nM-i      Toggle auto-indent\nM-R      Toggle read-only\nM-E      Toggle tab-to-spaces\nM-T      Set indent width\nM-F      Toggle auto-fill\nM-$      Toggle soft wrap\nC-x C-k  Close buffer\nC-x C-c  Exit\nM-]      Matching delimiter\nC-g      Close help\n")
