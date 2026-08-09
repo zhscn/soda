@@ -5,6 +5,7 @@
           host-state-runtime
           host-state-buffers
           host-state-buffer-attachments
+          host-state-modes
           host-state-views
           host-state-surfaces
           host-state-commands
@@ -17,10 +18,12 @@
   (import (rnrs)
           (soda host internal buffer)
           (soda host internal buffer-attachment)
+          (soda kernel state)
           (soda host command)
           (soda host command-runtime)
           (soda host condition)
           (soda host dispatch)
+          (soda host internal mode)
           (soda host runtime)
           (soda host internal surface)
           (soda host value)
@@ -33,6 +36,7 @@
       (immutable runtime host-state-runtime)
       (immutable buffers host-state-buffers)
       (immutable buffer-attachments host-state-buffer-attachments)
+      (immutable modes host-state-modes)
       (immutable views host-state-views)
       (immutable surfaces host-state-surfaces)
       (immutable commands host-state-commands)
@@ -51,6 +55,11 @@
            [commands (make-command-registry)]
            [conditions (make-condition-service)]
            [dispatch (make-dispatcher buffers views surfaces)]
+           [modes
+            (make-mode-service
+              (lambda (source condition)
+                (condition-service-capture
+                  conditions owner source (lambda arguments #f) '(dismiss))))]
            [command-runtime
              (make-command-runtime owner commands dispatch runtime conditions)])
       (view-service-set-plugin-error-handler!
@@ -69,6 +78,23 @@
             conditions owner (list 'dispatcher source condition)
             (lambda arguments #f)
             '(dismiss))))
+      (buffer-service-set-create-handler!
+        buffers
+        (lambda (buffer)
+          (mode-service-reconcile!
+            modes buffer #f
+            (buffer-state-configuration (buffer-state buffer)))))
+      (dispatcher-add-listener!
+        dispatch owner
+        (lambda (update)
+          (let* ([buffer (buffer-service-ref buffers (editor-update-buffer-id update) #f)]
+                 [old-configuration
+                  (buffer-state-configuration (editor-update-old-buffer-state update))]
+                 [new-configuration
+                  (buffer-state-configuration (editor-update-new-buffer-state update))])
+            (when (and buffer (not (eq? old-configuration new-configuration)))
+              (mode-service-reconcile!
+                modes buffer old-configuration new-configuration)))))
       (view-service-set-close-handler!
         views
         (lambda (view)
@@ -80,10 +106,11 @@
       (buffer-service-set-close-handler!
         buffers
         (lambda (buffer)
-          (and (view-service-close-buffer-views! views (buffer-id buffer))
+          (and (mode-service-close-buffer! modes buffer)
+               (view-service-close-buffer-views! views (buffer-id buffer))
                (buffer-attachment-service-destroy-buffer! buffer-attachments buffer))))
       (%make-host-state
-        owner runtime buffers buffer-attachments views surfaces commands command-runtime conditions dispatch #f)))
+        owner runtime buffers buffer-attachments modes views surfaces commands command-runtime conditions dispatch #f)))
 
   (define (host-state-close! state)
     (unless (host-state? state)

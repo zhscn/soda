@@ -6,6 +6,7 @@
           (soda kernel change)
           (soda kernel document)
           (soda kernel extension)
+          (soda kernel mode)
           (soda kernel range-set)
           (soda kernel state)
           (soda kernel selection)
@@ -14,6 +15,7 @@
           (soda host dispatch)
           (soda host internal buffer)
           (soda host internal buffer-attachment)
+          (soda host internal mode)
           (soda host internal state)
           (soda host internal view)
           (soda host value)
@@ -185,6 +187,97 @@
       (owner-close! buffer-owner)
       (host-state-close! state)))
 
+  (define (run-mode-lifecycle-test!)
+    (let* ([state (make-host-state)]
+           [owner (make-owner 'mode-lifecycle-test)]
+           [events '()]
+           [record! (lambda (event) (set! events (append events (list event))))]
+           [hook
+            (lambda (name phase order)
+              (make-hook-spec
+                name phase order
+                (lambda (event)
+                  (unless (and (mode-event? event)
+                               (buffer? (mode-event-buffer event)))
+                    (error 'buffer-ui-tests "mode hook received an invalid event"))
+                  (record! name))))]
+           [first
+            (make-mode-spec
+              'first-mode 'major "First" #f
+              (list (make-buffer-hook-extension
+                      (list (hook 'first-before 'before-major-mode-change 0)
+                            (hook 'first-close 'buffer-close 0))))
+              '() #f
+              (lambda (buffer instance-owner)
+                (record! 'first-activate)
+                (owner-add-cleanup! instance-owner
+                                    (lambda () (record! 'first-cleanup))))
+              (lambda (buffer instance-owner) (record! 'first-deactivate)))]
+           [second
+            (make-mode-spec
+              'second-mode 'major "Second" #f
+              (list (make-buffer-hook-extension
+                      (list (hook 'second-after-late 'after-major-mode-change 10)
+                            (hook 'second-after-early 'after-major-mode-change -10)
+                            (hook 'second-major 'major-mode 0)
+                            (hook 'second-configuration
+                                  'buffer-configuration-changed 0)
+                            (hook 'second-close 'buffer-close 0))))
+              '() #f
+              (lambda (buffer instance-owner)
+                (record! 'second-activate)
+                (owner-add-cleanup! instance-owner
+                                    (lambda () (record! 'second-cleanup))))
+              (lambda (buffer instance-owner) (record! 'second-deactivate)))]
+           [configuration
+            (make-configuration (make-buffer-modes-extension first '()))]
+           [buffer
+            (buffer-service-create!
+              (host-state-buffers state) owner "*modes*" (make-document "")
+              configuration)]
+           [first-instance
+            (car (mode-service-instances (host-state-modes state) (buffer-id buffer)))])
+      (unless (and (mode-instance? first-instance)
+                   (eq? (mode-instance-spec first-instance) first)
+                   (owner-active? (mode-instance-owner first-instance)))
+        (error 'buffer-ui-tests "Buffer creation did not activate its major mode"))
+      (dispatcher-dispatch!
+        (host-state-dispatch state)
+        (make-transaction-spec
+          (buffer-id buffer) #f (buffer-state-generation (buffer-state buffer))
+          (make-change-set 0 '()) #f (list (set-buffer-major-mode-effect second)) '()))
+      (let ([second-instance
+             (car (mode-service-instances (host-state-modes state) (buffer-id buffer)))])
+        (unless (and (not (eq? first-instance second-instance))
+                     (not (owner-active? (mode-instance-owner first-instance)))
+                     (owner-active? (mode-instance-owner second-instance))
+                     (equal? events
+                             '(first-activate
+                               first-before first-deactivate first-cleanup
+                               second-activate second-after-early second-after-late
+                               second-major second-configuration)))
+          (error 'buffer-ui-tests "major-mode transition order or ownership differs"
+                 events))
+        (set! events '())
+        (dispatcher-dispatch!
+          (host-state-dispatch state)
+          (make-transaction-spec
+            (buffer-id buffer) #f (buffer-state-generation (buffer-state buffer))
+            (make-change-set 0 '()) #f '() '()))
+        (unless (and (null? events)
+                     (eq? second-instance
+                          (car (mode-service-instances
+                                 (host-state-modes state) (buffer-id buffer)))))
+          (error 'buffer-ui-tests "unchanged mode configuration was not idempotent"))
+        (buffer-service-close-buffer! (host-state-buffers state) (buffer-id buffer))
+        (unless (and (equal? events '(second-close second-deactivate second-cleanup))
+                     (not (owner-active? (mode-instance-owner second-instance)))
+                     (null? (mode-service-instances
+                              (host-state-modes state) (buffer-id buffer))))
+          (error 'buffer-ui-tests "Buffer close did not retire its ModeInstance" events)))
+      (owner-close! owner)
+      (host-state-close! state)))
+
   (define (run-item-and-policy-test!)
     (let* ([state (make-host-state)]
            [owner (make-owner 'buffer-item-test)]
@@ -309,5 +402,6 @@
     (run-close-reentrancy-test!)
     (run-host-close-veto-test!)
     (run-owner-detach-test!)
+    (run-mode-lifecycle-test!)
     (run-item-and-policy-test!)
     (run-bootstrap-buffer-ui-test!)))

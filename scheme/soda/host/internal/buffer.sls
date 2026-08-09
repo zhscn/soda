@@ -22,6 +22,7 @@
           buffer-service-rebind-key!
           buffer-service-ref
           buffer-service-buffers
+          buffer-service-set-create-handler!
           buffer-service-set-close-query-handler!
           buffer-service-set-close-handler!
           buffer-service-add-close-listener!
@@ -145,6 +146,8 @@
             (immutable catalog buffer-service-catalog)
             (immutable reverse-catalog buffer-service-reverse-catalog)
             (immutable close-requests buffer-service-close-requests)
+            (mutable create! buffer-service-create-handler
+                     buffer-service-create-handler-set!)
             (mutable close-query! buffer-service-close-query-handler
                      buffer-service-close-query-handler-set!)
             (mutable close! buffer-service-close-handler buffer-service-close-handler-set!)
@@ -155,7 +158,15 @@
     (%make-buffer-service (make-identity-source) (make-eqv-hashtable)
                           (make-hashtable equal-hash equal?) (make-eqv-hashtable)
                           (make-eqv-hashtable)
+                          (lambda (buffer) #t)
                           (lambda (buffer) #t) (lambda (buffer) #t) '()))
+
+  (define (buffer-service-set-create-handler! service handler)
+    (unless (and (buffer-service? service) (procedure? handler))
+      (assertion-violation 'buffer-service-set-create-handler!
+                           "expected a BufferService and create handler" service handler))
+    (buffer-service-create-handler-set! service handler)
+    handler)
 
   (define (buffer-service-set-close-query-handler! service handler)
     (unless (and (buffer-service? service) (procedure? handler))
@@ -199,7 +210,14 @@
                     (lambda (buffer)
                       (buffer-service-close-buffer! service (buffer-id buffer))))])
       (hashtable-set! (buffer-service-table service) (buffer-id buffer) buffer)
-      buffer))
+      (guard
+        (condition
+          [else
+           (hashtable-delete! (buffer-service-table service) (buffer-id buffer))
+           (buffer-close! buffer)
+           (raise condition)])
+        ((buffer-service-create-handler service) buffer)
+        buffer)))
 
   (define (buffer-service-find-key service key . default)
     (unless (and (buffer-service? service) (buffer-key? key))
