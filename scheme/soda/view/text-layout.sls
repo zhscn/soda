@@ -32,10 +32,13 @@
           text-layout-options-wrap?
           default-text-layout-options
           text-layout-options-facet
+          make-tab-width-setting-extension
+          make-soft-wrap-setting-extension
           line-number-facet
           line-number-compartment
           line-numbers-enabled?
           make-line-number-extension
+          make-line-number-setting-extension
           guide-column-facet
           guide-column-compartment
           guide-column
@@ -120,6 +123,56 @@
 
   (define default-text-layout-options (make-text-layout-options 8 #t))
 
+  (define-record-type text-layout-option-contribution
+    (fields tab-width wrap?))
+
+  (define (combine-text-layout-options values)
+    (let loop ([remaining values] [tab-width #f] [wrap? 'unset])
+      (if (null? remaining)
+          (make-text-layout-options
+            (or tab-width
+                (text-layout-options-tab-width default-text-layout-options))
+            (if (eq? wrap? 'unset)
+                (text-layout-options-wrap? default-text-layout-options)
+                wrap?))
+          (let ([value (car remaining)])
+            (cond
+              [(text-layout-options? value)
+               (loop (cdr remaining)
+                     (or tab-width (text-layout-options-tab-width value))
+                     (if (eq? wrap? 'unset)
+                         (text-layout-options-wrap? value)
+                         wrap?))]
+              [(text-layout-option-contribution? value)
+               (loop (cdr remaining)
+                     (or tab-width
+                         (text-layout-option-contribution-tab-width value))
+                     (if (and (eq? wrap? 'unset)
+                              (boolean?
+                                (text-layout-option-contribution-wrap? value)))
+                         (text-layout-option-contribution-wrap? value)
+                         wrap?))]
+              [else
+               (assertion-violation
+                 'text-layout-options
+                 "invalid text layout option contribution" value)])))))
+
+  (define (make-tab-width-setting-extension width)
+    (unless (and (integer? width) (exact? width) (> width 0))
+      (assertion-violation 'make-tab-width-setting-extension
+                           "expected a positive tab width" width))
+    (make-facet-provider
+      text-layout-options-facet
+      (make-text-layout-option-contribution width 'unset)))
+
+  (define (make-soft-wrap-setting-extension enabled?)
+    (unless (boolean? enabled?)
+      (assertion-violation 'make-soft-wrap-setting-extension
+                           "expected a soft-wrap boolean" enabled?))
+    (make-facet-provider
+      text-layout-options-facet
+      (make-text-layout-option-contribution #f enabled?)))
+
   ;; Line numbers are View chrome.  They consume terminal columns but never
   ;; alter document/display coordinates or the TextLayout's DisplayMap.
   (define (first-option values default)
@@ -138,6 +191,12 @@
   (define (make-line-number-extension enabled?)
     (unless (boolean? enabled?)
       (assertion-violation 'make-line-number-extension "expected a boolean" enabled?))
+    (make-facet-provider line-number-facet enabled? 'highest))
+
+  (define (make-line-number-setting-extension enabled?)
+    (unless (boolean? enabled?)
+      (assertion-violation 'make-line-number-setting-extension
+                           "expected a boolean" enabled?))
     (make-facet-provider line-number-facet enabled?))
 
   (define guide-column-facet
@@ -473,8 +532,7 @@
   ;; Higher-precedence providers are ordered first by Configuration.
   (define text-layout-options-facet
     (make-facet 'text-layout-options 'view default-text-layout-options
-                (lambda (values)
-                  (if (null? values) default-text-layout-options (car values)))
+                combine-text-layout-options
                 eq? eq?))
 
   ;; These queries are the layout-level coordinate contract.  Consumers never

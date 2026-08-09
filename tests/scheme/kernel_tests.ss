@@ -48,9 +48,11 @@
         (soda ffi tree-sitter)
         (soda bootstrap)
         (soda packages base fundamental-editing)
+        (soda packages base editing-options)
         (soda packages analysis-ui)
         (soda packages buffer-ui)
         (soda packages interaction)
+        (soda packages file)
         (soda packages process)
         (soda packages spell)
         (prefix (soda ffi runtime) native:)
@@ -2199,7 +2201,19 @@
              "configured keys accepted a same-layer conflict")))
   (registration-close! second-registration)
   (registration-close! first-registration)
-  (owner-close! binding-owner))
+  (owner-close! binding-owner)
+  (unless
+    (guard
+      (condition
+        [(key-binding-configuration-error? condition)
+         (eq? (key-binding-configuration-error-reason condition)
+              'unknown-command)]
+        [else #f])
+      (package-host-materialize-key-bindings
+        (make-package-host host) (list default-binding) 'editing #f)
+      #f)
+    (error 'kernel-tests
+           "configured key retained a command after Owner cleanup")))
 (let* ([first (make-keymap 'first-package)]
        [second (make-keymap 'second-package)]
        [_first-binding (keymap-bind! first (list control-s) 'first-command)]
@@ -3806,6 +3820,103 @@
                (= (view-state-buffer-generation (view-state secondary-view))
                   (buffer-state-generation (buffer-state buffer))))
     (error 'kernel-tests "fundamental-mode is not the Buffer major mode"))
+  (let* ([settings-owner (make-owner 'editor-setting-source-test)]
+         [package-host (make-package-host state)]
+         [resource (make-resource 'file "/tmp/project/main.scm")]
+         [context (make-configuration-context 'project-a resource)]
+         [source-location
+          (make-location resource
+                         (make-line-column-position 0 0)
+                         (make-line-column-position 0 1)
+                         #f 'after '())]
+         [declaration
+          (lambda (name value scope)
+            (make-setting-declaration
+              name value scope source-location))]
+         [source
+          (make-configuration-source
+            'test.editor-settings 'workspace 'project-a
+            (list
+              (declaration 'editor.tab-width "4" 'view)
+              (declaration 'editor.indent-width "2" 'buffer)
+              (declaration 'editor.fill-column "100" 'buffer)
+              (declaration 'editor.soft-wrap "off" 'view)
+              (declaration 'editor.line-numbers "on" 'view)
+              (declaration 'editor.auto-indent "false" 'buffer)
+              (declaration 'editor.auto-fill "true" 'buffer)
+              (declaration 'editor.tab-to-spaces "yes" 'buffer)
+              (declaration 'editor.read-only "true" 'buffer)
+              (declaration 'file.backup "on" 'buffer))
+            0)])
+    (package-host-reload-configuration-source!
+      package-host settings-owner source)
+    (let* ([buffer-settings
+            (package-host-configuration-extensions
+              package-host 'buffer context)]
+           [view-settings
+            (package-host-configuration-extensions
+              package-host 'view context)]
+           [configured-buffer
+            (make-configuration
+              (append (configuration-extensions configuration)
+                      buffer-settings))]
+           [configured-view (make-configuration view-settings)]
+           [indent (configuration-indent-options configured-buffer)]
+           [fill (configuration-fill-options configured-buffer)]
+           [layout
+            (configuration-facet
+              configured-view text-layout-options-facet 'view)]
+           [temporary-buffer
+            (make-configuration
+              (append (configuration-extensions configured-buffer)
+                      (list
+                        (compartment-of
+                          indent-options-compartment
+                          (make-indent-options-extension 6 #t)))))]
+           [temporary-view
+            (make-configuration
+              (append (configuration-extensions configured-view)
+                      (list
+                        (compartment-of
+                          layout-options-compartment
+                          (make-layout-options-extension 7 #t))
+                        (compartment-of
+                          line-number-compartment
+                          (make-line-number-extension #f)))))]
+           [temporary-indent
+            (configuration-indent-options temporary-buffer)]
+           [temporary-layout
+            (configuration-facet
+              temporary-view text-layout-options-facet 'view)])
+      (unless
+        (and (= (indent-options-width indent) 2)
+             (not (indent-options-insert-tabs? indent))
+             (= (fill-options-column fill) 100)
+             (fill-options-auto-fill? fill)
+             (not (auto-indent-enabled? configured-buffer))
+             (buffer-read-only? configured-buffer)
+             (file-backup-enabled? configured-buffer)
+             (= (text-layout-options-tab-width layout) 4)
+             (not (text-layout-options-wrap? layout))
+             (line-numbers-enabled? configured-view)
+             (= (indent-options-width temporary-indent) 6)
+             (indent-options-insert-tabs? temporary-indent)
+             (= (text-layout-options-tab-width temporary-layout) 7)
+             (text-layout-options-wrap? temporary-layout)
+             (not (line-numbers-enabled? temporary-view)))
+        (error 'kernel-tests
+               "persistent editor settings did not compose with local overrides"
+               (list
+                 (indent-options-width temporary-indent)
+                 (indent-options-insert-tabs? temporary-indent)
+                 (text-layout-options-tab-width temporary-layout)
+                 (text-layout-options-wrap? temporary-layout)
+                 (line-numbers-enabled? temporary-view)
+                 (text-layout-options-tab-width layout)
+                 (text-layout-options-wrap? layout)
+                 (line-numbers-enabled? configured-view)
+                 (file-backup-enabled? configured-buffer)))))
+    (owner-close! settings-owner))
   (owner-close! secondary-owner)
   (soda-application-close! application))
 

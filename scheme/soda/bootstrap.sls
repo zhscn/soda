@@ -128,7 +128,7 @@
                   '(80 . 24))]
                [options
                 (make-editor-options-service!
-                  (host-state-command-runtime state) owner)]
+                  host owner)]
                [history
                 (make-history! (host-state-command-runtime state)
                                (host-state-dispatch state) owner)]

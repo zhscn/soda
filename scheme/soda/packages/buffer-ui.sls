@@ -29,6 +29,7 @@
           buffer-input-context
           make-buffer-display-profile-extension
           make-buffer-read-only-extension
+          make-buffer-read-only-setting-extension
           make-edit-authority
           edit-authority?
           make-edit-authority-annotation
@@ -114,8 +115,8 @@
   (define buffer-edit-policies-facet
     (make-facet 'buffer-edit-policies 'buffer '() append-values eq? eq?))
   ;; Read-only is an ordinary Buffer configuration contribution.  The facet
-  ;; is descriptive so chrome and commands can report the state; the paired
-  ;; EditPolicy is authoritative and rejects all unprivileged content changes.
+  ;; is descriptive so chrome and commands can report the state; a transaction
+  ;; filter consults the final composed value before accepting content changes.
   ;; Generated packages can install their own policy independently, so turning
   ;; this user-facing option off never grants write access to a Dired/result
   ;; Buffer.
@@ -239,15 +240,33 @@
       (list (make-facet-provider buffer-edit-policies-facet (list policy))
             (make-facet-provider transaction-filters-facet (list filter)))))
 
+  (define (make-read-only-filter-extension)
+    (make-facet-provider
+      transaction-filters-facet
+      (list
+        (lambda (state transaction)
+          (if (or (change-set-empty?
+                    (resolved-transaction-changes transaction))
+                  (not (buffer-read-only?
+                         (buffer-state-configuration state))))
+              transaction
+              #f)))))
+
   (define (make-buffer-read-only-extension enabled?)
     (unless (boolean? enabled?)
       (assertion-violation 'make-buffer-read-only-extension
                            "expected a read-only boolean" enabled?))
-    (append
-      (list (make-buffer-local-option-extension buffer-read-only-option enabled?))
-      (if enabled?
-          (make-buffer-edit-policy-extension (make-buffer-edit-policy 'reject))
-          '())))
+    (list
+      (make-buffer-local-option-extension buffer-read-only-option enabled?)
+      (make-read-only-filter-extension)))
+
+  (define (make-buffer-read-only-setting-extension enabled?)
+    (unless (boolean? enabled?)
+      (assertion-violation 'make-buffer-read-only-setting-extension
+                           "expected a read-only boolean" enabled?))
+    (list
+      (make-facet-provider buffer-read-only-facet enabled?)
+      (make-read-only-filter-extension)))
 
   (define-record-type
     (buffer-item %make-buffer-item buffer-item?)

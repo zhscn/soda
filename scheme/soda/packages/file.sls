@@ -3,6 +3,7 @@
           file-service?
           file-service-resource
           file-service-register-mode!
+          file-backup-enabled?
           file-keymap)
   (import (rnrs)
           (only (chezscheme) current-directory get-process-id)
@@ -23,6 +24,7 @@
           (soda host input-event)
           (soda host location)
           (soda host operation)
+          (soda host setting)
           (soda host value)
           (soda host view)
           (soda packages base history)
@@ -142,7 +144,24 @@
     (unless (boolean? enabled?)
       (assertion-violation 'make-file-backup-extension
                            "expected a backup policy boolean" enabled?))
-    (make-facet-provider file-backup-facet enabled?))
+    (make-facet-provider file-backup-facet enabled? 'highest))
+
+  (define (parse-backup-policy input)
+    (cond
+      [(boolean? input) input]
+      [(and (string? input)
+            (member (string-downcase input) '("true" "yes" "on" "1"))) #t]
+      [(and (string? input)
+            (member (string-downcase input) '("false" "no" "off" "0"))) #f]
+      [else 'invalid]))
+
+  (define (register-file-settings! host owner)
+    (package-host-register-setting-schema!
+      host owner
+      (make-setting-schema
+        'file.backup 'boolean #f '(buffer) parse-backup-policy #f
+        (lambda (enabled? scope)
+          (make-facet-provider file-backup-facet enabled?)))))
 
   (define (buffer-id? value)
     (and (integer? value) (exact? value) (>= value 0)))
@@ -562,6 +581,7 @@
            [keymap (make-keymap 'file)]
            [service
             (%make-file-service (make-eqv-hashtable) host owner history keymap '())])
+      (register-file-settings! host owner)
       (command-runtime-register-effect-handler!
         runtime 'file.visit owner 'open-file-buffer
         (lambda (ignored invocation effect)

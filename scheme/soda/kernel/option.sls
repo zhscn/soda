@@ -38,14 +38,20 @@
       [(name default validator documentation)
        (make-option-spec name default validator equal? documentation)]
       [(name default validator compare documentation)
+       (make-option-spec
+         name default validator compare
+         (lambda (values) (first-value values default))
+         documentation)]
+      [(name default validator compare combine documentation)
        (unless (and (symbol? name) (procedure? validator) (validator default)
-                    (procedure? compare) (string? documentation))
+                    (procedure? compare) (procedure? combine)
+                    (string? documentation))
          (assertion-violation 'make-option-spec "invalid OptionSpec"
                               name default documentation))
        (let ([facet
               (make-facet
                 name 'buffer default
-                (lambda (values) (first-value values default))
+                combine
                 compare compare)])
          (%make-option-spec
            name default validator compare documentation facet

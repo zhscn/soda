@@ -17,6 +17,8 @@
           (soda host input)
           (soda host input-event)
           (soda host operation)
+          (soda host package)
+          (soda host setting)
           (soda host value)
           (soda view text-layout))
 
@@ -258,12 +260,56 @@
         name procedure owner documentation 'option
         (and (pair? readers) (make-interactive-plan (car readers))))))
 
-  (define (make-editor-options-service! runtime owner)
-    (unless (and (command-runtime? runtime) (owner? owner))
+  (define (parse-positive-integer input)
+    (cond
+      [(and (integer? input) (exact? input)) input]
+      [(string? input) (string->number input)]
+      [else #f]))
+
+  (define (parse-boolean input)
+    (cond
+      [(boolean? input) input]
+      [(and (string? input)
+            (member (string-downcase input) '("true" "yes" "on" "1"))) #t]
+      [(and (string? input)
+            (member (string-downcase input) '("false" "no" "off" "0"))) #f]
+      [else 'invalid]))
+
+  (define (register-setting! host owner name type default scope parser materialize)
+    (package-host-register-setting-schema!
+      host owner
+      (make-setting-schema
+        name type default (list scope) parser #f
+        (lambda (value ignored-scope) (materialize value)))))
+
+  (define (register-editor-settings! host owner)
+    (register-setting! host owner 'editor.tab-width 'positive-integer 8 'view
+      parse-positive-integer make-tab-width-setting-extension)
+    (register-setting! host owner 'editor.indent-width 'positive-integer 4 'buffer
+      parse-positive-integer make-indent-width-setting-extension)
+    (register-setting! host owner 'editor.fill-column 'positive-integer 80 'buffer
+      parse-positive-integer make-fill-column-setting-extension)
+    (register-setting! host owner 'editor.soft-wrap 'boolean #t 'view
+      parse-boolean make-soft-wrap-setting-extension)
+    (register-setting! host owner 'editor.line-numbers 'boolean #f 'view
+      parse-boolean make-line-number-setting-extension)
+    (register-setting! host owner 'editor.auto-indent 'boolean #t 'buffer
+      parse-boolean make-auto-indent-setting-extension)
+    (register-setting! host owner 'editor.auto-fill 'boolean #f 'buffer
+      parse-boolean make-auto-fill-setting-extension)
+    (register-setting! host owner 'editor.tab-to-spaces 'boolean #f 'buffer
+      parse-boolean make-tab-to-spaces-setting-extension)
+    (register-setting! host owner 'editor.read-only 'boolean #f 'buffer
+      parse-boolean make-buffer-read-only-setting-extension))
+
+  (define (make-editor-options-service! host owner)
+    (unless (and (package-host? host) (owner? owner))
       (assertion-violation 'make-editor-options-service!
-                           "expected a command runtime and owner" runtime owner))
-    (let* ([keymap (make-keymap 'editor-options)]
+                           "expected a PackageHost and owner" host owner))
+    (let* ([runtime (package-host-command-runtime host)]
+           [keymap (make-keymap 'editor-options)]
            [service (%make-editor-options-service keymap)])
+      (register-editor-settings! host owner)
       (install-command!
         runtime owner 'editor.toggle-auto-indent
         "Toggle automatic leading indentation for the active Buffer."
