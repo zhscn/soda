@@ -29,7 +29,8 @@
           (soda packages interaction)
           (soda ffi unicode)
           (soda view frame)
-          (soda view text-layout))
+          (soda view text-layout-options)
+          (soda view visual-geometry))
 
   ;; Fundamental editing is an ordinary package: it owns command
   ;; registrations and a keymap, while all mutation remains a TransactionSpec

@@ -21,7 +21,7 @@
           (soda host package)
           (soda host setting)
           (soda host value)
-          (soda view text-layout))
+          (soda view text-layout-options))
 
   ;; This package supplies interactive entry points for the configuration
   ;; contracts used by fundamental editing and text layout.  Option values

@@ -34,7 +34,7 @@
   (import (rnrs)
           (soda kernel extension)
           (soda kernel option)
-          (soda view text-layout))
+          (soda view text-layout-options))
 
   ;; Options remain ordinary configuration contributions.  These stable
   ;; compartments let a command, mode, or user configuration replace just one
