@@ -2,7 +2,7 @@
   (export command-shortcut-hints)
   (import (rnrs)
           (soda host command)
-          (soda host command-runtime)
+          (soda host command-runtime-registry)
           (soda host input)
           (soda host input-event))
 

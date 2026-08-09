@@ -20,7 +20,10 @@
           (soda host internal state)
           (soda host internal view)
           (soda host value)
-          (soda packages buffer-ui))
+          (soda packages buffer-mode)
+          (soda packages edit-policy)
+          (soda packages generated-buffer)
+          (soda packages buffer-item))
 
   (define (make-test-buffer buffers owner name)
     (buffer-service-create!
