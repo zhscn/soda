@@ -1,0 +1,132 @@
+(library (soda host internal location)
+  (export make-location-service
+          location-service?
+          location-service-register!
+          location-service-resolve)
+  (import (rnrs)
+          (soda kernel document)
+          (soda kernel location)
+          (soda kernel resource)
+          (soda kernel state)
+          (soda host internal buffer)
+          (soda host location)
+          (soda host value))
+
+  (define-record-type provider-registration
+    (fields owner provider))
+
+  (define-record-type
+    (location-service %make-location-service location-service?)
+    (fields buffers
+            (mutable registrations location-service-registrations
+                     location-service-registrations-set!)))
+
+  (define (make-location-service buffers)
+    (unless (buffer-service? buffers)
+      (assertion-violation
+        'make-location-service "expected a BufferService" buffers))
+    (%make-location-service buffers '()))
+
+  (define (location-service-register! service owner provider)
+    (unless (and (location-service? service) (owner? owner)
+                 (location-provider? provider))
+      (assertion-violation
+        'location-service-register! "invalid Location provider registration"
+        service owner provider))
+    (owner-assert-active 'location-service-register! owner)
+    (let ([entry (make-provider-registration owner provider)])
+      (location-service-registrations-set!
+        service (append (location-service-registrations service) (list entry)))
+      (make-registration
+        owner
+        (lambda ()
+          (location-service-registrations-set!
+            service
+            (filter (lambda (candidate) (not (eq? candidate entry)))
+                    (location-service-registrations service)))))))
+
+  (define (provider-for service scheme)
+    (let loop ([remaining (location-service-registrations service)])
+      (and (pair? remaining)
+           (let ([provider (provider-registration-provider (car remaining))])
+             (if (eq? scheme (location-provider-scheme provider))
+                 provider
+                 (loop (cdr remaining)))))))
+
+  (define (line-bounds text line)
+    (and (< line (text-line-count text))
+         (cons (text-line-start text line) (text-line-content-end text line))))
+
+  (define (line-column->offset text line column)
+    (let ([bounds (line-bounds text line)])
+      (and bounds
+           (let loop ([offset (car bounds)] [remaining column])
+             (cond
+               [(zero? remaining) offset]
+               [(>= offset (cdr bounds)) #f]
+               [else
+                (loop (text-next-grapheme-offset text offset)
+                      (- remaining 1))])))))
+
+  (define (utf16-position->offset text line character)
+    (let ([bounds (line-bounds text line)])
+      (and bounds
+           (let* ([base (text-utf16-offset text (car bounds))]
+                  [limit (text-utf16-offset text (cdr bounds))]
+                  [target (+ base character)])
+             (and (<= target limit)
+                  (text-offset-at-utf16 text target))))))
+
+  (define (position->offset text position)
+    (case (source-position-coordinate position)
+      [(byte)
+       (and (<= (source-position-first position) (text-size text))
+            (source-position-first position))]
+      [(utf16)
+       (utf16-position->offset
+         text (source-position-first position) (source-position-second position))]
+      [(line-column)
+       (line-column->offset
+         text (source-position-first position) (source-position-second position))]
+      [else #f]))
+
+  (define (unresolved provider value status)
+    (let* ([open (and provider (location-provider-request-open provider))]
+           [request (and open (open value))])
+      (if request
+          (make-location-resolution 'needs-open value #f #f #f request)
+          (make-location-resolution status value #f #f #f #f))))
+
+  (define (location-service-resolve service value)
+    (unless (and (location-service? service) (location? value))
+      (assertion-violation
+        'location-service-resolve "expected a LocationService and Location"
+        service value))
+    (let* ([resource (location-resource value)]
+           [provider (provider-for service (resource-scheme resource))])
+      (if (not provider)
+          (unresolved #f value 'unavailable)
+          (let* ([id ((location-provider-locate provider) resource)]
+                 [buffer (and id (buffer-service-ref
+                                   (location-service-buffers service) id #f))])
+            (if (not buffer)
+                (unresolved provider value 'unavailable)
+                (let* ([snapshot (buffer-state-document (buffer-state buffer))]
+                       [revision (snapshot-revision snapshot)])
+                  (if (and (location-revision value)
+                           (not (= (location-revision value) revision)))
+                      (make-location-resolution 'stale value (buffer-id buffer)
+                                                #f #f #f)
+                      (let ([text (snapshot-text snapshot)])
+                        (dynamic-wind
+                          (lambda () #f)
+                          (lambda ()
+                            (let ([from (position->offset text (location-start value))]
+                                  [to (position->offset text (location-end value))])
+                              (if (and from to (<= from to))
+                                  (make-location-resolution
+                                    'resolved value (buffer-id buffer) from to #f)
+                                  (make-location-resolution
+                                    'outside value (buffer-id buffer) #f #f #f))))
+                          (lambda () (text-close! text)))))))))))
+)

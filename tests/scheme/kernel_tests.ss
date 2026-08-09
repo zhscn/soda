@@ -23,6 +23,8 @@
         (soda host internal context)
         (soda host dispatch)
         (soda host frontend)
+        (soda host location)
+        (soda host package)
         (soda host internal buffer)
         (soda host input)
         (soda host input-event)
@@ -1049,6 +1051,76 @@
     (host-state-views host) owner buffer configuration))
 (define leaf (make-leaf-window (view-id view) '(0 0 80 24)))
 (define surface (make-surface 'terminal '(kitty color-256) leaf '(80 . 24)))
+
+(let* ([package-host (make-package-host host)]
+       [resource (make-resource 'buffer "kernel")]
+       [provider-owner (make-owner 'location-provider-test)]
+       [provider
+        (make-location-provider
+          'buffer
+          (lambda (candidate)
+            (and (resource=? candidate resource) (buffer-id buffer)))
+          (lambda (location) (list 'open (location-resource location))))]
+       [registration
+        (package-host-register-location-provider!
+          package-host provider-owner provider)]
+       [revision (snapshot-revision (buffer-state-document (buffer-state buffer)))]
+       [byte-resolution
+        (package-host-resolve-location
+          package-host
+          (make-location resource
+                         (make-byte-position 1) (make-byte-position 3)
+                         revision 'after '()))]
+       [line-resolution
+        (package-host-resolve-location
+          package-host
+          (make-location resource
+                         (make-line-column-position 0 2)
+                         (make-line-column-position 0 4)
+                         revision 'after '()))]
+       [utf16-resolution
+        (package-host-resolve-location
+          package-host
+          (make-location resource
+                         (make-utf16-position 0 1)
+                         (make-utf16-position 0 5)
+                         revision 'after '()))]
+       [stale-resolution
+        (package-host-resolve-location
+          package-host
+          (make-location resource
+                         (make-byte-position 0) (make-byte-position 0)
+                         (+ revision 1) 'after '()))]
+       [open-resolution
+        (package-host-resolve-location
+          package-host
+          (make-location (make-resource 'buffer "missing")
+                         (make-byte-position 0) (make-byte-position 0)
+                         #f 'after '()))])
+  (unless (and (eq? (location-resolution-status byte-resolution) 'resolved)
+               (= (location-resolution-buffer-id byte-resolution) (buffer-id buffer))
+               (= (location-resolution-from byte-resolution) 1)
+               (= (location-resolution-to byte-resolution) 3)
+               (eq? (location-resolution-status line-resolution) 'resolved)
+               (= (location-resolution-from line-resolution) 2)
+               (= (location-resolution-to line-resolution) 4)
+               (eq? (location-resolution-status utf16-resolution) 'resolved)
+               (= (location-resolution-from utf16-resolution) 1)
+               (= (location-resolution-to utf16-resolution) 5)
+               (eq? (location-resolution-status stale-resolution) 'stale)
+               (eq? (location-resolution-status open-resolution) 'needs-open)
+               (pair? (location-resolution-request open-resolution)))
+    (error 'kernel-tests "LocationResolver coordinate or revision policy differs"))
+  (registration-close! registration)
+  (unless (eq? (location-resolution-status
+                 (package-host-resolve-location
+                   package-host
+                   (make-location resource
+                                  (make-byte-position 0) (make-byte-position 0)
+                                  revision 'after '())))
+               'unavailable)
+    (error 'kernel-tests "LocationProvider owner cleanup differs"))
+  (owner-close! provider-owner))
 (surface-service-register! (host-state-surfaces host) surface)
 (surface-set-selected-window! surface leaf)
   (unless (and (eq? (surface-selected-window surface) leaf)

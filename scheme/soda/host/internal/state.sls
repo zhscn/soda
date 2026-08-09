@@ -6,6 +6,7 @@
           host-state-buffers
           host-state-buffer-attachments
           host-state-modes
+          host-state-locations
           host-state-views
           host-state-surfaces
           host-state-commands
@@ -23,6 +24,7 @@
           (soda host command-runtime)
           (soda host condition)
           (soda host dispatch)
+          (soda host internal location)
           (soda host internal mode)
           (soda host runtime)
           (soda host internal surface)
@@ -37,6 +39,7 @@
       (immutable buffers host-state-buffers)
       (immutable buffer-attachments host-state-buffer-attachments)
       (immutable modes host-state-modes)
+      (immutable locations host-state-locations)
       (immutable views host-state-views)
       (immutable surfaces host-state-surfaces)
       (immutable commands host-state-commands)
@@ -60,6 +63,7 @@
               (lambda (source condition)
                 (condition-service-capture
                   conditions owner source (lambda arguments #f) '(dismiss))))]
+           [locations (make-location-service buffers)]
            [command-runtime
              (make-command-runtime owner commands dispatch runtime conditions)])
       (view-service-set-plugin-error-handler!
@@ -110,7 +114,8 @@
                (view-service-close-buffer-views! views (buffer-id buffer))
                (buffer-attachment-service-destroy-buffer! buffer-attachments buffer))))
       (%make-host-state
-        owner runtime buffers buffer-attachments modes views surfaces commands command-runtime conditions dispatch #f)))
+        owner runtime buffers buffer-attachments modes locations views surfaces commands
+        command-runtime conditions dispatch #f)))
 
   (define (host-state-close! state)
     (unless (host-state? state)

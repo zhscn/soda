@@ -2,6 +2,8 @@
   (export make-package-host
           package-host?
           package-host-command-runtime
+          package-host-register-location-provider!
+          package-host-resolve-location
           package-host-dispatch!
           package-host-dispatch-view!
           package-host-buffer-ref
@@ -28,6 +30,7 @@
           (soda host command-runtime)
           (soda host dispatch)
           (soda host internal buffer)
+          (soda host internal location)
           (soda host internal state)
           (soda host internal surface)
           (soda host internal view)
@@ -49,6 +52,14 @@
 
   (define (package-host-command-runtime host)
     (host-state-command-runtime (package-host-state host)))
+
+  (define (package-host-register-location-provider! host owner provider)
+    (location-service-register!
+      (host-state-locations (package-host-state host)) owner provider))
+
+  (define (package-host-resolve-location host location)
+    (location-service-resolve
+      (host-state-locations (package-host-state host)) location))
 
   (define (package-host-dispatch! host specification)
     (dispatcher-dispatch! (host-state-dispatch (package-host-state host)) specification))
