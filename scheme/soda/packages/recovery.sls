@@ -24,6 +24,7 @@
           (soda host value)
           (soda host view)
           (soda packages base history)
+          (soda packages completion)
           (soda packages interaction)
           (soda support vfs))
 
@@ -264,12 +265,47 @@
       (lambda (context arguments)
         (cond
           [(pair? arguments) (make-interactive-ready '())]
-          [(pair? (recovery-service-pending-artifacts service))
+          [(null? (recovery-service-pending-artifacts service))
+           (assertion-violation 'recovery.restore
+                                "no recovery artifacts are available")]
+          [(null? (cdr (recovery-service-pending-artifacts service)))
            (make-interactive-ready
              (list (car (recovery-service-pending-artifacts service))))]
           [else
-           (assertion-violation 'recovery.restore
-                                "no recovery artifacts are available")]))))
+           (let* ([artifacts (recovery-service-pending-artifacts service)]
+                  [artifact-for
+                   (lambda (value)
+                     (find
+                       (lambda (artifact)
+                         (string=?
+                           value
+                           (resource-locator
+                             (recovery-artifact-resource artifact))))
+                       artifacts))]
+                  [source
+                   (make-completion-source
+                     (lambda (snapshot)
+                       (map
+                         (lambda (artifact)
+                           (let ([path
+                                  (resource-locator
+                                    (recovery-artifact-resource artifact))])
+                             (make-completion-candidate
+                               path path path "recovery snapshot" "recovery"
+                               artifact)))
+                         artifacts))
+                     #f #f #f)])
+             (make-interactive-suspend
+               (make-interaction-request
+                 'file-selection "Recover file: " #f source 'must-match
+                 (lambda (value ignored)
+                   (and (string? value) (artifact-for value))))
+               (lambda (value)
+                 (let ([artifact (and (string? value) (artifact-for value))])
+                   (unless artifact
+                     (assertion-violation 'recovery.restore
+                                          "unknown recovery file" value))
+                   (make-interactive-ready (list artifact))))))]))))
 
   (define (make-recovery-decision-reader)
     (make-interactive-reader

@@ -9,7 +9,9 @@
           (soda kernel extension)
           (soda kernel mode)
           (soda kernel range-set)
+          (soda kernel selection)
           (soda kernel state)
+          (soda kernel view-state)
           (soda host command)
           (soda host command-runtime)
           (soda host buffer)
@@ -21,6 +23,7 @@
           (soda host view)
           (soda packages buffer-ui)
           (soda packages file)
+          (soda packages interaction)
           (soda packages resource)
           (soda support vfs))
 
@@ -43,6 +46,9 @@
 
   (define-record-type directory-refresh-request
     (fields context))
+
+  (define-record-type directory-mutation-request
+    (fields kind context path destination))
 
   (define (control-stroke character)
     (make-key-stroke 'character (char->integer character) 4))
@@ -186,6 +192,80 @@
                                 (command-context-buffer-id context) #f)])
       (and buffer (publish-directory! service buffer))))
 
+  (define (selected-entry context)
+    (let* ([range
+            (selection-primary-range
+              (view-state-selection (command-context-view-state context)))]
+           [item
+            (buffer-item-at-point
+              (command-context-buffer-state context)
+              (selection-range-head range))]
+           [entry (and item (buffer-item-payload item))])
+      (and (directory-entry? entry)
+           (not (string=? (directory-entry-label entry) "../"))
+           entry)))
+
+  (define (make-selected-path-reader operation)
+    (make-interactive-reader
+      'directory-entry
+      (lambda (context arguments)
+        (if (pair? arguments)
+            (make-interactive-ready '())
+            (let ([entry (selected-entry context)])
+              (if entry
+                  (make-interactive-ready (list (directory-entry-path entry)))
+                  (assertion-violation operation
+                                       "point does not identify a mutable directory entry")))))))
+
+  (define (make-rename-destination-reader)
+    (make-interactive-reader
+      'directory-rename-destination
+      (lambda (context arguments)
+        (let ([source (and (pair? arguments) (car arguments))])
+          (unless (string? source)
+            (assertion-violation 'directory.rename "missing source path"))
+          (make-interactive-suspend
+            (make-interaction-request
+              'file-name "Rename to: " source #f 'free
+              (lambda (value ignored)
+                (and (string? value) (positive? (string-length value)))))
+            (lambda (value) (make-interactive-ready (list value))))))))
+
+  (define (delete-decision value)
+    (and (string? value) (string-ci=? value "yes")))
+
+  (define (make-delete-reader)
+    (make-interactive-reader
+      'directory-delete-confirmation
+      (lambda (context arguments)
+        (let ([path (and (pair? arguments) (car arguments))])
+          (unless (string? path)
+            (assertion-violation 'directory.delete "missing target path"))
+          (make-interactive-suspend
+            (make-interaction-request
+              'confirmation (string-append "Delete " path "? (yes/no) ")
+              #f #f 'free
+              (lambda (value ignored)
+                (and (string? value)
+                     (or (string-ci=? value "yes")
+                         (string-ci=? value "no")))))
+            (lambda (value)
+              (make-interactive-ready (list (delete-decision value)))))))))
+
+  (define (mutate-directory! service request)
+    (let ([kind (directory-mutation-request-kind request)]
+          [path (directory-mutation-request-path request)]
+          [destination (directory-mutation-request-destination request)])
+      (case kind
+        [(create) (vfs-create-directory! path #f)]
+        [(rename) (vfs-rename-path! path destination)]
+        [(delete) (vfs-delete-path! path)]
+        [else (assertion-violation 'directory.mutate "unknown mutation" kind)])
+      (refresh-directory!
+        service
+        (make-directory-refresh-request
+          (directory-mutation-request-context request)))))
+
   (define (activate-directory-entry! service item context ignored)
     (let ([entry (buffer-item-payload item)]
           [runtime (package-host-command-runtime (directory-service-host service))])
@@ -231,6 +311,15 @@
       (keymap-bind! result-keymap
                     (list (make-key-stroke 'character (char->integer #\g) 0))
                     'directory.refresh)
+      (keymap-bind! result-keymap
+                    (list (make-key-stroke 'character (char->integer #\+) 0))
+                    'directory.create-directory)
+      (keymap-bind! result-keymap
+                    (list (make-key-stroke 'character (char->integer #\R) 0))
+                    'directory.rename)
+      (keymap-bind! result-keymap
+                    (list (make-key-stroke 'character (char->integer #\D) 0))
+                    'directory.delete)
       (buffer-item-action-register!
         actions owner 'directory 'open
         (lambda (item context generation)
@@ -243,6 +332,10 @@
         runtime 'directory.refresh owner 'refresh-directory
         (lambda (ignored invocation effect)
           (refresh-directory! service (command-effect-payload effect))))
+      (command-runtime-register-effect-handler!
+        runtime 'directory.mutate owner 'mutate-directory
+        (lambda (ignored invocation effect)
+          (mutate-directory! service (command-effect-payload effect))))
       (command-runtime-register-command!
         runtime
         (make-command-definition
@@ -265,6 +358,62 @@
           (lambda (context)
             (make-command-effect 'directory.refresh (make-directory-refresh-request context)))
           owner "Refresh the directory entries in the current Directory Buffer." 'directory #f))
+      (command-runtime-register-command!
+        runtime
+        (make-command-definition
+          'directory.create-directory
+          (lambda (context name)
+            (let ([base
+                   (directory-service-path
+                     service (command-context-buffer-id context) #f)])
+              (unless base
+                (assertion-violation 'directory.create-directory
+                                     "current Buffer is not a directory browser"))
+              (make-command-effect
+                'directory.mutate
+                (make-directory-mutation-request
+                  'create context (vfs-resolve-path base name) #f))))
+          owner "Create a directory and refresh the current browser."
+          'directory
+          (make-interactive-plan
+            (list (make-interaction-string-reader
+                    'directory-name "Create directory: ")))))
+      (command-runtime-register-command!
+        runtime
+        (make-command-definition
+          'directory.rename
+          (lambda (context source destination)
+            (let ([base
+                   (directory-service-path
+                     service (command-context-buffer-id context) #f)])
+              (unless base
+                (assertion-violation 'directory.rename
+                                     "current Buffer is not a directory browser"))
+              (make-command-effect
+                'directory.mutate
+                (make-directory-mutation-request
+                  'rename context source
+                  (vfs-resolve-path base destination)))))
+          owner "Rename the entry at point without replacing an existing path."
+          'directory
+          (make-interactive-plan
+            (list (make-selected-path-reader 'directory.rename)
+                  (make-rename-destination-reader)))))
+      (command-runtime-register-command!
+        runtime
+        (make-command-definition
+          'directory.delete
+          (lambda (context path confirmed?)
+            (if confirmed?
+                (make-command-effect
+                  'directory.mutate
+                  (make-directory-mutation-request 'delete context path #f))
+                (command-handled)))
+          owner "Delete the entry at point after confirmation."
+          'directory
+          (make-interactive-plan
+            (list (make-selected-path-reader 'directory.delete)
+                  (make-delete-reader)))))
       (package-host-add-buffer-close-listener!
         host owner
         (lambda (buffer)

@@ -8,7 +8,10 @@
           vfs-delete-file-if-matches!
           vfs-file-exists?
           vfs-directory-exists?
+          vfs-path-exists?
           vfs-create-directory!
+          vfs-rename-path!
+          vfs-delete-path!
           vfs-list-directory
           vfs-path-separator?
           vfs-directory-path
@@ -28,6 +31,7 @@
   (import (rnrs)
           (only (chezscheme)
                 current-directory
+                delete-directory
                 directory-list
                 directory-separator
                 file-directory?
@@ -73,6 +77,10 @@
     (require-path 'vfs-directory-exists? path)
     (file-directory? path #t))
 
+  (define (vfs-path-exists? path)
+    (require-path 'vfs-path-exists? path)
+    (vfs-path-present? path))
+
   (define vfs-create-directory!
     (case-lambda
       [(path) (vfs-create-directory! path #f)]
@@ -91,6 +99,28 @@
              (mkdir target)))
          (create! resolved)
          resolved)]))
+
+  ;; Browser mutations use no-overwrite rename and non-recursive deletion.
+  ;; A non-empty directory therefore remains intact and reports the host
+  ;; filesystem condition to the command runtime.
+  (define (vfs-rename-path! source destination)
+    (require-path 'vfs-rename-path! source)
+    (require-path 'vfs-rename-path! destination)
+    (when (vfs-path-present? destination)
+      (assertion-violation 'vfs-rename-path!
+                           "destination already exists" destination))
+    (rename-file source destination)
+    destination)
+
+  (define (vfs-delete-path! path)
+    (require-path 'vfs-delete-path! path)
+    (case (vfs-path-kind path #f)
+      [(directory) (delete-directory path #f)]
+      [(file link) (delete-file path)]
+      [else
+       (assertion-violation 'vfs-delete-path!
+                            "path does not name a removable resource" path)])
+    #t)
 
   (define atomic-write-serial 0)
 

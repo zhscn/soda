@@ -235,6 +235,8 @@
            [nested (string-append root "/nested")]
            [note (string-append root "/note.txt")]
            [new-note (string-append root "/new.txt")]
+           [renamed-note (string-append root "/renamed.txt")]
+           [created (string-append root "/created")]
            [application (make-soda-application)]
            [state (soda-application-state application)]
            [runtime (host-state-command-runtime state)])
@@ -296,11 +298,59 @@
                     (buffer-service-ref (host-state-buffers state)
                                         (active-context-buffer-id refreshed-active))])
               (unless (string-contains? (buffer-string refreshed-buffer) "new.txt")
-                (error 'fundamental-editing-tests "directory refresh did not republish entries")))))
+                (error 'fundamental-editing-tests "directory refresh did not republish entries"))
+              (command-runtime-start!
+                runtime 'directory.create-directory
+                (application-command-context application) (list "created"))
+              (command-runtime-start!
+                runtime 'directory.rename
+                (application-command-context application)
+                (list new-note "renamed.txt"))
+              (unless (and (vfs-directory-exists? created)
+                           (vfs-file-exists? renamed-note)
+                           (not (vfs-file-exists? new-note))
+                           (string-contains? (buffer-string refreshed-buffer)
+                                             "renamed.txt"))
+                (error 'fundamental-editing-tests
+                       "directory mutations did not refresh the browser"))
+              (let* ([current
+                      (surface-active-context surface (host-state-views state))]
+                     [current-view
+                      (view-service-ref
+                        (host-state-views state) (active-context-view-id current))])
+                (dispatcher-dispatch-view!
+                  (host-state-dispatch state)
+                  (make-view-transaction-spec
+                    (view-id current-view)
+                    (view-state-generation (view-state current-view))
+                    (make-selection (list (make-selection-range 0 0)))
+                    #f #f '() '() #f)))
+              ;; parent, created/, nested/, note.txt, renamed.txt
+              (do ([index 0 (+ index 1)])
+                  ((= index 5))
+                (command-runtime-start!
+                  runtime 'buffer.next-item
+                  (application-command-context application)))
+              (command-runtime-start-interactive!
+                runtime 'directory.delete
+                (application-command-context application))
+              (let ([interaction (soda-application-interaction application)])
+                (unless (interaction-service-current interaction)
+                  (error 'fundamental-editing-tests
+                         "directory deletion did not request confirmation"))
+                (interaction-service-submit! interaction "yes")
+                (host-state-run! state))
+              (unless (and (not (vfs-file-exists? renamed-note))
+                           (not (string-contains? (buffer-string refreshed-buffer)
+                                                  "renamed.txt")))
+                (error 'fundamental-editing-tests
+                       "confirmed directory deletion was not published")))))
         (lambda ()
           (soda-application-close! application)
+          (guard (condition [else #f]) (delete-file renamed-note))
           (guard (condition [else #f]) (delete-file new-note))
           (guard (condition [else #f]) (delete-file note))
+          (guard (condition [else #f]) (delete-directory created #f))
           (delete-directory nested #f)
           (delete-directory root #f))))
 
