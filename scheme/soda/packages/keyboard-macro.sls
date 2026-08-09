@@ -178,9 +178,14 @@
                    [context (cdr payload)])
               (command-runtime-enqueue!
                 runtime
-                (make-command-invoke-message
-                  (macro-step-name step) context
-                  (copy-value (macro-step-arguments step)) #f))))))
+                (let ([name (macro-step-name step)])
+                  (unless (command-runtime-command-definition runtime name #f)
+                    (stop-playback! service)
+                    (assertion-violation
+                      'macro.play "recorded command is no longer registered" name))
+                  (make-command-invoke-message
+                    name context
+                    (copy-value (macro-step-arguments step)) #f)))))))
       (command-runtime-register-command!
         runtime
         (make-command-definition

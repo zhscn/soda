@@ -51,6 +51,7 @@
           (soda packages scheme-mode)
           (soda packages message)
           (soda packages interaction)
+          (soda packages keyboard-macro)
           (soda packages minibuffer)
           (soda packages resource)
           (soda support vfs)
@@ -2052,6 +2053,40 @@
               (error 'fundamental-editing-tests
                      "cancelled keyboard macro executed queued command debt"))))
         (lambda () (soda-application-close! application))))
+
+    ;; Package retirement can remove a command retained by a macro.  Playback
+    ;; stops at that boundary instead of retaining motion debt indefinitely.
+    (let ([application (make-soda-application)]
+          [temporary-owner (make-owner 'retired-macro-command-test)])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (let* ([state (soda-application-state application)]
+                 [runtime (host-state-command-runtime state)])
+            (command-runtime-register-command!
+              runtime
+              (make-command-definition
+                'test.retired-macro-command
+                (lambda (context) (command-handled))
+                temporary-owner "Temporary macro command." 'test #f))
+            (command-runtime-start!
+              runtime 'macro.start (application-command-context application))
+            (command-runtime-start!
+              runtime 'test.retired-macro-command
+              (application-command-context application))
+            (command-runtime-start!
+              runtime 'macro.end (application-command-context application))
+            (owner-close! temporary-owner)
+            (command-runtime-start!
+              runtime 'macro.play (application-command-context application))
+            (host-state-run! state)
+            (when (keyboard-macro-playing?
+                    (soda-application-keyboard-macros application))
+              (error 'fundamental-editing-tests
+                     "keyboard macro retained an unregistered command"))))
+        (lambda ()
+          (when (owner-active? temporary-owner) (owner-close! temporary-owner))
+          (soda-application-close! application))))
 
     ;; A visited file is normalized for editing and encoded from its binding
     ;; metadata on save, preserving CRLF, BOM, and final newline by default.

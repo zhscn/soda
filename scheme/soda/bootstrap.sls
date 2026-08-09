@@ -8,6 +8,7 @@
           soda-application-editing
           soda-application-options
           soda-application-history
+          soda-application-keyboard-macros
           soda-application-files
           soda-application-scheme-mode
           soda-application-directories
@@ -74,6 +75,7 @@
       (immutable editing soda-application-editing)
       (immutable options soda-application-options)
       (immutable history soda-application-history)
+      (immutable keyboard-macros soda-application-keyboard-macros)
       (immutable files soda-application-files)
       (immutable scheme-mode soda-application-scheme-mode)
       (immutable directories soda-application-directories)
@@ -185,7 +187,7 @@
           (surface-service-register! (host-state-surfaces state) surface)
           (history-mark-saved! history (buffer-id buffer))
           (%make-soda-application
-            state owner buffer view surface editing options history files scheme-mode directories processes spelling messages search interaction minibuffer buffer-item-actions buffer-lists default-keymap
+            state owner buffer view surface editing options history keyboard-macros files scheme-mode directories processes spelling messages search interaction minibuffer buffer-item-actions buffer-lists default-keymap
             #f #f #f)))))
 
   ;; Application policy belongs to composition.  Fundamental editing exports

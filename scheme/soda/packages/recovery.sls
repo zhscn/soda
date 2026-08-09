@@ -278,20 +278,19 @@
                      (find
                        (lambda (artifact)
                          (string=?
-                           value
-                           (resource-locator
-                             (recovery-artifact-resource artifact))))
+                           value (recovery-artifact-path artifact)))
                        artifacts))]
                   [source
                    (make-completion-source
                      (lambda (snapshot)
                        (map
                          (lambda (artifact)
-                           (let ([path
+                           (let ([path (recovery-artifact-path artifact)]
+                                 [resource
                                   (resource-locator
                                     (recovery-artifact-resource artifact))])
                              (make-completion-candidate
-                               path path path "recovery snapshot" "recovery"
+                               path path resource path "recovery"
                                artifact)))
                          artifacts))
                      #f #f #f)])

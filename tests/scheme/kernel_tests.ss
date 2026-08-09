@@ -2724,6 +2724,13 @@
       (host-state-close! state)
       (unless (= (length (vfs-list-directory directory)) 1)
         (error 'kernel-tests "service shutdown removed crash recovery state"))
+      ;; Two process artifacts may describe the same original resource.  The
+      ;; selector identifies the artifact file, not that shared resource.
+      (let* ([first-entry (car (vfs-list-directory directory))]
+             [first-path
+              (vfs-path-join directory (vfs-entry-name first-entry))]
+             [second-path (vfs-path-join directory "duplicate.soda-recovery")])
+        (vfs-write-file second-path (vfs-read-file first-path)))
 
       (let* ([next-state (make-host-state)]
              [next-host (make-package-host next-state)]
@@ -2758,14 +2765,29 @@
                 (view-id base-view) (buffer-id base)
                 (buffer-state base) (view-state base-view)
                 #f '() #f #f 'recovery-test)])
-        (unless (and (= (length (recovery-service-pending-artifacts reader)) 1)
+        (unless (and (= (length (recovery-service-pending-artifacts reader)) 2)
+                     (not (string=?
+                            (recovery-artifact-path
+                              (car (recovery-service-pending-artifacts reader)))
+                            (recovery-artifact-path
+                              (cadr (recovery-service-pending-artifacts reader)))))
                      (string=?
                        (utf8->string
                          (recovery-artifact-contents
                            (car (recovery-service-pending-artifacts reader))))
                        "crash contents"))
           (error 'kernel-tests "startup recovery discovery differs"))
-        (recovery-service-start! reader context)
+        (command-runtime-start-interactive!
+          (host-state-command-runtime next-state) 'recovery.restore context)
+        (unless (eq? (interaction-request-kind
+                       (interaction-session-request
+                         (interaction-service-current interactions)))
+                     'file-selection)
+          (error 'kernel-tests "multiple recovery artifacts did not request a target"))
+        (interaction-service-submit!
+          interactions
+          (recovery-artifact-path
+            (cadr (recovery-service-pending-artifacts reader))))
         (host-state-run! next-state)
         (unless (eq? (interaction-request-kind
                        (interaction-session-request
@@ -2782,9 +2804,18 @@
                [restored (view-buffer restored-view)])
           (unless (and (string=? (buffer-string restored) "crash contents")
                        (not (= (buffer-id restored) (buffer-id base)))
-                       (null? (vfs-list-directory directory)))
+                       (= (length (vfs-list-directory directory)) 1))
             (error 'kernel-tests
-                   "recovery restore changed the original resource or retained its artifact")))
+                   "recovery restore changed the resource or wrong artifact")))
+        (unless (eq? (interaction-request-kind
+                       (interaction-session-request
+                         (interaction-service-current interactions)))
+                     'recovery-decision)
+          (error 'kernel-tests "remaining recovery artifact was not queued"))
+        (interaction-service-submit! interactions "discard")
+        (host-state-run! next-state)
+        (unless (null? (vfs-list-directory directory))
+          (error 'kernel-tests "recovery discard retained the remaining artifact"))
         (owner-close! next-owner)
         (host-state-close! next-state)))
     (lambda ()
