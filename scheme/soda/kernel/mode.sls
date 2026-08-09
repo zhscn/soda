@@ -10,6 +10,13 @@
           mode-spec-modeline-contribution
           mode-spec-activate
           mode-spec-deactivate
+          mode-spec-comment-syntax
+          mode-spec-effective-comment-syntax
+          make-comment-syntax
+          comment-syntax?
+          comment-syntax-line-prefix
+          comment-syntax-block-start
+          comment-syntax-block-end
           mode-spec-extension-list
           mode-spec-command-category-list
           buffer-mode-facet
@@ -43,26 +50,75 @@
             (immutable command-categories mode-spec-command-categories)
             (immutable modeline-contribution mode-spec-modeline-contribution)
             (immutable activate mode-spec-activate)
-            (immutable deactivate mode-spec-deactivate)))
+            (immutable deactivate mode-spec-deactivate)
+            (immutable comment-syntax mode-spec-comment-syntax)))
+
+  (define-record-type
+    (comment-syntax %make-comment-syntax comment-syntax?)
+    (fields (immutable line-prefix comment-syntax-line-prefix-raw)
+            (immutable block-start comment-syntax-block-start-raw)
+            (immutable block-end comment-syntax-block-end-raw)))
+
+  (define (copy-optional-string value)
+    (and value (string-copy value)))
+
+  (define (comment-syntax-line-prefix syntax)
+    (copy-optional-string (comment-syntax-line-prefix-raw syntax)))
+  (define (comment-syntax-block-start syntax)
+    (copy-optional-string (comment-syntax-block-start-raw syntax)))
+  (define (comment-syntax-block-end syntax)
+    (copy-optional-string (comment-syntax-block-end-raw syntax)))
+
+  (define (make-comment-syntax line-prefix block-start block-end)
+    (unless (and (or (not line-prefix)
+                     (and (string? line-prefix)
+                          (positive? (string-length line-prefix))))
+                 (or (and (not block-start) (not block-end))
+                     (and (string? block-start)
+                          (positive? (string-length block-start))
+                          (string? block-end)
+                          (positive? (string-length block-end))))
+                 (or line-prefix block-start))
+      (assertion-violation 'make-comment-syntax
+                           "invalid line or block comment description"
+                           line-prefix block-start block-end))
+    (%make-comment-syntax
+      (copy-optional-string line-prefix)
+      (copy-optional-string block-start)
+      (copy-optional-string block-end)))
 
   (define (optional-procedure? value) (or (not value) (procedure? value)))
 
   (define make-mode-spec
     (case-lambda
       [(id kind display-name parent extensions categories modeline)
-       (make-mode-spec id kind display-name parent extensions categories modeline #f #f)]
+       (make-mode-spec id kind display-name parent extensions categories modeline #f #f #f)]
       [(id kind display-name parent extensions categories modeline activate deactivate)
+       (make-mode-spec id kind display-name parent extensions categories modeline
+                       activate deactivate #f)]
+      [(id kind display-name parent extensions categories modeline activate deactivate
+           comment-syntax)
        (unless (and (symbol? id) (memq kind '(major minor)) (string? display-name)
                     (or (not parent)
                         (and (mode-spec? parent) (eq? kind (mode-spec-kind parent))))
                     (list? extensions) (list? categories)
                     (for-all symbol? categories)
                     (or (not modeline) (procedure? modeline) (string? modeline))
-                    (optional-procedure? activate) (optional-procedure? deactivate))
+                    (optional-procedure? activate) (optional-procedure? deactivate)
+                    (or (not comment-syntax) (comment-syntax? comment-syntax)))
          (assertion-violation 'make-mode-spec "invalid mode specification"
                               id kind display-name))
        (%make-mode-spec id kind display-name parent (list-copy extensions)
-                        (list-copy categories) modeline activate deactivate)]))
+                        (list-copy categories) modeline activate deactivate
+                        comment-syntax)]))
+
+  (define (mode-spec-effective-comment-syntax spec)
+    (unless (mode-spec? spec)
+      (assertion-violation 'mode-spec-effective-comment-syntax
+                           "expected a ModeSpec" spec))
+    (or (mode-spec-comment-syntax spec)
+        (and (mode-spec-parent spec)
+             (mode-spec-effective-comment-syntax (mode-spec-parent spec)))))
 
   (define (mode-spec-extension-list spec)
     (append (if (mode-spec-parent spec)

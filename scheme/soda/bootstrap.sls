@@ -50,6 +50,7 @@
           (soda packages search)
           (soda packages word-completion)
           (soda packages whitespace)
+          (soda packages comment)
           (soda packages interaction)
           (soda packages buffer-ui)
           (soda packages command-ui)
@@ -111,6 +112,8 @@
                   (host-state-command-runtime state) owner)]
                [whitespace
                 (make-whitespace-service! host owner)]
+               [comments
+                (make-comment-service! host owner)]
                [configuration
                 (make-configuration
                   (list (buffer-item-field-extension)
@@ -165,6 +168,7 @@
                         (search-keymap search)
                         (word-completion-keymap word-completion)
                         (whitespace-keymap whitespace)
+                        (comment-keymap comments)
                         (message-keymap messages)
                         (spell-keymap spelling)
                         (process-keymap processes)

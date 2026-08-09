@@ -27,6 +27,7 @@
           (soda kernel document)
           (soda kernel extension)
           (soda kernel location)
+          (soda kernel mode)
           (soda kernel range-set)
           (soda kernel regex)
           (soda kernel selection)
@@ -1150,10 +1151,7 @@
                    [service (soda-application-scheme-mode application)]
                    [profile
                     (configuration-facet
-                      configuration buffer-syntax-profile-facet 'buffer)]
-                   [layers
-                    (configuration-facet
-                      configuration buffer-input-layers-facet 'buffer)])
+                      configuration buffer-syntax-profile-facet 'buffer)])
               (unless (and (eq? (configuration-facet
                                   configuration buffer-mode-facet 'buffer)
                                 (scheme-mode-spec service))
@@ -1168,13 +1166,16 @@
                            (syntax-profile-word-constituent? profile #\-)
                            (syntax-profile-word-constituent? profile #\?)
                            (command-runtime-command-available?
-                             runtime 'scheme.comment-lines context)
-                           (eq? (cadr
-                                  (resolve-key-sequence
-                                    layers
-                                    (list (make-key-stroke
-                                            'character (char->integer #\;) 2))))
-                                'scheme.comment-lines))
+                             runtime 'comment.add context)
+                           (let ([syntax
+                                  (mode-spec-effective-comment-syntax
+                                    (scheme-mode-spec service))])
+                             (and (string=?
+                                    (comment-syntax-line-prefix syntax) "; ")
+                                  (string=?
+                                    (comment-syntax-block-start syntax) "#|")
+                                  (string=?
+                                    (comment-syntax-block-end syntax) "|#"))))
                 (error 'fundamental-editing-tests
                        "Scheme file did not activate its derived mode contracts"))
               (host-state-run! state)
@@ -1245,7 +1246,7 @@
                 runtime 'fundamental.beginning-of-buffer
                 (application-command-context application))
               (command-runtime-start!
-                runtime 'scheme.comment-lines
+                runtime 'comment.add
                 (application-command-context application))
               (unless (string-prefix?
                         "; "
@@ -1254,9 +1255,69 @@
                             (host-state-buffers state)
                             (command-context-buffer-id context))))
                 (error 'fundamental-editing-tests
-                       "Scheme mode command did not publish a normal transaction")))))
+                       "generic comment command did not publish a normal transaction"))
+              (command-runtime-start!
+                runtime 'comment.remove
+                (application-command-context application))
+              (when (string-prefix?
+                      "; "
+                      (buffer-string
+                        (buffer-service-ref
+                          (host-state-buffers state)
+                          (command-context-buffer-id context))))
+                (error 'fundamental-editing-tests
+                       "generic uncomment command did not remove the mode prefix")))))
         (lambda ()
           (soda-application-close! application)
+          (when (file-exists? path) (delete-file path)))))
+
+    (let* ([path (string-append "/tmp/soda-comment-selection-"
+                                (number->string (get-process-id)) ".ss")])
+      (dynamic-wind
+        (lambda ()
+          (when (file-exists? path) (delete-file path))
+          (vfs-write-file path (string->utf8 "one\n  two\nthree")))
+        (lambda ()
+          (let* ([application (make-soda-application)]
+                 [state (soda-application-state application)]
+                 [runtime (host-state-command-runtime state)])
+            (dynamic-wind
+              (lambda () #f)
+              (lambda ()
+                (command-runtime-start!
+                  runtime 'file.visit (application-command-context application)
+                  (list path))
+                (let* ([context (application-command-context application)]
+                       [view
+                        (view-service-ref
+                          (host-state-views state)
+                          (command-context-view-id context))]
+                       [selection
+                        (make-selection
+                          (list (make-selection-range 0 0)
+                                (make-selection-range 6 6)) 0)])
+                  (dispatcher-dispatch-view!
+                    (host-state-dispatch state)
+                    (make-view-transaction-spec
+                      (view-id view) (view-state-generation (view-state view))
+                      selection #f #f '() '() #f))
+                  (let ([invocation
+                         (command-runtime-start!
+                           runtime 'comment.add
+                           (application-command-context application))])
+                  (let ([buffer (view-buffer view)])
+                    (unless (and (eq? (command-invocation-phase invocation) 'completed)
+                                 (string=? (buffer-string buffer)
+                                           "; one\n  ; two\nthree"))
+                      (error 'fundamental-editing-tests
+                             "comment command did not cover multiple selections"))
+                    (command-runtime-start!
+                      runtime 'comment.remove (application-command-context application))
+                    (unless (string=? (buffer-string buffer) "one\n  two\nthree")
+                      (error 'fundamental-editing-tests
+                             "uncomment command did not cover multiple selections"))))))
+              (lambda () (soda-application-close! application)))))
+        (lambda ()
           (when (file-exists? path) (delete-file path)))))
 
     ;; VFS publishes a complete replacement or leaves the target intact.  It

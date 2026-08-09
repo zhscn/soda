@@ -241,55 +241,6 @@
       (list (cons #\( #\)) (cons #\[ #\]) (cons #\{ #\}))
       (list ";") (list (cons "#|" "|#")) (list #\") #\\))
 
-  (define (unique-sorted values)
-    (let loop ([remaining (list-sort < values)] [previous #f] [result '()])
-      (cond
-        [(null? remaining) (reverse result)]
-        [(and previous (= previous (car remaining)))
-         (loop (cdr remaining) previous result)]
-        [else
-         (loop (cdr remaining) (car remaining) (cons (car remaining) result))])))
-
-  (define (selected-line-starts text selection)
-    (unique-sorted
-      (fold-left
-        append '()
-        (map
-          (lambda (range)
-            (let* ([from (selection-range-from range)]
-                   [to (selection-range-to range)]
-                   [first-line (car (text-position text from))]
-                   [last-line
-                    (car (text-position text
-                           (if (and (> to from) (> to 0)) (- to 1) to)))])
-              (let loop ([line first-line] [result '()])
-                (if (> line last-line)
-                    (reverse result)
-                    (loop (+ line 1) (cons (text-line-start text line) result))))))
-          (selection-ranges selection)))))
-
-  (define (comment-lines context)
-    (let* ([state (command-context-buffer-state context)]
-           [document (buffer-state-document state)]
-           [text (snapshot-text document)])
-      (dynamic-wind
-        (lambda () #f)
-        (lambda ()
-          (let* ([selection
-                  (view-state-selection (command-context-view-state context))]
-                 [starts (selected-line-starts text selection)]
-                 [changes
-                  (map (lambda (offset)
-                         (make-text-change offset 0 (string->utf8 "; ")))
-                       starts)])
-            (make-transaction-spec
-              (command-context-buffer-id context)
-              (command-context-view-id context)
-              (buffer-state-generation state)
-              (make-change-set (snapshot-byte-size document) changes)
-              #f '() '())))
-        (lambda () (text-close! text)))))
-
   (define (activate-scheme-mode context spec)
     (let* ([state (command-context-buffer-state context)]
            [length (snapshot-byte-size (buffer-state-document state))])
@@ -324,23 +275,15 @@
                   host (buffer-id buffer) scheme-highlight-provider-key))
               (lambda (buffer instance-owner)
                 (package-host-stop-analysis!
-                  host (buffer-id buffer) scheme-highlight-provider-key)))]
+                  host (buffer-id buffer) scheme-highlight-provider-key))
+              (make-comment-syntax "; " "#|" "|#"))]
            [service (%make-scheme-mode-service spec profile keymap)])
       (package-host-register-analysis-provider!
         host owner (make-scheme-highlight-provider host))
       (define-command
-        runtime owner 'scheme.comment-lines (context)
-        "Insert a Scheme line-comment prefix on every selected logical line."
-        'scheme (scope 'mode)
-        (comment-lines context))
-      (define-command
         runtime owner 'scheme-mode.activate (context)
         "Select Scheme major mode for the active Buffer." 'mode
         (activate-scheme-mode context spec))
-      (keymap-bind!
-        keymap
-        (list (make-key-stroke 'character (char->integer #\;) 2))
-        'scheme.comment-lines)
       (for-each
         (lambda (suffix) (file-service-register-mode! files owner suffix spec))
         '(".scm" ".ss" ".sls"))
