@@ -1476,7 +1476,7 @@
       [(pass)
        (let ([event (command-context-event context)])
          (and (pointer-event? event)
-              (eq? (pointer-event-type event) 'scroll)
+              (eq? (pointer-event-phase event) 'wheel)
               (case (pointer-event-button event)
                 [(wheel-up)
                  (make-command-invoke-message

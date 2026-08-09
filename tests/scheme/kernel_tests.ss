@@ -2417,10 +2417,56 @@
   (unless (and (= (length events) 1)
                (eq? (key-event-key (car events)) 'escape))
     (error 'kernel-tests "Escape flush differs" events)))
+(unless (null?
+          (terminal-input-decoder-feed!
+            terminal-decoder (string->utf8 "\x1b;[<52;10")))
+  (error 'kernel-tests "partial SGR mouse report produced an event"))
+(let* ([events
+         (terminal-input-decoder-feed!
+           terminal-decoder (string->utf8 ";20M"))]
+       [event (car events)])
+  (unless (and (= (length events) 1)
+               (pointer-event? event)
+               (= (pointer-event-row event) 19)
+               (= (pointer-event-column event) 9)
+               (eq? (pointer-event-button event) 'left)
+               (pointer-event-modifier? event 'ctrl)
+               (= (pointer-event-click-count event) 0)
+               (eq? (pointer-event-phase event) 'move))
+    (error 'kernel-tests "SGR mouse motion decoding differs" events)))
+(let* ([press
+         (car (terminal-input-decoder-feed!
+                terminal-decoder (string->utf8 "\x1b;[<4;2;3M")))]
+       [release
+         (car (terminal-input-decoder-feed!
+                terminal-decoder (string->utf8 "\x1b;[<0;2;3m")))]
+       [wheel
+         (car (terminal-input-decoder-feed!
+                terminal-decoder (string->utf8 "\x1b;[<65;5;6M")))]
+       [double-click
+         (make-pointer-event 2 1 'left 0 2 'press)])
+  (unless (and (eq? (pointer-event-phase press) 'press)
+               (pointer-event-modifier? press 'shift)
+               (= (pointer-event-click-count press) 1)
+               (eq? (pointer-event-phase release) 'release)
+               (= (pointer-event-click-count release) 1)
+               (eq? (pointer-event-phase wheel) 'wheel)
+               (eq? (pointer-event-button wheel) 'wheel-down)
+               (= (pointer-event-click-count wheel) 0)
+               (= (pointer-event-click-count double-click) 2)
+               (input-event? double-click))
+    (error 'kernel-tests "PointerEvent phase or click contract differs")))
+(let ([events
+       (terminal-input-decoder-feed!
+         terminal-decoder (string->utf8 "\x1b;[<0;0;1M"))])
+  (unless (and (= (length events) 1)
+               (key-event? (car events))
+               (eq? (key-event-key (car events)) 'unknown))
+    (error 'kernel-tests "invalid SGR mouse report was accepted" events)))
 (unless (and (string=? terminal-input-enable-sequence
-                       "\x1b;[>7u\x1b;[?2004h")
+                       "\x1b;[>7u\x1b;[?2004h\x1b;[?1003h\x1b;[?1006h")
              (string=? terminal-input-disable-sequence
-                       "\x1b;[<u\x1b;[?2004l"))
+                       "\x1b;[?1006l\x1b;[?1003l\x1b;[?2004l\x1b;[<u"))
   (error 'kernel-tests "terminal input protocol sequences differ"))
 
 (unless (and (string=? terminal-alternate-screen-enable-sequence

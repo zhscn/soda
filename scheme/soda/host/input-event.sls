@@ -27,6 +27,8 @@
           pointer-event-column
           pointer-event-button
           pointer-event-modifiers
+          pointer-event-click-count
+          pointer-event-phase
           pointer-event-type
           pointer-event-modifier?
           input-event?)
@@ -173,19 +175,39 @@
       (immutable column pointer-event-column)
       (immutable button pointer-event-button)
       (immutable modifiers pointer-event-modifiers)
-      (immutable type pointer-event-type)))
+      (immutable click-count pointer-event-click-count)
+      (immutable phase pointer-event-phase)))
 
-  (define (make-pointer-event row column button modifiers type)
-    (unless (and (integer? row) (exact? row) (not (negative? row))
-                 (integer? column) (exact? column) (not (negative? column))
-                 (memq button '(left middle right none wheel-up wheel-down))
-                 (valid-modifiers? modifiers)
-                 (memq type '(press release move scroll)))
-      (assertion-violation
-        'make-pointer-event
-        "invalid pointer event"
-        row column button modifiers type))
-    (%make-pointer-event row column button modifiers type))
+  (define make-pointer-event
+    (case-lambda
+      [(row column button modifiers phase)
+       (make-pointer-event
+         row column button modifiers
+         (if (memq phase '(press release)) 1 0)
+         (if (eq? phase 'scroll) 'wheel phase))]
+      [(row column button modifiers click-count phase)
+       (unless (and (integer? row) (exact? row) (not (negative? row))
+                    (integer? column) (exact? column) (not (negative? column))
+                    (memq button
+                          '(left middle right none
+                            wheel-up wheel-down wheel-left wheel-right))
+                    (valid-modifiers? modifiers)
+                    (integer? click-count) (exact? click-count)
+                    (not (negative? click-count))
+                    (memq phase '(press release move wheel))
+                    (if (eq? phase 'wheel)
+                        (memq button
+                              '(wheel-up wheel-down wheel-left wheel-right))
+                        (not (memq button
+                                   '(wheel-up wheel-down wheel-left wheel-right)))))
+         (assertion-violation
+           'make-pointer-event
+           "invalid pointer event"
+           row column button modifiers click-count phase))
+       (%make-pointer-event
+         row column button modifiers click-count phase)]))
+
+  (define pointer-event-type pointer-event-phase)
 
   (define (pointer-event-modifier? event modifier)
     (unless (pointer-event? event)

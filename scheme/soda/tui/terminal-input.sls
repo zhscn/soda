@@ -8,6 +8,8 @@
           kitty-keyboard-disable-sequence
           bracketed-paste-enable-sequence
           bracketed-paste-disable-sequence
+          mouse-reporting-enable-sequence
+          mouse-reporting-disable-sequence
           terminal-input-enable-sequence
           terminal-input-disable-sequence)
   (import (rnrs)
@@ -24,12 +26,18 @@
   (define kitty-keyboard-disable-sequence "\x1b;[<u")
   (define bracketed-paste-enable-sequence "\x1b;[?2004h")
   (define bracketed-paste-disable-sequence "\x1b;[?2004l")
+  ;; SGR coordinates avoid the byte-range limits of legacy mouse reports.
+  ;; Any-motion tracking supplies press, drag, hover, release, and wheel input.
+  (define mouse-reporting-enable-sequence "\x1b;[?1003h\x1b;[?1006h")
+  (define mouse-reporting-disable-sequence "\x1b;[?1006l\x1b;[?1003l")
   (define terminal-input-enable-sequence
     (string-append
-      kitty-keyboard-enable-sequence bracketed-paste-enable-sequence))
+      kitty-keyboard-enable-sequence bracketed-paste-enable-sequence
+      mouse-reporting-enable-sequence))
   (define terminal-input-disable-sequence
     (string-append
-      kitty-keyboard-disable-sequence bracketed-paste-disable-sequence))
+      mouse-reporting-disable-sequence bracketed-paste-disable-sequence
+      kitty-keyboard-disable-sequence))
 
   (define-record-type
     (terminal-input-decoder %make-terminal-input-decoder
@@ -319,26 +327,38 @@
   (define (parse-sgr-mouse parameters final)
     (let* ([body (substring parameters 1 (string-length parameters))]
            [fields (split-string body #\;)]
-           [encoded (or (optional-number (list-ref/default fields 0 "")) 0)]
-           [column (max 0 (- (or (optional-number
-                                   (list-ref/default fields 1 "1")) 1) 1))]
-           [row (max 0 (- (or (optional-number
-                                (list-ref/default fields 2 "1")) 1) 1))]
+           [numbers (map optional-number fields)])
+      (unless (and (= (length numbers) 3)
+                   (for-all
+                     (lambda (value)
+                       (and (integer? value) (exact? value)
+                            (not (negative? value))))
+                     numbers)
+                   (positive? (cadr numbers))
+                   (positive? (caddr numbers)))
+        (assertion-violation 'parse-sgr-mouse "invalid SGR mouse report"))
+      (let* ([encoded (car numbers)]
+           [column (- (cadr numbers) 1)]
+           [row (- (caddr numbers) 1)]
            [wheel? (not (zero? (bitwise-and encoded 64)))]
            [motion? (not (zero? (bitwise-and encoded 32)))]
            [button-code (bitwise-and encoded 3)]
            [button (if wheel?
-                       (if (zero? button-code) 'wheel-up 'wheel-down)
+                       (case button-code
+                         [(0) 'wheel-up] [(1) 'wheel-down]
+                         [(2) 'wheel-left] [else 'wheel-right])
                        (case button-code
                          [(0) 'left] [(1) 'middle] [(2) 'right]
                          [else 'none]))]
-           [type (cond
-                   [wheel? 'scroll]
+           [phase (cond
+                   [wheel? 'wheel]
                    [(char=? final #\m) 'release]
                    [motion? 'move]
                    [else 'press])])
       (make-pointer-event
-        row column button (sgr-mouse-modifiers encoded) type)))
+        row column button (sgr-mouse-modifiers encoded)
+        (if (memq phase '(press release)) 1 0)
+        phase))))
 
   (define (parse-csi bytes start end)
     (guard (condition [else (unknown-event)])
