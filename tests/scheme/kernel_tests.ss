@@ -2566,6 +2566,7 @@
          (string-append
            "/tmp/soda-vfs-kernel-" (number->string (get-process-id)))]
        [path (vfs-path-join directory "content.bin")]
+       [destination (vfs-path-join directory "destination.bin")]
        [lock (vfs-path-join directory "content.bin.soda-lock")]
        [token (string->utf8 "soda-lock-token")])
   (dynamic-wind
@@ -2592,9 +2593,33 @@
                      (eq? (vfs-stat-kind stat) 'file)
                      (= (vfs-stat-size stat) 4)
                      (vfs-stat-same-version? stat (vfs-stat-path path)))
-          (error 'kernel-tests "synchronous VFS metadata differs" entries stat))))
+          (error 'kernel-tests "synchronous VFS metadata differs" entries stat)))
+      (let ([selected (vfs-stat-path path #f)])
+        (vfs-write-file destination (string->utf8 "occupied"))
+        (guard (condition [else #t])
+          (vfs-rename-path-if-matches! path destination selected)
+          (error 'kernel-tests "conditional rename replaced a destination"))
+        (unless (and (vfs-file-exists? path)
+                     (bytevector=? (vfs-read-file destination)
+                                   (string->utf8 "occupied")))
+          (error 'kernel-tests "failed conditional rename did not restore source"))
+        (delete-file destination)
+        (vfs-rename-path-if-matches! path destination selected)
+        (unless (and (not (vfs-file-exists? path))
+                     (vfs-file-exists? destination))
+          (error 'kernel-tests "conditional rename did not commit"))
+        (let ([stale (vfs-stat-path destination #f)])
+          (delete-file destination)
+          (vfs-write-file destination (string->utf8 "replacement"))
+          (guard (condition [else #t])
+            (vfs-delete-path-if-matches! destination stale)
+            (error 'kernel-tests "conditional delete removed a replacement"))
+          (unless (bytevector=? (vfs-read-file destination)
+                                (string->utf8 "replacement"))
+            (error 'kernel-tests "conditional delete failed to restore replacement")))))
     (lambda ()
       (when (file-exists? path) (delete-file path))
+      (when (file-exists? destination) (delete-file destination))
       (when (file-exists? lock) (delete-file lock))
       (delete-directory directory #t))))
 

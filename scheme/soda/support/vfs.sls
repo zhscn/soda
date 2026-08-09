@@ -12,6 +12,8 @@
           vfs-create-directory!
           vfs-rename-path!
           vfs-delete-path!
+          vfs-rename-path-if-matches!
+          vfs-delete-path-if-matches!
           vfs-list-directory
           vfs-path-separator?
           vfs-directory-path
@@ -26,15 +28,21 @@
           vfs-stat-size
           vfs-stat-mtime-seconds
           vfs-stat-mtime-nanoseconds
+          vfs-stat-ctime-seconds
+          vfs-stat-ctime-nanoseconds
+          vfs-stat-device
+          vfs-stat-inode
           vfs-stat-same-version?
           vfs-stat-path)
   (import (rnrs)
+          (soda ffi runtime)
           (only (chezscheme)
                 current-directory
                 delete-directory
                 directory-list
                 directory-separator
                 file-directory?
+                file-change-time
                 file-length
                 file-modification-time
                 file-regular?
@@ -57,7 +65,8 @@
     (fields name kind))
 
   (define-record-type vfs-stat
-    (fields kind size mtime-seconds mtime-nanoseconds))
+    (fields kind size mtime-seconds mtime-nanoseconds
+            ctime-seconds ctime-nanoseconds device inode))
 
   (define (require-path who path)
     (unless (and (string? path) (positive? (string-length path)))
@@ -100,16 +109,13 @@
          (create! resolved)
          resolved)]))
 
-  ;; Browser mutations use no-overwrite rename and non-recursive deletion.
-  ;; A non-empty directory therefore remains intact and reports the host
-  ;; filesystem condition to the command runtime.
+  ;; Browser mutations use an atomic no-overwrite primitive.  Conditional
+  ;; mutations first move the selected name to a private name in the same
+  ;; directory, validate that object, and either commit or restore it.
   (define (vfs-rename-path! source destination)
     (require-path 'vfs-rename-path! source)
     (require-path 'vfs-rename-path! destination)
-    (when (vfs-path-present? destination)
-      (assertion-violation 'vfs-rename-path!
-                           "destination already exists" destination))
-    (rename-file source destination)
+    (runtime-rename-noreplace! source destination)
     destination)
 
   (define (vfs-delete-path! path)
@@ -120,6 +126,66 @@
       [else
        (assertion-violation 'vfs-delete-path!
                             "path does not name a removable resource" path)])
+    #t)
+
+  (define mutation-serial 0)
+
+  (define (next-mutation-path path)
+    (set! mutation-serial (+ mutation-serial 1))
+    (string-append path ".soda-mutation-"
+                   (number->string (get-process-id)) "-"
+                   (number->string mutation-serial)))
+
+  (define (claim-mutation-path! path)
+    (let loop ()
+      (let ([temporary (next-mutation-path path)])
+        (if (vfs-path-present? temporary)
+            (loop)
+            (begin
+              (runtime-rename-noreplace! path temporary)
+              temporary)))))
+
+  (define (restore-mutation-path! temporary path)
+    (guard (condition
+            [else
+             (assertion-violation
+               'vfs-conditional-mutation
+               "selected resource was preserved at a quarantine path"
+               path temporary condition)])
+      (runtime-rename-noreplace! temporary path)))
+
+  (define (with-matching-path who path expected commit!)
+    (require-path who path)
+    (unless (vfs-stat? expected)
+      (assertion-violation who "expected a VFS version" expected))
+    (let ([temporary (claim-mutation-path! path)] [committed? #f])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (unless (vfs-stat-same-resource? expected (vfs-stat-path temporary #f))
+            (restore-mutation-path! temporary path)
+            (set! committed? #t)
+            (assertion-violation who
+                                 "selected resource changed before mutation"
+                                 path))
+          (commit! temporary)
+          (set! committed? #t))
+        (lambda ()
+          (unless committed?
+            (restore-mutation-path! temporary path))))))
+
+  (define (vfs-rename-path-if-matches! source destination expected)
+    (require-path 'vfs-rename-path-if-matches! destination)
+    (with-matching-path
+      'vfs-rename-path-if-matches! source expected
+      (lambda (temporary)
+        (runtime-rename-noreplace! temporary destination)))
+    destination)
+
+  (define (vfs-delete-path-if-matches! path expected)
+    (with-matching-path
+      'vfs-delete-path-if-matches! path expected
+      (lambda (temporary) (vfs-delete-path! temporary)))
     #t)
 
   (define atomic-write-serial 0)
@@ -382,6 +448,8 @@
        (require-path 'vfs-stat-path path)
        (let* ([kind (vfs-path-kind path follow?)]
               [modified (file-modification-time path follow?)]
+              [changed (file-change-time path follow?)]
+              [identity (runtime-path-identity path follow?)]
               [size
                 (if (eq? kind 'file)
                     (call-with-port
@@ -390,7 +458,17 @@
                       file-length)
                     0)])
          (make-vfs-stat
-           kind size (time-second modified) (time-nanosecond modified)))]))
+           kind size (time-second modified) (time-nanosecond modified)
+           (time-second changed) (time-nanosecond changed)
+           (car identity) (cdr identity)))]))
+
+  (define (vfs-stat-same-resource? left right)
+    (and (eq? (vfs-stat-kind left) (vfs-stat-kind right))
+         (= (vfs-stat-size left) (vfs-stat-size right))
+         (= (vfs-stat-mtime-seconds left) (vfs-stat-mtime-seconds right))
+         (= (vfs-stat-mtime-nanoseconds left) (vfs-stat-mtime-nanoseconds right))
+         (= (vfs-stat-device left) (vfs-stat-device right))
+         (= (vfs-stat-inode left) (vfs-stat-inode right))))
 
   (define (vfs-stat-same-version? left right)
     (unless (and (vfs-stat? left) (vfs-stat? right))
@@ -405,4 +483,10 @@
       (= (vfs-stat-mtime-seconds left)
          (vfs-stat-mtime-seconds right))
       (= (vfs-stat-mtime-nanoseconds left)
-         (vfs-stat-mtime-nanoseconds right)))))
+         (vfs-stat-mtime-nanoseconds right))
+      (= (vfs-stat-ctime-seconds left)
+         (vfs-stat-ctime-seconds right))
+      (= (vfs-stat-ctime-nanoseconds left)
+         (vfs-stat-ctime-nanoseconds right))
+      (= (vfs-stat-device left) (vfs-stat-device right))
+      (= (vfs-stat-inode left) (vfs-stat-inode right)))))

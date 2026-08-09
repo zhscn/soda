@@ -16,6 +16,8 @@
           runtime-cancel!
           runtime-status-name
           runtime-status-message
+          runtime-rename-noreplace!
+          runtime-path-identity
           make-terminal
           terminal?
           terminal-close!
@@ -45,7 +47,7 @@
     (foreign-procedure __atomic "soda_runtime_abi_version" () unsigned-32))
 
   (define abi-version-checked
-    (unless (= (%abi-version) 11)
+    (unless (= (%abi-version) 12)
       (error 'soda-runtime "unsupported native runtime ABI version")))
 
   (define %runtime-create
@@ -112,6 +114,14 @@
     (foreign-procedure __atomic "soda_runtime_status_name" (int) string))
   (define %status-message
     (foreign-procedure __atomic "soda_runtime_status_message" (int) string))
+  (define %rename-noreplace
+    (foreign-procedure __atomic "soda_runtime_rename_noreplace"
+                       (string string)
+                       int))
+  (define %path-device
+    (foreign-procedure __atomic "soda_runtime_path_device" (string int) unsigned-64))
+  (define %path-inode
+    (foreign-procedure __atomic "soda_runtime_path_inode" (string int) unsigned-64))
   (define %last-error
     (foreign-procedure __atomic "soda_runtime_last_error" (void*) string))
   (define %terminal-create
@@ -157,6 +167,33 @@
   (define process-stdout #x1)
   (define process-stderr #x2)
   (define process-terminal #x4)
+
+  (define (runtime-rename-noreplace! source destination)
+    (unless (and (string? source) (positive? (string-length source))
+                 (string? destination) (positive? (string-length destination)))
+      (assertion-violation 'runtime-rename-noreplace!
+                           "expected non-empty source and destination paths"
+                           source destination))
+    (let ([status (%rename-noreplace source destination)])
+      (unless (zero? status)
+        (error 'runtime-rename-noreplace!
+               (string-append (runtime-status-name status) ": "
+                              (runtime-status-message status))))
+      destination))
+
+  (define (runtime-path-identity path follow-links?)
+    (unless (and (string? path) (positive? (string-length path))
+                 (boolean? follow-links?))
+      (assertion-violation 'runtime-path-identity
+                           "expected a non-empty path and follow-links flag"
+                           path follow-links?))
+    (let* ([follow (if follow-links? 1 0)]
+           [device (%path-device path follow)]
+           [inode (%path-inode path follow)]
+           [failure (- (expt 2 64) 1)])
+      (when (or (= device failure) (= inode failure))
+        (error 'runtime-path-identity "unable to identify filesystem path" path))
+      (cons device inode)))
 
   (define (require-runtime who value)
     (unless (runtime? value)

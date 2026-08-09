@@ -16,6 +16,14 @@
 #include <utility>
 #include <vector>
 
+#if defined(__linux__)
+#include <cerrno>
+#include <fcntl.h>
+#include <sys/syscall.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
+
 struct soda_runtime {
     soda::runtime::Runtime runtime;
     std::optional<soda::runtime::Event> current_event;
@@ -281,6 +289,49 @@ const char* soda_runtime_status_name(int status) {
 
 const char* soda_runtime_status_message(int status) {
     return uv_strerror(status);
+}
+
+int soda_runtime_rename_noreplace(const char* source, const char* destination) {
+    if (source == nullptr || destination == nullptr) {
+        return UV_EINVAL;
+    }
+#if defined(__linux__) && defined(SYS_renameat2)
+    if (::syscall(SYS_renameat2, AT_FDCWD, source, AT_FDCWD, destination,
+                  static_cast<unsigned int>(RENAME_NOREPLACE)) == 0) {
+        return 0;
+    }
+    return -errno;
+#else
+    return UV_ENOTSUP;
+#endif
+}
+
+uint64_t soda_runtime_path_device(const char* path, int follow_links) {
+#if defined(__linux__)
+    struct stat value {};
+    if (path == nullptr || (follow_links ? ::stat(path, &value) : ::lstat(path, &value)) != 0) {
+        return UINT64_MAX;
+    }
+    return static_cast<uint64_t>(value.st_dev);
+#else
+    (void)path;
+    (void)follow_links;
+    return UINT64_MAX;
+#endif
+}
+
+uint64_t soda_runtime_path_inode(const char* path, int follow_links) {
+#if defined(__linux__)
+    struct stat value {};
+    if (path == nullptr || (follow_links ? ::stat(path, &value) : ::lstat(path, &value)) != 0) {
+        return UINT64_MAX;
+    }
+    return static_cast<uint64_t>(value.st_ino);
+#else
+    (void)path;
+    (void)follow_links;
+    return UINT64_MAX;
+#endif
 }
 
 const char* soda_runtime_last_error(soda_runtime* runtime) {

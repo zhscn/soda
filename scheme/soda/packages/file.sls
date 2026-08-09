@@ -12,6 +12,8 @@
           file-service-handle-state-event!
           file-service-add-state-listener!
           file-service-register-mode!
+          file-service-rename-resource!
+          file-service-delete-resource!
           file-conflict?
           file-conflict-buffer-id
           file-conflict-resource
@@ -466,6 +468,83 @@
       (if binding
           (file-binding-format binding)
           (if (null? default) #f (car default)))))
+
+  (define (file-service-binding-at-path service path)
+    (let-values ([(ids bindings)
+                  (hashtable-entries (file-service-resources service))])
+      (let loop ([index 0])
+        (if (= index (vector-length ids))
+            (values #f #f)
+            (let ([binding (vector-ref bindings index)])
+              (if (string=? path
+                            (resource-locator (file-binding-resource binding)))
+                  (values (vector-ref ids index) binding)
+                  (loop (+ index 1))))))))
+
+  ;; Directory packages delegate file mutations here so Buffer identity,
+  ;; locks, watches, and resource keys change as one host-owned operation.
+  (define (file-service-rename-resource! service source destination expected)
+    (unless (file-service? service)
+      (assertion-violation 'file-service-rename-resource!
+                           "expected a FileService" service))
+    (let ([target (canonical-file-resource destination)])
+      (let-values ([(buffer-id binding)
+                    (file-service-binding-at-path service source)])
+        (if (not binding)
+            (vfs-rename-path-if-matches! source destination expected)
+            (let* ([host (file-service-host service)]
+                   [buffer (package-host-buffer-ref host buffer-id #f)]
+                   [existing
+                    (package-host-find-buffer-key
+                      host (file-buffer-key target) #f)])
+              (unless buffer
+                (assertion-violation 'file-service-rename-resource!
+                                     "visited file Buffer is no longer live" source))
+              (when (and existing (not (= (buffer-id existing) buffer-id)))
+                (assertion-violation 'file-service-rename-resource!
+                                     "destination is already visited" destination))
+              (let ([new-lock (acquire-file-lock target)]
+                    [renamed? #f]
+                    [committed? #f])
+                (unless new-lock
+                  (assertion-violation 'file-service-rename-resource!
+                                       "destination is locked" destination))
+                (dynamic-wind
+                  (lambda () #f)
+                  (lambda ()
+                    (vfs-rename-path-if-matches! source destination expected)
+                    (set! renamed? #t)
+                    (package-host-rebind-buffer-key!
+                      host (file-buffer-key target) buffer)
+                    (set-resource!
+                      service buffer-id target (vfs-stat-path destination)
+                      new-lock (file-binding-format binding) #t)
+                    (release-file-lock! (file-binding-lock binding))
+                    (clear-conflict! service buffer-id)
+                    (set! committed? #t)
+                    destination)
+                  (lambda ()
+                    (unless committed?
+                      (when renamed? (vfs-rename-path! destination source))
+                      (release-file-lock! new-lock))))))))))
+
+  (define (file-service-delete-resource! service path expected)
+    (unless (file-service? service)
+      (assertion-violation 'file-service-delete-resource!
+                           "expected a FileService" service))
+    (let-values ([(buffer-id binding)
+                  (file-service-binding-at-path service path)])
+      (vfs-delete-path-if-matches! path expected)
+      (when binding
+        (release-file-lock! (file-binding-lock binding))
+        (set-resource!
+          service buffer-id (file-binding-resource binding) #f #f
+          (file-binding-format binding) #t)
+        (hashtable-set!
+          (file-service-conflicts service) buffer-id
+          (%make-file-conflict
+            buffer-id (file-binding-resource binding) #f 'deleted 'pending)))
+      #t))
 
   (define (file-service-conflict service buffer-id . default)
     (unless (and (file-service? service) (buffer-id? buffer-id))

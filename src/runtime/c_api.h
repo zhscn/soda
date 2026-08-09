@@ -29,7 +29,7 @@ typedef struct soda_terminal soda_terminal;
 #define SODA_EVENT_PROCESS_OUTPUT 4U
 #define SODA_EVENT_PROCESS_EXIT 5U
 
-#define SODA_RUNTIME_ABI_VERSION 11U
+#define SODA_RUNTIME_ABI_VERSION 12U
 
 #define SODA_FD_READABLE (1U << 0U)
 #define SODA_FD_WRITABLE (1U << 1U)
@@ -97,6 +97,12 @@ SODA_RUNTIME_API size_t soda_runtime_copy_event_data(soda_runtime* runtime, uint
 // status. The returned strings have static lifetime.
 SODA_RUNTIME_API const char* soda_runtime_status_name(int status);
 SODA_RUNTIME_API const char* soda_runtime_status_message(int status);
+
+// Atomically moves source to destination only when destination does not exist.
+// Returns zero on success or a negative platform error status.
+SODA_RUNTIME_API int soda_runtime_rename_noreplace(const char* source, const char* destination);
+SODA_RUNTIME_API uint64_t soda_runtime_path_device(const char* path, int follow_links);
+SODA_RUNTIME_API uint64_t soda_runtime_path_inode(const char* path, int follow_links);
 
 // The returned message is owned by the runtime and remains valid until the
 // next C API operation on that runtime.

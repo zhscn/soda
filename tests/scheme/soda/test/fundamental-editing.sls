@@ -290,6 +290,11 @@
             (command-runtime-start! runtime 'directory.browse
                                     (application-command-context application) (list root))
             (vfs-write-file new-note (string->utf8 "new"))
+            (command-runtime-start! runtime 'file.visit
+                                    (application-command-context application)
+                                    (list new-note))
+            (command-runtime-start! runtime 'directory.browse
+                                    (application-command-context application) (list root))
             (command-runtime-start! runtime 'directory.refresh
                                     (application-command-context application))
             (let* ([refreshed-active
@@ -309,6 +314,17 @@
               (unless (and (vfs-directory-exists? created)
                            (vfs-file-exists? renamed-note)
                            (not (vfs-file-exists? new-note))
+                           (let ([visited
+                                  (buffer-service-find-key
+                                    (host-state-buffers state)
+                                    (make-buffer-key 'file renamed-note) #f)])
+                             (and visited
+                                  (string=?
+                                    (resource-locator
+                                      (file-service-resource
+                                        (soda-application-files application)
+                                        (buffer-id visited)))
+                                    renamed-note)))
                            (string-contains? (buffer-string refreshed-buffer)
                                              "renamed.txt"))
                 (error 'fundamental-editing-tests
@@ -338,13 +354,26 @@
                 (unless (interaction-service-current interaction)
                   (error 'fundamental-editing-tests
                          "directory deletion did not request confirmation"))
+                ;; The confirmation retains the selected filesystem identity.
+                ;; Replacing that name must not delete the replacement.
+                (delete-file renamed-note)
+                (vfs-write-file renamed-note (string->utf8 "replacement"))
                 (interaction-service-submit! interaction "yes")
                 (host-state-run! state))
+              (unless (and (vfs-file-exists? renamed-note)
+                           (bytevector=? (vfs-read-file renamed-note)
+                                         (string->utf8 "replacement")))
+                (error 'fundamental-editing-tests
+                       "stale directory deletion removed a replacement"))
+              (command-runtime-start!
+                runtime 'directory.delete
+                (application-command-context application)
+                (list renamed-note #t))
               (unless (and (not (vfs-file-exists? renamed-note))
                            (not (string-contains? (buffer-string refreshed-buffer)
                                                   "renamed.txt")))
                 (error 'fundamental-editing-tests
-                       "confirmed directory deletion was not published")))))
+                       "fresh directory deletion was not published")))))
         (lambda ()
           (soda-application-close! application)
           (guard (condition [else #f]) (delete-file renamed-note))

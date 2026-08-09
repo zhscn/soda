@@ -36,7 +36,8 @@
     (fields host owner files actions keymap result-keymap authority mode directories))
 
   (define-record-type directory-state
-    (fields path (mutable generation directory-state-generation directory-state-generation-set!)))
+    (fields (mutable path directory-state-path directory-state-path-set!)
+            (mutable generation directory-state-generation directory-state-generation-set!)))
 
   (define-record-type directory-entry
     (fields path kind label))
@@ -49,6 +50,16 @@
 
   (define-record-type directory-mutation-request
     (fields kind context path destination))
+
+  (define-record-type directory-target
+    (fields path version))
+
+  (define (capture-directory-target who value)
+    (cond
+      [(directory-target? value) value]
+      [(and (string? value) (positive? (string-length value)))
+       (make-directory-target value (vfs-stat-path value #f))]
+      [else (assertion-violation who "expected a directory entry path" value)]))
 
   (define (control-stroke character)
     (make-key-stroke 'character (char->integer character) 4))
@@ -213,7 +224,9 @@
             (make-interactive-ready '())
             (let ([entry (selected-entry context)])
               (if entry
-                  (make-interactive-ready (list (directory-entry-path entry)))
+                  (let ([path (directory-entry-path entry)])
+                    (make-interactive-ready
+                      (list (make-directory-target path (vfs-stat-path path #f)))))
                   (assertion-violation operation
                                        "point does not identify a mutable directory entry")))))))
 
@@ -222,11 +235,11 @@
       'directory-rename-destination
       (lambda (context arguments)
         (let ([source (and (pair? arguments) (car arguments))])
-          (unless (string? source)
+          (unless (directory-target? source)
             (assertion-violation 'directory.rename "missing source path"))
           (make-interactive-suspend
             (make-interaction-request
-              'file-name "Rename to: " source #f 'free
+              'file-name "Rename to: " (directory-target-path source) #f 'free
               (lambda (value ignored)
                 (and (string? value) (positive? (string-length value)))))
             (lambda (value) (make-interactive-ready (list value))))))))
@@ -238,12 +251,13 @@
     (make-interactive-reader
       'directory-delete-confirmation
       (lambda (context arguments)
-        (let ([path (and (pair? arguments) (car arguments))])
-          (unless (string? path)
+        (let ([target (and (pair? arguments) (car arguments))])
+          (unless (directory-target? target)
             (assertion-violation 'directory.delete "missing target path"))
           (make-interactive-suspend
             (make-interaction-request
-              'confirmation (string-append "Delete " path "? (yes/no) ")
+              'confirmation
+              (string-append "Delete " (directory-target-path target) "? (yes/no) ")
               #f #f 'free
               (lambda (value ignored)
                 (and (string? value)
@@ -254,12 +268,59 @@
 
   (define (mutate-directory! service request)
     (let ([kind (directory-mutation-request-kind request)]
-          [path (directory-mutation-request-path request)]
+          [target (directory-mutation-request-path request)]
           [destination (directory-mutation-request-destination request)])
       (case kind
-        [(create) (vfs-create-directory! path #f)]
-        [(rename) (vfs-rename-path! path destination)]
-        [(delete) (vfs-delete-path! path)]
+        [(create) (vfs-create-directory! target #f)]
+        [(rename)
+         (file-service-rename-resource!
+           (directory-service-files service)
+           (directory-target-path target) destination
+           (directory-target-version target))
+         (let* ([source-prefix
+                 (vfs-directory-path (directory-target-path target))]
+                [destination-prefix (vfs-directory-path destination)])
+           (let-values ([(ids states)
+                         (hashtable-entries
+                           (directory-service-directories service))])
+             (do ([index 0 (+ index 1)])
+                 ((= index (vector-length ids)))
+               (let* ([state (vector-ref states index)]
+                      [path (directory-state-path state)])
+                 (when (and (>= (string-length path)
+                                (string-length source-prefix))
+                            (string=? source-prefix
+                                      (substring path 0
+                                                 (string-length source-prefix))))
+                   (let* ([next
+                           (string-append
+                             destination-prefix
+                             (substring path (string-length source-prefix)
+                                        (string-length path)))]
+                          [buffer
+                           (package-host-buffer-ref
+                             (directory-service-host service)
+                             (vector-ref ids index) #f)])
+                     (when buffer
+                       (package-host-rebind-buffer-key!
+                         (directory-service-host service)
+                         (directory-buffer-key next) buffer)
+                       (directory-state-path-set! state next)
+                       (publish-directory! service buffer))))))))]
+        [(delete)
+         (let ([selected (vfs-directory-path (directory-target-path target))])
+           (let-values ([(ids states)
+                         (hashtable-entries
+                           (directory-service-directories service))])
+             (do ([index 0 (+ index 1)])
+                 ((= index (vector-length ids)))
+               (when (string=? selected
+                               (directory-state-path (vector-ref states index)))
+                 (assertion-violation
+                   'directory.delete "cannot delete an open directory" selected)))))
+         (file-service-delete-resource!
+           (directory-service-files service)
+           (directory-target-path target) (directory-target-version target))]
         [else (assertion-violation 'directory.mutate "unknown mutation" kind)])
       (refresh-directory!
         service
@@ -392,7 +453,7 @@
               (make-command-effect
                 'directory.mutate
                 (make-directory-mutation-request
-                  'rename context source
+                  'rename context (capture-directory-target 'directory.rename source)
                   (vfs-resolve-path base destination)))))
           owner "Rename the entry at point without replacing an existing path."
           'directory
@@ -407,7 +468,8 @@
             (if confirmed?
                 (make-command-effect
                   'directory.mutate
-                  (make-directory-mutation-request 'delete context path #f))
+                  (make-directory-mutation-request
+                    'delete context (capture-directory-target 'directory.delete path) #f))
                 (command-handled)))
           owner "Delete the entry at point after confirmation."
           'directory

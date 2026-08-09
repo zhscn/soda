@@ -34,6 +34,32 @@ static_assert(static_cast<std::uint8_t>(EventKind::PathChange) == SODA_EVENT_PAT
 static_assert(static_cast<std::uint8_t>(EventKind::ProcessOutput) == SODA_EVENT_PROCESS_OUTPUT);
 static_assert(static_cast<std::uint8_t>(EventKind::ProcessExit) == SODA_EVENT_PROCESS_EXIT);
 
+#if defined(__linux__)
+TEST_CASE("atomic no-replace rename preserves an existing destination") {
+    const auto root = std::filesystem::temp_directory_path() /
+                      ("soda-rename-" + std::to_string(::getpid()));
+    std::filesystem::remove_all(root);
+    std::filesystem::create_directory(root);
+    const auto source = root / "source";
+    const auto destination = root / "destination";
+    { std::ofstream(source) << "source"; }
+    { std::ofstream(destination) << "destination"; }
+
+    CHECK(soda_runtime_rename_noreplace(source.c_str(), destination.c_str()) < 0);
+    CHECK(std::filesystem::exists(source));
+    std::ifstream input(destination);
+    std::string contents;
+    input >> contents;
+    CHECK(contents == "destination");
+
+    std::filesystem::remove(destination);
+    CHECK(soda_runtime_rename_noreplace(source.c_str(), destination.c_str()) == 0);
+    CHECK_FALSE(std::filesystem::exists(source));
+    CHECK(std::filesystem::exists(destination));
+    std::filesystem::remove_all(root);
+}
+#endif
+
 TEST_CASE("one-shot timer is delivered as a pulled event") {
     Runtime runtime;
     const SourceId timer = runtime.start_timer(1);
