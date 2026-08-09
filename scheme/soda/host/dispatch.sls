@@ -24,7 +24,8 @@
           dispatcher-set-listener!
           dispatcher-set-host-listener!
           dispatcher-add-listener!
-          dispatcher-add-host-listener!)
+          dispatcher-add-host-listener!
+          dispatcher-register-global-operation-handler!)
   (import (rnrs)
           (soda kernel change)
           (soda kernel document)
@@ -77,6 +78,7 @@
       (mutable host-listener dispatcher-host-listener dispatcher-host-listener-set!)
       (mutable listeners dispatcher-listeners dispatcher-listeners-set!)
       (mutable host-listeners dispatcher-host-listeners dispatcher-host-listeners-set!)
+      (immutable global-handlers dispatcher-global-handlers)
       (mutable phase dispatcher-phase dispatcher-phase-set!)
       (mutable deferred dispatcher-deferred dispatcher-deferred-set!)
       (mutable draining? dispatcher-draining? dispatcher-draining?-set!)))
@@ -84,6 +86,10 @@
   (define-record-type
     (dispatcher-observer %make-dispatcher-observer dispatcher-observer?)
     (fields (immutable procedure dispatcher-observer-procedure)))
+
+  (define-record-type
+    (global-operation-handler %make-global-operation-handler global-operation-handler?)
+    (fields owner damage procedure))
 
   (define make-dispatcher
     (case-lambda
@@ -101,7 +107,8 @@
     (unless (or (not listener) (procedure? listener))
       (assertion-violation 'make-dispatcher "expected a listener or #f" listener))
     (%make-dispatcher
-      buffers views surfaces (lambda (source condition) #f) listener #f '() '() 'idle '() #f)]))
+      buffers views surfaces (lambda (source condition) #f) listener #f '() '()
+      (make-eq-hashtable) 'idle '() #f)]))
 
   (define (dispatcher-drain-deferred! dispatcher)
     (when (and (eq? (dispatcher-phase dispatcher) 'idle)
@@ -200,12 +207,72 @@
     (add-observer! 'dispatcher-add-host-listener! dispatcher owner listener
                    dispatcher-host-listeners dispatcher-host-listeners-set!))
 
+  (define (dispatcher-register-global-operation-handler!
+           dispatcher owner kind damage procedure)
+    (unless (and (dispatcher? dispatcher) (owner? owner)
+                 (symbol? kind) (list? damage)
+                 (for-all symbol? damage) (procedure? procedure))
+      (assertion-violation
+        'dispatcher-register-global-operation-handler!
+        "invalid global HostOperation handler"
+        dispatcher owner kind damage procedure))
+    (owner-assert-active 'dispatcher-register-global-operation-handler! owner)
+    (let ([table (dispatcher-global-handlers dispatcher)])
+      (when (hashtable-ref table kind #f)
+        (assertion-violation
+          'dispatcher-register-global-operation-handler!
+          "global HostOperation handler is already registered" kind))
+      (let ([entry
+             (%make-global-operation-handler owner (list-copy damage) procedure)])
+        (hashtable-set! table kind entry)
+        (make-registration
+          owner
+          (lambda ()
+            (when (eq? (hashtable-ref table kind #f) entry)
+              (hashtable-delete! table kind)))))))
+
+  (define (notify-host-update! dispatcher update)
+    (dispatcher-notify!
+      dispatcher
+      (lambda ()
+        (let ([listener (dispatcher-host-listener dispatcher)])
+          (when listener
+            (dispatcher-notify-one!
+              dispatcher '(host listener) listener update)))
+        (for-each
+          (lambda (entry)
+            (dispatcher-notify-one!
+              dispatcher '(host observer)
+              (dispatcher-observer-procedure entry) update))
+          (dispatcher-host-listeners dispatcher))))
+    update)
+
+  (define (dispatch-global-operation! dispatcher operation)
+    (let ([entry
+           (hashtable-ref
+             (dispatcher-global-handlers dispatcher)
+             (host-operation-kind operation) #f)])
+      (unless entry
+        (assertion-violation
+          'dispatcher-dispatch-host! "unsupported global HostOperation" operation))
+      (let ([resolution
+             ((global-operation-handler-procedure entry)
+              (host-operation-value operation))])
+        (and resolution
+             (notify-host-update!
+               dispatcher
+               (make-host-update
+                 operation #f #f #f resolution
+                 (global-operation-handler-damage entry)))))))
+
   (define (dispatcher-dispatch-host-now! dispatcher operation)
     (unless (and (dispatcher? dispatcher) (host-operation? operation))
       (assertion-violation 'dispatcher-dispatch-host!
                            "expected a Dispatcher and HostOperation"
                            dispatcher operation))
-    (let ([surfaces (dispatcher-surfaces dispatcher)])
+    (if (not (host-operation-surface-id operation))
+        (dispatch-global-operation! dispatcher operation)
+        (let ([surfaces (dispatcher-surfaces dispatcher)])
       (unless surfaces
         (assertion-violation 'dispatcher-dispatch-host!
                              "Dispatcher has no SurfaceService" dispatcher))
@@ -272,20 +339,7 @@
                                    [(resize-surface) '(resize layout)]
                                    [(invalidate-surface) '(redraw)]
                                    [else '(chrome)])))])
-                      (dispatcher-notify!
-                        dispatcher
-                        (lambda ()
-                          (let ([listener (dispatcher-host-listener dispatcher)])
-                            (when listener
-                              (dispatcher-notify-one!
-                                dispatcher '(host listener) listener update)))
-                          (for-each
-                            (lambda (entry)
-                              (dispatcher-notify-one!
-                                dispatcher '(host observer)
-                                (dispatcher-observer-procedure entry) update))
-                            (dispatcher-host-listeners dispatcher))))
-                      update)))))))
+                      (notify-host-update! dispatcher update)))))))))
 
   (define (dispatcher-dispatch-host! dispatcher operation)
     (unless (and (dispatcher? dispatcher) (host-operation? operation))

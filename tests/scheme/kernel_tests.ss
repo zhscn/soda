@@ -1376,6 +1376,95 @@
                    package-host 'test.width "20" 'workspace source)
                  #f))
     (error 'kernel-tests "SettingSchema parsing or source diagnostics differ"))
+  (let* ([file-resource (make-resource 'file "/tmp/project/main.scm")]
+         [other-resource (make-resource 'file "/tmp/project/other.scm")]
+         [context (make-configuration-context 'project-a file-resource)]
+         [other-context (make-configuration-context 'project-b other-resource)]
+         [declaration
+          (lambda (input)
+            (make-setting-declaration 'test.width input 'buffer source))]
+         [application-source
+          (make-configuration-source
+            'test.application 'application #f (list (declaration "2")) 0)]
+         [user-source
+          (make-configuration-source
+            'test.user 'user #f (list (declaration "4")) 0)]
+         [workspace-source
+          (make-configuration-source
+            'test.workspace 'workspace 'project-a
+            (list (declaration "8")) 0)]
+         [file-source
+          (make-configuration-source
+            'test.file 'file-local file-resource
+            (list (declaration "12")) 0)]
+         [later-user-source
+          (make-configuration-source
+            'test.later-user 'user #f (list (declaration "6")) 0)]
+         [updates '()]
+         [observer
+          (dispatcher-add-host-listener!
+            (host-state-dispatch host) schema-owner
+            (lambda (update) (set! updates (cons update updates))))])
+    (for-each
+      (lambda (configuration-source)
+        (package-host-reload-configuration-source!
+          package-host schema-owner configuration-source))
+      (list application-source user-source workspace-source
+            file-source later-user-source))
+    (let* ([resolved
+            (package-host-resolve-setting
+              package-host 'test.width 'buffer context)]
+           [other
+            (package-host-resolve-setting
+              package-host 'test.width 'buffer other-context)]
+           [materialized
+            (make-configuration
+              (package-host-configuration-extensions
+                package-host 'buffer context))]
+           [update (car updates)])
+      (unless (and (= (setting-value-value
+                        (resolved-setting-value resolved)) 12)
+                   (eq? (resolved-setting-source-id resolved) 'test.file)
+                   (eq? (resolved-setting-layer resolved) 'file-local)
+                   (= (setting-value-value
+                        (resolved-setting-value other)) 6)
+                   (= (configuration-facet materialized facet 'buffer) 12)
+                   (not (host-update-surface-id update))
+                   (memq 'configuration (host-update-damage update))
+                   (eq? (host-update-resolution update) later-user-source))
+        (error 'kernel-tests
+               "ConfigurationSource precedence or publication differs")))
+    (package-host-reload-configuration-source!
+      package-host schema-owner
+      (make-configuration-source
+        'test.user 'user #f (list (declaration "5")) 1))
+    (unless (= (setting-value-value
+                 (resolved-setting-value
+                   (package-host-resolve-setting
+                     package-host 'test.width 'buffer other-context)))
+               6)
+      (error 'kernel-tests
+             "ConfigurationSource reload changed stable source ordering"))
+    (unless
+      (guard
+        (condition
+          [(setting-error? condition)
+           (and (eq? (setting-error-name condition) 'test.width)
+                (eq? (setting-error-source condition) source))]
+          [else #f])
+        (package-host-reload-configuration-source!
+          package-host schema-owner
+          (make-configuration-source
+            'test.user 'user #f (list (declaration "20")) 2))
+        #f)
+      (error 'kernel-tests
+             "ConfigurationSource invalid reload did not report its source"))
+    (unless (= (configuration-source-generation
+                 (package-host-configuration-source package-host 'test.user))
+               1)
+      (error 'kernel-tests
+             "ConfigurationSource invalid reload replaced active generation"))
+    (registration-close! observer))
   (registration-close! registration)
   (unless (not (package-host-setting-schema package-host 'test.width #f))
     (error 'kernel-tests "SettingSchema Owner cleanup differs"))

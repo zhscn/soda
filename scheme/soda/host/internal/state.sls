@@ -95,6 +95,10 @@
             conditions owner (list 'dispatcher source condition)
             (lambda arguments #f)
             '(dismiss))))
+      (dispatcher-register-global-operation-handler!
+        dispatch owner 'configuration-source-reload '(configuration)
+        (lambda (request)
+          (setting-service-apply-reload-request! settings request)))
       (buffer-service-set-create-handler!
         buffers
         (lambda (buffer)

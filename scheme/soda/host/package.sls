@@ -10,6 +10,10 @@
           package-host-setting-schema
           package-host-setting-schemas
           package-host-parse-setting
+          package-host-reload-configuration-source!
+          package-host-configuration-source
+          package-host-resolve-setting
+          package-host-configuration-extensions
           package-host-register-location-provider!
           package-host-resolve-location
           package-host-begin-navigation!
@@ -110,6 +114,25 @@
     (setting-service-parse
       (host-state-settings (package-host-state host))
       name input scope source))
+
+  (define (package-host-reload-configuration-source! host owner source)
+    (let ([state (package-host-state host)])
+      (dispatcher-dispatch-host!
+        (host-state-dispatch state)
+        (setting-service-make-reload-operation
+          (host-state-settings state) owner source))))
+
+  (define (package-host-configuration-source host id . default)
+    (apply setting-service-source
+           (host-state-settings (package-host-state host)) id default))
+
+  (define (package-host-resolve-setting host name scope context)
+    (setting-service-resolve
+      (host-state-settings (package-host-state host)) name scope context))
+
+  (define (package-host-configuration-extensions host scope context)
+    (setting-service-extensions
+      (host-state-settings (package-host-state host)) scope context))
 
   (define (package-host-register-location-provider! host owner provider)
     (location-service-register!

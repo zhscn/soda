@@ -13,6 +13,7 @@
           make-resize-surface-operation
           make-invalidate-surface-operation
           make-set-surface-message-operation
+          make-global-host-operation
           make-host-update
           host-update?
           host-update-operation
@@ -117,6 +118,12 @@
                            surface-id message))
     (%make-host-operation 'set-surface-message surface-id
                           (and message (string-copy message))))
+
+  (define (make-global-host-operation kind value)
+    (unless (symbol? kind)
+      (assertion-violation
+        'make-global-host-operation "operation kind must be a symbol" kind))
+    (%make-host-operation kind #f value))
 
   ;; HostUpdate preserves both the focused context and the resolved placement.
   ;; With preserve focus these can differ: resolution identifies where a
