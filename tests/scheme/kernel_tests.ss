@@ -8,7 +8,9 @@
         (soda kernel change)
         (soda kernel extension)
         (soda kernel option)
+        (soda kernel location)
         (soda kernel range-set)
+        (soda kernel resource)
         (soda kernel selection)
         (soda kernel state)
         (soda kernel syntax-profile)
@@ -1008,6 +1010,35 @@
                (= (text-next-grapheme-offset text 1) 3))
     (error 'kernel-tests "control grapheme boundaries differ"))
   (text-close! text))
+
+(let* ([resource (make-resource 'file "/tmp/location.ss")]
+       [same-resource (make-resource 'file "/tmp/location.ss")]
+       [location
+        (make-location resource
+                       (make-byte-position 2) (make-byte-position 4)
+                       7 'after '((label . "definition")))]
+       [changes
+        (change-set-change-desc
+          (make-change-set 6 (list (make-text-change 1 1 "xx"))))]
+       [mapped (location-map-change-desc location changes 8)])
+  (unless (and (resource=? resource same-resource)
+               (location=? location
+                           (make-location same-resource
+                                          (make-byte-position 2)
+                                          (make-byte-position 4)
+                                          7 'after '()))
+               (= (source-position-first (location-start mapped)) 4)
+               (= (source-position-first (location-end mapped)) 6)
+               (= (location-revision mapped) 8)
+               (equal? (location-metadata mapped)
+                       '((label . "definition")))
+               (guard (condition [else #t])
+                 (make-location resource
+                                (make-utf16-position 0 1)
+                                (make-byte-position 1)
+                                #f 'after '())
+                 #f))
+    (error 'kernel-tests "Location coordinate or revision mapping differs")))
 
 (define document (make-document "hello"))
 (define buffer
