@@ -6,7 +6,8 @@
           history-discard-buffer!)
   (import (rnrs)
           (soda kernel change) (soda kernel document) (soda kernel extension) (soda kernel state)
-          (soda host command) (soda host command-runtime) (soda host dispatch)
+          (soda host command) (soda host command-runtime)
+          (soda host dispatch-core) (soda host dispatch-transaction)
           (soda host value))
   (define-record-type history-entry (fields undo redo))
   (define-record-type history
