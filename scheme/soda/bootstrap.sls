@@ -136,7 +136,7 @@
                 (make-file-service! host owner history)]
                [scheme-mode
                 (make-scheme-mode!
-                  (host-state-command-runtime state) files owner
+                  host files owner
                   (fundamental-mode editing))]
                [processes (make-process-service! host owner)]
                [buffer-item-actions (make-buffer-item-action-service)]

@@ -10,6 +10,7 @@
           (soda host frontend)
           (soda host input)
           (soda host input-event)
+          (soda host analysis)
           (soda host location)
           (soda host package)
           (soda host internal buffer)
@@ -1131,7 +1132,10 @@
            [application (make-soda-application)])
       (dynamic-wind
         (lambda ()
-          (vfs-write-file path (string->utf8 "(define foo-bar? 1)\n")))
+          (vfs-write-file
+            path
+            (string->utf8
+              "(define foo-bar? \"value\")\n(display foo-bar?)\n; note\n42\n")))
         (lambda ()
           (let* ([state (soda-application-state application)]
                  [runtime (host-state-command-runtime state)])
@@ -1171,7 +1175,76 @@
                                 'scheme.comment-lines))
                 (error 'fundamental-editing-tests
                        "Scheme file did not activate its derived mode contracts"))
-              (command-runtime-start! runtime 'scheme.comment-lines context)
+              (host-state-run! state)
+              (let* ([host (make-package-host state)]
+                     [buffer-id (command-context-buffer-id context)]
+                     [initial
+                      (package-host-analysis-result
+                        host buffer-id scheme-highlight-provider-key #f)]
+                     [initial-ranges
+                      (and initial (range-set-ranges
+                                     (analysis-result-ranges initial)))]
+                     [initial-prefix (and (pair? initial-ranges)
+                                          (car initial-ranges))]
+                     [kinds (and initial-ranges (map range-value-value initial-ranges))])
+                (unless (and initial
+                             (for-all (lambda (kind) (memq kind kinds))
+                                      '(comment string number keyword definition symbol)))
+                  (error 'fundamental-editing-tests
+                         "Scheme provider did not classify its core lexical forms"
+                         kinds))
+                (let* ([render
+                        (render-surface
+                          (soda-application-surface application)
+                          (host-state-views state))]
+                       [rendered (car (surface-render-rendered-views render))]
+                       [view
+                        (package-host-view-ref
+                          host (rendered-view-view-id rendered))])
+                  (view-service-publish-occurrences!
+                    (host-state-views state) (view-id view)
+                    (list (rendered-view-occurrence rendered)))
+                  (unless (pair?
+                            (range-set-ranges
+                              (view-projection-decorations
+                                (view-projection view))))
+                    (error 'fundamental-editing-tests
+                           "Scheme analysis did not enter ViewProjection")))
+                (command-runtime-start!
+                  runtime 'fundamental.end-of-buffer
+                  (application-command-context application))
+                (command-runtime-start!
+                  runtime 'fundamental.insert-text
+                  (application-command-context application)
+                  (list (string->utf8 "; tail")))
+                (host-state-run! state)
+                (let* ([updated
+                        (package-host-analysis-result
+                          host buffer-id scheme-highlight-provider-key #f)]
+                       [updated-ranges (analysis-result-ranges updated)]
+                       [replaced-from
+                        (cdr (assq 'replaced-from
+                                   (analysis-result-metadata updated)))])
+                  (unless (and (> replaced-from 0)
+                               (exists (lambda (range) (eq? range initial-prefix))
+                                       (range-set-ranges updated-ranges))
+                               (exists
+                                 (lambda (range)
+                                   (eq? (range-value-value range) 'comment))
+                                 (analysis-result-query
+                                   updated replaced-from
+                                   (snapshot-byte-size
+                                     (buffer-state-document
+                                       (command-context-buffer-state
+                                         (application-command-context application)))))))
+                    (error 'fundamental-editing-tests
+                           "Scheme incremental analysis replaced its stable prefix"))))
+              (command-runtime-start!
+                runtime 'fundamental.beginning-of-buffer
+                (application-command-context application))
+              (command-runtime-start!
+                runtime 'scheme.comment-lines
+                (application-command-context application))
               (unless (string-prefix?
                         "; "
                         (buffer-string
