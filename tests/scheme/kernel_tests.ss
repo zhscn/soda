@@ -2162,6 +2162,23 @@
                (= (length (display-map-document-range map 1 2)) 2))
     (error 'kernel-tests "DisplayMap affinity differs")))
 
+(let* ([map
+         (make-display-map
+           (list (make-display-map-entry 0 1 0 2 'text 'outside)
+                 (make-display-map-entry 1 2 2 4 'text 'left)
+                 (make-display-map-entry 2 3 4 4 'line-break 'break)
+                 (make-display-map-entry 3 4 4 6 'text 'right)
+                 (make-display-map-entry 4 5 6 8 'text 'outside)))]
+       [slice (display-map-cell-slice map 2 6)]
+       [entries (display-map-entries slice)])
+  (unless (and (= (length entries) 3)
+               (= (display-map-entry-cell-from (car entries)) 0)
+               (= (display-map-entry-cell-to (car entries)) 2)
+               (eq? (display-map-cell-boundary-entry slice 2) (cadr entries))
+               (= (display-map-entry-cell-from (caddr entries)) 2)
+               (= (display-map-entry-cell-to (caddr entries)) 4))
+    (error 'kernel-tests "DisplayMap cell slicing differs")))
+
 (let* ([base (make-frame 5 2)]
        [emphasis (make-frame-cell "x" 1 #f 'emphasis 'source)]
        [changed

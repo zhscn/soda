@@ -582,28 +582,8 @@
            [cell-start (* drop width)]
            [cell-end (* source-height width)]
            [cells (make-vector (* width height) default-frame-cell)]
-           [source-map (text-layout-display-map layout)]
-           [entries
-            (let loop ([remaining (display-map-entries source-map)] [result '()])
-              (if (null? remaining)
-                  (reverse result)
-                  (let* ([entry (car remaining)]
-                         [from (display-map-entry-cell-from entry)]
-                         [to (display-map-entry-cell-to entry)])
-                    ;; Layout entries are atomic glyph or widget cells, so an
-                    ;; entry cannot span a visual-row crop boundary.
-                    (loop (cdr remaining)
-                          (if (if (= from to)
-                                  (and (< cell-start from) (< from cell-end))
-                                  (and (<= cell-start from) (<= to cell-end)))
-                              (cons (make-display-map-entry
-                                      (display-map-entry-document-from entry)
-                                      (display-map-entry-document-to entry)
-                                      (- from cell-start) (- to cell-start)
-                                      (display-map-entry-kind entry)
-                                      (display-map-entry-source entry))
-                                    result)
-                              result)))))])
+           [map (display-map-cell-slice
+                  (text-layout-display-map layout) cell-start cell-end)])
       (let copy-row ([row 0])
         (when (< row height)
           (let copy-column ([column 0])
@@ -615,7 +595,7 @@
       (let ([cursor-row (text-layout-cursor-row layout)])
         (make-text-layout
           (make-frame width height cells)
-          (make-display-map entries)
+          map
           (and cursor-row (>= cursor-row drop) (< cursor-row source-height)
                (- cursor-row drop))
           (let ([column (text-layout-cursor-column layout)])

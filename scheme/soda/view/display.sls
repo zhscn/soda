@@ -10,7 +10,7 @@
           display-map-entry-cell-from display-map-entry-cell-to display-map-entry-kind
           display-map-entry-source make-display-map display-map? display-map-entries
           display-map-document->cell display-map-cell->document display-map-document-range
-          display-map-cell-range display-map-cell-boundary-entry
+          display-map-cell-range display-map-cell-slice display-map-cell-boundary-entry
           display-map-visible-ranges)
   (import (rnrs) (soda kernel value))
 
@@ -240,6 +240,41 @@
                         (cons entry result)
                         result)))))))
 
+  ;; Select entries wholly contained in a cell interval and rebase them to
+  ;; zero.  Ordinary entries may touch either interval edge.  A zero-cell line
+  ;; break belongs to the visual row before its boundary, so it is retained
+  ;; only when the boundary lies strictly inside the slice.
+  (define (display-map-cell-slice map from to)
+    (unless (and (display-map? map) (offset? from) (offset? to) (<= from to))
+      (assertion-violation 'display-map-cell-slice "invalid cell slice" map from to))
+    (let* ([index (display-map-index map)]
+           [length (vector-length index)]
+           [first (vector-lower-bound index display-map-entry-cell-from from)])
+      (let loop ([position first] [result '()])
+        (if (or (= position length)
+                (>= (display-map-entry-cell-from (vector-ref index position)) to))
+            (make-display-map (reverse result))
+            (let* ([entry (vector-ref index position)]
+                   [entry-from (display-map-entry-cell-from entry)]
+                   [entry-to (display-map-entry-cell-to entry)]
+                   [contained?
+                    (if (= entry-from entry-to)
+                        (< from entry-from to)
+                        (<= entry-to to))])
+              (loop
+                (+ position 1)
+                (if contained?
+                    (cons
+                      (make-display-map-entry
+                        (display-map-entry-document-from entry)
+                        (display-map-entry-document-to entry)
+                        (- entry-from from)
+                        (- entry-to from)
+                        (display-map-entry-kind entry)
+                        (display-map-entry-source entry))
+                      result)
+                    result)))))))
+
   ;; A line break is a zero-cell source boundary.  It is queried separately
   ;; from ordinary cell ranges so hit testing a blank cell at end-of-line can
   ;; still report the newline rather than an unrelated neighboring glyph.
@@ -247,14 +282,17 @@
     (unless (and (display-map? map) (offset? cell))
       (assertion-violation 'display-map-cell-boundary-entry
                            "expected a DisplayMap and cell offset" map cell))
-    (let loop ([entries (display-map-entries map)])
-      (and (pair? entries)
-           (let ([entry (car entries)])
-             (if (and (= (display-map-entry-cell-from entry) cell)
-                      (= (display-map-entry-cell-to entry) cell)
-                      (eq? (display-map-entry-kind entry) 'line-break))
-                 entry
-                 (loop (cdr entries)))))))
+    (let* ([index (display-map-index map)]
+           [length (vector-length index)]
+           [first (vector-lower-bound index display-map-entry-cell-from cell)])
+      (let loop ([position first])
+        (and (< position length)
+             (let ([entry (vector-ref index position)])
+               (and (= (display-map-entry-cell-from entry) cell)
+                    (if (and (= (display-map-entry-cell-to entry) cell)
+                             (eq? (display-map-entry-kind entry) 'line-break))
+                        entry
+                        (loop (+ position 1)))))))))
 
   ;; Visible document ranges are derived from the displayed map entries rather
   ;; than from a source-line approximation.  Virtual and widget entries have
