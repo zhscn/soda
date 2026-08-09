@@ -983,6 +983,37 @@
                          (eq? (display-text-face fragment) 'minibuffer.prompt))
               (error 'fundamental-editing-tests
                      "minibuffer prompt was not projected as virtual View content")))))
+      ;; Temporary prompt Views inherit the package-owned basic editing map
+      ;; through the ordinary Buffer input composition.  Exercise the frontend
+      ;; path so named keys are not masked by working text input.
+      (let* ([editing (soda-application-editing application)]
+             [surface (soda-application-surface application)]
+             [frontend
+              (make-frontend
+                state surface
+                (lambda (active prompt-view)
+                  (minibuffer-input-context
+                    minibuffer active prompt-view
+                    (list (fundamental-fallback-input-layer editing))))
+                (lambda (context disposition)
+                  (fundamental-input-disposition context disposition))
+                (lambda (render theme) #f)
+                (make-render-service) default-theme)])
+        (define (send! event)
+          (frontend-enqueue!
+            frontend (make-surface-input-message (surface-id surface) event))
+          (frontend-step! frontend))
+        (send! (make-key-event 'end #f #f #f 0 'press (make-bytevector 0)))
+        (send! (make-text-input-event 'text (string->utf8 "x")))
+        (send! (make-key-event 'backspace 127 #f #f 0 'press (make-bytevector 0)))
+        (unless (string=?
+                  (prompt-snapshot-input
+                    (minibuffer-session-snapshot
+                      minibuffer (minibuffer-service-current minibuffer)))
+                  "accepted")
+          (error 'fundamental-editing-tests
+                 "minibuffer did not inherit basic named-key editing"))
+        (frontend-close! frontend))
       (command-runtime-start! runtime 'fundamental.end-of-buffer
                               (application-command-context application))
       (command-runtime-start! runtime 'fundamental.insert-text

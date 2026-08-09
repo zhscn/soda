@@ -193,25 +193,32 @@
                           (accessor service)))))))
   (define (control-stroke character)
     (make-key-stroke 'character (char->integer character) 4))
-  (define (minibuffer-input-context service active view)
-    (let ([session (minibuffer-service-current service)])
-      (and session (= (minibuffer-session-view-id session) (view-id view))
-           (let* ([request
-                   (interaction-session-request
-                     (minibuffer-session-interaction session))]
-                  [request-keymap (interaction-request-keymap request)]
-                  [layers
-                   (append
-                     (if request-keymap
-                         (list (make-input-layer 'transient request-keymap #f 'ignore))
-                         '())
-                     (list
-                       (make-input-layer
-                         'minibuffer (minibuffer-service-keymap service) #f 'accept)))])
-             (make-input-context
-               (active-context-view-id active) (active-context-buffer-id active)
-               (input-layer-compose layers)
-               (view-state-input-state (view-state view)))))))
+  ;; A minibuffer contributes local overrides to the ordinary Buffer input
+  ;; composition.  The application supplies its basic-editing fallback while
+  ;; request-specific answers retain transient precedence.  Application-global
+  ;; bindings are intentionally outside this contract.
+  (define minibuffer-input-context
+    (case-lambda
+      [(service active view)
+       (minibuffer-input-context service active view '())]
+      [(service active view fallback-layers)
+       (let ([session (minibuffer-service-current service)])
+         (and session (= (minibuffer-session-view-id session) (view-id view))
+              (let* ([request
+                      (interaction-session-request
+                        (minibuffer-session-interaction session))]
+                     [request-keymap (interaction-request-keymap request)]
+                     [local-layers
+                      (append
+                        (if request-keymap
+                            (list (make-input-layer
+                                    'transient request-keymap #f 'ignore))
+                            '())
+                        (list
+                          (make-input-layer
+                            'major (minibuffer-service-keymap service) #f 'accept)))])
+                (buffer-input-context
+                  active view (append local-layers fallback-layers)))))]))
   (define (open! service interaction)
     (let* ([host (minibuffer-service-host service)]
            [context (interaction-session-context interaction)]

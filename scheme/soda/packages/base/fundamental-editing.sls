@@ -3,6 +3,7 @@
           fundamental-editing?
           fundamental-editing-keymap
           fundamental-mode
+          fundamental-fallback-input-layer
           fundamental-input-context
           fundamental-input-disposition)
   (import (rnrs)
@@ -1463,6 +1464,16 @@
       (active-context-buffer-id active)
       (list (make-input-layer 'fundamental (fundamental-editing-keymap editing) #f 'accept))
       (view-state-input-state (view-state view))))
+
+  ;; Temporary editable interfaces reuse the package-owned bindings without
+  ;; adopting fundamental-mode as their major mode.  The default rank leaves
+  ;; transient and interface-local maps in control of their own keys.
+  (define (fundamental-fallback-input-layer editing)
+    (unless (fundamental-editing? editing)
+      (assertion-violation
+        'fundamental-fallback-input-layer "expected a fundamental editing service" editing))
+    (make-input-layer
+      'default (fundamental-editing-keymap editing) #f 'accept))
 
   (define (fundamental-input-disposition context disposition)
     (unless (and (command-context? context) (input-disposition? disposition))

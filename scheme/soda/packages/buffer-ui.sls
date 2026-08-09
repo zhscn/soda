@@ -134,9 +134,9 @@
                            "expected a list of InputLayer values" layers))
     (make-facet-provider buffer-input-layers-facet (list-copy layers)))
 
-  ;; Buffer-local input contributions precede the fundamental/global fallback,
-  ;; while InputState remains owned by the View.  A minibuffer or other
-  ;; transient frontend can replace this complete context for its own View.
+  ;; Buffer-local input contributions precede caller-supplied fallback layers,
+  ;; while InputState remains owned by the View.  Temporary interfaces add
+  ;; their local and transient maps through the same composition boundary.
   (define (buffer-input-context active view fallback-layers)
     (unless (and (active-context? active) (view? view)
                  (list? fallback-layers) (for-all input-layer? fallback-layers))

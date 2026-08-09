@@ -304,7 +304,11 @@
 
   (define (make-resolver application)
     (lambda (active view)
-      (or (minibuffer-input-context (soda-application-minibuffer application) active view)
+      (or (minibuffer-input-context
+            (soda-application-minibuffer application) active view
+            (list
+              (fundamental-fallback-input-layer
+                (soda-application-editing application))))
           (buffer-input-context
             active view
             (list
