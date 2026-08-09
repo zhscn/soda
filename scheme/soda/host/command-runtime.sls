@@ -488,7 +488,7 @@
       (assertion-violation 'command-runtime-start! "invalid command start" name context arguments))
     (let* ([definition (lookup-definition service name)]
            [invocation
-             (if interactive?
+             (if (and interactive? (command-definition-interactive? definition))
                  (make-interactive-command-invocation definition context arguments)
                  (make-command-invocation definition context arguments))])
       (hashtable-set! (command-runtime-invocations service)

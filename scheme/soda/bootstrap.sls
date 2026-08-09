@@ -48,6 +48,7 @@
           (soda packages search)
           (soda packages interaction)
           (soda packages buffer-ui)
+          (soda packages command-ui)
           (soda packages help)
           (soda packages minibuffer)
           (soda support cleanup)
@@ -142,7 +143,19 @@
                [interaction
                 (make-interaction-service! (host-state-command-runtime state) owner)]
                [minibuffer (make-minibuffer-service! host interaction owner)]
-               [default-keymap (make-default-keymap)])
+               [default-keymap (make-default-keymap)]
+               [_command-ui
+                (make-command-ui!
+                  (host-state-command-runtime state) owner
+                  (list (editor-options-keymap options)
+                        (search-keymap search)
+                        (message-keymap messages)
+                        (spell-keymap spelling)
+                        (process-keymap processes)
+                        (file-keymap files)
+                        (directory-keymap directories)
+                        (buffer-list-keymap buffer-lists)
+                        default-keymap))])
           (install-buffer-item-commands!
             (host-state-command-runtime state) owner buffer-item-actions)
           (surface-service-register! (host-state-surfaces state) surface)
@@ -166,6 +179,17 @@
                     'history.undo)
       (keymap-bind! keymap (list (make-key-stroke 'character (char->integer #\e) 2))
                     'history.redo)
+      (keymap-bind! keymap
+                    (list (make-key-stroke 'character (char->integer #\x) 2))
+                    'command.execute-extended)
+      (keymap-bind! keymap
+                    (list (make-key-stroke 'character (char->integer #\h) 4)
+                          (make-key-stroke 'character (char->integer #\f) 0))
+                    'command.describe)
+      (keymap-bind! keymap
+                    (list (make-key-stroke 'character (char->integer #\h) 4)
+                          (make-key-stroke 'character (char->integer #\w) 0))
+                    'command.where-is)
       keymap))
 
   (define (require-open who application)

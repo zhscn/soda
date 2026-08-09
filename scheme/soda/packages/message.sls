@@ -1,7 +1,11 @@
 (library (soda packages message)
   (export make-message-service!
           message-service?
-          message-keymap)
+          message-keymap
+          make-message-request
+          message-request?
+          message-request-context
+          message-request-text)
   (import (rnrs)
           (soda kernel document)
           (soda kernel state)
@@ -22,8 +26,16 @@
     (message-service %make-message-service message-service?)
     (fields host owner keymap))
 
-  (define-record-type message-request
-    (fields context text))
+  (define-record-type
+    (message-request %make-message-request message-request?)
+    (fields (immutable context message-request-context)
+            (immutable text message-request-text)))
+
+  (define (make-message-request context text)
+    (unless (and (command-context? context) (string? text))
+      (assertion-violation 'make-message-request
+                           "expected a CommandContext and text" context text))
+    (%make-message-request context text))
 
   (define (control-stroke character)
     (make-key-stroke 'character (char->integer character) 4))

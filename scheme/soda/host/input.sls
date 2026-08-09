@@ -5,6 +5,8 @@
           keymap-bind!
           keymap-unbind!
           keymap-lookup
+          keymap-binding-entries
+          keymap-where-is
           keymap-prefix?
           keymap-remap!
           keymap-remap
@@ -58,7 +60,7 @@
     (keymap %make-keymap keymap?)
     (fields
       (immutable name keymap-name)
-      (immutable bindings keymap-bindings)
+      (immutable bindings keymap-binding-table)
       (immutable remaps keymap-remaps)
       (immutable prefixes keymap-prefixes)))
 
@@ -91,7 +93,7 @@
     (unless (and (keymap? map) (valid-sequence? sequence))
       (assertion-violation 'keymap-bind! "expected a keymap and non-empty sequence" map sequence))
     (let ([normalized (normalize-sequence sequence)])
-      (hashtable-set! (keymap-bindings map) normalized binding)
+      (hashtable-set! (keymap-binding-table map) normalized binding)
       (let loop ([items normalized] [prefix '()])
       (unless (null? items)
         (let ([next (append prefix (list (car items)))])
@@ -100,7 +102,7 @@
     binding)
 
   (define (keymap-unbind! map sequence)
-    (hashtable-delete! (keymap-bindings map) (normalize-sequence sequence))
+    (hashtable-delete! (keymap-binding-table map) (normalize-sequence sequence))
     (let ([prefixes (keymap-prefixes map)])
       (call-with-values
         (lambda () (hashtable-entries prefixes))
@@ -109,7 +111,7 @@
               ((= index (vector-length keys)))
             (hashtable-delete! prefixes (vector-ref keys index)))))
       (call-with-values
-        (lambda () (hashtable-entries (keymap-bindings map)))
+        (lambda () (hashtable-entries (keymap-binding-table map)))
         (lambda (keys values)
           (do ([index 0 (+ index 1)])
               ((= index (vector-length keys)))
@@ -123,8 +125,74 @@
   (define (keymap-lookup map sequence . default)
     (let ([value
             (hashtable-ref
-              (keymap-bindings map) (normalize-sequence sequence) #f)])
+              (keymap-binding-table map) (normalize-sequence sequence) #f)])
       (if value value (if (null? default) #f (car default)))))
+
+  (define (binding-key->public value)
+    (if (and (vector? value) (= (vector-length value) 4)
+             (eq? (vector-ref value 0) 'key-stroke))
+        (make-key-stroke
+          (vector-ref value 1) (vector-ref value 2) (vector-ref value 3))
+        value))
+
+  ;; Enumeration is a read-only snapshot.  Keymap storage remains private so
+  ;; introspection consumers cannot bypass bind/unbind prefix maintenance.
+  (define (keymap-binding-entries keymap)
+    (unless (keymap? keymap)
+      (assertion-violation 'keymap-binding-entries "expected a keymap" keymap))
+    (call-with-values
+      (lambda () (hashtable-entries (keymap-binding-table keymap)))
+      (lambda (keys values)
+        (let loop ([index 0] [result '()])
+          (if (= index (vector-length keys))
+              (reverse result)
+              (loop (+ index 1)
+                    (cons
+                      (cons (map binding-key->public (vector-ref keys index))
+                            (vector-ref values index))
+                      result)))))))
+
+  (define (keymap-where-is maps command)
+    (unless (and (list? maps) (for-all keymap? maps) (symbol? command))
+      (assertion-violation 'keymap-where-is
+                           "expected keymaps and a command name" maps command))
+    (let* ([sequence=?
+            (lambda (left right)
+              (and (= (length left) (length right))
+                   (for-all
+                     (lambda (pair)
+                       (let ([left-key (car pair)] [right-key (cdr pair)])
+                         (if (and (key-stroke? left-key) (key-stroke? right-key))
+                             (key-stroke=? left-key right-key)
+                             (equal? left-key right-key))))
+                     (map cons left right))))]
+           [sequences
+            (fold-left
+              (lambda (result sequence)
+                (if (exists (lambda (seen) (sequence=? seen sequence)) result)
+                    result
+                    (append result (list sequence))))
+              '()
+              (fold-left
+                append '()
+                (map (lambda (keymap)
+                       (map car (keymap-binding-entries keymap)))
+                     maps)))]
+           [effective-command
+            (lambda (sequence)
+              (let ([binding
+                     (let loop ([remaining maps])
+                       (and (pair? remaining)
+                            (or (keymap-lookup (car remaining) sequence #f)
+                                (loop (cdr remaining)))))])
+                (and binding
+                     (let loop ([remaining maps])
+                       (if (null? remaining)
+                           binding
+                           (or (keymap-remap (car remaining) binding #f)
+                               (loop (cdr remaining))))))))])
+      (filter (lambda (sequence) (eq? (effective-command sequence) command))
+              sequences)))
 
   (define (keymap-prefix? map sequence)
     (hashtable-contains?

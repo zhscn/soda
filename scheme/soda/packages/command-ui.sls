@@ -1,0 +1,152 @@
+(library (soda packages command-ui)
+  (export make-command-ui!)
+  (import (rnrs)
+          (soda kernel extension)
+          (soda kernel state)
+          (soda host command)
+          (soda host command-runtime)
+          (soda host input)
+          (soda host input-event)
+          (soda host value)
+          (soda packages buffer-ui)
+          (soda packages completion)
+          (soda packages interaction)
+          (soda packages message))
+
+  (define (string-contains? value needle)
+    (let ([limit (- (string-length value) (string-length needle))])
+      (let loop ([index 0])
+        (and (<= index limit)
+             (or (string=? needle
+                           (substring value index (+ index (string-length needle))))
+                 (loop (+ index 1)))))))
+
+  (define (command-source runtime context)
+    (make-completion-source
+      (lambda (snapshot)
+        (let ([query (prompt-snapshot-input snapshot)])
+          (map
+            (lambda (definition)
+              (let ([name (symbol->string (command-definition-name definition))])
+                (make-completion-candidate
+                  (command-definition-name definition) name name
+                  (command-definition-documentation definition)
+                  (symbol->string (command-definition-scope definition)) definition)))
+            (filter
+              (lambda (definition)
+                (string-contains?
+                  (symbol->string (command-definition-name definition)) query))
+              (command-runtime-available-command-definitions runtime context)))))
+      #f #f #f
+      (lambda (input snapshot)
+        (let ([name (string->symbol input)])
+          (command-runtime-command-available? runtime name context)))))
+
+  (define (make-command-reader runtime name prompt)
+    (make-interactive-reader
+      name
+      (lambda (context arguments)
+        (make-interactive-suspend
+          (make-interaction-request
+            'command prompt "" (command-source runtime context) 'must-match
+            (lambda (input snapshot)
+              (command-runtime-command-available?
+                runtime (string->symbol input) context)))
+          (lambda (value)
+            (make-interactive-ready (list (string->symbol value))))))))
+
+  (define (modifier-prefix modifiers)
+    (string-append
+      (if (not (zero? (bitwise-and modifiers 4))) "C-" "")
+      (if (not (zero? (bitwise-and modifiers 2))) "M-" "")
+      (if (not (zero? (bitwise-and modifiers 1))) "S-" "")
+      (if (not (zero? (bitwise-and modifiers 8))) "s-" "")))
+
+  (define (stroke-name stroke)
+    (let ([prefix (modifier-prefix (key-stroke-modifiers stroke))]
+          [codepoint (key-stroke-codepoint stroke)])
+      (string-append
+        prefix
+        (if codepoint
+            (string (integer->char codepoint))
+            (string-append "<" (symbol->string (key-stroke-key stroke)) ">")))))
+
+  (define (join strings separator)
+    (if (null? strings)
+        ""
+        (let loop ([remaining (cdr strings)] [result (car strings)])
+          (if (null? remaining)
+              result
+              (loop (cdr remaining)
+                    (string-append result separator (car remaining)))))))
+
+  (define (sequence-name sequence)
+    (join (map (lambda (key)
+                 (if (key-stroke? key) (stroke-name key)
+                     (if (symbol? key) (symbol->string key) key)))
+               sequence)
+          " "))
+
+  (define (context-keymaps context fallback-keymaps)
+    (let ([state (command-context-buffer-state context)])
+      (append
+        (if state
+            (map input-layer-keymap
+                 (configuration-facet
+                   (buffer-state-configuration state)
+                   buffer-input-layers-facet 'buffer))
+            '())
+        fallback-keymaps)))
+
+  (define (description runtime name)
+    (let ([definition (command-runtime-command-definition runtime name #f)])
+      (if definition
+          (string-append
+            (symbol->string name) " ["
+            (symbol->string (command-definition-scope definition))
+            (if (command-definition-class definition)
+                (string-append "/" (symbol->string (command-definition-class definition)))
+                "")
+            "] — "
+            (or (command-definition-documentation definition)
+                "No documentation."))
+          (string-append "Unknown command: " (symbol->string name)))))
+
+  (define (make-command-ui! runtime owner fallback-keymaps)
+    (unless (and (command-runtime? runtime) (owner? owner)
+                 (list? fallback-keymaps) (for-all keymap? fallback-keymaps))
+      (assertion-violation 'make-command-ui!
+                           "expected a runtime, owner, and application keymaps"))
+    (let ([execute-reader (make-command-reader runtime 'extended-command "M-x ")]
+          [describe-reader (make-command-reader runtime 'describe-command "Describe command: ")]
+          [where-reader (make-command-reader runtime 'where-is "Where is command: ")])
+      (define-command
+        runtime owner 'command.execute-extended (context name)
+        "Read and enqueue an available command for interactive execution." 'command
+        (interactive (make-interactive-plan (list execute-reader)))
+        (command-runtime-enqueue!
+          runtime (make-command-invoke-message name context '() #t))
+        (command-handled))
+      (define-command
+        runtime owner 'command.describe (context name)
+        "Describe an available command." 'command
+        (interactive (make-interactive-plan (list describe-reader)))
+        (make-command-effect
+          'message.show (make-message-request context (description runtime name))))
+      (define-command
+        runtime owner 'command.where-is (context name)
+        "Show active key sequences bound to an available command." 'command
+        (interactive (make-interactive-plan (list where-reader)))
+        (let ([sequences
+               (keymap-where-is (context-keymaps context fallback-keymaps) name)])
+          (make-command-effect
+            'message.show
+            (make-message-request
+              context
+              (if (null? sequences)
+                  (string-append (symbol->string name) " is not bound")
+                  (string-append
+                    (symbol->string name) " is on "
+                    (join (map sequence-name sequences) ", ")))))))
+      #t))
+)

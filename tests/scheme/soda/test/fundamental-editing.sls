@@ -5,6 +5,7 @@
           (soda bootstrap)
           (soda host command)
           (soda host command-runtime)
+          (soda host condition)
           (soda host dispatch)
           (soda host input)
           (soda host input-event)
@@ -1002,6 +1003,51 @@
                             runtime (command-invocation-id cancelled) #f))
                      (not (interaction-service-current interaction)))
           (error 'fundamental-editing-tests "interaction cancellation did not retire its invocation")))
+      (command-runtime-start-interactive!
+        runtime 'command.execute-extended (application-command-context application))
+      (let* ([request
+              (interaction-session-request (interaction-service-current interaction))]
+             [controller (minibuffer-service-refresh-completion! minibuffer)])
+        (unless (and (eq? (interaction-request-kind request) 'command)
+                     (eq? (interaction-request-selection-policy request) 'must-match)
+                     controller
+                     (exists
+                       (lambda (candidate)
+                         (string=? (completion-candidate-insert-text candidate)
+                                   "fundamental.insert-text"))
+                       (completion-controller-candidates controller)))
+          (error 'fundamental-editing-tests
+                 "M-x did not expose mode-aware command completion")))
+      (interaction-service-submit! interaction "message.show-position")
+      (host-state-run! state)
+      (host-state-run! state)
+      (let ([message (surface-status-message (soda-application-surface application))])
+        (unless (and message (string=? message "Line 1, column 1"))
+          (error 'fundamental-editing-tests "M-x did not enqueue the selected command"
+                 message
+                 (map (lambda (entry)
+                        (let ([value (editor-condition-value entry)])
+                          (if (and (list? value) (= (length value) 3)
+                                   (condition? (caddr value))
+                                   (message-condition? (caddr value)))
+                              (condition-message (caddr value))
+                              value)))
+                      (condition-service-entries (host-state-conditions state))))))
+      (command-runtime-start-interactive!
+        runtime 'command.describe (application-command-context application))
+      (interaction-service-submit! interaction "message.show-position")
+      (host-state-run! state)
+      (let ([message (surface-status-message (soda-application-surface application))])
+        (unless (and message (string-contains? message "Show the active selection"))
+          (error 'fundamental-editing-tests
+                 "describe-command did not use command metadata" message)))
+      (command-runtime-start-interactive!
+        runtime 'command.where-is (application-command-context application))
+      (interaction-service-submit! interaction "message.show-position")
+      (host-state-run! state)
+      (unless (string-contains?
+                (surface-status-message (soda-application-surface application)) "C-c")
+        (error 'fundamental-editing-tests "where-is did not reverse-query active keymaps"))
       (owner-close! owner)
       (soda-application-close! application))
 

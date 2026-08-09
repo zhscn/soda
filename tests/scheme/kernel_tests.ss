@@ -1453,7 +1453,19 @@
   (unless (and (eq? (input-layer-kind (car layers)) 'first-package)
                (eq? (cadr (resolve-key-sequence layers (list control-s)))
                     'first-command))
-    (error 'kernel-tests "equal-priority input layers did not retain declaration order")))
+    (error 'kernel-tests "equal-priority input layers did not retain declaration order"))
+  (let ([sequences (keymap-where-is (list first second) 'first-command)])
+    (unless (and (= (length sequences) 1)
+                 (= (length (car sequences)) 1)
+                 (key-stroke=? (caar sequences) control-s)
+                 (null? (keymap-where-is (list first second) 'second-command)))
+      (error 'kernel-tests "where-is did not honor keymap precedence"
+             sequences (keymap-where-is (list first second) 'second-command))))
+  (keymap-remap! first 'first-command 'remapped-command)
+  (let ([sequences (keymap-where-is (list first second) 'remapped-command)])
+    (unless (and (= (length sequences) 1)
+                 (key-stroke=? (caar sequences) control-s))
+      (error 'kernel-tests "where-is did not honor active command remapping"))))
 (define input-context
   (make-input-context
     0 0 (list (make-input-layer 'global test-keymap #f 'ignore))
