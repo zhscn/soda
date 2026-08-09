@@ -5,6 +5,7 @@
           surface-frontend
           surface-capabilities
           surface-status-message
+          surface-shortcut-hints
           surface-size
           surface-root-window
           surface-selected-window
@@ -20,6 +21,7 @@
           surface-resize!
           surface-invalidate!
           surface-set-status-message!
+          surface-set-shortcut-hints!
           surface-generation
           make-surface-service
           surface-service?
@@ -60,6 +62,7 @@
       (immutable frontend surface-frontend)
       (immutable capabilities surface-capabilities)
       (mutable status-message surface-status-message surface-status-message-set!)
+      (mutable shortcut-hints surface-shortcut-hints surface-shortcut-hints-set!)
       (mutable size surface-size surface-size-set!)
       (mutable root-window surface-root-window surface-root-window-set!)
       (mutable selected-window surface-selected-window surface-selected-window-set!)
@@ -85,7 +88,27 @@
        (let ([selected (car (window-leaves root-window))])
          (window-set-selected! selected #t)
          (%make-surface (identity-source-next! surface-identities)
-                        frontend (list-copy capabilities) #f size root-window selected '() 0))]))
+                        frontend (list-copy capabilities) #f '()
+                        size root-window selected '() 0))]))
+
+  (define (surface-set-shortcut-hints! surface hints)
+    (unless (and (surface? surface) (list? hints)
+                 (for-all
+                   (lambda (hint)
+                     (and (pair? hint) (string? (car hint))
+                          (string? (cdr hint))))
+                   hints))
+      (assertion-violation 'surface-set-shortcut-hints!
+                           "expected a Surface and shortcut hint pairs" surface hints))
+    (let ([next (map (lambda (hint)
+                       (cons (string-copy (car hint)) (string-copy (cdr hint))))
+                     hints)])
+      (if (equal? next (surface-shortcut-hints surface))
+          #f
+          (begin
+            (surface-shortcut-hints-set! surface next)
+            (surface-generation-set! surface (+ 1 (surface-generation surface)))
+            #t))))
 
   (define (surface-set-status-message! surface message)
     (unless (and (surface? surface)

@@ -155,6 +155,17 @@
                   (loop next (+ column glyph-width)))))))
       (make-frame width 1 cells)))
 
+  (define (shortcut-hint-text hints)
+    (let loop ([remaining hints] [pieces '()])
+      (if (null? remaining)
+          (apply string-append (reverse pieces))
+          (let ([hint (car remaining)])
+            (loop (cdr remaining)
+                  (cons (string-append
+                          (if (null? pieces) "" "  ")
+                          (car hint) " " (cdr hint))
+                        pieces))))))
+
   (define (compose-surface-frame width height placements message)
     (compose-frame
       width height
@@ -385,8 +396,13 @@
       (let loop ([leaves (surface-windows surface)]
                  [placements '()] [rendered-views '()] [cursor-row #f] [cursor-column #f])
           (if (null? leaves)
-              (let ([message (or (surface-status-message surface)
-                                 (surface-position-message surface views))])
+              (let ([message
+                     (or (surface-status-message surface)
+                         (surface-position-message surface views)
+                         (and (>= height 3)
+                              (pair? (surface-shortcut-hints surface))
+                              (shortcut-hint-text
+                                (surface-shortcut-hints surface))))])
                 (make-surface-render
                   (surface-id surface)
                   (surface-generation surface)

@@ -126,6 +126,107 @@
     (host-frontend-active-view
       (frontend-host-state value) (frontend-surface value)))
 
+  (define (key-stroke-label stroke)
+    (let* ([modifiers (key-stroke-modifiers stroke)]
+           [prefix
+            (string-append
+              (if (zero? (bitwise-and modifiers 4)) "" "C-")
+              (if (zero? (bitwise-and modifiers 2)) "" "M-")
+              (if (zero? (bitwise-and modifiers 1)) "" "S-"))]
+           [key
+            (if (key-stroke-codepoint stroke)
+                (string (integer->char (key-stroke-codepoint stroke)))
+                (symbol->string (key-stroke-key stroke)))])
+      (string-append prefix key)))
+
+  (define (key-sequence-label sequence)
+    (let loop ([remaining sequence] [result ""])
+      (if (null? remaining)
+          result
+          (loop (cdr remaining)
+                (string-append result (if (zero? (string-length result)) "" " ")
+                               (key-stroke-label (car remaining)))))))
+
+  (define (sequence-prefix? prefix sequence)
+    (let loop ([left prefix] [right sequence])
+      (or (null? left)
+          (and (pair? right)
+               (key-stroke=? (car left) (car right))
+               (loop (cdr left) (cdr right))))))
+
+  (define (remapped-command layers name)
+    (let loop ([remaining layers])
+      (if (null? remaining)
+          name
+          (or (keymap-remap
+                (input-layer-keymap (car remaining)) name #f)
+              (loop (cdr remaining))))))
+
+  ;; Hints are derived from the same composed InputLayers used for dispatch.
+  ;; Effective lookup removes shadowed bindings, and a pending prefix narrows
+  ;; the bar to its immediate continuations.
+  (define (shortcut-hints value active view input-context)
+    (let* ([layers (input-context-layers input-context)]
+           [pending
+            (or (input-stack-pending-sequence (input-context-stack input-context)) '())]
+           [runtime (host-state-command-runtime (frontend-host-state value))]
+           [command-context
+            (make-active-command-context value active view #f pending
+                                         (input-stack-pending-argument
+                                           (input-context-stack input-context))
+                                         active)]
+           [sequences
+            (fold-left
+              append '()
+              (map (lambda (layer)
+                     (map car
+                          (keymap-binding-entries
+                            (input-layer-keymap layer))))
+                   layers))]
+           [candidates
+            (fold-left
+              (lambda (result sequence)
+                (let ([resolved (resolve-key-sequence layers sequence)])
+                  (if (and (eq? (car resolved) 'command)
+                           (or (null? pending)
+                               (and (= (length sequence) (+ 1 (length pending)))
+                                    (sequence-prefix? pending sequence)))
+                           (not (exists
+                                  (lambda (hint)
+                                    (string=? (car hint)
+                                              (key-sequence-label sequence)))
+                                  result)))
+                      (let* ([name (remapped-command layers (cadr resolved))]
+                             [definition
+                              (and (symbol? name)
+                                   (command-runtime-command-definition
+                                     runtime name #f))])
+                        (if (and definition
+                                 (command-runtime-command-available?
+                                   runtime definition command-context))
+                            (cons
+                              (cons (key-sequence-label sequence)
+                                    (symbol->string name))
+                              result)
+                            result))
+                      result)))
+              '() sequences)])
+      (list-sort (lambda (left right) (string<? (car left) (car right)))
+                 candidates)))
+
+  (define (frontend-refresh-shortcut-hints! value)
+    (let ([current (active-view value)])
+      (when current
+        (let* ([active (car current)]
+               [view (cdr current)]
+               [context ((frontend-resolve-input-context value) active view)])
+          (validate-input-context! context active view)
+          (host-frontend-dispatch-host!
+            (frontend-host-state value)
+            (make-set-surface-shortcut-hints-operation
+              (surface-id (frontend-surface value))
+              (shortcut-hints value active view context)))))))
+
   (define (validate-input-context! context active view)
     (unless (and (input-context? context)
                  (= (input-context-view-id context) (active-context-view-id active))
@@ -334,6 +435,7 @@
     (if (not (frontend-dirty? value))
         #f
         (begin
+          (frontend-refresh-shortcut-hints! value)
           ;; A scroll intent resolved from this render may publish a newer
           ;; viewport and set dirty again.  Clear the old damage first so that
           ;; notification is retained for the follow-up render.

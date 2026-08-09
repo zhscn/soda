@@ -321,6 +321,10 @@
                         (and (surface-set-status-message!
                                surface (host-operation-value operation))
                              #t)]
+                       [(set-surface-shortcut-hints)
+                        (and (surface-set-shortcut-hints!
+                               surface (host-operation-value operation))
+                             #t)]
                        [else
                         (assertion-violation 'dispatcher-dispatch-host!
                                              "unsupported HostOperation" operation)])]

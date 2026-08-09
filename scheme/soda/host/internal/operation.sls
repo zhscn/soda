@@ -14,6 +14,7 @@
           make-resize-surface-operation
           make-invalidate-surface-operation
           make-set-surface-message-operation
+          make-set-surface-shortcut-hints-operation
           make-global-host-operation
           make-host-update
           host-update?
@@ -126,6 +127,22 @@
                            surface-id message))
     (%make-host-operation 'set-surface-message surface-id
                           (and message (string-copy message))))
+
+  (define (make-set-surface-shortcut-hints-operation surface-id hints)
+    (unless (and (identity? surface-id) (list? hints)
+                 (for-all
+                   (lambda (hint)
+                     (and (pair? hint) (string? (car hint))
+                          (string? (cdr hint))))
+                   hints))
+      (assertion-violation 'make-set-surface-shortcut-hints-operation
+                           "invalid Surface identity or shortcut hints"
+                           surface-id hints))
+    (%make-host-operation
+      'set-surface-shortcut-hints surface-id
+      (map (lambda (hint)
+             (cons (string-copy (car hint)) (string-copy (cdr hint))))
+           hints)))
 
   (define (make-global-host-operation kind value)
     (unless (symbol? kind)

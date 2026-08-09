@@ -3206,16 +3206,22 @@
            [view (soda-application-view application)]
            [buffer (soda-application-buffer application)]
            [editing (soda-application-editing application)]
+           [presented #f]
            [frontend
             (make-frontend
               state surface
               (lambda (active current-view)
                 (buffer-input-context
                   active current-view
-                  (list (fundamental-fallback-input-layer editing))))
+                  (list
+                    (make-input-layer
+                      'default
+                      (file-keymap (soda-application-files application))
+                      #f 'accept)
+                    (fundamental-fallback-input-layer editing))))
               (lambda (context disposition)
                 (fundamental-input-disposition context disposition))
-              (lambda (render theme) #f)
+              (lambda (render theme) (set! presented render))
               (make-render-service) default-theme)])
       (define (send! event)
         (frontend-enqueue!
@@ -3223,6 +3229,21 @@
         (frontend-step! frontend))
       (frontend-resize! frontend '(4 . 4))
       (frontend-step! frontend)
+      (send! (make-key-event 'character (char->integer #\x) #f #f 4 'press
+                             (make-bytevector 0)))
+      (unless (and
+                (exists
+                  (lambda (hint)
+                    (and (string=? (car hint) "C-x C-f")
+                         (string=? (cdr hint) "file.visit")))
+                  (surface-shortcut-hints surface))
+                (string-contains?
+                  (frame-row-string
+                    (surface-render-frame presented)
+                    (- (frame-height (surface-render-frame presented)) 1))
+                  "C-x"))
+        (error 'fundamental-editing-tests
+               "shortcut hints were not derived from the pending InputLayer prefix"))
       (send! (make-text-input-event 'text (string->utf8 "abcdefghijk")))
       (send! (make-key-event 'character (char->integer #\a) #f #f 4 'press
                              (make-bytevector 0)))

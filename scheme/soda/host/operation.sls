@@ -14,6 +14,7 @@
           make-resize-surface-operation
           make-invalidate-surface-operation
           make-set-surface-message-operation
+          make-set-surface-shortcut-hints-operation
           host-update?
           host-update-operation
           host-update-surface-id
