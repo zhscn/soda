@@ -1247,6 +1247,24 @@
                  (string=? (frame-cell-grapheme (frame-cell-at (surface-render-frame rendered) 0 0)) "h"))
     (error 'kernel-tests "Surface render composition differs"))))
 
+;; Projection, Frame diffing, and ANSI encoding consume immutable published
+;; values.  None of them may advance host generations or replace live state.
+(let* ([buffer-state-before (buffer-state buffer)]
+       [view-state-before (view-state view)]
+       [projection-before (view-projection view)]
+       [view-render-generation-before (view-render-generation view)]
+       [surface-generation-before (surface-generation surface)]
+       [rendered (render-surface surface (host-state-views host))]
+       [frame (surface-render-frame rendered)]
+       [_spans (frame-diff frame frame)]
+       [_ansi (frame-diff->ansi frame frame default-theme 0 0)])
+  (unless (and (eq? buffer-state-before (buffer-state buffer))
+               (eq? view-state-before (view-state view))
+               (eq? projection-before (view-projection view))
+               (= view-render-generation-before (view-render-generation view))
+               (= surface-generation-before (surface-generation surface)))
+    (error 'kernel-tests "render or presentation projection mutated host state")))
+
 (let ([service (make-render-service)])
   (let ([first (render-service-render! service surface (host-state-views host))]
         [second (render-service-render! service surface (host-state-views host))])
@@ -1288,9 +1306,119 @@
             (view-id view) (view-state-generation state)
             (make-selection (list (make-selection-range 1 1))) #f #f
             '() '() #f))]
-       [after-selection (render-service-render! service surface (host-state-views host))])
-  (unless (and (eq? initial after-input) (not (eq? after-input after-selection)))
-    (error 'kernel-tests "RenderService damage invalidation differs")))
+       [after-selection (render-service-render! service surface (host-state-views host))]
+       [state (view-state view)]
+       [_viewport-update
+        (dispatcher-dispatch-view!
+          (host-state-dispatch host)
+          (make-view-transaction-spec
+            (view-id view) (view-state-generation state)
+            #f (make-viewport 0 1) #f '() '() #f))]
+       [after-viewport (render-service-render! service surface (host-state-views host))]
+       [view-field
+        (make-state-field
+          'render-cache-view-configuration 'view
+          (lambda (state) 'enabled)
+          (lambda (value transaction) value))]
+       [view-compartment (make-compartment 'render-cache-view-configuration 'view)]
+       [state (view-state view)]
+       [_configuration-update
+        (dispatcher-dispatch-view!
+          (host-state-dispatch host)
+          (make-view-transaction-spec
+            (view-id view) (view-state-generation state)
+            #f #f #f
+            (list (make-compartment-reconfigure-effect
+                    view-compartment view-field))
+            '() #f))]
+       [after-configuration
+        (render-service-render! service surface (host-state-views host))]
+       [_document-update
+        (dispatcher-dispatch!
+          (host-state-dispatch host)
+          (make-transaction-spec
+            (buffer-id buffer) (view-id view)
+            (buffer-state-generation (buffer-state buffer))
+            (make-change-set 5 (list (make-text-change 5 5 "!")))
+            #f '() '()))]
+       [after-document (render-service-render! service surface (host-state-views host))]
+       [_chrome-update (surface-set-status-message! surface "cache status")]
+       [after-chrome (render-service-render! service surface (host-state-views host))]
+       [_layout-update (surface-push-interaction! surface (view-id view) '(0 0 1 1))]
+       [after-layout (render-service-render! service surface (host-state-views host))])
+  (unless (and (eq? initial after-input)
+               (not (eq? after-input after-selection))
+               (not (eq? after-selection after-viewport))
+               (not (eq? after-viewport after-configuration))
+               (not (eq? after-configuration after-document))
+               (not (eq? after-document after-chrome))
+               (not (eq? after-chrome after-layout)))
+    (error 'kernel-tests "RenderService invalidation matrix differs")))
+
+;; A ViewPlugin may project InputState even though core rendering does not.
+;; Its published projection generation must invalidate only that View's render
+;; token, leaving sibling Views of the same Buffer untouched.
+(let* ([plugin
+        (make-view-plugin
+          'independent-projection
+          (lambda (view) (vector 0))
+          (lambda (value update)
+            (when (view-update-damaged? update 'input)
+              (vector-set! value 0 (+ 1 (vector-ref value 0)))))
+          #f #f
+          (lambda (value)
+            (make-display-stream
+              (list (make-display-text
+                      (if (= (vector-ref value 0) 0) "a" "b")
+                      0 1 'text 'plugin)))))]
+       [plugin-configuration
+        (make-configuration
+          (list (make-facet-provider view-plugins-facet (list plugin))))]
+       [document (make-document "x")]
+       [buffer (buffer-service-create! (host-state-buffers host) owner
+                                       "*independent-views*" document
+                                       plugin-configuration)]
+       [left (view-service-create! (host-state-views host) owner buffer
+                                   plugin-configuration)]
+       [right (view-service-create! (host-state-views host) owner buffer
+                                    plugin-configuration)]
+       [left-surface (make-surface (make-leaf-window (view-id left) '(0 0 1 1))
+                                   '(1 . 1))]
+       [service (make-render-service)]
+       [before (render-service-render! service left-surface (host-state-views host))]
+       [right-state (view-state right)]
+       [right-projection (view-projection right)]
+       [left-state (view-state left)]
+       [_update
+        (dispatcher-dispatch-view!
+          (host-state-dispatch host)
+          (make-view-transaction-spec
+            (view-id left) (view-state-generation left-state)
+            (make-selection (list (make-selection-range 1 1)))
+            #f
+            (make-input-stack (make-input-state 'transient '() 'accept))
+            '() '() #f))]
+       [after (render-service-render! service left-surface (host-state-views host))])
+  (unless (and (not (eq? before after))
+               (string=? (frame-cell-grapheme
+                            (frame-cell-at (surface-render-frame after) 0 0)) "b")
+               (eq? right-state (view-state right))
+               (eq? right-projection (view-projection right))
+               (= (selection-range-head
+                    (selection-primary-range
+                      (view-state-selection (view-state left))))
+                  1)
+               (= (viewport-visual-row
+                    (view-state-viewport (view-state left)))
+                  0)
+               (= (selection-range-head
+                    (selection-primary-range
+                      (view-state-selection (view-state right))))
+                  0)
+               (= (viewport-visual-row
+                    (view-state-viewport (view-state right)))
+                  0))
+    (error 'kernel-tests "sibling View state or projection was not independent")))
 
 (let* ([layout-configuration
         (make-configuration
@@ -2417,6 +2545,25 @@
   (snapshot-close! snapshot)
   (document-close! document))
 
+(let* ([document (make-document #vu8(255 97))]
+       [snapshot (document-snapshot document)]
+       [stream (snapshot-display-stream snapshot 0 1)]
+       [fragments (display-stream-fragments stream)]
+       [layout (layout-display-stream
+                 stream (make-selection (list (make-selection-range 0 0))) 2 1)])
+  (unless (and (= (length fragments) 2)
+               (display-text-atomic? (car fragments))
+               (= (display-text-from (car fragments)) 0)
+               (= (display-text-to (car fragments)) 1)
+               (= (display-text-width (car fragments)) 1)
+               (string=? (frame-cell-grapheme
+                            (frame-cell-at (text-layout-frame layout) 0 0))
+                          "\xfffd;")
+               (= (text-layout-point->document layout 0 1) 1))
+    (error 'kernel-tests "invalid UTF-8 display projection differs"))
+  (snapshot-close! snapshot)
+  (document-close! document))
+
 (let* ([document (make-document "ab\tcd")]
        [snapshot (document-snapshot document)]
        [selection (make-selection (list (make-selection-range 3 3)))]
@@ -2627,6 +2774,57 @@
   (unless (and (= created 1) (= updated 1) (= destroyed 1))
     (error 'kernel-tests "host ViewPlugin integration differs"
            created updated destroyed)))
+
+;; Reconfiguring a view-scoped plugin compartment retires removed instances
+;; before publishing the replacement projection.  Closing the View then owns
+;; the replacement instance's final cleanup.
+(let* ([events '()]
+       [first
+        (make-view-plugin
+          'reconfigure-first
+          (lambda (view) (set! events (cons 'first-create events)) 'first)
+          #f
+          (lambda (value) (set! events (cons 'first-destroy events)))
+          #f)]
+       [second
+        (make-view-plugin
+          'reconfigure-second
+          (lambda (view) (set! events (cons 'second-create events)) 'second)
+          #f
+          (lambda (value) (set! events (cons 'second-destroy events)))
+          #f)]
+       [compartment (make-compartment 'view-plugin-reconfigure 'view)]
+       [configuration
+        (make-configuration
+          (list
+            (make-compartment-entry
+              compartment
+              (make-facet-provider view-plugins-facet (list first)))))]
+       [document (make-document "x")]
+       [buffer (buffer-service-create! (host-state-buffers host) owner
+                                       "*plugin-reconfigure*" document
+                                       (make-configuration '()))]
+       [view (view-service-create! (host-state-views host) owner buffer configuration)]
+       [before-generation (view-render-generation view)]
+       [state (view-state view)]
+       [_update
+        (dispatcher-dispatch-view!
+          (host-state-dispatch host)
+          (make-view-transaction-spec
+            (view-id view) (view-state-generation state)
+            #f #f #f
+            (list
+              (make-compartment-reconfigure-effect
+                compartment
+                (make-facet-provider view-plugins-facet (list second))))
+            '() #f))]
+       [after-generation (view-render-generation view)])
+  (view-service-close-view! (host-state-views host) (view-id view))
+  (unless (and (> after-generation before-generation)
+               (equal? (reverse events)
+                       '(first-create first-destroy second-create second-destroy)))
+    (error 'kernel-tests "ViewPlugin reconfiguration lifecycle differs"
+           (reverse events))))
 
 (let* ([updates 0]
        [destroyed 0]

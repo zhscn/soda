@@ -621,6 +621,13 @@
   (define (line-at text requested)
     (min (max 0 requested) (- (text-line-count text) 1)))
 
+  ;; Native Text preserves arbitrary bytes.  Invalid UTF-8 advances as one
+  ;; grapheme in the shared Unicode boundary implementation and projects as a
+  ;; replacement character, retaining the original one-byte document range.
+  (define (display-grapheme-string bytes)
+    (guard (condition [else "\xfffd;"])
+      (utf8->string bytes)))
+
   ;; Build atomic, visible document fragments.  Each text fragment is one
   ;; grapheme with its exact source interval, which makes subsequent display
   ;; transforms independent of the document implementation.
@@ -654,7 +661,7 @@
                                (if (< line last) (cons (make-display-break end) result) result))
                     (let* ([next (text-next-grapheme-offset text offset)]
                            [bytes (text-subbytevector text offset next)]
-                           [glyph (utf8->string bytes)])
+                           [glyph (display-grapheme-string bytes)])
                       (loop-grapheme
                         next
                         (cons (make-display-grapheme
