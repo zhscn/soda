@@ -41,7 +41,7 @@
           (soda packages base fundamental-editing)
           (soda packages base history)
           (soda packages editor-options)
-          (soda packages file)
+          (soda packages file-service)
           (soda packages scheme-mode)
           (soda packages directory)
           (soda packages buffer-list)

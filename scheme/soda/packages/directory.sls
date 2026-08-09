@@ -25,7 +25,7 @@
           (soda packages edit-policy)
           (soda packages generated-buffer)
           (soda packages buffer-item)
-          (soda packages file)
+          (soda packages file-service)
           (soda packages interaction)
           (soda packages resource)
           (soda support vfs))

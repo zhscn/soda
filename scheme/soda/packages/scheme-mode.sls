@@ -25,7 +25,7 @@
           (soda host value)
           (soda packages analysis-ui)
           (soda packages buffer-mode)
-          (soda packages file)
+          (soda packages file-service)
           (soda view decoration)
           (soda view plugin))
 
