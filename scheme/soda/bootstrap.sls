@@ -49,6 +49,7 @@
           (soda packages message)
           (soda packages search)
           (soda packages word-completion)
+          (soda packages whitespace)
           (soda packages interaction)
           (soda packages buffer-ui)
           (soda packages command-ui)
@@ -108,9 +109,12 @@
         (let* ([editing
                 (make-fundamental-editing!
                   (host-state-command-runtime state) owner)]
+               [whitespace
+                (make-whitespace-service! host owner)]
                [configuration
                 (make-configuration
                   (list (buffer-item-field-extension)
+                        (whitespace-view-extension whitespace)
                         (make-buffer-modes-extension
                           (fundamental-mode editing) '())))]
                [next-document (make-document "")]
@@ -160,6 +164,7 @@
                   (list (editor-options-keymap options)
                         (search-keymap search)
                         (word-completion-keymap word-completion)
+                        (whitespace-keymap whitespace)
                         (message-keymap messages)
                         (spell-keymap spelling)
                         (process-keymap processes)

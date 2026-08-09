@@ -2400,6 +2400,42 @@
                  "transient Surface feedback did not take precedence over position chrome")))
       (soda-application-close! application))
 
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [runtime (host-state-command-runtime state)]
+           [surface (soda-application-surface application)])
+      (command-runtime-start!
+        runtime 'fundamental.insert-text (application-command-context application)
+        (list (string->utf8 "\tfoo  \nbar baz")))
+      (command-runtime-start!
+        runtime 'whitespace.toggle (application-command-context application))
+      (let* ([render (render-surface surface (host-state-views state))]
+             [frame (surface-render-frame render)]
+             [hit (surface-render-hit-test render 0 0)])
+        (unless (and (string=? (frame-cell-grapheme (frame-cell-at frame 0 0)) "→")
+                     (eq? (surface-hit-kind hit) 'text)
+                     (= (surface-hit-document-offset hit) 0))
+          (error 'fundamental-editing-tests
+                 "tab marker changed document hit-test semantics")))
+      (command-runtime-start!
+        runtime 'whitespace.toggle (application-command-context application))
+      (let ([frame
+             (surface-render-frame
+               (render-surface surface (host-state-views state)))])
+        (unless (frame-cell-has-face? (frame-cell-at frame 0 11)
+                                      'whitespace.trailing)
+          (error 'fundamental-editing-tests
+                 "trailing whitespace decoration was not projected")))
+      (command-runtime-start!
+        runtime 'whitespace.toggle (application-command-context application))
+      (let ([frame
+             (surface-render-frame
+               (render-surface surface (host-state-views state)))])
+        (unless (string=? (frame-cell-grapheme (frame-cell-at frame 1 3)) "·")
+          (error 'fundamental-editing-tests
+                 "optional space markers were not projected")))
+      (soda-application-close! application))
+
     (let ([text (string->text "alpha _β gamma\nline")])
       (unless (and (= (text-forward-word-offset text 0) 5)
                    (= (text-forward-word-offset text 5) 9)

@@ -50,6 +50,8 @@
             (cons 'message (make-face-style #f #f '(reverse)))
             (cons 'line-number (make-face-style 8 #f '(dim)))
             (cons 'guide-column (make-face-style #f 236 '()))
+            (cons 'whitespace.marker (make-face-style 8 #f '(dim)))
+            (cons 'whitespace.trailing (make-face-style #f 52 '()))
             (cons 'syntax.comment (make-face-style 8 #f '(italic)))
             (cons 'syntax.string (make-face-style 2 #f '()))
             (cons 'syntax.number (make-face-style 6 #f '()))
