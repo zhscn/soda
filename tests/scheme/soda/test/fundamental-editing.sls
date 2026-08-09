@@ -1798,6 +1798,39 @@
           (when (file-exists? path) (delete-file path))
           (when (file-exists? saved-as) (delete-file saved-as)))))
 
+    ;; Buffer word completion presents the existing CompletionController in
+    ;; the minibuffer and commits the accepted candidate as an ordinary edit.
+    (let ([application (make-soda-application)])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (let* ([state (soda-application-state application)]
+                 [runtime (host-state-command-runtime state)]
+                 [interaction (soda-application-interaction application)])
+            (command-runtime-start!
+              runtime 'fundamental.insert-text
+              (application-command-context application)
+              (list (string->utf8 "alpha alphabet al")))
+            (command-runtime-start-interactive!
+              runtime 'word.complete (application-command-context application))
+            (let ([request
+                   (interaction-session-request
+                     (interaction-service-current interaction))])
+              (unless (and (eq? (interaction-request-kind request)
+                                'word-completion)
+                           (completion-source?
+                             (interaction-request-completion-source request)))
+                (error 'fundamental-editing-tests
+                       "word completion did not use prompt completion presentation")))
+            (interaction-service-submit! interaction "alphabet")
+            (host-state-run! state)
+            (unless (string=?
+                      (buffer-string (soda-application-buffer application))
+                      "alpha alphabet alphabet")
+              (error 'fundamental-editing-tests
+                     "word completion did not replace the active prefix"))))
+        (lambda () (soda-application-close! application))))
+
     ;; A visited file is normalized for editing and encoded from its binding
     ;; metadata on save, preserving CRLF, BOM, and final newline by default.
     (let* ([path (string-append "/tmp/soda-file-format-"

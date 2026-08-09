@@ -48,6 +48,7 @@
           (soda packages spell)
           (soda packages message)
           (soda packages search)
+          (soda packages word-completion)
           (soda packages interaction)
           (soda packages buffer-ui)
           (soda packages command-ui)
@@ -147,6 +148,8 @@
                [_help (make-help-service! host owner buffer-item-actions)]
                [search
                 (make-search-service! host owner)]
+               [word-completion
+                (make-word-completion-service! host owner)]
                [interaction
                 (make-interaction-service! (host-state-command-runtime state) owner)]
                [minibuffer (make-minibuffer-service! host interaction owner)]
@@ -156,6 +159,7 @@
                   (host-state-command-runtime state) owner
                   (list (editor-options-keymap options)
                         (search-keymap search)
+                        (word-completion-keymap word-completion)
                         (message-keymap messages)
                         (spell-keymap spelling)
                         (process-keymap processes)
