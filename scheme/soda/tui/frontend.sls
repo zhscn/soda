@@ -109,7 +109,7 @@
   (define (frontend-reconcile-pointer-capture! value)
     (let ([capture (frontend-pointer-capture value)])
       (when (and capture
-                 (not (host-frontend-surface-hit-current?
+                 (not (host-frontend-pointer-capture-current?
                         (frontend-host-state value)
                         (frontend-surface value) capture)))
         (frontend-pointer-capture-set! value #f))))
@@ -196,6 +196,7 @@
            [phase (pointer-event-phase event)]
            [candidate
             (and render
+                 (or capture (not (memq phase '(move release))))
                  (if (and capture (memq phase '(move release)))
                      (surface-render-hit-test-window
                        render (surface-hit-window-id capture)
@@ -210,7 +211,13 @@
                    (frontend-surface value) candidate))])
       (cond
         [(eq? phase 'press)
-         (frontend-pointer-capture-set! value (and target candidate))]
+         (frontend-pointer-capture-set! value (and target candidate))
+         (when target
+           (host-frontend-dispatch-host!
+             (frontend-host-state value)
+             (make-focus-window-operation
+               (surface-id (frontend-surface value))
+               (surface-hit-window-id candidate))))]
         [(eq? phase 'release)
          (frontend-pointer-capture-set! value #f)])
       (and target (list (car target) (cdr target) candidate))))

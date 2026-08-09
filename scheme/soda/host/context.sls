@@ -18,6 +18,7 @@
   (import
     (except (soda host internal context)
             surface-select-view!
+            surface-select-window!
             surface-split-view!
             surface-remove-view-window!
             surface-push-interaction-view!

@@ -286,6 +286,10 @@
                        [(focus-view)
                         (surface-select-view! surface (dispatcher-views dispatcher)
                                               (host-operation-value operation))]
+                       [(focus-window)
+                        (surface-select-window!
+                          surface (dispatcher-views dispatcher)
+                          (host-operation-value operation))]
                        [(replace-window-view)
                         (let ([value (host-operation-value operation)])
                           (surface-replace-window-view-context!

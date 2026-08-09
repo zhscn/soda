@@ -312,8 +312,20 @@
                    (text-layout-point->display-entry
                      layout local-row local-column)]
                   [document-offset
-                   (text-layout-point->document
-                     layout local-row local-column)]
+                   (or (text-layout-point->document
+                         layout local-row local-column)
+                       (let search ([distance 1])
+                         (and (< distance width)
+                              (or
+                                (let ([left (- local-column distance)])
+                                  (and (>= left 0)
+                                       (text-layout-point->document
+                                         layout local-row left)))
+                                (let ([right (+ local-column distance)])
+                                  (and (< right width)
+                                       (text-layout-point->document
+                                         layout local-row right)))
+                                (search (+ distance 1))))))]
                   [kind (and entry (display-map-entry-kind entry))]
                   [source (and entry (display-map-entry-source entry))])
              (if (surface-render-surface-id render)

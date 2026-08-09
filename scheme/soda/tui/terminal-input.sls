@@ -13,6 +13,7 @@
           terminal-input-enable-sequence
           terminal-input-disable-sequence)
   (import (rnrs)
+          (only (chezscheme) current-time time-second time-nanosecond)
           (soda host input-event))
 
   (define escape-byte #x1b)
@@ -46,11 +47,55 @@
       (mutable pending decoder-pending decoder-pending-set!)
       (mutable paste? decoder-paste? decoder-paste?-set!)
       (mutable paste-chunks decoder-paste-chunks decoder-paste-chunks-set!)
-      (mutable paste-tail decoder-paste-tail decoder-paste-tail-set!)))
+      (mutable paste-tail decoder-paste-tail decoder-paste-tail-set!)
+      (immutable clock decoder-clock)
+      (mutable last-click decoder-last-click decoder-last-click-set!)))
 
-  (define (make-terminal-input-decoder)
-    (%make-terminal-input-decoder
-      (make-bytevector 0) #f '() (make-bytevector 0)))
+  (define (monotonic-milliseconds)
+    (let ([time (current-time 'time-monotonic)])
+      (+ (* (time-second time) 1000)
+         (div (time-nanosecond time) 1000000))))
+
+  (define make-terminal-input-decoder
+    (case-lambda
+      [() (make-terminal-input-decoder monotonic-milliseconds)]
+      [(clock)
+       (unless (procedure? clock)
+         (assertion-violation
+           'make-terminal-input-decoder "clock must be a procedure" clock))
+       (%make-terminal-input-decoder
+         (make-bytevector 0) #f '() (make-bytevector 0) clock #f)]))
+
+  (define click-interval-ms 500)
+
+  (define (with-click-count decoder event)
+    (if (not (and (pointer-event? event)
+                  (memq (pointer-event-phase event) '(press release))))
+        event
+        (let* ([now ((decoder-clock decoder))]
+               [previous (decoder-last-click decoder)]
+               [same?
+                (and previous
+                     (eq? (pointer-event-button event) (car previous))
+                     (= (pointer-event-row event) (cadr previous))
+                     (= (pointer-event-column event) (caddr previous)))]
+               [count
+                (if (eq? (pointer-event-phase event) 'release)
+                    (if same? (list-ref previous 4) 1)
+                    (if (and same? (<= 0 (- now (cadddr previous))
+                                       click-interval-ms))
+                        (+ 1 (list-ref previous 4))
+                        1))])
+          (when (eq? (pointer-event-phase event) 'press)
+            (decoder-last-click-set!
+              decoder
+              (list (pointer-event-button event)
+                    (pointer-event-row event)
+                    (pointer-event-column event) now count)))
+          (make-pointer-event
+            (pointer-event-row event) (pointer-event-column event)
+            (pointer-event-button event) (pointer-event-modifiers event)
+            count (pointer-event-phase event)))))
 
   (define (terminal-input-decoder-pending? decoder)
     (unless (terminal-input-decoder? decoder)
@@ -483,7 +528,9 @@
                                               bytes (+ index 2) end)])
                                       (parse-normal
                                         bytes (+ end 1)
-                                        (if event (cons event events) events))))))]
+                                        (if event
+                                            (cons (with-click-count decoder event) events)
+                                            events))))))]
                          [(= (bytevector-u8-ref bytes (+ index 1)) #x4f)
                           (if (>= (+ index 2) size)
                               (begin

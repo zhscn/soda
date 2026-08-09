@@ -23,6 +23,7 @@
           (soda host input)
           (soda host input-event)
           (soda host operation)
+          (soda host render)
           (soda host view)
           (soda host value)
           (soda packages interaction)
@@ -1020,6 +1021,77 @@
         (command-context-view-id context) (view-state-generation state)
         selection #f #f '() '() #f)))
 
+  (define (replace-primary-selection selection range)
+    (let ([primary (selection-primary selection)])
+      (make-selection
+        (let loop ([remaining (selection-ranges selection)]
+                   [index 0] [result '()])
+          (if (null? remaining)
+              (reverse result)
+              (loop
+                (cdr remaining) (+ index 1)
+                (cons (if (= index primary) range (car remaining)) result))))
+        primary)))
+
+  (define (pointer-word-range text offset)
+    (let ([size (text-size text)])
+      (cond
+        [(and (< offset size) (text-word-character-at? text offset))
+         (make-selection-range
+           (text-backward-word-offset text offset)
+           (text-forward-word-offset text offset))]
+        [(text-word-character-before? text offset)
+         (make-selection-range
+           (text-backward-word-offset text offset)
+           (text-forward-word-offset text offset))]
+        [else (make-selection-range offset offset)])))
+
+  (define (pointer-line-range text offset)
+    (let ([line (car (text-position text offset))])
+      (make-selection-range
+        (text-line-start text line)
+        (text-line-content-end text line)
+        'before 'line '())))
+
+  (define (pointer-selection context)
+    (let ([event (command-context-event context)]
+          [hit (command-context-target context)])
+      (if (not (and (pointer-event? event) (surface-hit? hit)
+                    (surface-hit-document-offset hit)))
+          (command-handled)
+          (let* ([selection (context-selection context)]
+                 [primary (selection-primary-range selection)]
+                 [offset (surface-hit-document-offset hit)]
+                 [phase (pointer-event-phase event)]
+                 [clicks (pointer-event-click-count event)]
+                 [shift? (pointer-event-modifier? event 'shift)]
+                 [ctrl? (pointer-event-modifier? event 'ctrl)])
+            (with-context-text
+              context
+              (lambda (text)
+                (let ([range
+                       (cond
+                         [(eq? phase 'release) primary]
+                         [(eq? phase 'move)
+                          (make-selection-range
+                            (selection-range-anchor primary) offset)]
+                         [(>= clicks 3) (pointer-line-range text offset)]
+                         [(= clicks 2) (pointer-word-range text offset)]
+                         [shift?
+                          (make-selection-range
+                            (selection-range-anchor primary) offset)]
+                         [else (make-selection-range offset offset)])])
+                  (view-selection-transaction
+                    context
+                    (if (and ctrl? (eq? phase 'press))
+                        (make-selection
+                          (append (selection-ranges selection) (list range))
+                          (length (selection-ranges selection)))
+                        (replace-primary-selection selection range))))))))))
+
+  (define (pointer-scroll context amount page?)
+    (scroll-visual context amount page?))
+
   (define (set-mark context)
     (view-selection-transaction context (set-mark-selection (context-selection context))))
 
@@ -1314,6 +1386,14 @@
         "Scroll the Viewport forward by one visual row." 'viewport
         (scroll-visual context 1 #f))
       (install-command!
+        runtime owner 'fundamental.pointer-select (context)
+        "Select document content targeted by a pointer event." 'selection
+        (pointer-selection context))
+      (install-command!
+        runtime owner 'fundamental.pointer-scroll (context amount page?)
+        "Scroll the targeted View from a pointer wheel event." 'viewport
+        (pointer-scroll context amount page?))
+      (install-command!
         runtime owner 'fundamental.recenter (context)
         "Center point vertically in the active Window." 'viewport
         (recenter-viewport context 'center))
@@ -1476,14 +1556,23 @@
       [(pass)
        (let ([event (command-context-event context)])
          (and (pointer-event? event)
-              (eq? (pointer-event-phase event) 'wheel)
-              (case (pointer-event-button event)
-                [(wheel-up)
-                 (make-command-invoke-message
-                   'fundamental.scroll-backward-line context '() #f)]
-                [(wheel-down)
-                 (make-command-invoke-message
-                   'fundamental.scroll-forward-line context '() #f)]
+              (case (pointer-event-phase event)
+                [(wheel)
+                 (let* ([direction
+                         (case (pointer-event-button event)
+                           [(wheel-up) -1] [(wheel-down) 1]
+                           [else 0])]
+                        [page? (pointer-event-modifier? event 'alt)]
+                        [step
+                         (if (pointer-event-modifier? event 'ctrl) 5 1)])
+                   (and (not (zero? direction))
+                        (make-command-invoke-message
+                          'fundamental.pointer-scroll context
+                          (list (* direction step) page?) #f)))]
+                [(press move)
+                 (and (memq (pointer-event-button event) '(left none))
+                      (make-command-invoke-message
+                        'fundamental.pointer-select context '() #f))]
                 [else #f])))]
       [else #f]))
 )

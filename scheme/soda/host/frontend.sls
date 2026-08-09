@@ -3,6 +3,7 @@
           host-frontend-active-view
           host-frontend-surface-message
           host-frontend-surface-hit-current?
+          host-frontend-pointer-capture-current?
           host-frontend-pointer-target
           host-frontend-make-command-context
           host-frontend-resolve-scroll-request!
@@ -139,6 +140,28 @@
                   (surface-hit-viewport hit))
                 (eq? (view-state-configuration (view-state view))
                      (surface-hit-configuration hit))))))
+
+  ;; Pointer capture follows a Window placement rather than a particular
+  ;; document projection.  Buffer, selection, viewport, and decoration
+  ;; updates may produce a new Frame while a button remains held; the next
+  ;; motion is hit-tested against that Frame.  Placement changes still cancel
+  ;; capture so an old coordinate cannot be applied to a different View.
+  (define (host-frontend-pointer-capture-current? state surface hit)
+    (and (host-state? state) (surface? surface) (surface-hit? hit)
+         (equal? (surface-hit-surface-id hit) (surface-id surface))
+         (equal? (surface-hit-surface-size hit) (surface-size surface))
+         (let ([window
+                (find
+                  (lambda (candidate)
+                    (= (window-id candidate) (surface-hit-window-id hit)))
+                  (surface-windows surface))])
+           (and window
+                (= (window-view-id window) (surface-hit-view-id hit))
+                (equal? (window-rectangle window)
+                        (surface-hit-window-rectangle hit))
+                (view-service-ref
+                  (host-state-views state) (surface-hit-view-id hit) #f)
+                #t))))
 
   (define (host-frontend-pointer-target state surface hit)
     (and (host-frontend-surface-hit-current? state surface hit)

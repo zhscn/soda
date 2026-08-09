@@ -1594,6 +1594,11 @@
         (dispatcher-dispatch-host!
           (host-state-dispatch host)
           (make-invalidate-surface-operation (surface-id split-surface)))]
+       [window-focus-update
+        (dispatcher-dispatch-host!
+          (host-state-dispatch host)
+          (make-focus-window-operation
+            (surface-id split-surface) (window-id right)))]
        [generation (surface-generation split-surface)])
   (unless (and (host-update? split-update)
                (= (active-context-view-id (host-update-resolution split-update))
@@ -1634,9 +1639,13 @@
                (equal? (surface-size split-surface) '(16 . 2))
                (host-update? redraw-update)
                (equal? (host-update-damage redraw-update) '(redraw))
-               (= (length host-updates) 9)
-               (eq? (surface-selected-window split-surface) left)
-               (eq? (surface-set-selected-window! split-surface left) left)
+               (host-update? window-focus-update)
+               (= (active-context-window-id
+                    (host-update-resolution window-focus-update))
+                  (window-id right))
+               (= (length host-updates) 10)
+               (eq? (surface-selected-window split-surface) right)
+               (eq? (surface-set-selected-window! split-surface right) right)
                (= (surface-generation split-surface) generation)
                (not (dispatcher-dispatch-host!
                       (host-state-dispatch host)
@@ -2471,6 +2480,26 @@
                (key-event? (car events))
                (eq? (key-event-key (car events)) 'unknown))
     (error 'kernel-tests "invalid SGR mouse report was accepted" events)))
+(let* ([now 0]
+       [click-decoder (make-terminal-input-decoder (lambda () now))]
+       [first
+        (car (terminal-input-decoder-feed!
+               click-decoder (string->utf8 "\x1b;[<0;4;5M")))]
+       [_release
+        (terminal-input-decoder-feed!
+          click-decoder (string->utf8 "\x1b;[<0;4;5m"))]
+       [_second-time (set! now 200)]
+       [second
+        (car (terminal-input-decoder-feed!
+               click-decoder (string->utf8 "\x1b;[<0;4;5M")))]
+       [_expired-time (set! now 800)]
+       [expired
+        (car (terminal-input-decoder-feed!
+               click-decoder (string->utf8 "\x1b;[<0;4;5M")))])
+  (unless (and (= (pointer-event-click-count first) 1)
+               (= (pointer-event-click-count second) 2)
+               (= (pointer-event-click-count expired) 1))
+    (error 'kernel-tests "terminal pointer click aggregation differs")))
 (unless (and (string=? terminal-input-enable-sequence
                        "\x1b;[>7u\x1b;[?2004h\x1b;[?1003h\x1b;[?1006h")
              (string=? terminal-input-disable-sequence
@@ -3974,6 +4003,83 @@
   (owner-close! secondary-owner)
   (soda-application-close! application))
 
+(let* ([application (make-soda-application)]
+       [state (soda-application-state application)]
+       [surface (soda-application-surface application)]
+       [buffer (soda-application-buffer application)]
+       [view (soda-application-view application)]
+       [contents (string->utf8 "hello world\nnext")]
+       [_contents
+        (dispatcher-dispatch!
+          (host-state-dispatch state)
+          (make-transaction-spec
+            (buffer-id buffer) (view-id view)
+            (buffer-state-generation (buffer-state buffer))
+            (make-change-set 0 (list (make-text-change 0 0 contents)))
+            #f '() '()))]
+       [render (render-surface surface (host-state-views state))])
+  (define (pointer-context event)
+    (let* ([hit
+            (surface-render-hit-test
+              render (pointer-event-row event) (pointer-event-column event))]
+           [active (surface-active-context surface (host-state-views state))])
+      (make-command-context
+        #f (surface-id surface) (surface-hit-window-id hit)
+        (view-id view) (buffer-id buffer)
+        (buffer-state buffer) (view-state view)
+        event '() #f hit 'pointer-test)))
+  (define (pointer-message event)
+    (fundamental-input-disposition
+      (pointer-context event) (input-pass)))
+  (define (dispatch-pointer! event)
+    (let ([message (pointer-message event)])
+      (when message
+        (command-runtime-enqueue!
+          (host-state-command-runtime state) message)
+        (host-state-run! state))))
+  (define (primary-range)
+    (selection-primary-range
+      (view-state-selection (view-state view))))
+  (dispatch-pointer! (make-pointer-event 0 1 'left 0 1 'press))
+  (unless (= (selection-range-head (primary-range)) 1)
+    (error 'kernel-tests "single click did not move point"))
+  (dispatch-pointer! (make-pointer-event 0 7 'left 0 2 'press))
+  (unless (and (= (selection-range-from (primary-range)) 6)
+               (= (selection-range-to (primary-range)) 11))
+    (error 'kernel-tests "double click did not select a semantic word"))
+  (dispatch-pointer! (make-pointer-event 0 3 'left 0 3 'press))
+  (unless (and (= (selection-range-from (primary-range)) 0)
+               (= (selection-range-to (primary-range)) 11)
+               (eq? (selection-range-granularity (primary-range)) 'line))
+    (error 'kernel-tests "triple click did not select a logical line"))
+  (dispatch-pointer! (make-pointer-event 0 1 'left 0 1 'press))
+  (dispatch-pointer! (make-pointer-event 0 5 'left 0 0 'move))
+  (dispatch-pointer! (make-pointer-event 0 5 'left 0 1 'release))
+  (unless (and (= (selection-range-anchor (primary-range)) 1)
+               (= (selection-range-head (primary-range)) 5))
+    (error 'kernel-tests "pointer drag did not extend selection"))
+  (dispatch-pointer! (make-pointer-event 0 8 'left 1 1 'press))
+  (unless (= (selection-range-head (primary-range)) 8)
+    (error 'kernel-tests "Shift-click did not extend the primary selection"))
+  (dispatch-pointer! (make-pointer-event 0 10 'left 4 1 'press))
+  (unless (= (length
+               (selection-ranges
+                 (view-state-selection (view-state view))))
+             2)
+    (error 'kernel-tests "Control-click did not add a selection range"))
+  (let ([rows
+         (pointer-message
+           (make-pointer-event 0 0 'wheel-up 4 0 'wheel))]
+        [page
+         (pointer-message
+           (make-pointer-event 0 0 'wheel-down 2 0 'wheel))])
+    (unless (and (eq? (command-invoke-message-name rows)
+                      'fundamental.pointer-scroll)
+                 (equal? (command-invoke-message-arguments rows) '(-5 #f))
+                 (equal? (command-invoke-message-arguments page) '(1 #t)))
+      (error 'kernel-tests "pointer wheel modifier policy differs")))
+  (soda-application-close! application))
+
 ;; Frontend orchestration converts queued Surface input into a published
 ;; InputState and a command-runtime message, then redraws only after the
 ;; dispatcher reports a changed View or Surface.
@@ -4039,6 +4145,14 @@
            "frontend pointer hit did not target its rendered Window"))
   (frontend-dispatch-input!
     frontend (make-pointer-event 0 1 'left 0 1 'press))
+  (let ([state-before-frame (view-state view)])
+    (dispatcher-dispatch-view!
+      (host-state-dispatch host)
+      (make-view-transaction-spec
+        (view-id view) (view-state-generation state-before-frame)
+        (make-selection (list (make-selection-range 3 3)))
+        #f #f '() '() #f)))
+  (frontend-render! frontend)
   (frontend-dispatch-input!
     frontend (make-pointer-event 0 2 'left 0 0 'move))
   (unless (and (= (surface-hit-document-offset

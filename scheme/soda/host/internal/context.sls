@@ -8,6 +8,7 @@
           active-context-interaction-stack
           surface-active-context
           surface-select-view!
+          surface-select-window!
           surface-replace-window-view-context!
           surface-split-view!
           surface-remove-view-window!
@@ -86,6 +87,24 @@
                 (surface-set-selected-window! surface (car leaves))
                 (context-for-window surface views (car leaves))]
                [else (loop (cdr leaves))])))))
+
+  (define (surface-select-window! surface views target-window-id)
+    (unless (and (surface? surface) (view-service? views)
+                 (identity? target-window-id))
+      (assertion-violation 'surface-select-window!
+                           "invalid Surface, ViewService, or Window identity"
+                           surface views target-window-id))
+    (let ([target
+           (find
+             (lambda (window) (= (window-id window) target-window-id))
+             (surface-windows surface))])
+      (and target
+           (if (memq target (window-leaves (surface-root-window surface)))
+               (begin
+                 (surface-set-selected-window! surface target)
+                 (context-for-window surface views target))
+               (and (eq? target (surface-active-window surface))
+                    (surface-active-context surface views))))))
 
   (define (surface-replace-window-view-context! surface views window-id view-id)
     (unless (and (surface? surface) (view-service? views) (identity? window-id)
