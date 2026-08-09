@@ -41,6 +41,7 @@
   (import (rnrs)
           (soda kernel change)
           (soda kernel selection)
+          (soda kernel viewport)
           (soda kernel extension)
           (soda kernel internal field-table)
           (soda kernel value))
@@ -171,6 +172,11 @@
        (unless (boolean? sequential?)
          (assertion-violation
            'make-transaction-spec "sequential flag must be boolean" sequential?))
+       (unless (or (not scroll-request) (scroll-request? scroll-request))
+         (assertion-violation
+           'make-transaction-spec
+           "scroll request must be a ScrollRequest or #f"
+           scroll-request))
        (%make-transaction-spec
          buffer-id origin-view-id start-generation changes selection
          (normalize-state-effect-list 'make-transaction-spec effects)
@@ -231,6 +237,11 @@
         selection))
     (validate-selection-length
       'make-resolved-transaction selection (change-set-new-length changes))
+    (unless (or (not scroll-request) (scroll-request? scroll-request))
+      (assertion-violation
+        'make-resolved-transaction
+        "scroll request must be a ScrollRequest or #f"
+        scroll-request))
     (%make-resolved-transaction
       buffer-id origin-view-id start-generation changes selection
       (normalize-state-effect-list 'make-resolved-transaction effects)

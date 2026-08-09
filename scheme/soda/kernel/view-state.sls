@@ -215,6 +215,11 @@
          (assertion-violation
            'make-view-transaction-spec "viewport must be a Viewport or #f"
            viewport))
+       (unless (or (not scroll-request) (scroll-request? scroll-request))
+         (assertion-violation
+           'make-view-transaction-spec
+           "scroll request must be a ScrollRequest or #f"
+           scroll-request))
        (%make-view-transaction-spec
          view-id start-generation selection viewport input-state
          (normalize-state-effect-list 'make-view-transaction-spec effects)

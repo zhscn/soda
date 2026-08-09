@@ -2033,29 +2033,56 @@
            [state (soda-application-state application)]
            [runtime (host-state-command-runtime state)]
            [view (soda-application-view application)]
-           [options (make-text-layout-options 4 #t)])
+           [surface (soda-application-surface application)]
+           [editing (soda-application-editing application)]
+           [frontend
+            (make-frontend
+              state surface
+              (lambda (active current-view)
+                (fundamental-input-context editing active current-view))
+              (lambda (context disposition)
+                (fundamental-input-disposition context disposition))
+              (lambda (render theme) #f)
+              (make-render-service) default-theme)])
+      (frontend-resize! frontend '(4 . 2))
+      (frontend-step! frontend)
       (command-runtime-start!
         runtime 'fundamental.insert-text (application-command-context application)
         (list (string->utf8 "abcdefghijkl")))
       (command-runtime-start!
         runtime 'fundamental.beginning-of-buffer (application-command-context application))
+      (frontend-step! frontend)
       (let move ([remaining 8])
         (when (> remaining 0)
-          (let ([layout
-                 (layout-snapshot-display-stream
-                   (buffer-state-document
-                     (buffer-state (soda-application-buffer application)))
-                   (view-state-selection (view-state view))
-                   (viewport-first-line (view-state-viewport (view-state view)))
-                   (viewport-visual-row (view-state-viewport (view-state view)))
-                   4 2 (make-decoration-set '()) #f options)])
-            (command-runtime-start!
-              runtime 'fundamental.forward-char
-              (application-command-context application layout)))
+          (frontend-enqueue!
+            frontend
+            (make-surface-input-message
+              (surface-id surface)
+              (make-key-event 'right #f #f #f 0 'press (make-bytevector 0))))
+          (frontend-step! frontend)
           (move (- remaining 1))))
       (unless (= (viewport-visual-row (view-state-viewport (view-state view))) 1)
         (error 'fundamental-editing-tests
                "horizontal motion did not reveal point across a wrapped viewport"))
+      (let move ([keys '(up up down down)])
+        (when (pair? keys)
+          (frontend-enqueue!
+            frontend
+            (make-surface-input-message
+              (surface-id surface)
+              (make-key-event (car keys) #f #f #f 0 'press (make-bytevector 0))))
+          (frontend-step! frontend)
+          (move (cdr keys))))
+      (unless (and (= (selection-range-head
+                        (selection-primary-range
+                          (view-state-selection (view-state view))))
+                      8)
+                   (= (viewport-visual-row
+                        (view-state-viewport (view-state view)))
+                      1))
+        (error 'fundamental-editing-tests
+               "vertical arrow motion did not resolve point reveal requests"))
+      (frontend-close! frontend)
       (soda-application-close! application))
 
     ;; Consecutive vertical commands preserve a desired display column across
@@ -2167,9 +2194,9 @@
                         (selection-primary-range (view-state-selection (view-state view))))
                       8)
                    (= (viewport-first-line (view-state-viewport (view-state view))) 0)
-                   (= (viewport-visual-row (view-state-viewport (view-state view))) 1))
+                   (= (viewport-visual-row (view-state-viewport (view-state view))) 0))
         (error 'fundamental-editing-tests
-               "visual next-line did not cross the rendered boundary"))
+               "visual next-line did not cross the rendered boundary in document space"))
       (let ([layout
              (layout-snapshot-display-stream
                (buffer-state-document (buffer-state buffer))
@@ -2180,13 +2207,13 @@
       (unless (and (= (selection-range-head
                         (selection-primary-range (view-state-selection (view-state view))))
                       4)
-                   (= (viewport-visual-row (view-state-viewport (view-state view))) 1))
+                   (= (viewport-visual-row (view-state-viewport (view-state view))) 0))
         (error 'fundamental-editing-tests
-               "visual previous-line did not retain a visible target row"))
+               "visual previous-line did not retain its target row"))
       (let ([layout
              (layout-snapshot-display-stream
                (buffer-state-document (buffer-state buffer))
-               (view-state-selection (view-state view)) 0 1 4 2
+               (view-state-selection (view-state view)) 0 0 4 2
                (make-decoration-set '()) #f options)])
         (command-runtime-start!
           runtime 'fundamental.previous-line (application-command-context application layout)))

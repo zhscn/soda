@@ -3,6 +3,7 @@
           host-frontend-active-view
           host-frontend-surface-message
           host-frontend-make-command-context
+          host-frontend-resolve-scroll-request!
           host-frontend-enqueue!
           host-frontend-run!
           host-frontend-dispatch-view!
@@ -13,6 +14,12 @@
           host-frontend-publish-render-feedback!
           host-frontend-capture-condition!)
   (import (rnrs)
+          (soda kernel document)
+          (soda kernel extension)
+          (soda kernel selection)
+          (soda kernel state)
+          (soda kernel view-state)
+          (soda kernel viewport)
           (soda host condition)
           (soda host command)
           (soda host context)
@@ -24,7 +31,9 @@
           (soda host render)
           (soda host render-service)
           (soda host runtime)
-          (soda host value))
+          (soda host value)
+          (soda view frame)
+          (soda view text-layout))
 
   ;; Host-owned adapter for presentation loops. Registry traversal and render
   ;; feedback remain host policy rather than becoming frontend policy.
@@ -63,6 +72,59 @@
         (buffer-state buffer)
         (view-state view)
         event sequence prefix-argument active source layout)))
+
+  ;; Resolve a semantic scroll request against the immutable layout last
+  ;; presented for its exact Surface/Window/View occurrence.  Host owns the
+  ;; resulting View publication; text-layout owns the pure coordinate policy.
+  (define (host-frontend-resolve-scroll-request! state active layout request)
+    (unless (and (host-state? state) (active-context? active)
+                 (text-layout? layout) (scroll-request? request))
+      (assertion-violation
+        'host-frontend-resolve-scroll-request!
+        "invalid scroll request resolution input"
+        state active layout request))
+    (if (not (and (eq? (scroll-request-kind request) 'reveal-point)
+                  (equal? (scroll-request-surface-id request)
+                          (active-context-surface-id active))
+                  (equal? (scroll-request-window-id request)
+                          (active-context-window-id active))
+                  (= (scroll-request-view-id request)
+                     (active-context-view-id active))))
+        #f
+        (let* ([view
+                (view-service-ref
+                  (host-state-views state) (active-context-view-id active) #f)]
+               [view-state (and view (view-state view))]
+               [frame (text-layout-frame layout)]
+               [width (frame-width frame)]
+               [height (frame-height frame)])
+          (and view-state (> width 0) (> height 0)
+               (let* ([snapshot
+                       (buffer-state-document (buffer-state (view-buffer view)))]
+                      [text (snapshot-text snapshot)])
+                 (dynamic-wind
+                   (lambda () #f)
+                   (lambda ()
+                     (let* ([options
+                             (configuration-facet
+                               (view-state-configuration view-state)
+                               text-layout-options-facet 'view)]
+                            [point
+                             (selection-range-head
+                               (selection-primary-range
+                                 (view-state-selection view-state)))]
+                            [viewport
+                             (text-layout-reveal-viewport
+                               text options width height
+                               (view-state-viewport view-state) point)])
+                       (and (not (equal? viewport
+                                         (view-state-viewport view-state)))
+                            (dispatcher-dispatch-view!
+                              (host-state-dispatch state)
+                              (make-view-transaction-spec
+                                (view-id view) (view-state-generation view-state)
+                                #f viewport #f '() '() #f)))))
+                   (lambda () (text-close! text))))))))
 
   (define (host-frontend-enqueue! state message)
     (runtime-enqueue! (host-state-runtime state) message))

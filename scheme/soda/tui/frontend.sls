@@ -16,6 +16,7 @@
   (import (rnrs)
           (soda kernel state)
           (soda kernel view-state)
+          (soda kernel viewport)
           (soda host command-runtime)
           (soda host buffer)
           (soda host context)
@@ -77,7 +78,10 @@
       (frontend-update-registration-set!
         value
         (host-frontend-add-update-listener!
-          state (lambda (update) (frontend-dirty?-set! value #t))))
+          state
+          (lambda (update)
+            (frontend-dirty?-set! value #t)
+            (frontend-resolve-scroll-request! value update))))
       (frontend-host-update-registration-set!
         value
         (host-frontend-add-host-listener!
@@ -131,6 +135,22 @@
                                   (view-state-configuration state)))
                         (rendered-view-layout candidate)
                         (find (cdr rendered)))))))))
+
+  ;; Scroll requests are resolved after a command publishes immutable editor
+  ;; state and before the next presentation.  This boundary has both the
+  ;; command's window identity and the last compatible TextLayout, while
+  ;; command packages remain independent of viewport measurement.
+  (define (frontend-resolve-scroll-request! value update)
+    (let ([request (editor-update-scroll-request update)])
+      (when (scroll-request? request)
+        (let ([current (active-view value)])
+          (when current
+            (let* ([active (car current)]
+                   [view (cdr current)]
+                   [layout (active-command-layout value active view)])
+              (when layout
+                (host-frontend-resolve-scroll-request!
+                  (frontend-host-state value) active layout request))))))))
 
   (define (make-active-command-context value active view event sequence prefix-argument)
     (host-frontend-make-command-context

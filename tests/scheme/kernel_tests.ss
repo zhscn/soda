@@ -357,16 +357,18 @@
                (not (text-change? span)))
     (error 'kernel-tests "ChangeDesc retained ChangeSet payload data")))
 (let* ([base (string->utf8 "abcde")]
+       [first-scroll (make-scroll-request 'reveal-point 0 0 0)]
+       [second-scroll (make-scroll-request 'reveal-point 0 0 1)]
        [first-spec
         (make-transaction-spec
           0 #f 0
           (make-change-set 5 (list (make-text-change 1 1 "X")))
-          #f '() '() 'first #f)]
+          #f '() '() first-scroll #f)]
        [second-spec
         (make-transaction-spec
           0 #f 0
           (make-change-set 5 (list (make-text-change 4 4 "Y")))
-          #f '() '() 'second #f)]
+          #f '() '() second-scroll #f)]
        [resolved
         (resolve-transaction-specs (list first-spec second-spec) 5)]
        [sequential-spec
@@ -386,7 +388,7 @@
                  (change-set-apply
                    (resolved-transaction-changes sequential-resolved) base #t)
                  "aXYbcde")
-               (eq? (resolved-transaction-scroll-request resolved) 'second))
+               (eq? (resolved-transaction-scroll-request resolved) second-scroll))
     (error 'kernel-tests "transaction spec resolution differs")))
 (unless
     (guard (condition [else #t])
@@ -400,6 +402,12 @@
         5)
       #f)
   (error 'kernel-tests "out-of-range transaction selection was accepted"))
+(unless
+    (guard (condition [else #t])
+      (make-transaction-spec
+        0 #f 0 (make-change-set 0 '()) #f '() '() 'untyped-scroll-request)
+      #f)
+  (error 'kernel-tests "untyped transaction scroll request was accepted"))
 (unless
     (guard (condition [else #t])
       (resolve-transaction-specs
@@ -1736,7 +1744,7 @@
             (view-id secondary) (view-state-generation old-state)
             #f (make-viewport 3 9) new-input-state '()
             (list (make-annotation 'origin 'input))
-            'nearest))]
+            (make-scroll-request 'reveal-point #f #f (view-id secondary))))]
        [new-state (view-state secondary)])
   (unless (and (editor-update? update)
                (eq? (editor-update-old-buffer-state update)

@@ -478,21 +478,15 @@
                         (motion-range range position)))
                     (selection-ranges selection))
                   (selection-primary selection))]
-               [state (command-context-view-state context)]
-               [layout (command-context-layout context)]
-               [viewport
-                (and (text-layout? layout)
-                     (let ([frame (text-layout-frame layout)])
-                       (and (> (frame-width frame) 0) (> (frame-height frame) 0)
-                            (text-layout-reveal-viewport
-                              text (context-layout-options context)
-                              (frame-width frame) (frame-height frame)
-                              (view-state-viewport state)
-                              (selection-range-head
-                                (selection-primary-range next))))))])
+               [state (command-context-view-state context)])
           (make-view-transaction-spec
             (command-context-view-id context) (view-state-generation state)
-            next viewport #f '() '() #f)))))
+            next #f #f '() '()
+            (make-scroll-request
+              'reveal-point
+              (command-context-surface-id context)
+              (command-context-window-id context)
+              (command-context-view-id context)))))))
 
   (define (move-selection-by context target)
     (with-context-text
@@ -507,21 +501,15 @@
                         (motion-range range position)))
                     (selection-ranges selection))
                   (selection-primary selection))]
-               [state (command-context-view-state context)]
-               [layout (command-context-layout context)]
-               [viewport
-                (and (text-layout? layout)
-                     (let ([frame (text-layout-frame layout)])
-                       (and (> (frame-width frame) 0) (> (frame-height frame) 0)
-                            (text-layout-reveal-viewport
-                              text (context-layout-options context)
-                              (frame-width frame) (frame-height frame)
-                              (view-state-viewport state)
-                              (selection-range-head
-                                (selection-primary-range next))))))])
+               [state (command-context-view-state context)])
           (make-view-transaction-spec
             (command-context-view-id context) (view-state-generation state)
-            next viewport #f '() '() #f)))))
+            next #f #f '() '()
+            (make-scroll-request
+              'reveal-point
+              (command-context-surface-id context)
+              (command-context-window-id context)
+              (command-context-view-id context)))))))
 
   (define (text-character-at text offset)
     (let* ([next (text-next-grapheme-offset text offset)]
@@ -661,35 +649,15 @@
                              (motion-range range (target range goal)) goal)))
                        (selection-ranges selection))
                   (selection-primary selection))]
-               [state (command-context-view-state context)]
-               [primary (selection-primary-range selection)]
-               [primary-goal (vertical-goal-column text layout options primary)]
-               [primary-target (visual-target primary primary-goal)]
-               [viewport
-                (and primary-target width (> width 0)
-                     (let* ([frame (text-layout-frame layout)]
-                            [point (text-layout-document->point
-                                     layout (selection-range-head primary))]
-                            [height (frame-height frame)]
-                            [current (view-state-viewport state)])
-                       (and point (> height 0)
-                            (or (and (positive? delta) (>= (car point) (- height 1)))
-                                (and (negative? delta) (zero? (car point))))
-                            (let* ([top
-                                    (text-layout-visual-position-at
-                                      text options width
-                                      (viewport-first-line current)
-                                      (viewport-visual-row current))]
-                                   [shifted
-                                    (text-layout-visual-step text options width top
-                                                             (if (positive? delta) 1 -1))])
-                              (and shifted
-                                   (make-viewport
-                                     (visual-position-line shifted)
-                                     (visual-position-row shifted)))))))])
+               [state (command-context-view-state context)])
           (make-view-transaction-spec
             (command-context-view-id context) (view-state-generation state)
-            next viewport #f '() '() #f)))))
+            next #f #f '() '()
+            (make-scroll-request
+              'reveal-point
+              (command-context-surface-id context)
+              (command-context-window-id context)
+              (command-context-view-id context)))))))
 
   (define (move-buffer-boundary context end?)
     (move-selection-by
