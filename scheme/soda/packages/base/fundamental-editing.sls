@@ -478,10 +478,21 @@
                         (motion-range range position)))
                     (selection-ranges selection))
                   (selection-primary selection))]
-               [state (command-context-view-state context)])
+               [state (command-context-view-state context)]
+               [layout (command-context-layout context)]
+               [viewport
+                (and (text-layout? layout)
+                     (let ([frame (text-layout-frame layout)])
+                       (and (> (frame-width frame) 0) (> (frame-height frame) 0)
+                            (text-layout-reveal-viewport
+                              text (context-layout-options context)
+                              (frame-width frame) (frame-height frame)
+                              (view-state-viewport state)
+                              (selection-range-head
+                                (selection-primary-range next))))))])
           (make-view-transaction-spec
             (command-context-view-id context) (view-state-generation state)
-            next #f #f '() '() #f)))))
+            next viewport #f '() '() #f)))))
 
   (define (move-selection-by context target)
     (with-context-text
@@ -496,10 +507,21 @@
                         (motion-range range position)))
                     (selection-ranges selection))
                   (selection-primary selection))]
-               [state (command-context-view-state context)])
+               [state (command-context-view-state context)]
+               [layout (command-context-layout context)]
+               [viewport
+                (and (text-layout? layout)
+                     (let ([frame (text-layout-frame layout)])
+                       (and (> (frame-width frame) 0) (> (frame-height frame) 0)
+                            (text-layout-reveal-viewport
+                              text (context-layout-options context)
+                              (frame-width frame) (frame-height frame)
+                              (view-state-viewport state)
+                              (selection-range-head
+                                (selection-primary-range next))))))])
           (make-view-transaction-spec
             (command-context-view-id context) (view-state-generation state)
-            next #f #f '() '() #f)))))
+            next viewport #f '() '() #f)))))
 
   (define (text-character-at text offset)
     (let* ([next (text-next-grapheme-offset text offset)]

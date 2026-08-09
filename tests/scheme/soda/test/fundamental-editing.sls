@@ -2010,6 +2010,50 @@
                  "vertical movement did not follow presented soft-wrap rows")))
       (soda-application-close! application))
 
+    ;; An off-screen point is absent from the terminal projection.  It must
+    ;; not be represented by a synthetic cursor in the frame's final cell.
+    (let* ([document (make-document "zero\none\ntwo\nthree")]
+           [snapshot (document-snapshot document)]
+           [selection (make-selection (list (make-selection-range 14 14)))]
+           [layout (layout-text-snapshot snapshot selection 0 8 2)])
+      (unless (and (not (text-layout-cursor-row layout))
+                   (not (text-layout-cursor-column layout)))
+        (error 'fundamental-editing-tests
+               "off-screen point was clamped to the frame boundary"))
+      (snapshot-close! snapshot)
+      (document-close! document))
+
+    ;; Horizontal point motion crosses visual viewport boundaries through the
+    ;; shared reveal projection instead of leaving point off screen.
+    (let* ([application (make-soda-application)]
+           [state (soda-application-state application)]
+           [runtime (host-state-command-runtime state)]
+           [view (soda-application-view application)]
+           [options (make-text-layout-options 4 #t)])
+      (command-runtime-start!
+        runtime 'fundamental.insert-text (application-command-context application)
+        (list (string->utf8 "abcdefghijkl")))
+      (command-runtime-start!
+        runtime 'fundamental.beginning-of-buffer (application-command-context application))
+      (let move ([remaining 8])
+        (when (> remaining 0)
+          (let ([layout
+                 (layout-snapshot-display-stream
+                   (buffer-state-document
+                     (buffer-state (soda-application-buffer application)))
+                   (view-state-selection (view-state view))
+                   (viewport-first-line (view-state-viewport (view-state view)))
+                   (viewport-visual-row (view-state-viewport (view-state view)))
+                   4 2 (make-decoration-set '()) #f options)])
+            (command-runtime-start!
+              runtime 'fundamental.forward-char
+              (application-command-context application layout)))
+          (move (- remaining 1))))
+      (unless (= (viewport-visual-row (view-state-viewport (view-state view))) 1)
+        (error 'fundamental-editing-tests
+               "horizontal motion did not reveal point across a wrapped viewport"))
+      (soda-application-close! application))
+
     ;; Consecutive vertical commands preserve a desired display column across
     ;; short rows; a horizontal command establishes a fresh desired column.
     (let* ([application (make-soda-application)]

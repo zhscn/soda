@@ -20,6 +20,7 @@
           text-layout-document-visual-position
           text-layout-visual-position-at
           text-layout-visual-step
+          text-layout-reveal-viewport
           make-text-layout-options
           text-layout-options?
           text-layout-options-tab-width
@@ -48,6 +49,7 @@
           (soda kernel range-set)
           (soda kernel selection)
           (soda kernel value)
+          (soda kernel viewport)
           (soda ffi unicode)
           (soda view decoration)
           (soda view display)
@@ -308,6 +310,42 @@
             (let ([next (text-layout-visual-adjacent-position
                           text options width current (if (negative? delta) -1 1) goal)])
               (loop (or next current) (- remaining 1)))))))
+
+  ;; Return the nearest Viewport which contains OFFSET.  Commands describe
+  ;; point motion in document coordinates; this pure projection translates
+  ;; that result into visual-row scrolling without giving packages ownership
+  ;; of View placement or renderer state.
+  (define (text-layout-reveal-viewport text options width height viewport offset)
+    (unless (and (text? text) (text-layout-options? options)
+                 (offset? width) (> width 0) (offset? height) (> height 0)
+                 (viewport? viewport) (offset? offset) (<= offset (text-size text)))
+      (assertion-violation 'text-layout-reveal-viewport
+                           "invalid point reveal request"
+                           text options width height viewport offset))
+    (let* ([top
+           (text-layout-visual-position-at
+              text options width
+              (min (viewport-first-line viewport) (- (text-line-count text) 1))
+              (viewport-visual-row viewport))]
+           [point (text-layout-document-visual-position text options width offset)]
+           [bottom (text-layout-visual-step text options width top (- height 1))]
+           [before-top?
+            (or (< (visual-position-line point) (visual-position-line top))
+                (and (= (visual-position-line point) (visual-position-line top))
+                     (< (visual-position-row point) (visual-position-row top))))]
+           [after-bottom?
+            (or (> (visual-position-line point) (visual-position-line bottom))
+                (and (= (visual-position-line point) (visual-position-line bottom))
+                     (> (visual-position-row point) (visual-position-row bottom))))])
+      (cond
+        [before-top?
+         (make-viewport (visual-position-line point) (visual-position-row point))]
+        [after-bottom?
+         (let ([next-top
+                (text-layout-visual-step text options width point (- 1 height))])
+           (make-viewport
+             (visual-position-line next-top) (visual-position-row next-top)))]
+        [else viewport])))
 
   ;; This View facet is the sole configuration path for terminal text layout.
   ;; Higher-precedence providers are ordered first by Configuration.
@@ -750,12 +788,12 @@
                 [capacity (* width layout-height)]
                 [cursor-row
                  (and (> width 0) (> layout-height 0)
-                      (cond [cell (div (min cell (- capacity 1)) width)]
-                            [(= caret 0) 0]
+                      (cond [(and cell (< cell capacity)) (div cell width)]
+                            [(and (= caret 0) (zero? visual-row)) 0]
                             [else #f]))]
                 [cursor-column
                  (and cursor-row
-                      (if cell (mod (min cell (- capacity 1)) width) 0))])
+                      (if cell (mod cell width) 0))])
            (text-layout-drop-rows
              (make-text-layout frame map cursor-row cursor-column complete?)
              visual-row)))]))
