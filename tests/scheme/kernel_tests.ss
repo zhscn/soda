@@ -46,6 +46,7 @@
         (soda ffi tree-sitter)
         (soda bootstrap)
         (soda packages base fundamental-editing)
+        (soda packages analysis-ui)
         (soda packages buffer-ui)
         (soda packages interaction)
         (soda packages process)
@@ -1088,6 +1089,29 @@
     (error 'kernel-tests "AnalysisProvider publication contract differs"))
   (snapshot-close! snapshot))
 
+(let* ([result
+        (make-analysis-result
+          'test.highlight 3 0
+          (make-range-set
+            (list (make-range-value 0 5 'comment)
+                  (make-range-value 8 10 'number)))
+          '((language . scheme)))]
+       [decorations
+        (analysis-result->decorations
+          result (list (cons 0 3) (cons 2 5))
+          (lambda (range metadata)
+            (and (eq? (range-value-value range) 'comment)
+                 (eq? (cdr (assq 'language metadata)) 'scheme)
+                 (make-face-decoration 'syntax.comment 10))))]
+       [ranges (range-set-ranges decorations)])
+  (unless (and (= (length ranges) 1)
+               (= (range-value-from (car ranges)) 0)
+               (= (range-value-to (car ranges)) 5)
+               (eq? (face-decoration-face (range-value-value (car ranges)))
+                    'syntax.comment))
+    (error 'kernel-tests
+           "visible AnalysisResult projection duplicated or missed a range")))
+
 (define buffer
   (buffer-service-create!
     (host-state-buffers host) owner "*kernel*" document configuration))
@@ -1177,6 +1201,43 @@
                  "stale AnalysisResult replaced the current revision"))))
     (unless (= cancel-count 1)
       (error 'kernel-tests "completed analysis task was cancelled")))
+  (let* ([plugin
+          (make-analysis-decoration-plugin
+            package-host 'test.service
+            (lambda (range metadata)
+              (and (eq? (range-value-value range) 'current)
+                   (make-face-decoration 'syntax.current 10))))]
+         [configuration
+          (make-configuration
+            (list (make-facet-provider view-plugins-facet (list plugin))))]
+         [visible-view
+          (view-service-create!
+            (host-state-views host) provider-owner analysis-buffer configuration)]
+         [outside-view
+          (view-service-create!
+            (host-state-views host) provider-owner analysis-buffer configuration)])
+    (view-service-publish-occurrences!
+      (host-state-views host) (view-id visible-view)
+      (list
+        (make-view-occurrence
+          1 1 (view-id visible-view) '(0 0 2 1) default-viewport
+          (list (cons 0 1)) 0)))
+    (view-service-publish-occurrences!
+      (host-state-views host) (view-id outside-view)
+      (list
+        (make-view-occurrence
+          1 2 (view-id outside-view) '(0 0 2 1) default-viewport
+          (list (cons 3 6)) 0)))
+    (unless (and (= (length
+                      (range-set-ranges
+                        (view-projection-decorations
+                          (view-projection visible-view))))
+                    1)
+                 (range-set-empty?
+                   (view-projection-decorations
+                     (view-projection outside-view))))
+      (error 'kernel-tests
+             "shared analysis did not retain View-local visible projection")))
   (package-host-request-analysis!
     package-host (buffer-id analysis-buffer) 'test.service)
   (let* ([pending (car starts)]
