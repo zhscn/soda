@@ -15,6 +15,7 @@
           runtime-request-live?
           runtime-enqueue-request!
           runtime-pending?
+          runtime-discard!
           runtime-drain!
           runtime-close!)
   (import (rnrs)
@@ -90,6 +91,19 @@
     (unless (runtime? runtime)
       (assertion-violation 'runtime-pending? "expected a runtime" runtime))
     (or (pair? (runtime-front runtime)) (pair? (runtime-back runtime))))
+
+  (define (runtime-discard! runtime predicate)
+    (unless (and (runtime? runtime) (procedure? predicate))
+      (assertion-violation 'runtime-discard!
+                           "expected a runtime and predicate" runtime predicate))
+    (let* ([old-front (runtime-front runtime)]
+           [old-back (runtime-back runtime)]
+           [new-front (filter (lambda (item) (not (predicate item))) old-front)]
+           [new-back (filter (lambda (item) (not (predicate item))) old-back)])
+      (runtime-front-set! runtime new-front)
+      (runtime-back-set! runtime new-back)
+      (- (+ (length old-front) (length old-back))
+         (+ (length new-front) (length new-back)))))
 
   (define (runtime-next-item! runtime)
     (when (null? (runtime-front runtime))

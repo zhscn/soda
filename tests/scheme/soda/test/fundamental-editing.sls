@@ -2527,6 +2527,45 @@
                      (equal? rows '(3 2 1 0)))
           (error 'fundamental-editing-tests
                  "a burst of vertical input did not preserve visible motion feedback" rows)))
+      (command-runtime-start!
+        (host-state-command-runtime state) 'fundamental.end-of-buffer
+        (application-command-context application))
+      (frontend-step! frontend)
+      (do ([index 0 (+ index 1)])
+          ((= index 3))
+        (frontend-enqueue!
+          frontend
+          (make-surface-input-message
+            (surface-id surface)
+            (make-key-event 'up #f #f #f 0 'repeat (make-bytevector 0)))))
+      (frontend-step! frontend)
+      (unless (= (selection-range-head
+                   (selection-primary-range (view-state-selection (view-state view))))
+                 5)
+        (error 'fundamental-editing-tests
+               "queued key repeats were not compacted to current input state"))
+      (command-runtime-start!
+        (host-state-command-runtime state) 'fundamental.end-of-buffer
+        (application-command-context application))
+      (frontend-step! frontend)
+      (do ([index 0 (+ index 1)])
+          ((= index 3))
+        (frontend-enqueue!
+          frontend
+          (make-surface-input-message
+            (surface-id surface)
+            (make-key-event 'up #f #f #f 0 'repeat (make-bytevector 0)))))
+      (frontend-enqueue!
+        frontend
+        (make-surface-input-message
+          (surface-id surface)
+          (make-key-event 'up #f #f #f 0 'release (make-bytevector 0))))
+      (frontend-step! frontend)
+      (unless (= (selection-range-head
+                   (selection-primary-range (view-state-selection (view-state view))))
+                 7)
+        (error 'fundamental-editing-tests
+               "released vertical input executed queued repeat debt"))
       (frontend-close! frontend)
       (soda-application-close! application))
 

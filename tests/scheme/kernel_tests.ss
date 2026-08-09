@@ -1697,7 +1697,7 @@
                (eq? (key-event-key (car events)) 'escape))
     (error 'kernel-tests "Escape flush differs" events)))
 (unless (and (string=? terminal-input-enable-sequence
-                       "\x1b;[>5u\x1b;[?2004h")
+                       "\x1b;[>7u\x1b;[?2004h")
              (string=? terminal-input-disable-sequence
                        "\x1b;[<u\x1b;[?2004l"))
   (error 'kernel-tests "terminal input protocol sequences differ"))

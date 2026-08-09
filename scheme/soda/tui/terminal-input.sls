@@ -20,7 +20,7 @@
   ;; Alternate-key reporting preserves shifted/base-layout codepoints while
   ;; disambiguation makes control keys unambiguous.  Protocol state is stacked
   ;; so a containing terminal application can restore its own flags.
-  (define kitty-keyboard-enable-sequence "\x1b;[>5u")
+  (define kitty-keyboard-enable-sequence "\x1b;[>7u")
   (define kitty-keyboard-disable-sequence "\x1b;[<u")
   (define bracketed-paste-enable-sequence "\x1b;[?2004h")
   (define bracketed-paste-disable-sequence "\x1b;[?2004l")
