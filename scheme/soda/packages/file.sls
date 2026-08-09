@@ -2,6 +2,7 @@
   (export make-file-service!
           file-service?
           file-service-resource
+          file-service-format
           file-service-conflict
           file-service-recovery
           file-service-start-recovery!
@@ -18,6 +19,9 @@
           file-conflict-kind
           file-conflict-status
           file-backup-enabled?
+          file-newline-policy
+          file-bom-policy
+          file-final-newline-policy
           file-keymap)
   (import (rnrs)
           (only (chezscheme) current-directory get-process-id)
@@ -45,6 +49,7 @@
           (soda packages buffer-ui)
           (soda packages completion)
           (soda packages file-watch)
+          (soda packages file-format)
           (soda packages interaction)
           (soda packages recovery)
           (soda packages resource)
@@ -116,7 +121,7 @@
                   best))))))
 
   (define-record-type file-binding
-    (fields resource version lock))
+    (fields resource version lock format))
 
   (define-record-type
     (file-conflict %make-file-conflict file-conflict?)
@@ -127,10 +132,10 @@
     (fields path token))
 
   (define-record-type file-load
-    (fields buffer-id resource version discard-history?))
+    (fields buffer-id resource version format discard-history?))
 
   (define-record-type file-write
-    (fields buffer-id resource contents expected-version rebind?))
+    (fields buffer-id resource contents format expected-version rebind?))
 
   (define-record-type file-visit
     (fields context resource))
@@ -159,6 +164,16 @@
 
   (define file-backup-compartment (make-compartment 'file-backup 'buffer))
 
+  (define file-newline-facet
+    (make-facet 'file-newline 'buffer 'preserve
+                (lambda (values) (first-value values 'preserve)) eq? eq?))
+  (define file-bom-facet
+    (make-facet 'file-bom 'buffer 'preserve
+                (lambda (values) (first-value values 'preserve)) eq? eq?))
+  (define file-final-newline-facet
+    (make-facet 'file-final-newline 'buffer 'preserve
+                (lambda (values) (first-value values 'preserve)) eq? eq?))
+
   ;; A lock conflict is Buffer-local.  The compartment prevents this safety
   ;; policy from leaking into the next file visited from a read-only Buffer.
   (define file-lock-read-only-compartment
@@ -166,6 +181,15 @@
 
   (define (file-backup-enabled? configuration)
     (configuration-facet configuration file-backup-facet 'buffer))
+
+  (define (file-newline-policy configuration)
+    (configuration-facet configuration file-newline-facet 'buffer))
+
+  (define (file-bom-policy configuration)
+    (configuration-facet configuration file-bom-facet 'buffer))
+
+  (define (file-final-newline-policy configuration)
+    (configuration-facet configuration file-final-newline-facet 'buffer))
 
   (define (make-file-backup-extension enabled?)
     (unless (boolean? enabled?)
@@ -182,13 +206,39 @@
             (member (string-downcase input) '("false" "no" "off" "0"))) #f]
       [else 'invalid]))
 
+  (define (parse-symbol-policy input allowed)
+    (let ([value
+           (cond [(symbol? input) input]
+                 [(string? input) (string->symbol (string-downcase input))]
+                 [else 'invalid])])
+      (if (memq value allowed) value 'invalid)))
+
   (define (register-file-settings! host owner)
     (package-host-register-setting-schema!
       host owner
       (make-setting-schema
         'file.backup 'boolean #f '(buffer) parse-backup-policy #f
         (lambda (enabled? scope)
-          (make-facet-provider file-backup-facet enabled?)))))
+          (make-facet-provider file-backup-facet enabled?))))
+    (package-host-register-setting-schema!
+      host owner
+      (make-setting-schema
+        'file.newline 'symbol 'preserve '(buffer)
+        (lambda (input) (parse-symbol-policy input '(preserve lf crlf))) #f
+        (lambda (value scope) (make-facet-provider file-newline-facet value))))
+    (package-host-register-setting-schema!
+      host owner
+      (make-setting-schema
+        'file.bom 'symbol 'preserve '(buffer)
+        (lambda (input) (parse-symbol-policy input '(preserve yes no))) #f
+        (lambda (value scope) (make-facet-provider file-bom-facet value))))
+    (package-host-register-setting-schema!
+      host owner
+      (make-setting-schema
+        'file.final-newline 'symbol 'preserve '(buffer)
+        (lambda (input) (parse-symbol-policy input '(preserve yes no))) #f
+        (lambda (value scope)
+          (make-facet-provider file-final-newline-facet value)))))
 
   (define (buffer-id? value)
     (and (integer? value) (exact? value) (>= value 0)))
@@ -411,6 +461,12 @@
           (file-binding-resource binding)
           (if (null? default) #f (car default)))))
 
+  (define (file-service-format service buffer-id . default)
+    (let ([binding (file-service-binding service buffer-id #f)])
+      (if binding
+          (file-binding-format binding)
+          (if (null? default) #f (car default)))))
+
   (define (file-service-conflict service buffer-id . default)
     (unless (and (file-service? service) (buffer-id? buffer-id))
       (assertion-violation 'file-service-conflict
@@ -464,11 +520,18 @@
   (define set-resource!
     (case-lambda
       [(service buffer-id resource version)
-       (set-resource! service buffer-id resource version #f #f)]
+       (set-resource! service buffer-id resource version #f
+                      (make-default-file-format) #f)]
       [(service buffer-id resource version lock)
-       (set-resource! service buffer-id resource version lock #f)]
-      [(service buffer-id resource version lock local?)
-       (let ([binding (make-file-binding resource version lock)])
+       (set-resource! service buffer-id resource version lock
+                      (make-default-file-format) #f)]
+      [(service buffer-id resource version lock format)
+       (set-resource! service buffer-id resource version lock format #f)]
+      [(service buffer-id resource version lock format local?)
+       (unless (file-format? format)
+         (assertion-violation 'set-resource!
+                              "expected file format metadata" format))
+       (let ([binding (make-file-binding resource version lock format)])
          (hashtable-set! (file-service-resources service) buffer-id binding)
          (file-watch-service-update!
            (file-service-watch-service service) buffer-id
@@ -608,8 +671,11 @@
   (define (resource-contents resource)
     (let ([path (resource-locator resource)])
       (if (vfs-file-exists? path)
-          (values (vfs-read-file path) (vfs-stat-path path))
-          (values (empty-bytes) #f))))
+          (call-with-values
+            (lambda () (decode-file-contents (vfs-read-file path)))
+            (lambda (contents format)
+              (values contents (vfs-stat-path path) format)))
+          (values (empty-bytes) #f (make-default-file-format)))))
 
   ;; Loading a Resource and displaying it are separate lifecycle actions.
   ;; Location resolution uses this operation without changing any Window;
@@ -626,7 +692,7 @@
               (lambda ()
                 (call-with-values
                   (lambda () (resource-contents resource))
-                  (lambda (contents version)
+                  (lambda (contents version format)
                     (let ([created
                            (package-host-create-buffer!
                              host (file-service-owner service)
@@ -634,7 +700,8 @@
                              (make-document contents)
                              (file-buffer-configuration
                                service resource context (not lock)))])
-                      (set-resource! service (buffer-id created) resource version lock)
+                      (set-resource!
+                        service (buffer-id created) resource version lock format)
                       (when (file-service-history service)
                         (history-mark-saved! (file-service-history service)
                                              (buffer-id created)))
@@ -685,11 +752,25 @@
       (make-command-definition
         name procedure owner documentation 'file (make-interactive-plan readers))))
 
-  (define (make-file-write-effect buffer-id document resource version rebind?)
-    (make-command-effect
-      'file.write
-      (make-file-write
-        buffer-id resource (snapshot-bytevector document) version rebind?)))
+  (define (encode-buffer-for-write service buffer-id state)
+    (let* ([binding (file-service-binding service buffer-id #f)]
+           [format (if binding (file-binding-format binding)
+                       (make-default-file-format))]
+           [configuration (buffer-state-configuration state)])
+      (encode-file-contents
+        (snapshot-bytevector (buffer-state-document state)) format
+        (file-newline-policy configuration)
+        (file-bom-policy configuration)
+        (file-final-newline-policy configuration))))
+
+  (define (make-file-write-effect service buffer-id state resource version rebind?)
+    (call-with-values
+      (lambda () (encode-buffer-for-write service buffer-id state))
+      (lambda (contents format)
+        (make-command-effect
+          'file.write
+          (make-file-write
+            buffer-id resource contents format version rebind?)))))
 
   (define (toggle-backup context)
     (let* ([buffer-state (command-context-buffer-state context)]
@@ -841,7 +922,7 @@
     (let ([recovery (file-service-recovery service)])
       (when recovery (recovery-service-clear-buffer! recovery buffer-id))))
 
-  (define (replace-live-buffer-contents! service buffer contents version)
+  (define (replace-live-buffer-contents! service buffer contents version format)
     (let* ([state (buffer-state buffer)]
            [length (snapshot-byte-size (buffer-state-document state))])
       (package-host-dispatch!
@@ -852,7 +933,7 @@
       (let* ([binding (file-service-binding service (buffer-id buffer))]
              [resource (file-binding-resource binding)])
         (set-resource! service (buffer-id buffer) resource version
-                       (file-binding-lock binding) #f))
+                       (file-binding-lock binding) format #f))
       (when (file-service-history service)
         (history-discard-buffer! (file-service-history service) (buffer-id buffer))
         (history-mark-saved! (file-service-history service) (buffer-id buffer)))
@@ -866,20 +947,24 @@
         (assertion-violation 'file.resolve-external-change
                              "cannot reload a deleted file"
                              (resource-locator resource)))
-      (let* ([contents (vfs-read-file (resource-locator resource))]
-             [after (current-resource-version resource)])
-        (unless (file-version=? before after)
-          (assertion-violation 'file.resolve-external-change
-                               "file changed while it was being reloaded"
-                               (resource-locator resource)))
-        (let ([buffer
-               (package-host-buffer-ref
-                 (file-service-host service) (file-conflict-buffer-id conflict) #f)])
-          (unless buffer
-            (assertion-violation 'file.resolve-external-change
-                                 "conflicted Buffer is no longer live" conflict))
-          (replace-live-buffer-contents! service buffer contents after)
-          (clear-conflict! service (buffer-id buffer))))))
+      (call-with-values
+        (lambda ()
+          (decode-file-contents (vfs-read-file (resource-locator resource))))
+        (lambda (contents format)
+          (let ([after (current-resource-version resource)])
+            (unless (file-version=? before after)
+              (assertion-violation 'file.resolve-external-change
+                                   "file changed while it was being reloaded"
+                                   (resource-locator resource)))
+            (let ([buffer
+                   (package-host-buffer-ref
+                     (file-service-host service)
+                     (file-conflict-buffer-id conflict) #f)])
+              (unless buffer
+                (assertion-violation 'file.resolve-external-change
+                                     "conflicted Buffer is no longer live" conflict))
+              (replace-live-buffer-contents! service buffer contents after format)
+              (clear-conflict! service (buffer-id buffer))))))))
 
   (define (write-current-buffer! service conflict)
     (let* ([resource (file-conflict-resource conflict)]
@@ -891,21 +976,25 @@
       (unless buffer
         (assertion-violation 'file.resolve-external-change
                              "conflicted Buffer is no longer live" conflict))
-      (let ([path (resource-locator resource)])
+      (let ([path (resource-locator resource)]
+            [state (buffer-state buffer)])
         (when (and (file-backup-enabled?
                      (buffer-state-configuration (buffer-state buffer)))
                    (vfs-file-exists? path))
           (vfs-write-file (file-backup-path path) (vfs-read-file path)))
-        (vfs-write-file
-          path (snapshot-bytevector (buffer-state-document (buffer-state buffer))))
-        (let* ([binding (file-service-binding service (buffer-id buffer))]
-               [version (vfs-stat-path path)])
-          (set-resource! service (buffer-id buffer) resource version
-                         (file-binding-lock binding) #t)
-          (when (file-service-history service)
-            (history-mark-saved! (file-service-history service) (buffer-id buffer)))
-          (clear-recovery! service (buffer-id buffer))
-          (clear-conflict! service (buffer-id buffer))))))
+        (call-with-values
+          (lambda () (encode-buffer-for-write service (buffer-id buffer) state))
+          (lambda (contents format)
+            (vfs-write-file path contents)
+            (let* ([binding (file-service-binding service (buffer-id buffer))]
+                   [version (vfs-stat-path path)])
+              (set-resource! service (buffer-id buffer) resource version
+                             (file-binding-lock binding) format #t)
+              (when (file-service-history service)
+                (history-mark-saved!
+                  (file-service-history service) (buffer-id buffer)))
+              (clear-recovery! service (buffer-id buffer))
+              (clear-conflict! service (buffer-id buffer))))))))
 
   (define (save-conflicted-buffer-as! service conflict destination expected-destination)
     (let* ([source (file-conflict-resource conflict)]
@@ -942,15 +1031,19 @@
         (dynamic-wind
           (lambda () #f)
           (lambda ()
-            (vfs-write-file
-              (resource-locator destination)
-              (snapshot-bytevector
-                (buffer-state-document (buffer-state buffer))))
-            (package-host-rebind-buffer-key! host (file-buffer-key destination) buffer)
-            (set-resource!
-              service (buffer-id buffer) destination
-              (vfs-stat-path (resource-locator destination))
-              (if same-resource? (file-binding-lock old-binding) new-lock) #t)
+            (call-with-values
+              (lambda ()
+                (encode-buffer-for-write
+                  service (buffer-id buffer) (buffer-state buffer)))
+              (lambda (contents format)
+                (vfs-write-file (resource-locator destination) contents)
+                (package-host-rebind-buffer-key!
+                  host (file-buffer-key destination) buffer)
+                (set-resource!
+                  service (buffer-id buffer) destination
+                  (vfs-stat-path (resource-locator destination))
+                  (if same-resource? (file-binding-lock old-binding) new-lock)
+                  format #t)))
             (set! written? #t)
             (unless same-resource?
               (release-file-lock! (file-binding-lock old-binding)))
@@ -1148,7 +1241,8 @@
             (let ([binding (file-service-binding service (file-load-buffer-id request) #f)])
               (set-resource! service (file-load-buffer-id request)
                              (file-load-resource request) (file-load-version request)
-                             (and binding (file-binding-lock binding))))
+                             (and binding (file-binding-lock binding))
+                             (file-load-format request)))
             (clear-conflict! service (file-load-buffer-id request))
             (when (and (file-load-discard-history? request) history)
               (history-discard-buffer! history (file-load-buffer-id request)))
@@ -1203,7 +1297,7 @@
                                    (if transfer-lock?
                                        new-lock
                                        (and binding (file-binding-lock binding)))
-                                   #t)
+                                   (file-write-format request) #t)
                     (clear-conflict! service (file-write-buffer-id request))
                     (set! written? #t)
                     (when transfer-lock?
@@ -1230,14 +1324,18 @@
             ;; Reading is an external effect.  The actual edit returns through
             ;; the ordinary fundamental command, retaining its multi-selection
             ;; mapping, History integration, and transaction boundary.
-            (command-runtime-enqueue!
-              runtime
-              (make-command-invoke-message
-                'fundamental.insert-text
-                (file-insert-context request)
-                (list (vfs-read-file
-                        (resource-locator (file-insert-resource request))))
-                #f)))))
+            (call-with-values
+              (lambda ()
+                (decode-file-contents
+                  (vfs-read-file
+                    (resource-locator (file-insert-resource request)))))
+              (lambda (contents ignored-format)
+                (command-runtime-enqueue!
+                  runtime
+                  (make-command-invoke-message
+                    'fundamental.insert-text
+                    (file-insert-context request)
+                    (list contents) #f)))))))
       (install-file-command! runtime owner 'file.visit "Visit a file in the active Window."
         (list (make-file-name-reader "Visit file: "))
         (lambda (context path)
@@ -1256,13 +1354,18 @@
             (if (not binding)
                 (command-handled)
                 (let* ([resource (file-binding-resource binding)]
-                       [version (vfs-stat-path (resource-locator resource))]
-                       [contents (vfs-read-file (resource-locator resource))])
-                  (list
-                    (replace-buffer-contents context contents)
-                    (make-command-effect 'file.load
-                      (make-file-load (command-context-buffer-id context)
-                                      resource version #t))))))))
+                       [version (vfs-stat-path (resource-locator resource))])
+                  (call-with-values
+                    (lambda ()
+                      (decode-file-contents
+                        (vfs-read-file (resource-locator resource))))
+                    (lambda (contents format)
+                      (list
+                        (replace-buffer-contents context contents)
+                        (make-command-effect 'file.load
+                          (make-file-load
+                            (command-context-buffer-id context)
+                            resource version format #t))))))))))
       (install-file-command! runtime owner 'file.toggle-backup
         "Toggle adjacent backup creation before writing an existing file."
         '()
@@ -1275,8 +1378,9 @@
                 (if (or (null? arguments)
                         (and (pair? arguments) (eq? (car arguments) 'overwrite)))
                     (make-file-write-effect
+                      service
                       (command-context-buffer-id context)
-                      (buffer-state-document (command-context-buffer-state context))
+                      (command-context-buffer-state context)
                       (file-binding-resource binding) (file-binding-version binding) #f)
                     (command-handled))
                 (if (or (null? arguments) (not (string? (car arguments)))
@@ -1285,8 +1389,9 @@
                     (command-handled)
                     (let ([resource (canonical-file-resource (car arguments))])
                       (make-file-write-effect
+                        service
                         (command-context-buffer-id context)
-                        (buffer-state-document (command-context-buffer-state context))
+                        (command-context-buffer-state context)
                         resource #f #t)))))))
       (install-file-command! runtime owner 'file.save-as "Write the active Buffer to a file and visit it."
         (list (make-file-name-reader "Write file: ") (make-overwrite-reader service))
@@ -1297,13 +1402,9 @@
           (let ([decision (if (null? decisions) 'overwrite (car decisions))])
             (if (eq? decision 'overwrite)
                 (let ([resource (canonical-file-resource path)])
-                  (make-command-effect
-                    'file.write
-                    (make-file-write
-                      (command-context-buffer-id context) resource
-                      (snapshot-bytevector
-                        (buffer-state-document (command-context-buffer-state context)))
-                      #f #t)))
+                  (make-file-write-effect
+                    service (command-context-buffer-id context)
+                    (command-context-buffer-state context) resource #f #t))
                 (command-handled)))))
       (install-file-command! runtime owner 'file.close "Close the active file Buffer."
         (list (make-buffer-close-target-reader)
@@ -1319,8 +1420,9 @@
                    (if binding
                        (list
                          (make-file-write-effect
+                           service
                            target-id
-                           (buffer-state-document (buffer-state target))
+                           (buffer-state target)
                            (file-binding-resource binding) (file-binding-version binding) #f)
                          (make-command-effect 'file.close (make-file-close target-id)))
                        (make-command-effect 'file.close (make-file-close target-id)))))]
@@ -1342,8 +1444,9 @@
                    (lambda (buffer)
                      (let ([binding (file-service-binding service (buffer-id buffer))])
                        (make-file-write-effect
+                         service
                          (buffer-id buffer)
-                         (buffer-state-document (buffer-state buffer))
+                         (buffer-state buffer)
                          (file-binding-resource binding) (file-binding-version binding) #f)))
                    (modified-file-buffers service))
                  (list (make-command-effect 'application.quit #f)))]

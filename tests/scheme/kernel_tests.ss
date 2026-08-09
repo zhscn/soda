@@ -55,6 +55,7 @@
         (soda packages buffer-ui)
         (soda packages interaction)
         (soda packages file)
+        (soda packages file-format)
         (soda packages file-watch)
         (soda packages recovery)
         (soda packages process)
@@ -2596,6 +2597,42 @@
       (when (file-exists? path) (delete-file path))
       (when (file-exists? lock) (delete-file lock))
       (delete-directory directory #t))))
+
+;; FileFormat keeps the document representation UTF-8/LF while preserving
+;; external newline spelling, BOM, and final-newline state at the file edge.
+(let ([source
+       (u8-list->bytevector
+         '(#xef #xbb #xbf #x61 #x0d #x0a #x62 #x0a #x63 #x0d #x0a))])
+  (call-with-values
+    (lambda () (decode-file-contents source))
+    (lambda (contents format)
+      (unless (and (bytevector=? contents (string->utf8 "a\nb\nc\n"))
+                   (eq? (file-format-encoding format) 'utf-8)
+                   (eq? (file-format-newline format) 'mixed)
+                   (file-format-final-newline? format)
+                   (file-format-bom? format))
+        (error 'kernel-tests "file format decoding differs"))
+      (call-with-values
+        (lambda ()
+          (encode-file-contents contents format 'preserve 'preserve 'preserve))
+        (lambda (encoded preserved)
+          (unless (and (bytevector=? encoded source)
+                       (eq? (file-format-newline preserved) 'mixed)
+                       (file-format-bom? preserved))
+            (error 'kernel-tests "mixed newline or BOM round trip differs"))))
+      (call-with-values
+        (lambda () (encode-file-contents contents format 'lf 'no 'no))
+        (lambda (encoded normalized)
+          (unless (and (bytevector=? encoded (string->utf8 "a\nb\nc"))
+                       (eq? (file-format-newline normalized) 'lf)
+                       (not (file-format-final-newline? normalized))
+                       (not (file-format-bom? normalized)))
+            (error 'kernel-tests "file format policy override differs"))))))
+  (unless
+    (guard (condition [else #t])
+      (decode-file-contents (u8-list->bytevector '(#xc0 #xaf)))
+      #f)
+    (error 'kernel-tests "invalid UTF-8 was silently decoded")))
 
 ;; Recovery snapshots are written from a queued command effect, coalesce to
 ;; the latest published Buffer generation, survive service shutdown, and are

@@ -40,6 +40,7 @@
           (soda packages base text-motion)
           (soda packages completion)
           (soda packages file)
+          (soda packages file-format)
           (soda packages file-watch)
           (soda packages directory)
           (soda packages editor-options)
@@ -1796,6 +1797,51 @@
           (soda-application-close! application)
           (when (file-exists? path) (delete-file path))
           (when (file-exists? saved-as) (delete-file saved-as)))))
+
+    ;; A visited file is normalized for editing and encoded from its binding
+    ;; metadata on save, preserving CRLF, BOM, and final newline by default.
+    (let* ([path (string-append "/tmp/soda-file-format-"
+                                (number->string (get-process-id)) ".txt")]
+           [source
+            (u8-list->bytevector
+              '(#xef #xbb #xbf #x6f #x6e #x65 #x0d #x0a
+                #x74 #x77 #x6f #x0d #x0a))])
+      (dynamic-wind
+        (lambda ()
+          (when (file-exists? path) (delete-file path))
+          (vfs-write-file path source))
+        (lambda ()
+          (let* ([application (make-soda-application)]
+                 [state (soda-application-state application)]
+                 [runtime (host-state-command-runtime state)])
+            (dynamic-wind
+              (lambda () #f)
+              (lambda ()
+                (command-runtime-start!
+                  runtime 'file.visit (application-command-context application)
+                  (list path))
+                (let* ([context (application-command-context application)]
+                       [buffer
+                        (buffer-service-ref
+                          (host-state-buffers state)
+                          (command-context-buffer-id context))]
+                       [format
+                        (file-service-format
+                          (soda-application-files application) (buffer-id buffer))])
+                  (unless (and (string=? (buffer-string buffer) "one\ntwo\n")
+                               (eq? (file-format-newline format) 'crlf)
+                               (file-format-final-newline? format)
+                               (file-format-bom? format))
+                    (error 'fundamental-editing-tests
+                           "file visit did not normalize and retain format metadata"))
+                  (command-runtime-start!
+                    runtime 'file.save (application-command-context application))
+                  (unless (bytevector=? (vfs-read-file path) source)
+                    (error 'fundamental-editing-tests
+                           "file save did not preserve external format"))))
+              (lambda () (soda-application-close! application)))))
+        (lambda ()
+          (when (file-exists? path) (delete-file path)))))
 
     ;; Visiting claims a sibling lock file for the Buffer lifetime.  A foreign
     ;; claim leaves the Buffer read-only and survives Soda's close path.
