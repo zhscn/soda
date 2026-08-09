@@ -100,10 +100,13 @@
   ;; branches on mode or package names; the frontend and commands consume the
   ;; combined values through the normal Buffer configuration.
   (define (append-values values) (fold-left append '() values))
+  (define (append-values-in-precedence-order values)
+    (fold-left (lambda (result value) (append value result)) '() values))
   (define (first-value values) (if (null? values) #f (car values)))
 
   (define buffer-input-layers-facet
-    (make-facet 'buffer-input-layers 'buffer '() append-values equal? equal?))
+    (make-facet 'buffer-input-layers 'buffer '()
+                append-values-in-precedence-order equal? equal?))
   (define buffer-edit-policies-facet
     (make-facet 'buffer-edit-policies 'buffer '() append-values eq? eq?))
   ;; Read-only is an ordinary Buffer configuration contribution.  The facet

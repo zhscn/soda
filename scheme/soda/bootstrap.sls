@@ -9,6 +9,7 @@
           soda-application-options
           soda-application-history
           soda-application-files
+          soda-application-scheme-mode
           soda-application-directories
           soda-application-processes
           soda-application-spelling
@@ -40,6 +41,7 @@
           (soda packages base history)
           (soda packages editor-options)
           (soda packages file)
+          (soda packages scheme-mode)
           (soda packages directory)
           (soda packages buffer-list)
           (soda packages process)
@@ -69,6 +71,7 @@
       (immutable options soda-application-options)
       (immutable history soda-application-history)
       (immutable files soda-application-files)
+      (immutable scheme-mode soda-application-scheme-mode)
       (immutable directories soda-application-directories)
       (immutable processes soda-application-processes)
       (immutable spelling soda-application-spelling)
@@ -131,6 +134,10 @@
                                (host-state-dispatch state) owner)]
                [files
                 (make-file-service! host owner history)]
+               [scheme-mode
+                (make-scheme-mode!
+                  (host-state-command-runtime state) files owner
+                  (fundamental-mode editing))]
                [processes (make-process-service! host owner)]
                [buffer-item-actions (make-buffer-item-action-service)]
                [directories (make-directory-service! host owner files buffer-item-actions)]
@@ -161,7 +168,7 @@
           (surface-service-register! (host-state-surfaces state) surface)
           (history-mark-saved! history (buffer-id buffer))
           (%make-soda-application
-            state owner buffer view surface editing options history files directories processes spelling messages search interaction minibuffer buffer-item-actions buffer-lists default-keymap
+            state owner buffer view surface editing options history files scheme-mode directories processes spelling messages search interaction minibuffer buffer-item-actions buffer-lists default-keymap
             #f #f #f)))))
 
   ;; Application policy belongs to composition.  Fundamental editing exports

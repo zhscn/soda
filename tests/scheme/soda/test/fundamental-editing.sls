@@ -11,6 +11,7 @@
           (soda host input-event)
           (soda host internal buffer)
           (soda host internal context)
+          (soda host internal mode)
           (soda host internal state)
           (soda host internal surface)
           (soda host internal operation)
@@ -25,6 +26,7 @@
           (soda kernel regex)
           (soda kernel selection)
           (soda kernel state)
+          (soda kernel syntax-profile)
           (soda kernel view-state)
           (soda kernel viewport)
           (soda packages base fundamental-editing)
@@ -38,6 +40,7 @@
           (soda packages buffer-ui)
           (soda packages buffer-list)
           (soda packages search)
+          (soda packages scheme-mode)
           (soda packages message)
           (soda packages interaction)
           (soda packages minibuffer)
@@ -1050,6 +1053,67 @@
         (error 'fundamental-editing-tests "where-is did not reverse-query active keymaps"))
       (owner-close! owner)
       (soda-application-close! application))
+
+    ;; File-mode association selects an ordinary derived ModeSpec.  Scheme
+    ;; behavior then comes from the active configuration, not from FileService
+    ;; branches or terminal input special cases.
+    (let* ([path (string-append "/tmp/soda-scheme-mode-"
+                                (number->string (get-process-id)) ".sls")]
+           [application (make-soda-application)])
+      (dynamic-wind
+        (lambda ()
+          (vfs-write-file path (string->utf8 "(define foo-bar? 1)\n")))
+        (lambda ()
+          (let* ([state (soda-application-state application)]
+                 [runtime (host-state-command-runtime state)])
+            (command-runtime-start!
+              runtime 'file.visit (application-command-context application)
+              (list path))
+            (let* ([context (application-command-context application)]
+                   [buffer-state (command-context-buffer-state context)]
+                   [configuration (buffer-state-configuration buffer-state)]
+                   [service (soda-application-scheme-mode application)]
+                   [profile
+                    (configuration-facet
+                      configuration buffer-syntax-profile-facet 'buffer)]
+                   [layers
+                    (configuration-facet
+                      configuration buffer-input-layers-facet 'buffer)])
+              (unless (and (eq? (configuration-facet
+                                  configuration buffer-mode-facet 'buffer)
+                                (scheme-mode-spec service))
+                           (eq? profile (scheme-mode-syntax-profile service))
+                           (exists
+                             (lambda (instance)
+                               (eq? (mode-instance-spec instance)
+                                    (scheme-mode-spec service)))
+                             (mode-service-instances
+                               (host-state-modes state)
+                               (command-context-buffer-id context)))
+                           (syntax-profile-word-constituent? profile #\-)
+                           (syntax-profile-word-constituent? profile #\?)
+                           (command-runtime-command-available?
+                             runtime 'scheme.comment-lines context)
+                           (eq? (cadr
+                                  (resolve-key-sequence
+                                    layers
+                                    (list (make-key-stroke
+                                            'character (char->integer #\;) 2))))
+                                'scheme.comment-lines))
+                (error 'fundamental-editing-tests
+                       "Scheme file did not activate its derived mode contracts"))
+              (command-runtime-start! runtime 'scheme.comment-lines context)
+              (unless (string-prefix?
+                        "; "
+                        (buffer-string
+                          (buffer-service-ref
+                            (host-state-buffers state)
+                            (command-context-buffer-id context))))
+                (error 'fundamental-editing-tests
+                       "Scheme mode command did not publish a normal transaction")))))
+        (lambda ()
+          (soda-application-close! application)
+          (when (file-exists? path) (delete-file path)))))
 
     ;; VFS publishes a complete replacement or leaves the target intact.  It
     ;; preserves an existing regular file's mode and removes a temporary when

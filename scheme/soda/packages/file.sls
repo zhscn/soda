@@ -2,6 +2,7 @@
   (export make-file-service!
           file-service?
           file-service-resource
+          file-service-register-mode!
           file-keymap)
   (import (rnrs)
           (only (chezscheme) current-directory get-process-id)
@@ -11,6 +12,7 @@
           (soda kernel selection)
           (soda kernel state)
           (soda kernel view-state)
+          (soda kernel mode)
           (soda host command)
           (soda host command-runtime)
           (soda host buffer)
@@ -38,7 +40,56 @@
       (immutable host file-service-host)
       (immutable owner file-service-owner)
       (immutable history file-service-history)
-      (immutable keymap file-keymap)))
+      (immutable keymap file-keymap)
+      (mutable mode-associations file-service-mode-associations
+                                 file-service-mode-associations-set!)))
+
+  (define-record-type
+    (file-mode-association %make-file-mode-association file-mode-association?)
+    (fields (immutable suffix file-mode-association-suffix)
+            (immutable mode file-mode-association-mode)))
+
+  (define (file-service-register-mode! service owner suffix mode)
+    (unless (and (file-service? service) (owner? owner)
+                 (string? suffix) (positive? (string-length suffix))
+                 (mode-spec? mode) (eq? (mode-spec-kind mode) 'major))
+      (assertion-violation 'file-service-register-mode!
+                           "expected a FileService, owner, suffix, and major ModeSpec"
+                           service owner suffix mode))
+    (owner-assert-active 'file-service-register-mode! owner)
+    (let ([association
+           (%make-file-mode-association (string-copy suffix) mode)])
+      (file-service-mode-associations-set!
+        service (cons association (file-service-mode-associations service)))
+      (make-registration
+        owner
+        (lambda ()
+          (file-service-mode-associations-set!
+            service
+            (filter (lambda (item) (not (eq? item association)))
+                    (file-service-mode-associations service)))))))
+
+  (define (string-suffix? suffix value)
+    (let ([offset (- (string-length value) (string-length suffix))])
+      (and (>= offset 0)
+           (string=? suffix (substring value offset (string-length value))))))
+
+  (define (file-service-mode-for service resource)
+    (let loop ([associations (file-service-mode-associations service)]
+               [best #f])
+      (if (null? associations)
+          (and best (file-mode-association-mode best))
+          (let ([association (car associations)])
+            (loop
+              (cdr associations)
+              (if (and (string-suffix?
+                         (file-mode-association-suffix association)
+                         (resource-locator resource))
+                       (or (not best)
+                           (> (string-length (file-mode-association-suffix association))
+                              (string-length (file-mode-association-suffix best)))))
+                  association
+                  best))))))
 
   (define-record-type file-binding
     (fields resource version lock))
@@ -261,18 +312,25 @@
          (hashtable-set! (file-service-resources service) buffer-id binding)
          binding)]))
 
-  (define (file-buffer-configuration context lock-conflict?)
+  (define (file-buffer-configuration service resource context lock-conflict?)
     ;; New file Buffers inherit ordinary editing configuration from the active
     ;; Buffer.  The lock compartment is replaced at this boundary so a prior
     ;; conflict cannot make unrelated files read-only.
     (let* ([base (buffer-state-configuration (command-context-buffer-state context))]
+           [mode (file-service-mode-for service resource)]
+           [mode-configuration
+            (if mode
+                (configuration-reconfigure
+                  base buffer-major-mode-compartment
+                  (make-buffer-mode-extension mode))
+                base)]
            [extensions
             (filter
               (lambda (extension)
                 (not (and (compartment-entry? extension)
                           (eq? (compartment-entry-compartment extension)
                                file-lock-read-only-compartment))))
-              (configuration-extensions base))])
+              (configuration-extensions mode-configuration))])
       (make-configuration
         (append extensions
                 (list
@@ -317,7 +375,8 @@
                                    host (file-service-owner service)
                                    (resource-locator resource)
                                    (make-document contents)
-                                   (file-buffer-configuration context (not lock)))])
+                                   (file-buffer-configuration
+                                     service resource context (not lock)))])
                             (set-resource! service (buffer-id created) resource version lock)
                             (when (file-service-history service)
                               (history-mark-saved! (file-service-history service)
@@ -489,7 +548,8 @@
                            host owner history))
     (let* ([runtime (package-host-command-runtime host)]
            [keymap (make-keymap 'file)]
-           [service (%make-file-service (make-eqv-hashtable) host owner history keymap)])
+           [service
+            (%make-file-service (make-eqv-hashtable) host owner history keymap '())])
       (command-runtime-register-effect-handler!
         runtime 'file.visit owner 'open-file-buffer
         (lambda (ignored invocation effect)
