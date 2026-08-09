@@ -431,7 +431,11 @@
                    (eq? (keymap-lookup keymap (list (meta #\\)))
                        'fundamental.beginning-of-buffer)
                    (eq? (keymap-lookup keymap (list (meta #\/)))
-                       'fundamental.end-of-buffer))
+                       'fundamental.end-of-buffer)
+                   (eq? (keymap-lookup keymap (list (make-key-stroke 'up #f 0)))
+                       'fundamental.previous-line)
+                   (eq? (keymap-lookup keymap (list (make-key-stroke 'down #f 0)))
+                       'fundamental.next-line))
         (error 'fundamental-editing-tests "Nano editing aliases are not bound"))
       (soda-application-close! application))
 

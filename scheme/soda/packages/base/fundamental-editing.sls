@@ -1499,6 +1499,8 @@
          'fundamental.fill-paragraph)
         ((list (plain-stroke 'left #f)) 'fundamental.backward-char)
         ((list (plain-stroke 'right #f)) 'fundamental.forward-char)
+        ((list (plain-stroke 'up #f)) 'fundamental.previous-line)
+        ((list (plain-stroke 'down #f)) 'fundamental.next-line)
         ((list (plain-stroke 'home #f)) 'fundamental.beginning-of-line)
         ((list (plain-stroke 'end #f)) 'fundamental.end-of-line)
         ((list (plain-stroke 'page-up #f)) 'fundamental.scroll-up)
