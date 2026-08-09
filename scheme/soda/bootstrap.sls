@@ -51,6 +51,7 @@
           (soda packages word-completion)
           (soda packages whitespace)
           (soda packages comment)
+          (soda packages keyboard-macro)
           (soda packages interaction)
           (soda packages buffer-ui)
           (soda packages command-ui)
@@ -114,6 +115,8 @@
                 (make-whitespace-service! host owner)]
                [comments
                 (make-comment-service! host owner)]
+               [keyboard-macros
+                (make-keyboard-macro-service! host owner)]
                [configuration
                 (make-configuration
                   (list (buffer-item-field-extension)
@@ -169,6 +172,7 @@
                         (word-completion-keymap word-completion)
                         (whitespace-keymap whitespace)
                         (comment-keymap comments)
+                        (keyboard-macro-keymap keyboard-macros)
                         (message-keymap messages)
                         (spell-keymap spelling)
                         (process-keymap processes)

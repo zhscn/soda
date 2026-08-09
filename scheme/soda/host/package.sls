@@ -41,11 +41,13 @@
           package-host-replace-window-view!
           package-host-push-interaction-view!
           package-host-pop-interaction-view!
-          package-host-set-surface-message!)
+          package-host-set-surface-message!
+          package-host-refresh-command-context)
   (import (rnrs)
           (soda kernel document)
           (soda kernel state)
           (soda kernel view-state)
+          (soda host command)
           (soda host command-runtime)
           (soda host analysis)
           (soda host key-configuration)
@@ -310,4 +312,40 @@
     (dispatcher-dispatch-host!
       (host-state-dispatch (package-host-state host))
       (make-set-surface-message-operation surface-id message)))
+
+  ;; Long-running command compositions refresh state at each queued step.
+  ;; Window identity is followed across View replacement, so a file visit or
+  ;; buffer switch inside the composition changes the target of later steps.
+  (define (package-host-refresh-command-context host template prefix source)
+    (unless (and (package-host? host) (command-context? template) (symbol? source))
+      (assertion-violation 'package-host-refresh-command-context
+                           "expected a PackageHost, CommandContext, and source"
+                           host template source))
+    (let* ([state (package-host-state host)]
+           [surface-id (command-context-surface-id template)]
+           [requested-window-id (command-context-window-id template)]
+           [surface
+            (and surface-id
+                 (surface-service-ref
+                   (host-state-surfaces state) surface-id #f))]
+           [window
+            (and surface requested-window-id
+                 (let loop ([remaining (surface-windows surface)])
+                   (and (pair? remaining)
+                        (if (= (window-id (car remaining)) requested-window-id)
+                            (car remaining)
+                            (loop (cdr remaining))))))]
+           [resolved-view-id
+            (if window (window-view-id window)
+                (command-context-view-id template))]
+           [view
+            (and resolved-view-id
+                 (view-service-ref
+                   (host-state-views state) resolved-view-id #f))]
+           [buffer (and view (view-buffer view))])
+      (and view buffer
+           (make-command-context
+             #f surface-id requested-window-id (view-id view) (buffer-id buffer)
+             (buffer-state buffer) (view-state view) #f '() prefix
+             (command-context-target template) source #f))))
 )

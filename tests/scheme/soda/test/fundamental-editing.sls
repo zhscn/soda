@@ -1892,6 +1892,88 @@
                      "word completion did not replace the active prefix"))))
         (lambda () (soda-application-close! application))))
 
+    ;; Keyboard macros retain resolved command invocations.  Playback refreshes
+    ;; the live editor context between steps, repeats deterministically, and
+    ;; does not reopen interactive readers whose answers were already accepted.
+    (let ([application (make-soda-application)])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (let* ([state (soda-application-state application)]
+                 [runtime (host-state-command-runtime state)]
+                 [interaction (soda-application-interaction application)])
+            (command-runtime-start!
+              runtime 'macro.start (application-command-context application))
+            (command-runtime-start!
+              runtime 'fundamental.insert-text
+              (application-command-context application)
+              (list (string->utf8 "x")))
+            (command-runtime-start!
+              runtime 'macro.end (application-command-context application))
+            (command-runtime-start!
+              runtime 'macro.play (application-command-context application)
+              (list 3))
+            (host-state-run! state)
+            (unless (string=? (buffer-string (soda-application-buffer application))
+                              "xxxx")
+              (error 'fundamental-editing-tests
+                     "keyboard macro playback did not refresh context per step"))
+
+            (command-runtime-start!
+              runtime 'fundamental.insert-text
+              (application-command-context application)
+              (list (string->utf8 " alpha alphabet al")))
+            (command-runtime-start!
+              runtime 'macro.start (application-command-context application))
+            (command-runtime-start-interactive!
+              runtime 'word.complete (application-command-context application))
+            (interaction-service-submit! interaction "alphabet")
+            (host-state-run! state)
+            (command-runtime-start!
+              runtime 'macro.end (application-command-context application))
+            (command-runtime-start!
+              runtime 'fundamental.insert-text
+              (application-command-context application)
+              (list (string->utf8 " al")))
+            (command-runtime-start!
+              runtime 'macro.play (application-command-context application))
+            (host-state-run! state)
+            (unless (and
+                      (string=?
+                        (buffer-string (soda-application-buffer application))
+                        "xxxx alpha alphabet alphabet alphabet")
+                      (not (interaction-service-current interaction)))
+              (error 'fundamental-editing-tests
+                     "keyboard macro did not retain the resolved interactive answer"))))
+        (lambda () (soda-application-close! application))))
+
+    ;; Cancellation invalidates a queued macro step before it can invoke the
+    ;; recorded command.
+    (let ([application (make-soda-application)])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (let* ([state (soda-application-state application)]
+                 [runtime (host-state-command-runtime state)])
+            (command-runtime-start!
+              runtime 'macro.start (application-command-context application))
+            (command-runtime-start!
+              runtime 'fundamental.insert-text
+              (application-command-context application)
+              (list (string->utf8 "z")))
+            (command-runtime-start!
+              runtime 'macro.end (application-command-context application))
+            (command-runtime-start!
+              runtime 'macro.play (application-command-context application))
+            (command-runtime-start!
+              runtime 'macro.cancel (application-command-context application))
+            (host-state-run! state)
+            (unless (string=? (buffer-string (soda-application-buffer application))
+                              "z")
+              (error 'fundamental-editing-tests
+                     "cancelled keyboard macro executed queued command debt"))))
+        (lambda () (soda-application-close! application))))
+
     ;; A visited file is normalized for editing and encoded from its binding
     ;; metadata on save, preserving CRLF, BOM, and final newline by default.
     (let* ([path (string-append "/tmp/soda-file-format-"
