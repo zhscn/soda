@@ -209,7 +209,8 @@
                 (generated-projection-extension)
                 (list
                   (make-buffer-input-layer-extension
-                    (list (make-input-layer 'buffer result-keymap #f 'ignore)))
+                    (list (make-input-layer 'buffer result-keymap #f 'ignore)
+                          (buffer-item-input-layer actions)))
                   (make-buffer-edit-policy-extension
                     (make-buffer-edit-policy 'reject #f authority))))
               '(buffer-list buffer-item) "Buffers")]
@@ -218,12 +219,10 @@
               host owner history actions keymap result-keymap authority mode
               (make-eqv-hashtable))])
       (keymap-bind! keymap (list (control-stroke #\x) (control-stroke #\b)) 'buffer.list)
-      (keymap-bind! result-keymap (list (make-key-stroke 'enter #f 0)) 'buffer.activate-item)
       (keymap-bind! result-keymap (list (make-key-stroke 'character (char->integer #\g) 0))
                     'buffer-list.refresh)
       (keymap-bind! result-keymap (list (make-key-stroke 'character (char->integer #\d) 0))
                     'buffer-list.close-item)
-      (keymap-bind! result-keymap (list (control-stroke #\g)) 'file.close)
       (buffer-item-action-register!
         actions owner 'buffer-list 'visit
         (lambda (item context generation)

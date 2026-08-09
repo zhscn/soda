@@ -39,12 +39,9 @@
                     (command-context-window-id context) (view-id view))
             (assertion-violation 'help.show "origin Window is no longer available" context))))))
 
-  (define (make-help-service! host owner)
+  (define (make-help-service! host owner actions)
     (let* ([keymap (make-keymap 'help)]
            [service #f])
-      (keymap-bind! keymap
-                    (list (make-key-stroke 'character (char->integer #\g) 4))
-                    'file.close)
       (set! service
             (make-help-service
               host owner keymap
@@ -52,7 +49,8 @@
                 'help-mode 'major "Help" #f
                 (list
                   (make-buffer-input-layer-extension
-                    (list (make-input-layer 'buffer keymap #f 'accept)))
+                    (list (make-input-layer 'buffer keymap #f 'ignore)
+                          (buffer-item-input-layer actions)))
                   (make-buffer-edit-policy-extension
                     (make-buffer-edit-policy 'reject)))
                 '(help) "Help")))

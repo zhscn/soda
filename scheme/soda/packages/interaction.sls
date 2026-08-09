@@ -28,6 +28,7 @@
           (soda host command)
           (soda host command-runtime)
           (soda host input)
+          (soda host input-event)
           (soda host value))
 
   ;; InteractionSession is the frontend-neutral representation of one
@@ -148,15 +149,33 @@
        (make-interaction-request kind prompt initial-value completion-source selection-policy #f #f)]
       [(kind prompt initial-value completion-source selection-policy validator)
        (make-interaction-request kind prompt initial-value completion-source selection-policy validator #f)]
-      [(kind prompt initial-value completion-source selection-policy validator keymap)
+      [(kind prompt initial-value completion-source selection-policy validator answers)
        (unless (and (symbol? kind) (string? prompt)
                     (memq selection-policy '(free must-match))
                     (or (not validator) (procedure? validator))
-                    (or (not keymap) (keymap? keymap)))
+                    (or (not answers)
+                        (and (list? answers) (for-all char? answers))))
          (assertion-violation 'make-interaction-request "invalid interaction request"
                               kind prompt selection-policy))
-       (%make-interaction-request kind prompt initial-value completion-source selection-policy
-                                  validator keymap)]))
+       (let ([keymap
+              (and answers
+                   (let ([result (make-keymap 'interaction-answers)])
+                     (for-each
+                       (lambda (character)
+                         (keymap-bind!
+                           result
+                           (list (make-key-stroke
+                                   'character (char->integer character) 0))
+                           'interaction.submit-key)
+                         (keymap-bind!
+                           result
+                           (list (make-key-stroke
+                                   'character (char->integer character) 1))
+                           'interaction.submit-key))
+                       answers)
+                     result))])
+         (%make-interaction-request kind prompt initial-value completion-source selection-policy
+                                    validator keymap))]))
 
   ;; The basic string reader provides the common bridge from an ordinary
   ;; command parameter to a frontend request.  Typed readers can use the same
@@ -230,6 +249,23 @@
                            "expected a command runtime and owner" runtime owner))
     (owner-assert-active 'make-interaction-service! owner)
     (let ([service (%make-interaction-service runtime '() '() #f)])
+      (command-runtime-register-command!
+        runtime
+        (make-command-definition
+          'interaction.submit-key
+          (lambda (context)
+            (let* ([session (interaction-service-current service)]
+                   [event (command-context-event context)]
+                   [codepoint
+                    (and session (key-event? event)
+                         (or (key-event-codepoint event)
+                             (key-event-shifted-codepoint event)))])
+              (when codepoint
+                (interaction-service-submit! service
+                                             (string (integer->char codepoint))))
+              (command-handled)))
+          owner "Submit a discrete answer accepted by the active interaction."
+          'interaction #f))
       (interaction-service-registration-set!
         service
         (command-runtime-set-interaction-handler!

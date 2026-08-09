@@ -144,7 +144,7 @@
                [buffer-lists (make-buffer-list-service! host owner history buffer-item-actions)]
                [spelling (make-spell-service! host owner processes buffer-item-actions)]
                [messages (make-message-service! host owner)]
-               [_help (make-help-service! host owner)]
+               [_help (make-help-service! host owner buffer-item-actions)]
                [search
                 (make-search-service! host owner)]
                [interaction
@@ -164,7 +164,7 @@
                         (buffer-list-keymap buffer-lists)
                         default-keymap))])
           (install-buffer-item-commands!
-            (host-state-command-runtime state) owner buffer-item-actions)
+            (host-state-command-runtime state) owner buffer-item-actions host)
           (surface-service-register! (host-state-surfaces state) surface)
           (history-mark-saved! history (buffer-id buffer))
           (%make-soda-application
@@ -313,39 +313,39 @@
             active view
             (list
               (make-input-layer
-                'editor-options
+                'global
                 (editor-options-keymap (soda-application-options application))
                 #f 'pass)
               (make-input-layer
-                'search
+                'global
                 (search-keymap (soda-application-search application))
                 #f 'pass)
               (make-input-layer
-                'message
+                'global
                 (message-keymap (soda-application-messages application))
                 #f 'pass)
               (make-input-layer
-                'spell
+                'global
                 (spell-keymap (soda-application-spelling application))
                 #f 'pass)
               (make-input-layer
-                'process
+                'global
                 (process-keymap (soda-application-processes application))
                 #f 'pass)
               (make-input-layer
-                'file
+                'global
                 (file-keymap (soda-application-files application))
                 #f 'pass)
               (make-input-layer
-                'directory
+                'global
                 (directory-keymap (soda-application-directories application))
                 #f 'pass)
               (make-input-layer
-                'buffer-list
+                'global
                 (buffer-list-keymap (soda-application-buffer-lists application))
                 #f 'pass)
               (make-input-layer
-                'application
+                'global
                 (soda-application-default-keymap application)
                 #f 'pass))))))
 

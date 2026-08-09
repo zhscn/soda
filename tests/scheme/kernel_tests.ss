@@ -1499,9 +1499,9 @@
        [_second-binding (keymap-bind! second (list control-s) 'second-command)]
        [layers
         (input-layer-compose
-          (list (make-input-layer 'first-package first #f 'pass)
-                (make-input-layer 'second-package second #f 'pass)))])
-  (unless (and (eq? (input-layer-kind (car layers)) 'first-package)
+          (list (make-input-layer 'global first #f 'pass)
+                (make-input-layer 'global second #f 'pass)))])
+  (unless (and (eq? (input-layer-kind (car layers)) 'global)
                (eq? (cadr (resolve-key-sequence layers (list control-s)))
                     'first-command))
     (error 'kernel-tests "equal-priority input layers did not retain declaration order"))
@@ -1517,6 +1517,45 @@
     (unless (and (= (length sequences) 1)
                  (key-stroke=? (caar sequences) control-s))
       (error 'kernel-tests "where-is did not honor active command remapping"))))
+(let ([rejected? #f])
+  (guard (condition [else (set! rejected? #t)])
+    (make-input-layer 'package-name test-keymap #f 'pass))
+  (unless rejected?
+    (error 'kernel-tests "undeclared input layer kind was accepted")))
+(let* ([transient (make-keymap 'transient-prefix)]
+       [global (make-keymap 'global-command)]
+       [_prefix (keymap-bind! transient (list control-x control-s) 'transient-save)]
+       [_command (keymap-bind! global (list control-x) 'global-prefix-command)]
+       [result
+        (resolve-key-sequence
+          (input-layer-compose
+            (list (make-input-layer 'transient transient #f 'ignore)
+                  (make-input-layer 'global global #f 'pass)))
+          (list control-x))])
+  (unless (eq? (car result) 'prefix)
+    (error 'kernel-tests "higher-priority prefix did not shadow lower command" result)))
+(let* ([accept-map (make-keymap 'accept-text)]
+       [ignore-map (make-keymap 'ignore-text)]
+       [event (make-text-input-event 'text (string->utf8 "x"))]
+       [ignored
+        (input-dispatch
+          (make-input-context
+            0 0
+            (input-layer-compose
+              (list (make-input-layer 'transient ignore-map #f 'ignore)
+                    (make-input-layer 'default accept-map #f 'accept))))
+          event)]
+       [accepted
+        (input-dispatch
+          (make-input-context
+            0 0
+            (input-layer-compose
+              (list (make-input-layer 'transient ignore-map #f 'pass)
+                    (make-input-layer 'default accept-map #f 'accept))))
+          event)])
+  (unless (and (eq? (input-disposition-kind ignored) 'pass)
+               (eq? (input-disposition-kind accepted) 'text))
+    (error 'kernel-tests "text policy did not stop at the first decisive layer")))
 (define input-context
   (make-input-context
     0 0 (list (make-input-layer 'global test-keymap #f 'ignore))
@@ -2985,7 +3024,7 @@
             (make-input-context
               (active-context-view-id active)
               (active-context-buffer-id active)
-              (list (make-input-layer 'frontend keymap #f 'ignore))
+              (list (make-input-layer 'global keymap #f 'ignore))
               (view-state-input-state (view-state active-view))))
           (lambda (context disposition) #f)
           (lambda (render theme)
@@ -3196,17 +3235,19 @@
              [context
               (buffer-input-context
                 active view
-                (list (make-input-layer
-                        'fundamental
-                        (fundamental-editing-keymap (soda-application-editing application))
-                        #f 'accept)))]
+                (list (fundamental-fallback-input-layer
+                        (soda-application-editing application))))]
              [disposition
               (input-dispatch
                 context
                 (make-key-event
-                  'character (char->integer #\g) #f #f 4 'press (make-bytevector 0)))])
+                  'character (char->integer #\g) #f #f 4 'press (make-bytevector 0)))]
+             [text-disposition
+              (input-dispatch context
+                              (make-text-input-event 'text (string->utf8 "x")))])
         (unless (and (eq? (input-disposition-kind disposition) 'command)
-                     (eq? (input-disposition-value disposition) 'file.close))
+                     (eq? (input-disposition-value disposition) 'buffer.close)
+                     (eq? (input-disposition-kind text-disposition) 'pass))
           (error 'kernel-tests "help Buffer did not override C-g with close"))))
     (lambda () (soda-application-close! application))))
 

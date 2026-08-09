@@ -73,6 +73,7 @@
           make-semantic-position-restore-effect
           make-buffer-item-action-service
           buffer-item-action-service?
+          buffer-item-input-layer
           buffer-item-action-register!
           buffer-item-action-invoke
           install-buffer-item-commands!)
@@ -88,11 +89,14 @@
           (soda kernel selection)
           (soda kernel state)
           (soda kernel view-state)
+          (soda kernel viewport)
           (soda host command)
           (soda host command-runtime)
           (soda host context)
           (soda host buffer)
           (soda host input)
+          (soda host input-event)
+          (soda host package)
           (soda host view)
           (soda host value))
 
@@ -579,12 +583,38 @@
 
   (define-record-type
     (buffer-item-action-service %make-buffer-item-action-service buffer-item-action-service?)
-    (fields (immutable table buffer-item-action-service-table)))
+    (fields (immutable table buffer-item-action-service-table)
+            (immutable keymap buffer-item-action-service-keymap)))
   (define-record-type buffer-item-action-entry
     (fields owner procedure))
 
   (define (make-buffer-item-action-service)
-    (%make-buffer-item-action-service (make-hashtable equal-hash equal?)))
+    (let ([keymap (make-keymap 'buffer-item)])
+      (define (bind key command)
+        (keymap-bind! keymap (list (make-key-stroke key #f 0)) command))
+      (bind 'up 'buffer.previous-line)
+      (bind 'down 'buffer.next-line)
+      (bind 'page-up 'buffer.page-up)
+      (bind 'page-down 'buffer.page-down)
+      (bind 'home 'buffer.first-item)
+      (bind 'end 'buffer.last-item)
+      (bind 'enter 'buffer.activate-item)
+      (keymap-bind! keymap
+                    (list (make-key-stroke 'character (char->integer #\p) 4))
+                    'buffer.previous-item)
+      (keymap-bind! keymap
+                    (list (make-key-stroke 'character (char->integer #\n) 4))
+                    'buffer.next-item)
+      (keymap-bind! keymap
+                    (list (make-key-stroke 'character (char->integer #\g) 4))
+                    'buffer.close)
+      (%make-buffer-item-action-service (make-hashtable equal-hash equal?) keymap)))
+
+  (define (buffer-item-input-layer service)
+    (unless (buffer-item-action-service? service)
+      (assertion-violation 'buffer-item-input-layer
+                           "expected a BufferItem action service" service))
+    (make-input-layer 'buffer (buffer-item-action-service-keymap service) #f 'ignore))
 
   (define (buffer-item-action-key provider-id name)
     (list (stable-identity provider-id) name))
@@ -646,6 +676,32 @@
         (list (make-selection-range (range-value-from range) (range-value-from range))))
       #f #f '() '() #f))
 
+  (define (move-line context amount)
+    (let* ([state (command-context-buffer-state context)]
+           [snapshot (buffer-state-document state)]
+           [text (snapshot-text snapshot)])
+      (dynamic-wind
+        (lambda () #f)
+        (lambda ()
+          (let* ([position (text-position text (context-point context))]
+                 [line (max 0 (min (- (text-line-count text) 1)
+                                   (+ (car position) amount)))]
+                 [point (text-offset text line (cdr position))])
+            (move-to-item context (make-range-value point point #f))))
+        (lambda () (text-close! text)))))
+
+  (define (scroll-page context amount)
+    (let ([state (command-context-view-state context)])
+      (make-view-transaction-spec
+        (command-context-view-id context) (view-state-generation state)
+        #f #f #f '() '()
+        (make-scroll-request
+          'scroll-pages
+          (command-context-surface-id context)
+          (command-context-window-id context)
+          (command-context-view-id context)
+          amount))))
+
   (define (next-item-range state point)
     (let loop ([ranges (all-item-ranges state)])
       (and (pair? ranges)
@@ -661,14 +717,38 @@
               previous
               (loop (cdr ranges) (car ranges))))))
 
-  (define (install-buffer-item-commands! runtime owner actions)
+  (define (edge-item-range state first?)
+    (let ([ranges (all-item-ranges state)])
+      (and (pair? ranges)
+           (if first?
+               (car ranges)
+               (let loop ([items (cdr ranges)] [last (car ranges)])
+                 (if (null? items) last (loop (cdr items) (car items))))))))
+
+  (define (install-buffer-item-commands! runtime owner actions host)
     (unless (and (command-runtime? runtime) (owner? owner)
-                 (buffer-item-action-service? actions))
+                 (buffer-item-action-service? actions) (package-host? host))
       (assertion-violation 'install-buffer-item-commands!
                            "invalid BufferItem command dependencies" runtime owner actions))
     (for-each
       (lambda (definition) (command-runtime-register-command! runtime definition))
       (list
+        (make-command-definition
+          'buffer.next-line
+          (lambda (context) (move-line context 1))
+          owner "Move to the next logical line in a special Buffer." 'buffer-item #f)
+        (make-command-definition
+          'buffer.previous-line
+          (lambda (context) (move-line context -1))
+          owner "Move to the previous logical line in a special Buffer." 'buffer-item #f)
+        (make-command-definition
+          'buffer.page-up
+          (lambda (context) (scroll-page context -1))
+          owner "Scroll a special Buffer toward its beginning." 'buffer-item #f)
+        (make-command-definition
+          'buffer.page-down
+          (lambda (context) (scroll-page context 1))
+          owner "Scroll a special Buffer toward its end." 'buffer-item #f)
         (make-command-definition
           'buffer.next-item
           (lambda (context)
@@ -684,6 +764,18 @@
               (if range (move-to-item context range) (command-handled))))
           owner "Move to the previous semantic Buffer item." 'buffer-item #f)
         (make-command-definition
+          'buffer.first-item
+          (lambda (context)
+            (let ([range (edge-item-range (command-context-buffer-state context) #t)])
+              (if range (move-to-item context range) (command-handled))))
+          owner "Move to the first semantic Buffer item." 'buffer-item #f)
+        (make-command-definition
+          'buffer.last-item
+          (lambda (context)
+            (let ([range (edge-item-range (command-context-buffer-state context) #f)])
+              (if range (move-to-item context range) (command-handled))))
+          owner "Move to the last semantic Buffer item." 'buffer-item #f)
+        (make-command-definition
           'buffer.activate-item
           (lambda (context)
             (let ([item (buffer-item-at-point (command-context-buffer-state context)
@@ -692,5 +784,12 @@
                   (or (buffer-item-action-invoke actions (buffer-item-primary-action item) item context)
                       (command-handled))
                   (command-handled))))
-          owner "Run the primary action for the semantic item at point." 'buffer-item #f))))
+          owner "Run the primary action for the semantic item at point." 'buffer-item #f)
+        (make-command-definition
+          'buffer.close
+          (lambda (context)
+            (package-host-close-buffer-with-fallback!
+              host owner (command-context-buffer-id context))
+            (command-handled))
+          owner "Close the active special Buffer." 'buffer-item #f))))
 )

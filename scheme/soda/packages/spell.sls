@@ -369,17 +369,15 @@
               (list
                 (buffer-item-field-extension)
                 (make-buffer-input-layer-extension
-                  (list (make-input-layer 'buffer result-keymap #f 'ignore)))
+                  (list (make-input-layer 'buffer result-keymap #f 'ignore)
+                        (buffer-item-input-layer actions)))
                 (make-buffer-edit-policy-extension
                   (make-buffer-edit-policy 'reject)))
               '(spell buffer-item) "Spell")]
            [service
             (%make-spell-service
               host owner processes keymap result-keymap result-mode)])
-      (keymap-bind! result-keymap
-                    (list (make-key-stroke 'enter #f 0)) 'buffer.activate-item)
       (keymap-bind! result-keymap (list (control-stroke #\r)) 'spell.correct-item)
-      (keymap-bind! result-keymap (list (control-stroke #\g)) 'file.close)
       (buffer-item-action-register!
         actions owner 'spell 'visit
         (lambda (item context generation) (visit-finding! service item context generation)))

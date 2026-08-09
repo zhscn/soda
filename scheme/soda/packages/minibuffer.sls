@@ -401,28 +401,6 @@
       (command-runtime-register-command!
         (package-host-command-runtime host)
         (make-command-definition
-          'minibuffer.accept-key
-          (lambda (context)
-            (let* ([session (minibuffer-service-current service)]
-                   [event (command-context-event context)]
-                   [request
-                    (and session
-                         (interaction-session-request
-                           (minibuffer-session-interaction session)))]
-                   [codepoint
-                    (and (key-event? event)
-                         (or (key-event-codepoint event)
-                             (key-event-shifted-codepoint event)))])
-              (when (and request (interaction-request-keymap request) codepoint)
-                (interaction-service-submit!
-                  (minibuffer-service-interactions service)
-                  (string (integer->char codepoint))))
-              (command-handled)))
-          owner "Accept a discrete answer supplied by the current prompt keymap."
-          'minibuffer #f))
-      (command-runtime-register-command!
-        (package-host-command-runtime host)
-        (make-command-definition
           'minibuffer.complete
           (lambda (context) (minibuffer-service-complete! service context))
           owner "Apply the current prompt completion without accepting the prompt."

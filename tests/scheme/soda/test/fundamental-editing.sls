@@ -146,11 +146,10 @@
             (command-runtime-start!
               runtime 'fundamental.delete-forward (application-command-context application))]
            [context
-            (fundamental-input-context
-              editing
+            (buffer-input-context
               (surface-active-context (soda-application-surface application)
                                       (host-state-views state))
-              view)]
+              view (list (fundamental-fallback-input-layer editing)))]
            [disposition
             (fundamental-input-disposition
               (application-command-context application)
@@ -855,10 +854,10 @@
                 (view-state prompt-view)
                 event '() #f active 'query-replace-test)])
         (unless (and (eq? (input-disposition-kind disposition) 'command)
-                     (eq? (input-disposition-value disposition) 'minibuffer.accept-key))
+                     (eq? (input-disposition-value disposition) 'interaction.submit-key))
           (error 'fundamental-editing-tests
                  "query replace prompt did not install its discrete answer keymap"))
-        (command-runtime-start! runtime 'minibuffer.accept-key context))
+        (command-runtime-start! runtime 'interaction.submit-key context))
       (host-state-run! state)
       (unless (and (string=? (buffer-string buffer) "1 one one")
                    (interaction-service-current interaction)
@@ -2104,7 +2103,9 @@
             (make-frontend
               state surface
               (lambda (active current-view)
-                (fundamental-input-context editing active current-view))
+                (buffer-input-context
+                  active current-view
+                  (list (fundamental-fallback-input-layer editing))))
               (lambda (context disposition)
                 (fundamental-input-disposition context disposition))
               (lambda (render theme) #f)
@@ -2444,7 +2445,9 @@
             (make-frontend
               state surface
               (lambda (active current-view)
-                (fundamental-input-context editing active current-view))
+                (buffer-input-context
+                  active current-view
+                  (list (fundamental-fallback-input-layer editing))))
               (lambda (context disposition)
                 (fundamental-input-disposition context disposition))
               (lambda (render theme) #f)
@@ -2483,7 +2486,9 @@
             (make-frontend
               state surface
               (lambda (active current-view)
-                (fundamental-input-context editing active current-view))
+                (buffer-input-context
+                  active current-view
+                  (list (fundamental-fallback-input-layer editing))))
               (lambda (context disposition)
                 (fundamental-input-disposition context disposition))
               (lambda (render theme) #f)
@@ -2524,7 +2529,9 @@
             (make-frontend
               state surface
               (lambda (active current-view)
-                (fundamental-input-context editing active current-view))
+                (buffer-input-context
+                  active current-view
+                  (list (fundamental-fallback-input-layer editing))))
               (lambda (context disposition)
                 (fundamental-input-disposition context disposition))
               (lambda (render theme) #f)

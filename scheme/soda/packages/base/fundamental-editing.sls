@@ -4,7 +4,6 @@
           fundamental-editing-keymap
           fundamental-mode
           fundamental-fallback-input-layer
-          fundamental-input-context
           fundamental-input-disposition)
   (import (rnrs)
           (soda kernel change)
@@ -1454,16 +1453,6 @@
         ((list (plain-stroke 'delete #f)) 'fundamental.delete-forward)
         ((list (plain-stroke 'enter #f)) 'fundamental.newline))
       editing))
-
-  (define (fundamental-input-context editing active view)
-    (unless (and (fundamental-editing? editing) (active-context? active))
-      (assertion-violation 'fundamental-input-context "invalid editing package or active context"
-                           editing active))
-    (make-input-context
-      (active-context-view-id active)
-      (active-context-buffer-id active)
-      (list (make-input-layer 'fundamental (fundamental-editing-keymap editing) #f 'accept))
-      (view-state-input-state (view-state view))))
 
   ;; Temporary editable interfaces reuse the package-owned bindings without
   ;; adopting fundamental-mode as their major mode.  The default rank leaves

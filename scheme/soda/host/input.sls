@@ -305,13 +305,26 @@
       (immutable handler input-layer-handler)
       (immutable text-policy input-layer-text-policy)))
 
+  (define input-layer-order
+    '((override . 0) (transient . 1) (durable . 2) (window . 3)
+      (view . 4) (buffer . 5) (minor . 6) (major . 7)
+      (default . 8) (global . 9)))
+
   (define (make-input-layer kind keymap . options)
+    (unless (and (<= (length options) 2)
+                 (assq kind input-layer-order)
+                 (keymap? keymap)
+                 (or (null? options) (not (car options)) (procedure? (car options)))
+                 (or (null? options) (null? (cdr options))
+                     (memq (cadr options) '(pass accept ignore))))
+      (assertion-violation 'make-input-layer
+                           "expected a declared layer kind, Keymap, optional handler, and text policy"
+                           kind keymap options))
     (%make-input-layer
       kind keymap
       (if (null? options) #f (car options))
-      (if (or (null? options) (null? (cdr options))
-              (not (cadr options)))
-          'ignore
+      (if (or (null? options) (null? (cdr options)))
+          'pass
           (cadr options))))
 
   (define-record-type
@@ -332,14 +345,8 @@
               (assertion-violation 'make-input-context "expected an input stack" value))
             value))))
 
-  (define input-layer-order
-    '((override . 0) (transient . 1) (durable . 2) (window . 3)
-      (view . 4) (buffer . 5) (minor . 6) (major . 7)
-      (default . 8) (global . 9)))
-
   (define (input-layer-rank kind)
-    (let ([entry (assq kind input-layer-order)])
-      (if entry (cdr entry) 100)))
+    (cdr (assq kind input-layer-order)))
 
   ;; Build the canonical layer order once at the host boundary.  The resolver
   ;; itself remains pure and receives the resulting immutable list.  Layers
@@ -369,26 +376,19 @@
       [else (cons 'unbound #f)]))
 
   (define (resolve-key-sequence layers sequence)
-    (let loop ([items layers] [prefix? #f] [trace '()] [command #f])
+    (let loop ([items layers] [trace '()])
       (if (null? items)
-          (cond
-            [command
-             (list 'command
-                   (cdr command)
-                   (car command)
-                   (reverse trace))]
-            [prefix? (list 'prefix (reverse trace))]
-            [else (list 'unbound (reverse trace))])
+          (list 'unbound (reverse trace))
           (let* ([layer (car items)]
                  [result (lookup-layer (input-layer-keymap layer) sequence)])
             (case (car result)
               [(command)
-               (loop (cdr items) prefix? (cons (list layer result) trace)
-                     (or command (cons layer (cdr result))))]
+               (list 'command (cdr result) layer
+                     (reverse (cons (list layer result) trace)))]
               [(prefix)
-               (loop (cdr items) #t (cons (list layer result) trace) command)]
+               (list 'prefix (reverse (cons (list layer result) trace)))]
               [else
-               (loop (cdr items) prefix? (cons (list layer result) trace) command)])))))
+               (loop (cdr items) (cons (list layer result) trace))])))))
 
   (define-record-type
     (input-disposition %make-input-disposition input-disposition?)
@@ -473,8 +473,10 @@
 
   (define (accepting-text-layer? layers)
     (and (pair? layers)
-         (or (eq? (input-layer-text-policy (car layers)) 'accept)
-             (accepting-text-layer? (cdr layers)))))
+         (case (input-layer-text-policy (car layers))
+           [(accept) #t]
+           [(ignore) #f]
+           [else (accepting-text-layer? (cdr layers))])))
 
   (define (input-dispatch-once context event)
     (unless (and (input-context? context) (input-event? event))

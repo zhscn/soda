@@ -584,13 +584,14 @@
       (make-command-definition name procedure owner documentation 'search
                                (and readers (make-interactive-plan readers)))))
 
-  (define (make-query-replace-decision-reader keymap)
+  (define (make-query-replace-decision-reader)
     (make-interactive-reader
       'query-replace-decision
       (lambda (context arguments)
         (make-interactive-suspend
           (make-interaction-request
-            'query-replace-decision "Replace? (y/n/!/q) " #f #f 'free #f keymap)
+            'query-replace-decision "Replace? (y/n/!/q) " #f #f 'free #f
+            (list #\y #\n #\q #\! #\space))
           (lambda (value) (make-interactive-ready (list value)))))))
 
   (define (query-replace-decision! service context value)
@@ -688,24 +689,13 @@
                            host owner))
     (let* ([runtime (package-host-command-runtime host)]
            [keymap (make-keymap 'search)]
-           [decision-keymap (make-keymap 'query-replace-decision)]
            [service
             (%make-search-service
               host keymap (make-eqv-hashtable) (make-eqv-hashtable))]
            [forward-reader (make-interaction-string-reader 'search "Search: ")]
            [backward-reader (make-interaction-string-reader 'search "Search backward: ")]
            [replace-reader (make-interaction-string-reader 'search "Replace: ")]
-           [decision-reader (make-query-replace-decision-reader decision-keymap)])
-      (for-each
-        (lambda (character)
-          (keymap-bind! decision-keymap (list (plain-stroke character))
-                        'minibuffer.accept-key)
-          (keymap-bind! decision-keymap
-                        (list (make-key-stroke 'character (char->integer character) 1))
-                        'minibuffer.accept-key))
-        (list #\y #\n #\q))
-      (keymap-bind! decision-keymap (list (plain-stroke #\!)) 'minibuffer.accept-key)
-      (keymap-bind! decision-keymap (list (plain-stroke #\space)) 'minibuffer.accept-key)
+           [decision-reader (make-query-replace-decision-reader)])
       (install-command! runtime owner 'search.forward "Search forward for text."
                         (list forward-reader)
         (lambda (context value)
