@@ -15,8 +15,9 @@
           (soda host internal window))
 
   ;; Rendering is a pure projection, while this service owns the optional
-  ;; frontend cache.  Its signature contains only published generations and
-  ;; Surface geometry, so no mutable editor value enters a Frame cache key.
+  ;; frontend cache.  Surface generation covers tree, geometry, focus, size,
+  ;; and chrome; each leaf adds only the published Buffer/View generations
+  ;; which can change independently of its Surface placement.
   (define-record-type
     (render-service %make-render-service render-service?)
     (fields (mutable signature render-service-signature render-service-signature-set!)
@@ -26,22 +27,20 @@
   (define (make-render-service)
     (%make-render-service #f #f 0))
 
-  (define (leaf-signature leaf views)
+  (define (view-render-token leaf views)
     (let ([view (view-service-ref views (window-view-id leaf) #f)])
       (if view
-          (list (window-view-id leaf)
-                (list-copy (window-rectangle leaf))
-                (buffer-state-generation (buffer-state (view-buffer view)))
-                (view-render-generation view))
-          (list (window-view-id leaf) (list-copy (window-rectangle leaf)) #f #f))))
+          (vector (window-view-id leaf)
+                  (buffer-state-generation (buffer-state (view-buffer view)))
+                  (view-render-generation view))
+          (vector (window-view-id leaf) #f #f))))
 
-  (define (render-signature service surface views)
-    (list (render-service-epoch service)
-          (surface-id surface)
-          (surface-generation surface)
-          (let ([size (surface-size surface)]) (cons (car size) (cdr size)))
-          (map (lambda (leaf) (leaf-signature leaf views))
-               (surface-windows surface))))
+  (define (surface-render-token service surface views)
+    (vector (render-service-epoch service)
+            (surface-id surface)
+            (surface-generation surface)
+            (map (lambda (leaf) (view-render-token leaf views))
+                 (surface-windows surface))))
 
   (define (render-service-invalidate! service)
     (unless (render-service? service)
@@ -52,7 +51,7 @@
   (define (render-service-render! service surface views)
     (unless (and (render-service? service) (surface? surface) (view-service? views))
       (assertion-violation 'render-service-render! "invalid render request" service surface views))
-    (let ([signature (render-signature service surface views)])
+    (let ([signature (surface-render-token service surface views)])
       (if (equal? signature (render-service-signature service))
           (render-service-last-render service)
           (let ([render (render-surface surface views)])
