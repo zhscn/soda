@@ -20,7 +20,10 @@
           text-layout-document-visual-position
           text-layout-visual-position-at
           text-layout-visual-step
+          text-layout-scroll-start
           text-layout-page-start
+          text-layout-recenter-start
+          text-layout-viewport-row-position
           text-layout-reveal-viewport
           make-text-layout-options
           text-layout-options?
@@ -317,6 +320,43 @@
         (and (= (visual-position-line left) (visual-position-line right))
              (< (visual-position-row left) (visual-position-row right)))))
 
+  (define (visual-row-start text options width position)
+    (text-layout-visual-position-at
+      text options width
+      (visual-position-line position) (visual-position-row position)))
+
+  (define (text-layout-final-page-start text options width height)
+    (let* ([end
+            (text-layout-document-visual-position
+              text options width (text-size text))]
+           [position
+            (text-layout-visual-step text options width end (- 1 height))])
+      (visual-row-start text options width position)))
+
+  ;; Move a Viewport by DELTA visual rows and clamp it to the last origin that
+  ;; can still fill the frame from available document rows.
+  (define (text-layout-scroll-start text options width height viewport delta)
+    (unless (and (text? text) (text-layout-options? options)
+                 (offset? width) (> width 0) (offset? height) (> height 0)
+                 (viewport? viewport) (integer? delta) (exact? delta))
+      (assertion-violation 'text-layout-scroll-start
+                           "invalid visual scroll request"
+                           text options width height viewport delta))
+    (let* ([top
+            (text-layout-visual-position-at
+              text options width
+              (min (viewport-first-line viewport) (- (text-line-count text) 1))
+              (viewport-visual-row viewport))]
+           [requested
+            (visual-row-start
+              text options width
+              (text-layout-visual-step text options width top delta))]
+           [last-page
+            (text-layout-final-page-start text options width height)])
+      (if (visual-position-before? last-page requested)
+          last-page
+          requested)))
+
   ;; Compute a page-scroll origin while retaining as much document content as
   ;; the viewport can display.  The final page begins at most HEIGHT-1 visual
   ;; rows before the document end instead of placing the final row at the top.
@@ -327,28 +367,49 @@
       (assertion-violation 'text-layout-page-start
                            "invalid visual page request"
                            text options width height viewport direction))
-    (let* ([top
-            (text-layout-visual-position-at
-              text options width
-              (min (viewport-first-line viewport) (- (text-line-count text) 1))
-              (viewport-visual-row viewport))]
+    (text-layout-scroll-start
+      text options width height viewport (* direction height)))
+
+  ;; Place OFFSET at SCREEN-ROW when document boundaries permit it.  The
+  ;; returned value is a legal, content-retaining Viewport origin.
+  (define (text-layout-recenter-start text options width height offset screen-row)
+    (unless (and (text? text) (text-layout-options? options)
+                 (offset? width) (> width 0) (offset? height) (> height 0)
+                 (offset? offset) (<= offset (text-size text))
+                 (offset? screen-row) (< screen-row height))
+      (assertion-violation 'text-layout-recenter-start
+                           "invalid recenter request"
+                           text options width height offset screen-row))
+    (let* ([point
+            (text-layout-document-visual-position text options width offset)]
            [requested
-            (text-layout-visual-step text options width top (* direction height))])
-      (if (negative? direction)
-          requested
-          (let* ([end
-                  (text-layout-document-visual-position
-                    text options width (text-size text))]
-                 [last-position
-                  (text-layout-visual-step text options width end (- 1 height))]
-                 [last-page
-                  (text-layout-visual-position-at
-                    text options width
-                    (visual-position-line last-position)
-                    (visual-position-row last-position))])
-            (if (visual-position-before? last-page requested)
-                last-page
-                requested)))))
+            (visual-row-start
+              text options width
+              (text-layout-visual-step text options width point (- screen-row)))]
+           [last-page
+            (text-layout-final-page-start text options width height)])
+      (if (visual-position-before? last-page requested)
+          last-page
+          requested)))
+
+  ;; Resolve a screen row to a document position while retaining the desired
+  ;; visual column.  Rows beyond the document clamp to its final visual row.
+  (define (text-layout-viewport-row-position
+           text options width height viewport screen-row goal-column)
+    (unless (and (text? text) (text-layout-options? options)
+                 (offset? width) (> width 0) (offset? height) (> height 0)
+                 (viewport? viewport) (offset? screen-row) (< screen-row height)
+                 (offset? goal-column))
+      (assertion-violation 'text-layout-viewport-row-position
+                           "invalid viewport row request"
+                           text options width height viewport screen-row goal-column))
+    (let ([top
+           (text-layout-visual-position-at
+             text options width
+             (min (viewport-first-line viewport) (- (text-line-count text) 1))
+             (viewport-visual-row viewport))])
+      (text-layout-visual-step
+        text options width top screen-row goal-column)))
 
   ;; Return the nearest Viewport which contains OFFSET.  Commands describe
   ;; point motion in document coordinates; this pure projection translates

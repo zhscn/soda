@@ -187,7 +187,7 @@
                    (eq? (keymap-lookup
                           (fundamental-editing-keymap editing)
                           (list (make-key-stroke 'character (char->integer #\l) 4)))
-                        'fundamental.redraw)
+                        'fundamental.recenter)
                    (eq? (keymap-lookup
                           file-map
                           (list (make-key-stroke 'character (char->integer #\o) 4)))
@@ -432,6 +432,10 @@
                        'fundamental.beginning-of-buffer)
                    (eq? (keymap-lookup keymap (list (meta #\/)))
                        'fundamental.end-of-buffer)
+                   (eq? (keymap-lookup keymap (list (control #\l)))
+                       'fundamental.recenter)
+                   (eq? (keymap-lookup keymap (list (meta #\r)))
+                       'fundamental.move-to-window-center)
                    (eq? (keymap-lookup keymap (list (make-key-stroke 'up #f 0)))
                        'fundamental.previous-line)
                    (eq? (keymap-lookup keymap (list (make-key-stroke 'down #f 0)))
@@ -2289,6 +2293,63 @@
                       4))
         (error 'fundamental-editing-tests
                "page up did not restore viewport and keep point visible"))
+      (let ([layout
+             (layout-snapshot-display-stream
+               (buffer-state-document (buffer-state buffer))
+               (view-state-selection (view-state view)) 0 0 4 2
+               (make-decoration-set '()) #f options)])
+        (command-runtime-start!
+          runtime 'fundamental.scroll-forward-line
+          (application-command-context application layout)))
+      (unless (= (viewport-visual-row (view-state-viewport (view-state view))) 1)
+        (error 'fundamental-editing-tests
+               "visual-line scroll did not advance the viewport"))
+      (let ([layout
+             (layout-snapshot-display-stream
+               (buffer-state-document (buffer-state buffer))
+               (view-state-selection (view-state view)) 0 1 4 2
+               (make-decoration-set '()) #f options)])
+        (command-runtime-start!
+          runtime 'fundamental.scroll-backward-line
+          (application-command-context application layout)))
+      (unless (= (viewport-visual-row (view-state-viewport (view-state view))) 0)
+        (error 'fundamental-editing-tests
+               "visual-line scroll did not restore the viewport"))
+      (let ([layout
+             (layout-snapshot-display-stream
+               (buffer-state-document (buffer-state buffer))
+               (view-state-selection (view-state view)) 0 0 4 2
+               (make-decoration-set '()) #f options)])
+        (command-runtime-start!
+          runtime 'fundamental.recenter
+          (application-command-context application layout)))
+      (unless (= (viewport-visual-row (view-state-viewport (view-state view))) 1)
+        (error 'fundamental-editing-tests "recenter did not place point at window center"))
+      (let ([layout
+             (layout-snapshot-display-stream
+               (buffer-state-document (buffer-state buffer))
+               (view-state-selection (view-state view)) 0 1 4 2
+               (make-decoration-set '()) #f options)])
+        (command-runtime-start!
+          runtime 'fundamental.recenter-bottom
+          (application-command-context application layout)))
+      (unless (= (viewport-visual-row (view-state-viewport (view-state view))) 0)
+        (error 'fundamental-editing-tests
+               "recenter-bottom did not place point at window bottom"))
+      (let ([layout
+             (layout-snapshot-display-stream
+               (buffer-state-document (buffer-state buffer))
+               (view-state-selection (view-state view)) 0 0 4 2
+               (make-decoration-set '()) #f options)])
+        (command-runtime-start!
+          runtime 'fundamental.move-to-window-bottom
+          (application-command-context application layout)))
+      (unless (= (selection-range-head
+                   (selection-primary-range
+                     (view-state-selection (view-state view))))
+                 4)
+        (error 'fundamental-editing-tests
+               "move-to-window-bottom did not target the final screen row"))
       (soda-application-close! application))
 
     (let* ([application (make-soda-application)]

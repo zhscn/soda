@@ -965,7 +965,16 @@
             (command-context-view-id context) (view-state-generation state)
             #f (make-viewport first-line 0) #f '() '() #f)))))
 
-  (define (scroll-page context direction)
+  (define (viewport-screen-row height placement)
+    (case placement
+      [(top) 0]
+      [(center) (div (- height 1) 2)]
+      [(bottom) (- height 1)]
+      [else
+       (assertion-violation 'viewport-screen-row
+                            "unknown viewport placement" placement)]))
+
+  (define (scroll-visual context amount page?)
     ;; A TextLayout supplies the presented frame height, so page movement is
     ;; expressed in visual rows rather than a hard-coded logical-line count.
     ;; Headless callers retain the bounded logical fallback.
@@ -980,11 +989,17 @@
                      [current (view-state-viewport state)]
                      [options (context-layout-options context)]
                      [target
-                      (text-layout-page-start
-                        text options
-                        (frame-width (text-layout-frame layout))
-                        (frame-height (text-layout-frame layout))
-                        current direction)]
+                      (if page?
+                          (text-layout-page-start
+                            text options
+                            (frame-width (text-layout-frame layout))
+                            (frame-height (text-layout-frame layout))
+                            current amount)
+                          (text-layout-scroll-start
+                            text options
+                            (frame-width (text-layout-frame layout))
+                            (frame-height (text-layout-frame layout))
+                            current amount))]
                      [height (frame-height (text-layout-frame layout))])
                 (if target
                     (let* ([next-viewport
@@ -1032,7 +1047,71 @@
                         (command-context-view-id context) (view-state-generation state)
                         next-selection next-viewport #f '() '() #f))
                     (command-handled)))))
-          (scroll-lines context (* direction 10)))))
+          (scroll-lines context (* amount (if page? 10 1))))))
+
+  (define (recenter-viewport context placement)
+    (let ([layout (command-context-layout context)])
+      (if (and (text-layout? layout)
+               (> (frame-width (text-layout-frame layout)) 0)
+               (> (frame-height (text-layout-frame layout)) 0))
+          (with-context-text
+            context
+            (lambda (text)
+              (let* ([state (command-context-view-state context)]
+                     [frame (text-layout-frame layout)]
+                     [height (frame-height frame)]
+                     [point
+                      (selection-range-head
+                        (selection-primary-range (context-selection context)))]
+                     [target
+                      (text-layout-recenter-start
+                        text (context-layout-options context)
+                        (frame-width frame) height point
+                        (viewport-screen-row height placement))])
+                (make-view-transaction-spec
+                  (command-context-view-id context) (view-state-generation state)
+                  #f
+                  (make-viewport
+                    (visual-position-line target) (visual-position-row target))
+                  #f '() '() #f))))
+          (command-handled))))
+
+  (define (move-to-viewport-row context placement)
+    (let ([layout (command-context-layout context)])
+      (if (and (text-layout? layout)
+               (> (frame-width (text-layout-frame layout)) 0)
+               (> (frame-height (text-layout-frame layout)) 0))
+          (with-context-text
+            context
+            (lambda (text)
+              (let* ([state (command-context-view-state context)]
+                     [selection (context-selection context)]
+                     [frame (text-layout-frame layout)]
+                     [width (frame-width frame)]
+                     [height (frame-height frame)]
+                     [options (context-layout-options context)]
+                     [row (viewport-screen-row height placement)]
+                     [viewport (view-state-viewport state)]
+                     [next
+                      (make-selection
+                        (map
+                          (lambda (range)
+                            (let* ([goal
+                                    (vertical-goal-column
+                                      text layout options range)]
+                                   [position
+                                    (text-layout-viewport-row-position
+                                      text options width height viewport row goal)])
+                              (with-selection-vertical-goal
+                                (motion-range range
+                                  (visual-position-offset position))
+                                goal)))
+                          (selection-ranges selection))
+                        (selection-primary selection))])
+                (make-view-transaction-spec
+                  (command-context-view-id context) (view-state-generation state)
+                  next #f #f '() '() #f))))
+          (command-handled))))
 
   (define (transpose-characters context)
     (let ([range (selection-primary-range (context-selection context))])
@@ -1361,11 +1440,43 @@
       (install-command!
         runtime owner 'fundamental.scroll-up (context)
         "Scroll the Viewport toward the beginning of the Buffer." 'viewport
-        (scroll-page context -1))
+        (scroll-visual context -1 #t))
       (install-command!
         runtime owner 'fundamental.scroll-down (context)
         "Scroll the Viewport toward the end of the Buffer." 'viewport
-        (scroll-page context 1))
+        (scroll-visual context 1 #t))
+      (install-command!
+        runtime owner 'fundamental.scroll-backward-line (context)
+        "Scroll the Viewport backward by one visual row." 'viewport
+        (scroll-visual context -1 #f))
+      (install-command!
+        runtime owner 'fundamental.scroll-forward-line (context)
+        "Scroll the Viewport forward by one visual row." 'viewport
+        (scroll-visual context 1 #f))
+      (install-command!
+        runtime owner 'fundamental.recenter (context)
+        "Center point vertically in the active Window." 'viewport
+        (recenter-viewport context 'center))
+      (install-command!
+        runtime owner 'fundamental.recenter-top (context)
+        "Place point at the top of the active Window." 'viewport
+        (recenter-viewport context 'top))
+      (install-command!
+        runtime owner 'fundamental.recenter-bottom (context)
+        "Place point at the bottom of the active Window." 'viewport
+        (recenter-viewport context 'bottom))
+      (install-command!
+        runtime owner 'fundamental.move-to-window-top (context)
+        "Move point to the top visual row of the active Window." 'motion
+        (move-to-viewport-row context 'top))
+      (install-command!
+        runtime owner 'fundamental.move-to-window-center (context)
+        "Move point to the center visual row of the active Window." 'motion
+        (move-to-viewport-row context 'center))
+      (install-command!
+        runtime owner 'fundamental.move-to-window-bottom (context)
+        "Move point to the bottom visual row of the active Window." 'motion
+        (move-to-viewport-row context 'bottom))
       (install-command!
         runtime owner 'fundamental.redraw (context)
         "Request a fresh presentation of the active Surface." 'interface
@@ -1426,7 +1537,7 @@
         ((list (control-stroke #\n)) 'fundamental.next-line)
         ((list (control-stroke #\j)) 'fundamental.fill-paragraph)
         ((list (control-stroke #\t)) 'fundamental.transpose-characters)
-        ((list (control-stroke #\l)) 'fundamental.redraw)
+        ((list (control-stroke #\l)) 'fundamental.recenter)
         ((list (control-stroke #\y)) 'fundamental.scroll-up)
         ((list (control-stroke #\v)) 'fundamental.scroll-down)
         ((list (make-key-stroke 'character (char->integer #\space) 4)) 'fundamental.set-mark)
@@ -1442,6 +1553,8 @@
         ((list (make-key-stroke 'character (char->integer #\6) 2)) 'fundamental.copy-region)
         ((list (make-key-stroke 'character (char->integer #\d) 2)) 'fundamental.kill-word)
         ((list (make-key-stroke 'character (char->integer #\v) 2)) 'fundamental.scroll-up)
+        ((list (make-key-stroke 'character (char->integer #\r) 2))
+         'fundamental.move-to-window-center)
         ((list (make-key-stroke 'backspace #f 2)) 'fundamental.backward-kill-word)
         ((list (control-stroke #\d)) 'fundamental.delete-forward)
         ((list (control-stroke #\_)) 'fundamental.goto-line)
@@ -1506,9 +1619,11 @@
               (eq? (pointer-event-type event) 'scroll)
               (case (pointer-event-button event)
                 [(wheel-up)
-                 (make-command-invoke-message 'fundamental.scroll-up context '() #f)]
+                 (make-command-invoke-message
+                   'fundamental.scroll-backward-line context '() #f)]
                 [(wheel-down)
-                 (make-command-invoke-message 'fundamental.scroll-down context '() #f)]
+                 (make-command-invoke-message
+                   'fundamental.scroll-forward-line context '() #f)]
                 [else #f])))]
       [else #f]))
 )
