@@ -22,7 +22,7 @@
   ;; is therefore part of the same lifetime as raw input and Kitty protocol
   ;; negotiation.
   (define terminal-alternate-screen-enable-sequence "\x1b;[?1049h\x1b;[H")
-  (define terminal-alternate-screen-disable-sequence "\x1b;[0m\x1b;[?1049l")
+  (define terminal-alternate-screen-disable-sequence "\x1b;[0m\x1b;[?25h\x1b;[?1049l")
 
   (define-record-type
     (terminal-input-session %make-terminal-input-session

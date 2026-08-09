@@ -50,8 +50,14 @@
       (for-each (lambda (span) (write-span port frame span theme)) spans)
       (put-string port escape)
       (put-string port "[0m")
-      (when (and cursor-row cursor-column)
-        (put-string port (cursor-address cursor-row cursor-column)))
+      (if (and cursor-row cursor-column)
+          (begin
+            (put-string port (cursor-address cursor-row cursor-column))
+            (put-string port escape)
+            (put-string port "[?25h"))
+          (begin
+            (put-string port escape)
+            (put-string port "[?25l")))
       (get-output)))
 
   ;; The returned transaction is complete and can be written partially by a

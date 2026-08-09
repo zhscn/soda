@@ -1638,7 +1638,7 @@
 (unless (and (string=? terminal-alternate-screen-enable-sequence
                        "\x1b;[?1049h\x1b;[H")
              (string=? terminal-alternate-screen-disable-sequence
-                       "\x1b;[0m\x1b;[?1049l"))
+                       "\x1b;[0m\x1b;[?25h\x1b;[?1049l"))
   (error 'kernel-tests "terminal alternate screen sequences differ"))
 
 (let* ([event
@@ -2136,8 +2136,15 @@
   (unless (and (contains-string? ansi "[1;1H")
                (contains-string? ansi "[0;7m")
                (contains-string? ansi "[3;4H")
+               (contains-string? ansi "[?25h")
                (contains-string? ansi "x"))
     (error 'kernel-tests "ANSI presenter encoding differs" ansi)))
+
+(let* ([frame (make-frame 1 1)]
+       [ansi (frame-diff->ansi #f frame default-theme #f #f)])
+  (unless (and (contains-string? ansi "[?25l")
+               (not (contains-string? ansi "[?25h")))
+    (error 'kernel-tests "ANSI presenter did not hide an absent cursor" ansi)))
 
 (let* ([presenter (make-frame-presenter)]
        [frame (frame-with-cell (make-frame 2 1) 0 0
