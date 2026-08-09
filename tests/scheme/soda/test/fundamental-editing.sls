@@ -2199,8 +2199,13 @@
                (make-decoration-set '()) #f options)])
         (command-runtime-start!
           runtime 'fundamental.scroll-down (application-command-context application layout)))
-      (unless (= (viewport-visual-row (view-state-viewport (view-state view))) 2)
-        (error 'fundamental-editing-tests "page down did not use visual frame height"))
+      (unless (and (= (viewport-visual-row (view-state-viewport (view-state view))) 2)
+                   (= (selection-range-head
+                        (selection-primary-range
+                          (view-state-selection (view-state view))))
+                      8))
+        (error 'fundamental-editing-tests
+               "page down did not move an off-screen point into the new viewport"))
       (let ([layout
              (layout-snapshot-display-stream
                (buffer-state-document (buffer-state buffer))
@@ -2217,8 +2222,13 @@
                (make-decoration-set '()) #f options)])
         (command-runtime-start!
           runtime 'fundamental.scroll-up (application-command-context application layout)))
-      (unless (= (viewport-visual-row (view-state-viewport (view-state view))) 0)
-        (error 'fundamental-editing-tests "page up did not restore visual viewport origin"))
+      (unless (and (= (viewport-visual-row (view-state-viewport (view-state view))) 0)
+                   (= (selection-range-head
+                        (selection-primary-range
+                          (view-state-selection (view-state view))))
+                      4))
+        (error 'fundamental-editing-tests
+               "page up did not restore viewport and keep point visible"))
       (soda-application-close! application))
 
     (let* ([application (make-soda-application)]

@@ -1018,14 +1018,53 @@
                      [target
                       (text-layout-visual-step
                         text options (frame-width (text-layout-frame layout)) top
-                        (* direction (frame-height (text-layout-frame layout))))])
+                        (* direction (frame-height (text-layout-frame layout))))]
+                     [height (frame-height (text-layout-frame layout))])
                 (if target
-                    (make-view-transaction-spec
-                      (command-context-view-id context) (view-state-generation state)
-                      #f
-                      (make-viewport (visual-position-line target)
-                                     (visual-position-row target))
-                      #f '() '() #f)
+                    (let* ([next-viewport
+                            (make-viewport (visual-position-line target)
+                                           (visual-position-row target))]
+                           [bottom
+                            (text-layout-visual-step
+                              text options (frame-width (text-layout-frame layout))
+                              target (- height 1))]
+                           [selection (context-selection context)]
+                           [next-selection
+                            (make-selection
+                              (map
+                                (lambda (range)
+                                  (let* ([point
+                                          (text-layout-document-visual-position
+                                            text options
+                                            (frame-width (text-layout-frame layout))
+                                            (selection-range-head range))]
+                                         [before?
+                                          (or (< (visual-position-line point)
+                                                 (visual-position-line target))
+                                              (and (= (visual-position-line point)
+                                                      (visual-position-line target))
+                                                   (< (visual-position-row point)
+                                                      (visual-position-row target))))]
+                                         [after?
+                                          (or (> (visual-position-line point)
+                                                 (visual-position-line bottom))
+                                              (and (= (visual-position-line point)
+                                                      (visual-position-line bottom))
+                                                   (> (visual-position-row point)
+                                                      (visual-position-row bottom))))])
+                                    (cond
+                                      [before?
+                                       (motion-range range
+                                         (visual-position-offset target))]
+                                      [after?
+                                       (motion-range range
+                                         (visual-position-offset bottom))]
+                                      [else range])))
+                                (selection-ranges selection))
+                              (selection-primary selection))])
+                      (make-view-transaction-spec
+                        (command-context-view-id context) (view-state-generation state)
+                        next-selection next-viewport #f '() '() #f))
                     (command-handled)))))
           (scroll-lines context (* direction 10)))))
 
