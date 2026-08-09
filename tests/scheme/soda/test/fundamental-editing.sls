@@ -1601,6 +1601,202 @@
           (when (file-exists? saved-as) (delete-file saved-as))
           (when (file-exists? scratch-save) (delete-file scratch-save)))))
 
+    ;; External changes enter through immutable FileStateEvents.  Clean
+    ;; Buffers reload automatically; dirty Buffers retain their contents until
+    ;; an InteractionService decision is revalidated against the disk version.
+    (let* ([path (string-append "/tmp/soda-external-policy-"
+                                (number->string (get-process-id)) ".txt")]
+           [saved-as (string-append path ".local")]
+           [application (make-soda-application)])
+      (define (external-event files buffer kind)
+        (make-file-state-event
+          (buffer-id buffer) path kind 'external
+          (and (vfs-file-exists? path) (vfs-stat-path path))
+          (if (eq? kind 'replaced) '(rename) '(change)) 0))
+      (define (publish-external! files buffer kind)
+        (file-service-handle-state-event!
+          files (external-event files buffer kind)
+          (application-command-context application))
+        (host-state-run! (soda-application-state application)))
+      (dynamic-wind
+        (lambda ()
+          (when (file-exists? path) (delete-file path))
+          (when (file-exists? saved-as) (delete-file saved-as))
+          (vfs-write-file path (string->utf8 "initial"))
+          (vfs-write-file saved-as (string->utf8 "destination-old")))
+        (lambda ()
+          (let* ([state (soda-application-state application)]
+                 [runtime (host-state-command-runtime state)]
+                 [files (soda-application-files application)]
+                 [history (soda-application-history application)]
+                 [interaction (soda-application-interaction application)])
+            (command-runtime-start!
+              runtime 'file.visit (application-command-context application) (list path))
+            (let ([buffer
+                   (buffer-service-ref
+                     (host-state-buffers state)
+                     (command-context-buffer-id
+                       (application-command-context application)))])
+              (vfs-write-file path (string->utf8 "automatic"))
+              (publish-external! files buffer 'replaced)
+              (unless (and (string=? (buffer-string buffer) "automatic")
+                           (not (history-modified? history (buffer-id buffer)))
+                           (not (file-service-conflict files (buffer-id buffer) #f)))
+                (error 'fundamental-editing-tests
+                       "clean Buffer did not automatically reload a stable external version"))
+
+              ;; The clean/dirty decision is checked again when the queued
+              ;; reload effect runs, so an intervening edit cannot be lost.
+              (vfs-write-file path (string->utf8 "race"))
+              (file-service-handle-state-event!
+                files (external-event files buffer 'replaced)
+                (application-command-context application))
+              (command-runtime-start!
+                runtime 'fundamental.end-of-buffer
+                (application-command-context application))
+              (command-runtime-start!
+                runtime 'fundamental.insert-text
+                (application-command-context application)
+                (list (string->utf8 " local-race")))
+              (host-state-run! state)
+              (unless (and (string=? (buffer-string buffer) "automatic local-race")
+                           (eq? (file-conflict-status
+                                  (file-service-conflict files (buffer-id buffer)))
+                                'pending)
+                           (interaction-service-current interaction))
+                (error 'fundamental-editing-tests
+                       "queued automatic reload overwrote an intervening edit"))
+              (interaction-service-submit! interaction "r")
+              (host-state-run! state)
+              (unless (string=? (buffer-string buffer) "race")
+                (error 'fundamental-editing-tests
+                       "explicit reload after an intervening edit failed"))
+
+              (command-runtime-start!
+                runtime 'fundamental.end-of-buffer
+                (application-command-context application))
+              (command-runtime-start!
+                runtime 'fundamental.insert-text
+                (application-command-context application) (list (string->utf8 " local")))
+              (vfs-write-file path (string->utf8 "external-one"))
+              (publish-external! files buffer 'replaced)
+              (let ([session (interaction-service-current interaction)]
+                    [conflict (file-service-conflict files (buffer-id buffer))])
+                (unless (and session
+                             (eq? (interaction-request-kind
+                                    (interaction-session-request session))
+                                  'external-file-change)
+                             (eq? (file-conflict-status conflict) 'pending)
+                             (string=? (buffer-string buffer) "race local"))
+                  (error 'fundamental-editing-tests
+                         "dirty Buffer did not enter an explicit external conflict")))
+
+              ;; A decision for external-one must not load external-two.
+              (vfs-write-file path (string->utf8 "external-two"))
+              (interaction-service-submit! interaction "r")
+              (host-state-run! state)
+              (unless (and (string=? (buffer-string buffer) "race local")
+                           (file-service-conflict files (buffer-id buffer) #f))
+                (error 'fundamental-editing-tests
+                       "stale reload decision crossed the disk-version boundary"))
+              (publish-external! files buffer 'replaced)
+              (interaction-service-submit! interaction "r")
+              (host-state-run! state)
+              (unless (and (string=? (buffer-string buffer) "external-two")
+                           (not (history-modified? history (buffer-id buffer)))
+                           (not (file-service-conflict files (buffer-id buffer) #f)))
+                (error 'fundamental-editing-tests
+                       "revalidated reload did not replace the dirty Buffer"))
+
+              (command-runtime-start!
+                runtime 'fundamental.end-of-buffer
+                (application-command-context application))
+              (command-runtime-start!
+                runtime 'fundamental.insert-text
+                (application-command-context application) (list (string->utf8 " keep")))
+              (vfs-write-file path (string->utf8 "external-ignore"))
+              (publish-external! files buffer 'replaced)
+              (interaction-service-submit! interaction "i")
+              (host-state-run! state)
+              (unless (and (string=? (buffer-string buffer) "external-two keep")
+                           (eq? (file-conflict-status
+                                  (file-service-conflict files (buffer-id buffer)))
+                                'ignored))
+                (error 'fundamental-editing-tests
+                       "ignore did not preserve Buffer contents and conflict state"))
+
+              (vfs-write-file path (string->utf8 "external-overwrite"))
+              (publish-external! files buffer 'replaced)
+              (interaction-service-submit! interaction "o")
+              (host-state-run! state)
+              (unless (and (string=? (utf8->string (vfs-read-file path))
+                                     "external-two keep")
+                           (not (file-service-conflict files (buffer-id buffer) #f))
+                           (not (history-modified? history (buffer-id buffer))))
+                (error 'fundamental-editing-tests
+                       "overwrite did not publish the current Buffer after revalidation"))
+
+              (command-runtime-start!
+                runtime 'fundamental.end-of-buffer
+                (application-command-context application))
+              (command-runtime-start!
+                runtime 'fundamental.insert-text
+                (application-command-context application) (list (string->utf8 " save-as")))
+              (vfs-write-file path (string->utf8 "external-save-as"))
+              (publish-external! files buffer 'replaced)
+              (interaction-service-submit! interaction "s")
+              (host-state-run! state)
+              (unless (eq? (interaction-request-kind
+                             (interaction-session-request
+                               (interaction-service-current interaction)))
+                           'file-name)
+                (error 'fundamental-editing-tests
+                       "save-as conflict decision did not request a destination"))
+              (interaction-service-submit! interaction saved-as)
+              (host-state-run! state)
+              (unless (eq? (interaction-request-kind
+                             (interaction-session-request
+                               (interaction-service-current interaction)))
+                           'overwrite-decision)
+                (error 'fundamental-editing-tests
+                       "conflict save-as did not confirm an existing destination"))
+              (vfs-write-file saved-as (string->utf8 "destination-new"))
+              (interaction-service-submit! interaction "yes")
+              (host-state-run! state)
+              (unless (and (string=? (utf8->string (vfs-read-file saved-as))
+                                     "destination-new")
+                           (string=?
+                             (resource-locator
+                               (file-service-resource files (buffer-id buffer)))
+                             path)
+                           (eq? (interaction-request-kind
+                                  (interaction-session-request
+                                    (interaction-service-current interaction)))
+                                'external-file-change))
+                (error 'fundamental-editing-tests
+                       "stale save-as confirmation overwrote a newer destination"))
+              (interaction-service-submit! interaction "s")
+              (host-state-run! state)
+              (interaction-service-submit! interaction saved-as)
+              (host-state-run! state)
+              (interaction-service-submit! interaction "yes")
+              (host-state-run! state)
+              (unless (and (string=? (utf8->string (vfs-read-file path))
+                                     "external-save-as")
+                           (string=? (utf8->string (vfs-read-file saved-as))
+                                     "external-two keep save-as")
+                           (string=?
+                             (resource-locator
+                               (file-service-resource files (buffer-id buffer)))
+                             saved-as)
+                           (not (file-service-conflict files (buffer-id buffer) #f)))
+                (error 'fundamental-editing-tests
+                       "save-as did not preserve the externally changed source")))))
+        (lambda ()
+          (soda-application-close! application)
+          (when (file-exists? path) (delete-file path))
+          (when (file-exists? saved-as) (delete-file saved-as)))))
+
     ;; Visiting claims a sibling lock file for the Buffer lifetime.  A foreign
     ;; claim leaves the Buffer read-only and survives Soda's close path.
     (let* ([path (string-append "/tmp/soda-file-lock-"

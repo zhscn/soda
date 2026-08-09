@@ -9,6 +9,7 @@
           file-watch-service-handle-runtime-event!
           file-watch-service-binding-count
           file-watch-service-directory-count
+          make-file-state-event
           file-state-event?
           file-state-event-buffer-id
           file-state-event-path
@@ -50,6 +51,21 @@
   (define-record-type
     (file-state-event %make-file-state-event file-state-event?)
     (fields buffer-id path kind origin version causes status))
+
+  (define (make-file-state-event buffer-id path kind origin version causes status)
+    (unless (and (valid-buffer-id? buffer-id)
+                 (string? path) (positive? (string-length path))
+                 (memq kind '(modified replaced deleted metadata error))
+                 (memq origin '(local external))
+                 (valid-version? version)
+                 (list? causes)
+                 (for-all (lambda (cause) (memq cause '(rename change))) causes)
+                 (integer? status) (exact? status))
+      (assertion-violation 'make-file-state-event
+                           "invalid file state event"
+                           buffer-id path kind origin version causes status))
+    (%make-file-state-event
+      buffer-id (string-copy path) kind origin version (list-copy causes) status))
 
   (define (valid-buffer-id? value)
     (and (integer? value) (exact? value) (>= value 0)))
@@ -252,7 +268,7 @@
               [(same-version? current (file-watch-binding-version binding)) 'metadata]
               [else 'modified])]
            [event
-            (%make-file-state-event
+            (make-file-state-event
               (file-watch-binding-buffer-id binding) path kind origin current
               (event-causes flags) status)])
       ;; One filesystem operation may emit several native notifications.  A

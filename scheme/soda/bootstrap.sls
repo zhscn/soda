@@ -424,7 +424,8 @@
                 (lambda (event)
                   (or
                     (file-service-handle-runtime-event!
-                      (soda-application-files application) event)
+                      (soda-application-files application) event
+                      (application-command-context application 'file-watch))
                     (process-service-handle-runtime-event!
                       (soda-application-processes application) event)))))
             (soda-application-effect-registration-set! application registration)

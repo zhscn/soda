@@ -2,11 +2,19 @@
   (export make-file-service!
           file-service?
           file-service-resource
+          file-service-conflict
           file-service-watch-service
           file-service-attach-runtime!
           file-service-handle-runtime-event!
+          file-service-handle-state-event!
           file-service-add-state-listener!
           file-service-register-mode!
+          file-conflict?
+          file-conflict-buffer-id
+          file-conflict-resource
+          file-conflict-version
+          file-conflict-kind
+          file-conflict-status
           file-backup-enabled?
           file-keymap)
   (import (rnrs)
@@ -52,6 +60,7 @@
       (immutable history file-service-history)
       (immutable keymap file-keymap)
       (immutable watch-service file-service-watch-service)
+      (immutable conflicts file-service-conflicts)
       (mutable mode-associations file-service-mode-associations
                                  file-service-mode-associations-set!)))
 
@@ -105,6 +114,11 @@
   (define-record-type file-binding
     (fields resource version lock))
 
+  (define-record-type
+    (file-conflict %make-file-conflict file-conflict?)
+    (fields buffer-id resource version kind
+            (mutable status file-conflict-status file-conflict-status-set!)))
+
   (define-record-type file-lock
     (fields path token))
 
@@ -125,6 +139,9 @@
 
   (define-record-type file-insert
     (fields context resource))
+
+  (define-record-type file-external-resolution
+    (fields buffer-id version action destination destination-version))
 
   ;; Backups are a Buffer policy: visiting the same file through another View
   ;; observes the same save behavior, while an unrelated Buffer retains its
@@ -280,6 +297,103 @@
         (and (string? value)
              (or (string-ci=? value "yes") (string-ci=? value "no"))))))
 
+  (define (external-change-decision value)
+    (let ([text
+           (cond [(symbol? value) (symbol->string value)]
+                 [(string? value) value]
+                 [else ""])])
+      (cond
+        [(or (string-ci=? text "r") (string-ci=? text "reload")) 'reload]
+        [(or (string-ci=? text "o") (string-ci=? text "overwrite")) 'overwrite]
+        [(or (string-ci=? text "s") (string-ci=? text "save-as")) 'save-as]
+        [(or (string-ci=? text "i") (string-ci=? text "ignore")) 'ignore]
+        [else
+         (assertion-violation
+           'file.resolve-external-change
+           "expected reload, overwrite, save-as, or ignore" value)])))
+
+  (define (make-external-change-reader service)
+    (make-interactive-reader
+      'external-change-decision
+      (lambda (context arguments)
+        (unless (and (= (length arguments) 2)
+                     (buffer-id? (car arguments)))
+          (assertion-violation 'file.resolve-external-change
+                               "invalid external conflict arguments" arguments))
+        (let* ([binding (file-service-binding service (car arguments) #f)]
+               [path
+                (if binding
+                    (resource-locator (file-binding-resource binding))
+                    "file")])
+          (make-interactive-suspend
+            (make-interaction-request
+              'external-file-change
+              (string-append
+                "File changed on disk: " path
+                ". Reload, overwrite, save-as, or ignore? (r/o/s/i) ")
+              #f #f 'free
+              (lambda (value ignored)
+                (guard (condition [else #f])
+                  (external-change-decision value)
+                  #t))
+              (list #\r #\o #\s #\i))
+            (lambda (value)
+              (make-interactive-ready
+                (list (external-change-decision value)))))))))
+
+  (define (make-conflict-target-reader service)
+    (make-interactive-reader
+      'external-conflict
+      (lambda (context arguments)
+        (cond
+          [(null? arguments)
+           (let ([conflict
+                  (file-service-conflict
+                    service (command-context-buffer-id context) #f)])
+             (unless conflict
+               (assertion-violation 'file.resolve-external-change
+                                    "active Buffer has no external file conflict"))
+             (make-interactive-ready
+               (list (file-conflict-buffer-id conflict)
+                     (file-conflict-version conflict))))]
+          [(= (length arguments) 2) (make-interactive-ready '())]
+          [else
+           (assertion-violation 'file.resolve-external-change
+                                "invalid external conflict target" arguments)]))))
+
+  (define (make-conflict-save-as-reader)
+    (make-interactive-reader
+      'file-name
+      (lambda (context arguments)
+        (if (and (= (length arguments) 3)
+                 (eq? (caddr arguments) 'save-as))
+            (make-interactive-suspend
+              (make-interaction-request
+                'file-name "Write local contents to: "
+                #f file-name-completion-source 'free)
+              (lambda (value) (make-interactive-ready (list value))))
+            (make-interactive-ready '())))))
+
+  (define (make-conflict-overwrite-reader)
+    (make-interactive-reader
+      'overwrite-decision
+      (lambda (context arguments)
+        (if (and (= (length arguments) 4)
+                 (eq? (caddr arguments) 'save-as)
+                 (string? (cadddr arguments))
+                 (vfs-file-exists?
+                   (resource-locator
+                     (canonical-file-resource (cadddr arguments)))))
+            (let* ([resource (canonical-file-resource (cadddr arguments))]
+                   [path (resource-locator resource)]
+                   [version (vfs-stat-path path)])
+              (make-interactive-suspend
+                (make-overwrite-request path)
+                (lambda (value)
+                  (make-interactive-ready
+                    (list (overwrite-decision value) version)))))
+            (make-interactive-ready (list 'overwrite #f))))))
+
   (define (file-service-binding service buffer-id . default)
     (unless (and (file-service? service) (buffer-id? buffer-id))
       (assertion-violation 'file-service-binding "expected a file service and Buffer id"
@@ -292,6 +406,15 @@
       (if binding
           (file-binding-resource binding)
           (if (null? default) #f (car default)))))
+
+  (define (file-service-conflict service buffer-id . default)
+    (unless (and (file-service? service) (buffer-id? buffer-id))
+      (assertion-violation 'file-service-conflict
+                           "expected a FileService and Buffer id"
+                           service buffer-id))
+    (hashtable-ref
+      (file-service-conflicts service) buffer-id
+      (if (null? default) #f (car default))))
 
   ;; A visited Buffer has no preceding path argument and writes its own
   ;; resource directly.  For a supplied destination, an existing different
@@ -356,12 +479,79 @@
       (file-service-watch-service service) runtime)
     service)
 
-  (define (file-service-handle-runtime-event! service event)
-    (unless (file-service? service)
-      (assertion-violation 'file-service-handle-runtime-event!
-                           "expected a FileService" service))
-    (file-watch-service-handle-runtime-event!
-      (file-service-watch-service service) event))
+  (define (file-version=? left right)
+    (or (and (not left) (not right))
+        (and left right (vfs-stat-same-version? left right))))
+
+  (define (same-conflict-event? conflict event)
+    (and conflict
+         (file-version=? (file-conflict-version conflict)
+                         (file-state-event-version event))
+         (eq? (file-conflict-kind conflict) (file-state-event-kind event))))
+
+  (define (file-service-handle-state-event! service event context)
+    (unless (and (file-service? service) (file-state-event? event)
+                 (command-context? context))
+      (assertion-violation 'file-service-handle-state-event!
+                           "expected a FileService, FileStateEvent, and CommandContext"
+                           service event context))
+    (when (and (eq? (file-state-event-origin event) 'external)
+               (not (eq? (file-state-event-kind event) 'metadata)))
+      (let* ([buffer-id (file-state-event-buffer-id event)]
+             [buffer
+              (package-host-buffer-ref
+                (file-service-host service) buffer-id #f)]
+             [binding (file-service-binding service buffer-id #f)]
+             [existing (file-service-conflict service buffer-id #f)])
+        (when (and buffer binding
+                   (string=? (file-state-event-path event)
+                             (resource-locator (file-binding-resource binding)))
+                   (not (same-conflict-event? existing event)))
+          (let* ([modified?
+                  (or (not (file-service-history service))
+                      (history-modified?
+                        (file-service-history service) buffer-id))]
+                 [automatic?
+                  (and (not modified?)
+                       (memq (file-state-event-kind event)
+                             '(modified replaced))
+                       (file-state-event-version event))]
+                 [conflict
+                  (%make-file-conflict
+                    buffer-id
+                    (file-binding-resource binding)
+                    (file-state-event-version event)
+                    (file-state-event-kind event)
+                    (if automatic? 'reloading 'pending))])
+            (hashtable-set! (file-service-conflicts service) buffer-id conflict)
+            (command-runtime-enqueue!
+              (package-host-command-runtime (file-service-host service))
+              (make-command-invoke-message
+                (if automatic?
+                    'file.external-auto-reload
+                    'file.resolve-external-change)
+                context (list buffer-id (file-state-event-version event))
+                (not automatic?))))))))
+
+  (define file-service-handle-runtime-event!
+    (case-lambda
+      [(service event)
+       (unless (file-service? service)
+         (assertion-violation 'file-service-handle-runtime-event!
+                              "expected a FileService" service))
+       (file-watch-service-handle-runtime-event!
+         (file-service-watch-service service) event)]
+      [(service event context)
+       (unless (command-context? context)
+         (assertion-violation 'file-service-handle-runtime-event!
+                              "expected a CommandContext" context))
+       (let ([events (file-service-handle-runtime-event! service event)])
+         (when events
+           (for-each
+             (lambda (state-event)
+               (file-service-handle-state-event! service state-event context))
+             events))
+         events)]))
 
   (define (file-service-add-state-listener! service owner procedure)
     (unless (file-service? service)
@@ -605,6 +795,227 @@
     (package-host-close-buffer-with-fallback!
       (file-service-host service) (file-service-owner service) target-id))
 
+  (define (current-resource-version resource)
+    (let ([path (resource-locator resource)])
+      (and (vfs-file-exists? path) (vfs-stat-path path))))
+
+  (define (require-observed-version! resource expected)
+    (let ([current (current-resource-version resource)])
+      (unless (file-version=? current expected)
+        (assertion-violation
+          'file.resolve-external-change
+          "file changed again while awaiting a conflict decision"
+          (resource-locator resource)))
+      current))
+
+  (define (conflict-for-resolution service request)
+    (unless (file-external-resolution? request)
+      (assertion-violation 'file.resolve-external-change
+                           "invalid external file resolution" request))
+    (let ([conflict
+           (file-service-conflict
+             service (file-external-resolution-buffer-id request) #f)])
+      (unless (and conflict
+                   (file-version=?
+                     (file-conflict-version conflict)
+                     (file-external-resolution-version request)))
+        (assertion-violation 'file.resolve-external-change
+                             "external file conflict is stale" request))
+      conflict))
+
+  (define (clear-conflict! service buffer-id)
+    (hashtable-delete! (file-service-conflicts service) buffer-id))
+
+  (define (replace-live-buffer-contents! service buffer contents version)
+    (let* ([state (buffer-state buffer)]
+           [length (snapshot-byte-size (buffer-state-document state))])
+      (package-host-dispatch!
+        (file-service-host service)
+        (make-transaction-spec
+          (buffer-id buffer) (buffer-state-generation state)
+          (make-change-set length (list (make-text-change 0 length contents)))))
+      (let* ([binding (file-service-binding service (buffer-id buffer))]
+             [resource (file-binding-resource binding)])
+        (set-resource! service (buffer-id buffer) resource version
+                       (file-binding-lock binding) #f))
+      (when (file-service-history service)
+        (history-discard-buffer! (file-service-history service) (buffer-id buffer))
+        (history-mark-saved! (file-service-history service) (buffer-id buffer)))))
+
+  (define (reload-conflicted-buffer! service conflict)
+    (let* ([resource (file-conflict-resource conflict)]
+           [expected (file-conflict-version conflict)]
+           [before (require-observed-version! resource expected)])
+      (unless before
+        (assertion-violation 'file.resolve-external-change
+                             "cannot reload a deleted file"
+                             (resource-locator resource)))
+      (let* ([contents (vfs-read-file (resource-locator resource))]
+             [after (current-resource-version resource)])
+        (unless (file-version=? before after)
+          (assertion-violation 'file.resolve-external-change
+                               "file changed while it was being reloaded"
+                               (resource-locator resource)))
+        (let ([buffer
+               (package-host-buffer-ref
+                 (file-service-host service) (file-conflict-buffer-id conflict) #f)])
+          (unless buffer
+            (assertion-violation 'file.resolve-external-change
+                                 "conflicted Buffer is no longer live" conflict))
+          (replace-live-buffer-contents! service buffer contents after)
+          (clear-conflict! service (buffer-id buffer))))))
+
+  (define (write-current-buffer! service conflict)
+    (let* ([resource (file-conflict-resource conflict)]
+           [_current
+            (require-observed-version! resource (file-conflict-version conflict))]
+           [buffer
+            (package-host-buffer-ref
+              (file-service-host service) (file-conflict-buffer-id conflict) #f)])
+      (unless buffer
+        (assertion-violation 'file.resolve-external-change
+                             "conflicted Buffer is no longer live" conflict))
+      (let ([path (resource-locator resource)])
+        (when (and (file-backup-enabled?
+                     (buffer-state-configuration (buffer-state buffer)))
+                   (vfs-file-exists? path))
+          (vfs-write-file (file-backup-path path) (vfs-read-file path)))
+        (vfs-write-file
+          path (snapshot-bytevector (buffer-state-document (buffer-state buffer))))
+        (let* ([binding (file-service-binding service (buffer-id buffer))]
+               [version (vfs-stat-path path)])
+          (set-resource! service (buffer-id buffer) resource version
+                         (file-binding-lock binding) #t)
+          (when (file-service-history service)
+            (history-mark-saved! (file-service-history service) (buffer-id buffer)))
+          (clear-conflict! service (buffer-id buffer))))))
+
+  (define (save-conflicted-buffer-as! service conflict destination expected-destination)
+    (let* ([source (file-conflict-resource conflict)]
+           [_source-current
+            (require-observed-version! source (file-conflict-version conflict))]
+           [current-destination (current-resource-version destination)]
+           [host (file-service-host service)]
+           [buffer
+            (package-host-buffer-ref
+              host (file-conflict-buffer-id conflict) #f)])
+      (unless (file-version=? current-destination expected-destination)
+        (assertion-violation 'file.resolve-external-change
+                             "save-as destination changed while awaiting confirmation"
+                             (resource-locator destination)))
+      (unless buffer
+        (assertion-violation 'file.resolve-external-change
+                             "conflicted Buffer is no longer live" conflict))
+      (let ([existing
+             (package-host-find-buffer-key host (file-buffer-key destination) #f)])
+        (when (and existing (not (= (buffer-id existing) (buffer-id buffer))))
+          (assertion-violation 'file.resolve-external-change
+                               "save-as destination is already visited"
+                               (resource-locator destination))))
+      (let* ([old-binding (file-service-binding service (buffer-id buffer))]
+             [same-resource?
+              (resource=? destination (file-binding-resource old-binding))]
+             [new-lock
+              (and (not same-resource?) (acquire-file-lock destination))]
+             [written? #f])
+        (when (and (not same-resource?) (not new-lock))
+          (assertion-violation 'file.resolve-external-change
+                               "save-as destination is locked"
+                               (resource-locator destination)))
+        (dynamic-wind
+          (lambda () #f)
+          (lambda ()
+            (vfs-write-file
+              (resource-locator destination)
+              (snapshot-bytevector
+                (buffer-state-document (buffer-state buffer))))
+            (package-host-rebind-buffer-key! host (file-buffer-key destination) buffer)
+            (set-resource!
+              service (buffer-id buffer) destination
+              (vfs-stat-path (resource-locator destination))
+              (if same-resource? (file-binding-lock old-binding) new-lock) #t)
+            (set! written? #t)
+            (unless same-resource?
+              (release-file-lock! (file-binding-lock old-binding)))
+            (when (file-service-history service)
+              (history-mark-saved! (file-service-history service) (buffer-id buffer)))
+            (clear-conflict! service (buffer-id buffer)))
+          (lambda ()
+            (when (and new-lock (not written?)) (release-file-lock! new-lock)))))))
+
+  (define (resolve-external-file! service request)
+    (let* ([conflict (conflict-for-resolution service request)]
+           [action (file-external-resolution-action request)])
+      ;; Every resolution, including ignore, validates the exact disk state
+      ;; that was presented to the user.
+      (require-observed-version!
+        (file-conflict-resource conflict) (file-conflict-version conflict))
+      (case action
+        [(reload) (reload-conflicted-buffer! service conflict)]
+        [(overwrite) (write-current-buffer! service conflict)]
+        [(save-as)
+         (save-conflicted-buffer-as!
+           service conflict
+           (file-external-resolution-destination request)
+           (file-external-resolution-destination-version request))]
+        [(ignore) (file-conflict-status-set! conflict 'ignored)]
+        [else
+         (assertion-violation 'file.resolve-external-change
+                              "unknown external file resolution" action)])))
+
+  (define (retry-external-resolution! service request context)
+    (let* ([buffer-id (file-external-resolution-buffer-id request)]
+           [old (file-service-conflict service buffer-id #f)]
+           [buffer
+            (package-host-buffer-ref
+              (file-service-host service) buffer-id #f)])
+      (when (and old buffer)
+        (let* ([version (current-resource-version (file-conflict-resource old))]
+               [automatic?
+                (and (eq? (file-conflict-status old) 'reloading)
+                     version
+                     (file-service-history service)
+                     (not (history-modified?
+                            (file-service-history service) buffer-id)))]
+               [next
+                (%make-file-conflict
+                  buffer-id (file-conflict-resource old) version
+                  (if version 'replaced 'deleted)
+                  (if automatic? 'reloading 'pending))])
+          (hashtable-set! (file-service-conflicts service) buffer-id next)
+          (command-runtime-enqueue!
+            (package-host-command-runtime (file-service-host service))
+            (make-command-invoke-message
+              (if automatic?
+                  'file.external-auto-reload
+                  'file.resolve-external-change)
+              context (list buffer-id version) (not automatic?)))))))
+
+  (define (automatic-reload-became-dirty? service request)
+    (let ([conflict
+           (file-service-conflict
+             service (file-external-resolution-buffer-id request) #f)])
+      (and conflict
+           (eq? (file-conflict-status conflict) 'reloading)
+           (file-service-history service)
+           (history-modified?
+             (file-service-history service)
+             (file-conflict-buffer-id conflict)))))
+
+  (define (request-conflict-decision! service request context)
+    (let ([conflict
+           (file-service-conflict
+             service (file-external-resolution-buffer-id request) #f)])
+      (when conflict
+        (file-conflict-status-set! conflict 'pending)
+        (command-runtime-enqueue!
+          (package-host-command-runtime (file-service-host service))
+          (make-command-invoke-message
+            'file.resolve-external-change context
+            (list (file-conflict-buffer-id conflict)
+                  (file-conflict-version conflict))
+            #t)))))
+
   (define (make-file-service! host owner history)
     (unless (and (package-host? host) (owner? owner)
                  (or (not history) (history? history)))
@@ -615,8 +1026,63 @@
            [watch-service (make-file-watch-service owner)]
            [service
             (%make-file-service
-              (make-eqv-hashtable) host owner history keymap watch-service '())])
+              (make-eqv-hashtable) host owner history keymap watch-service
+              (make-eqv-hashtable) '())])
       (register-file-settings! host owner)
+      (command-runtime-register-effect-handler!
+        runtime 'file.external-resolution owner 'resolve-external-file
+        (lambda (ignored invocation effect)
+          (let ([request (command-effect-payload effect)])
+            (if (automatic-reload-became-dirty? service request)
+                (request-conflict-decision!
+                  service request (command-invocation-context invocation))
+                (guard
+                  (condition
+                    [else
+                     (retry-external-resolution!
+                       service request (command-invocation-context invocation))
+                     (raise condition)])
+                  (resolve-external-file! service request))))))
+      (command-runtime-register-command!
+        runtime
+        (make-command-definition
+          'file.external-auto-reload
+          (lambda (context buffer-id version)
+            (make-command-effect
+              'file.external-resolution
+              (make-file-external-resolution
+                buffer-id version 'reload #f #f)))
+          owner "Reload an unmodified Buffer after a stable external change."
+          'file #f))
+      (command-runtime-register-command!
+        runtime
+        (make-command-definition
+          'file.resolve-external-change
+          (lambda (context buffer-id version action . arguments)
+            (cond
+              [(and (eq? action 'save-as)
+                    (or (< (length arguments) 3)
+                        (eq? (cadr arguments) 'cancel)))
+               (command-handled)]
+              [else
+               (let* ([destination
+                        (and (eq? action 'save-as)
+                             (canonical-file-resource (car arguments)))]
+                      [destination-version
+                       (and destination (caddr arguments))])
+                 (make-command-effect
+                   'file.external-resolution
+                   (make-file-external-resolution
+                     buffer-id version action destination
+                     destination-version)))]))
+          owner
+          "Resolve a changed-on-disk conflict without applying a stale decision."
+          'file
+          (make-interactive-plan
+            (list (make-conflict-target-reader service)
+                  (make-external-change-reader service)
+                  (make-conflict-save-as-reader)
+                  (make-conflict-overwrite-reader)))))
       (command-runtime-register-effect-handler!
         runtime 'file.visit owner 'open-file-buffer
         (lambda (ignored invocation effect)
@@ -659,6 +1125,7 @@
               (set-resource! service (file-load-buffer-id request)
                              (file-load-resource request) (file-load-version request)
                              (and binding (file-binding-lock binding))))
+            (clear-conflict! service (file-load-buffer-id request))
             (when (and (file-load-discard-history? request) history)
               (history-discard-buffer! history (file-load-buffer-id request))))))
       (command-runtime-register-effect-handler!
@@ -712,6 +1179,7 @@
                                        new-lock
                                        (and binding (file-binding-lock binding)))
                                    #t)
+                    (clear-conflict! service (file-write-buffer-id request))
                     (set! written? #t)
                     (when transfer-lock?
                       (release-file-lock! (and binding (file-binding-lock binding)))))
@@ -892,6 +1360,7 @@
           (file-watch-service-unregister!
             (file-service-watch-service service) (buffer-id buffer))
           (hashtable-delete! (file-service-resources service) (buffer-id buffer))
+          (clear-conflict! service (buffer-id buffer))
           (when history (history-discard-buffer! history (buffer-id buffer)))))
       service))
 )
