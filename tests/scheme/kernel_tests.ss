@@ -34,6 +34,7 @@
         (soda host runtime)
         (soda host render)
         (soda host render-service)
+        (soda host setting)
         (soda host internal state)
         (soda host internal surface)
         (soda host value)
@@ -1330,6 +1331,55 @@
                'unavailable)
     (error 'kernel-tests "LocationProvider owner cleanup differs"))
   (owner-close! provider-owner))
+
+(let* ([package-host (make-package-host host)]
+       [schema-owner (make-owner 'setting-schema-test)]
+       [facet
+        (make-facet
+          'test-width 'buffer 1
+          (lambda (values) (if (null? values) 1 (car values)))
+          equal? equal?)]
+       [compartment (make-compartment 'test-width 'buffer)]
+       [schema
+        (make-setting-schema
+          'test.width 'positive-integer 4 '(workspace buffer)
+          (lambda (input) (and (string? input) (string->number input)))
+          (lambda (value) (<= value 16))
+          (lambda (value scope)
+            (compartment-of
+              compartment (make-facet-provider facet value))))]
+       [source
+        (make-location
+          (make-resource 'file "/tmp/soda.conf")
+          (make-line-column-position 2 4)
+          (make-line-column-position 2 6)
+          #f 'after '())]
+       [registration
+        (package-host-register-setting-schema!
+          package-host schema-owner schema)]
+       [parsed
+        (package-host-parse-setting
+          package-host 'test.width "8" 'workspace source)]
+       [configuration
+        (make-configuration (list (setting-value-extension parsed)))])
+  (unless (and (= (setting-value-value parsed) 8)
+               (eq? (setting-value-source parsed) source)
+               (= (configuration-facet configuration facet 'buffer) 8)
+               (guard
+                 (condition
+                   [(setting-error? condition)
+                    (and (eq? (setting-error-name condition) 'test.width)
+                         (eq? (setting-error-source condition) source)
+                         (equal? (setting-error-input condition) "20"))]
+                   [else #f])
+                 (package-host-parse-setting
+                   package-host 'test.width "20" 'workspace source)
+                 #f))
+    (error 'kernel-tests "SettingSchema parsing or source diagnostics differ"))
+  (registration-close! registration)
+  (unless (not (package-host-setting-schema package-host 'test.width #f))
+    (error 'kernel-tests "SettingSchema Owner cleanup differs"))
+  (owner-close! schema-owner))
 
 (let* ([package-host (make-package-host host)]
        [resource (make-resource 'buffer "navigation")]

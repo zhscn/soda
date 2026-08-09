@@ -6,6 +6,10 @@
           package-host-request-analysis!
           package-host-stop-analysis!
           package-host-analysis-result
+          package-host-register-setting-schema!
+          package-host-setting-schema
+          package-host-setting-schemas
+          package-host-parse-setting
           package-host-register-location-provider!
           package-host-resolve-location
           package-host-begin-navigation!
@@ -38,11 +42,13 @@
           (soda kernel view-state)
           (soda host command-runtime)
           (soda host analysis)
+          (soda host setting)
           (soda host dispatch)
           (soda host internal buffer)
           (soda host internal analysis)
           (soda host internal location)
           (soda host internal navigation)
+          (soda host internal setting)
           (soda host internal state)
           (soda host internal surface)
           (soda host internal view)
@@ -87,6 +93,23 @@
     (apply analysis-service-result
            (host-state-analyses (package-host-state host))
            buffer-id key default))
+
+  (define (package-host-register-setting-schema! host owner schema)
+    (setting-service-register!
+      (host-state-settings (package-host-state host)) owner schema))
+
+  (define (package-host-setting-schema host name . default)
+    (apply setting-service-ref
+           (host-state-settings (package-host-state host)) name default))
+
+  (define (package-host-setting-schemas host)
+    (setting-service-schemas
+      (host-state-settings (package-host-state host))))
+
+  (define (package-host-parse-setting host name input scope source)
+    (setting-service-parse
+      (host-state-settings (package-host-state host))
+      name input scope source))
 
   (define (package-host-register-location-provider! host owner provider)
     (location-service-register!

@@ -9,6 +9,7 @@
           host-state-modes
           host-state-locations
           host-state-navigation
+          host-state-settings
           host-state-views
           host-state-surfaces
           host-state-commands
@@ -29,6 +30,7 @@
           (soda host dispatch)
           (soda host internal location)
           (soda host internal navigation)
+          (soda host internal setting)
           (soda host internal mode)
           (soda host runtime)
           (soda host internal surface)
@@ -46,6 +48,7 @@
       (immutable modes host-state-modes)
       (immutable locations host-state-locations)
       (immutable navigation host-state-navigation)
+      (immutable settings host-state-settings)
       (immutable views host-state-views)
       (immutable surfaces host-state-surfaces)
       (immutable commands host-state-commands)
@@ -71,6 +74,7 @@
                   conditions owner source (lambda arguments #f) '(dismiss))))]
            [locations (make-location-service buffers)]
            [navigation (make-navigation-history)]
+           [settings (make-setting-service)]
            [command-runtime
              (make-command-runtime owner commands dispatch runtime conditions)]
            [analyses
@@ -125,7 +129,7 @@
                (view-service-close-buffer-views! views (buffer-id buffer))
                (buffer-attachment-service-destroy-buffer! buffer-attachments buffer))))
       (%make-host-state
-        owner runtime buffers buffer-attachments analyses modes locations navigation views surfaces commands
+        owner runtime buffers buffer-attachments analyses modes locations navigation settings views surfaces commands
         command-runtime conditions dispatch #f)))
 
   (define (host-state-close! state)
