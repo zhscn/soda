@@ -2,6 +2,8 @@
   (export make-surface-render
           surface-render?
           surface-render-frame
+          surface-render-surface-id
+          surface-render-surface-generation
           surface-render-cursor-row
           surface-render-cursor-column
           surface-render-rendered-views
@@ -21,10 +23,20 @@
           make-surface-hit
           surface-hit?
           surface-hit-view-id
+          surface-hit-surface-id
+          surface-hit-surface-generation
+          surface-hit-surface-size
+          surface-hit-window-id
+          surface-hit-window-rectangle
+          surface-hit-buffer-generation
+          surface-hit-projection-generation
+          surface-hit-viewport
+          surface-hit-configuration
           surface-hit-document-offset
           surface-hit-kind
           surface-hit-source
           surface-render-hit-test
+          surface-render-hit-test-window
           render-surface
           render-surface-frame)
   (import (rnrs)
@@ -214,7 +226,10 @@
 
   (define-record-type
     (surface-hit %make-surface-hit surface-hit?)
-    (fields view-id document-offset kind source))
+    (fields surface-id surface-generation surface-size
+            window-id window-rectangle view-id
+            buffer-generation projection-generation viewport configuration
+            document-offset kind source))
 
   (define make-surface-hit
     (case-lambda
@@ -224,11 +239,39 @@
        (unless (and (offset-or-false? document-offset)
                     (or (not kind) (memq kind '(text virtual widget line-break))))
          (assertion-violation 'make-surface-hit "invalid Surface hit" view-id document-offset kind))
-       (%make-surface-hit view-id document-offset kind source)]))
+       (%make-surface-hit
+         #f #f #f #f #f view-id #f #f #f #f document-offset kind source)]
+      [(surface-id surface-generation surface-size
+                   window-id window-rectangle view-id
+                   buffer-generation projection-generation viewport configuration
+                   document-offset kind source)
+       (unless (and (nonnegative-exact-integer? surface-id)
+                    (nonnegative-exact-integer? surface-generation)
+                    (pair? surface-size)
+                    (nonnegative-exact-integer? (car surface-size))
+                    (nonnegative-exact-integer? (cdr surface-size))
+                    (nonnegative-exact-integer? window-id)
+                    (rectangle? window-rectangle)
+                    (nonnegative-exact-integer? view-id)
+                    (nonnegative-exact-integer? buffer-generation)
+                    (nonnegative-exact-integer? projection-generation)
+                    (viewport? viewport)
+                    (offset-or-false? document-offset)
+                    (or (not kind) (memq kind '(text virtual widget line-break))))
+         (assertion-violation
+           'make-surface-hit "invalid generation-bound Surface hit"
+           surface-id window-id view-id document-offset kind))
+       (%make-surface-hit
+         surface-id surface-generation
+         (cons (car surface-size) (cdr surface-size))
+         window-id (list-copy window-rectangle) view-id
+         buffer-generation projection-generation viewport configuration
+         document-offset kind source)]))
 
   (define-record-type
     (surface-render %make-surface-render surface-render?)
-    (fields frame cursor-row cursor-column rendered-views))
+    (fields surface-id surface-generation frame cursor-row cursor-column
+            rendered-views))
 
   (define (offset-or-false? value)
     (or (not value) (nonnegative-exact-integer? value)))
@@ -238,34 +281,83 @@
       [(frame cursor-row cursor-column)
        (make-surface-render frame cursor-row cursor-column '())]
       [(frame cursor-row cursor-column rendered-views)
+       (make-surface-render #f #f frame cursor-row cursor-column rendered-views)]
+      [(surface-id surface-generation frame cursor-row cursor-column rendered-views)
        (unless (and (frame? frame) (offset-or-false? cursor-row)
                     (offset-or-false? cursor-column)
-                    (list? rendered-views) (for-all rendered-view? rendered-views))
+                    (list? rendered-views) (for-all rendered-view? rendered-views)
+                    (or (not surface-id)
+                        (nonnegative-exact-integer? surface-id))
+                    (or (not surface-generation)
+                        (nonnegative-exact-integer? surface-generation)))
          (assertion-violation 'make-surface-render "invalid surface render"))
-       (%make-surface-render frame cursor-row cursor-column (list-copy rendered-views))]))
+       (%make-surface-render
+         surface-id surface-generation frame cursor-row cursor-column
+         (list-copy rendered-views))]))
+
+  (define (rendered-view-hit render rendered row column clamp?)
+    (let* ([rectangle (rendered-view-rectangle rendered)]
+           [top (car rectangle)] [left (cadr rectangle)]
+           [width (caddr rectangle)] [height (cadddr rectangle)])
+      (and (> width 0) (> height 0)
+           (or clamp?
+               (and (<= top row) (< row (+ top height))
+                    (<= left column) (< column (+ left width))))
+           (let* ([layout (rendered-view-layout rendered)]
+                  [local-row
+                   (min (- height 1) (max 0 (- row top)))]
+                  [local-column
+                   (min (- width 1) (max 0 (- column left)))]
+                  [entry
+                   (text-layout-point->display-entry
+                     layout local-row local-column)]
+                  [document-offset
+                   (text-layout-point->document
+                     layout local-row local-column)]
+                  [kind (and entry (display-map-entry-kind entry))]
+                  [source (and entry (display-map-entry-source entry))])
+             (if (surface-render-surface-id render)
+                 (make-surface-hit
+                   (surface-render-surface-id render)
+                   (surface-render-surface-generation render)
+                   (cons (frame-width (surface-render-frame render))
+                         (frame-height (surface-render-frame render)))
+                   (rendered-view-window-id rendered)
+                   (rendered-view-rectangle rendered)
+                   (rendered-view-view-id rendered)
+                   (rendered-view-buffer-generation rendered)
+                   (rendered-view-projection-generation rendered)
+                   (rendered-view-viewport rendered)
+                   (rendered-view-configuration rendered)
+                   document-offset kind source)
+                 (make-surface-hit
+                   (rendered-view-view-id rendered)
+                   document-offset kind source))))))
 
   (define (surface-render-hit-test render row column)
-    (unless (and (surface-render? render) (offset-or-false? row)
-                 (offset-or-false? column))
+    (unless (and (surface-render? render)
+                 (nonnegative-exact-integer? row)
+                 (nonnegative-exact-integer? column))
       (assertion-violation 'surface-render-hit-test "invalid Surface coordinate" render row column))
     (let find ([views (reverse (surface-render-rendered-views render))])
       (and (pair? views)
-           (let* ([rendered (car views)]
-                  [rectangle (rendered-view-rectangle rendered)]
-                  [top (car rectangle)] [left (cadr rectangle)]
-                  [width (caddr rectangle)] [height (cadddr rectangle)])
-             (if (and (<= top row) (< row (+ top height))
-                      (<= left column) (< column (+ left width)))
-                 (let* ([layout (rendered-view-layout rendered)]
-                        [local-row (- row top)]
-                        [local-column (- column left)]
-                        [entry (text-layout-point->display-entry layout local-row local-column)])
-                   (make-surface-hit
-                     (rendered-view-view-id rendered)
-                     (text-layout-point->document layout local-row local-column)
-                     (and entry (display-map-entry-kind entry))
-                     (and entry (display-map-entry-source entry))))
-                 (find (cdr views)))))))
+           (or (rendered-view-hit render (car views) row column #f)
+               (find (cdr views))))))
+
+  (define (surface-render-hit-test-window render window-id row column)
+    (unless (and (surface-render? render)
+                 (nonnegative-exact-integer? window-id)
+                 (nonnegative-exact-integer? row)
+                 (nonnegative-exact-integer? column))
+      (assertion-violation
+        'surface-render-hit-test-window "invalid captured pointer coordinate"
+        render window-id row column))
+    (let ([rendered
+           (find
+             (lambda (candidate)
+               (equal? (rendered-view-window-id candidate) window-id))
+             (surface-render-rendered-views render))])
+      (and rendered (rendered-view-hit render rendered row column #t))))
 
   ;; Rendering consumes only published BufferState and ViewState.  A frontend
   ;; may retain the result, but no render step mutates editor state.
@@ -284,6 +376,8 @@
               (let ([message (or (surface-status-message surface)
                                  (surface-position-message surface views))])
                 (make-surface-render
+                  (surface-id surface)
+                  (surface-generation surface)
                   (compose-surface-frame width height (reverse placements) message)
                   (if (and message cursor-row (= cursor-row (- height 1))) #f cursor-row)
                   (if (and message cursor-row (= cursor-row (- height 1))) #f cursor-column)

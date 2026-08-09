@@ -1649,7 +1649,9 @@
          [prune-right (make-leaf-window (view-id other-view) #f)]
          [prune-root (make-split-window 'horizontal (list prune-left prune-right) #f)]
          [prune-surface (make-surface prune-root '(8 . 1))]
-         [lone-surface (make-surface (make-leaf-window (view-id other-view) #f) '(4 . 1))])
+         [lone-surface (make-surface (make-leaf-window (view-id other-view) #f) '(4 . 1))]
+         [stale-render (render-surface prune-surface (host-state-views host))]
+         [stale-hit (surface-render-hit-test stale-render 0 6)])
     (surface-service-register! (host-state-surfaces host) prune-surface)
     (surface-service-register! (host-state-surfaces host) lone-surface)
     (surface-push-interaction! prune-surface (view-id other-view) '(0 2 4 1))
@@ -1661,6 +1663,8 @@
                  (null? (surface-interaction-windows prune-surface))
                  (not (surface-service-ref (host-state-surfaces host)
                                            (surface-id lone-surface) #f))
+                 (not (host-frontend-surface-hit-current?
+                        host prune-surface stale-hit))
                  (= (active-context-view-id
                      (surface-active-context prune-surface (host-state-views host)))
                     (view-id view)))
@@ -1730,6 +1734,10 @@
                  (= (surface-render-cursor-column rendered) 0)
                  (= (length (surface-render-rendered-views rendered)) 1)
                  (surface-hit? hit)
+                 (= (surface-render-surface-id rendered) (surface-id surface))
+                 (= (surface-render-surface-generation rendered)
+                    (surface-generation surface))
+                 (= (surface-hit-window-id hit) (window-id leaf))
                  (eqv? (surface-hit-view-id hit) (view-id view))
                  (= (surface-hit-document-offset hit) 1)
                  (string=? (frame-cell-grapheme (frame-cell-at (surface-render-frame rendered) 0 0)) "h"))
@@ -3974,6 +3982,7 @@
        [keymap (make-keymap 'frontend-test)]
        [key (make-key-stroke 'character (char->integer #\f) 4)]
        [observed #f]
+       [pointer-observed #f]
        [renders 0]
        [presented-theme #f]
        [alternate-theme
@@ -4002,7 +4011,10 @@
               (active-context-buffer-id active)
               (list (make-input-layer 'global keymap #f 'ignore))
               (view-state-input-state (view-state active-view))))
-          (lambda (context disposition) #f)
+          (lambda (context disposition)
+            (when (pointer-event? (command-context-event context))
+              (set! pointer-observed context))
+            #f)
           (lambda (render theme)
             (set! renders (+ renders 1))
             (set! presented-theme theme))
@@ -4012,11 +4024,44 @@
         (make-key-event
           'character (char->integer #\f) #f #f 4 'press (make-bytevector 0))])
   (frontend-step! frontend)
+  (frontend-dispatch-input!
+    frontend (make-pointer-event 0 1 'left 0 1 'press))
+  (unless (and pointer-observed
+               (surface-hit? (command-context-target pointer-observed))
+               (= (surface-hit-window-id
+                    (command-context-target pointer-observed))
+                  (window-id leaf))
+               (= (surface-hit-document-offset
+                    (command-context-target pointer-observed))
+                  1)
+               (frontend-cancel-pointer-capture! frontend))
+    (error 'kernel-tests
+           "frontend pointer hit did not target its rendered Window"))
+  (frontend-dispatch-input!
+    frontend (make-pointer-event 0 1 'left 0 1 'press))
+  (frontend-dispatch-input!
+    frontend (make-pointer-event 0 2 'left 0 0 'move))
+  (unless (and (= (surface-hit-document-offset
+                    (command-context-target pointer-observed))
+                  2)
+               (= (surface-hit-window-id
+                    (command-context-target pointer-observed))
+                  (window-id leaf)))
+    (error 'kernel-tests
+           "pointer capture did not route motion through the captured Window"))
+  (frontend-dispatch-input!
+    frontend (make-pointer-event 0 200 'left 0 1 'release))
+  (unless (not (frontend-cancel-pointer-capture! frontend))
+    (error 'kernel-tests "pointer release retained capture"))
+  (frontend-dispatch-input!
+    frontend (make-pointer-event 0 1 'left 0 1 'press))
   (frontend-enqueue!
     frontend
     (make-surface-input-message (surface-id surface) event))
   (frontend-step! frontend)
   (frontend-resize! frontend '(60 . 20))
+  (unless (not (frontend-cancel-pointer-capture! frontend))
+    (error 'kernel-tests "Surface resize retained stale pointer capture"))
   (frontend-step! frontend)
   (frontend-set-theme! frontend alternate-theme)
   (frontend-render! frontend)

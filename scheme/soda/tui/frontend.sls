@@ -12,6 +12,7 @@
           frontend-render!
           frontend-step!
           frontend-resize!
+          frontend-cancel-pointer-capture!
           frontend-set-theme!
           frontend-close!)
   (import (rnrs)
@@ -53,6 +54,8 @@
                                    frontend-update-registration-set!)
       (mutable host-update-registration frontend-host-update-registration
                                         frontend-host-update-registration-set!)
+      (mutable pointer-capture frontend-pointer-capture
+                              frontend-pointer-capture-set!)
       (mutable closed? frontend-closed? frontend-closed?-set!)))
 
   (define (require-open who value)
@@ -76,13 +79,14 @@
       (assertion-violation 'make-frontend "invalid frontend dependencies"))
     (let ([value
             (%make-frontend state surface resolve-input-context handle-disposition
-                            present! render-service theme #t #f #f #f #f)])
+                            present! render-service theme #t #f #f #f #f #f)])
       (frontend-update-registration-set!
         value
         (host-frontend-add-update-listener!
           state
           (lambda (update)
             (frontend-dirty?-set! value #t)
+            (frontend-reconcile-pointer-capture! value)
             (let ([request (editor-update-scroll-request update)])
               (when (scroll-request? request)
                 (frontend-pending-scroll-set! value request)))
@@ -90,8 +94,25 @@
       (frontend-host-update-registration-set!
         value
         (host-frontend-add-host-listener!
-          state (lambda (update) (frontend-dirty?-set! value #t))))
+          state
+          (lambda (update)
+            (frontend-dirty?-set! value #t)
+            (frontend-reconcile-pointer-capture! value))))
       value))
+
+  (define (frontend-cancel-pointer-capture! value)
+    (require-open 'frontend-cancel-pointer-capture! value)
+    (let ([capture (frontend-pointer-capture value)])
+      (frontend-pointer-capture-set! value #f)
+      (and capture #t)))
+
+  (define (frontend-reconcile-pointer-capture! value)
+    (let ([capture (frontend-pointer-capture value)])
+      (when (and capture
+                 (not (host-frontend-surface-hit-current?
+                        (frontend-host-state value)
+                        (frontend-surface value) capture)))
+        (frontend-pointer-capture-set! value #f))))
 
   (define (frontend-enqueue! value message)
     (require-open 'frontend-enqueue! value)
@@ -162,10 +183,37 @@
                            (frontend-host-state value) active layout request))
                 (frontend-pending-scroll-set! value #f))))))))
 
-  (define (make-active-command-context value active view event sequence prefix-argument)
+  (define (make-active-command-context
+            value active view event sequence prefix-argument target)
     (host-frontend-make-command-context
       (frontend-host-state value) active event sequence prefix-argument
-      'tui-frontend (active-command-layout value active view)))
+      'tui-frontend (active-command-layout value active view) target))
+
+  (define (pointer-route value event)
+    (let* ([render
+            (render-service-last-render (frontend-render-service value))]
+           [capture (frontend-pointer-capture value)]
+           [phase (pointer-event-phase event)]
+           [candidate
+            (and render
+                 (if (and capture (memq phase '(move release)))
+                     (surface-render-hit-test-window
+                       render (surface-hit-window-id capture)
+                       (pointer-event-row event) (pointer-event-column event))
+                     (surface-render-hit-test
+                       render (pointer-event-row event)
+                       (pointer-event-column event))))]
+           [target
+            (and candidate
+                 (host-frontend-pointer-target
+                   (frontend-host-state value)
+                   (frontend-surface value) candidate))])
+      (cond
+        [(eq? phase 'press)
+         (frontend-pointer-capture-set! value (and target candidate))]
+        [(eq? phase 'release)
+         (frontend-pointer-capture-set! value #f)])
+      (and target (list (car target) (cdr target) candidate))))
 
   (define (enqueue-disposition-result! value result)
     (when result
@@ -191,7 +239,11 @@
         (frontend-host-state value)
         (make-set-surface-message-operation
           (surface-id (frontend-surface value)) #f)))
-    (let ([current (active-view value)])
+    (let* ([route (and (pointer-event? event) (pointer-route value event))]
+           [current
+            (if route
+                (cons (car route) (cadr route))
+                (and (not (pointer-event? event)) (active-view value)))])
       (and current
            (let* ([active (car current)]
                   [view (cdr current)]
@@ -212,7 +264,8 @@
                (let ([command-context
                     (make-active-command-context
                       value active view event sequence
-                      (input-stack-pending-argument (input-context-stack context)))])
+                      (input-stack-pending-argument (input-context-stack context))
+                      (if route (caddr route) active))])
                (case (input-disposition-kind disposition)
                  [(command)
                   (let ([name (input-disposition-value disposition)])
@@ -333,6 +386,7 @@
         #f
         (begin
           (frontend-closed?-set! value #t)
+          (frontend-pointer-capture-set! value #f)
           (let ([update (frontend-update-registration value)]
                 [host-update (frontend-host-update-registration value)])
             (when update (registration-close! update))

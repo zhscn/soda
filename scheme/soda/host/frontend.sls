@@ -2,6 +2,8 @@
   (export host-frontend-surface-registered?
           host-frontend-active-view
           host-frontend-surface-message
+          host-frontend-surface-hit-current?
+          host-frontend-pointer-target
           host-frontend-make-command-context
           host-frontend-resolve-scroll-request!
           host-frontend-enqueue!
@@ -30,6 +32,7 @@
           (soda host internal state)
           (soda host internal surface)
           (soda host internal view)
+          (soda host internal window)
           (soda host render)
           (soda host render-service)
           (soda host runtime)
@@ -110,8 +113,55 @@
     (and (host-frontend-surface-registered? state surface)
          (surface-status-message surface)))
 
-  (define (host-frontend-make-command-context
-            state active event sequence prefix-argument source layout)
+  (define (host-frontend-surface-hit-current? state surface hit)
+    (and (host-state? state) (surface? surface) (surface-hit? hit)
+         (equal? (surface-hit-surface-id hit) (surface-id surface))
+         (equal? (surface-hit-surface-size hit) (surface-size surface))
+         (let* ([window
+                 (find
+                   (lambda (candidate)
+                     (= (window-id candidate) (surface-hit-window-id hit)))
+                   (surface-windows surface))]
+                [view
+                 (and window
+                      (= (window-view-id window) (surface-hit-view-id hit))
+                      (view-service-ref
+                        (host-state-views state) (surface-hit-view-id hit) #f))])
+           (and view
+                (equal? (window-rectangle window)
+                        (surface-hit-window-rectangle hit))
+                (= (buffer-state-generation (buffer-state (view-buffer view)))
+                   (surface-hit-buffer-generation hit))
+                (= (view-projection-generation (view-projection view))
+                   (surface-hit-projection-generation hit))
+                (viewport=?
+                  (view-state-viewport (view-state view))
+                  (surface-hit-viewport hit))
+                (eq? (view-state-configuration (view-state view))
+                     (surface-hit-configuration hit))))))
+
+  (define (host-frontend-pointer-target state surface hit)
+    (and (host-frontend-surface-hit-current? state surface hit)
+         (let* ([view
+                 (view-service-ref
+                   (host-state-views state) (surface-hit-view-id hit) #f)]
+                [active (surface-active-context surface (host-state-views state))])
+           (and view active
+                (cons
+                  (make-active-context
+                    (surface-id surface)
+                    (surface-hit-window-id hit)
+                    (view-id view)
+                    (buffer-id (view-buffer view))
+                    (active-context-interaction-stack active))
+                  view)))))
+
+  (define host-frontend-make-command-context
+    (case-lambda
+      [(state active event sequence prefix-argument source layout)
+       (host-frontend-make-command-context
+         state active event sequence prefix-argument source layout active)]
+      [(state active event sequence prefix-argument source layout target)
     (let* ([view
             (or (view-service-ref
                   (host-state-views state) (active-context-view-id active) #f)
@@ -127,7 +177,7 @@
         (buffer-id buffer)
         (buffer-state buffer)
         (view-state view)
-        event sequence prefix-argument active source layout)))
+        event sequence prefix-argument target source layout))]))
 
   ;; Resolve a semantic scroll request against the immutable layout last
   ;; presented for its exact Surface/Window/View occurrence.  Host owns the
