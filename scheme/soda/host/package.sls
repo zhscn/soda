@@ -14,6 +14,7 @@
           package-host-configuration-source
           package-host-resolve-setting
           package-host-configuration-extensions
+          package-host-materialize-key-bindings
           package-host-register-location-provider!
           package-host-resolve-location
           package-host-begin-navigation!
@@ -46,6 +47,7 @@
           (soda kernel view-state)
           (soda host command-runtime)
           (soda host analysis)
+          (soda host key-configuration)
           (soda host setting)
           (soda host dispatch)
           (soda host internal buffer)
@@ -133,6 +135,15 @@
   (define (package-host-configuration-extensions host scope context)
     (setting-service-extensions
       (host-state-settings (package-host-state host)) scope context))
+
+  (define (package-host-materialize-key-bindings host declarations context mode)
+    (let ([runtime
+           (host-state-command-runtime (package-host-state host))])
+      (key-binding-declarations->input-layers
+        declarations
+        (lambda (name)
+          (and (command-runtime-command-definition runtime name #f) #t))
+        context mode)))
 
   (define (package-host-register-location-provider! host owner provider)
     (location-service-register!

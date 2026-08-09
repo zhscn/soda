@@ -30,6 +30,7 @@
         (soda host internal buffer)
         (soda host input)
         (soda host input-event)
+        (soda host key-configuration)
         (soda host operation)
         (soda host runtime)
         (soda host render)
@@ -2112,6 +2113,93 @@
                     (list control-x control-s)))
              'command)
   (error 'kernel-tests "keymap resolver differs"))
+(let* ([binding-owner (make-owner 'configured-key-binding-test)]
+       [runtime (host-state-command-runtime host)]
+       [register
+        (lambda (name)
+          (command-runtime-register-command!
+            runtime
+            (make-command-definition
+              name (lambda (context) (command-handled)) binding-owner)))]
+       [first-registration (register 'configured.default)]
+       [second-registration (register 'configured.scheme)]
+       [binding-source
+        (make-location
+          (make-resource 'file "/tmp/soda-keys.conf")
+          (make-line-column-position 3 0)
+          (make-line-column-position 3 12)
+          #f 'after '())]
+       [default-binding
+        (make-key-binding-declaration
+          'editing #f (list control-s) 'configured.default
+          'global binding-source)]
+       [scheme-binding
+        (make-key-binding-declaration
+          'editing 'scheme (list control-s) 'configured.scheme
+          'global binding-source)]
+       [layers
+        (package-host-materialize-key-bindings
+          (make-package-host host)
+          (list default-binding scheme-binding) 'editing 'scheme)])
+  (unless (and (= (length layers) 2)
+               (eq? (cadr (resolve-key-sequence layers (list control-s)))
+                    'configured.scheme))
+    (error 'kernel-tests
+           "mode-specific configured key did not precede its context default"))
+  (let ([unknown
+         (make-key-binding-declaration
+           'editing #f (list control-x) 'configured.missing
+           'global binding-source)])
+    (unless
+      (guard
+        (condition
+          [(key-binding-configuration-error? condition)
+           (and (eq? (key-binding-configuration-error-reason condition)
+                     'unknown-command)
+                (eq? (key-binding-configuration-error-source condition)
+                     binding-source))]
+          [else #f])
+        (package-host-materialize-key-bindings
+          (make-package-host host) (list default-binding unknown)
+          'unrelated #f)
+        #f)
+      (error 'kernel-tests
+             "configured key did not diagnose an unknown command")))
+  (let ([invalid
+         (make-key-binding-declaration
+           'editing #f (list 'not-a-key-stroke) 'configured.default
+           'global binding-source)])
+    (unless
+      (guard
+        (condition
+          [(key-binding-configuration-error? condition)
+           (eq? (key-binding-configuration-error-reason condition) 'invalid-key)]
+          [else #f])
+        (package-host-materialize-key-bindings
+          (make-package-host host) (list invalid) 'editing #f)
+        #f)
+      (error 'kernel-tests "configured key accepted an invalid sequence")))
+  (let ([conflict
+         (make-key-binding-declaration
+           'editing #f (list control-s) 'configured.scheme
+           'global binding-source)])
+    (unless
+      (guard
+        (condition
+          [(key-binding-configuration-error? condition)
+           (and (eq? (key-binding-configuration-error-reason condition) 'conflict)
+                (eq? (key-binding-configuration-error-conflict condition)
+                     default-binding))]
+          [else #f])
+        (package-host-materialize-key-bindings
+          (make-package-host host) (list default-binding conflict)
+          'editing #f)
+        #f)
+      (error 'kernel-tests
+             "configured keys accepted a same-layer conflict")))
+  (registration-close! second-registration)
+  (registration-close! first-registration)
+  (owner-close! binding-owner))
 (let* ([first (make-keymap 'first-package)]
        [second (make-keymap 'second-package)]
        [_first-binding (keymap-bind! first (list control-s) 'first-command)]
