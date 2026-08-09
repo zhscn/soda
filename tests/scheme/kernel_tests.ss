@@ -24,6 +24,7 @@
         (soda host dispatch)
         (soda host frontend)
         (soda host location)
+        (soda host navigation)
         (soda host package)
         (soda host internal buffer)
         (soda host input)
@@ -1121,6 +1122,40 @@
                'unavailable)
     (error 'kernel-tests "LocationProvider owner cleanup differs"))
   (owner-close! provider-owner))
+
+(let* ([package-host (make-package-host host)]
+       [resource (make-resource 'buffer "navigation")]
+       [at
+        (lambda (offset)
+          (make-location resource
+                         (make-byte-position offset) (make-byte-position offset)
+                         #f 'after '()))]
+       [first (package-host-begin-navigation! package-host (at 0) (at 1))]
+       [replacement (package-host-begin-navigation! package-host (at 0) (at 2))])
+  (unless (and (not (package-host-commit-navigation! package-host first (at 1)))
+               (package-host-commit-navigation! package-host replacement (at 2)))
+    (error 'kernel-tests "superseded navigation committed history"))
+  (let ([cancelled (package-host-navigation-back! package-host)])
+    (unless (and cancelled
+                 (location=? (navigation-jump-target cancelled) (at 0))
+                 (package-host-cancel-navigation! package-host cancelled)
+                 (not (package-host-navigation-forward! package-host)))
+      (error 'kernel-tests "cancelled navigation changed history cursor")))
+  (let ([back (package-host-navigation-back! package-host)])
+    (unless (and back
+                 (package-host-commit-navigation! package-host back (at 0)))
+      (error 'kernel-tests "navigation back did not commit")))
+  (let ([forward (package-host-navigation-forward! package-host)])
+    (unless (and forward
+                 (location=? (navigation-jump-target forward) (at 2))
+                 (package-host-commit-navigation! package-host forward (at 2)))
+      (error 'kernel-tests "navigation forward did not commit")))
+  (let ([back (package-host-navigation-back! package-host)])
+    (package-host-commit-navigation! package-host back (at 0)))
+  (let ([branch (package-host-begin-navigation! package-host (at 0) (at 3))])
+    (unless (and (package-host-commit-navigation! package-host branch (at 3))
+                 (not (package-host-navigation-forward! package-host)))
+      (error 'kernel-tests "new navigation did not truncate forward history"))))
 (surface-service-register! (host-state-surfaces host) surface)
 (surface-set-selected-window! surface leaf)
   (unless (and (eq? (surface-selected-window surface) leaf)

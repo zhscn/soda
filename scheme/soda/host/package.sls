@@ -4,6 +4,11 @@
           package-host-command-runtime
           package-host-register-location-provider!
           package-host-resolve-location
+          package-host-begin-navigation!
+          package-host-navigation-back!
+          package-host-navigation-forward!
+          package-host-commit-navigation!
+          package-host-cancel-navigation!
           package-host-dispatch!
           package-host-dispatch-view!
           package-host-buffer-ref
@@ -31,6 +36,7 @@
           (soda host dispatch)
           (soda host internal buffer)
           (soda host internal location)
+          (soda host internal navigation)
           (soda host internal state)
           (soda host internal surface)
           (soda host internal view)
@@ -60,6 +66,26 @@
   (define (package-host-resolve-location host location)
     (location-service-resolve
       (host-state-locations (package-host-state host)) location))
+
+  (define (package-host-begin-navigation! host from target)
+    (navigation-history-begin!
+      (host-state-navigation (package-host-state host)) from target))
+
+  (define (package-host-navigation-back! host)
+    (navigation-history-back!
+      (host-state-navigation (package-host-state host))))
+
+  (define (package-host-navigation-forward! host)
+    (navigation-history-forward!
+      (host-state-navigation (package-host-state host))))
+
+  (define (package-host-commit-navigation! host jump arrived)
+    (navigation-history-commit!
+      (host-state-navigation (package-host-state host)) jump arrived))
+
+  (define (package-host-cancel-navigation! host jump)
+    (navigation-history-cancel!
+      (host-state-navigation (package-host-state host)) jump))
 
   (define (package-host-dispatch! host specification)
     (dispatcher-dispatch! (host-state-dispatch (package-host-state host)) specification))
