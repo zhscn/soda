@@ -17,6 +17,7 @@
           (soda packages base text-motion)
           (soda packages base fundamental-keymap)
           (soda packages base fundamental-interface)
+          (soda packages base fundamental-selection)
           (soda packages base editing-options)
           (soda packages buffer-mode)
           (soda host command)
@@ -59,23 +60,6 @@
         (lambda () (procedure text))
         (lambda () (text-close! text)))))
 
-  (define (mark-active? range)
-    (let ([metadata (selection-range-metadata range)])
-      (and (list? metadata)
-           (let ([entry (assq 'mark-active metadata)])
-             (and entry (cdr entry))))))
-
-  (define (without-selection-metadata metadata key)
-    (if (list? metadata)
-        (filter (lambda (entry)
-                  (not (and (pair? entry) (eq? (car entry) key))))
-                metadata)
-        '()))
-
-  (define (set-mark-active metadata active?)
-    (cons (cons 'mark-active active?)
-          (without-selection-metadata metadata 'mark-active)))
-
   ;; Vertical motion owns a desired display column.  It is Selection metadata,
   ;; not View state: multiple carets may have independent goals, and ordinary
   ;; horizontal motion or editing clears it through collapse-range/motion-range.
@@ -93,7 +77,7 @@
       (selection-range-anchor range) (selection-range-head range)
       (selection-range-affinity range) (selection-range-granularity range)
       (cons (cons 'vertical-goal-column column)
-            (without-selection-metadata
+            (fundamental-without-selection-metadata
               (selection-range-metadata range) 'vertical-goal-column))))
 
   (define (collapse-range range position)
@@ -101,39 +85,20 @@
       position position
       (selection-range-affinity range)
       (selection-range-granularity range)
-      (set-mark-active
-        (without-selection-metadata
+      (fundamental-set-mark-active
+        (fundamental-without-selection-metadata
           (selection-range-metadata range) 'vertical-goal-column)
         #f)))
 
   (define (motion-range range position)
-    (if (mark-active? range)
+    (if (fundamental-mark-active? range)
         (make-selection-range
           (selection-range-anchor range) position
           (selection-range-affinity range)
           (selection-range-granularity range)
-          (without-selection-metadata
+          (fundamental-without-selection-metadata
             (selection-range-metadata range) 'vertical-goal-column))
         (collapse-range range position)))
-
-  (define (set-mark-selection selection)
-    (make-selection
-      (map
-        (lambda (range)
-          (let ([point (selection-range-head range)])
-            (make-selection-range
-              point point
-              (selection-range-affinity range)
-              (selection-range-granularity range)
-              (set-mark-active (selection-range-metadata range) #t))))
-        (selection-ranges selection))
-      (selection-primary selection)))
-
-  (define (deactivate-mark-selection selection)
-    (make-selection
-      (map (lambda (range) (collapse-range range (selection-range-head range)))
-           (selection-ranges selection))
-      (selection-primary selection)))
 
   (define (replace-selection context inserted)
     (unless (bytevector? inserted)
@@ -1009,46 +974,6 @@
                 (cons (if (= index primary) range (car remaining)) result))))
         primary)))
 
-
-  (define (set-mark context)
-    (view-selection-transaction context (set-mark-selection (context-selection context))))
-
-  (define (deactivate-mark context)
-    (view-selection-transaction context
-                                (deactivate-mark-selection (context-selection context))))
-
-  (define (mark-whole-buffer context)
-    (let* ([selection (context-selection context)]
-           [length (context-document-length context)]
-           [range (selection-primary-range selection)])
-      (view-selection-transaction
-        context
-        (make-selection
-          (list
-            (make-selection-range
-              0 length
-              (selection-range-affinity range)
-              'character
-              (set-mark-active (selection-range-metadata range) #t)))
-          0))))
-
-  (define (exchange-point-and-mark context)
-    (let* ([selection (context-selection context)]
-           [range (selection-primary-range selection)])
-      (if (not (mark-active? range))
-          (command-handled)
-          (view-selection-transaction
-            context
-            (make-selection
-              (list
-                (make-selection-range
-                  (selection-range-head range)
-                  (selection-range-anchor range)
-                  (selection-range-affinity range)
-                  (selection-range-granularity range)
-                  (selection-range-metadata range)))
-              0)))))
-
   (define (primary-region-bytes context)
     (let ([range (selection-primary-range (context-selection context))])
       (and (not (selection-range-empty? range))
@@ -1077,7 +1002,7 @@
           (command-handled)
           (make-command-result
             (list
-              (deactivate-mark context)
+              (fundamental-deactivate-mark context)
               (make-command-effect 'fundamental.record-kill bytes)
               (make-command-effect 'clipboard.write bytes))))))
 
@@ -1340,19 +1265,19 @@
       (install-command!
         runtime owner 'fundamental.set-mark (context)
         "Set the mark at every selection and activate the region." 'selection
-        (set-mark context))
+        (fundamental-set-mark context))
       (install-command!
         runtime owner 'fundamental.deactivate-mark (context)
         "Deactivate every active region." 'selection
-        (deactivate-mark context))
+        (fundamental-deactivate-mark context))
       (install-command!
         runtime owner 'fundamental.mark-whole-buffer (context)
         "Select the whole Buffer." 'selection
-        (mark-whole-buffer context))
+        (fundamental-mark-whole-buffer context))
       (install-command!
         runtime owner 'fundamental.exchange-point-and-mark (context)
         "Exchange point and mark in the primary region." 'selection
-        (exchange-point-and-mark context))
+        (fundamental-exchange-point-and-mark context))
       (install-command!
         runtime owner 'fundamental.copy-region (context)
         "Copy the primary active region to the kill ring and clipboard." 'kill
